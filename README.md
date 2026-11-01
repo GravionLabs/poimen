@@ -46,6 +46,15 @@ pnpm tauri dev
 | Live smoke tests (read-only, need a running herdr) | `cd src-tauri && cargo test -- --ignored` |
 | Lint | `cd src-tauri && cargo clippy --all-targets` |
 
+### App icon
+
+The icon source is `src-tauri/icons/source/icon.svg` (1024 x 1024, a shepherd's crook over a terminal prompt). After changing it, regenerate all sizes and drop the mobile outputs:
+
+```sh
+pnpm tauri icon src-tauri/icons/source/icon.svg
+rm -rf src-tauri/icons/android src-tauri/icons/ios
+```
+
 ## Keyboard
 
 | Shortcut | Action |
