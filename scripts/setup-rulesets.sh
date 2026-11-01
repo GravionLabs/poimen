@@ -54,6 +54,16 @@ release_ruleset=$(cat <<EOF
       "strict_required_status_checks_policy": false,
       "do_not_enforce_on_create": true,
       "required_status_checks": $checks
+    }},
+    {"type": "pull_request", "parameters": {
+      "required_approving_review_count": 0,
+      "dismiss_stale_reviews_on_push": false,
+      "require_code_owner_review": false,
+      "require_last_push_approval": false,
+      "require_extra_approval_for_unattributed_changes": true,
+      "required_review_thread_resolution": false,
+      "required_reviewers": [],
+      "allowed_merge_methods": ["squash"]
     }}
   ]
 }
