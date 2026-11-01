@@ -24,6 +24,7 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
 
 - **herdr stays the backend.** Closing poimen, or collapsing a card, only closes the view; the pane and its agent keep running. The herdr TUI keeps working next to poimen.
 - **Read-only by default.** A card opens as an observer (any number allowed). Switch it to *Input* to become the terminal's controller (one per terminal). If another controller holds it, the card offers *Take over*.
+- **Angular frontend.** The UI is Angular 22 with helix-ui (light and dark follow the system); `src/app/core` is the bridge to the Tauri commands and events, `src-tauri` stays a thin shell ([ADR 0001](docs/adr/0001-frontend-stack.md)).
 - **Events are invalidation signals.** Every herdr event triggers a debounced re-read of the workspace, tab and pane lists, as the herdr socket API docs recommend. `pane.agent_status_changed` is applied right away.
 
 ## Requirements
@@ -40,8 +41,11 @@ pnpm tauri dev
 
 | Check | Command |
 |---|---|
-| Frontend types | `pnpm check` |
+| Frontend types (incl. templates) | `pnpm check` |
+| Frontend lint | `pnpm lint` |
+| Frontend format | `pnpm format:check` |
 | Frontend tests | `pnpm test` |
+| Frontend build | `pnpm build` |
 | Rust tests | `cd src-tauri && cargo test` |
 | Live smoke tests (read-only, need a running herdr) | `cd src-tauri && cargo test -- --ignored` |
 | Lint | `cd src-tauri && cargo clippy --all-targets` |
