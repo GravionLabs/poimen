@@ -48,7 +48,9 @@ pnpm tauri dev
 | Frontend build | `pnpm build` |
 | Rust tests | `cd src-tauri && cargo test` |
 | Live smoke tests (read-only, need a running herdr) | `cd src-tauri && cargo test -- --ignored` |
-| Lint | `cd src-tauri && cargo clippy --all-targets` |
+| Lint | `cd src-tauri && cargo clippy --all-targets -- -D warnings` |
+
+CI (`.github/workflows/ci.yml`, built on GravionLabs/ci) runs the frontend checks and `cargo fmt`, `clippy` and `test` of `src-tauri` on every pull request; its gate job `ci` and the `pr-checks / PR checks` job are the required checks. The Rust toolchain is pinned in `rust-toolchain.toml`, Node.js in `.nvmrc`.
 
 ### App icon
 
@@ -67,6 +69,18 @@ rm -rf src-tauri/icons/android src-tauri/icons/ios
 | ⌘⇧C | Collapse all cards |
 | ⌘⇧W | Close all views |
 | ⌘R | Refresh |
+
+## Releases
+
+- Work branches are cut from `release/next` and merge into it; the `Release branch` workflow keeps the release PR `release/next` → `main` open and current (`github-release` skill).
+- Work PRs into `release/**` are **squash** merged; their PR title must be a Conventional Commit (`pr-checks` title job) and becomes the one commit of the change.
+- A release is made by merging that release PR into `main` with a **merge commit, never squash** (the `main` ruleset allows only merge commits), so GitVersion sees every commit. A hotfix PR into `main` is merged the same way, and every commit of it must be a Conventional Commit.
+- The version comes from Conventional Commits (`versioning/determine-version` of GravionLabs/ci, `GitVersion.yml`): `fix:`/`perf:`/`revert:` → patch, `feat:` → minor, `type!:` or `BREAKING CHANGE:` → major. A release with only fixes is a patch, one with a `feat:` a minor.
+- While the version is 0.x, use **no** `!` and no `BREAKING CHANGE:` until 1.0 is intended: either one jumps the version to 1.0.0.
+- On the push to `main`, `.github/workflows/release.yml` runs the CI checks, determines the version, commits `CHANGELOG.md` (git-cliff, `cliff.toml`) to `main`, tags `v<version>`, creates the GitHub Release and closes the issues the release delivered. The changelog commit is pushed with the `GH_PAT` secret (a repository admin, bypass actor of the `main` ruleset).
+- The versions in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` are placeholders; the tag carries the released version.
+- Tags are `v<major>.<minor>.<patch>`, as in the other GravionLabs repositories; milestones carry the same names.
+- The rulesets `main` and `release` are created by `scripts/setup-rulesets.sh`.
 
 ## License
 
