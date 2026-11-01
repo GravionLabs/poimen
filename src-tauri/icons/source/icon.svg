@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- poimen app icon: a shepherd's crook guarding a terminal prompt. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1F4B4F"/>
+      <stop offset="1" stop-color="#0E2427"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS grid: 824 px rounded square centered on the 1024 canvas. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#bg)"/>
+  <!-- Shepherd's crook: staff on the right, hook curling to the left. -->
+  <path d="M 662 800 L 662 420 A 150 150 0 0 0 362 420 L 362 452"
+        fill="none" stroke="#F2C46D" stroke-width="100" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Terminal prompt under the hook. -->
+  <path d="M 330 590 L 450 670 L 330 750"
+        fill="none" stroke="#E8F1EF" stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
