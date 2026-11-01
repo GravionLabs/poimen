@@ -1,33 +1,24 @@
+/*
+ * App chrome on the helix tokens (--h-*, from tokens.css; dark under .app-dark, set by HxTheme).
+ * Only what helix has no token for is defined here: the terminal colors and the agent status colors.
+ */
 :root {
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
-  --bg: #f4f4f2;
-  --panel: #ffffff;
-  --border: #dcdcd6;
-  --text: #1d1d1b;
-  --muted: #74746c;
-  --accent: #3a6ea5;
+  --app-ground: var(--h-surface-50);
   --term-bg: #1b1c1e;
   --term-fg: #e4e4e0;
-  --idle: #8a8a82;
-  --working: #3a8fd8;
-  --blocked: #e0912f;
-  --done: #3fa86b;
-  --unknown: #b9b9b1;
-  color-scheme: light dark;
+  --status-idle: var(--h-surface-400);
+  --status-working: var(--h-blue-500);
+  --status-blocked: var(--h-orange-500);
+  --status-done: var(--h-green-500);
+  --status-unknown: var(--h-surface-300);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141517;
-    --panel: #1d1e21;
-    --border: #2e3034;
-    --text: #e6e6e2;
-    --muted: #8e8f8a;
-    --accent: #6fa3dc;
-    --term-bg: #111214;
-    --unknown: #55575c;
-  }
+:root.app-dark {
+  --app-ground: var(--h-surface-950);
+  --term-bg: #111214;
+  --status-unknown: var(--h-surface-600);
 }
 
 * {
@@ -41,236 +32,42 @@ body {
 }
 
 body {
-  display: flex;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--app-ground);
+  color: var(--h-text-color);
   font: 13px/1.4 var(--font-ui);
   overflow: hidden;
 }
 
-button {
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: var(--accent);
-}
-
-/* Sidebar */
-
-.sidebar {
-  width: 260px;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--panel);
-  overflow-y: auto;
-}
-
-.brand {
-  padding: 14px 14px 8px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.connection {
-  margin: 0 10px 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--blocked) 18%, transparent);
-  font-size: 12px;
-}
-
-.workspace > summary {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 6px 14px;
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-  list-style: none;
-}
-
-.pane-row {
-  display: grid;
-  grid-template-columns: 10px 1fr;
-  column-gap: 8px;
-  width: 100%;
-  padding: 5px 14px 5px 22px;
-  border: none;
-  border-radius: 0;
-  text-align: left;
-}
-
-.pane-row:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.pane-row.open {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-
-.pane-row .dot {
-  margin-top: 5px;
-}
-
-.pane-row .label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pane-row .tab {
-  grid-column: 2;
-  color: var(--muted);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Status dots */
+/* Status dots (sidebar rows and card headers) */
 
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex: none;
-  background: var(--unknown);
+  background: var(--status-unknown);
 }
 
-.status-idle { background: var(--idle); }
-.status-working { background: var(--working); animation: pulse 1.4s ease-in-out infinite; }
-.status-blocked { background: var(--blocked); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blocked) 30%, transparent); }
-.status-done { background: var(--done); }
+.status-idle {
+  background: var(--status-idle);
+}
+
+.status-working {
+  background: var(--status-working);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.status-blocked {
+  background: var(--status-blocked);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-blocked) 30%, transparent);
+}
+
+.status-done {
+  background: var(--status-done);
+}
 
 @keyframes pulse {
-  50% { opacity: 0.35; }
-}
-
-/* Views */
-
-#views {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-  min-width: 0;
-  overflow-y: auto;
-}
-
-.empty {
-  margin: auto;
-  max-width: 360px;
-  text-align: center;
-  color: var(--muted);
-}
-
-.empty .hint {
-  font-size: 12px;
-}
-
-.view {
-  flex: 1 1 0;
-  min-height: 160px;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
-  overflow: hidden;
-}
-
-.view.collapsed {
-  flex: none;
-  min-height: 0;
-}
-
-.view.controlling {
-  border-color: var(--accent);
-}
-
-.view-header {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border);
-  user-select: none;
-}
-
-.view.collapsed .view-header {
-  border-bottom: none;
-}
-
-.view-title {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.view-id {
-  color: var(--muted);
-  font: 11px var(--font-mono);
-}
-
-.spacer {
-  flex: 1;
-}
-
-.icon {
-  border: none;
-  padding: 0 4px;
-  color: var(--muted);
-}
-
-.chevron {
-  transition: transform 0.12s;
-}
-
-.view.collapsed .chevron {
-  transform: rotate(-90deg);
-}
-
-.mode.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.view-banner {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 6px 10px;
-  background: color-mix(in srgb, var(--blocked) 16%, transparent);
-  font-size: 12px;
-}
-
-.view-banner span {
-  flex: 1;
-}
-
-.view-body {
-  flex: 1;
-  min-height: 0;
-  padding: 4px 0 0 6px;
-  background: var(--term-bg);
-}
-
-.view.collapsed .view-body,
-.view.collapsed .view-banner {
-  display: none;
+  50% {
+    opacity: 0.35;
+  }
 }
