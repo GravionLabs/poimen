@@ -24,5 +24,11 @@ Guidance for humans and coding agents working in this repository. Generated text
 
 ```sh
 pnpm check && pnpm lint && pnpm format:check && pnpm test && pnpm build
-cd src-tauri && cargo fmt --check && cargo clippy --all-targets && cargo test
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
+
+## CI and releases
+
+- `.github/workflows/ci.yml` checks the frontend and the Tauri crate (with the Linux system libraries) through GravionLabs/ci `@v1`; its always-running `ci` gate job (green when the checks passed or no app files changed) and `pr-checks / PR checks` (`pr-checks.yml`: readiness, Conventional Commit title) are the checks required on `main` and `release/**`.
+- Reusable workflows and actions of GravionLabs/ci are referenced at `@v1`, never `@main` or a SHA.
+- Work is integrated on `release/next`: every PBI branch is cut from it and its PR targets it (squash); `main` only receives the release PR (merge commit). `release.yml` versions with GitVersion, writes `CHANGELOG.md` with git-cliff and tags `v<version>`. README "Releases" has the rules.
