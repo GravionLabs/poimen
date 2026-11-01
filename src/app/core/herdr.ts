@@ -34,6 +34,20 @@ export interface Snapshot {
   panes: Pane[];
 }
 
+/** Payload of the `herdr` Tauri event: a herdr event or a poimen connection event. */
+export interface HerdrEvent {
+  kind: string;
+  data: { pane_id?: string; agent_status?: AgentStatus; reason?: string } | null;
+}
+
+/** How a terminal view attaches: as one of many observers or as the single controller. */
+export type Mode = "observe" | "control";
+
+/** One record of a terminal stream (payload of the `terminal` Tauri event, per session id). */
+export type StreamRecord =
+  | { type: "frame"; seq: number; full: boolean; width: number; height: number; bytes: string }
+  | { type: "closed"; reason: string };
+
 export interface TabNode {
   tab: Tab;
   panes: Pane[];

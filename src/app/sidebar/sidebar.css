@@ -1,0 +1,79 @@
+:host {
+  width: 260px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--h-content-border-color);
+  background: var(--h-content-background);
+  overflow-y: auto;
+}
+
+.brand {
+  padding: 14px 14px 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.connection {
+  margin: 0 10px 8px;
+}
+
+.workspace > summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 14px;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  list-style: none;
+}
+
+.pane-row {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  column-gap: 8px;
+  width: 100%;
+  padding: 5px 14px 5px 22px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pane-row:hover {
+  background: var(--h-content-hover-background);
+}
+
+.pane-row.open {
+  background: var(--h-highlight-background);
+  color: var(--h-highlight-color);
+}
+
+.pane-row:focus-visible {
+  outline: var(--h-focus-ring-width) var(--h-focus-ring-style) var(--h-focus-ring-color);
+  outline-offset: calc(-1 * var(--h-focus-ring-width));
+}
+
+.pane-row .dot {
+  margin-top: 5px;
+}
+
+.pane-row .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-row .tab {
+  grid-column: 2;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1,0 +1,14 @@
+dist
+.angular
+node_modules
+out-tsc
+src-tauri/target
+src-tauri/gen
+src-tauri/icons
+pnpm-lock.yaml
+Cargo.lock
+docs
+*.md
+LICENSE
+.claude
+src-tauri

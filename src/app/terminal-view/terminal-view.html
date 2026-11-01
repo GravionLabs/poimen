@@ -1,0 +1,68 @@
+<header class="view-header">
+  <button
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
+    class="chevron"
+    title="Collapse / expand"
+    [attr.aria-expanded]="!collapsed()"
+    (click)="toggle()"
+  >
+    ▾
+  </button>
+  <span class="dot status-{{ pane().agent_status }}"></span>
+  <!-- Double-click is a shortcut; the chevron is the accessible control. -->
+  <span class="view-title" (dblclick)="toggle()">{{ label() }}</span>
+  <span class="view-id">{{ pane().pane_id }}</span>
+  <span class="spacer"></span>
+  <button
+    hx-button
+    size="small"
+    [variant]="mode() === 'control' ? 'filled' : 'outlined'"
+    [severity]="mode() === 'control' ? 'primary' : 'secondary'"
+    title="Switch between read-only and input"
+    [attr.aria-pressed]="mode() === 'control'"
+    (click)="toggleMode()"
+  >
+    {{ mode() === "control" ? "Input" : "Read-only" }}
+  </button>
+  <button
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
+    title="Close view (pane keeps running)"
+    aria-label="Close view"
+    (click)="close()"
+  >
+    ✕
+  </button>
+</header>
+@if (banner(); as reason) {
+  <div class="view-banner" role="status">
+    <span>Stream closed: {{ reason }}</span>
+    <button
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
+      (click)="reconnect(false)"
+    >
+      Reconnect
+    </button>
+    @if (mode() === "control") {
+      <button
+        hx-button
+        variant="outlined"
+        severity="warn"
+        size="small"
+        title="Replace the current controller of this terminal"
+        (click)="reconnect(true)"
+      >
+        Take over
+      </button>
+    }
+  </div>
+}
+<div #body class="view-body"></div>
