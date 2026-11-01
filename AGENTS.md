@@ -16,6 +16,10 @@ Guidance for humans and coding agents working in this repository. Generated text
 - **Tests stay read-only.** Live tests (`#[ignore]`) may list and observe, never control, send input or create panes in the user's session.
 - **Protocol drift.** herdr's API protocol is versioned (22 at the time of the spike). Keep all wire shapes in `herdr.rs` and `stream.rs`, each with a parsing test.
 
+## Decisions
+
+- Frontend stack: Angular 22 and helix-ui, and when a component goes to helix-ui ([ADR 0001](docs/adr/0001-frontend-stack.md)).
+
 ## Verification
 
 ```sh
