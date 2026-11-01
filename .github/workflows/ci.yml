@@ -1,0 +1,112 @@
+name: CI
+
+# Checks of the frontend (src/) and the Tauri crate (src-tauri/). On pull requests the `changes` job decides from
+# the diff whether app files or this workflow changed; the `ci` job always runs last and is the single check to
+# require on a branch (green when the checks passed or were skipped for lack of app changes).
+# Pushes to main run these checks through release.yml (workflow_call), so they run once per release.
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    branches: [main, "release/**"]
+  push:
+    branches: ["release/**"]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: changes (app files)
+    runs-on: ubuntu-24.04
+    outputs:
+      app: ${{ steps.diff.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "app=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          pattern='^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|angular\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|vitest\.[^/]*|\.prettier[^/]*|rust-toolchain\.toml|src/.*|src-tauri/.*|\.github/workflows/ci\.yml)$'
+          git diff --name-only "$BASE_SHA" HEAD > changed.txt
+          cat changed.txt
+          if grep -Eq "$pattern" changed.txt; then
+            echo "app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    name: frontend (check, lint, format, test, build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm test
+      - run: pnpm build
+
+  rust:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    name: rust (fmt, clippy, test)
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+      # The Tauri macros read the built frontend (frontendDist in tauri.conf.json).
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # cargo fmt --check, clippy -D warnings and test (--locked) with the toolchain of rust-toolchain.toml and the
+      # Linux libraries Tauri needs. The live tests are #[ignore]d and need a herdr server; they never run here.
+      - uses: GravionLabs/ci/rust/ci@v1
+        with:
+          working-directory: src-tauri
+          tauri-linux-deps: "true"
+
+  # The one check to require: green when frontend and rust passed or were skipped because no app files changed;
+  # red when any of them (or `changes`) failed or was cancelled.
+  ci:
+    name: ci
+    if: always()
+    needs: [changes, frontend, rust]
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needed job results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "a needed job ended as $r"; exit 1 ;;
+            esac
+          done
