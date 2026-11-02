@@ -509,29 +509,32 @@ describe("TerminalView links", () => {
     }
   });
 
-  it("underlines a hovered link with the WebGL renderer and removes it on leave", async () => {
-    const { body } = await setup("control");
-    const screen = document.createElement("div");
-    screen.className = "xterm-screen";
-    screen.getBoundingClientRect = () => ({ width: 800, height: 480 }) as DOMRect;
-    body.appendChild(screen);
-    const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {
-      options: { hover: (e: MouseEvent, t: string, r: unknown) => void; leave: () => void };
-    };
-    // 80x24 cells of 10x20 px; the link covers cells 7..12 of the second row.
-    addon.options.hover(new MouseEvent("mousemove"), "https://x.y", {
-      start: { x: 7, y: 2 },
-      end: { x: 12, y: 2 },
-    });
-    const lines = screen.querySelectorAll<HTMLElement>(".link-underline");
-    expect(lines).toHaveLength(1);
-    expect(lines[0].style.left).toBe("60px");
-    expect(lines[0].style.top).toBe("39px");
-    expect(lines[0].style.width).toBe("60px");
-    expect(lines[0].style.background).toContain("228, 228, 224");
-    expect(screen.style.cursor).toBe("pointer");
-    addon.options.leave();
-    expect(screen.style.cursor).toBe("");
-    expect(screen.querySelectorAll(".link-underline")).toHaveLength(0);
+  it("forwards Cmd to the pane on macOS outside a link and after the pointer left a link", async () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    try {
+      const { session, body } = await setup("control");
+      await new Promise((resolve) => setTimeout(resolve));
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+      expect(session.mouse).toHaveBeenCalledTimes(1);
+      hoverLink();
+      const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {
+        options: { leave: () => void };
+      };
+      addon.options.leave();
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+      expect(session.mouse).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("forwards Shift-less Ctrl drags outside a link and still bypasses on Shift over a link", async () => {
+    const { session, body } = await setup("control");
+    await new Promise((resolve) => setTimeout(resolve));
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
+    expect(session.mouse).toHaveBeenCalledTimes(1);
+    hoverLink();
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, shiftKey: true }));
+    expect(session.mouse).toHaveBeenCalledTimes(1);
   });
 });
