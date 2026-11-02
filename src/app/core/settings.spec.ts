@@ -19,6 +19,7 @@ describe("parseSettings", () => {
     expect(
       parseSettings({
         theme: "dark",
+        colorSchema: " dracula ",
         fontFamily: "Hack",
         fontSize: 15,
         colors: { background: "#000000", foreground: null },
@@ -27,6 +28,7 @@ describe("parseSettings", () => {
       }),
     ).toEqual({
       theme: "dark",
+      colorSchema: "dracula",
       fontFamily: "Hack",
       fontSize: 15,
       colors: { background: "#000000", foreground: null },
@@ -37,6 +39,12 @@ describe("parseSettings", () => {
       explorerShowHidden: false,
       warnings: ["w"],
     });
+  });
+
+  it("keeps colorSchema only as a non-empty string", () => {
+    expect(parseSettings({}).colorSchema).toBeNull();
+    for (const bad of [3, "", "  ", { light: "a" }, null])
+      expect(parseSettings({ colorSchema: bad }).colorSchema).toBeNull();
   });
 
   it("merges the shortcuts over the defaults and ignores bad entries", () => {

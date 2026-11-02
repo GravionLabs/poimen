@@ -1,0 +1,46 @@
+import { Injectable, inject } from "@angular/core";
+import { HxTheme } from "@gravionlabs/helix-ui";
+import { appearance, bundled, deriveTokens, resolveScheme, type ColorScheme } from "./color-scheme";
+
+/**
+ * Puts a scheme's derived tokens on `<html>` and sets helix' light/dark class from its background.
+ * Without a scheme (no `colorSchema`, `poimen`, or an unknown name) the tokens of `styles.css` are in
+ * charge and `theme` picks light or dark.
+ */
+@Injectable({ providedIn: "root" })
+export class ColorSchemeService {
+  private readonly theme = inject(HxTheme);
+  private applied: string[] = [];
+  private lastName: string | null | undefined;
+
+  /**
+   * Applies the scheme named by `colorSchema`. Returns whether a scheme now decides light or dark
+   * (then `theme` is ignored); `false` means the caller follows `theme`. An unknown name warns once.
+   */
+  sync(name: string | null): boolean {
+    const changed = name !== this.lastName;
+    this.lastName = name;
+    const scheme = resolveScheme(name, bundled, changed ? undefined : () => undefined);
+    if (!scheme) {
+      this.clear();
+      return false;
+    }
+    this.apply(scheme);
+    return true;
+  }
+
+  private apply(scheme: ColorScheme): void {
+    const root = document.documentElement;
+    const tokens = deriveTokens(scheme);
+    for (const name of this.applied) if (!(name in tokens)) root.style.removeProperty(name);
+    for (const [name, value] of Object.entries(tokens)) root.style.setProperty(name, value);
+    this.applied = Object.keys(tokens);
+    this.theme.setDark(appearance(scheme) === "dark");
+  }
+
+  private clear(): void {
+    const root = document.documentElement;
+    for (const name of this.applied) root.style.removeProperty(name);
+    this.applied = [];
+  }
+}

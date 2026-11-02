@@ -1,0 +1,27 @@
+{
+  "name": "poimen-dark",
+  "label": "Poimen Dark",
+  "background": "#111214",
+  "foreground": "#e4e4e0",
+  "cursor": "#e4e4e0",
+  "selectionBackground": "#2f4a73",
+  "selectionForeground": "#f4f4f0",
+  "ansi": [
+    "#2a2c31",
+    "#f06a6a",
+    "#6bcf7f",
+    "#e0b94f",
+    "#6ea8fe",
+    "#c792ea",
+    "#5fd0d6",
+    "#c9cac5",
+    "#6b6e76",
+    "#ff8585",
+    "#8ae59b",
+    "#f0cc6c",
+    "#8dbcff",
+    "#d9a9f5",
+    "#86e3e8",
+    "#f4f4f0"
+  ]
+}

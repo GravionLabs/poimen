@@ -122,6 +122,7 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 ```
 
 - `theme`: `light`, `dark` or `system` (default). The toolbar button writes this entry; poimen writes no other setting.
+- `colorSchema`: the name of a bundled color scheme: `poimen` (default, follows `theme`), or one of herdr's `catppuccin`, `tokyo-night`, `tokyo-night-day`, `dracula`, `gruvbox`, `gruvbox-light`, `one-dark`, `one-light`, `solarized`, `solarized-light`, `kanagawa`, `kanagawa-lotus`, `rose-pine`, `rose-pine-dawn`, `vesper`. The scheme colors the terminal and the chrome (surfaces, accent, status colors, derived from its palette) and decides light or dark from its background, so `theme` is ignored while one is set. A wrong type or an unknown name logs a warning and uses `poimen`. The values and licenses are in `src/app/themes/`.
 - `terminal.fontFamily` / `terminal.fontSize` (6 to 72, default 13).
 - `terminal.autoControl`: `true` (default) opens panes for input when no other client controls them; `false` opens every tab read-only.
 - `shortcuts`: accelerator per action (keys in the table above), such as `Cmd+Shift+K`, `CmdOrCtrl+Alt+Left` or `F5`. It needs Cmd, Ctrl or Alt (or is an F key); an empty string unbinds the action. Unknown actions, invalid accelerators and ones already used by another action log a warning and keep the default.

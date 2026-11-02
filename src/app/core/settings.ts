@@ -14,6 +14,8 @@ export type ThemeSetting = "light" | "dark" | "system";
 /** The resolved user settings from `~/.config/poimen/config.json` (wire shape of `settings.rs`). */
 export interface Settings {
   theme: ThemeSetting;
+  /** Name of the color scheme (`colorSchema`); `null` is the `poimen` scheme that follows `theme`. */
+  colorSchema: string | null;
   /** `null` keeps the app's default monospace stack. */
   fontFamily: string | null;
   fontSize: number;
@@ -39,6 +41,7 @@ export function nextTheme(theme: ThemeSetting): ThemeSetting {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
+  colorSchema: null,
   fontFamily: null,
   fontSize: 13,
   colors: null,
@@ -91,6 +94,10 @@ export function parseSettings(raw: unknown): Settings {
   const color = (v: unknown) => (typeof v === "string" ? v : null);
   return {
     theme: r["theme"] === "light" || r["theme"] === "dark" ? r["theme"] : "system",
+    colorSchema:
+      typeof r["colorSchema"] === "string" && r["colorSchema"].trim() !== ""
+        ? r["colorSchema"].trim()
+        : null,
     fontFamily: typeof r["fontFamily"] === "string" ? r["fontFamily"] : null,
     fontSize:
       typeof r["fontSize"] === "number" && Number.isFinite(r["fontSize"])

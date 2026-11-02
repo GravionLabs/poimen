@@ -1,0 +1,27 @@
+{
+  "name": "rose-pine-dawn",
+  "label": "Rosé Pine Dawn",
+  "background": "#faf4ed",
+  "foreground": "#575279",
+  "cursor": "#575279",
+  "selectionBackground": "#dfdad9",
+  "selectionForeground": "#575279",
+  "ansi": [
+    "#f2e9e1",
+    "#b4637a",
+    "#286983",
+    "#ea9d34",
+    "#56949f",
+    "#907aa9",
+    "#d7827e",
+    "#575279",
+    "#9893a5",
+    "#b4637a",
+    "#286983",
+    "#ea9d34",
+    "#56949f",
+    "#907aa9",
+    "#d7827e",
+    "#575279"
+  ]
+}
