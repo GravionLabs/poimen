@@ -172,6 +172,87 @@ describe("TerminalView theme", () => {
     expect(token(":root.app-dark", "--term-fg")).toBe("#e4e4e0");
   });
 
+  it("defines 16 ANSI colors, cursor and selection tokens for light and dark", () => {
+    for (const selector of [":root", ":root.app-dark"]) {
+      for (let i = 0; i < 16; i++) expect(token(selector, `--term-ansi-${i}`)).toBeDefined();
+      for (const name of ["--term-cursor", "--term-selection-bg", "--term-selection-fg"]) {
+        expect(token(selector, name)).toBeDefined();
+      }
+    }
+    expect(token(":root", "--term-ansi-1")).not.toBe(token(":root.app-dark", "--term-ansi-1"));
+  });
+
+  it("passes all 16 ANSI colors, cursor and selection to xterm, and re-reads them on app-dark", async () => {
+    const root = document.documentElement;
+    const names = [
+      "black",
+      "red",
+      "green",
+      "yellow",
+      "blue",
+      "magenta",
+      "cyan",
+      "white",
+      "brightBlack",
+      "brightRed",
+      "brightGreen",
+      "brightYellow",
+      "brightBlue",
+      "brightMagenta",
+      "brightCyan",
+      "brightWhite",
+    ];
+    const set = (hex: (i: number) => string, extra: string) => {
+      for (let i = 0; i < 16; i++) root.style.setProperty(`--term-ansi-${i}`, hex(i));
+      root.style.setProperty("--term-cursor", extra);
+      root.style.setProperty("--term-selection-bg", extra);
+      root.style.setProperty("--term-selection-fg", extra);
+    };
+    set((i) => `#0000${i.toString(16).padStart(2, "0")}`, "#111111");
+    const { fixture } = await setup("observe");
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: Record<string, string> } };
+      }
+    ).term;
+    names.forEach((n, i) =>
+      expect(term.options.theme[n]).toBe(`#0000${i.toString(16).padStart(2, "0")}`),
+    );
+    expect(term.options.theme).toMatchObject({
+      cursor: "#111111",
+      selectionBackground: "#111111",
+      selectionForeground: "#111111",
+    });
+    set((i) => `#ff00${i.toString(16).padStart(2, "0")}`, "#222222");
+    root.classList.add("app-dark");
+    await new Promise((resolve) => setTimeout(resolve));
+    names.forEach((n, i) =>
+      expect(term.options.theme[n]).toBe(`#ff00${i.toString(16).padStart(2, "0")}`),
+    );
+    expect(term.options.theme["selectionBackground"]).toBe("#222222");
+    root.classList.remove("app-dark");
+    root.removeAttribute("style");
+  });
+
+  it("keeps Ghostty background and foreground while the palette still comes from the tokens", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--term-ansi-1", "#aa0000");
+    const { fixture, settings } = await setup("observe");
+    settings.set({ ...DEFAULT_SETTINGS, colors: { background: "#000001", foreground: "#fffffe" } });
+    fixture.detectChanges();
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: Record<string, string> } };
+      }
+    ).term;
+    expect(term.options.theme).toMatchObject({
+      background: "#000001",
+      foreground: "#fffffe",
+      red: "#aa0000",
+    });
+    root.removeAttribute("style");
+  });
+
   it("re-reads the token colors when the theme class changes", async () => {
     const root = document.documentElement;
     root.style.setProperty("--term-bg", "#fbfbf9");

@@ -49,6 +49,35 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
+const ANSI_NAMES = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+
+/** The 16 ANSI colors from `--term-ansi-0..15`; a missing token leaves xterm's default. */
+function ansiColors(): Partial<Record<(typeof ANSI_NAMES)[number], string>> {
+  const colors: Partial<Record<(typeof ANSI_NAMES)[number], string>> = {};
+  ANSI_NAMES.forEach((name, i) => {
+    const value = cssVar(`--term-ansi-${i}`);
+    if (value) colors[name] = value;
+  });
+  return colors;
+}
+
 /**
  * The live terminal of the active tab. It exists only while its tab is visible: hiding the tab
  * destroys it, which closes the stream and disposes xterm; the herdr pane keeps running.
@@ -149,7 +178,10 @@ export class TerminalView implements OnDestroy {
       theme: {
         background: colors?.background ?? cssVar("--term-bg"),
         foreground,
-        cursor: foreground,
+        cursor: cssVar("--term-cursor") || foreground,
+        selectionBackground: cssVar("--term-selection-bg") || undefined,
+        selectionForeground: cssVar("--term-selection-fg") || undefined,
+        ...ansiColors(),
       },
     };
   }
