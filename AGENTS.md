@@ -20,6 +20,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 ## Decisions
 
 - Frontend stack: Angular 22 and helix-ui, and when a component goes to helix-ui ([ADR 0001](docs/adr/0001-frontend-stack.md)).
+- Color schemes: bundled and imported schemes, a derived chrome and the `colorSchema` setting ([ADR 0002](docs/adr/0002-color-schemes.md)).
 
 ## Verification
 
