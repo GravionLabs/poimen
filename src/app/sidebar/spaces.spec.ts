@@ -51,6 +51,7 @@ describe("paneDetail and subline", () => {
       "codex · fix bug",
     );
     expect(subline(row())).toBe("");
+    expect(subline(row({ pane: { terminal_title_stripped: "jkaufmann@M01:~/a/b" } }))).toBe("");
   });
 });
 

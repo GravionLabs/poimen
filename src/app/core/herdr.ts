@@ -98,6 +98,22 @@ export function paneLabel(pane: Pane): string {
   );
 }
 
+/**
+ * Sidebar name of a pane row. herdr's own sidebar shows an agent pane by its session title and a
+ * plain terminal by its label: the pane label, else the tab label (`herdr tab list`, e.g.
+ * "terminal"). The shell's terminal title (`user@host:~/path`) is never shown. With no label at
+ * all, the directory name stands in.
+ */
+export function rowName(pane: Pane, tabLabel?: string): string {
+  if (agentKind(pane)) return paneLabel(pane);
+  return (
+    pane.label?.trim() ||
+    tabLabel?.trim() ||
+    (paneDir(pane) ? basename(paneDir(pane)!) : "") ||
+    pane.pane_id
+  );
+}
+
 /** Panes whose agent waits for the user. */
 export function waitingCount(panes: Pane[]): number {
   return panes.filter((pane) => pane.agent_status === "blocked").length;
@@ -178,7 +194,7 @@ export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoI
         return {
           pane,
           tab: tab.label,
-          name: paneLabel(pane),
+          name: rowName(pane, tab.label),
           agent: agentKind(pane),
           branch: repo?.branch ?? undefined,
           worktree: repo?.worktree ?? false,
