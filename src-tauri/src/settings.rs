@@ -759,6 +759,11 @@ pub fn set_color_schema_text(text: &str, schema: &serde_json::Value) -> Result<S
 
 /// Byte range of the value of `key` in the object that opens at `open` (a `{`), if present.
 fn find_value(text: &str, open: usize, key: &str) -> Option<(usize, usize)> {
+    find_entry(text, open, key).map(|(_, start, stop)| (start, stop))
+}
+
+/// Like `find_value`, plus the start of the quoted key: `(key, value start, value stop)`.
+fn find_entry(text: &str, open: usize, key: &str) -> Option<(usize, usize, usize)> {
     let quoted = format!("\"{key}\"");
     let b = text.as_bytes();
     let (mut i, mut depth) = (open + 1, 1usize);
@@ -769,6 +774,7 @@ fn find_value(text: &str, open: usize, key: &str) -> Option<(usize, usize)> {
             Some(b'"') => {
                 let end = skip_string(b, i);
                 let is_key = depth == 1 && text[i..end] == quoted;
+                let key_start = i;
                 i = end;
                 if is_key {
                     let colon = skip_trivia(b, i);
@@ -794,7 +800,7 @@ fn find_value(text: &str, open: usize, key: &str) -> Option<(usize, usize)> {
                             }
                             e
                         };
-                        return Some((start, stop));
+                        return Some((key_start, start, stop));
                     }
                 }
             }
@@ -882,6 +888,62 @@ pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, Strin
     set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
 }
 
+/// Index before the whitespace (not comments) that ends just before `i`.
+fn trim_ws_back(b: &[u8], mut i: usize) -> usize {
+    while i > 0 && b[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    i
+}
+
+/// Removes the nested key `path` with its value and one separating comma, touching nothing else.
+/// A missing key (or a missing object on the way) leaves the text unchanged.
+fn remove_path_text(text: &str, path: &[&str]) -> Result<String, String> {
+    let b = text.as_bytes();
+    let mut open = root_open(text)?;
+    let (last, parents) = path.split_last().ok_or("empty key path")?;
+    for key in parents {
+        match find_value(text, open, key) {
+            None => return Ok(text.to_owned()),
+            Some((start, _)) if b.get(start) == Some(&b'{') => open = start,
+            Some(_) => return Err(format!("{key} in config.json is not an object")),
+        }
+    }
+    let Some((key_start, _, stop)) = find_entry(text, open, last) else {
+        return Ok(text.to_owned());
+    };
+    let stop = trim_ws_back(b, stop).max(key_start);
+    let mut after = stop;
+    while after < b.len() && b[after].is_ascii_whitespace() {
+        after += 1;
+    }
+    if b.get(after) == Some(&b',') {
+        // Not the last entry: drop the entry, its comma and the whitespace before it.
+        let from = trim_ws_back(b, key_start);
+        return Ok(format!("{}{}", &text[..from], &text[after + 1..]));
+    }
+    // The last entry: drop the comma before it, if any.
+    let before = trim_ws_back(b, key_start);
+    let from = if before > 0 && b[before - 1] == b',' {
+        before - 1
+    } else {
+        before
+    };
+    Ok(format!("{}{}", &text[..from], &text[stop..]))
+}
+
+/// Returns `text` with `spaces.layout` set to `layout` after validating it like the settings
+/// loader does; other keys, comments and formatting stay.
+pub fn set_spaces_layout_text(text: &str, layout: &Value) -> Result<String, String> {
+    crate::layout::parse_layout_value(layout).map_err(|e| format!("spaces.layout: {e}"))?;
+    set_path_text(text, &["spaces", "layout"], &layout.to_string())
+}
+
+/// Returns `text` without `spaces.layout`, so new spaces use the built-in default again.
+pub fn remove_spaces_layout_text(text: &str) -> Result<String, String> {
+    remove_path_text(text, &["spaces", "layout"])
+}
+
 /// Writes a path below `home` as `~` or `~/…`; other paths stay as they are.
 pub fn tilde_path(path: &str, home: &Path) -> String {
     let path = path.trim();
@@ -943,6 +1005,19 @@ pub fn save_explorer_roots(home: &Path, roots: &[String]) -> Result<(), String> 
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
 pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> {
     save_with(home, |text| set_explorer_show_hidden_text(text, show))
+}
+
+/// Writes `spaces.layout` below `home`, like `save_theme`.
+pub fn save_spaces_layout(home: &Path, layout: &Value) -> Result<(), String> {
+    save_with(home, |text| set_spaces_layout_text(text, layout))
+}
+
+/// Removes `spaces.layout` below `home`; a missing file stays missing.
+pub fn remove_spaces_layout(home: &Path) -> Result<(), String> {
+    if !config_path(home).exists() {
+        return Ok(());
+    }
+    save_with(home, remove_spaces_layout_text)
 }
 
 fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> Result<(), String> {
@@ -1146,6 +1221,65 @@ mod tests {
         let s = load(&home);
         assert_eq!(s.explorer_roots, vec!["~/Source", "/srv"]);
         assert!(s.explorer_show_hidden);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn set_spaces_layout_validates_and_keeps_the_rest() {
+        let layout = serde_json::json!({"panes": [{"name": "a", "command": "nvim"}, {"name": "b", "split": {"from": "a", "direction": "down", "ratio": 0.7}}]});
+        let text = "{\n  // keep\n  \"theme\": \"dark\"\n}";
+        let out = set_spaces_layout_text(text, &layout).unwrap();
+        assert!(out.contains("// keep"));
+        assert!(out.contains("\"theme\": \"dark\""));
+        let parsed = resolve(Some(&out.replace("  // keep\n", "")), || None);
+        let panes = parsed.spaces_layout.unwrap().panes;
+        assert_eq!(panes.len(), 2);
+        assert_eq!(panes[1].split.as_ref().unwrap().ratio, 0.7);
+        let bad = serde_json::json!({"panes": [{"name": "a"}, {"name": "a", "split": {"direction": "right"}}]});
+        assert!(
+            set_spaces_layout_text("{}", &bad)
+                .unwrap_err()
+                .contains("duplicate")
+        );
+        assert!(set_spaces_layout_text("{\"spaces\": 1}", &layout).is_err());
+    }
+
+    #[test]
+    fn remove_spaces_layout_drops_only_the_entry() {
+        let middle = "{\n  \"spaces\": {\n    \"layout\": { \"panes\": [] },\n    \"x\": 1\n  }\n}";
+        assert_eq!(
+            remove_spaces_layout_text(middle).unwrap(),
+            "{\n  \"spaces\": {\n    \"x\": 1\n  }\n}"
+        );
+        let last = "{\n  \"spaces\": {\n    \"x\": 1,\n    \"layout\": { \"panes\": [] }\n  },\n  \"theme\": \"dark\"\n}";
+        assert_eq!(
+            remove_spaces_layout_text(last).unwrap(),
+            "{\n  \"spaces\": {\n    \"x\": 1\n  },\n  \"theme\": \"dark\"\n}"
+        );
+        let only = "{ \"spaces\": { \"layout\": {\"panes\":[]} } }";
+        assert_eq!(
+            remove_spaces_layout_text(only).unwrap(),
+            "{ \"spaces\": { } }"
+        );
+        let missing = "{ // c\n \"theme\": \"dark\" }";
+        assert_eq!(remove_spaces_layout_text(missing).unwrap(), missing);
+        let compact = "{\"spaces\":{\"layout\":{\"panes\":[]},\"x\":1}}";
+        let out = remove_spaces_layout_text(compact).unwrap();
+        assert_eq!(out, "{\"spaces\":{\"x\":1}}");
+        assert!(serde_json::from_str::<Value>(&out).is_ok());
+    }
+
+    #[test]
+    fn save_and_remove_spaces_layout_round_trip() {
+        let home = std::env::temp_dir().join(format!("poimen-spaces-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        remove_spaces_layout(&home).unwrap();
+        assert!(!config_path(&home).exists());
+        let layout = serde_json::json!({"panes": [{"name": "solo", "command": "claude"}]});
+        save_spaces_layout(&home, &layout).unwrap();
+        assert_eq!(load(&home).spaces_layout.unwrap().panes[0].name, "solo");
+        remove_spaces_layout(&home).unwrap();
+        assert!(load(&home).spaces_layout.is_none());
         let _ = std::fs::remove_dir_all(&home);
     }
 

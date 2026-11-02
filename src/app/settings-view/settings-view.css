@@ -187,7 +187,7 @@ h3 {
 .toolbar-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
   margin-top: 8px;
   font-size: 13px;
 }
@@ -196,4 +196,108 @@ h3 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pane-row {
+  padding: 6px 8px;
+}
+
+.pane-row + .pane-row {
+  border-top: 1px solid var(--h-content-border-color);
+}
+
+.pane-row.invalid {
+  box-shadow: inset 2px 0 0 var(--status-blocked);
+}
+
+.pane-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+}
+
+.field input,
+.field select {
+  box-sizing: border-box;
+  height: 26px;
+  padding: 2px 6px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--h-text-color);
+  font: inherit;
+  font-size: 12px;
+}
+
+.field input[type="text"] {
+  width: 110px;
+}
+
+.field.grow {
+  flex: 1;
+  min-width: 140px;
+}
+
+.field.grow input {
+  width: 100%;
+}
+
+.field.ratio input {
+  width: 64px;
+}
+
+.field select option {
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+}
+
+.field input:focus-visible,
+.field select:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}
+
+.root-note {
+  align-self: center;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+}
+
+.pane-fields .actions {
+  margin-left: auto;
+}
+
+.field-error {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--status-blocked);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.btn.primary:not(:disabled) {
+  border-color: var(--h-primary-color);
+  color: var(--h-primary-color);
+  font-weight: 600;
 }

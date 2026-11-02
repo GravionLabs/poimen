@@ -18,6 +18,7 @@ import {
   SettingsView,
   withRoot,
 } from "./settings-view";
+import { SpaceLayoutEditor } from "./space-layout-editor";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -106,6 +107,13 @@ function setup(
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/settings-view/settings-view.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(SpaceLayoutEditor, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/settings-view/space-layout-editor.html", "utf8"),
     },
   });
   const store = TestBed.inject(SettingsStore);
