@@ -621,83 +621,154 @@ fn skip_trivia(b: &[u8], mut i: usize) -> usize {
     }
 }
 
-/// Returns `text` with the top-level `theme` set to `theme`, touching nothing else: other keys,
-/// comments and formatting stay. A missing `theme` is inserted as the first entry.
-pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
-    if !matches!(theme, "light" | "dark" | "system") {
-        return Err(format!("invalid theme {theme:?}"));
+/// Index after the JSON value that starts at `i`: a string, a balanced object or array (strings
+/// and comments inside skipped), or a scalar up to the next delimiter.
+fn skip_value(b: &[u8], i: usize) -> usize {
+    match b.get(i) {
+        Some(b'"') => skip_string(b, i),
+        Some(b'{' | b'[') => {
+            let (mut i, mut depth) = (i + 1, 1usize);
+            while i < b.len() {
+                i = skip_trivia(b, i);
+                match b.get(i) {
+                    Some(b'"') => i = skip_string(b, i),
+                    Some(b'{' | b'[') => {
+                        depth += 1;
+                        i += 1;
+                    }
+                    Some(b'}' | b']') => {
+                        depth -= 1;
+                        i += 1;
+                        if depth == 0 {
+                            return i;
+                        }
+                    }
+                    Some(_) => i += 1,
+                    None => break,
+                }
+            }
+            b.len()
+        }
+        _ => {
+            let mut e = i;
+            while e < b.len() && !matches!(b[e], b',' | b'}' | b']') && !b[e].is_ascii_whitespace()
+            {
+                e += 1;
+            }
+            e
+        }
     }
+}
+
+/// Byte range of the value of `key` in the object whose `{` is at `open`, if it has that member.
+fn find_member(text: &str, open: usize, key: &str) -> Option<(usize, usize)> {
     let b = text.as_bytes();
-    let open = skip_trivia(b, 0);
-    if b.get(open) != Some(&b'{') {
-        return Err("config.json is not a JSON object".into());
-    }
-    let (mut i, mut depth) = (open + 1, 1usize);
-    while i < b.len() {
+    let quoted = format!("\"{key}\"");
+    let mut i = open + 1;
+    loop {
         i = skip_trivia(b, i);
         match b.get(i) {
-            None => break,
+            None | Some(b'}') => return None,
             Some(b'"') => {
                 let end = skip_string(b, i);
-                let is_key = depth == 1 && &text[i..end] == "\"theme\"";
-                i = end;
-                if is_key {
-                    let colon = skip_trivia(b, i);
-                    if b.get(colon) == Some(&b':') {
-                        let start = skip_trivia(b, colon + 1);
-                        let stop = if b.get(start) == Some(&b'"') {
-                            skip_string(b, start)
-                        } else {
-                            let mut e = start;
-                            while e < b.len() && !matches!(b[e], b',' | b'}' | b'\n') {
-                                e += 1;
-                            }
-                            e
-                        };
-                        return Ok(format!("{}\"{theme}\"{}", &text[..start], &text[stop..]));
-                    }
+                let colon = skip_trivia(b, end);
+                if b.get(colon) != Some(&b':') {
+                    i = end;
+                    continue;
                 }
-            }
-            Some(b'{' | b'[') => {
-                depth += 1;
-                i += 1;
-            }
-            Some(b'}' | b']') => {
-                depth -= 1;
-                i += 1;
-                if depth == 0 {
-                    break;
+                let start = skip_trivia(b, colon + 1);
+                let stop = skip_value(b, start);
+                if text[i..end] == quoted {
+                    return Some((start, stop));
                 }
+                i = stop;
             }
             Some(_) => i += 1,
         }
     }
-    let first = skip_trivia(b, open + 1);
-    let entry = format!("\"theme\": \"{theme}\"");
-    Ok(if b.get(first) == Some(&b'}') {
-        format!("{}{entry}{}", &text[..=open], &text[first..])
-    } else {
-        format!("{}\n  {entry},{}", &text[..=open], &text[open + 1..])
-    })
 }
 
-/// Writes the `theme` setting below `home` (creating the file when missing). The watcher then
-/// emits the new settings like for any external edit.
-pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
-    let path = config_path(home);
-    let next = match std::fs::read_to_string(&path) {
-        Ok(text) => set_theme_text(&text, theme)?,
+/// `value` wrapped in one object per key of `path` (`["a","b"], 1` → `{"a": {"b": 1}}`).
+fn nest(path: &[&str], value: &str) -> String {
+    path.iter()
+        .rev()
+        .fold(value.to_owned(), |v, k| format!("{{\"{k}\": {v}}}"))
+}
+
+/// Sets `path` in the object at `open`: replaces the value, descends into an existing object, or
+/// inserts the member as the first entry.
+fn set_member_at(text: &str, open: usize, path: &[&str], value: &str) -> String {
+    let b = text.as_bytes();
+    let (key, rest) = (path[0], &path[1..]);
+    match find_member(text, open, key) {
+        Some((start, _)) if !rest.is_empty() && b.get(start) == Some(&b'{') => {
+            set_member_at(text, start, rest, value)
+        }
+        Some((start, stop)) => format!("{}{}{}", &text[..start], nest(rest, value), &text[stop..]),
+        None => {
+            let entry = format!("\"{key}\": {}", nest(rest, value));
+            let first = skip_trivia(b, open + 1);
+            if b.get(first) == Some(&b'}') {
+                format!("{}{entry}{}", &text[..=open], &text[first..])
+            } else {
+                format!("{}\n  {entry},{}", &text[..=open], &text[open + 1..])
+            }
+        }
+    }
+}
+
+/// Returns `text` with the member at `path` (keys from the top level down) set to the JSON
+/// `value`, touching nothing else: other keys, comments and formatting stay. Missing members are
+/// inserted as the first entry of their object.
+pub fn set_member_text(text: &str, path: &[&str], value: &str) -> Result<String, String> {
+    let open = skip_trivia(text.as_bytes(), 0);
+    if text.as_bytes().get(open) != Some(&b'{') {
+        return Err("config.json is not a JSON object".into());
+    }
+    if path.is_empty() {
+        return Err("empty settings path".into());
+    }
+    Ok(set_member_at(text, open, path, value))
+}
+
+/// Writes the member at `path` of config.json below `home` (creating the file when missing).
+/// The watcher then emits the new settings like for any external edit.
+fn save_member(home: &Path, path: &[&str], value: &str) -> Result<(), String> {
+    let file = config_path(home);
+    let next = match std::fs::read_to_string(&file) {
+        Ok(text) => set_member_text(&text, path, value)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            set_theme_text("{}", theme).map(|t| t + "\n")?
+            set_member_text("{}", path, value).map(|t| t + "\n")?
         }
         Err(e) => return Err(format!("cannot read config.json: {e}")),
     };
-    if let Some(dir) = path.parent() {
+    if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let tmp = path.with_extension("json.tmp");
+    let tmp = file.with_extension("json.tmp");
     std::fs::write(&tmp, next).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())
+}
+
+/// Writes the `theme` setting below `home`.
+pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
+    if !matches!(theme, "light" | "dark" | "system") {
+        return Err(format!("invalid theme {theme:?}"));
+    }
+    save_member(home, &["theme"], &format!("\"{theme}\""))
+}
+
+/// Replaces root `index` of `explorer.roots` with `dir` (the other roots stay) and writes the
+/// list below `home`; returns the new roots.
+pub fn save_explorer_root(home: &Path, index: usize, dir: &str) -> Result<Vec<String>, String> {
+    let mut roots = load(home).explorer_roots;
+    let slot = roots
+        .get_mut(index)
+        .ok_or_else(|| format!("there is no explorer root {index}"))?;
+    *slot = dir.to_owned();
+    let value = serde_json::to_string(&roots).map_err(|e| e.to_string())?;
+    save_member(home, &["explorer", "roots"], &value)?;
+    Ok(roots)
 }
 
 fn stamp(home: &Path) -> [Option<SystemTime>; 2] {
@@ -983,7 +1054,7 @@ mod tests {
     #[test]
     fn set_theme_replaces_the_value_and_keeps_the_rest() {
         let text = "{\n  // my theme\n  \"theme\": \"system\", /* c */\n  \"terminal\": {\"theme\": \"x\"}\n}";
-        let out = set_theme_text(text, "dark").unwrap();
+        let out = set_member_text(text, &["theme"], "\"dark\"").unwrap();
         assert_eq!(
             out,
             "{\n  // my theme\n  \"theme\": \"dark\", /* c */\n  \"terminal\": {\"theme\": \"x\"}\n}"
@@ -992,13 +1063,14 @@ mod tests {
 
     #[test]
     fn set_theme_inserts_when_missing_and_ignores_nested_keys() {
-        let out = set_theme_text("{\"terminal\":{\"theme\":\"x\"}}", "light").unwrap();
+        let out =
+            set_member_text("{\"terminal\":{\"theme\":\"x\"}}", &["theme"], "\"light\"").unwrap();
         assert_eq!(
             out,
             "{\n  \"theme\": \"light\",\"terminal\":{\"theme\":\"x\"}}"
         );
         assert_eq!(
-            set_theme_text("{ }", "dark").unwrap(),
+            set_member_text("{ }", &["theme"], "\"dark\"").unwrap(),
             "{\"theme\": \"dark\"}"
         );
         assert_eq!(resolve(Some(&out), none).theme, "light");
@@ -1006,8 +1078,76 @@ mod tests {
 
     #[test]
     fn set_theme_rejects_bad_input() {
-        assert!(set_theme_text("{}", "blue").is_err());
-        assert!(set_theme_text("[1]", "dark").is_err());
+        let home = std::env::temp_dir().join(format!("poimen-bad-theme-{}", std::process::id()));
+        assert!(save_theme(&home, "blue").is_err());
+        assert!(!config_path(&home).exists());
+        assert!(set_member_text("[1]", &["theme"], "\"dark\"").is_err());
+    }
+
+    #[test]
+    fn set_member_replaces_a_nested_value_and_keeps_comments() {
+        let text = "{\n  // roots\n  \"explorer\": {\n    \"roots\": [\"~\", \"/srv\"], // mine\n    \"showHidden\": true\n  },\n  \"theme\": \"dark\"\n}";
+        let out = set_member_text(text, &["explorer", "roots"], r#"["~/Source","/srv"]"#).unwrap();
+        assert_eq!(
+            out,
+            "{\n  // roots\n  \"explorer\": {\n    \"roots\": [\"~/Source\",\"/srv\"], // mine\n    \"showHidden\": true\n  },\n  \"theme\": \"dark\"\n}"
+        );
+    }
+
+    #[test]
+    fn set_member_inserts_missing_objects_and_keys() {
+        let roots = r#"["~/Source"]"#;
+        let out = set_member_text(r#"{"theme": "dark"}"#, &["explorer", "roots"], roots).unwrap();
+        assert_eq!(rows(&out).explorer_roots, ["~/Source"]);
+        assert_eq!(rows(&out).theme, "dark");
+        let out = set_member_text(
+            r#"{"explorer": {"showHidden": true}}"#,
+            &["explorer", "roots"],
+            roots,
+        )
+        .unwrap();
+        let s = rows(&out);
+        assert_eq!(
+            (s.explorer_roots.as_slice(), s.explorer_show_hidden),
+            (["~/Source".to_owned()].as_slice(), true)
+        );
+        // a non-object `explorer` is replaced by one that holds the key
+        let out = set_member_text(r#"{"explorer": 3}"#, &["explorer", "roots"], roots).unwrap();
+        assert_eq!(out, r#"{"explorer": {"roots": ["~/Source"]}}"#);
+    }
+
+    #[test]
+    fn set_member_skips_lookalike_keys_in_strings_and_nested_values() {
+        let text = r#"{"x": {"roots": 1}, "s": ""explorer": {", "explorer": {"roots": ["~"]}}"#;
+        let out = set_member_text(text, &["explorer", "roots"], r#"["/a"]"#).unwrap();
+        assert_eq!(
+            out,
+            r#"{"x": {"roots": 1}, "s": ""explorer": {", "explorer": {"roots": ["/a"]}}"#
+        );
+    }
+
+    #[test]
+    fn save_explorer_root_replaces_one_root_and_keeps_the_others() {
+        let home = std::env::temp_dir().join(format!("poimen-roots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(
+            save_explorer_root(&home, 0, "~/Source").unwrap(),
+            ["~/Source"]
+        );
+        assert_eq!(load(&home).explorer_roots, ["~/Source"]);
+        std::fs::write(
+            config_path(&home),
+            "{\n  \"theme\": \"dark\",\n  \"explorer\": {\"roots\": [\"~\", \"/srv\"]}\n}\n",
+        )
+        .unwrap();
+        assert_eq!(save_explorer_root(&home, 1, "/opt").unwrap(), ["~", "/opt"]);
+        let s = load(&home);
+        assert_eq!(
+            (s.theme.as_str(), s.explorer_roots.as_slice()),
+            ("dark", ["~".to_owned(), "/opt".to_owned()].as_slice())
+        );
+        assert!(save_explorer_root(&home, 2, "/x").is_err());
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

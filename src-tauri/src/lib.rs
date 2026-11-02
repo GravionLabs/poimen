@@ -249,6 +249,15 @@ fn set_theme(theme: String) -> Result<(), String> {
     settings::save_theme(&home, &theme)
 }
 
+/// Replaces root `index` of `explorer.roots` in config.json with `path` (`..` allowed, so a root
+/// can move up); returns the new roots, the settings watcher emits them as well.
+#[tauri::command]
+fn set_explorer_root(index: usize, path: String) -> Result<Vec<String>, String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    let dir = spaces::explorer_root(&path, Some(&home))?;
+    settings::save_explorer_root(&home, index, &dir)
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(
@@ -521,6 +530,7 @@ pub fn run() {
             app_version,
             get_settings,
             set_theme,
+            set_explorer_root,
             repo_info,
             open_terminal,
             terminal_input,

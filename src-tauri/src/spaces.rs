@@ -133,6 +133,38 @@ pub fn resolve_dir(input: &str, home: Option<&Path>) -> Result<String, String> {
     })
 }
 
+/// A directory for `explorer.roots`: `~` expanded, `.` and `..` folded lexically (symlinks stay),
+/// checked to exist, and written back with `~` when it lies in the home directory.
+pub fn explorer_root(input: &str, home: Option<&Path>) -> Result<String, String> {
+    let input = input.trim();
+    let path = expand_home(input, home);
+    if !path.is_absolute() {
+        return Err(format!("{input} is not an absolute path."));
+    }
+    let mut dir = PathBuf::new();
+    for c in path.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                dir.pop();
+            }
+            std::path::Component::CurDir => {}
+            c => dir.push(c),
+        }
+    }
+    if !dir.is_dir() {
+        return Err(format!("{input} is not a directory."));
+    }
+    if let Some(rest) = home.and_then(|h| dir.strip_prefix(h).ok()) {
+        let rest = rest.to_string_lossy();
+        return Ok(if rest.is_empty() {
+            "~".into()
+        } else {
+            format!("~/{rest}")
+        });
+    }
+    Ok(dir.to_string_lossy().into_owned())
+}
+
 /// Names of the subdirectories of `dir` (symlinks to directories included); empty when `dir` is
 /// unreadable. Unsorted.
 fn subdir_names(dir: impl AsRef<Path>) -> Vec<String> {
@@ -278,6 +310,23 @@ mod tests {
         let result = json!({ "type": "workspace_created", "workspace": { "workspace_id": "w3" } });
         assert_eq!(created_workspace_id(&result), Some("w3".into()));
         assert_eq!(created_workspace_id(&json!({})), None);
+    }
+
+    #[test]
+    fn explorer_root_folds_dots_and_writes_home_as_tilde() {
+        let base = std::env::temp_dir().join(format!("poimen-root-{}", std::process::id()));
+        let home = base.join("home");
+        std::fs::create_dir_all(home.join("Source/app")).unwrap();
+        let h = Some(home.as_path());
+        assert_eq!(explorer_root("~/Source", h).unwrap(), "~/Source");
+        assert_eq!(explorer_root("~/Source/app/..", h).unwrap(), "~/Source");
+        assert_eq!(explorer_root("~/Source/..", h).unwrap(), "~");
+        let outside = base.to_string_lossy().into_owned();
+        assert_eq!(explorer_root("~/..", h).unwrap(), outside);
+        assert_eq!(explorer_root("/..", h).unwrap(), "/");
+        assert!(explorer_root("~/missing", h).is_err());
+        assert!(explorer_root("relative", h).is_err());
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
