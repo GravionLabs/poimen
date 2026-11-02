@@ -19,20 +19,78 @@ describe("parseSettings", () => {
     expect(
       parseSettings({
         theme: "dark",
+        colorSchema: " dracula ",
         fontFamily: "Hack",
         fontSize: 15,
-        colors: { background: "#000000", foreground: null },
+        colors: {
+          background: "#000000",
+          foreground: null,
+          cursor: "#ffffff",
+          selectionBackground: "#222222",
+          palette: ["#111111", null, 5],
+        },
         autoControl: false,
+        spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+        home: "/Users/x",
         warnings: ["w"],
       }),
     ).toEqual({
       theme: "dark",
+      colorSchema: "dracula",
       fontFamily: "Hack",
       fontSize: 15,
-      colors: { background: "#000000", foreground: null },
+      colors: {
+        background: "#000000",
+        foreground: null,
+        cursor: "#ffffff",
+        selectionBackground: "#222222",
+        selectionForeground: null,
+        palette: ["#111111", null, null],
+      },
       autoControl: false,
+      shortcuts: DEFAULT_SETTINGS.shortcuts,
+      sidebarRows: DEFAULT_SETTINGS.sidebarRows,
+      sidebarLayout: "tree",
+      explorerRoots: ["~"],
+      explorerShowHidden: false,
+      spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+      home: "/Users/x",
       warnings: ["w"],
     });
+  });
+
+  it("keeps colorSchema only as a non-empty string or a complete pair", () => {
+    expect(parseSettings({}).colorSchema).toBeNull();
+    for (const bad of [3, "", "  ", { light: "a" }, { light: "a", dark: 1 }, null])
+      expect(parseSettings({ colorSchema: bad }).colorSchema).toBeNull();
+    expect(parseSettings({ colorSchema: { light: " a ", dark: "b" } }).colorSchema).toEqual({
+      light: "a",
+      dark: "b",
+    });
+  });
+
+  it("merges the shortcuts over the defaults and ignores bad entries", () => {
+    const parsed = parseSettings({
+      shortcuts: { toggleSidebar: "Ctrl+Alt+B", closeTab: 5, x: "y" },
+    });
+    expect(parsed.shortcuts.toggleSidebar).toBe("Ctrl+Alt+B");
+    expect(parsed.shortcuts.closeTab).toBe("CmdOrCtrl+W");
+    expect(parseSettings({ shortcuts: "no" }).shortcuts).toEqual(DEFAULT_SETTINGS.shortcuts);
+  });
+
+  it("takes valid sidebarRows per row type and defaults the rest", () => {
+    const parsed = parseSettings({
+      sidebarRows: {
+        workspace: [[{ token: "name", bold: true }, "$step"]],
+        agent: [["nope"]],
+        terminal: [],
+      },
+    });
+    expect(parsed.sidebarRows.workspace).toEqual([
+      [{ token: "name", bold: true, dim: false }, { token: "$step" }],
+    ]);
+    expect(parsed.sidebarRows.agent).toEqual(DEFAULT_SETTINGS.sidebarRows.agent);
+    expect(parsed.sidebarRows.terminal).toEqual(DEFAULT_SETTINGS.sidebarRows.terminal);
   });
 
   it("falls back to the defaults on malformed input", () => {

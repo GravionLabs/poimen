@@ -1,0 +1,303 @@
+:host {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+}
+
+.page {
+  max-width: 720px;
+  padding: 16px 24px 32px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 16px;
+}
+
+h2 {
+  font-size: 14px;
+  margin: 20px 0 8px;
+}
+
+h3 {
+  font-size: 12px;
+  margin: 16px 0 6px;
+  color: var(--h-text-muted-color);
+  text-transform: uppercase;
+}
+
+.hint {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+}
+
+.radios {
+  display: inline-flex;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.choice {
+  padding: 5px 12px;
+  border: 0;
+  background: none;
+  color: var(--h-text-muted-color);
+  cursor: pointer;
+  font: inherit;
+}
+
+/*
+ * Hover and selected states tint the text color over the content background. The derived surface
+ * ramp runs from light to dark in both modes, so its steps would be light under light
+ * text in a dark scheme (#139). settings-contrast.spec.ts checks the selected label.
+ */
+.choice.on {
+  background: color-mix(in srgb, var(--h-text-color) 18%, transparent);
+  color: var(--h-text-color);
+}
+
+.list {
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.option:hover,
+.option:focus-visible {
+  background: color-mix(in srgb, var(--h-text-color) 10%, transparent);
+  outline: none;
+}
+
+.option.on {
+  border-left-color: var(--status-working);
+  background: color-mix(in srgb, var(--h-text-color) 18%, transparent);
+  color: var(--h-text-color);
+  font-weight: 600;
+}
+
+.swatches {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+
+.sw {
+  width: 10px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid var(--h-content-border-color);
+}
+
+.sw.big {
+  width: 18px;
+}
+
+/* Lists and buttons of the Explorer and layout sections: tints of the text color, readable in light and dark. */
+.error {
+  margin: 0 0 12px;
+  color: var(--status-blocked);
+  font-size: 12px;
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+}
+
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+}
+
+.row-item + .row-item {
+  border-top: 1px solid var(--h-content-border-color);
+}
+
+.path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+
+.icon-btn,
+.btn {
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.icon-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+}
+
+.btn {
+  padding: 4px 10px;
+}
+
+.icon-btn:hover:not(:disabled),
+.btn:hover:not(:disabled),
+.icon-btn:focus-visible,
+.btn:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  outline: none;
+}
+
+.icon-btn:disabled,
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pane-row {
+  padding: 6px 8px;
+}
+
+.pane-row + .pane-row {
+  border-top: 1px solid var(--h-content-border-color);
+}
+
+.pane-row.invalid {
+  box-shadow: inset 2px 0 0 var(--status-blocked);
+}
+
+.pane-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+}
+
+.field input,
+.field select {
+  box-sizing: border-box;
+  height: 26px;
+  padding: 2px 6px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--h-text-color);
+  font: inherit;
+  font-size: 12px;
+}
+
+.field input[type="text"] {
+  width: 110px;
+}
+
+.field.grow {
+  flex: 1;
+  min-width: 140px;
+}
+
+.field.grow input {
+  width: 100%;
+}
+
+.field.ratio input {
+  width: 64px;
+}
+
+.field select option {
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+}
+
+.field input:focus-visible,
+.field select:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}
+
+.root-note {
+  align-self: center;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+}
+
+.pane-fields .actions {
+  margin-left: auto;
+}
+
+.field-error {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--status-blocked);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.btn.primary:not(:disabled) {
+  border-color: var(--h-primary-color);
+  color: var(--h-primary-color);
+  font-weight: 600;
+}

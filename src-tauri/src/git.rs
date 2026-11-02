@@ -45,6 +45,19 @@ pub fn info(dir: &str) -> Option<RepoInfo> {
     parse_rev_parse(&String::from_utf8_lossy(&out.stdout))
 }
 
+/// The top-level directory of the repository containing `dir`; `None` outside a repository.
+pub fn toplevel(dir: &str) -> Option<String> {
+    let out = Command::new("git")
+        .args(["-C", dir, "rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let top = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    (!top.is_empty()).then_some(top)
+}
+
 /// Repository info per directory; directories outside a repository are left out.
 pub fn infos(dirs: Vec<String>) -> HashMap<String, RepoInfo> {
     dirs.into_iter()

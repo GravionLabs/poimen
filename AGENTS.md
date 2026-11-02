@@ -7,6 +7,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - `src-tauri/src/herdr.rs`: socket API client (NDJSON over the Unix socket); `SUPPORTED_PROTOCOL` (the protocol poimen is written for) lives here. Requests use short-lived connections; subscriptions keep theirs.
 - `src-tauri/src/watch.rs`: one long-lived `events.subscribe`. `pane.agent_status_changed` needs a `pane_id`, and herdr rejects the whole subscription when a referenced pane is gone, so the watcher resubscribes on pane-set changes.
 - `src-tauri/src/settings.rs`: user settings (`~/.config/poimen/config.json`, optional Ghostty config); `get_settings` command plus a polling watcher emitting `settings`. Preferences only, never UI state; frontend side is `core/settings.ts`.
+- `src-tauri/src/schemes.rs`: user color schemes (WezTerm TOML in `~/.config/poimen/themes/`); `get_color_schemes` command plus a polling watcher emitting `color-schemes`; frontend side is `core/user-schemes.ts`.
 - `src-tauri/src/stream.rs`: live terminals by spawning `herdr terminal session observe|control`. Use this public CLI contract; do not reimplement herdr's internal binary client protocol.
 - `src/`: Angular 22 (standalone components, signals) on helix-ui, built with `@angular/build` (`angular.json`), tested with Vitest. `src/app/core/` is the Tauri bridge and state: `tauri.ts` (the only `invoke`/`listen` caller), `herdr.ts` (wire types, pure helpers), `herdr-store.ts` (snapshot signals, debounced re-read), `terminal-stream.ts` (routes `terminal` records by session id). `src/app/terminal-view/` wraps xterm.js for the active editor tab (`core/editor-tabs.ts` holds tabs, preview/pinned and mode; `src/app/ui/helix-candidates/tab-bar/` is the generic tab bar, a helix-ui candidate); `src/app/sidebar/` shows the spaces tree (`hx-tree`; `src-tauri/src/git.rs` answers the read-only `repo_info` command with branch and worktree per directory); `src/app/activity-bar/` is the view rail; `core/ui-state.ts` holds persisted UI state (sidebar width/collapsed), never pane state.
 
@@ -20,6 +21,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 ## Decisions
 
 - Frontend stack: Angular 22 and helix-ui, and when a component goes to helix-ui ([ADR 0001](docs/adr/0001-frontend-stack.md)).
+- Color schemes: bundled and imported schemes, a derived chrome and the `colorSchema` setting ([ADR 0002](docs/adr/0002-color-schemes.md)).
 
 ## Verification
 

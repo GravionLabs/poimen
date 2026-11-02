@@ -3,7 +3,12 @@ import { Injectable, InjectionToken, inject, signal } from "@angular/core";
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
+export const ZOOM_LIMIT = 20;
+export const DEFAULT_VIEW = "spaces";
 export const UI_STATE_KEY = "poimen.ui-state";
+/** Smallest share of a section of the split sidebar layout, so its title stays visible. */
+export const SPLIT_MIN_SHARE = 0.15;
+export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
 export interface UiStorage {
@@ -26,6 +31,28 @@ export const UI_STORAGE = new InjectionToken<UiStorage | null>("UI_STORAGE", {
 export interface LayoutState {
   sidebarWidth: number;
   sidebarCollapsed: boolean;
+  /** The editor area (tabs, groups); validated by `EditorTabs`, absent when never stored. */
+  editor?: unknown;
+  /** The view shown in the sidebar (an id of `ACTIVITY_VIEWS`). */
+  activeView: string;
+  /** Paths of the explorer folders that are expanded. */
+  expandedDirs: string[];
+  /** The workspace selected in the split sidebar layout; absent until one is picked. */
+  splitWorkspace?: string;
+  /** Shares of the Spaces and Agents sections in the split sidebar layout; they sum to 1. */
+  splitSizes?: [number, number];
+}
+
+/** Two shares that sum to 1, each at least {@link SPLIT_MIN_SHARE}; anything else is `null`. */
+export function clampSplitSizes(sizes: unknown): [number, number] | null {
+  if (!Array.isArray(sizes) || sizes.length !== 2) return null;
+  const [a, b] = sizes as unknown[];
+  if (typeof a !== "number" || typeof b !== "number") return null;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0 || a + b <= 0) return null;
+  const share = Math.min(1 - SPLIT_MIN_SHARE, Math.max(SPLIT_MIN_SHARE, a / (a + b)));
+  // Rounded to 0.1 % so the stored state stays readable (no 0.15000000000000002).
+  const first = Math.round(share * 1000) / 1000;
+  return [first, Math.round((1 - first) * 1000) / 1000];
 }
 
 export function clampSidebarWidth(width: number): number {
@@ -35,30 +62,41 @@ export function clampSidebarWidth(width: number): number {
 
 /** Reads stored layout JSON; anything missing or malformed falls back to the defaults. */
 export function parseLayout(raw: string | null): LayoutState {
-  const state: LayoutState = { sidebarWidth: SIDEBAR_DEFAULT_WIDTH, sidebarCollapsed: false };
+  const state: LayoutState = {
+    sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+    sidebarCollapsed: false,
+    activeView: DEFAULT_VIEW,
+    expandedDirs: [],
+  };
   if (!raw) return state;
   try {
     const data: unknown = JSON.parse(raw);
     if (typeof data !== "object" || data === null) return state;
-    const { sidebarWidth, sidebarCollapsed } = data as Record<string, unknown>;
+    const {
+      sidebarWidth,
+      sidebarCollapsed,
+      editor,
+      activeView,
+      expandedDirs,
+      splitWorkspace,
+      splitSizes,
+    } = data as Record<string, unknown>;
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
+    if (typeof activeView === "string" && activeView) state.activeView = activeView;
+    if (Array.isArray(expandedDirs)) {
+      state.expandedDirs = expandedDirs.filter((d): d is string => typeof d === "string");
+    }
+    if (typeof splitWorkspace === "string" && splitWorkspace) {
+      state.splitWorkspace = splitWorkspace;
+    }
+    const sizes = clampSplitSizes(splitSizes);
+    if (sizes) state.splitSizes = sizes;
+    if (editor !== undefined) state.editor = editor;
   } catch {
     // corrupt state: use defaults
   }
   return state;
-}
-
-/** `Cmd+B` (macOS) or `Ctrl+B` toggles the sidebar; hard-wired like VS Code until #26. */
-export function isToggleSidebarKey(
-  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
-): boolean {
-  return (
-    event.key.toLowerCase() === "b" &&
-    (event.metaKey || event.ctrlKey) &&
-    !event.altKey &&
-    !event.shiftKey
-  );
 }
 
 /** Window layout that survives restarts. UI state only; pane state stays with herdr. */
@@ -69,14 +107,78 @@ export class UiState {
 
   readonly sidebarWidth = signal(this.initial.sidebarWidth);
   readonly sidebarCollapsed = signal(this.initial.sidebarCollapsed);
+  readonly activeView = signal(this.initial.activeView);
+  readonly expandedDirs = signal<ReadonlySet<string>>(new Set(this.initial.expandedDirs));
+  /** The workspace selected in the split sidebar layout (UI state, not a setting). */
+  readonly splitWorkspace = signal<string | null>(this.initial.splitWorkspace ?? null);
+  /** Shares of the Spaces and Agents sections of the split sidebar layout. */
+  readonly splitSizes = signal<readonly [number, number]>(
+    this.initial.splitSizes ?? SPLIT_DEFAULT_SIZES,
+  );
+  /** Terminal font size offset in points from the View > Zoom items; not persisted. */
+  readonly zoom = signal(0);
+
+  /** The stored editor area, read once at start; `EditorTabs` validates it. */
+  readonly storedEditor: unknown = this.initial.editor;
+  private editor: unknown = this.initial.editor;
 
   setSidebarWidth(width: number): void {
     this.sidebarWidth.set(clampSidebarWidth(width));
     this.save();
   }
 
+  setSplitWorkspace(id: string): void {
+    this.splitWorkspace.set(id);
+    this.save();
+  }
+
+  /** Resizes the sections of the split sidebar layout; malformed sizes are ignored. */
+  setSplitSizes(sizes: readonly number[]): void {
+    const next = clampSplitSizes(sizes);
+    if (!next) return;
+    this.splitSizes.set(next);
+    this.save();
+  }
+
+  /** Persists the editor area (open tabs, groups, split sizes, focus). */
+  saveEditor(editor: unknown): void {
+    this.editor = editor;
+    this.save();
+  }
+
+  /** Zooms the terminals by `delta` points, or back to the configured size when `delta` is null. */
+  zoomBy(delta: number | null): void {
+    this.zoom.update((z) =>
+      delta === null ? 0 : Math.max(-ZOOM_LIMIT, Math.min(ZOOM_LIMIT, z + delta)),
+    );
+  }
+
   toggleSidebar(): void {
     this.sidebarCollapsed.update((collapsed) => !collapsed);
+    this.save();
+  }
+
+  /**
+   * A click on a view of the activity bar: the active view collapses the sidebar, any other view
+   * (also while collapsed) shows it. `known` are the valid view ids; an unknown id is ignored.
+   */
+  selectView(id: string, known: readonly string[]): void {
+    if (!known.includes(id)) return;
+    if (id === this.activeView() && !this.sidebarCollapsed()) {
+      this.sidebarCollapsed.set(true);
+    } else {
+      this.activeView.set(id);
+      this.sidebarCollapsed.set(false);
+    }
+    this.save();
+  }
+
+  /** Remembers whether the explorer folder at `path` is expanded. */
+  setDirExpanded(path: string, expanded: boolean): void {
+    const next = new Set(this.expandedDirs());
+    if (expanded) next.add(path);
+    else next.delete(path);
+    this.expandedDirs.set(next);
     this.save();
   }
 
@@ -92,6 +194,13 @@ export class UiState {
     const state: LayoutState = {
       sidebarWidth: this.sidebarWidth(),
       sidebarCollapsed: this.sidebarCollapsed(),
+      editor: this.editor,
+      activeView: this.activeView(),
+      expandedDirs: [...this.expandedDirs()],
+      splitWorkspace: this.splitWorkspace() ?? undefined,
+      // Like splitWorkspace: stored only once it differs from the default.
+      splitSizes:
+        this.splitSizes()[0] === SPLIT_DEFAULT_SIZES[0] ? undefined : [...this.splitSizes()],
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

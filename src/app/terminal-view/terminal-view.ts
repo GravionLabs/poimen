@@ -20,8 +20,10 @@ import { Terminal } from "@xterm/xterm";
 import { TauriBridge } from "../core/tauri";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
+import { Keymap } from "../core/keymap";
+import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
-import { linkHandler } from "./links";
+import { detectedLinkHandler, holdsLinkModifier, linkHandler } from "./links";
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -45,6 +47,37 @@ export function isControllerHeld(reason: string): boolean {
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+const ANSI_NAMES = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+
+/** The 16 ANSI colors: Ghostty's `palette` entries over `--term-ansi-0..15`; a missing token leaves xterm's default. */
+function ansiColors(
+  palette: readonly (string | null)[] = [],
+): Partial<Record<(typeof ANSI_NAMES)[number], string>> {
+  const colors: Partial<Record<(typeof ANSI_NAMES)[number], string>> = {};
+  ANSI_NAMES.forEach((name, i) => {
+    const value = palette[i] || cssVar(`--term-ansi-${i}`);
+    if (value) colors[name] = value;
+  });
+  return colors;
 }
 
 /**
@@ -76,18 +109,24 @@ export class TerminalView implements OnDestroy {
 
   private readonly streams = inject(TerminalStreamService);
   private readonly prefs = inject(SettingsStore);
+  private readonly keymap = inject(Keymap);
+  private readonly ui = inject(UiState);
   private readonly tauri = inject(TauriBridge);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
   private term?: Terminal;
   private fit?: FitAddon;
   private session?: TerminalSession;
+  private themeObserver?: MutationObserver;
   private resizeObserver?: ResizeObserver;
   private resizeTimer?: ReturnType<typeof setTimeout>;
   private size = { cols: 0, rows: 0 };
   private destroyed = false;
   private framed = false;
   private detachMouse?: () => void;
+  private detachClipboard?: () => void;
+  /** Whether the pointer is over a link (xterm reports it for every renderer). */
+  private linkHovered = false;
   private endDrag?: () => void;
   /** Counts connects; a result of an older one is dropped. */
   private generation = 0;
@@ -96,15 +135,20 @@ export class TerminalView implements OnDestroy {
 
   constructor() {
     afterNextRender(() => void this.start(false));
+    // The theme tokens change with the class HxTheme puts on <html>, in its own effect and possibly
+    // in a view transition, so re-read the colors when the class really changed, not when the setting did.
+    if (typeof MutationObserver === "function") {
+      this.themeObserver = new MutationObserver(() => this.applyLook());
+      this.themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class", "data-theme", "style"],
+      });
+    }
     // Settings edits (and theme switches) apply to the open terminal without a restart.
     effect(() => {
       this.prefs.settings();
-      untracked(() => {
-        if (!this.term) return;
-        Object.assign(this.term.options, this.look());
-        // A new font changes the cell size, so cols/rows change without a body resize.
-        this.applySize();
-      });
+      this.ui.zoom();
+      untracked(() => this.applyLook());
     });
     // A change of the wanted mode reopens the stream; it never takes over a controller by itself.
     let seen = this.wanted();
@@ -118,9 +162,17 @@ export class TerminalView implements OnDestroy {
     });
   }
 
+  private applyLook(): void {
+    if (!this.term) return;
+    Object.assign(this.term.options, this.look());
+    // A new font changes the cell size, so cols/rows change without a body resize.
+    this.applySize();
+  }
+
   /** Font and colors from the settings, over the theme tokens. */
   private look() {
-    const { fontFamily, fontSize, colors } = this.prefs.settings();
+    const { fontFamily, fontSize: configured, colors } = this.prefs.settings();
+    const fontSize = Math.min(72, Math.max(6, configured + this.ui.zoom()));
     const foreground = colors?.foreground ?? cssVar("--term-fg");
     return {
       fontFamily: fontFamily ?? (cssVar("--font-mono") || "Menlo, monospace"),
@@ -128,13 +180,19 @@ export class TerminalView implements OnDestroy {
       theme: {
         background: colors?.background ?? cssVar("--term-bg"),
         foreground,
-        cursor: foreground,
+        cursor: colors?.cursor ?? (cssVar("--term-cursor") || foreground),
+        selectionBackground:
+          colors?.selectionBackground ?? (cssVar("--term-selection-bg") || undefined),
+        selectionForeground:
+          colors?.selectionForeground ?? (cssVar("--term-selection-fg") || undefined),
+        ...ansiColors(colors?.palette),
       },
     };
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.themeObserver?.disconnect();
     this.stop();
   }
 
@@ -143,7 +201,18 @@ export class TerminalView implements OnDestroy {
   }
 
   private createTerminal(): void {
+    const open = (url: string) => this.tauri.openUrl(url);
+    const openLink = linkHandler(open);
+    const hoverCallbacks = {
+      hover: () => (this.linkHovered = true),
+      leave: () => (this.linkHovered = false),
+    };
     const term = new Terminal({
+      // OSC 8 hyperlinks: xterm's default would confirm() and window.open(); use the opener instead.
+      linkHandler: {
+        activate: openLink,
+        ...hoverCallbacks,
+      },
       scrollback: 0, // herdr owns scrollback; wheel events are forwarded instead
       cursorBlink: true,
       allowProposedApi: true,
@@ -151,13 +220,24 @@ export class TerminalView implements OnDestroy {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon(linkHandler((url) => this.tauri.openUrl(url))));
+    // xterm marks a hovered link itself (underline, pointer); the view only needs to know about it.
+    this.linkHovered = false;
+    term.loadAddon(
+      // Detected URLs are trimmed before opening (the addon's range, and so the underline, stays).
+      new WebLinksAddon(detectedLinkHandler(open), hoverCallbacks),
+    );
     term.open(this.body().nativeElement);
     try {
       term.loadAddon(new WebglAddon());
     } catch {
       // DOM renderer fallback
     }
+    // App shortcuts belong to the app: keep xterm from forwarding them to the pane. Only Cmd
+    // shortcuts match here; other keys go to the program in the pane.
+    term.attachCustomKeyEventHandler((event) => {
+      if (this.keymap.match(event, true) !== null) return false;
+      return !this.clipboardKey(event);
+    });
     term.onData((data) => {
       if (this.mode() === "control") this.session?.input(data);
     });
@@ -171,8 +251,61 @@ export class TerminalView implements OnDestroy {
     this.term = term;
     this.fit = fit;
     this.detachMouse = this.attachMouse(this.body().nativeElement);
+    this.detachClipboard = this.attachClipboard(this.body().nativeElement);
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(this.body().nativeElement);
+  }
+
+  /**
+   * Clipboard keys that are not the native Edit menu's. On macOS Cmd+C and Cmd+V are the menu's
+   * (they arrive as `copy` and `paste` events, see {@link attachClipboard}). Elsewhere Ctrl+C and
+   * Ctrl+V belong to the pane application, so the terminal convention Ctrl+Shift+C copies the
+   * selection and Ctrl+Shift+V pastes (the browser's own paste event follows). Returns whether the
+   * key was taken, so xterm does not send it to the pane.
+   */
+  private clipboardKey(event: KeyboardEvent): boolean {
+    if (this.keymap.mac || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) {
+      return false;
+    }
+    const key = event.key.toLowerCase();
+    if (key === "c") {
+      const text = this.term?.getSelection();
+      if (text) void navigator.clipboard?.writeText(text).catch(() => undefined);
+      return true;
+    }
+    return key === "v"; // the paste event does the work
+  }
+
+  /**
+   * Copy and paste through the DOM events of the Edit menu / browser. Copy puts the terminal
+   * selection (Shift+drag in input mode, plain drag when read-only) on the clipboard in either
+   * mode. Paste goes through xterm's `paste`, which wraps the text in bracketed paste markers when
+   * the pane application asked for them; a read-only tab pastes nothing.
+   */
+  private attachClipboard(host: HTMLElement): () => void {
+    const onCopy = (event: ClipboardEvent) => {
+      const text = this.term?.getSelection();
+      if (!text || !event.clipboardData) return;
+      event.clipboardData.setData("text/plain", text);
+      event.preventDefault();
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation(); // xterm's own paste listener would send it a second time
+      const text = event.clipboardData?.getData("text/plain");
+      if (text && this.mode() === "control" && this.session?.open) this.term?.paste(text);
+    };
+    host.addEventListener("copy", onCopy, true);
+    host.addEventListener("paste", onPaste, true);
+    return () => {
+      host.removeEventListener("copy", onCopy, true);
+      host.removeEventListener("paste", onPaste, true);
+    };
+  }
+
+  /** A press with the link modifier over a link opens it instead of going to the pane application. */
+  private opensLink(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
+    return this.linkHovered && holdsLinkModifier(event);
   }
 
   /**
@@ -181,8 +314,10 @@ export class TerminalView implements OnDestroy {
    * `terminal.mouse` cells; herdr encodes them for the pane application's mouse mode and drops
    * them when the application did not ask for the mouse. herdr does not expose that mode to
    * clients, so it cannot be checked here; a held Shift (as in other terminals) bypasses the
-   * forwarding and leaves xterm's text selection and the native context menu; Cmd (Meta) does the
-   * same so a link can be clicked (the web-links addon sees the click only then). Read-only tabs send
+   * forwarding and leaves xterm's text selection and the native context menu; so does Cmd on macOS
+   * or Ctrl elsewhere while the pointer is over a link, which is how a link is opened in input mode
+   * (the web-links addon sees the click only then; Ctrl+click is the context menu on macOS, hence
+   * Cmd there). Ctrl elsewhere stays the pane application's modifier outside a link. Read-only tabs send
    * nothing. Returns the function that removes every listener.
    */
   private attachMouse(host: HTMLElement): () => void {
@@ -214,7 +349,7 @@ export class TerminalView implements OnDestroy {
     };
     const onMove = (event: MouseEvent) => {
       if (pressed) send(event, "drag", event.button);
-      else if (!event.shiftKey && !event.metaKey) send(event, "move", 0);
+      else if (!event.shiftKey && !this.opensLink(event)) send(event, "move", 0);
     };
     const onHostMove = (event: MouseEvent) => {
       if (!pressed) onMove(event);
@@ -230,7 +365,7 @@ export class TerminalView implements OnDestroy {
       release();
     }
     const onDown = (event: MouseEvent) => {
-      if (this.attempt !== "control" || event.shiftKey || event.metaKey) return; // Shift: xterm selects text, Cmd: links
+      if (this.attempt !== "control" || event.shiftKey || this.opensLink(event)) return; // Shift: xterm selects text, Cmd (macOS) or Ctrl over a link: open it
       event.stopPropagation(); // no text selection while the pane application owns the mouse
       event.preventDefault();
       this.term?.focus();
@@ -351,6 +486,9 @@ export class TerminalView implements OnDestroy {
     this.closeStream();
     this.detachMouse?.();
     this.detachMouse = undefined;
+    this.detachClipboard?.();
+    this.detachClipboard = undefined;
+    this.linkHovered = false;
     this.endDrag = undefined;
     clearTimeout(this.resizeTimer);
     this.resizeObserver?.disconnect();

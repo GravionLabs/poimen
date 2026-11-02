@@ -1,0 +1,27 @@
+{
+  "name": "one-dark",
+  "label": "One Dark",
+  "background": "#282c34",
+  "foreground": "#abb2bf",
+  "cursor": "#528bff",
+  "selectionBackground": "#3e4451",
+  "selectionForeground": "#abb2bf",
+  "ansi": [
+    "#282c34",
+    "#e06c75",
+    "#98c379",
+    "#e5c07b",
+    "#61afef",
+    "#c678dd",
+    "#56b6c2",
+    "#abb2bf",
+    "#5c6370",
+    "#e06c75",
+    "#98c379",
+    "#e5c07b",
+    "#61afef",
+    "#c678dd",
+    "#56b6c2",
+    "#ffffff"
+  ]
+}

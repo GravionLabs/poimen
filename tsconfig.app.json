@@ -5,6 +5,6 @@
     "outDir": "./out-tsc/app",
     "types": []
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/app/themes/*.json"],
   "exclude": ["src/**/*.spec.ts", "src/**/*.mock.ts"]
 }

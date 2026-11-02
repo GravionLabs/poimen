@@ -1,0 +1,99 @@
+.backdrop {
+  all: unset;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 35%);
+}
+
+.dialog {
+  position: fixed;
+  z-index: 61;
+  top: 20vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(440px, 90vw);
+  padding: 16px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 8px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 30%);
+  font-size: 13px;
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+p {
+  margin: 0 0 12px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cwd {
+  padding: 5px 8px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+label + label {
+  margin-top: 8px;
+}
+
+.hint {
+  margin: 8px 0 0;
+  opacity: 0.7;
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+button {
+  padding: 4px 12px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.danger {
+  border-color: #c0392b;
+  color: #c0392b;
+}
+
+.error {
+  position: fixed;
+  z-index: 62;
+  right: 16px;
+  bottom: 32px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 420px;
+  padding: 8px 12px;
+  border: 1px solid #c0392b;
+  border-radius: 6px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  font-size: 12px;
+}
+
+.error button {
+  padding: 0 6px;
+}

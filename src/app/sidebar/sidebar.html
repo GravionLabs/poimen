@@ -1,8 +1,59 @@
-<div class="brand">Spaces</div>
+<div class="head">
+  <div class="brand">Spaces</div>
+  <button
+    type="button"
+    class="layout-toggle"
+    [attr.aria-label]="'Show ' + otherLayout() + ' layout'"
+    [title]="'Show ' + otherLayout() + ' layout'"
+    (click)="toggleLayout()"
+  >
+    @if (layout() === "tree") {
+      <svg
+        viewBox="0 0 16 16"
+        width="14"
+        height="14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="2" y="2" width="12" height="5" rx="1" />
+        <rect x="2" y="9" width="12" height="5" rx="1" />
+      </svg>
+    } @else {
+      <svg
+        viewBox="0 0 16 16"
+        width="14"
+        height="14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M2.5 3h6M5 8h8.5M5 13h8.5M3 3v10M3 8h2M3 13h2" />
+      </svg>
+    }
+  </button>
+  <button
+    type="button"
+    class="add"
+    aria-label="New space"
+    title="New space from a directory"
+    (click)="spaceActions.ask()"
+  >
+    +
+  </button>
+</div>
 @if (store.connectionError(); as reason) {
   <hx-message class="connection" severity="warn" size="small">
     herdr not reachable: {{ reason }}
   </hx-message>
+}
+@if (writeError(); as reason) {
+  <hx-message class="connection" severity="warn" size="small">{{ reason }}</hx-message>
 }
 <input
   hx-input
@@ -13,57 +64,196 @@
   [value]="query()"
   (input)="setQuery($event)"
 />
-<hx-tree
-  #tree
-  class="spaces"
-  ariaLabel="herdr spaces"
-  selectionMode="single"
-  emptyMessage="No matching panes"
-  [value]="nodes()"
-  [selection]="selection()"
-  (selectionChange)="onSelect($event)"
->
-  <ng-template hxTreeNode let-node let-expanded="expanded">
-    @let d = data(node);
-    @if (d.kind === "workspace") {
-      <span class="space">
-        <span class="dot status-{{ d.status }}"></span>
-        <span class="space-name">{{ d.workspace.label }}</span>
-        @if (d.state) {
-          <span class="state state-{{ d.status }}">{{ d.state }}</span>
+<ng-template #nodeTpl let-node let-expanded="expanded" let-tree="tree">
+  @let d = data(node);
+  @if (d.kind === "workspace") {
+    <span
+      class="space"
+      [class.chosen]="d.selected"
+      (contextmenu)="openMenu($event, 'workspace', d.workspace.workspace_id)"
+    >
+      <span class="main space-main">
+        @for (line of d.lines; track $index) {
+          <span class="line">
+            @for (seg of line; track $index) {
+              @switch (seg.kind) {
+                @case ("dot") {
+                  <span class="dot status-{{ seg.status }}"></span>
+                }
+                @case ("name") {
+                  <span class="space-name" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                    seg.text
+                  }}</span>
+                }
+                @case ("state") {
+                  <span
+                    class="state state-{{ seg.status }}"
+                    [class.bold]="seg.bold"
+                    [class.dim]="seg.dim"
+                    >{{ seg.text }}</span
+                  >
+                }
+                @default {
+                  <span class="space-meta" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                    (seg.sep ? "· " : "") + seg.text
+                  }}</span>
+                }
+              }
+            }
+          </span>
         }
-        @if (d.meta) {
-          <span class="space-meta">{{ d.meta }}</span>
-        }
+      </span>
+      @if (layout() === "tree") {
         <span
           class="chevron"
           [class.open]="expanded"
           aria-hidden="true"
           (click)="toggle(tree, node.key, $event)"
         ></span>
-      </span>
-    } @else {
-      @let m = marks(d.row);
-      <span class="row" [class.open]="m.open" [class.active]="m.active" [title]="rowTitle(d.row)">
-        <span
-          class="icon"
-          [class.agent]="d.row.agent"
-          [attr.aria-label]="d.row.agent ? 'Agent ' + d.row.agent : 'Terminal'"
-          >{{ glyph(d.row) }}</span
-        >
-        <span class="main">
+      }
+    </span>
+  } @else {
+    @let m = marks(d.row);
+    <span
+      class="row"
+      [class.open]="m.open"
+      [class.active]="m.active"
+      [title]="rowTitle(d.row)"
+      (contextmenu)="openMenu($event, 'pane', d.row.pane.pane_id)"
+    >
+      <span
+        class="icon"
+        [class.agent]="d.row.agent"
+        [attr.aria-label]="d.row.agent ? 'Agent ' + d.row.agent : 'Terminal'"
+        >{{ glyph(d.row) }}</span
+      >
+      <span class="main">
+        @for (line of d.lines; track $index) {
           <span class="line">
-            <span class="dot status-{{ d.row.pane.agent_status }}"></span>
-            <span class="name">{{ d.row.name }}</span>
-            @if (d.state) {
-              <span class="state state-{{ d.row.pane.agent_status }}">{{ d.state }}</span>
+            @for (seg of line; track $index) {
+              @switch (seg.kind) {
+                @case ("dot") {
+                  <span class="dot status-{{ seg.status }}"></span>
+                }
+                @case ("name") {
+                  <span class="name" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                    seg.text
+                  }}</span>
+                }
+                @case ("state") {
+                  <span
+                    class="state state-{{ seg.status }}"
+                    [class.bold]="seg.bold"
+                    [class.dim]="seg.dim"
+                    >{{ seg.text }}</span
+                  >
+                }
+                @default {
+                  <span class="text" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                    (seg.sep ? "· " : "") + seg.text
+                  }}</span>
+                }
+              }
             }
           </span>
-          @if (d.sub) {
-            <span class="text">{{ d.sub }}</span>
-          }
-        </span>
+        }
       </span>
+    </span>
+  }
+</ng-template>
+@if (layout() === "tree") {
+  <hx-tree
+    #tree
+    class="spaces"
+    ariaLabel="herdr spaces"
+    emptyMessage="No matching panes"
+    selectionMode="single"
+    [value]="nodes()"
+    [selection]="selection()"
+    (selectionChange)="onSelect($event)"
+  >
+    <ng-template hxTreeNode let-node let-expanded="expanded">
+      <ng-container
+        [ngTemplateOutlet]="nodeTpl"
+        [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
+      />
+    </ng-template>
+  </hx-tree>
+} @else {
+  <app-split-pane
+    class="sections"
+    direction="column"
+    [count]="2"
+    [sizes]="ui.splitSizes()"
+    (sizesChange)="ui.setSplitSizes($event)"
+  >
+    <ng-template #pane let-i>
+      @if (i === 0) {
+        <section class="section" aria-labelledby="split-spaces">
+          <h2 id="split-spaces" class="section-title">Spaces</h2>
+          <hx-tree
+            #tree
+            class="spaces"
+            ariaLabel="Spaces"
+            emptyMessage="No matching spaces"
+            selectionMode="single"
+            [value]="split().spaces"
+            [selection]="selection()"
+            (selectionChange)="onSelect($event)"
+          >
+            <ng-template hxTreeNode let-node let-expanded="expanded">
+              <ng-container
+                [ngTemplateOutlet]="nodeTpl"
+                [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
+              />
+            </ng-template>
+          </hx-tree>
+        </section>
+      } @else {
+        <section class="section" aria-labelledby="split-agents">
+          <h2 id="split-agents" class="section-title">Agents</h2>
+          <hx-tree
+            #tree
+            class="spaces"
+            ariaLabel="Agents"
+            emptyMessage="No matching agents"
+            selectionMode="single"
+            [value]="split().agents"
+            [selection]="selection()"
+            (selectionChange)="onSelect($event)"
+          >
+            <ng-template hxTreeNode let-node let-expanded="expanded">
+              <ng-container
+                [ngTemplateOutlet]="nodeTpl"
+                [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
+              />
+            </ng-template>
+          </hx-tree>
+        </section>
+      }
+    </ng-template>
+  </app-split-pane>
+}
+@if (menuAt(); as at) {
+  <button
+    type="button"
+    class="menu-backdrop"
+    tabindex="-1"
+    aria-label="Close menu"
+    (click)="closeMenu()"
+    (contextmenu)="$event.preventDefault(); closeMenu()"
+  ></button>
+  <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
+    @for (item of menuItems(at.kind); track item.action) {
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="choose(item.action)"
+        (keydown.escape)="closeMenu()"
+      >
+        {{ item.label }}
+      </button>
     }
-  </ng-template>
-</hx-tree>
+  </div>
+}

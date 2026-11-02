@@ -9,7 +9,35 @@
       [attr.aria-label]="view.label"
       (click)="selected.emit(view.id)"
     >
-      <span aria-hidden="true">{{ view.icon }}</span>
+      @switch (view.icon) {
+        @case ("spaces") {
+          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="1.5" y="2" width="13" height="12" rx="1.5" />
+            <path d="M6 2v12M6 8h8.5" />
+          </svg>
+        }
+        @case ("folder") {
+          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M1.5 4a1 1 0 011-1h4L8 5h5.5a1 1 0 011 1v6.5a1 1 0 01-1 1h-11a1 1 0 01-1-1z" />
+          </svg>
+        }
+      }
     </button>
   }
 </nav>
+<button
+  type="button"
+  class="item settings"
+  title="Settings"
+  aria-label="Settings"
+  (click)="settingsOpened.emit()"
+>
+  <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+    <circle cx="8" cy="8" r="2.2" stroke="currentColor" />
+    <path
+      stroke="currentColor"
+      d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"
+    />
+    <circle cx="8" cy="8" r="4.6" stroke="currentColor" />
+  </svg>
+</button>

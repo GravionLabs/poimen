@@ -12,6 +12,9 @@
   >
     {{ waiting() }} waiting
   </button>
+  @if (notice(); as text) {
+    <span class="item version warn notice" [title]="text">{{ text }}</span>
+  }
   <span class="spacer"></span>
   @if (paneId(); as id) {
     <span class="item">{{ id }}</span>

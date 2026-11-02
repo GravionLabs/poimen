@@ -216,11 +216,20 @@ export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoI
 }
 
 /** Keeps rows matching `query` (name, agent, branch, tab, directory, text; every word must match). */
-export function filterSpaces(spaces: SpaceNode[], query: string): SpaceNode[] {
+export function filterSpaces(
+  spaces: SpaceNode[],
+  query: string,
+  /** Texts a row is matched on instead of the defaults (the values of the shown tokens). */
+  values?: (row: PaneRow) => string[],
+): SpaceNode[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return spaces;
   const matches = (row: PaneRow, space: string) => {
-    const hay = [row.name, row.agent, row.branch, row.tab, row.dir, row.text, space]
+    const hay = (
+      values
+        ? [...values(row), space]
+        : [row.name, row.agent, row.branch, row.tab, row.dir, row.text, space]
+    )
       .filter(Boolean)
       .join("\n")
       .toLowerCase();
@@ -264,3 +273,54 @@ export function protocolWarning(info: HerdrInfo | null | undefined): string {
   if (!info || info.protocol == null || info.protocol === info.supported) return "";
   return `herdr protocol ${info.protocol}, poimen supports ${info.supported}`;
 }
+
+/** Where a split puts the new pane (`pane.split` direction). */
+export type SplitDirection = "right" | "down";
+
+/** The distinct directories of a workspace's panes, in pane order: the choices for a new terminal. */
+export function workspaceDirs(snapshot: Snapshot, workspaceId: string): string[] {
+  const dirs = snapshot.panes
+    .filter((pane) => pane.workspace_id === workspaceId)
+    .map(paneDir)
+    .filter((dir): dir is string => !!dir);
+  return [...new Set(dirs)];
+}
+
+/** What the close confirmation says: an agent that is still working or waiting gets a warning. */
+export function closeWarning(pane: Pane | undefined): string {
+  const agent = pane ? agentKind(pane) : undefined;
+  if (!pane || !agent) return "The process in the pane ends.";
+  if (pane.agent_status === "working" || pane.agent_status === "blocked") {
+    const state = pane.agent_status === "working" ? "working" : "waiting for you";
+    return `The ${agent} agent is ${state}; closing the pane ends it.`;
+  }
+  return `The ${agent} agent in the pane ends.`;
+}
+
+/** Agent kinds `agent.start` supports (`herdr agent start --help`). */
+export const AGENT_KINDS = [
+  "claude",
+  "codex",
+  "gemini",
+  "opencode",
+  "copilot",
+  "cursor",
+  "pi",
+  "devin",
+  "agy",
+  "cline",
+  "omp",
+  "mastracode",
+  "kimi",
+  "kiro",
+  "droid",
+  "amp",
+  "grok",
+  "hermes",
+  "kilo",
+  "qodercli",
+  "qwen",
+  "letta",
+  "maki",
+  "muse",
+] as const;

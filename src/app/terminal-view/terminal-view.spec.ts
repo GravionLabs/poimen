@@ -16,11 +16,18 @@ const fake = vi.hoisted(() => ({
   observers: [] as (() => void)[],
   addons: [] as unknown[],
   openUrl: undefined as unknown,
+  term: undefined as { selection: string; pasted: string[] } | undefined,
+  keyHandler: undefined as ((event: KeyboardEvent) => boolean) | undefined,
 }));
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
-    options: Record<string, unknown> = {};
+    options: Record<string, unknown>;
+    constructor(options: Record<string, unknown> = {}) {
+      this.options = { theme: { foreground: "#e4e4e0" }, ...options };
+      fake.term = this;
+    }
+    buffer = { active: { viewportY: 0 } };
     get cols() {
       return fake.cols;
     }
@@ -33,7 +40,18 @@ vi.mock("@xterm/xterm", () => ({
     open() {}
     onData() {}
     attachCustomWheelEventHandler() {}
+    attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
+      fake.keyHandler = handler;
+    }
     focus() {}
+    selection = "";
+    pasted: string[] = [];
+    getSelection() {
+      return this.selection;
+    }
+    paste(text: string) {
+      this.pasted.push(text);
+    }
     write() {}
     dispose() {}
   },
@@ -47,10 +65,20 @@ vi.mock("@xterm/addon-fit", () => ({
 }));
 vi.mock("@xterm/addon-web-links", () => ({
   WebLinksAddon: class {
-    constructor(public handler: (event: MouseEvent, uri: string) => void) {}
+    constructor(
+      public handler: (event: MouseEvent, uri: string) => void,
+      public options: {
+        hover: (event: MouseEvent, text: string, range: unknown) => void;
+        leave: () => void;
+      },
+    ) {}
   },
 }));
-vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class {} }));
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: class {
+    onContextLoss = vi.fn();
+  },
+}));
 
 import { TerminalView, isControllerHeld } from "./terminal-view";
 
@@ -129,6 +157,187 @@ async function setup(wanted: "control" | "observe") {
   };
   return { fixture, settings, session, open, sized, modes, send, body, openUrl };
 }
+
+const GHOSTTY = {
+  background: "#000001",
+  foreground: "#fffffe",
+  cursor: null,
+  selectionBackground: null,
+  selectionForeground: null,
+  palette: [],
+};
+
+describe("TerminalView theme", () => {
+  const css = readFileSync("src/styles.css", "utf8");
+  const block = (selector: string) =>
+    new RegExp(`${selector.replace(".", "\\.")}\\s*\\{([^}]*)\\}`).exec(css)![1];
+  const token = (selector: string, name: string) =>
+    new RegExp(`${name}:\\s*(#[0-9a-f]{6})`, "i").exec(block(selector))?.[1];
+
+  it("defines the terminal tokens (also the tab-bar background) for light and dark", () => {
+    expect(token(":root", "--term-bg")).toBe("#fbfbf9");
+    expect(token(":root", "--term-fg")).toBe("#26272a");
+    expect(token(":root.app-dark", "--term-bg")).toBe("#111214");
+    expect(token(":root.app-dark", "--term-fg")).toBe("#e4e4e0");
+  });
+
+  it("defines 16 ANSI colors, cursor and selection tokens for light and dark", () => {
+    for (const selector of [":root", ":root.app-dark"]) {
+      for (let i = 0; i < 16; i++) expect(token(selector, `--term-ansi-${i}`)).toBeDefined();
+      for (const name of ["--term-cursor", "--term-selection-bg", "--term-selection-fg"]) {
+        expect(token(selector, name)).toBeDefined();
+      }
+    }
+    expect(token(":root", "--term-ansi-1")).not.toBe(token(":root.app-dark", "--term-ansi-1"));
+  });
+
+  it("passes all 16 ANSI colors, cursor and selection to xterm, and re-reads them on app-dark", async () => {
+    const root = document.documentElement;
+    const names = [
+      "black",
+      "red",
+      "green",
+      "yellow",
+      "blue",
+      "magenta",
+      "cyan",
+      "white",
+      "brightBlack",
+      "brightRed",
+      "brightGreen",
+      "brightYellow",
+      "brightBlue",
+      "brightMagenta",
+      "brightCyan",
+      "brightWhite",
+    ];
+    const set = (hex: (i: number) => string, extra: string) => {
+      for (let i = 0; i < 16; i++) root.style.setProperty(`--term-ansi-${i}`, hex(i));
+      root.style.setProperty("--term-cursor", extra);
+      root.style.setProperty("--term-selection-bg", extra);
+      root.style.setProperty("--term-selection-fg", extra);
+    };
+    set((i) => `#0000${i.toString(16).padStart(2, "0")}`, "#111111");
+    const { fixture } = await setup("observe");
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: Record<string, string> } };
+      }
+    ).term;
+    names.forEach((n, i) =>
+      expect(term.options.theme[n]).toBe(`#0000${i.toString(16).padStart(2, "0")}`),
+    );
+    expect(term.options.theme).toMatchObject({
+      cursor: "#111111",
+      selectionBackground: "#111111",
+      selectionForeground: "#111111",
+    });
+    set((i) => `#ff00${i.toString(16).padStart(2, "0")}`, "#222222");
+    root.classList.add("app-dark");
+    await new Promise((resolve) => setTimeout(resolve));
+    names.forEach((n, i) =>
+      expect(term.options.theme[n]).toBe(`#ff00${i.toString(16).padStart(2, "0")}`),
+    );
+    expect(term.options.theme["selectionBackground"]).toBe("#222222");
+    root.classList.remove("app-dark");
+    root.removeAttribute("style");
+  });
+
+  it("keeps Ghostty background and foreground while the palette still comes from the tokens", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--term-ansi-1", "#aa0000");
+    const { fixture, settings } = await setup("observe");
+    settings.set({ ...DEFAULT_SETTINGS, colors: GHOSTTY });
+    fixture.detectChanges();
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: Record<string, string> } };
+      }
+    ).term;
+    expect(term.options.theme).toMatchObject({
+      background: "#000001",
+      foreground: "#fffffe",
+      red: "#aa0000",
+    });
+    root.removeAttribute("style");
+  });
+
+  it("re-reads the token colors when the theme class changes", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--term-bg", "#fbfbf9");
+    root.style.setProperty("--term-fg", "#26272a");
+    const { fixture } = await setup("observe");
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: { background: string } } };
+      }
+    ).term;
+    expect(term.options.theme.background).toBe("#fbfbf9");
+    root.style.setProperty("--term-bg", "#111214");
+    root.style.setProperty("--term-fg", "#e4e4e0");
+    root.classList.add("app-dark");
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(term.options.theme).toMatchObject({ background: "#111214", foreground: "#e4e4e0" });
+    root.classList.remove("app-dark");
+    root.removeAttribute("style");
+  });
+
+  it("keeps colors from the Ghostty config over the tokens on a theme change", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--term-bg", "#fbfbf9");
+    const { fixture, settings } = await setup("observe");
+    settings.set({ ...DEFAULT_SETTINGS, colors: GHOSTTY });
+    fixture.detectChanges();
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: { background: string } } };
+      }
+    ).term;
+    root.style.setProperty("--term-bg", "#111214");
+    root.classList.add("app-dark");
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(term.options.theme.background).toBe("#000001");
+    root.classList.remove("app-dark");
+    root.removeAttribute("style");
+  });
+});
+
+describe("TerminalView Ghostty palette", () => {
+  it("lays palette, cursor and selection over the scheme tokens and keeps the rest", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--term-ansi-1", "#aa0000");
+    root.style.setProperty("--term-ansi-2", "#00aa00");
+    root.style.setProperty("--term-cursor", "#123456");
+    root.style.setProperty("--term-selection-bg", "#222222");
+    root.style.setProperty("--term-selection-fg", "#333333");
+    const { fixture, settings } = await setup("observe");
+    settings.set({
+      ...DEFAULT_SETTINGS,
+      colors: {
+        ...GHOSTTY,
+        cursor: "#abcdef",
+        selectionBackground: "#010203",
+        selectionForeground: null,
+        palette: ["#0a0a0a", null, ...Array<null>(14).fill(null)],
+      },
+    });
+    fixture.detectChanges();
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: Record<string, string> } };
+      }
+    ).term;
+    expect(term.options.theme).toMatchObject({
+      black: "#0a0a0a",
+      red: "#aa0000",
+      green: "#00aa00",
+      cursor: "#abcdef",
+      selectionBackground: "#010203",
+      selectionForeground: "#333333",
+    });
+    root.removeAttribute("style");
+  });
+});
 
 describe("TerminalView font change", () => {
   it("resizes the control stream and emits sized when the font changes cols", async () => {
@@ -449,15 +658,227 @@ describe("TerminalView links", () => {
     expect(openUrl.mock.calls).toEqual([["https://github.com/GravionLabs/poimen/pull/69"]]);
   });
 
-  it("lets a Cmd mousedown reach xterm in input mode, but captures a plain one", async () => {
+  it("opens OSC 8 hyperlinks through the opener, http(s) only", async () => {
+    const { openUrl } = await setup("control");
+    const options = (
+      fake.term as unknown as {
+        options: { linkHandler: { activate: (e: MouseEvent, uri: string) => void } };
+      }
+    ).options;
+    options.linkHandler.activate(new MouseEvent("click"), "https://example.com/doc");
+    options.linkHandler.activate(new MouseEvent("click"), "file:///etc/passwd");
+    expect(openUrl.mock.calls).toEqual([["https://example.com/doc"]]);
+  });
+
+  /** Makes xterm report a hovered link, as it does on a real mouse move. */
+  function hoverLink() {
+    const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {
+      options: { hover: (e: MouseEvent, t: string, r: unknown) => void };
+    };
+    addon.options.hover(new MouseEvent("mousemove"), "https://x.y", {
+      start: { x: 1, y: 1 },
+      end: { x: 2, y: 1 },
+    });
+  }
+
+  it("lets a Ctrl mousedown over a link reach xterm in input mode off macOS, but captures a plain one", async () => {
     const { session, body } = await setup("control");
     await new Promise((resolve) => setTimeout(resolve));
+    hoverLink();
     const reached = vi.fn();
     body.addEventListener("mousedown", reached);
-    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
     expect(reached).toHaveBeenCalledTimes(1);
     body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     expect(reached).toHaveBeenCalledTimes(1);
     expect(session.mouse).toHaveBeenCalledTimes(1); // only the plain press
+  });
+
+  it("keeps Ctrl for the pane application outside a link", async () => {
+    const { session, body } = await setup("control");
+    await new Promise((resolve) => setTimeout(resolve));
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
+    expect(session.mouse).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses Cmd instead of Ctrl on macOS", async () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    try {
+      const { session, body } = await setup("control");
+      await new Promise((resolve) => setTimeout(resolve));
+      hoverLink();
+      const reached = vi.fn();
+      body.addEventListener("mousedown", reached);
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+      expect(reached).toHaveBeenCalledTimes(1);
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
+      expect(reached).toHaveBeenCalledTimes(1);
+      expect(session.mouse).toHaveBeenCalledTimes(1); // the Ctrl press is the pane's
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("forwards Cmd to the pane on macOS outside a link and after the pointer left a link", async () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    try {
+      const { session, body } = await setup("control");
+      await new Promise((resolve) => setTimeout(resolve));
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+      expect(session.mouse).toHaveBeenCalledTimes(1);
+      hoverLink();
+      const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {
+        options: { leave: () => void };
+      };
+      addon.options.leave();
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+      expect(session.mouse).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("forwards Shift-less Ctrl drags outside a link and still bypasses on Shift over a link", async () => {
+    const { session, body } = await setup("control");
+    await new Promise((resolve) => setTimeout(resolve));
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
+    expect(session.mouse).toHaveBeenCalledTimes(1);
+    hoverLink();
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, shiftKey: true }));
+    expect(session.mouse).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TerminalView app shortcuts (#23, #26)", () => {
+  const key = (k: string, init: KeyboardEventInit = {}) =>
+    new KeyboardEvent("keydown", { key: k, ...init });
+
+  it("keeps Cmd shortcuts from xterm so they are not sent to the pane", async () => {
+    const { settings } = await setup("control");
+    settings.set({
+      ...DEFAULT_SETTINGS,
+      shortcuts: { ...DEFAULT_SETTINGS.shortcuts, splitRight: "Cmd+\\" },
+    });
+    expect(fake.keyHandler?.(key("\\", { metaKey: true }))).toBe(false);
+  });
+
+  it("sends Ctrl+\\ to the pane: a focused terminal only yields shortcuts that use Cmd", async () => {
+    await setup("control");
+    expect(fake.keyHandler?.(key("\\", { ctrlKey: true }))).toBe(true);
+    expect(fake.keyHandler?.(key("b", { ctrlKey: true }))).toBe(true);
+  });
+
+  it("lets other keys through to xterm", async () => {
+    await setup("control");
+    expect(fake.keyHandler?.(key("\\"))).toBe(true);
+    expect(fake.keyHandler?.(key("c", { ctrlKey: true }))).toBe(true);
+  });
+});
+
+describe("TerminalView copy and paste (#35)", () => {
+  const frame: StreamRecord = {
+    type: "frame",
+    seq: 1,
+    full: true,
+    width: 80,
+    height: 24,
+    bytes: "",
+  };
+  const clipboardEvent = (type: string, text?: string) => {
+    const data = new Map<string, string>(text === undefined ? [] : [["text/plain", text]]);
+    const event = new Event(type, { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        getData: (k: string) => data.get(k) ?? "",
+        setData: (k: string, v: string) => data.set(k, v),
+      },
+    });
+    return { event, data };
+  };
+
+  it("copies the selection on copy in input mode", async () => {
+    const { body, send } = await setup("control");
+    await send(0, frame);
+    fake.term!.selection = "hello";
+    const { event, data } = clipboardEvent("copy");
+    body.dispatchEvent(event);
+    expect(data.get("text/plain")).toBe("hello");
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("copies the selection in a read-only tab too", async () => {
+    const { body } = await setup("observe");
+    fake.term!.selection = "read only text";
+    const { event, data } = clipboardEvent("copy");
+    body.dispatchEvent(event);
+    expect(data.get("text/plain")).toBe("read only text");
+  });
+
+  it("leaves copy alone without a selection", async () => {
+    const { body } = await setup("control");
+    fake.term!.selection = "";
+    const { event, data } = clipboardEvent("copy");
+    body.dispatchEvent(event);
+    expect(data.has("text/plain")).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("pastes the clipboard text once through xterm in input mode", async () => {
+    const { body, send } = await setup("control");
+    await send(0, frame);
+    const { event } = clipboardEvent("paste", "line1\nline2");
+    body.dispatchEvent(event);
+    expect(fake.term!.pasted).toEqual(["line1\nline2"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("pastes nothing in a read-only tab", async () => {
+    const { body } = await setup("observe");
+    body.dispatchEvent(clipboardEvent("paste", "text").event);
+    expect(fake.term!.pasted).toEqual([]);
+  });
+
+  it("pastes nothing from an empty clipboard", async () => {
+    const { body, send } = await setup("control");
+    await send(0, frame);
+    body.dispatchEvent(clipboardEvent("paste", "").event);
+    expect(fake.term!.pasted).toEqual([]);
+  });
+
+  it("stops listening when the view is destroyed", async () => {
+    const { body, fixture, send } = await setup("control");
+    await send(0, frame);
+    fixture.destroy();
+    body.dispatchEvent(clipboardEvent("paste", "late").event);
+    expect(fake.term!.pasted).toEqual([]);
+  });
+
+  it("takes Ctrl+Shift+C and Ctrl+Shift+V off macOS and leaves Ctrl+C and Ctrl+V to the pane", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { platform: "Linux x86_64", clipboard: { writeText } });
+    try {
+      await setup("control");
+      fake.term!.selection = "sel";
+      const key = (k: string, init: KeyboardEventInit) =>
+        new KeyboardEvent("keydown", { key: k, ...init });
+      expect(fake.keyHandler?.(key("C", { ctrlKey: true, shiftKey: true }))).toBe(false);
+      expect(writeText).toHaveBeenCalledWith("sel");
+      expect(fake.keyHandler?.(key("V", { ctrlKey: true, shiftKey: true }))).toBe(false);
+      expect(fake.keyHandler?.(key("c", { ctrlKey: true }))).toBe(true);
+      expect(fake.keyHandler?.(key("v", { ctrlKey: true }))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not take Ctrl+Shift+C on macOS (Cmd+C is the menu's)", async () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    try {
+      await setup("control");
+      const event = new KeyboardEvent("keydown", { key: "C", ctrlKey: true, shiftKey: true });
+      expect(fake.keyHandler?.(event)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -4,6 +4,7 @@
 //! Invalid entries produce a warning and fall back to the default. The only write is `save_theme`
 //! (the toolbar button), which edits the `theme` value in place and keeps everything else.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -19,6 +20,129 @@ const MAX_FONT_SIZE: f64 = 72.0;
 pub struct Colors {
     pub background: Option<String>,
     pub foreground: Option<String>,
+    pub cursor: Option<String>,
+    pub selection_background: Option<String>,
+    pub selection_foreground: Option<String>,
+    /// ANSI colors 0-15 (`palette = N=#rrggbb`); empty when Ghostty sets none, else 16 entries.
+    pub palette: Vec<Option<String>>,
+}
+
+/// A token on a sidebar row line (`sidebar.rows`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RowToken {
+    pub token: String,
+    pub bold: bool,
+    pub dim: bool,
+}
+
+/// Lines of tokens per row type; `None` keeps the frontend default of that row type.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct SidebarRows {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<Vec<Vec<RowToken>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<Vec<Vec<RowToken>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<Vec<Vec<RowToken>>>,
+}
+
+/// Built-in row tokens; `$<name>` shows the herdr token `<name>`.
+pub const ROW_TOKENS: &[&str] = &[
+    "state_icon",
+    "name",
+    "state_text",
+    "agent",
+    "title",
+    "branch",
+    "dir",
+    "tab",
+];
+
+fn parse_row_token(value: &Value) -> Result<RowToken, String> {
+    let (name, bold, dim) = match value {
+        Value::String(s) => (s.as_str(), false, false),
+        Value::Object(o) => {
+            let Some(Value::String(name)) = o.get("token") else {
+                return Err("an object token needs a string \"token\"".into());
+            };
+            let flag = |key: &str| match o.get(key) {
+                None => Ok(false),
+                Some(Value::Bool(b)) => Ok(*b),
+                Some(other) => Err(format!("{key} {other} must be true or false")),
+            };
+            (name.as_str(), flag("bold")?, flag("dim")?)
+        }
+        other => return Err(format!("token {other} must be a string or an object")),
+    };
+    let known = ROW_TOKENS.contains(&name)
+        || name
+            .strip_prefix('$')
+            .is_some_and(|n| !n.is_empty() && !n.contains(char::is_whitespace));
+    if !known {
+        return Err(format!("unknown token \"{name}\""));
+    }
+    Ok(RowToken {
+        token: name.to_owned(),
+        bold,
+        dim,
+    })
+}
+
+fn parse_row_lines(value: &Value) -> Result<Vec<Vec<RowToken>>, String> {
+    let Some(lines) = value.as_array().filter(|l| !l.is_empty()) else {
+        return Err("must be a non-empty list of lines".into());
+    };
+    lines
+        .iter()
+        .map(|line| {
+            let Some(tokens) = line.as_array().filter(|t| !t.is_empty()) else {
+                return Err("each line must be a non-empty list of tokens".into());
+            };
+            tokens.iter().map(parse_row_token).collect()
+        })
+        .collect()
+}
+
+/// The valid row types of `sidebar.rows`; an invalid one warns and stays `None` (the default).
+fn resolve_sidebar_rows(sidebar: &Value, warnings: &mut Vec<String>) -> SidebarRows {
+    let mut out = SidebarRows::default();
+    let Some(sidebar) = sidebar.as_object() else {
+        warnings.push("sidebar must be an object".into());
+        return out;
+    };
+    let Some(rows) = sidebar.get("rows") else {
+        return out;
+    };
+    let Some(rows) = rows.as_object() else {
+        warnings.push("sidebar.rows must be an object".into());
+        return out;
+    };
+    for (kind, value) in rows {
+        let slot = match kind.as_str() {
+            "workspace" => &mut out.workspace,
+            "agent" => &mut out.agent,
+            "terminal" => &mut out.terminal,
+            _ => {
+                warnings.push(format!(
+                    "sidebar.rows.{kind} is not a known row type; ignored"
+                ));
+                continue;
+            }
+        };
+        match parse_row_lines(value) {
+            Ok(lines) => *slot = Some(lines),
+            Err(e) => warnings.push(format!("sidebar.rows.{kind}: {e}; using the default")),
+        }
+    }
+    out
+}
+
+/// The `colorSchema` setting: one scheme name, or a light/dark pair picked by `theme`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ColorSchema {
+    Name(String),
+    Pair { light: String, dark: String },
 }
 
 /// The resolved settings sent to the frontend (event `settings`, command `get_settings`).
@@ -27,6 +151,9 @@ pub struct Colors {
 pub struct Settings {
     /// `light`, `dark` or `system`.
     pub theme: String,
+    /// The `colorSchema`: a name or a light/dark pair; `None` keeps the `poimen` scheme that follows
+    /// `theme`. Names are resolved in the frontend.
+    pub color_schema: Option<ColorSchema>,
     /// `None` keeps the app's default monospace stack.
     pub font_family: Option<String>,
     pub font_size: f64,
@@ -34,17 +161,181 @@ pub struct Settings {
     pub colors: Option<Colors>,
     /// Open panes for input when no other client controls them (`terminal.autoControl`).
     pub auto_control: bool,
+    /// Accelerator per action id (see `ACTIONS`), defaults merged with the valid `shortcuts`
+    /// overrides; an empty string means unbound.
+    pub shortcuts: BTreeMap<String, String>,
+    /// Lines and tokens of the sidebar rows from `sidebar.rows`; types left `None` use the default.
+    pub sidebar_rows: SidebarRows,
+    /// `sidebar.layout`: `tree` (default) or `split`.
+    pub sidebar_layout: String,
+    /// Roots of the explorer (`explorer.roots`, a leading `~` is the home directory).
+    pub explorer_roots: Vec<String>,
+    /// Whether the explorer shows hidden directories (`explorer.showHidden`).
+    pub explorer_show_hidden: bool,
+    /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
+    pub spaces_layout: Option<crate::layout::Layout>,
+    /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
+    pub home: Option<String>,
     pub warnings: Vec<String>,
+}
+
+/// Menu/shortcut actions with their default accelerators (VS Code style). `CmdOrCtrl` is Cmd on
+/// macOS and Ctrl elsewhere.
+pub const ACTIONS: &[(&str, &str)] = &[
+    ("newTerminal", "CmdOrCtrl+T"),
+    ("closeTab", "CmdOrCtrl+W"),
+    ("closeAll", "CmdOrCtrl+Shift+W"),
+    ("refresh", "CmdOrCtrl+R"),
+    ("toggleSidebar", "CmdOrCtrl+B"),
+    ("splitRight", "CmdOrCtrl+\\"),
+    ("splitDown", "CmdOrCtrl+Shift+\\"),
+    ("zoomIn", "CmdOrCtrl+="),
+    ("zoomOut", "CmdOrCtrl+-"),
+    ("zoomReset", "CmdOrCtrl+0"),
+    ("nextWaiting", "CmdOrCtrl+Shift+A"),
+    ("nextTab", "CmdOrCtrl+Alt+Right"),
+    ("previousTab", "CmdOrCtrl+Alt+Left"),
+];
+
+pub fn default_shortcuts() -> BTreeMap<String, String> {
+    ACTIONS
+        .iter()
+        .map(|(id, acc)| ((*id).to_owned(), (*acc).to_owned()))
+        .collect()
+}
+
+/// Canonical form of an accelerator such as `cmd+shift+w` -> `Cmd+Shift+W`; `None` when invalid.
+/// A shortcut needs a Cmd, Ctrl or Alt modifier, or is a function key.
+pub fn normalize_accelerator(text: &str) -> Option<String> {
+    let parts: Vec<&str> = text.split('+').map(str::trim).collect();
+    let (key, mods) = parts.split_last()?;
+    let (mut cmd_or_ctrl, mut cmd, mut ctrl, mut alt, mut shift) =
+        (false, false, false, false, false);
+    for m in mods {
+        match m.to_ascii_lowercase().as_str() {
+            "cmdorctrl" | "commandorcontrol" | "mod" => cmd_or_ctrl = true,
+            "cmd" | "command" | "meta" | "super" => cmd = true,
+            "ctrl" | "control" => ctrl = true,
+            "alt" | "option" => alt = true,
+            "shift" => shift = true,
+            _ => return None,
+        }
+    }
+    let lower = key.to_ascii_lowercase();
+    let named = match lower.as_str() {
+        "tab" => Some("Tab"),
+        "enter" | "return" => Some("Enter"),
+        "space" => Some("Space"),
+        "escape" | "esc" => Some("Escape"),
+        "left" | "arrowleft" => Some("Left"),
+        "right" | "arrowright" => Some("Right"),
+        "up" | "arrowup" => Some("Up"),
+        "down" | "arrowdown" => Some("Down"),
+        "pageup" => Some("PageUp"),
+        "pagedown" => Some("PageDown"),
+        "home" => Some("Home"),
+        "end" => Some("End"),
+        "backspace" => Some("Backspace"),
+        "delete" => Some("Delete"),
+        "plus" => Some("Plus"),
+        _ => None,
+    };
+    let function_key = lower
+        .strip_prefix('f')
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| (1..=12).contains(&n));
+    let key = if let Some(n) = named {
+        n.to_owned()
+    } else if function_key {
+        lower.to_uppercase()
+    } else if key.chars().count() == 1 && !key.chars().all(char::is_whitespace) && *key != "+" {
+        key.to_uppercase()
+    } else {
+        return None;
+    };
+    if !(cmd_or_ctrl || cmd || ctrl || alt || function_key) {
+        return None;
+    }
+    let mut out = String::new();
+    for (on, name) in [
+        (cmd_or_ctrl, "CmdOrCtrl"),
+        (cmd, "Cmd"),
+        (ctrl, "Ctrl"),
+        (alt, "Alt"),
+        (shift, "Shift"),
+    ] {
+        if on {
+            out.push_str(name);
+            out.push('+');
+        }
+    }
+    out.push_str(&key);
+    Some(out)
+}
+
+/// Defaults overlaid with the `shortcuts` object; unknown actions, invalid accelerators and
+/// accelerators already used by another action warn and keep the default.
+fn resolve_shortcuts(value: &Value, warnings: &mut Vec<String>) -> BTreeMap<String, String> {
+    let mut out = default_shortcuts();
+    let Some(map) = value.as_object() else {
+        warnings.push("shortcuts must be an object".into());
+        return out;
+    };
+    for key in map.keys() {
+        if !ACTIONS.iter().any(|(id, _)| id == key) {
+            warnings.push(format!("shortcuts.{key} is not a known action; ignored"));
+        }
+    }
+    let mut chosen: Vec<(&str, &str, String)> = Vec::new();
+    for (id, default) in ACTIONS {
+        let mut acc = (*default).to_owned();
+        match map.get(*id) {
+            None => {}
+            Some(Value::String(s)) if s.trim().is_empty() => acc = String::new(),
+            Some(Value::String(s)) => match normalize_accelerator(s) {
+                Some(n) => acc = n,
+                None => warnings.push(format!(
+                    "shortcuts.{id} \"{s}\" is not a valid shortcut; using {default}"
+                )),
+            },
+            Some(other) => warnings.push(format!(
+                "shortcuts.{id} {other} must be a string; using {default}"
+            )),
+        }
+        chosen.push((id, default, acc));
+    }
+    // An override that collides with another action's shortcut loses to the default.
+    let all: Vec<String> = chosen.iter().map(|(_, _, a)| a.clone()).collect();
+    for (id, default, acc) in chosen {
+        let clash = !acc.is_empty() && all.iter().filter(|a| **a == acc).count() > 1;
+        if clash && acc != default {
+            warnings.push(format!(
+                "shortcuts.{id} {acc} is already used by another action; using {default}"
+            ));
+            out.insert(id.to_owned(), default.to_owned());
+        } else {
+            out.insert(id.to_owned(), acc);
+        }
+    }
+    out
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: "system".into(),
+            color_schema: None,
             font_family: None,
             font_size: DEFAULT_FONT_SIZE,
             colors: None,
             auto_control: true,
+            shortcuts: default_shortcuts(),
+            sidebar_rows: SidebarRows::default(),
+            sidebar_layout: "tree".into(),
+            explorer_roots: vec!["~".into()],
+            explorer_show_hidden: false,
+            spaces_layout: None,
+            home: None,
             warnings: Vec::new(),
         }
     }
@@ -56,6 +347,11 @@ pub struct Ghostty {
     pub font_size: Option<f64>,
     pub background: Option<String>,
     pub foreground: Option<String>,
+    pub cursor: Option<String>,
+    pub selection_background: Option<String>,
+    pub selection_foreground: Option<String>,
+    /// Empty, or 16 entries once a `palette` line was read.
+    pub palette: Vec<Option<String>>,
 }
 
 fn valid_size(size: f64) -> bool {
@@ -84,10 +380,79 @@ pub fn parse_ghostty(text: &str) -> Ghostty {
             "font-size" => out.font_size = value.parse().ok().filter(|s| valid_size(*s)),
             "background" => out.background = hex_color(value),
             "foreground" => out.foreground = hex_color(value),
+            "cursor-color" => out.cursor = hex_color(value),
+            "selection-background" => out.selection_background = hex_color(value),
+            "selection-foreground" => out.selection_foreground = hex_color(value),
+            "palette" => {
+                if let Some((index, color)) = value.split_once('=')
+                    && let Ok(index) = index.trim().parse::<usize>()
+                    && index < 16
+                    && let Some(color) = hex_color(color.trim().trim_matches('"'))
+                {
+                    out.palette.resize(16, None);
+                    out.palette[index] = Some(color);
+                }
+            }
             _ => {}
         }
     }
     out
+}
+
+/// `explorer.roots` (non-empty list of absolute or `~` paths) and `explorer.showHidden`; invalid
+/// entries warn and keep the default.
+fn resolve_explorer(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("explorer must be an object".into());
+        return;
+    };
+    match obj.get("roots") {
+        None => {}
+        Some(Value::Array(items)) => {
+            let roots: Option<Vec<String>> = items
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(str::trim)
+                        .filter(|p| p.starts_with('/') || *p == "~" || p.starts_with("~/"))
+                        .map(str::to_owned)
+                })
+                .collect();
+            match roots {
+                Some(r) if !r.is_empty() => s.explorer_roots = r,
+                _ => s.warnings.push(
+                    "explorer.roots must be a non-empty list of absolute paths (or ~); using the home directory"
+                        .into(),
+                ),
+            }
+        }
+        Some(_) => s
+            .warnings
+            .push("explorer.roots must be a list; using the home directory".into()),
+    }
+    match obj.get("showHidden") {
+        None => {}
+        Some(Value::Bool(b)) => s.explorer_show_hidden = *b,
+        Some(_) => s
+            .warnings
+            .push("explorer.showHidden must be true or false".into()),
+    }
+}
+
+/// `spaces.layout` (the layout-bootstrap schema); an invalid one warns and keeps the default.
+fn resolve_spaces(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("spaces must be an object".into());
+        return;
+    };
+    if let Some(layout) = obj.get("layout") {
+        match crate::layout::parse_layout_value(layout) {
+            Ok(l) => s.spaces_layout = Some(l),
+            Err(e) => s
+                .warnings
+                .push(format!("spaces.layout: {e}; using the default layout")),
+        }
+    }
 }
 
 /// Resolves the settings from the file contents. `read_ghostty` is only called when the
@@ -112,6 +477,56 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
         Some(other) => s.warnings.push(format!(
             "theme {other} must be \"light\", \"dark\" or \"system\""
         )),
+    }
+
+    match root.get("colorSchema") {
+        None => {}
+        Some(Value::String(name)) if !name.trim().is_empty() => {
+            s.color_schema = Some(ColorSchema::Name(name.trim().to_owned()));
+        }
+        Some(Value::Object(pair)) => {
+            let side = |key: &str| match pair.get(key) {
+                Some(Value::String(n)) if !n.trim().is_empty() => Some(n.trim().to_owned()),
+                _ => None,
+            };
+            match (side("light"), side("dark")) {
+                (Some(light), Some(dark)) => {
+                    s.color_schema = Some(ColorSchema::Pair { light, dark });
+                }
+                _ => s.warnings.push(
+                    "colorSchema pair needs \"light\" and \"dark\" scheme names; using poimen"
+                        .to_owned(),
+                ),
+            }
+        }
+        Some(other) => s.warnings.push(format!(
+            "colorSchema {other} must be a scheme name or a {{\"light\", \"dark\"}} pair; using poimen"
+        )),
+    }
+
+    if let Some(value) = root.get("shortcuts") {
+        s.shortcuts = resolve_shortcuts(value, &mut s.warnings);
+    }
+
+    if let Some(value) = root.get("sidebar") {
+        s.sidebar_rows = resolve_sidebar_rows(value, &mut s.warnings);
+        match value.get("layout") {
+            None => {}
+            Some(Value::String(l)) if matches!(l.as_str(), "tree" | "split") => {
+                s.sidebar_layout = l.clone();
+            }
+            Some(other) => s.warnings.push(format!(
+                "sidebar.layout {other} must be \"tree\" or \"split\"; using tree"
+            )),
+        }
+    }
+
+    if let Some(value) = root.get("explorer") {
+        resolve_explorer(value, &mut s);
+    }
+
+    if let Some(value) = root.get("spaces") {
+        resolve_spaces(value, &mut s);
     }
 
     let mut use_ghostty = false;
@@ -173,10 +588,20 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
                 if !explicit_size && let Some(size) = g.font_size {
                     s.font_size = size;
                 }
-                if g.background.is_some() || g.foreground.is_some() {
+                if g.background.is_some()
+                    || g.foreground.is_some()
+                    || g.cursor.is_some()
+                    || g.selection_background.is_some()
+                    || g.selection_foreground.is_some()
+                    || !g.palette.is_empty()
+                {
                     s.colors = Some(Colors {
                         background: g.background,
                         foreground: g.foreground,
+                        cursor: g.cursor,
+                        selection_background: g.selection_background,
+                        selection_foreground: g.selection_foreground,
+                        palette: g.palette,
                     });
                 }
             }
@@ -193,20 +618,86 @@ pub fn ghostty_path(home: &Path) -> PathBuf {
     home.join(".config/ghostty/config")
 }
 
+pub fn herdr_config_path(home: &Path) -> PathBuf {
+    home.join(".config/herdr/config.toml")
+}
+
+/// The `[theme] name` of a herdr `config.toml` (minimal read: no full TOML parser needed).
+pub fn parse_herdr_theme(text: &str) -> Option<String> {
+    let mut in_theme = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_theme = line.split('#').next().unwrap_or("").trim() == "[theme]";
+            continue;
+        }
+        if !in_theme {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "name" {
+            continue;
+        }
+        let value = value.trim();
+        let quote = value.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+        let rest = &value[1..];
+        let name = rest[..rest.find(quote)?].trim();
+        return (!name.is_empty()).then(|| name.to_owned());
+    }
+    None
+}
+
+/// Replaces `colorSchema: "herdr"` by the scheme named in herdr's config. `terminal`, a missing
+/// file or no name warns and falls back to `poimen` (which follows `theme`). Unknown scheme names
+/// are warned about and replaced by the frontend, like any other name.
+fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>) {
+    if s.color_schema != Some(ColorSchema::Name("herdr".into())) {
+        return;
+    }
+    match herdr_toml.and_then(parse_herdr_theme) {
+        Some(name) if name != "terminal" => s.color_schema = Some(ColorSchema::Name(name)),
+        Some(_) => {
+            s.color_schema = None;
+            s.warnings.push(
+                "colorSchema \"herdr\": herdr uses the terminal colors (theme \"terminal\"); using poimen"
+                    .into(),
+            );
+        }
+        None => {
+            s.color_schema = None;
+            s.warnings.push(
+                "colorSchema \"herdr\": no [theme] name in ~/.config/herdr/config.toml; using poimen"
+                    .into(),
+            );
+        }
+    }
+}
+
 /// Reads and resolves the settings below `home`; a missing file means defaults.
 pub fn load(home: &Path) -> Settings {
     let json = match std::fs::read_to_string(config_path(home)) {
         Ok(text) => Some(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => {
-            let mut s = Settings::default();
+            let mut s = Settings {
+                home: Some(home.to_string_lossy().into_owned()),
+                ..Settings::default()
+            };
             s.warnings.push(format!("cannot read config.json: {e}"));
             return s;
         }
     };
-    resolve(json.as_deref(), || {
+    let mut s = resolve(json.as_deref(), || {
         std::fs::read_to_string(ghostty_path(home)).ok()
-    })
+    });
+    if s.color_schema == Some(ColorSchema::Name("herdr".into())) {
+        let toml = std::fs::read_to_string(herdr_config_path(home)).ok();
+        apply_herdr(&mut s, toml.as_deref());
+    }
+    s.home = Some(home.to_string_lossy().into_owned());
+    s
 }
 
 /// Index after a `"..."` string that starts at `i`.
@@ -250,11 +741,38 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
     if !matches!(theme, "light" | "dark" | "system") {
         return Err(format!("invalid theme {theme:?}"));
     }
-    let b = text.as_bytes();
-    let open = skip_trivia(b, 0);
-    if b.get(open) != Some(&b'{') {
-        return Err("config.json is not a JSON object".into());
+    set_key_text(text, "theme", &format!("\"{theme}\""))
+}
+
+/// Returns `text` with `colorSchema` set to a scheme name or a `{light, dark}` pair, like
+/// `set_theme_text`: only that key changes, comments and the rest stay.
+pub fn set_color_schema_text(text: &str, schema: &serde_json::Value) -> Result<String, String> {
+    let name = |v: Option<&serde_json::Value>| {
+        v.and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .is_some()
+    };
+    let valid = match schema {
+        serde_json::Value::String(_) => name(Some(schema)),
+        serde_json::Value::Object(o) => o.len() == 2 && name(o.get("light")) && name(o.get("dark")),
+        _ => false,
+    };
+    if !valid {
+        return Err("colorSchema must be a name or a {light, dark} pair of names".into());
     }
+    set_key_text(text, "colorSchema", &schema.to_string())
+}
+
+/// Byte range of the value of `key` in the object that opens at `open` (a `{`), if present.
+fn find_value(text: &str, open: usize, key: &str) -> Option<(usize, usize)> {
+    find_entry(text, open, key).map(|(_, start, stop)| (start, stop))
+}
+
+/// Like `find_value`, plus the start of the quoted key: `(key, value start, value stop)`.
+fn find_entry(text: &str, open: usize, key: &str) -> Option<(usize, usize, usize)> {
+    let quoted = format!("\"{key}\"");
+    let b = text.as_bytes();
     let (mut i, mut depth) = (open + 1, 1usize);
     while i < b.len() {
         i = skip_trivia(b, i);
@@ -262,7 +780,8 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
             None => break,
             Some(b'"') => {
                 let end = skip_string(b, i);
-                let is_key = depth == 1 && &text[i..end] == "\"theme\"";
+                let is_key = depth == 1 && text[i..end] == quoted;
+                let key_start = i;
                 i = end;
                 if is_key {
                     let colon = skip_trivia(b, i);
@@ -271,13 +790,24 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
                         let stop = if b.get(start) == Some(&b'"') {
                             skip_string(b, start)
                         } else {
-                            let mut e = start;
-                            while e < b.len() && !matches!(b[e], b',' | b'}' | b'\n') {
+                            let (mut e, mut nest) = (start, 0usize);
+                            while e < b.len() {
+                                match b[e] {
+                                    b'"' => {
+                                        e = skip_string(b, e);
+                                        continue;
+                                    }
+                                    b'{' | b'[' => nest += 1,
+                                    b'}' | b']' if nest == 0 => break,
+                                    b'}' | b']' => nest -= 1,
+                                    b',' | b'\n' if nest == 0 => break,
+                                    _ => {}
+                                }
                                 e += 1;
                             }
                             e
                         };
-                        return Ok(format!("{}\"{theme}\"{}", &text[..start], &text[stop..]));
+                        return Some((key_start, start, stop));
                     }
                 }
             }
@@ -295,24 +825,219 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
             Some(_) => i += 1,
         }
     }
-    let first = skip_trivia(b, open + 1);
-    let entry = format!("\"theme\": \"{theme}\"");
-    Ok(if b.get(first) == Some(&b'}') {
+    None
+}
+
+/// Sets `key` of the object opening at `open` to the JSON `value`; a missing key is inserted as
+/// the first entry.
+fn set_key_at(text: &str, open: usize, key: &str, value: &str) -> String {
+    if let Some((start, stop)) = find_value(text, open, key) {
+        return format!("{}{value}{}", &text[..start], &text[stop..]);
+    }
+    let first = skip_trivia(text.as_bytes(), open + 1);
+    let entry = format!("\"{key}\": {value}");
+    if text.as_bytes().get(first) == Some(&b'}') {
         format!("{}{entry}{}", &text[..=open], &text[first..])
     } else {
         format!("{}\n  {entry},{}", &text[..=open], &text[open + 1..])
-    })
+    }
+}
+
+/// Start of the top-level object, or an error when the text is something else.
+fn root_open(text: &str) -> Result<usize, String> {
+    let open = skip_trivia(text.as_bytes(), 0);
+    if text.as_bytes().get(open) == Some(&b'{') {
+        Ok(open)
+    } else {
+        Err("config.json is not a JSON object".into())
+    }
+}
+
+/// Sets the top-level `key` to the JSON `value` (already serialized), touching nothing else. A
+/// missing key is inserted as the first entry.
+fn set_key_text(text: &str, key: &str, value: &str) -> Result<String, String> {
+    Ok(set_key_at(text, root_open(text)?, key, value))
+}
+
+/// Sets the value at the key `path` (outermost first) of the object opening at `open`. Missing
+/// objects on the way are created; a key on the way that is not an object is an error.
+fn set_path_at(text: &str, open: usize, path: &[&str], value: &str) -> Result<String, String> {
+    let (key, rest) = path.split_first().ok_or("empty key path")?;
+    if rest.is_empty() {
+        return Ok(set_key_at(text, open, key, value));
+    }
+    match find_value(text, open, key) {
+        None => {
+            let nested = rest.iter().rev().fold(value.to_owned(), |inner, k| {
+                format!("{{ \"{k}\": {inner} }}")
+            });
+            Ok(set_key_at(text, open, key, &nested))
+        }
+        Some((start, _)) if text.as_bytes().get(start) == Some(&b'{') => {
+            set_path_at(text, start, rest, value)
+        }
+        Some(_) => Err(format!("{key} in config.json is not an object")),
+    }
+}
+
+/// Sets the nested key `path` (e.g. `["sidebar", "layout"]`) to the JSON `value`, touching nothing
+/// else: other keys, comments and formatting stay.
+fn set_path_text(text: &str, path: &[&str], value: &str) -> Result<String, String> {
+    set_path_at(text, root_open(text)?, path, value)
+}
+
+/// Returns `text` with `sidebar.layout` set to `tree` or `split`, touching nothing else. A missing
+/// `sidebar` object is created; a `sidebar` that is not an object is an error.
+pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, String> {
+    if !matches!(layout, "tree" | "split") {
+        return Err(format!("invalid sidebar layout {layout:?}"));
+    }
+    set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
+}
+
+/// Index before the whitespace (not comments) that ends just before `i`.
+fn trim_ws_back(b: &[u8], mut i: usize) -> usize {
+    while i > 0 && b[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    i
+}
+
+/// Removes the nested key `path` with its value and one separating comma, touching nothing else.
+/// A missing key (or a missing object on the way) leaves the text unchanged.
+fn remove_path_text(text: &str, path: &[&str]) -> Result<String, String> {
+    let b = text.as_bytes();
+    let mut open = root_open(text)?;
+    let (last, parents) = path.split_last().ok_or("empty key path")?;
+    for key in parents {
+        match find_value(text, open, key) {
+            None => return Ok(text.to_owned()),
+            Some((start, _)) if b.get(start) == Some(&b'{') => open = start,
+            Some(_) => return Err(format!("{key} in config.json is not an object")),
+        }
+    }
+    let Some((key_start, _, stop)) = find_entry(text, open, last) else {
+        return Ok(text.to_owned());
+    };
+    let stop = trim_ws_back(b, stop).max(key_start);
+    let mut after = stop;
+    while after < b.len() && b[after].is_ascii_whitespace() {
+        after += 1;
+    }
+    if b.get(after) == Some(&b',') {
+        // Not the last entry: drop the entry, its comma and the whitespace before it.
+        let from = trim_ws_back(b, key_start);
+        return Ok(format!("{}{}", &text[..from], &text[after + 1..]));
+    }
+    // The last entry: drop the comma before it, if any.
+    let before = trim_ws_back(b, key_start);
+    let from = if before > 0 && b[before - 1] == b',' {
+        before - 1
+    } else {
+        before
+    };
+    Ok(format!("{}{}", &text[..from], &text[stop..]))
+}
+
+/// Returns `text` with `spaces.layout` set to `layout` after validating it like the settings
+/// loader does; other keys, comments and formatting stay.
+pub fn set_spaces_layout_text(text: &str, layout: &Value) -> Result<String, String> {
+    crate::layout::parse_layout_value(layout).map_err(|e| format!("spaces.layout: {e}"))?;
+    set_path_text(text, &["spaces", "layout"], &layout.to_string())
+}
+
+/// Returns `text` without `spaces.layout`, so new spaces use the built-in default again.
+pub fn remove_spaces_layout_text(text: &str) -> Result<String, String> {
+    remove_path_text(text, &["spaces", "layout"])
+}
+
+/// Writes a path below `home` as `~` or `~/…`; other paths stay as they are.
+pub fn tilde_path(path: &str, home: &Path) -> String {
+    let path = path.trim();
+    let home = home.to_string_lossy();
+    let home = home.trim_end_matches('/');
+    if home.is_empty() {
+        return path.to_owned();
+    }
+    match path.strip_prefix(home) {
+        Some("") | Some("/") => "~".to_owned(),
+        Some(rest) if rest.starts_with('/') => format!("~{}", rest.trim_end_matches('/')),
+        _ => path.to_owned(),
+    }
+}
+
+/// Returns `text` with `explorer.roots` set to `roots`, touching nothing else. Every root must be
+/// absolute or start with `~`, and the list must not be empty.
+pub fn set_explorer_roots_text(text: &str, roots: &[String]) -> Result<String, String> {
+    if roots.is_empty() {
+        return Err("explorer.roots needs at least one folder".into());
+    }
+    if let Some(bad) = roots
+        .iter()
+        .find(|p| !(p.starts_with('/') || *p == "~" || p.starts_with("~/")))
+    {
+        return Err(format!("{bad:?} is not an absolute path"));
+    }
+    let value = serde_json::to_string(roots).map_err(|e| e.to_string())?;
+    set_path_text(text, &["explorer", "roots"], &value)
+}
+
+/// Returns `text` with `explorer.showHidden` set, touching nothing else.
+pub fn set_explorer_show_hidden_text(text: &str, show: bool) -> Result<String, String> {
+    set_path_text(text, &["explorer", "showHidden"], &show.to_string())
 }
 
 /// Writes the `theme` setting below `home` (creating the file when missing). The watcher then
 /// emits the new settings like for any external edit.
 pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
+    save_with(home, |text| set_theme_text(text, theme))
+}
+
+/// Writes the `colorSchema` setting below `home`, like `save_theme`.
+pub fn save_color_schema(home: &Path, schema: &serde_json::Value) -> Result<(), String> {
+    save_with(home, |text| set_color_schema_text(text, schema))
+}
+
+/// Writes `sidebar.layout` below `home`, like `save_theme`.
+pub fn save_sidebar_layout(home: &Path, layout: &str) -> Result<(), String> {
+    save_with(home, |text| set_sidebar_layout_text(text, layout))
+}
+
+/// Writes `explorer.roots` below `home`, like `save_theme`; paths under `home` become `~/…`.
+pub fn save_explorer_roots(home: &Path, roots: &[String]) -> Result<(), String> {
+    let mut shortened: Vec<String> = Vec::new();
+    for root in roots.iter().map(|r| tilde_path(r, home)) {
+        if !shortened.contains(&root) {
+            shortened.push(root);
+        }
+    }
+    let roots = shortened;
+    save_with(home, |text| set_explorer_roots_text(text, &roots))
+}
+
+/// Writes `explorer.showHidden` below `home`, like `save_theme`.
+pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> {
+    save_with(home, |text| set_explorer_show_hidden_text(text, show))
+}
+
+/// Writes `spaces.layout` below `home`, like `save_theme`.
+pub fn save_spaces_layout(home: &Path, layout: &Value) -> Result<(), String> {
+    save_with(home, |text| set_spaces_layout_text(text, layout))
+}
+
+/// Removes `spaces.layout` below `home`; a missing file stays missing.
+pub fn remove_spaces_layout(home: &Path) -> Result<(), String> {
+    if !config_path(home).exists() {
+        return Ok(());
+    }
+    save_with(home, remove_spaces_layout_text)
+}
+
+fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> Result<(), String> {
     let path = config_path(home);
     let next = match std::fs::read_to_string(&path) {
-        Ok(text) => set_theme_text(&text, theme)?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            set_theme_text("{}", theme).map(|t| t + "\n")?
-        }
+        Ok(text) => edit(&text)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => edit("{}").map(|t| t + "\n")?,
         Err(e) => return Err(format!("cannot read config.json: {e}")),
     };
     if let Some(dir) = path.parent() {
@@ -323,12 +1048,16 @@ pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-fn stamp(home: &Path) -> [Option<SystemTime>; 2] {
-    [config_path(home), ghostty_path(home)]
-        .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+fn stamp(home: &Path) -> [Option<SystemTime>; 3] {
+    [
+        config_path(home),
+        ghostty_path(home),
+        herdr_config_path(home),
+    ]
+    .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
 }
 
-/// Runs forever on the calling thread: polls both files and calls `emit` on every change.
+/// Runs forever on the calling thread: polls the config files (poimen, Ghostty, herdr) and calls `emit` on every change.
 pub fn watch(home: &Path, interval: Duration, emit: impl Fn(&Settings)) {
     let mut last = stamp(home);
     loop {
@@ -349,6 +1078,287 @@ mod tests {
         None
     }
 
+    fn rows(json: &str) -> Settings {
+        resolve(Some(json), none)
+    }
+
+    #[test]
+    fn explorer_settings_default_and_override() {
+        let d = resolve(None, none);
+        assert_eq!(d.explorer_roots, ["~"]);
+        assert!(!d.explorer_show_hidden);
+        let s = rows(r#"{"explorer":{"roots":["/srv","~/code"],"showHidden":true}}"#);
+        assert_eq!(s.explorer_roots, ["/srv", "~/code"]);
+        assert!(s.explorer_show_hidden);
+        assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn spaces_layout_parses_and_invalid_ones_warn_and_fall_back() {
+        let ok = resolve(
+            Some(r#"{"spaces":{"layout":{"panes":[{"name":"main","command":"vim"}]}}}"#),
+            || None,
+        );
+        assert!(ok.warnings.is_empty(), "{:?}", ok.warnings);
+        assert_eq!(ok.spaces_layout.unwrap().panes[0].name, "main");
+        for json in [
+            r#"{"spaces":{"layout":{"panes":[]}}}"#,
+            r#"{"spaces":{"layout":"x"}}"#,
+            r#"{"spaces":3}"#,
+        ] {
+            let s = resolve(Some(json), || None);
+            assert_eq!(s.warnings.len(), 1, "{json}");
+            assert_eq!(s.spaces_layout, None, "{json}");
+        }
+        assert_eq!(resolve(None, || None).spaces_layout, None);
+    }
+
+    #[test]
+    fn explorer_settings_invalid_warn_and_keep_defaults() {
+        for json in [
+            r#"{"explorer":{"roots":[]}}"#,
+            r#"{"explorer":{"roots":["relative"]}}"#,
+            r#"{"explorer":{"roots":"/srv"}}"#,
+            r#"{"explorer":"x"}"#,
+        ] {
+            let s = rows(json);
+            assert_eq!(s.explorer_roots, ["~"], "{json}");
+            assert_eq!(s.warnings.len(), 1, "{json}");
+        }
+        assert_eq!(rows(r#"{"explorer":{"showHidden":1}}"#).warnings.len(), 1);
+    }
+
+    #[test]
+    fn sidebar_rows_accept_names_objects_and_herdr_tokens() {
+        let s = rows(
+            r#"{"sidebar":{"rows":{"agent":[["state_icon",{"token":"name","bold":true}],["$deliver_step","dir"]]}}}"#,
+        );
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let tok = |t: &str, bold| RowToken {
+            token: t.into(),
+            bold,
+            dim: false,
+        };
+        assert_eq!(
+            s.sidebar_rows.agent,
+            Some(vec![
+                vec![tok("state_icon", false), tok("name", true)],
+                vec![tok("$deliver_step", false), tok("dir", false)],
+            ])
+        );
+        assert_eq!(s.sidebar_rows.workspace, None);
+    }
+
+    #[test]
+    fn sidebar_layout_parses_and_invalid_warns() {
+        assert_eq!(rows("{}").sidebar_layout, "tree");
+        assert_eq!(
+            rows(r#"{"sidebar":{"layout":"split"}}"#).sidebar_layout,
+            "split"
+        );
+        let s = rows(r#"{"sidebar":{"layout":"grid"}}"#);
+        assert_eq!(s.sidebar_layout, "tree");
+        assert!(s.warnings[0].contains("sidebar.layout"));
+    }
+
+    #[test]
+    fn set_sidebar_layout_replaces_inserts_and_keeps_the_rest() {
+        let text = "{\n  // c\n  \"theme\": \"dark\",\n  \"sidebar\": { \"layout\": \"tree\", \"rows\": {} }\n}";
+        let out = set_sidebar_layout_text(text, "split").unwrap();
+        assert_eq!(out, text.replace("\"tree\"", "\"split\""));
+        let into = set_sidebar_layout_text("{\"sidebar\":{\"rows\":{}}}", "split").unwrap();
+        assert_eq!(
+            into,
+            "{\"sidebar\":{\n  \"layout\": \"split\",\"rows\":{}}}"
+        );
+        let empty = set_sidebar_layout_text("{\"sidebar\":{}}", "split").unwrap();
+        assert_eq!(empty, "{\"sidebar\":{\"layout\": \"split\"}}");
+        let none = set_sidebar_layout_text("{\"theme\":\"dark\"}", "split").unwrap();
+        assert_eq!(
+            none,
+            "{\n  \"sidebar\": { \"layout\": \"split\" },\"theme\":\"dark\"}"
+        );
+        let nested = set_sidebar_layout_text("{\"x\":{\"layout\":\"tree\"}}", "split").unwrap();
+        assert!(nested.contains("\"x\":{\"layout\":\"tree\"}"));
+    }
+
+    #[test]
+    fn set_path_creates_and_descends_nested_objects() {
+        let text = "{\n  // keep\n  \"explorer\": { \"showHidden\": true }\n}";
+        let out = set_explorer_roots_text(text, &["~/Source".into()]).unwrap();
+        assert_eq!(
+            out,
+            "{\n  // keep\n  \"explorer\": {\n  \"roots\": [\"~/Source\"], \"showHidden\": true }\n}"
+        );
+        let replaced = set_explorer_roots_text(&out, &["~".into(), "/srv".into()]).unwrap();
+        assert!(replaced.contains("\"roots\": [\"~\",\"/srv\"], \"showHidden\": true"));
+        assert!(replaced.contains("// keep"));
+        let created = set_explorer_show_hidden_text("{\"theme\":\"dark\"}", true).unwrap();
+        assert_eq!(
+            created,
+            "{\n  \"explorer\": { \"showHidden\": true },\"theme\":\"dark\"}"
+        );
+        let plain = "{\"explorer\": { \"roots\": [\"~\"], \"showHidden\": true }}";
+        let plain = set_explorer_roots_text(plain, &["~".into(), "/srv".into()]).unwrap();
+        let r = resolve(Some(&plain), || None);
+        assert_eq!(r.explorer_roots, vec!["~", "/srv"]);
+        assert!(r.explorer_show_hidden);
+    }
+
+    #[test]
+    fn set_explorer_roots_rejects_bad_input() {
+        assert!(set_explorer_roots_text("{}", &[]).is_err());
+        assert!(set_explorer_roots_text("{}", &["relative".into()]).is_err());
+        assert!(set_explorer_roots_text("{\"explorer\":[1]}", &["~".into()]).is_err());
+        assert!(set_explorer_show_hidden_text("[]", true).is_err());
+    }
+
+    #[test]
+    fn tilde_path_shortens_paths_under_home() {
+        let home = Path::new("/Users/me");
+        assert_eq!(tilde_path("/Users/me", home), "~");
+        assert_eq!(tilde_path("/Users/me/", home), "~");
+        assert_eq!(tilde_path("/Users/me/Source/", home), "~/Source");
+        assert_eq!(tilde_path("/Users/meow", home), "/Users/meow");
+        assert_eq!(tilde_path("/srv/x", home), "/srv/x");
+        assert_eq!(tilde_path("~/x", home), "~/x");
+    }
+
+    #[test]
+    fn save_explorer_roots_writes_home_relative_paths() {
+        let home = std::env::temp_dir().join(format!("poimen-roots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let sub = home.join("Source").to_string_lossy().into_owned();
+        save_explorer_roots(&home, &[sub, "/srv".into()]).unwrap();
+        save_explorer_show_hidden(&home, true).unwrap();
+        let s = load(&home);
+        assert_eq!(s.explorer_roots, vec!["~/Source", "/srv"]);
+        assert!(s.explorer_show_hidden);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn save_explorer_roots_drops_duplicates_after_shortening() {
+        let home = std::env::temp_dir().join(format!("poimen-dedupe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let abs = home.join("Source").to_string_lossy().into_owned();
+        let h = home.to_string_lossy().into_owned();
+        save_explorer_roots(
+            &home,
+            &["~/Source".into(), abs, "~".into(), h, "/srv".into()],
+        )
+        .unwrap();
+        assert_eq!(load(&home).explorer_roots, vec!["~/Source", "~", "/srv"]);
+        assert_eq!(load(&home).home, Some(home.to_string_lossy().into_owned()));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn set_spaces_layout_validates_and_keeps_the_rest() {
+        let layout = serde_json::json!({"panes": [{"name": "a", "command": "nvim"}, {"name": "b", "split": {"from": "a", "direction": "down", "ratio": 0.7}}]});
+        let text = "{\n  // keep\n  \"theme\": \"dark\"\n}";
+        let out = set_spaces_layout_text(text, &layout).unwrap();
+        assert!(out.contains("// keep"));
+        assert!(out.contains("\"theme\": \"dark\""));
+        let parsed = resolve(Some(&out.replace("  // keep\n", "")), || None);
+        let panes = parsed.spaces_layout.unwrap().panes;
+        assert_eq!(panes.len(), 2);
+        assert_eq!(panes[1].split.as_ref().unwrap().ratio, 0.7);
+        let bad = serde_json::json!({"panes": [{"name": "a"}, {"name": "a", "split": {"direction": "right"}}]});
+        assert!(
+            set_spaces_layout_text("{}", &bad)
+                .unwrap_err()
+                .contains("duplicate")
+        );
+        assert!(set_spaces_layout_text("{\"spaces\": 1}", &layout).is_err());
+    }
+
+    #[test]
+    fn remove_spaces_layout_drops_only_the_entry() {
+        let middle = "{\n  \"spaces\": {\n    \"layout\": { \"panes\": [] },\n    \"x\": 1\n  }\n}";
+        assert_eq!(
+            remove_spaces_layout_text(middle).unwrap(),
+            "{\n  \"spaces\": {\n    \"x\": 1\n  }\n}"
+        );
+        let last = "{\n  \"spaces\": {\n    \"x\": 1,\n    \"layout\": { \"panes\": [] }\n  },\n  \"theme\": \"dark\"\n}";
+        assert_eq!(
+            remove_spaces_layout_text(last).unwrap(),
+            "{\n  \"spaces\": {\n    \"x\": 1\n  },\n  \"theme\": \"dark\"\n}"
+        );
+        let only = "{ \"spaces\": { \"layout\": {\"panes\":[]} } }";
+        assert_eq!(
+            remove_spaces_layout_text(only).unwrap(),
+            "{ \"spaces\": { } }"
+        );
+        let missing = "{ // c\n \"theme\": \"dark\" }";
+        assert_eq!(remove_spaces_layout_text(missing).unwrap(), missing);
+        let compact = "{\"spaces\":{\"layout\":{\"panes\":[]},\"x\":1}}";
+        let out = remove_spaces_layout_text(compact).unwrap();
+        assert_eq!(out, "{\"spaces\":{\"x\":1}}");
+        assert!(serde_json::from_str::<Value>(&out).is_ok());
+    }
+
+    #[test]
+    fn save_and_remove_spaces_layout_round_trip() {
+        let home = std::env::temp_dir().join(format!("poimen-spaces-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        remove_spaces_layout(&home).unwrap();
+        assert!(!config_path(&home).exists());
+        let layout = serde_json::json!({"panes": [{"name": "solo", "command": "claude"}]});
+        save_spaces_layout(&home, &layout).unwrap();
+        assert_eq!(load(&home).spaces_layout.unwrap().panes[0].name, "solo");
+        remove_spaces_layout(&home).unwrap();
+        assert!(load(&home).spaces_layout.is_none());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn set_sidebar_layout_rejects_bad_input() {
+        assert!(set_sidebar_layout_text("{}", "grid").is_err());
+        assert!(set_sidebar_layout_text("[1]", "tree").is_err());
+        assert!(set_sidebar_layout_text("{\"sidebar\":3}", "tree").is_err());
+    }
+
+    #[test]
+    fn save_sidebar_layout_writes_a_temp_file() {
+        let home = std::env::temp_dir().join(format!("poimen-layout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        save_sidebar_layout(&home, "split").unwrap();
+        assert_eq!(load(&home).sidebar_layout, "split");
+        save_sidebar_layout(&home, "tree").unwrap();
+        assert_eq!(load(&home).sidebar_layout, "tree");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn sidebar_rows_unknown_token_warns_and_keeps_the_default() {
+        let s =
+            rows(r#"{"sidebar":{"rows":{"workspace":[["name","nope"]],"terminal":[["name"]]}}}"#);
+        assert_eq!(s.sidebar_rows.workspace, None);
+        assert!(s.sidebar_rows.terminal.is_some());
+        assert_eq!(s.warnings.len(), 1);
+        assert!(s.warnings[0].contains("sidebar.rows.workspace") && s.warnings[0].contains("nope"));
+    }
+
+    #[test]
+    fn sidebar_rows_wrong_types_warn() {
+        for json in [
+            r#"{"sidebar":{"rows":{"agent":"name"}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[]}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[[]]}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[["name",5]]}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[[{"token":"name","bold":"yes"}]]}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[["$"]]}}}"#,
+            r#"{"sidebar":{"rows":{"pane":[["name"]]}}}"#,
+            r#"{"sidebar":{"rows":[]}}"#,
+            r#"{"sidebar":3}"#,
+        ] {
+            let s = rows(json);
+            assert_eq!(s.sidebar_rows, SidebarRows::default(), "{json}");
+            assert_eq!(s.warnings.len(), 1, "{json}");
+        }
+    }
+
     #[test]
     fn missing_file_gives_defaults() {
         assert_eq!(resolve(None, none), Settings::default());
@@ -364,6 +1374,58 @@ mod tests {
         assert_eq!(s.font_family.as_deref(), Some("Fira Code"));
         assert_eq!(s.font_size, 15.0);
         assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn color_schema_passes_a_name_through() {
+        assert_eq!(resolve(None, none).color_schema, None);
+        let s = resolve(Some(r#"{"colorSchema":" dracula "}"#), none);
+        assert_eq!(s.color_schema, Some(ColorSchema::Name("dracula".into())));
+        assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn color_schema_accepts_a_light_dark_pair() {
+        let s = resolve(
+            Some(r#"{"colorSchema":{"light":" one-light ","dark":"dracula"}}"#),
+            none,
+        );
+        assert_eq!(
+            s.color_schema,
+            Some(ColorSchema::Pair {
+                light: "one-light".into(),
+                dark: "dracula".into()
+            })
+        );
+        assert!(s.warnings.is_empty());
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            json["colorSchema"],
+            serde_json::json!({"light": "one-light", "dark": "dracula"})
+        );
+    }
+
+    #[test]
+    fn color_schema_pair_needs_two_names() {
+        for bad in [
+            r#"{"light":"a"}"#,
+            r#"{"light":"a","dark":3}"#,
+            r#"{"light":"","dark":"b"}"#,
+            "{}",
+        ] {
+            let s = resolve(Some(&format!(r#"{{"colorSchema":{bad}}}"#)), none);
+            assert_eq!(s.color_schema, None, "{bad}");
+            assert_eq!(s.warnings.len(), 1, "{bad}");
+        }
+    }
+
+    #[test]
+    fn color_schema_that_is_not_a_name_warns() {
+        for bad in ["3", "\"\"", "null", "[\"a\"]"] {
+            let s = resolve(Some(&format!(r#"{{"colorSchema":{bad}}}"#)), none);
+            assert_eq!(s.color_schema, None, "{bad}");
+            assert_eq!(s.warnings.len(), 1, "{bad}");
+        }
     }
 
     #[test]
@@ -402,12 +1464,19 @@ mod tests {
     #[test]
     fn parses_ghostty_config() {
         let g = parse_ghostty(
-            "# comment\nfont-family = \"JetBrains Mono\"\nfont-family = Menlo\nfont-size = 14\nbackground = #1e1e2e\nforeground = cdd6f4\nbad line\n",
+            "# comment\nfont-family = \"JetBrains Mono\"\nfont-family = Menlo\nfont-size = 14\nbackground = #1e1e2e\nforeground = cdd6f4\ncursor-color = #f5e0dc\nselection-background = #585b70\nselection-foreground = #cdd6f4\npalette = 1=#f38ba8\npalette = 15 = \"a6adc8\"\npalette = 16=#000000\npalette = 2=red\nbad line\n",
         );
         assert_eq!(g.font_family.as_deref(), Some("JetBrains Mono"));
         assert_eq!(g.font_size, Some(14.0));
         assert_eq!(g.background.as_deref(), Some("#1e1e2e"));
         assert_eq!(g.foreground.as_deref(), Some("#cdd6f4"));
+        assert_eq!(g.cursor.as_deref(), Some("#f5e0dc"));
+        assert_eq!(g.selection_background.as_deref(), Some("#585b70"));
+        assert_eq!(g.selection_foreground.as_deref(), Some("#cdd6f4"));
+        assert_eq!(g.palette.len(), 16);
+        assert_eq!(g.palette[1].as_deref(), Some("#f38ba8"));
+        assert_eq!(g.palette[15].as_deref(), Some("#a6adc8"));
+        assert_eq!(g.palette.iter().flatten().count(), 2);
         assert_eq!(
             parse_ghostty("background = red\nfont-size = x"),
             Ghostty::default()
@@ -416,8 +1485,12 @@ mod tests {
 
     #[test]
     fn ghostty_fills_gaps_but_explicit_wins() {
-        let ghostty =
-            || Some("font-family = Hack\nfont-size = 16\nbackground = #000000".to_owned());
+        let ghostty = || {
+            Some(
+                "font-family = Hack\nfont-size = 16\nbackground = #000000\ncursor-color = #ffffff\npalette = 0=#111111"
+                    .to_owned(),
+            )
+        };
         let s = resolve(
             Some(r#"{"terminal":{"ghostty":true,"fontSize":12}}"#),
             ghostty,
@@ -428,7 +1501,15 @@ mod tests {
             s.colors,
             Some(Colors {
                 background: Some("#000000".into()),
-                foreground: None
+                foreground: None,
+                cursor: Some("#ffffff".into()),
+                selection_background: None,
+                selection_foreground: None,
+                palette: {
+                    let mut p = vec![None; 16];
+                    p[0] = Some("#111111".into());
+                    p
+                },
             })
         );
     }
@@ -448,7 +1529,63 @@ mod tests {
         std::fs::write(config_path(&home), r#"{"theme":"light"}"#).unwrap();
         assert_eq!(load(&home).theme, "light");
         std::fs::remove_dir_all(&home).unwrap();
-        assert_eq!(load(&home), Settings::default());
+        assert_eq!(
+            load(&home),
+            Settings {
+                home: Some(home.to_string_lossy().into_owned()),
+                ..Settings::default()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_the_herdr_theme_name() {
+        let toml = "[ui]\nname = \"no\"\n\n[theme] # colors\n# name = \"x\"\nname = 'dracula'\n[other]\nname = \"y\"\n";
+        assert_eq!(parse_herdr_theme(toml), Some("dracula".into()));
+        assert_eq!(
+            parse_herdr_theme("[theme]\nname = \"gruvbox\" # c"),
+            Some("gruvbox".into())
+        );
+        assert_eq!(parse_herdr_theme("[theme]\nname = \"\""), None);
+        assert_eq!(parse_herdr_theme("[theme]\nname = dracula"), None);
+        assert_eq!(parse_herdr_theme("[other]\nname = \"x\""), None);
+        assert_eq!(parse_herdr_theme(""), None);
+    }
+
+    #[test]
+    fn herdr_schema_follows_the_herdr_theme_or_falls_back_with_a_warning() {
+        let herdr = |toml: Option<&str>| {
+            let mut s = resolve(Some(r#"{"colorSchema":"herdr"}"#), none);
+            apply_herdr(&mut s, toml);
+            s
+        };
+        let s = herdr(Some("[theme]\nname = \"dracula\""));
+        assert_eq!(s.color_schema, Some(ColorSchema::Name("dracula".into())));
+        assert!(s.warnings.is_empty());
+        for toml in [Some("[theme]\nname = \"terminal\""), Some("[ui]\n"), None] {
+            let s = herdr(toml);
+            assert_eq!(s.color_schema, None, "{toml:?}");
+            assert_eq!(s.warnings.len(), 1, "{toml:?}");
+        }
+        let mut other = resolve(Some(r#"{"colorSchema":"vesper"}"#), none);
+        apply_herdr(&mut other, Some("[theme]\nname = \"dracula\""));
+        assert_eq!(other.color_schema, Some(ColorSchema::Name("vesper".into())));
+    }
+
+    #[test]
+    fn load_follows_the_herdr_config_in_a_temp_home() {
+        let home = std::env::temp_dir().join(format!("poimen-herdr-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
+        std::fs::create_dir_all(home.join(".config/herdr")).unwrap();
+        std::fs::write(config_path(&home), r#"{"colorSchema":"herdr"}"#).unwrap();
+        assert_eq!(load(&home).color_schema, None);
+        std::fs::write(herdr_config_path(&home), "[theme]\nname = \"vesper\"\n").unwrap();
+        assert_eq!(
+            load(&home).color_schema,
+            Some(ColorSchema::Name("vesper".into()))
+        );
+        assert!(stamp(&home)[2].is_some());
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
@@ -473,6 +1610,62 @@ mod tests {
             "{\"theme\": \"dark\"}"
         );
         assert_eq!(resolve(Some(&out), none).theme, "light");
+    }
+
+    #[test]
+    fn set_color_schema_replaces_a_name_with_a_pair_and_keeps_comments() {
+        let text =
+            "{\n  // scheme\n  \"colorSchema\": \"dracula\", /* c */\n  \"theme\": \"dark\"\n}";
+        let pair = serde_json::json!({"light": "one-light", "dark": "one-dark"});
+        let out = set_color_schema_text(text, &pair).unwrap();
+        assert_eq!(
+            out,
+            "{\n  // scheme\n  \"colorSchema\": {\"dark\":\"one-dark\",\"light\":\"one-light\"}, /* c */\n  \"theme\": \"dark\"\n}"
+        );
+        let back = set_color_schema_text(&out, &serde_json::json!("vesper")).unwrap();
+        assert_eq!(
+            back,
+            "{\n  // scheme\n  \"colorSchema\": \"vesper\", /* c */\n  \"theme\": \"dark\"\n}"
+        );
+        let plain = set_color_schema_text("{}", &pair).unwrap();
+        assert_eq!(
+            resolve(Some(&plain), none).color_schema,
+            Some(ColorSchema::Pair {
+                light: "one-light".into(),
+                dark: "one-dark".into()
+            })
+        );
+        assert!(back.contains("// scheme"));
+    }
+
+    #[test]
+    fn set_color_schema_inserts_when_missing() {
+        let out =
+            set_color_schema_text("{\"theme\":\"dark\"}", &serde_json::json!("vesper")).unwrap();
+        assert_eq!(out, "{\n  \"colorSchema\": \"vesper\",\"theme\":\"dark\"}");
+    }
+
+    #[test]
+    fn set_color_schema_rejects_bad_input() {
+        for bad in [
+            serde_json::json!(""),
+            serde_json::json!(3),
+            serde_json::json!({"light": "a"}),
+            serde_json::json!({"light": "a", "dark": "b", "x": "c"}),
+        ] {
+            assert!(set_color_schema_text("{}", &bad).is_err(), "{bad}");
+        }
+        assert!(set_color_schema_text("[1]", &serde_json::json!("a")).is_err());
+    }
+
+    #[test]
+    fn save_color_schema_writes_a_temp_file() {
+        let home = std::env::temp_dir().join(format!("poimen-save-cs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        save_color_schema(&home, &serde_json::json!("dracula")).unwrap();
+        let text = std::fs::read_to_string(config_path(&home)).unwrap();
+        assert_eq!(text, "{\"colorSchema\": \"dracula\"}\n");
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
@@ -504,5 +1697,67 @@ mod tests {
         assert_eq!(v["fontSize"], 13.0);
         assert!(v["fontFamily"].is_null());
         assert_eq!(v["autoControl"], true);
+        assert_eq!(v["shortcuts"]["toggleSidebar"], "CmdOrCtrl+B");
+    }
+
+    #[test]
+    fn normalizes_accelerators() {
+        assert_eq!(
+            normalize_accelerator("cmd+shift+w").as_deref(),
+            Some("Cmd+Shift+W")
+        );
+        assert_eq!(
+            normalize_accelerator("shift+ctrl+arrowleft").as_deref(),
+            Some("Ctrl+Shift+Left")
+        );
+        assert_eq!(
+            normalize_accelerator("CmdOrCtrl+\\").as_deref(),
+            Some("CmdOrCtrl+\\")
+        );
+        assert_eq!(normalize_accelerator("f5").as_deref(), Some("F5"));
+    }
+
+    #[test]
+    fn rejects_invalid_accelerators() {
+        for bad in ["", "W", "Shift+W", "Hyper+W", "Cmd+", "Cmd+Foo", "Cmd+F13"] {
+            assert_eq!(normalize_accelerator(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn shortcuts_default_without_overrides() {
+        let s = resolve(Some("{}"), none);
+        assert_eq!(s.shortcuts, default_shortcuts());
+        assert_eq!(s.shortcuts["closeTab"], "CmdOrCtrl+W");
+    }
+
+    #[test]
+    fn shortcut_overrides_apply_and_can_unbind() {
+        let s = resolve(
+            Some(r#"{"shortcuts":{"toggleSidebar":"ctrl+alt+b","refresh":""}}"#),
+            none,
+        );
+        assert_eq!(s.shortcuts["toggleSidebar"], "Ctrl+Alt+B");
+        assert_eq!(s.shortcuts["refresh"], "");
+        assert_eq!(s.shortcuts["closeTab"], "CmdOrCtrl+W");
+        assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn invalid_shortcuts_warn_and_fall_back() {
+        let s = resolve(
+            Some(
+                r#"{"shortcuts":{"closeTab":"nope","bogus":"Cmd+X","zoomIn":3,"refresh":"CmdOrCtrl+B"}}"#,
+            ),
+            none,
+        );
+        assert_eq!(s.shortcuts["closeTab"], "CmdOrCtrl+W");
+        assert_eq!(s.shortcuts["zoomIn"], "CmdOrCtrl+=");
+        assert_eq!(s.shortcuts["refresh"], "CmdOrCtrl+R");
+        assert!(!s.shortcuts.contains_key("bogus"));
+        assert_eq!(s.warnings.len(), 4, "{:?}", s.warnings);
+        let bad = resolve(Some(r#"{"shortcuts":[]}"#), none);
+        assert_eq!(bad.shortcuts, default_shortcuts());
+        assert_eq!(bad.warnings.len(), 1);
     }
 }

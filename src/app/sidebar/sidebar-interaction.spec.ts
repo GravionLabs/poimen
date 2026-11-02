@@ -6,6 +6,8 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, describe, expect, it } from "vitest";
 import type { Pane, SpaceNode } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
+import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
+import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar } from "./sidebar";
 
 const pane = (id: string, status: Pane["agent_status"] = "idle"): Pane => ({
@@ -39,6 +41,10 @@ async function setup() {
       styleUrl: undefined,
       template: readFileSync("src/app/sidebar/sidebar.html", "utf8"),
     },
+  });
+  TestBed.overrideComponent(Sidebar, {
+    remove: { imports: [SplitPane] },
+    add: { imports: [SplitPaneStub] },
   });
   const fixture = TestBed.createComponent(Sidebar);
   const selected: string[] = [];

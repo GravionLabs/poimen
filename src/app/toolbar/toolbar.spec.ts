@@ -5,7 +5,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { nextTheme, type ThemeSetting } from "../core/settings";
-import { themeLabel } from "./toolbar";
+import { fixedLabel, themeLabel } from "./toolbar";
 
 beforeAll(() => {
   try {
@@ -24,7 +24,7 @@ describe("themeLabel", () => {
 });
 
 describe("theme button", () => {
-  const render = (theme: ThemeSetting) => {
+  const render = (theme: ThemeSetting, fixedBy: string | null = null) => {
     const emitted: ThemeSetting[] = [];
     @Component({
       selector: "app-host",
@@ -32,6 +32,8 @@ describe("theme button", () => {
     })
     class Host {
       theme = () => theme;
+      fixedBy = () => fixedBy;
+      fixed = fixedLabel;
       themeChange = { emit: (t: ThemeSetting) => emitted.push(t) };
       label = themeLabel;
       next = nextTheme;
@@ -55,5 +57,18 @@ describe("theme button", () => {
     expect(button.title).toBe(themeLabel(theme));
     button.click();
     expect(emitted).toEqual([next]);
+  });
+
+  it("is disabled with a tooltip naming the color schema that fixes the theme", () => {
+    const { button, emitted } = render("system", "dracula");
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("Theme fixed by color schema dracula");
+    expect(button.getAttribute("aria-label")).toBe("Theme fixed by color schema dracula");
+    button.click();
+    expect(emitted).toEqual([]);
+  });
+
+  it("is enabled without a fixing color schema", () => {
+    expect(render("light").button.disabled).toBe(false);
   });
 });

@@ -11,6 +11,8 @@ import {
   rowName,
   tabHeader,
   waitingCount,
+  closeWarning,
+  workspaceDirs,
   type Pane,
   type Snapshot,
 } from "./herdr";
@@ -170,5 +172,49 @@ describe("version labels", () => {
     expect(protocolWarning({ ...info, protocol: 23 })).toBe(
       "herdr protocol 23, poimen supports 22",
     );
+  });
+});
+
+describe("workspaceDirs", () => {
+  const snapshot: Snapshot = {
+    workspaces: [],
+    tabs: [],
+    panes: [
+      pane({ pane_id: "a", cwd: "/work/a", foreground_cwd: "/work/a/sub" }),
+      pane({ pane_id: "b", cwd: "/work/b" }),
+      pane({ pane_id: "c", cwd: "/work/b" }),
+      pane({ pane_id: "d" }),
+      pane({ pane_id: "e", workspace_id: "w2", cwd: "/other" }),
+    ],
+  };
+
+  it("lists the distinct directories of the workspace in pane order", () => {
+    expect(workspaceDirs(snapshot, "w1")).toEqual(["/work/a/sub", "/work/b"]);
+  });
+
+  it("is empty for a workspace without panes", () => {
+    expect(workspaceDirs(snapshot, "w9")).toEqual([]);
+  });
+});
+
+describe("closeWarning", () => {
+  it("warns that a working or waiting agent ends", () => {
+    expect(closeWarning(pane({ agent: "claude", agent_status: "working" }))).toBe(
+      "The claude agent is working; closing the pane ends it.",
+    );
+    expect(closeWarning(pane({ agent: "codex", agent_status: "blocked" }))).toBe(
+      "The codex agent is waiting for you; closing the pane ends it.",
+    );
+  });
+
+  it("names an idle agent without the alarm", () => {
+    expect(closeWarning(pane({ agent: "claude", agent_status: "idle" }))).toBe(
+      "The claude agent in the pane ends.",
+    );
+  });
+
+  it("is plain for a terminal or an unknown pane", () => {
+    expect(closeWarning(pane({}))).toBe("The process in the pane ends.");
+    expect(closeWarning(undefined)).toBe("The process in the pane ends.");
   });
 });

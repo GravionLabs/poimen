@@ -1,0 +1,42 @@
+:host {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+  min-height: 0;
+}
+
+:host(.column) {
+  flex-direction: column;
+}
+
+.pane {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.divider {
+  flex: none;
+  width: 5px;
+  margin: 0 -2px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+:host(.column) > .divider {
+  width: auto;
+  height: 5px;
+  margin: -2px 0;
+  cursor: row-resize;
+}
+
+.divider:hover,
+.divider:focus-visible,
+.divider.dragging {
+  background: color-mix(in srgb, var(--status-working) 50%, transparent);
+  outline: none;
+}

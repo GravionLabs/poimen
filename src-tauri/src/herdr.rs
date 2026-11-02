@@ -9,6 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use serde::Serialize;
 use serde_json::{Value, json};
 
 #[derive(Debug)]
@@ -126,6 +127,98 @@ pub fn parse_ping(result: &Value) -> Option<ServerInfo> {
             .and_then(|p| u32::try_from(p).ok()),
         supported: SUPPORTED_PROTOCOL,
     })
+}
+
+/// Where `pane.split` puts the new pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitDirection {
+    Right,
+    Down,
+}
+
+impl SplitDirection {
+    fn as_str(self) -> &'static str {
+        match self {
+            SplitDirection::Right => "right",
+            SplitDirection::Down => "down",
+        }
+    }
+}
+
+fn non_empty(cwd: Option<&str>) -> Option<&str> {
+    cwd.map(str::trim).filter(|c| !c.is_empty())
+}
+
+/// Params of `pane.split`: splits `target`, optionally starting the new shell in `cwd`.
+pub fn split_params(target: &str, direction: SplitDirection, cwd: Option<&str>) -> Value {
+    let mut params = json!({ "target_pane_id": target, "direction": direction.as_str() });
+    if let Some(cwd) = non_empty(cwd) {
+        params["cwd"] = json!(cwd);
+    }
+    params
+}
+
+/// Params of `pane.split` with the share (`ratio`, 0 to 1) the split pane keeps.
+pub fn split_params_ratio(
+    target: &str,
+    direction: SplitDirection,
+    cwd: Option<&str>,
+    ratio: Option<f64>,
+) -> Value {
+    let mut params = split_params(target, direction, cwd);
+    if let Some(ratio) = ratio {
+        params["ratio"] = json!(ratio);
+    }
+    params
+}
+
+/// Params of `pane.send_input`: types `text` into a pane and presses Enter.
+pub fn send_input_params(pane_id: &str, text: &str) -> Value {
+    json!({ "pane_id": pane_id, "text": text, "keys": ["enter"] })
+}
+
+/// Params of `pane.close`.
+pub fn close_params(pane_id: &str) -> Value {
+    json!({ "pane_id": pane_id })
+}
+
+/// Params of `agent.start`: starts `kind` in an existing pane that sits at a shell prompt. The name
+/// is required by herdr, so an empty one falls back to the kind; `args` are split on whitespace.
+pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &str) -> Value {
+    let kind = kind.trim();
+    let name = non_empty(name).unwrap_or(kind);
+    let args: Vec<&str> = args.split_whitespace().collect();
+    let mut params = json!({ "pane_id": pane_id, "kind": kind, "name": name });
+    if !args.is_empty() {
+        params["args"] = json!(args);
+    }
+    params
+}
+
+/// Params of `agent.rename`; a blank name clears the agent name (`null`).
+pub fn agent_rename_params(target: &str, name: Option<&str>) -> Value {
+    json!({ "target": target, "name": non_empty(name) })
+}
+
+/// Params of `pane.rename`; a blank label clears the pane label (`null`).
+pub fn pane_rename_params(pane_id: &str, label: Option<&str>) -> Value {
+    json!({ "pane_id": pane_id, "label": non_empty(label) })
+}
+
+/// Params of `tab.create`: a new tab (with one terminal pane) in a workspace, optionally in `cwd`.
+pub fn tab_create_params(workspace_id: &str, cwd: Option<&str>) -> Value {
+    let mut params = json!({ "workspace_id": workspace_id });
+    if let Some(cwd) = non_empty(cwd) {
+        params["cwd"] = json!(cwd);
+    }
+    params
+}
+
+/// The pane a `pane.split` (`pane_info`) or `tab.create` (`tab_created`) result created.
+pub fn created_pane_id(result: &Value) -> Option<String> {
+    let pane = result.get("pane").or_else(|| result.get("root_pane"))?;
+    Some(pane.get("pane_id")?.as_str()?.to_owned())
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -287,6 +380,116 @@ mod tests {
                 supported: SUPPORTED_PROTOCOL
             })
         );
+    }
+
+    #[test]
+    fn split_params_name_target_direction_and_cwd() {
+        assert_eq!(
+            split_params("w1:p1", SplitDirection::Right, Some("/tmp/x")),
+            json!({ "target_pane_id": "w1:p1", "direction": "right", "cwd": "/tmp/x" })
+        );
+        assert_eq!(
+            split_params("w1:p1", SplitDirection::Down, None),
+            json!({ "target_pane_id": "w1:p1", "direction": "down" })
+        );
+    }
+
+    #[test]
+    fn blank_cwd_is_left_out() {
+        assert_eq!(
+            split_params("p", SplitDirection::Down, Some("  ")),
+            json!({ "target_pane_id": "p", "direction": "down" })
+        );
+        assert_eq!(
+            tab_create_params("w1", Some("")),
+            json!({ "workspace_id": "w1" })
+        );
+    }
+
+    #[test]
+    fn tab_create_params_carry_workspace_and_cwd() {
+        assert_eq!(
+            tab_create_params("w1", Some(" /work ")),
+            json!({ "workspace_id": "w1", "cwd": "/work" })
+        );
+    }
+
+    #[test]
+    fn agent_start_params_carry_pane_kind_name_and_args() {
+        assert_eq!(
+            agent_start_params("w1:p1", "claude", Some(" helper "), " --model  opus "),
+            json!({ "pane_id": "w1:p1", "kind": "claude", "name": "helper", "args": ["--model", "opus"] })
+        );
+    }
+
+    #[test]
+    fn agent_start_params_default_the_name_to_the_kind_and_skip_empty_args() {
+        assert_eq!(
+            agent_start_params("w1:p1", "codex", Some(" "), "  "),
+            json!({ "pane_id": "w1:p1", "kind": "codex", "name": "codex" })
+        );
+        assert_eq!(
+            agent_start_params("w1:p1", "codex", None, ""),
+            json!({ "pane_id": "w1:p1", "kind": "codex", "name": "codex" })
+        );
+    }
+
+    #[test]
+    fn rename_params_clear_with_null_when_blank() {
+        assert_eq!(
+            agent_rename_params("w1:p2", Some(" review ")),
+            json!({ "target": "w1:p2", "name": "review" })
+        );
+        assert_eq!(
+            agent_rename_params("w1:p2", Some("")),
+            json!({ "target": "w1:p2", "name": null })
+        );
+        assert_eq!(
+            pane_rename_params("w1:p1", Some("build")),
+            json!({ "pane_id": "w1:p1", "label": "build" })
+        );
+        assert_eq!(
+            pane_rename_params("w1:p1", None),
+            json!({ "pane_id": "w1:p1", "label": null })
+        );
+    }
+
+    #[test]
+    fn split_ratio_and_send_input_params() {
+        assert_eq!(
+            split_params_ratio("w1:p1", SplitDirection::Right, Some("/a"), Some(0.6)),
+            json!({ "target_pane_id": "w1:p1", "direction": "right", "cwd": "/a", "ratio": 0.6 })
+        );
+        assert_eq!(
+            split_params_ratio("w1:p1", SplitDirection::Down, None, None),
+            split_params("w1:p1", SplitDirection::Down, None)
+        );
+        assert_eq!(
+            send_input_params("w1:p1", "claude"),
+            json!({ "pane_id": "w1:p1", "text": "claude", "keys": ["enter"] })
+        );
+    }
+
+    #[test]
+    fn close_params_name_the_pane() {
+        assert_eq!(close_params("w1:p2"), json!({ "pane_id": "w1:p2" }));
+    }
+
+    #[test]
+    fn split_direction_parses_from_the_ipc_payload() {
+        let right: SplitDirection = serde_json::from_str("\"right\"").unwrap();
+        assert_eq!(right, SplitDirection::Right);
+        assert!(serde_json::from_str::<SplitDirection>("\"left\"").is_err());
+    }
+
+    #[test]
+    fn created_pane_id_reads_split_and_tab_results() {
+        let split = json!({"type":"pane_info","pane":{"pane_id":"w1:p3"}});
+        let tab =
+            json!({"type":"tab_created","tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p4"}});
+        assert_eq!(created_pane_id(&split).as_deref(), Some("w1:p3"));
+        assert_eq!(created_pane_id(&tab).as_deref(), Some("w1:p4"));
+        assert_eq!(created_pane_id(&json!({"type":"ok"})), None);
     }
 
     #[test]

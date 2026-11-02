@@ -8,7 +8,43 @@
   overflow-y: auto;
 }
 
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 10px;
+}
+
+.add {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.layout-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 6px;
+  padding: 0;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
 .brand {
+  flex: 1;
   padding: 14px 14px 8px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -214,4 +250,112 @@
 
 .chevron.open {
   transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.menu-backdrop {
+  all: unset;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.menu {
+  position: fixed;
+  z-index: 51;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
+}
+
+.menu-item {
+  all: unset;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+/* Emphasis from `sidebar.rows`; a value after another one on the line sits close to its "·". */
+.bold {
+  font-weight: 700;
+}
+
+.dim {
+  opacity: 0.6;
+}
+
+.text + .text,
+.space-meta + .space-meta {
+  margin-left: -3px;
+}
+
+.space-main {
+  flex: 1;
+}
+
+/*
+ * Split layout: two labelled lists stacked in a split pane with a draggable divider between them
+ * (sizes are UI state). The host stops scrolling; each section scrolls its own list below its title.
+ */
+:host(.split) {
+  overflow: hidden;
+}
+
+.sections {
+  min-height: 0;
+}
+
+/* Each section keeps room for its title and a row; `clampSplitSizes` keeps the shares >= 15 %. */
+.sections ::ng-deep > .pane {
+  min-height: 56px;
+}
+
+/* A visible 1px line in the middle of the 5px drag handle; hover and focus still tint the handle. */
+.sections ::ng-deep > .divider::before {
+  content: "";
+  display: block;
+  height: 1px;
+  margin-top: 2px;
+  background: var(--h-content-border-color);
+}
+
+.section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.section .spaces {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.section-title {
+  flex: none;
+  margin: 8px 0 4px;
+  padding: 0 14px;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.space.chosen .space-name {
+  color: var(--h-text-color);
+  font-weight: 700;
 }

@@ -1,18 +1,58 @@
 import { Injectable, inject, signal } from "@angular/core";
+import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
+import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
 import { TauriBridge } from "./tauri";
+import {
+  DEFAULT_SIDEBAR_ROWS,
+  isRowToken,
+  type RowLines,
+  type RowType,
+  type SidebarRows,
+} from "../sidebar/spaces";
+
+export type SidebarLayout = "tree" | "split";
 
 export type ThemeSetting = "light" | "dark" | "system";
+
+/** A scheme name, or a pair of names that `theme` picks from. */
+export type ColorSchemeSetting = string | { light: string; dark: string };
+
+/** Terminal colors of the Ghostty config; `palette` is empty or holds the 16 ANSI colors. */
+export interface GhosttyColors {
+  background: string | null;
+  foreground: string | null;
+  cursor: string | null;
+  selectionBackground: string | null;
+  selectionForeground: string | null;
+  palette: (string | null)[];
+}
 
 /** The resolved user settings from `~/.config/poimen/config.json` (wire shape of `settings.rs`). */
 export interface Settings {
   theme: ThemeSetting;
+  /** The `colorSchema`: a name or a light/dark pair; `null` is the `poimen` scheme that follows `theme`. */
+  colorSchema: ColorSchemeSetting | null;
   /** `null` keeps the app's default monospace stack. */
   fontFamily: string | null;
   fontSize: number;
   /** Terminal colors taken from Ghostty; `null` keeps the theme colors. */
-  colors: { background: string | null; foreground: string | null } | null;
+  colors: GhosttyColors | null;
   /** Open panes for input when no other client controls them (`terminal.autoControl`). */
   autoControl: boolean;
+  /** Accelerator per action: the defaults over the valid `shortcuts` of config.json. */
+  shortcuts: Shortcuts;
+  /** Lines and tokens per row type: the defaults over the valid `sidebar.rows` of config.json. */
+  sidebarRows: SidebarRows;
+  /** `sidebar.layout`: the Spaces view as a tree or as two lists (Spaces, Agents). */
+  sidebarLayout: SidebarLayout;
+  /** Roots of the explorer; a leading `~` is the home directory (resolved by the backend). */
+  explorerRoots: string[];
+  /** Whether the explorer shows hidden directories. */
+  explorerShowHidden: boolean;
+  /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
+  spacesLayout: SpaceLayout | null;
+  /** The home directory `~` stands for; `null` until the backend knows it. */
+  home: string | null;
   warnings: string[];
 }
 
@@ -23,12 +63,63 @@ export function nextTheme(theme: ThemeSetting): ThemeSetting {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
+  colorSchema: null,
   fontFamily: null,
   fontSize: 13,
   colors: null,
   autoControl: true,
+  shortcuts: DEFAULT_SHORTCUTS,
+  sidebarRows: DEFAULT_SIDEBAR_ROWS,
+  sidebarLayout: "tree",
+  explorerRoots: ["~"],
+  explorerShowHidden: false,
+  spacesLayout: null,
+  home: null,
   warnings: [],
 };
+
+/** A valid list of lines of tokens, or `null`. */
+function parseRowLines(raw: unknown): RowLines | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const lines: RowLines = [];
+  for (const l of raw) {
+    if (!Array.isArray(l) || l.length === 0) return null;
+    const line: RowLines[number] = [];
+    for (const t of l) {
+      if (typeof t === "string" && isRowToken(t)) line.push({ token: t });
+      else if (typeof t === "object" && t !== null) {
+        const o = t as Record<string, unknown>;
+        if (typeof o["token"] !== "string" || !isRowToken(o["token"])) return null;
+        line.push({ token: o["token"], bold: o["bold"] === true, dim: o["dim"] === true });
+      } else return null;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+function parseSidebarRows(raw: unknown): SidebarRows {
+  const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const pick = (type: RowType) => parseRowLines(r[type]) ?? DEFAULT_SIDEBAR_ROWS[type];
+  return { workspace: pick("workspace"), agent: pick("agent"), terminal: pick("terminal") };
+}
+
+function parseRoots(raw: unknown): string[] {
+  const roots = Array.isArray(raw)
+    ? raw.filter((p): p is string => typeof p === "string" && p !== "")
+    : [];
+  return roots.length ? roots : DEFAULT_SETTINGS.explorerRoots;
+}
+
+function parseColorSchema(raw: unknown): ColorSchemeSetting | null {
+  const name = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
+  if (typeof raw === "object" && raw !== null) {
+    const light = name((raw as Record<string, unknown>)["light"]);
+    const dark = name((raw as Record<string, unknown>)["dark"]);
+    return light && dark ? { light, dark } : null;
+  }
+  return name(raw);
+}
 
 /** Accepts a payload from the backend; anything malformed falls back to the defaults. */
 export function parseSettings(raw: unknown): Settings {
@@ -38,6 +129,7 @@ export function parseSettings(raw: unknown): Settings {
   const color = (v: unknown) => (typeof v === "string" ? v : null);
   return {
     theme: r["theme"] === "light" || r["theme"] === "dark" ? r["theme"] : "system",
+    colorSchema: parseColorSchema(r["colorSchema"]),
     fontFamily: typeof r["fontFamily"] === "string" ? r["fontFamily"] : null,
     fontSize:
       typeof r["fontSize"] === "number" && Number.isFinite(r["fontSize"])
@@ -45,9 +137,25 @@ export function parseSettings(raw: unknown): Settings {
         : DEFAULT_SETTINGS.fontSize,
     colors:
       colors && typeof colors === "object"
-        ? { background: color(colors["background"]), foreground: color(colors["foreground"]) }
+        ? {
+            background: color(colors["background"]),
+            foreground: color(colors["foreground"]),
+            cursor: color(colors["cursor"]),
+            selectionBackground: color(colors["selectionBackground"]),
+            selectionForeground: color(colors["selectionForeground"]),
+            palette: Array.isArray(colors["palette"])
+              ? colors["palette"].slice(0, 16).map(color)
+              : [],
+          }
         : null,
     autoControl: r["autoControl"] !== false,
+    shortcuts: parseShortcuts(r["shortcuts"]),
+    sidebarRows: parseSidebarRows(r["sidebarRows"]),
+    sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
+    explorerRoots: parseRoots(r["explorerRoots"]),
+    explorerShowHidden: r["explorerShowHidden"] === true,
+    spacesLayout: parseSpaceLayout(r["spacesLayout"]),
+    home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
       : [],
@@ -60,6 +168,9 @@ export class SettingsStore {
   private readonly bridge = inject(TauriBridge);
   private readonly _settings = signal<Settings>(DEFAULT_SETTINGS);
   readonly settings = this._settings.asReadonly();
+  private readonly _writeError = signal<string | null>(null);
+  /** Why the last write of a setting from the UI failed; cleared by the next successful write. */
+  readonly writeError = this._writeError.asReadonly();
 
   async start(): Promise<void> {
     await this.bridge.listen<unknown>("settings", (s) => this.apply(s));
@@ -79,6 +190,91 @@ export class SettingsStore {
     } catch (e) {
       this._settings.set(previous);
       console.warn(`poimen settings: cannot save theme: ${e}`);
+    }
+  }
+
+  /** Writes the `colorSchema` entry of config.json and applies it at once; the watcher confirms. */
+  async setColorSchema(colorSchema: ColorSchemeSetting): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, colorSchema });
+    try {
+      await this.bridge.invoke("set_color_schema", { schema: colorSchema });
+    } catch (e) {
+      this._settings.set(previous);
+      console.warn(`poimen settings: cannot save colorSchema: ${e}`);
+    }
+  }
+
+  /** Writes `sidebar.layout` of config.json and applies it at once; the watcher confirms. */
+  async setSidebarLayout(sidebarLayout: SidebarLayout): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, sidebarLayout });
+    try {
+      await this.bridge.invoke("set_sidebar_layout", { layout: sidebarLayout });
+      this._writeError.set(null);
+    } catch (e) {
+      this._settings.set(previous);
+      this._writeError.set(`Cannot save the sidebar layout: ${e}`);
+      console.warn(`poimen settings: cannot save sidebar.layout: ${e}`);
+    }
+  }
+
+  /** Writes `explorer.roots` of config.json (home paths as `~/…`) and applies it at once. */
+  async setExplorerRoots(explorerRoots: string[]): Promise<void> {
+    await this.write({ explorerRoots }, "the explorer folders", "set_explorer_roots", {
+      roots: explorerRoots,
+    });
+  }
+
+  /** Writes `explorer.showHidden` of config.json and applies it at once. */
+  async setExplorerShowHidden(explorerShowHidden: boolean): Promise<void> {
+    await this.write(
+      { explorerShowHidden },
+      "the hidden folders option",
+      "set_explorer_show_hidden",
+      { show: explorerShowHidden },
+    );
+  }
+
+  /** Writes `spaces.layout` (validated again by the backend); `false` when the write failed. */
+  setSpacesLayout(layout: SpaceLayout, config: Record<string, unknown>): Promise<boolean> {
+    return this.write({ spacesLayout: layout }, "the new space layout", "set_spaces_layout", {
+      layout: config,
+    });
+  }
+
+  /** Removes `spaces.layout`, so new spaces use the built-in default again. */
+  resetSpacesLayout(): Promise<boolean> {
+    return this.write({ spacesLayout: null }, "the new space layout", "remove_spaces_layout", {});
+  }
+
+  /** The built-in layout of a new space; `null` when the backend cannot be asked. */
+  async defaultSpacesLayout(): Promise<SpaceLayout | null> {
+    try {
+      return parseSpaceLayout(await this.bridge.invoke("default_spaces_layout"));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Optimistic write: applies `patch`, calls `command`, goes back and reports a failure. */
+  private async write(
+    patch: Partial<Settings>,
+    what: string,
+    command: string,
+    args: Record<string, unknown>,
+  ): Promise<boolean> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, ...patch });
+    try {
+      await this.bridge.invoke(command, args);
+      this._writeError.set(null);
+      return true;
+    } catch (e) {
+      this._settings.set(previous);
+      this._writeError.set(`Cannot save ${what}: ${e}`);
+      console.warn(`poimen settings: cannot save ${what}: ${e}`);
+      return false;
     }
   }
 

@@ -14,3 +14,53 @@ export function linkHandler(open: (url: string) => Promise<void>) {
     if (isOpenableUrl(uri)) void open(uri).catch(() => undefined);
   };
 }
+
+const TRAILING_PLAIN = new Set([".", ",", ";", ":", "'", '"']);
+const OPENER_FOR_CLOSER: Record<string, string> = { ")": "(", "]": "[" };
+
+function count(text: string, char: string): number {
+  return text.split(char).length - 1;
+}
+
+/**
+ * Removes trailing punctuation that URL detection picks up from the surrounding text; the same
+ * rules as the herdr link-trim plugin. `. , ; : ' "` go repeatedly; a closing `)` or `]` goes only
+ * when the URL holds no opening partner, so `https://en.wikipedia.org/wiki/Foo_(bar)` stays whole.
+ */
+export function trimTrailingPunctuation(input: string): string {
+  let url = input;
+  for (;;) {
+    const last = url.slice(-1);
+    const opener = OPENER_FOR_CLOSER[last];
+    if (
+      TRAILING_PLAIN.has(last) ||
+      (opener !== undefined && count(url, last) > count(url, opener))
+    ) {
+      url = url.slice(0, -1);
+    } else {
+      return url;
+    }
+  }
+}
+
+/** The click handler for URLs detected in plain terminal text: trims, then opens like `linkHandler`. */
+export function detectedLinkHandler(open: (url: string) => Promise<void>) {
+  const handle = linkHandler(open);
+  return (event: MouseEvent, uri: string): void => handle(event, trimTrailingPunctuation(uri));
+}
+
+/** Whether the platform opens links with Cmd (macOS); elsewhere Ctrl does. */
+export function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+}
+
+/**
+ * Whether `event` holds the modifier that works a link in input mode: Cmd on macOS, Ctrl elsewhere
+ * (Ctrl+click is the context menu on macOS). Such a press bypasses the mouse forwarding, like Shift.
+ */
+export function holdsLinkModifier(
+  event: { metaKey: boolean; ctrlKey: boolean },
+  mac = isMacPlatform(),
+): boolean {
+  return mac ? event.metaKey : event.ctrlKey;
+}
