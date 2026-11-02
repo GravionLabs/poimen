@@ -570,6 +570,63 @@ pub fn ghostty_path(home: &Path) -> PathBuf {
     home.join(".config/ghostty/config")
 }
 
+pub fn herdr_config_path(home: &Path) -> PathBuf {
+    home.join(".config/herdr/config.toml")
+}
+
+/// The `[theme] name` of a herdr `config.toml` (minimal read: no full TOML parser needed).
+pub fn parse_herdr_theme(text: &str) -> Option<String> {
+    let mut in_theme = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_theme = line.split('#').next().unwrap_or("").trim() == "[theme]";
+            continue;
+        }
+        if !in_theme {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "name" {
+            continue;
+        }
+        let value = value.trim();
+        let quote = value.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+        let rest = &value[1..];
+        let name = rest[..rest.find(quote)?].trim();
+        return (!name.is_empty()).then(|| name.to_owned());
+    }
+    None
+}
+
+/// Replaces `colorSchema: "herdr"` by the scheme named in herdr's config. `terminal`, a missing
+/// file or no name warns and falls back to `poimen` (which follows `theme`). Unknown scheme names
+/// are warned about and replaced by the frontend, like any other name.
+fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>) {
+    if s.color_schema != Some(ColorSchema::Name("herdr".into())) {
+        return;
+    }
+    match herdr_toml.and_then(parse_herdr_theme) {
+        Some(name) if name != "terminal" => s.color_schema = Some(ColorSchema::Name(name)),
+        Some(_) => {
+            s.color_schema = None;
+            s.warnings.push(
+                "colorSchema \"herdr\": herdr uses the terminal colors (theme \"terminal\"); using poimen"
+                    .into(),
+            );
+        }
+        None => {
+            s.color_schema = None;
+            s.warnings.push(
+                "colorSchema \"herdr\": no [theme] name in ~/.config/herdr/config.toml; using poimen"
+                    .into(),
+            );
+        }
+    }
+}
+
 /// Reads and resolves the settings below `home`; a missing file means defaults.
 pub fn load(home: &Path) -> Settings {
     let json = match std::fs::read_to_string(config_path(home)) {
@@ -581,9 +638,14 @@ pub fn load(home: &Path) -> Settings {
             return s;
         }
     };
-    resolve(json.as_deref(), || {
+    let mut s = resolve(json.as_deref(), || {
         std::fs::read_to_string(ghostty_path(home)).ok()
-    })
+    });
+    if s.color_schema == Some(ColorSchema::Name("herdr".into())) {
+        let toml = std::fs::read_to_string(herdr_config_path(home)).ok();
+        apply_herdr(&mut s, toml.as_deref());
+    }
+    s
 }
 
 /// Index after a `"..."` string that starts at `i`.
@@ -700,12 +762,16 @@ pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
-fn stamp(home: &Path) -> [Option<SystemTime>; 2] {
-    [config_path(home), ghostty_path(home)]
-        .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+fn stamp(home: &Path) -> [Option<SystemTime>; 3] {
+    [
+        config_path(home),
+        ghostty_path(home),
+        herdr_config_path(home),
+    ]
+    .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
 }
 
-/// Runs forever on the calling thread: polls both files and calls `emit` on every change.
+/// Runs forever on the calling thread: polls the config files (poimen, Ghostty, herdr) and calls `emit` on every change.
 pub fn watch(home: &Path, interval: Duration, emit: impl Fn(&Settings)) {
     let mut last = stamp(home);
     loop {
@@ -978,6 +1044,56 @@ mod tests {
         assert_eq!(load(&home).theme, "light");
         std::fs::remove_dir_all(&home).unwrap();
         assert_eq!(load(&home), Settings::default());
+    }
+
+    #[test]
+    fn parses_the_herdr_theme_name() {
+        let toml = "[ui]\nname = \"no\"\n\n[theme] # colors\n# name = \"x\"\nname = 'dracula'\n[other]\nname = \"y\"\n";
+        assert_eq!(parse_herdr_theme(toml), Some("dracula".into()));
+        assert_eq!(
+            parse_herdr_theme("[theme]\nname = \"gruvbox\" # c"),
+            Some("gruvbox".into())
+        );
+        assert_eq!(parse_herdr_theme("[theme]\nname = \"\""), None);
+        assert_eq!(parse_herdr_theme("[theme]\nname = dracula"), None);
+        assert_eq!(parse_herdr_theme("[other]\nname = \"x\""), None);
+        assert_eq!(parse_herdr_theme(""), None);
+    }
+
+    #[test]
+    fn herdr_schema_follows_the_herdr_theme_or_falls_back_with_a_warning() {
+        let herdr = |toml: Option<&str>| {
+            let mut s = resolve(Some(r#"{"colorSchema":"herdr"}"#), none);
+            apply_herdr(&mut s, toml);
+            s
+        };
+        let s = herdr(Some("[theme]\nname = \"dracula\""));
+        assert_eq!(s.color_schema, Some(ColorSchema::Name("dracula".into())));
+        assert!(s.warnings.is_empty());
+        for toml in [Some("[theme]\nname = \"terminal\""), Some("[ui]\n"), None] {
+            let s = herdr(toml);
+            assert_eq!(s.color_schema, None, "{toml:?}");
+            assert_eq!(s.warnings.len(), 1, "{toml:?}");
+        }
+        let mut other = resolve(Some(r#"{"colorSchema":"vesper"}"#), none);
+        apply_herdr(&mut other, Some("[theme]\nname = \"dracula\""));
+        assert_eq!(other.color_schema, Some(ColorSchema::Name("vesper".into())));
+    }
+
+    #[test]
+    fn load_follows_the_herdr_config_in_a_temp_home() {
+        let home = std::env::temp_dir().join(format!("poimen-herdr-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
+        std::fs::create_dir_all(home.join(".config/herdr")).unwrap();
+        std::fs::write(config_path(&home), r#"{"colorSchema":"herdr"}"#).unwrap();
+        assert_eq!(load(&home).color_schema, None);
+        std::fs::write(herdr_config_path(&home), "[theme]\nname = \"vesper\"\n").unwrap();
+        assert_eq!(
+            load(&home).color_schema,
+            Some(ColorSchema::Name("vesper".into()))
+        );
+        assert!(stamp(&home)[2].is_some());
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
