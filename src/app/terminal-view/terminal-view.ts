@@ -14,11 +14,14 @@ import {
 } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
+import { TauriBridge } from "../core/tauri";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
+import { linkHandler } from "./links";
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -73,6 +76,7 @@ export class TerminalView implements OnDestroy {
 
   private readonly streams = inject(TerminalStreamService);
   private readonly prefs = inject(SettingsStore);
+  private readonly tauri = inject(TauriBridge);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
   private term?: Terminal;
@@ -147,6 +151,7 @@ export class TerminalView implements OnDestroy {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    term.loadAddon(new WebLinksAddon(linkHandler((url) => this.tauri.openUrl(url))));
     term.open(this.body().nativeElement);
     try {
       term.loadAddon(new WebglAddon());
@@ -176,7 +181,8 @@ export class TerminalView implements OnDestroy {
    * `terminal.mouse` cells; herdr encodes them for the pane application's mouse mode and drops
    * them when the application did not ask for the mouse. herdr does not expose that mode to
    * clients, so it cannot be checked here; a held Shift (as in other terminals) bypasses the
-   * forwarding and leaves xterm's text selection and the native context menu. Read-only tabs send
+   * forwarding and leaves xterm's text selection and the native context menu; Cmd (Meta) does the
+   * same so a link can be clicked (the web-links addon sees the click only then). Read-only tabs send
    * nothing. Returns the function that removes every listener.
    */
   private attachMouse(host: HTMLElement): () => void {
@@ -208,7 +214,7 @@ export class TerminalView implements OnDestroy {
     };
     const onMove = (event: MouseEvent) => {
       if (pressed) send(event, "drag", event.button);
-      else if (!event.shiftKey) send(event, "move", 0);
+      else if (!event.shiftKey && !event.metaKey) send(event, "move", 0);
     };
     const onHostMove = (event: MouseEvent) => {
       if (!pressed) onMove(event);
@@ -224,7 +230,7 @@ export class TerminalView implements OnDestroy {
       release();
     }
     const onDown = (event: MouseEvent) => {
-      if (this.attempt !== "control" || event.shiftKey) return; // Shift: xterm selects text
+      if (this.attempt !== "control" || event.shiftKey || event.metaKey) return; // Shift: xterm selects text, Cmd: links
       event.stopPropagation(); // no text selection while the pane application owns the mouse
       event.preventDefault();
       this.term?.focus();
