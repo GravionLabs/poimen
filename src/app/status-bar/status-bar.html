@@ -16,17 +16,26 @@
   @if (paneId(); as id) {
     <span class="item">{{ id }}</span>
     @if (mode(); as m) {
-      <label class="item mode-switch" [title]="modeHint(blocked())">
+      <button
+        type="button"
+        class="item mode-button"
+        [title]="modeHint(blocked())"
+        [attr.aria-label]="modeText(m, blocked())"
+        [attr.aria-pressed]="m === 'control'"
+        [disabled]="!!blocked()"
+        (click)="control.emit(m !== 'control')"
+      >
+        @if (m === "control") {
+          <svg class="icon pencil" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2 14l1-4 8-8 3 3-8 8-4 1zM10 3l3 3" />
+          </svg>
+        } @else {
+          <svg class="icon lock" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M4 7h8v7H4zM5.5 7V5a2.5 2.5 0 015 0v2" />
+          </svg>
+        }
         <span>{{ modeText(m, blocked()) }}</span>
-        <input
-          hx-switch
-          type="checkbox"
-          aria-label="Input mode"
-          [checked]="m === 'control'"
-          [disabled]="!!blocked()"
-          (change)="control.emit($any($event.target).checked)"
-        />
-      </label>
+      </button>
     }
     @if (size()) {
       <span class="item">{{ sizeText(size()) }}</span>
