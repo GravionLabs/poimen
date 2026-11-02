@@ -82,6 +82,7 @@ export class TerminalView implements OnDestroy {
   private term?: Terminal;
   private fit?: FitAddon;
   private session?: TerminalSession;
+  private themeObserver?: MutationObserver;
   private resizeObserver?: ResizeObserver;
   private resizeTimer?: ReturnType<typeof setTimeout>;
   private size = { cols: 0, rows: 0 };
@@ -98,15 +99,19 @@ export class TerminalView implements OnDestroy {
 
   constructor() {
     afterNextRender(() => void this.start(false));
+    // The theme tokens change with the class HxTheme puts on <html>, in its own effect and possibly
+    // in a view transition, so re-read the colors when the class really changed, not when the setting did.
+    if (typeof MutationObserver === "function") {
+      this.themeObserver = new MutationObserver(() => this.applyLook());
+      this.themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class", "data-theme"],
+      });
+    }
     // Settings edits (and theme switches) apply to the open terminal without a restart.
     effect(() => {
       this.prefs.settings();
-      untracked(() => {
-        if (!this.term) return;
-        Object.assign(this.term.options, this.look());
-        // A new font changes the cell size, so cols/rows change without a body resize.
-        this.applySize();
-      });
+      untracked(() => this.applyLook());
     });
     // A change of the wanted mode reopens the stream; it never takes over a controller by itself.
     let seen = this.wanted();
@@ -118,6 +123,13 @@ export class TerminalView implements OnDestroy {
         if (this.term) void this.restartStream(false);
       });
     });
+  }
+
+  private applyLook(): void {
+    if (!this.term) return;
+    Object.assign(this.term.options, this.look());
+    // A new font changes the cell size, so cols/rows change without a body resize.
+    this.applySize();
   }
 
   /** Font and colors from the settings, over the theme tokens. */
@@ -137,6 +149,7 @@ export class TerminalView implements OnDestroy {
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.themeObserver?.disconnect();
     this.stop();
   }
 

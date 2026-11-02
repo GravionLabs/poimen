@@ -20,7 +20,10 @@ const fake = vi.hoisted(() => ({
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
-    options: Record<string, unknown> = { theme: { foreground: "#e4e4e0" } };
+    options: Record<string, unknown>;
+    constructor(options: Record<string, unknown> = {}) {
+      this.options = { theme: { foreground: "#e4e4e0" }, ...options };
+    }
     buffer = { active: { viewportY: 0 } };
     get cols() {
       return fake.cols;
@@ -140,6 +143,60 @@ async function setup(wanted: "control" | "observe") {
   };
   return { fixture, settings, session, open, sized, modes, send, body, openUrl };
 }
+
+describe("TerminalView theme", () => {
+  const css = readFileSync("src/styles.css", "utf8");
+  const block = (selector: string) =>
+    new RegExp(`${selector.replace(".", "\\.")}\\s*\\{([^}]*)\\}`).exec(css)![1];
+  const token = (selector: string, name: string) =>
+    new RegExp(`${name}:\\s*(#[0-9a-f]{6})`, "i").exec(block(selector))?.[1];
+
+  it("defines the terminal tokens (also the tab-bar background) for light and dark", () => {
+    expect(token(":root", "--term-bg")).toBe("#fbfbf9");
+    expect(token(":root", "--term-fg")).toBe("#26272a");
+    expect(token(":root.app-dark", "--term-bg")).toBe("#111214");
+    expect(token(":root.app-dark", "--term-fg")).toBe("#e4e4e0");
+  });
+
+  it("re-reads the token colors when the theme class changes", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--term-bg", "#fbfbf9");
+    root.style.setProperty("--term-fg", "#26272a");
+    const { fixture } = await setup("observe");
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: { background: string } } };
+      }
+    ).term;
+    expect(term.options.theme.background).toBe("#fbfbf9");
+    root.style.setProperty("--term-bg", "#111214");
+    root.style.setProperty("--term-fg", "#e4e4e0");
+    root.classList.add("app-dark");
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(term.options.theme).toMatchObject({ background: "#111214", foreground: "#e4e4e0" });
+    root.classList.remove("app-dark");
+    root.removeAttribute("style");
+  });
+
+  it("keeps colors from the Ghostty config over the tokens on a theme change", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--term-bg", "#fbfbf9");
+    const { fixture, settings } = await setup("observe");
+    settings.set({ ...DEFAULT_SETTINGS, colors: { background: "#000001", foreground: "#fffffe" } });
+    fixture.detectChanges();
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: { background: string } } };
+      }
+    ).term;
+    root.style.setProperty("--term-bg", "#111214");
+    root.classList.add("app-dark");
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(term.options.theme.background).toBe("#000001");
+    root.classList.remove("app-dark");
+    root.removeAttribute("style");
+  });
+});
 
 describe("TerminalView font change", () => {
   it("resizes the control stream and emits sized when the font changes cols", async () => {
