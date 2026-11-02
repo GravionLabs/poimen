@@ -24,8 +24,23 @@ export interface Pane {
   agent?: string;
   agent_status: AgentStatus;
   cwd?: string;
+  /** Directory of the foreground process; follows `cd` and is more precise than `cwd`. */
+  foreground_cwd?: string;
+  /** User-set pane label (e.g. "terminal"). */
+  label?: string;
+  /** Free-form key/value tokens set by integrations (e.g. `deliver_step`). */
+  tokens?: Record<string, string>;
+  /** Message or state label an integration reports for the pane, when present. */
+  status_message?: string;
+  state_label?: string;
   terminal_title_stripped?: string;
   focused?: boolean;
+}
+
+/** Branch and worktree flag of a directory (answer of the `repo_info` command). */
+export interface RepoInfo {
+  branch: string | null;
+  worktree: boolean;
 }
 
 export interface Snapshot {
@@ -99,6 +114,89 @@ export function applyStatus(snapshot: Snapshot, paneId: string, status: AgentSta
       pane.pane_id === paneId ? { ...pane, agent_status: status } : pane,
     ),
   };
+}
+
+/** The directory to show for a pane. */
+export function paneDir(pane: Pane): string | undefined {
+  return pane.foreground_cwd || pane.cwd || undefined;
+}
+
+/** Agent kind of a pane (`claude`, `codex`, ...); `undefined` for a plain terminal. */
+export function agentKind(pane: Pane): string | undefined {
+  return pane.agent?.trim() || undefined;
+}
+
+/** Last status message or state label; falls back to the integration tokens. */
+export function statusText(pane: Pane): string | undefined {
+  const text = pane.status_message?.trim() || pane.state_label?.trim();
+  if (text) return text;
+  const tokens = Object.values(pane.tokens ?? {}).filter((v) => v.trim());
+  return tokens.length ? tokens.join(" · ") : undefined;
+}
+
+/** The last two path segments, so rows stay short. */
+export function shortPath(path: string): string {
+  const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
+  return parts.length <= 2 ? path : "…/" + parts.slice(-2).join("/");
+}
+
+/** What a sidebar row shows for one pane. */
+export interface PaneRow {
+  pane: Pane;
+  tab: string;
+  name: string;
+  agent?: string;
+  branch?: string;
+  worktree: boolean;
+  dir?: string;
+  text?: string;
+}
+
+export interface SpaceNode {
+  workspace: Workspace;
+  rows: PaneRow[];
+}
+
+/** Workspaces with their pane rows (tab label as secondary text), enriched with repo info. */
+export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoInfo>): SpaceNode[] {
+  return buildTree(snapshot).map(({ workspace, tabs }) => ({
+    workspace,
+    rows: tabs.flatMap(({ tab, panes }) =>
+      panes.map((pane): PaneRow => {
+        const dir = paneDir(pane);
+        const repo = dir ? repos.get(dir) : undefined;
+        return {
+          pane,
+          tab: tab.label,
+          name: paneLabel(pane),
+          agent: agentKind(pane),
+          branch: repo?.branch ?? undefined,
+          worktree: repo?.worktree ?? false,
+          dir,
+          text: statusText(pane),
+        };
+      }),
+    ),
+  }));
+}
+
+/** Keeps rows matching `query` (name, agent, branch, tab, directory, text; every word must match). */
+export function filterSpaces(spaces: SpaceNode[], query: string): SpaceNode[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return spaces;
+  const matches = (row: PaneRow, space: string) => {
+    const hay = [row.name, row.agent, row.branch, row.tab, row.dir, row.text, space]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  };
+  return spaces
+    .map((space) => ({
+      ...space,
+      rows: space.rows.filter((r) => matches(r, space.workspace.label)),
+    }))
+    .filter((space) => space.rows.length > 0);
 }
 
 export function decodeBase64(text: string): Uint8Array {
