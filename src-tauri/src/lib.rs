@@ -34,6 +34,48 @@ async fn snapshot(client: State<'_, Client>) -> Result<Value, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Runs one herdr request off the main thread; shared by the pane commands below.
+async fn herdr_call(client: &Client, method: &'static str, params: Value) -> Result<Value, String> {
+    let client = client.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        client.request(method, params).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Splits a pane (`pane.split`); returns the new pane id. The change also arrives as events.
+#[tauri::command]
+async fn pane_split(
+    client: State<'_, Client>,
+    target: String,
+    direction: herdr::SplitDirection,
+    cwd: Option<String>,
+) -> Result<Option<String>, String> {
+    let params = herdr::split_params(&target, direction, cwd.as_deref());
+    let result = herdr_call(client.inner(), "pane.split", params).await?;
+    Ok(herdr::created_pane_id(&result))
+}
+
+/// Closes a pane (`pane.close`). The UI confirms first; herdr ends the pane's process.
+#[tauri::command]
+async fn pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
+    herdr_call(client.inner(), "pane.close", herdr::close_params(&pane_id)).await?;
+    Ok(())
+}
+
+/// Opens a new terminal in a workspace as a new tab (`tab.create`); returns its pane id.
+#[tauri::command]
+async fn terminal_create(
+    client: State<'_, Client>,
+    workspace_id: String,
+    cwd: Option<String>,
+) -> Result<Option<String>, String> {
+    let params = herdr::tab_create_params(&workspace_id, cwd.as_deref());
+    let result = herdr_call(client.inner(), "tab.create", params).await?;
+    Ok(herdr::created_pane_id(&result))
+}
+
 /// Version and protocol of the running herdr; `None` when unreachable or too old.
 #[tauri::command]
 async fn herdr_info(client: State<'_, Client>) -> Result<Option<herdr::ServerInfo>, String> {
@@ -208,8 +250,7 @@ fn build_menu(
             ],
         )?)?;
     }
-    // "New Terminal" waits for pane creation (#32): shown, but disabled.
-    let new_terminal = action_item(app, shortcuts, "newTerminal", "New Terminal", false)?;
+    let new_terminal = item("newTerminal", "New Terminal")?;
     let file = Submenu::with_items(
         app,
         "File",
@@ -326,6 +367,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             snapshot,
             herdr_info,
+            pane_split,
+            pane_close,
+            terminal_create,
             app_version,
             get_settings,
             set_theme,

@@ -264,3 +264,26 @@ export function protocolWarning(info: HerdrInfo | null | undefined): string {
   if (!info || info.protocol == null || info.protocol === info.supported) return "";
   return `herdr protocol ${info.protocol}, poimen supports ${info.supported}`;
 }
+
+/** Where a split puts the new pane (`pane.split` direction). */
+export type SplitDirection = "right" | "down";
+
+/** The distinct directories of a workspace's panes, in pane order: the choices for a new terminal. */
+export function workspaceDirs(snapshot: Snapshot, workspaceId: string): string[] {
+  const dirs = snapshot.panes
+    .filter((pane) => pane.workspace_id === workspaceId)
+    .map(paneDir)
+    .filter((dir): dir is string => !!dir);
+  return [...new Set(dirs)];
+}
+
+/** What the close confirmation says: an agent that is still working or waiting gets a warning. */
+export function closeWarning(pane: Pane | undefined): string {
+  const agent = pane ? agentKind(pane) : undefined;
+  if (!pane || !agent) return "The process in the pane ends.";
+  if (pane.agent_status === "working" || pane.agent_status === "blocked") {
+    const state = pane.agent_status === "working" ? "working" : "waiting for you";
+    return `The ${agent} agent is ${state}; closing the pane ends it.`;
+  }
+  return `The ${agent} agent in the pane ends.`;
+}

@@ -68,6 +68,26 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
   });
 }
 
+/** A row's context menu: `kind` says what was clicked, `action` what was picked. */
+export interface SidebarMenuAction {
+  kind: "workspace" | "pane";
+  id: string;
+  action: "new-terminal" | "split-right" | "split-down" | "close";
+}
+
+/** Entries of the context menu of a workspace row or a pane row. */
+export function sidebarMenuItems(
+  kind: SidebarMenuAction["kind"],
+): { action: SidebarMenuAction["action"]; label: string }[] {
+  return kind === "workspace"
+    ? [{ action: "new-terminal", label: "New terminal..." }]
+    : [
+        { action: "split-right", label: "Split right" },
+        { action: "split-down", label: "Split down" },
+        { action: "close", label: "Close pane..." },
+      ];
+}
+
 export const DOUBLE_CLICK_MS = 400;
 
 /** Whether a click on `key` at `now` completes a double click that started with `last`. */
@@ -95,7 +115,32 @@ export class Sidebar {
   readonly selected = output<Pane>();
   /** A second click on the same row within {@link DOUBLE_CLICK_MS}: pin the tab. */
   readonly pinned = output<Pane>();
+  /** An entry of a row's context menu was picked. */
+  readonly menuAction = output<SidebarMenuAction>();
   private last: { key: string; at: number } | null = null;
+  protected readonly menuAt = signal<{
+    kind: SidebarMenuAction["kind"];
+    id: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  protected readonly menuItems = sidebarMenuItems;
+
+  protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.menuAt.set({ kind, id, x: event.clientX, y: event.clientY });
+  }
+
+  protected closeMenu(): void {
+    this.menuAt.set(null);
+  }
+
+  protected choose(action: SidebarMenuAction["action"]): void {
+    const at = this.menuAt();
+    this.closeMenu();
+    if (at) this.menuAction.emit({ kind: at.kind, id: at.id, action });
+  }
 
   private readonly injector = inject(Injector);
   protected readonly store = inject(HerdrStore);

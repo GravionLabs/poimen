@@ -8,6 +8,7 @@
         [activeId]="editor.activeId()"
         (selected)="open($event)"
         (pinned)="open($event, true)"
+        (menuAction)="onSidebarMenu($event)"
       />
     </div>
     <div
@@ -62,6 +63,8 @@
   [info]="store.info()"
   (jump)="jumpToWaiting()"
 />
+
+<app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
 
 <ng-template #nodeTpl let-node>
   @if (node.kind === "split") {

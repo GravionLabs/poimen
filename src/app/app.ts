@@ -24,6 +24,9 @@ import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { Toolbar } from "./toolbar/toolbar";
+import { PaneActions } from "./core/pane-actions";
+import { PaneDialog } from "./pane-dialog/pane-dialog";
+import type { SidebarMenuAction } from "./sidebar/sidebar";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
 import {
@@ -47,6 +50,7 @@ const ZOOM_STEP = 1;
     StatusBar,
     Toolbar,
     NgTemplateOutlet,
+    PaneDialog,
   ],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
@@ -58,6 +62,7 @@ export class App {
   private readonly theme = inject(HxTheme);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
+  private readonly paneActions = inject(PaneActions);
   protected readonly ui = inject(UiState);
   protected readonly minWidth = SIDEBAR_MIN_WIDTH;
   protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
@@ -203,9 +208,29 @@ export class App {
         this.editor.cycle(-1);
         break;
       case "newTerminal":
-        // Needs pane creation (#32); the menu item is disabled until then.
+        this.paneActions.askNew(active ? this.pane(active)?.workspace_id : undefined);
         break;
     }
+  }
+
+  /** Context menu of a sidebar row: new terminal in a workspace, split or close a pane. */
+  protected onSidebarMenu(event: SidebarMenuAction): void {
+    if (event.action === "new-terminal") this.paneActions.askNew(event.id);
+    else this.paneAction(event.id, event.action);
+  }
+
+  private paneAction(paneId: string, action: string): void {
+    if (action === "split-right" || action === "split-down") {
+      const direction = action === "split-right" ? "right" : "down";
+      void this.paneActions.split(paneId, direction).then((pane) => pane && this.open(pane, true));
+    } else if (action === "close") {
+      this.paneActions.askClose(paneId);
+    }
+  }
+
+  /** A pane closed in herdr: its tab goes with it. */
+  protected onPaneClosed(paneId: string): void {
+    this.editor.close(paneId);
   }
 
   /** Context menu of a group's tabs; splitting needs a second tab in the group. */
@@ -225,6 +250,9 @@ export class App {
         disabled: single,
       },
       { action: "close", label: "Close" },
+      { action: "pane-split-right", label: "New pane to the right" },
+      { action: "pane-split-down", label: "New pane below" },
+      { action: "pane-close", label: "Close herdr pane..." },
     ];
   }
 
@@ -232,6 +260,7 @@ export class App {
     if (action === "split-right") this.editor.split(id, "row");
     else if (action === "split-down") this.editor.split(id, "column");
     else if (action === "close") this.editor.close(id);
+    else if (action.startsWith("pane-")) this.paneAction(id, action.slice("pane-".length));
   }
 
   protected groupPane(group: EditorGroup): Pane | undefined {

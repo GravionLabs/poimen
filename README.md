@@ -33,6 +33,14 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
 - **Status bar.** The bottom bar shows the herdr connection (connected, reconnecting when the event watcher lost herdr, unreachable when a snapshot read failed, each with the reason), the count of waiting (blocked) agents (a click opens the next one) and the active tab: pane id, the mode button (input, or read-only with the reason when another client controls the pane) and terminal size.
 - **Events are invalidation signals.** Every herdr event triggers a debounced re-read of the workspace, tab and pane lists, as the herdr socket API docs recommend. `pane.agent_status_changed` is applied right away.
 
+### Creating, splitting and closing panes
+
+Panes are managed in herdr, so the result shows up through herdr's events like any other change.
+
+- **New terminal**: File > New Terminal (`CmdOrCtrl+T`), or right click a workspace in the sidebar. A dialog asks for the directory (the workspace's pane directories are suggested; empty uses herdr's default). It creates a tab in the workspace (`tab.create`) and opens it.
+- **Split**: right click a pane in the sidebar (Split right / Split down), or its tab (New pane to the right / below). The new shell starts in the pane's directory (`pane.split`).
+- **Close pane**: right click a pane in the sidebar or its tab (Close pane / Close herdr pane). It always asks first and warns when an agent is working or waiting (`pane.close`). Closing a tab with the tab's own Close entry still only closes the view.
+
 ## Requirements
 
 - herdr 0.9.5 or newer, server running (`herdr` once)
@@ -79,7 +87,7 @@ The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoo
 
 | Action | Setting key | Default |
 |---|---|---|
-| New terminal (disabled until pane creation, #32) | `newTerminal` | CmdOrCtrl+T |
+| New terminal (asks for the directory) | `newTerminal` | CmdOrCtrl+T |
 | Close tab | `closeTab` | CmdOrCtrl+W |
 | Close all tabs | `closeAll` | CmdOrCtrl+Shift+W |
 | Refresh | `refresh` | CmdOrCtrl+R |
