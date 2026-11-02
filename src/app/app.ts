@@ -11,7 +11,7 @@ import {
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
-import { rowName, tabHeader, type Mode, type Pane } from "./core/herdr";
+import { rowName, tabHeader, type Mode, type Pane, type PluginAction } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { HerdrStore } from "./core/herdr-store";
@@ -33,6 +33,7 @@ import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { CommandPalette } from "./core/command-palette";
+import { PluginActions, pluginMenuId } from "./core/plugin-actions";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
@@ -81,6 +82,7 @@ export class App {
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
+  protected readonly plugins = inject(PluginActions);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -150,6 +152,7 @@ export class App {
       this.theme.setDark(setting === "system" ? systemDark : setting === "dark");
     });
     destroyRef.onDestroy(this.followSystemTheme());
+    void this.plugins.load();
     void this.prefs.start();
     void this.userSchemes.start();
     void this.store.start().then(() => this.dropMissing());
@@ -261,7 +264,9 @@ export class App {
 
   /** Context menu of a sidebar row: new terminal in a workspace, split or close a pane. */
   protected onSidebarMenu(event: SidebarMenuAction): void {
-    if (event.action === "new-terminal") this.paneActions.askNew(event.id);
+    if (event.kind === "pane" && event.action.startsWith("plugin:")) {
+      void this.runPlugin(this.plugins.find(event.action), event.id);
+    } else if (event.action === "new-terminal") this.paneActions.askNew(event.id);
     else this.paneAction(event.id, event.action);
   }
 
@@ -305,15 +310,39 @@ export class App {
       { action: "pane-start-agent", label: "Start agent..." },
       { action: "pane-rename", label: "Rename pane..." },
       { action: "pane-close", label: "Close herdr pane..." },
+      ...this.plugins.actions().map((a) => ({ action: pluginMenuId(a), label: a.title })),
     ];
   }
 
   protected onTabMenu(id: string, action: string): void {
-    if (action === "split-right") this.editor.split(id, "row");
+    if (action.startsWith("plugin:")) {
+      if (tabKind(id) === "pane") void this.runPlugin(this.plugins.find(action), id);
+    } else if (action === "split-right") this.editor.split(id, "row");
     else if (action === "split-down") this.editor.split(id, "column");
     else if (action === "close") this.editor.close(id);
     else if (action.startsWith("pane-") && tabKind(id) === "pane")
       this.paneAction(id, action.slice("pane-".length));
+  }
+
+  /** Runs a plugin action with `paneId` as context; a refusal shows as a notice. */
+  protected async runPlugin(
+    action: PluginAction | undefined,
+    paneId: string | null,
+  ): Promise<void> {
+    if (!action) return;
+    const error = await this.plugins.invoke(action, paneId);
+    if (error) this.showError(error);
+  }
+
+  /** The Plugins menu opens: re-read the actions; the context menus use the same list. */
+  @HostListener("window:focus")
+  protected loadPlugins(): void {
+    void this.plugins.load();
+  }
+
+  /** An action of the Plugins menu runs with the active pane as context. */
+  protected onPluginChosen(action: PluginAction): void {
+    void this.runPlugin(action, this.activePaneId());
   }
 
   protected groupPane(group: EditorGroup): Pane | undefined {

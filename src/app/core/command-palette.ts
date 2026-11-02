@@ -1,10 +1,9 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { fuzzyFilter } from "./fuzzy";
-import { pluginContext, type PluginAction } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { PluginAction } from "./herdr";
 import { Keymap } from "./keymap";
 import type { ShortcutAction } from "./shortcuts";
-import { TauriBridge } from "./tauri";
+import { PluginActions } from "./plugin-actions";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
 export interface PoimenCommand {
@@ -40,20 +39,17 @@ export type PaletteItem =
  */
 @Injectable({ providedIn: "root" })
 export class CommandPalette {
-  private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly plugins = inject(PluginActions);
   private readonly keymap = inject(Keymap);
 
   private readonly _open = signal(false);
   private readonly _query = signal("");
   private readonly _selected = signal(0);
-  private readonly _actions = signal<PluginAction[]>([]);
-  private readonly _loadError = signal<string | null>(null);
 
   readonly isOpen = this._open.asReadonly();
   readonly query = this._query.asReadonly();
   /** Why the plugin actions could not be listed; the poimen commands still work. */
-  readonly loadError = this._loadError.asReadonly();
+  readonly loadError = this.plugins.error;
 
   private readonly all = computed<PaletteItem[]>(() => [
     ...POIMEN_COMMANDS.map((c): PaletteItem => ({
@@ -63,7 +59,7 @@ export class CommandPalette {
       hint: c.id === "openSettings" ? "" : this.keymap.label(c.id),
       command: c.id,
     })),
-    ...this._actions().map((a): PaletteItem => ({
+    ...this.plugins.actions().map((a): PaletteItem => ({
       kind: "plugin",
       key: `plugin:${a.plugin_id}:${a.action_id}`,
       title: a.title,
@@ -89,13 +85,7 @@ export class CommandPalette {
     this._query.set("");
     this._selected.set(0);
     this._open.set(true);
-    this._loadError.set(null);
-    try {
-      this._actions.set(await this.bridge.invoke<PluginAction[]>("plugin_actions"));
-    } catch (err) {
-      this._actions.set([]);
-      this._loadError.set(String(err));
-    }
+    await this.plugins.load();
   }
 
   close(): void {
@@ -128,20 +118,8 @@ export class CommandPalette {
     return this.items()[this.selected()];
   }
 
-  /**
-   * Runs a plugin action through herdr with `paneId` (the focused pane) and its workspace as
-   * context. Resolves to `null`, or to the error text when herdr refused it.
-   */
-  async invoke(action: PluginAction, paneId: string | null): Promise<string | null> {
-    try {
-      await this.bridge.invoke("plugin_invoke", {
-        pluginId: action.plugin_id,
-        actionId: action.action_id,
-        context: pluginContext(this.store.snapshot(), paneId),
-      });
-      return null;
-    } catch (err) {
-      return `${action.title}: ${String(err)}`;
-    }
+  /** Runs a plugin action with `paneId` as context; see {@link PluginActions.invoke}. */
+  invoke(action: PluginAction, paneId: string | null): Promise<string | null> {
+    return this.plugins.invoke(action, paneId);
   }
 }

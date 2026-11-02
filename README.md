@@ -101,6 +101,8 @@ The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoo
 | Next waiting agent | `nextWaiting` | CmdOrCtrl+Shift+A |
 | Next / previous tab | `nextTab` / `previousTab` | CmdOrCtrl+Alt+Right / CmdOrCtrl+Alt+Left |
 
+The **Plugins** button in the top bar lists the herdr plugin actions (`plugin.action.list`, re-read each time the menu opens, on window focus and at start); a pick runs the action with the active pane as context. The context menu of a pane (sidebar row or tab) lists the same actions and runs them with that pane as context. Errors show as a notice.
+
 While a terminal has focus, only shortcuts that use Cmd are captured; every other key (Ctrl combinations on Linux and Windows included) goes to the program in the pane. Use the menu, or bind a `Cmd+` (Super) shortcut, to reach an action from a focused terminal there.
 
 ## Settings

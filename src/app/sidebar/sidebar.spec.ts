@@ -76,3 +76,26 @@ describe("isDoubleClick", () => {
     expect(isDoubleClick(null, "p1", 1000)).toBe(false);
   });
 });
+
+describe("sidebarMenuItems with plugin actions", () => {
+  const plugin = {
+    plugin_id: "review-popup",
+    action_id: "open",
+    title: "Review",
+    description: null,
+  };
+
+  it("appends the plugin actions to a pane row menu", () => {
+    const items = sidebarMenuItems("pane", [plugin]);
+    expect(items.at(-1)).toEqual({
+      action: 'plugin:["review-popup","open"]',
+      label: "Review",
+    });
+    expect(items[0]).toEqual({ action: "split-right", label: "Split right" });
+  });
+
+  it("leaves the workspace menu and a menu without plugins alone", () => {
+    expect(sidebarMenuItems("workspace", [plugin])).toHaveLength(1);
+    expect(sidebarMenuItems("pane")).toHaveLength(5);
+  });
+});
