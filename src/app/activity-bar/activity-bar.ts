@@ -1,16 +1,19 @@
 import { ChangeDetectionStrategy, Component, input, output } from "@angular/core";
 
+/** The icons the activity bar can draw; SVG keeps them the same size in every font. */
+export type ActivityIcon = "spaces" | "folder";
+
 export interface ActivityView {
   id: string;
   label: string;
-  /** Single glyph shown on the button. */
-  icon: string;
+  /** Which inline SVG icon the button shows. */
+  icon: ActivityIcon;
 }
 
 /** The views the activity bar offers; plugins and notifications follow later. */
 export const ACTIVITY_VIEWS: readonly ActivityView[] = [
-  { id: "spaces", label: "Spaces", icon: "▤" },
-  { id: "explorer", label: "Explorer", icon: "🗀" },
+  { id: "spaces", label: "Spaces", icon: "spaces" },
+  { id: "explorer", label: "Explorer", icon: "folder" },
 ];
 
 /** Narrow icon rail at the far left; clicking a view selects it. */

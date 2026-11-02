@@ -9,7 +9,19 @@
       [attr.aria-label]="view.label"
       (click)="selected.emit(view.id)"
     >
-      <span aria-hidden="true">{{ view.icon }}</span>
+      @switch (view.icon) {
+        @case ("spaces") {
+          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="1.5" y="2" width="13" height="12" rx="1.5" />
+            <path d="M6 2v12M6 8h8.5" />
+          </svg>
+        }
+        @case ("folder") {
+          <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M1.5 4a1 1 0 011-1h4L8 5h5.5a1 1 0 011 1v6.5a1 1 0 01-1 1h-11a1 1 0 01-1-1z" />
+          </svg>
+        }
+      }
     </button>
   }
 </nav>
