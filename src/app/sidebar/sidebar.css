@@ -42,10 +42,38 @@
   display: none;
 }
 
-/* The pane of the active tab: 4px bar at the left edge and a clearly stronger background. */
+/*
+ * The pane of the active tab: 4px bar at the left edge and a clearly stronger background.
+ * Contrast on the blended tint (primary 28% over --h-content-background), real helix tokens:
+ *   light: primary-600 #555dad over #ffffff -> #cfd2e8; dark: primary-400 #8a94ce over #1b1b1f -> #3a3d50.
+ *   --h-text-muted-color is only 3.75 (light) / 3.74 (dark) there, so inside .row.active line 2,
+ *   the icon and idle state use --h-text-color: 7.30 (light) / 7.99 (dark).
+ *   State text uses --status-*-on-active (styles.css): light 800 shades, working 5.64, blocked 4.74,
+ *   done 4.88; dark 300 shades, working 5.96, blocked 6.43, done 7.47.
+ * sidebar-contrast.spec.ts asserts these >= 4.5.
+ */
 .spaces ::ng-deep .hx-tree-node-content:has(.row.active) {
   background: color-mix(in srgb, var(--h-primary-color) 28%, transparent);
   box-shadow: inset 4px 0 0 var(--h-primary-color);
+}
+
+.row.active .name,
+.row.active .text,
+.row.active .icon:not(.agent),
+.row.active .state-idle {
+  color: var(--h-text-color);
+}
+
+.row.active .state-working {
+  color: var(--status-working-on-active);
+}
+
+.row.active .state-blocked {
+  color: var(--status-blocked-on-active);
+}
+
+.row.active .state-done {
+  color: var(--status-done-on-active);
 }
 
 .space {
