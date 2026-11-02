@@ -51,8 +51,13 @@ h3 {
   font: inherit;
 }
 
+/*
+ * Hover and selected states tint the text color over the content background. The derived surface
+ * ramp runs from light to dark in both modes, so its steps would be light under light
+ * text in a dark scheme (#139). settings-contrast.spec.ts checks the selected label.
+ */
 .choice.on {
-  background: var(--h-surface-200, var(--h-content-border-color));
+  background: color-mix(in srgb, var(--h-text-color) 18%, transparent);
   color: var(--h-text-color);
 }
 
@@ -74,12 +79,14 @@ h3 {
 
 .option:hover,
 .option:focus-visible {
-  background: var(--h-surface-100, var(--h-content-border-color));
+  background: color-mix(in srgb, var(--h-text-color) 10%, transparent);
   outline: none;
 }
 
 .option.on {
   border-left-color: var(--status-working);
+  background: color-mix(in srgb, var(--h-text-color) 18%, transparent);
+  color: var(--h-text-color);
   font-weight: 600;
 }
 
