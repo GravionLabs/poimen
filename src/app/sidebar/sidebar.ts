@@ -13,18 +13,19 @@ import { HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/hel
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import {
   filterSpaces,
+  type AgentStatus,
   type Pane,
   type PaneRow,
   type SpaceNode,
   type Workspace,
 } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
-import { paneMeta, spaceContext, spaceMeta, stateLabel, subline } from "./spaces";
+import { aggregateStatus, paneLine2, spaceContext, spaceMeta, stateLabel } from "./spaces";
 
 /** What a tree node carries back to the template. */
 export type SpaceData =
-  | { kind: "workspace"; workspace: Workspace; state?: string; meta: string }
-  | { kind: "pane"; row: PaneRow; state?: string; sub: string; meta: string };
+  | { kind: "workspace"; workspace: Workspace; status: AgentStatus; state?: string; meta: string }
+  | { kind: "pane"; row: PaneRow; state?: string; sub: string };
 
 /** Tree keys: the pane id for a pane, a prefixed workspace id for a workspace. */
 const WORKSPACE_PREFIX = "workspace:";
@@ -33,6 +34,7 @@ const WORKSPACE_PREFIX = "workspace:";
 export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
   return spaces.map((space) => {
     const ctx = spaceContext(space);
+    const status = aggregateStatus(space);
     return {
       key: WORKSPACE_PREFIX + space.workspace.workspace_id,
       label: space.workspace.label,
@@ -40,7 +42,8 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
       data: {
         kind: "workspace",
         workspace: space.workspace,
-        state: stateLabel(space.workspace.agent_status),
+        status,
+        state: stateLabel(status),
         meta: spaceMeta(ctx),
       },
       children: space.rows.map((row) => ({
@@ -51,8 +54,7 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
           kind: "pane",
           row,
           state: stateLabel(row.pane.agent_status),
-          sub: subline(row),
-          meta: paneMeta(row, ctx),
+          sub: paneLine2(row, ctx),
         },
       })),
     };

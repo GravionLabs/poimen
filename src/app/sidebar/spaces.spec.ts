@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { Pane, PaneRow, SpaceNode } from "../core/herdr";
-import { paneDetail, paneMeta, spaceContext, spaceMeta, stateLabel, subline } from "./spaces";
+import type { AgentStatus, Pane, PaneRow, SpaceNode } from "../core/herdr";
+import {
+  aggregateStatus,
+  paneDetail,
+  paneLine2,
+  paneMeta,
+  spaceContext,
+  spaceMeta,
+  stateLabel,
+  subline,
+} from "./spaces";
 
 const row = (over: Omit<Partial<PaneRow>, "pane"> & { pane?: Partial<Pane> } = {}): PaneRow => ({
   tab: "t",
@@ -64,5 +73,41 @@ describe("spaceContext, spaceMeta and paneMeta", () => {
 
   it("is empty for a space without rows", () => {
     expect(spaceMeta(spaceContext(space([])))).toBe("");
+  });
+});
+
+describe("paneLine2", () => {
+  it("is one line: agent, title, then only a differing branch or path", () => {
+    const a = row({ agent: "claude", dir: "/a/b/c", branch: "main" });
+    const c = row({
+      agent: "codex",
+      dir: "/a/b/c",
+      branch: "feat",
+      pane: { terminal_title_stripped: "fix" },
+    });
+    const ctx = spaceContext(space([a, a, row({ dir: "/a/b/c", branch: "main" })]));
+    expect(paneLine2(a, ctx)).toBe("claude");
+    expect(paneLine2(c, ctx)).toBe("codex · fix · feat");
+    expect(paneLine2(row({ dir: "/a/b/c", branch: "main" }), ctx)).toBe("");
+  });
+});
+
+describe("aggregateStatus", () => {
+  const withStatuses = (ws: AgentStatus, ...panes: AgentStatus[]): SpaceNode => ({
+    workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: ws },
+    rows: panes.map((s) => row({ pane: { agent_status: s } })),
+  });
+
+  it("ranks blocked > working > done > idle > unknown", () => {
+    expect(aggregateStatus(withStatuses("unknown", "idle", "blocked", "working"))).toBe("blocked");
+    expect(aggregateStatus(withStatuses("unknown", "done", "working"))).toBe("working");
+    expect(aggregateStatus(withStatuses("unknown", "idle", "done"))).toBe("done");
+    expect(aggregateStatus(withStatuses("unknown", "unknown", "idle"))).toBe("idle");
+  });
+
+  it("keeps herdr's value when it is higher or there are no panes", () => {
+    expect(aggregateStatus(withStatuses("working"))).toBe("working");
+    expect(aggregateStatus(withStatuses("working", "idle"))).toBe("working");
+    expect(aggregateStatus(withStatuses("unknown"))).toBe("unknown");
   });
 });

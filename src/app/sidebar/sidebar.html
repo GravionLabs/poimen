@@ -26,10 +26,10 @@
     @let d = data(node);
     @if (d.kind === "workspace") {
       <span class="space">
-        <span class="dot status-{{ d.workspace.agent_status }}"></span>
+        <span class="dot status-{{ d.status }}"></span>
         <span class="space-name">{{ d.workspace.label }}</span>
         @if (d.state) {
-          <span class="state state-{{ d.workspace.agent_status }}">{{ d.state }}</span>
+          <span class="state state-{{ d.status }}">{{ d.state }}</span>
         }
         @if (d.meta) {
           <span class="space-meta">{{ d.meta }}</span>
@@ -53,9 +53,6 @@
           </span>
           @if (d.sub) {
             <span class="text">{{ d.sub }}</span>
-          }
-          @if (d.meta) {
-            <span class="text">{{ d.meta }}</span>
           }
         </span>
       </span>

@@ -28,11 +28,12 @@
   --h-tree-gap: 0;
   --h-tree-indent: 0.5rem;
   --h-tree-node-gap: 0.25rem;
-  --h-tree-node-padding: 1px 0.375rem;
+  --h-tree-node-padding: 0 0.375rem;
 }
 
 .space {
-  display: inline-flex;
+  display: flex;
+  min-width: 0;
   gap: 6px;
   align-items: center;
   color: var(--h-text-muted-color);
@@ -43,14 +44,19 @@
 
 .row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: flex-start;
   min-width: 0;
   padding: 0;
 }
 
 .name {
-  font-weight: 600;
+  font-weight: 500;
+}
+
+.row.open .name {
+  font-weight: 700;
+  color: var(--h-highlight-background);
 }
 
 .icon {
@@ -101,8 +107,13 @@
 }
 
 .space-meta {
+  min-width: 0;
   text-transform: none;
   letter-spacing: 0;
+}
+
+.space-name {
+  flex: none;
 }
 
 .state {
