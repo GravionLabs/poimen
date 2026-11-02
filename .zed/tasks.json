@@ -1,0 +1,31 @@
+// Zed tasks: run with `task: spawn`.
+[
+  {
+    "label": "pnpm tauri dev",
+    "command": "pnpm",
+    "args": ["tauri", "dev"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "ng serve (port 1420)",
+    "command": "pnpm",
+    "args": ["start"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "pnpm test",
+    "command": "pnpm",
+    "args": ["test"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "cargo test",
+    "command": "cargo",
+    "args": ["test", "--manifest-path=src-tauri/Cargo.toml"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]

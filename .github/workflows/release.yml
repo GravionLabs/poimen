@@ -1,0 +1,63 @@
+# Release on main, built from the versioning actions of GravionLabs/ci.
+#
+# push to main (the merge commit of the release PR release/next -> main):
+#   ci.yml (frontend and Rust checks) -> determine-version (GitVersion.yml) -> gh-release: git-cliff writes CHANGELOG.md
+#   and commits it to main ([skip ci]), tags v<version>, creates the GitHub Release and closes the issues delivered by
+#   the release PR. Bundling and signing the macOS application are not part of this workflow yet.
+#
+# The version numbers in package.json, src-tauri/Cargo.toml and src-tauri/tauri.conf.json are placeholders; the tag
+# carries the released version.
+#
+# GH_PAT: classic PAT with scope `repo` of a repository admin. The `main` ruleset requires a pull request and the
+# `ci` check; admins (RepositoryRole 5) are bypass actors, so the changelog commit is pushed with GH_PAT. The
+# GITHUB_TOKEN cannot bypass the ruleset.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release
+  # A release in progress is never canceled.
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Release
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # changelog commit, tag, GitHub Release
+      issues: write # close-issues
+      pull-requests: read # close-issues reads the release PR
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # required by GitVersion
+
+      - name: Determine version
+        id: version
+        uses: GravionLabs/ci/versioning/determine-version@v1
+        with:
+          gitversion-config-file: GitVersion.yml
+
+      # Commits CHANGELOG.md to main, then tags that commit (create-version-tag runs inside gh-release; a tag created
+      # before it would leave git-cliff's --unreleased notes empty), creates the release and closes the issues.
+      - name: Create GitHub Release
+        uses: GravionLabs/ci/versioning/gh-release@v1
+        with:
+          version: ${{ steps.version.outputs.semver }}
+          changelog-file: CHANGELOG.md
+          cliff-config: cliff.toml
+          update-changelog: "true"
+          close-issues: "true"
+          token: ${{ secrets.GH_PAT }}

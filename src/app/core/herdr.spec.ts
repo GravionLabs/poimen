@@ -7,7 +7,7 @@ import {
   waitingCount,
   type Pane,
   type Snapshot,
-} from "./model";
+} from "./herdr";
 
 const pane = (over: Partial<Pane>): Pane => ({
   pane_id: "w1:p1",
@@ -46,7 +46,9 @@ describe("buildTree", () => {
 
 describe("paneLabel", () => {
   it("prefers the terminal title, then agent, then cwd basename, then id", () => {
-    expect(paneLabel(pane({ terminal_title_stripped: " Fix auth ", agent: "claude" }))).toBe("Fix auth");
+    expect(paneLabel(pane({ terminal_title_stripped: " Fix auth ", agent: "claude" }))).toBe(
+      "Fix auth",
+    );
     expect(paneLabel(pane({ terminal_title_stripped: "", agent: "claude" }))).toBe("claude");
     expect(paneLabel(pane({ cwd: "/Users/x/Source/poimen/" }))).toBe("poimen");
     expect(paneLabel(pane({}))).toBe("w1:p1");

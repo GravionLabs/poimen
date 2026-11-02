@@ -1,0 +1,44 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ui:dev",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["start"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "angular",
+        "pattern": { "regexp": "^__never_matches__$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Building\\.\\.\\.",
+          "endsPattern": "Local:\\s+http://localhost:1420/"
+        }
+      }
+    },
+    {
+      "label": "check",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["check"],
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "cargo test",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["test", "--manifest-path=src-tauri/Cargo.toml"],
+      "group": "test",
+      "problemMatcher": "$rustc"
+    }
+  ]
+}

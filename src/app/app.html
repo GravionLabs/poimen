@@ -1,0 +1,14 @@
+<app-sidebar [openIds]="openIds()" (selected)="open($event)" />
+<main class="views">
+  @for (pane of views(); track pane.pane_id) {
+    <app-terminal-view [pane]="pane" (closed)="closed(pane.pane_id)" />
+  } @empty {
+    <div class="empty">
+      <p>Pick a pane on the left.</p>
+      <p class="hint">
+        Panes open read-only. Switch a card to <em>Input</em> to type into it. Collapsing a card
+        only closes the view; the herdr pane keeps running.
+      </p>
+    </div>
+  }
+</main>

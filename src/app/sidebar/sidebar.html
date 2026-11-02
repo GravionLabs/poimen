@@ -1,0 +1,37 @@
+<div class="brand">poimen</div>
+@if (store.connectionError(); as reason) {
+  <hx-message class="connection" severity="warn" size="small">
+    herdr not reachable: {{ reason }}
+  </hx-message>
+}
+<nav aria-label="herdr panes">
+  @for (node of store.tree(); track node.workspace.workspace_id) {
+    <details class="workspace" open>
+      <summary>
+        <span class="dot status-{{ node.workspace.agent_status }}"></span>
+        <span>{{ node.workspace.label }}</span>
+      </summary>
+      @for (tabNode of node.tabs; track tabNode.tab.tab_id) {
+        @for (pane of tabNode.panes; track pane.pane_id) {
+          <button
+            type="button"
+            class="pane-row"
+            [class.open]="openIds().has(pane.pane_id)"
+            [title]="rowTitle(pane)"
+            (click)="selected.emit(pane)"
+          >
+            <span class="dot status-{{ pane.agent_status }}"></span>
+            <span class="label">{{ paneLabel(pane) }}</span>
+            <span class="tab">
+              {{
+                tabNode.panes.length > 1
+                  ? tabNode.tab.label + " · " + pane.pane_id
+                  : tabNode.tab.label
+              }}
+            </span>
+          </button>
+        }
+      }
+    </details>
+  }
+</nav>

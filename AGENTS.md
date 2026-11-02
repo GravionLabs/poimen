@@ -7,7 +7,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - `src-tauri/src/herdr.rs`: socket API client (NDJSON over the Unix socket). Requests use short-lived connections; subscriptions keep theirs.
 - `src-tauri/src/watch.rs`: one long-lived `events.subscribe`. `pane.agent_status_changed` needs a `pane_id`, and herdr rejects the whole subscription when a referenced pane is gone, so the watcher resubscribes on pane-set changes.
 - `src-tauri/src/stream.rs`: live terminals by spawning `herdr terminal session observe|control`. Use this public CLI contract; do not reimplement herdr's internal binary client protocol.
-- `src/`: vanilla TypeScript + xterm.js. `model.ts` is pure and tested; `terminal-view.ts` is one collapsible card.
+- `src/`: Angular 22 (standalone components, signals) on helix-ui, built with `@angular/build` (`angular.json`), tested with Vitest. `src/app/core/` is the Tauri bridge and state: `tauri.ts` (the only `invoke`/`listen` caller), `herdr.ts` (wire types, pure helpers), `herdr-store.ts` (snapshot signals, debounced re-read), `terminal-stream.ts` (routes `terminal` records by session id). `src/app/terminal-view/` wraps xterm.js in one collapsible card; `src/app/sidebar/` lists the panes.
 
 ## Rules
 
@@ -16,9 +16,19 @@ Guidance for humans and coding agents working in this repository. Generated text
 - **Tests stay read-only.** Live tests (`#[ignore]`) may list and observe, never control, send input or create panes in the user's session.
 - **Protocol drift.** herdr's API protocol is versioned (22 at the time of the spike). Keep all wire shapes in `herdr.rs` and `stream.rs`, each with a parsing test.
 
+## Decisions
+
+- Frontend stack: Angular 22 and helix-ui, and when a component goes to helix-ui ([ADR 0001](docs/adr/0001-frontend-stack.md)).
+
 ## Verification
 
 ```sh
-pnpm check && pnpm test
-cd src-tauri && cargo fmt --check && cargo clippy --all-targets && cargo test
+pnpm check && pnpm lint && pnpm format:check && pnpm test && pnpm build
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
+
+## CI and releases
+
+- `.github/workflows/ci.yml` checks the frontend and the Tauri crate (with the Linux system libraries) through GravionLabs/ci `@v1`; its always-running `ci` gate job (green when the checks passed or no app files changed) and `pr-checks / PR checks` (`pr-checks.yml`: readiness, Conventional Commit title) are the checks required on `main` and `release/**`.
+- Reusable workflows and actions of GravionLabs/ci are referenced at `@v1`, never `@main` or a SHA.
+- Work is integrated on `release/next`: every PBI branch is cut from it and its PR targets it (squash); `main` only receives the release PR (merge commit). `release.yml` versions with GitVersion, writes `CHANGELOG.md` with git-cliff and tags `v<version>`. README "Releases" has the rules.

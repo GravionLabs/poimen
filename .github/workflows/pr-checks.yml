@@ -1,0 +1,20 @@
+# Pull request checks of GravionLabs/ci (pr-checks.yml): the PR must close a ready issue (no needs-refinement or
+# needs-decision label, no open blocker; release PRs are exempt), its title must be a Conventional Commit that agrees
+# with the commits, and ADR and spec changes follow the governance of .agents/config.json (skipped green without it).
+# The rulesets main and release require the aggregate check "pr-checks / PR checks"; keep the job id pr-checks.
+name: PR checks
+
+on:
+  pull_request:
+    branches: [main, "release/**"]
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled, ready_for_review]
+
+permissions: {}
+
+jobs:
+  pr-checks:
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    uses: GravionLabs/ci/.github/workflows/pr-checks.yml@v1
