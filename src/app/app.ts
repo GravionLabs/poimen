@@ -32,6 +32,8 @@ import { Toolbar } from "./toolbar/toolbar";
 import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
+import { CommandPalette } from "./core/command-palette";
+import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
 import { StatusBar } from "./status-bar/status-bar";
@@ -61,6 +63,7 @@ const ZOOM_STEP = 1;
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
+    PaletteView,
   ],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
@@ -77,6 +80,7 @@ export class App {
   private readonly paneActions = inject(PaneActions);
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
+  private readonly palette = inject(CommandPalette);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -158,6 +162,11 @@ export class App {
     this.notice.set(null);
   }
 
+  /** A plugin action failed in the command palette. */
+  protected showError(message: string): void {
+    this.notice.set(message);
+  }
+
   /** After the first snapshot, closes restored tabs whose pane is gone, and says so. */
   private dropMissing(): void {
     if (this.store.connectionError() !== null) return;
@@ -198,6 +207,10 @@ export class App {
 
   /** Runs a menu or shortcut action; ids come from the native menu and the shortcut table. */
   protected run(id: string): void {
+    if (id === "openSettings") {
+      this.openSettings();
+      return;
+    }
     const action = id as ShortcutAction;
     const active = this.editor.activeId();
     switch (action) {
@@ -227,6 +240,9 @@ export class App {
         break;
       case "zoomReset":
         this.ui.zoomBy(null);
+        break;
+      case "commandPalette":
+        this.palette.toggle();
         break;
       case "nextWaiting":
         this.jumpToWaiting();

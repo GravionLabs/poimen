@@ -192,6 +192,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("zoomIn", "CmdOrCtrl+="),
     ("zoomOut", "CmdOrCtrl+-"),
     ("zoomReset", "CmdOrCtrl+0"),
+    ("commandPalette", "CmdOrCtrl+Shift+P"),
     ("nextWaiting", "CmdOrCtrl+Shift+A"),
     ("nextTab", "CmdOrCtrl+Alt+Right"),
     ("previousTab", "CmdOrCtrl+Alt+Left"),

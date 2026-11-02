@@ -221,6 +221,67 @@ pub fn created_pane_id(result: &Value) -> Option<String> {
     Some(pane.get("pane_id")?.as_str()?.to_owned())
 }
 
+/// An action a herdr plugin offers (`plugin.action.list`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginAction {
+    pub plugin_id: String,
+    pub action_id: String,
+    pub title: String,
+    pub description: Option<String>,
+}
+
+/// Reads `{"type":"plugin_action_list","actions":[...]}`; entries without ids or title are skipped.
+pub fn parse_plugin_actions(result: &Value) -> Vec<PluginAction> {
+    let Some(actions) = result.get("actions").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    actions
+        .iter()
+        .filter_map(|a| {
+            let text = |key: &str| a.get(key)?.as_str().map(str::to_owned);
+            Some(PluginAction {
+                plugin_id: text("plugin_id")?,
+                action_id: text("action_id")?,
+                title: text("title")?,
+                description: text("description"),
+            })
+        })
+        .collect()
+}
+
+/// What an invoked plugin action learns about where it was started (`PluginInvocationContext`).
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct PluginContext {
+    pub focused_pane_id: Option<String>,
+    pub focused_pane_cwd: Option<String>,
+    pub focused_pane_agent: Option<String>,
+    pub tab_id: Option<String>,
+    pub tab_label: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_label: Option<String>,
+}
+
+/// Params of `plugin.action.invoke`; the context lists only the fields that are set.
+pub fn plugin_invoke_params(plugin_id: &str, action_id: &str, context: &PluginContext) -> Value {
+    let mut ctx = serde_json::Map::new();
+    ctx.insert("invocation_source".into(), json!("poimen"));
+    let fields = [
+        ("focused_pane_id", &context.focused_pane_id),
+        ("focused_pane_cwd", &context.focused_pane_cwd),
+        ("focused_pane_agent", &context.focused_pane_agent),
+        ("tab_id", &context.tab_id),
+        ("tab_label", &context.tab_label),
+        ("workspace_id", &context.workspace_id),
+        ("workspace_label", &context.workspace_label),
+    ];
+    for (key, value) in fields {
+        if let Some(value) = non_empty(value.as_deref()) {
+            ctx.insert(key.into(), json!(value));
+        }
+    }
+    json!({ "plugin_id": plugin_id, "action_id": action_id, "context": ctx })
+}
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 fn next_id() -> String {
@@ -292,6 +353,37 @@ impl Subscription {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn plugin_actions_are_parsed_and_incomplete_ones_skipped() {
+        let result = json!({"type": "plugin_action_list", "actions": [
+            {"plugin_id": "link-trim", "action_id": "open", "title": "Open link", "command": ["node"]},
+            {"plugin_id": "x", "action_id": "y", "title": "Y", "description": "why"},
+            {"plugin_id": "broken"}
+        ]});
+        let actions = parse_plugin_actions(&result);
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].plugin_id, "link-trim");
+        assert_eq!(actions[0].description, None);
+        assert_eq!(actions[1].description.as_deref(), Some("why"));
+        assert!(parse_plugin_actions(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn plugin_invoke_params_carry_the_set_context_fields() {
+        let ctx = PluginContext {
+            focused_pane_id: Some("p_1".into()),
+            workspace_id: Some("w_1".into()),
+            tab_label: Some("  ".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            plugin_invoke_params("review-popup", "open", &ctx),
+            json!({"plugin_id": "review-popup", "action_id": "open", "context": {
+                "invocation_source": "poimen", "focused_pane_id": "p_1", "workspace_id": "w_1"
+            }})
+        );
+    }
     use super::*;
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
