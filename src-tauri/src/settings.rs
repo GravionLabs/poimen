@@ -138,6 +138,9 @@ fn resolve_sidebar_rows(sidebar: &Value, warnings: &mut Vec<String>) -> SidebarR
 pub struct Settings {
     /// `light`, `dark` or `system`.
     pub theme: String,
+    /// The color scheme name (`colorSchema`); `None` keeps the `poimen` scheme that follows `theme`.
+    /// Names are resolved in the frontend.
+    pub color_schema: Option<String>,
     /// `None` keeps the app's default monospace stack.
     pub font_family: Option<String>,
     pub font_size: f64,
@@ -304,6 +307,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: "system".into(),
+            color_schema: None,
             font_family: None,
             font_size: DEFAULT_FONT_SIZE,
             colors: None,
@@ -435,6 +439,16 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
         }
         Some(other) => s.warnings.push(format!(
             "theme {other} must be \"light\", \"dark\" or \"system\""
+        )),
+    }
+
+    match root.get("colorSchema") {
+        None => {}
+        Some(Value::String(name)) if !name.trim().is_empty() => {
+            s.color_schema = Some(name.trim().to_owned());
+        }
+        Some(other) => s.warnings.push(format!(
+            "colorSchema {other} must be a non-empty scheme name; using poimen"
         )),
     }
 
@@ -804,6 +818,23 @@ mod tests {
         assert_eq!(s.font_family.as_deref(), Some("Fira Code"));
         assert_eq!(s.font_size, 15.0);
         assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn color_schema_passes_a_name_through() {
+        assert_eq!(resolve(None, none).color_schema, None);
+        let s = resolve(Some(r#"{"colorSchema":" dracula "}"#), none);
+        assert_eq!(s.color_schema.as_deref(), Some("dracula"));
+        assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn color_schema_that_is_not_a_name_warns() {
+        for bad in ["3", "\"\"", "{\"light\":\"a\"}", "null"] {
+            let s = resolve(Some(&format!(r#"{{"colorSchema":{bad}}}"#)), none);
+            assert_eq!(s.color_schema, None, "{bad}");
+            assert_eq!(s.warnings.len(), 1, "{bad}");
+        }
     }
 
     #[test]

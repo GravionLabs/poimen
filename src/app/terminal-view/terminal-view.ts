@@ -139,7 +139,7 @@ export class TerminalView implements OnDestroy {
       this.themeObserver = new MutationObserver(() => this.applyLook());
       this.themeObserver.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ["class", "data-theme"],
+        attributeFilter: ["class", "data-theme", "style"],
       });
     }
     // Settings edits (and theme switches) apply to the open terminal without a restart.

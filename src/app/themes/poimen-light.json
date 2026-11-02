@@ -1,0 +1,27 @@
+{
+  "name": "poimen-light",
+  "label": "Poimen Light",
+  "background": "#fbfbf9",
+  "foreground": "#26272a",
+  "cursor": "#26272a",
+  "selectionBackground": "#cfe0fa",
+  "selectionForeground": "#26272a",
+  "ansi": [
+    "#26272a",
+    "#b4232a",
+    "#1f7a3a",
+    "#8a5a00",
+    "#1f5fbf",
+    "#8e3fa8",
+    "#0f7a85",
+    "#5c5f66",
+    "#4a4d55",
+    "#d6343c",
+    "#2a9a4c",
+    "#a86f00",
+    "#3a7ae0",
+    "#a855c4",
+    "#1493a0",
+    "#8a8d95"
+  ]
+}

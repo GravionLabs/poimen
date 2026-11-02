@@ -12,6 +12,7 @@ import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import { rowName, tabHeader, type Mode, type Pane } from "./core/herdr";
+import { ColorSchemeService } from "./core/color-scheme-service";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TauriBridge } from "./core/tauri";
@@ -65,6 +66,7 @@ export class App {
   protected readonly store = inject(HerdrStore);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
+  private readonly schemes = inject(ColorSchemeService);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
   private readonly paneActions = inject(PaneActions);
@@ -129,7 +131,8 @@ export class App {
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     effect((onCleanup) => {
-      const setting = this.prefs.settings().theme;
+      const { theme: setting, colorSchema } = this.prefs.settings();
+      if (this.schemes.sync(colorSchema)) return;
       if (setting !== "system") {
         this.theme.setDark(setting === "dark");
         return;
