@@ -50,3 +50,51 @@ button.item:focus-visible {
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+
+.menu-backdrop {
+  all: unset;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.menu {
+  position: fixed;
+  top: 26px;
+  left: 10px;
+  z-index: 51;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  font-size: 12px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
+}
+
+.menu-item {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.plugin,
+.menu-empty {
+  opacity: 0.6;
+}
+
+.menu-empty {
+  padding: 5px 10px;
+}

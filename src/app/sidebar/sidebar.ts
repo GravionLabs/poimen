@@ -17,10 +17,12 @@ import {
   type AgentStatus,
   type Pane,
   type PaneRow,
+  type PluginAction,
   type SpaceNode,
   type Workspace,
 } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
+import { pluginMenuId } from "../core/plugin-actions";
 import {
   DEFAULT_SIDEBAR_ROWS,
   aggregateStatus,
@@ -184,12 +186,20 @@ export function splitSections(
 export interface SidebarMenuAction {
   kind: "workspace" | "pane";
   id: string;
-  action: "new-terminal" | "split-right" | "split-down" | "start-agent" | "rename" | "close";
+  action:
+    | "new-terminal"
+    | "split-right"
+    | "split-down"
+    | "start-agent"
+    | "rename"
+    | "close"
+    | `plugin:${string}`;
 }
 
-/** Entries of the context menu of a workspace row or a pane row. */
+/** Entries of the context menu of a workspace row or a pane row; a pane row adds plugin actions. */
 export function sidebarMenuItems(
   kind: SidebarMenuAction["kind"],
+  plugins: readonly PluginAction[] = [],
 ): { action: SidebarMenuAction["action"]; label: string }[] {
   return kind === "workspace"
     ? [{ action: "new-terminal", label: "New terminal..." }]
@@ -199,6 +209,10 @@ export function sidebarMenuItems(
         { action: "start-agent", label: "Start agent..." },
         { action: "rename", label: "Rename..." },
         { action: "close", label: "Close pane..." },
+        ...plugins.map((a) => ({
+          action: pluginMenuId(a) as SidebarMenuAction["action"],
+          label: a.title,
+        })),
       ];
 }
 
@@ -227,6 +241,8 @@ export class Sidebar {
   readonly openIds = input<ReadonlySet<string>>(new Set());
   /** Id of the pane whose tab is active in the editor. */
   readonly activeId = input<string | null>(null);
+  /** The herdr plugin actions the pane context menu offers. */
+  readonly pluginActions = input<readonly PluginAction[]>([]);
   readonly selected = output<Pane>();
   /** A second click on the same row within {@link DOUBLE_CLICK_MS}: pin the tab. */
   readonly pinned = output<Pane>();
@@ -239,7 +255,9 @@ export class Sidebar {
     x: number;
     y: number;
   } | null>(null);
-  protected readonly menuItems = sidebarMenuItems;
+  protected menuItems(kind: SidebarMenuAction["kind"]) {
+    return sidebarMenuItems(kind, this.pluginActions());
+  }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
     event.preventDefault();

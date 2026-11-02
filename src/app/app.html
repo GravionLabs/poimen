@@ -1,4 +1,12 @@
-<app-toolbar [theme]="theme$()" [fixedBy]="fixedBy()" (themeChange)="setTheme($event)" />
+<app-toolbar
+  [plugins]="plugins.actions()"
+  [pluginsError]="plugins.error()"
+  (pluginsOpened)="loadPlugins()"
+  (pluginChosen)="onPluginChosen($event)"
+  [theme]="theme$()"
+  [fixedBy]="fixedBy()"
+  (themeChange)="setTheme($event)"
+/>
 <div class="work">
   <app-activity-bar
     [active]="ui.activeView()"
@@ -16,6 +24,7 @@
           [activeId]="editor.activeId()"
           (selected)="open($event)"
           (pinned)="open($event, true)"
+          [pluginActions]="plugins.actions()"
           (menuAction)="onSidebarMenu($event)"
         />
       }

@@ -4,6 +4,7 @@ import { CommandPalette } from "./command-palette";
 import type { PluginAction, Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import { Keymap } from "./keymap";
+import { PluginActions } from "./plugin-actions";
 import { SettingsStore } from "./settings";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -41,7 +42,7 @@ describe("CommandPalette", () => {
       action("review-popup", "open", "Open the review popup"),
     ]);
     const injector = Injector.create({
-      providers: [TauriBridge, HerdrStore, SettingsStore, Keymap, CommandPalette],
+      providers: [TauriBridge, HerdrStore, SettingsStore, Keymap, PluginActions, CommandPalette],
     });
     await injector.get(HerdrStore).refresh();
     palette = injector.get(CommandPalette);
