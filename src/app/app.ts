@@ -12,6 +12,7 @@ import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import { rowName, tabHeader, type Mode, type Pane } from "./core/herdr";
+import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
@@ -130,15 +131,13 @@ export class App {
     const destroyRef = inject(DestroyRef);
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
-    effect((onCleanup) => {
+    effect(() => {
       const { theme: setting, colorSchema } = this.prefs.settings();
-      if (this.schemes.sync(colorSchema)) return;
-      if (setting !== "system") {
-        this.theme.setDark(setting === "dark");
-        return;
-      }
-      onCleanup(this.followSystemTheme());
+      const systemDark = this.systemDark();
+      if (this.schemes.sync(pickSchemeName(colorSchema, setting, systemDark))) return;
+      this.theme.setDark(setting === "system" ? systemDark : setting === "dark");
     });
+    destroyRef.onDestroy(this.followSystemTheme());
     void this.prefs.start();
     void this.store.start().then(() => this.dropMissing());
   }
@@ -165,6 +164,9 @@ export class App {
   protected readonly rootNode = computed<LayoutNode>(() => this.editor.layout());
 
   protected readonly theme$ = computed(() => this.prefs.settings().theme);
+
+  /** The scheme that fixes light or dark, so the theme button cannot act; `null` when it can. */
+  protected readonly fixedBy = computed(() => fixedSchemeName(this.prefs.settings().colorSchema));
 
   protected setTheme(theme: ThemeSetting): void {
     void this.prefs.setTheme(theme);
@@ -354,11 +356,14 @@ export class App {
     return this.store.panes().get(id) ?? this.known.get(id);
   }
 
-  /** HxTheme reads the system setting once; keep light/dark in step when it changes. */
+  /** The OS appearance; light when it cannot be read. */
+  private readonly systemDark = signal(false);
+
+  /** HxTheme reads the system setting once; track the OS appearance as it changes. */
   private followSystemTheme(): () => void {
     if (typeof matchMedia !== "function") return () => undefined;
     const query = matchMedia("(prefers-color-scheme: dark)");
-    const update = () => this.theme.setDark(query.matches);
+    const update = () => this.systemDark.set(query.matches);
     update();
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);

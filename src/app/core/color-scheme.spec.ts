@@ -8,6 +8,8 @@ import {
   luminance,
   deriveTokens,
   mix,
+  fixedSchemeName,
+  pickSchemeName,
   resolveScheme,
   type ColorScheme,
 } from "./color-scheme";
@@ -198,5 +200,37 @@ describe("resolveScheme", () => {
   it("lets a user scheme of the same name win", () => {
     const mine = { ...dracula, label: "Mine" };
     expect(resolveScheme("dracula", new Map([["dracula", mine]]))?.label).toBe("Mine");
+  });
+});
+
+describe("pickSchemeName", () => {
+  const pair = { light: "one-light", dark: "dracula" };
+
+  it("picks the slot of an explicit theme", () => {
+    expect(pickSchemeName(pair, "light", true)).toBe("one-light");
+    expect(pickSchemeName(pair, "dark", false)).toBe("dracula");
+  });
+
+  it("follows the OS appearance for system", () => {
+    expect(pickSchemeName(pair, "system", false)).toBe("one-light");
+    expect(pickSchemeName(pair, "system", true)).toBe("dracula");
+  });
+
+  it("passes a single name or null through whatever the theme", () => {
+    expect(pickSchemeName("dracula", "light", false)).toBe("dracula");
+    expect(pickSchemeName(null, "dark", true)).toBeNull();
+  });
+});
+
+describe("fixedSchemeName", () => {
+  it("is the name of a single known scheme", () => {
+    expect(fixedSchemeName("dracula")).toBe("dracula");
+  });
+
+  it("is null when theme still decides", () => {
+    expect(fixedSchemeName(null)).toBeNull();
+    expect(fixedSchemeName("poimen")).toBeNull();
+    expect(fixedSchemeName("nope")).toBeNull();
+    expect(fixedSchemeName({ light: "one-light", dark: "dracula" })).toBeNull();
   });
 });

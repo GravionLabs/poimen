@@ -41,10 +41,14 @@ describe("parseSettings", () => {
     });
   });
 
-  it("keeps colorSchema only as a non-empty string", () => {
+  it("keeps colorSchema only as a non-empty string or a complete pair", () => {
     expect(parseSettings({}).colorSchema).toBeNull();
-    for (const bad of [3, "", "  ", { light: "a" }, null])
+    for (const bad of [3, "", "  ", { light: "a" }, { light: "a", dark: 1 }, null])
       expect(parseSettings({ colorSchema: bad }).colorSchema).toBeNull();
+    expect(parseSettings({ colorSchema: { light: " a ", dark: "b" } }).colorSchema).toEqual({
+      light: "a",
+      dark: "b",
+    });
   });
 
   it("merges the shortcuts over the defaults and ignores bad entries", () => {

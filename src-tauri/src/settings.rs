@@ -132,15 +132,23 @@ fn resolve_sidebar_rows(sidebar: &Value, warnings: &mut Vec<String>) -> SidebarR
     out
 }
 
+/// The `colorSchema` setting: one scheme name, or a light/dark pair picked by `theme`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ColorSchema {
+    Name(String),
+    Pair { light: String, dark: String },
+}
+
 /// The resolved settings sent to the frontend (event `settings`, command `get_settings`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     /// `light`, `dark` or `system`.
     pub theme: String,
-    /// The color scheme name (`colorSchema`); `None` keeps the `poimen` scheme that follows `theme`.
-    /// Names are resolved in the frontend.
-    pub color_schema: Option<String>,
+    /// The `colorSchema`: a name or a light/dark pair; `None` keeps the `poimen` scheme that follows
+    /// `theme`. Names are resolved in the frontend.
+    pub color_schema: Option<ColorSchema>,
     /// `None` keeps the app's default monospace stack.
     pub font_family: Option<String>,
     pub font_size: f64,
@@ -445,10 +453,25 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     match root.get("colorSchema") {
         None => {}
         Some(Value::String(name)) if !name.trim().is_empty() => {
-            s.color_schema = Some(name.trim().to_owned());
+            s.color_schema = Some(ColorSchema::Name(name.trim().to_owned()));
+        }
+        Some(Value::Object(pair)) => {
+            let side = |key: &str| match pair.get(key) {
+                Some(Value::String(n)) if !n.trim().is_empty() => Some(n.trim().to_owned()),
+                _ => None,
+            };
+            match (side("light"), side("dark")) {
+                (Some(light), Some(dark)) => {
+                    s.color_schema = Some(ColorSchema::Pair { light, dark });
+                }
+                _ => s.warnings.push(
+                    "colorSchema pair needs \"light\" and \"dark\" scheme names; using poimen"
+                        .to_owned(),
+                ),
+            }
         }
         Some(other) => s.warnings.push(format!(
-            "colorSchema {other} must be a non-empty scheme name; using poimen"
+            "colorSchema {other} must be a scheme name or a {{\"light\", \"dark\"}} pair; using poimen"
         )),
     }
 
@@ -824,13 +847,48 @@ mod tests {
     fn color_schema_passes_a_name_through() {
         assert_eq!(resolve(None, none).color_schema, None);
         let s = resolve(Some(r#"{"colorSchema":" dracula "}"#), none);
-        assert_eq!(s.color_schema.as_deref(), Some("dracula"));
+        assert_eq!(s.color_schema, Some(ColorSchema::Name("dracula".into())));
         assert!(s.warnings.is_empty());
     }
 
     #[test]
+    fn color_schema_accepts_a_light_dark_pair() {
+        let s = resolve(
+            Some(r#"{"colorSchema":{"light":" one-light ","dark":"dracula"}}"#),
+            none,
+        );
+        assert_eq!(
+            s.color_schema,
+            Some(ColorSchema::Pair {
+                light: "one-light".into(),
+                dark: "dracula".into()
+            })
+        );
+        assert!(s.warnings.is_empty());
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            json["colorSchema"],
+            serde_json::json!({"light": "one-light", "dark": "dracula"})
+        );
+    }
+
+    #[test]
+    fn color_schema_pair_needs_two_names() {
+        for bad in [
+            r#"{"light":"a"}"#,
+            r#"{"light":"a","dark":3}"#,
+            r#"{"light":"","dark":"b"}"#,
+            "{}",
+        ] {
+            let s = resolve(Some(&format!(r#"{{"colorSchema":{bad}}}"#)), none);
+            assert_eq!(s.color_schema, None, "{bad}");
+            assert_eq!(s.warnings.len(), 1, "{bad}");
+        }
+    }
+
+    #[test]
     fn color_schema_that_is_not_a_name_warns() {
-        for bad in ["3", "\"\"", "{\"light\":\"a\"}", "null"] {
+        for bad in ["3", "\"\"", "null", "[\"a\"]"] {
             let s = resolve(Some(&format!(r#"{{"colorSchema":{bad}}}"#)), none);
             assert_eq!(s.color_schema, None, "{bad}");
             assert_eq!(s.warnings.len(), 1, "{bad}");

@@ -1,3 +1,4 @@
+import type { ColorSchemeSetting, ThemeSetting } from "./settings";
 import catppuccin from "../themes/catppuccin.json";
 import dracula from "../themes/dracula.json";
 import gruvbox from "../themes/gruvbox.json";
@@ -75,6 +76,29 @@ export function resolveScheme(
   if (scheme) return scheme;
   warn(`poimen settings: unknown colorSchema "${name}"; using ${DEFAULT_SCHEME}`);
   return null;
+}
+
+/**
+ * The scheme name a `colorSchema` selects: a single name as is, a pair by `theme` (`system` follows
+ * the OS appearance, `systemDark`). `null` is the default look.
+ */
+export function pickSchemeName(
+  schema: ColorSchemeSetting | null,
+  theme: ThemeSetting,
+  systemDark: boolean,
+): string | null {
+  if (schema === null || typeof schema === "string") return schema;
+  const dark = theme === "system" ? systemDark : theme === "dark";
+  return dark ? schema.dark : schema.light;
+}
+
+/**
+ * The scheme name that fixes light or dark (a single known scheme other than `poimen`), or `null`
+ * when `theme` still decides (a pair, no scheme, `poimen`, or an unknown name that falls back).
+ */
+export function fixedSchemeName(schema: ColorSchemeSetting | null): string | null {
+  if (typeof schema !== "string") return null;
+  return resolveScheme(schema, bundled, () => undefined) ? schema : null;
 }
 
 // --- color math ------------------------------------------------------------------------------
