@@ -14,3 +14,19 @@ export function linkHandler(open: (url: string) => Promise<void>) {
     if (isOpenableUrl(uri)) void open(uri).catch(() => undefined);
   };
 }
+
+/** Whether the platform opens links with Cmd (macOS); elsewhere Ctrl does. */
+export function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+}
+
+/**
+ * Whether `event` holds the modifier that works a link in input mode: Cmd on macOS, Ctrl elsewhere
+ * (Ctrl+click is the context menu on macOS). Such a press bypasses the mouse forwarding, like Shift.
+ */
+export function holdsLinkModifier(
+  event: { metaKey: boolean; ctrlKey: boolean },
+  mac = isMacPlatform(),
+): boolean {
+  return mac ? event.metaKey : event.ctrlKey;
+}

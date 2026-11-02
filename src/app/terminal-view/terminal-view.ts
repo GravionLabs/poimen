@@ -21,7 +21,7 @@ import { TauriBridge } from "../core/tauri";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
-import { linkHandler } from "./links";
+import { holdsLinkModifier, linkHandler } from "./links";
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -88,6 +88,8 @@ export class TerminalView implements OnDestroy {
   private destroyed = false;
   private framed = false;
   private detachMouse?: () => void;
+  /** Whether the pointer is over a link (xterm reports it for every renderer). */
+  private linkHovered = false;
   private endDrag?: () => void;
   /** Counts connects; a result of an older one is dropped. */
   private generation = 0;
@@ -151,7 +153,17 @@ export class TerminalView implements OnDestroy {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon(linkHandler((url) => this.tauri.openUrl(url))));
+    // xterm marks a hovered link itself (underline, pointer); the view only needs to know about it.
+    this.linkHovered = false;
+    term.loadAddon(
+      new WebLinksAddon(
+        linkHandler((url) => this.tauri.openUrl(url)),
+        {
+          hover: () => (this.linkHovered = true),
+          leave: () => (this.linkHovered = false),
+        },
+      ),
+    );
     term.open(this.body().nativeElement);
     try {
       term.loadAddon(new WebglAddon());
@@ -175,14 +187,21 @@ export class TerminalView implements OnDestroy {
     this.resizeObserver.observe(this.body().nativeElement);
   }
 
+  /** A press with the link modifier over a link opens it instead of going to the pane application. */
+  private opensLink(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
+    return this.linkHovered && holdsLinkModifier(event);
+  }
+
   /**
    * herdr's stream is a rendered screen: it carries no DECSET 1000/1002/1003/1006, so xterm never
    * enables mouse tracking and would never report anything. The mouse is therefore forwarded as
    * `terminal.mouse` cells; herdr encodes them for the pane application's mouse mode and drops
    * them when the application did not ask for the mouse. herdr does not expose that mode to
    * clients, so it cannot be checked here; a held Shift (as in other terminals) bypasses the
-   * forwarding and leaves xterm's text selection and the native context menu; Cmd (Meta) does the
-   * same so a link can be clicked (the web-links addon sees the click only then). Read-only tabs send
+   * forwarding and leaves xterm's text selection and the native context menu; so does Cmd on macOS
+   * or Ctrl elsewhere while the pointer is over a link, which is how a link is opened in input mode
+   * (the web-links addon sees the click only then; Ctrl+click is the context menu on macOS, hence
+   * Cmd there). Ctrl elsewhere stays the pane application's modifier outside a link. Read-only tabs send
    * nothing. Returns the function that removes every listener.
    */
   private attachMouse(host: HTMLElement): () => void {
@@ -214,7 +233,7 @@ export class TerminalView implements OnDestroy {
     };
     const onMove = (event: MouseEvent) => {
       if (pressed) send(event, "drag", event.button);
-      else if (!event.shiftKey && !event.metaKey) send(event, "move", 0);
+      else if (!event.shiftKey && !this.opensLink(event)) send(event, "move", 0);
     };
     const onHostMove = (event: MouseEvent) => {
       if (!pressed) onMove(event);
@@ -230,7 +249,7 @@ export class TerminalView implements OnDestroy {
       release();
     }
     const onDown = (event: MouseEvent) => {
-      if (this.attempt !== "control" || event.shiftKey || event.metaKey) return; // Shift: xterm selects text, Cmd: links
+      if (this.attempt !== "control" || event.shiftKey || this.opensLink(event)) return; // Shift: xterm selects text, Cmd (macOS) or Ctrl over a link: open it
       event.stopPropagation(); // no text selection while the pane application owns the mouse
       event.preventDefault();
       this.term?.focus();
@@ -351,6 +370,7 @@ export class TerminalView implements OnDestroy {
     this.closeStream();
     this.detachMouse?.();
     this.detachMouse = undefined;
+    this.linkHovered = false;
     this.endDrag = undefined;
     clearTimeout(this.resizeTimer);
     this.resizeObserver?.disconnect();

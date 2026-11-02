@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { isOpenableUrl, linkHandler } from "./links";
+import { holdsLinkModifier, isOpenableUrl, linkHandler } from "./links";
 
 describe("isOpenableUrl", () => {
   it.each(["https://github.com/GravionLabs/poimen/pull/69", "http://localhost:4200/x?a=1#b"])(
@@ -37,5 +38,17 @@ describe("linkHandler", () => {
     const open = vi.fn(async () => Promise.reject(new Error("denied")));
     expect(() => linkHandler(open)(event, "https://example.com")).not.toThrow();
     await Promise.resolve();
+  });
+});
+
+describe("holdsLinkModifier", () => {
+  it("is Cmd on macOS", () => {
+    expect(holdsLinkModifier({ metaKey: true, ctrlKey: false }, true)).toBe(true);
+    expect(holdsLinkModifier({ metaKey: false, ctrlKey: true }, true)).toBe(false);
+  });
+
+  it("is Ctrl elsewhere", () => {
+    expect(holdsLinkModifier({ metaKey: false, ctrlKey: true }, false)).toBe(true);
+    expect(holdsLinkModifier({ metaKey: true, ctrlKey: false }, false)).toBe(false);
   });
 });
