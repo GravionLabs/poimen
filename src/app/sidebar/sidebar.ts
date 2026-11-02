@@ -1,6 +1,8 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  Injector,
+  afterNextRender,
   computed,
   inject,
   input,
@@ -69,6 +71,7 @@ export class Sidebar {
   readonly pinned = output<Pane>();
   private last: { key: string; at: number } | null = null;
 
+  private readonly injector = inject(Injector);
   protected readonly store = inject(HerdrStore);
   protected readonly query = signal("");
   protected readonly selection = signal<string | null>(null);
@@ -88,8 +91,11 @@ export class Sidebar {
       .spaces()
       .flatMap((s) => s.rows)
       .find((r) => r.pane.pane_id === key);
-    // Reset so the same row can be picked again.
-    this.selection.set(null);
+    // hx-tree skips equal values, so it reports a row once while it stays selected. Hold the key in
+    // the binding for one render (the tree sees it), then clear it: the tree is reset to null and
+    // reports the same row again. Setting null right here would be a no-op for the binding.
+    this.selection.set(key);
+    afterNextRender(() => this.selection.set(null), { injector: this.injector });
     if (!row) return;
     const now = Date.now();
     const double = isDoubleClick(this.last, key, now);
