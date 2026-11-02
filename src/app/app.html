@@ -1,4 +1,24 @@
-<app-sidebar [openIds]="openIds()" (selected)="open($event)" />
+<app-activity-bar [expanded]="!ui.sidebarCollapsed()" (selected)="ui.toggleSidebar()" />
+@if (!ui.sidebarCollapsed()) {
+  <div class="side" [style.width.px]="ui.sidebarWidth()">
+    <app-sidebar [openIds]="openIds()" (selected)="open($event)" />
+  </div>
+  <div
+    class="resizer"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize sidebar"
+    tabindex="0"
+    [attr.aria-valuenow]="ui.sidebarWidth()"
+    [attr.aria-valuemin]="minWidth"
+    [attr.aria-valuemax]="maxWidth"
+    (pointerdown)="dragStart($event)"
+    (pointermove)="dragMove($event)"
+    (pointerup)="dragEnd($event)"
+    (pointercancel)="dragEnd($event)"
+    (keydown)="resizeKey($event)"
+  ></div>
+}
 <main class="views">
   @for (pane of views(); track pane.pane_id) {
     <app-terminal-view [pane]="pane" (closed)="closed(pane.pane_id)" />

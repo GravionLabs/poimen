@@ -1,5 +1,5 @@
 :host {
-  width: 260px;
+  width: 100%;
   flex: none;
   display: flex;
   flex-direction: column;

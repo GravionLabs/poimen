@@ -23,3 +23,26 @@
 .empty .hint {
   font-size: 12px;
 }
+
+.side {
+  flex: none;
+  display: flex;
+  min-width: 0;
+  max-width: calc(100vw - 48px - 320px);
+}
+
+.resizer {
+  flex: none;
+  width: 5px;
+  margin: 0 -2px 0 -3px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizer:hover,
+.resizer:focus-visible,
+.resizer.dragging {
+  background: color-mix(in srgb, var(--status-working) 50%, transparent);
+  outline: none;
+}
