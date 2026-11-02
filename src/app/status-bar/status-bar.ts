@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, input, output } from "@angular/core";
-import { HxSwitch } from "@gravionlabs/helix-ui";
 import type { ConnectionState } from "../core/herdr-store";
 import {
   appVersionLabel,
@@ -32,7 +31,7 @@ export function modeLabel(mode: Mode, blocked: string | null): string {
   return blocked ? "Read-only (controlled elsewhere)" : "Read-only";
 }
 
-/** Tooltip of the mode switch. */
+/** Tooltip of the mode button. */
 export function modeTitle(blocked: string | null): string {
   return blocked
     ? `Another client controls this terminal (${blocked}); use Take over to switch`
@@ -42,7 +41,6 @@ export function modeTitle(blocked: string | null): string {
 /** Bottom bar: herdr connection, waiting agents (click jumps to the next) and the active tab. */
 @Component({
   selector: "app-status-bar",
-  imports: [HxSwitch],
   templateUrl: "./status-bar.html",
   styleUrl: "./status-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -59,7 +57,7 @@ export class StatusBar {
   readonly appVersion = input<string | null>(null);
   readonly info = input<HerdrInfo | null>(null);
   readonly jump = output<void>();
-  /** The user flips the mode switch: `true` asks for input. */
+  /** The user flips the mode button: `true` asks for input. */
   readonly control = output<boolean>();
 
   protected readonly label = connectionLabel;
