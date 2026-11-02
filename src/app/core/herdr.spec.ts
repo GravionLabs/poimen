@@ -6,6 +6,7 @@ import {
   nextWaiting,
   paneLabel,
   rowName,
+  tabHeader,
   waitingCount,
   type Pane,
   type Snapshot,
@@ -119,5 +120,30 @@ describe("nextWaiting", () => {
   });
   it("is undefined when nothing waits", () => {
     expect(nextWaiting([pane({ pane_id: "b" })], "b")).toBeUndefined();
+  });
+});
+
+describe("tabHeader", () => {
+  it("puts the workspace before the pane name and builds the full tooltip", () => {
+    expect(tabHeader("Poimen", "Deliver milestone 0.1.0")).toEqual({
+      group: "Poimen",
+      label: "Deliver milestone 0.1.0",
+      title: "POIMEN / Deliver milestone 0.1.0",
+    });
+    expect(tabHeader("Poimen", "terminal").title).toBe("POIMEN / terminal");
+  });
+
+  it("keeps a long name whole for truncation by CSS", () => {
+    const name = "x".repeat(200);
+    expect(tabHeader("W", name).title).toBe(`W / ${name}`);
+  });
+
+  it("is only the name without a workspace", () => {
+    expect(tabHeader(undefined, "claude")).toEqual({
+      group: undefined,
+      label: "claude",
+      title: "claude",
+    });
+    expect(tabHeader("  ", "claude").group).toBeUndefined();
   });
 });

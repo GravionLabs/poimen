@@ -13,12 +13,19 @@
   --status-blocked: var(--h-orange-500);
   --status-done: var(--h-green-500);
   --status-unknown: var(--h-surface-300);
+  /* State text on the tinted active sidebar row (see sidebar.css): AA >= 4.5 on that tint. */
+  --status-working-on-active: var(--h-blue-800);
+  --status-blocked-on-active: var(--h-orange-800);
+  --status-done-on-active: var(--h-green-800);
 }
 
 :root.app-dark {
   --app-ground: var(--h-surface-950);
   --term-bg: #111214;
   --status-unknown: var(--h-surface-600);
+  --status-working-on-active: var(--h-blue-300);
+  --status-blocked-on-active: var(--h-orange-300);
+  --status-done-on-active: var(--h-green-300);
 }
 
 * {

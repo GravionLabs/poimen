@@ -19,7 +19,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  max-width: 240px;
+  max-width: 320px;
   padding: 0 6px 0 12px;
   border-right: 1px solid var(--h-content-border-color);
   color: var(--h-text-muted-color);
@@ -44,6 +44,18 @@
 
 .tab.drop-after {
   box-shadow: inset -2px 0 0 var(--h-primary-color);
+}
+
+.group {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
 }
 
 .label {
