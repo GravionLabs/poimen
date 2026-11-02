@@ -9,4 +9,34 @@
   [value]="nodes()"
   (nodeExpand)="onExpand($event)"
   (nodeCollapse)="onCollapse($event)"
-/>
+>
+  <ng-template hxTreeNode let-node>
+    <span class="dir" (contextmenu)="openMenu($event, node.key)" (dblclick)="createSpace(node.key)">
+      <span class="hx-tree-node-label">{{ node.label }}</span>
+      @if (withSpace().has(node.key)) {
+        <span class="has-space" title="Has a space" aria-label="Has a space">●</span>
+      }
+    </span>
+  </ng-template>
+</hx-tree>
+@if (menuAt(); as at) {
+  <button
+    type="button"
+    class="menu-backdrop"
+    tabindex="-1"
+    aria-label="Close menu"
+    (click)="closeMenu()"
+    (contextmenu)="$event.preventDefault(); closeMenu()"
+  ></button>
+  <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
+    <button
+      type="button"
+      role="menuitem"
+      class="menu-item"
+      (click)="createSpace(at.path)"
+      (keydown.escape)="closeMenu()"
+    >
+      Create space here
+    </button>
+  </div>
+}

@@ -7,8 +7,10 @@ import {
   signal,
   untracked,
 } from "@angular/core";
-import { HxTree } from "@gravionlabs/helix-ui";
+import { HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
+import { HerdrStore } from "../core/herdr-store";
+import { SpaceActions } from "../core/space-actions";
 import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
@@ -41,10 +43,21 @@ export function explorerNodes(
   return roots.map((r) => build(r, r));
 }
 
+/** Directories (trailing slashes ignored) that are the working directory of a pane of some space. */
+export function spaceDirs(
+  panes: readonly { cwd?: string; foreground_cwd?: string }[],
+): Set<string> {
+  const dirs = new Set<string>();
+  for (const p of panes) {
+    for (const d of [p.cwd, p.foreground_cwd]) if (d) dirs.add(d.replace(/(.)\/+$/, "$1"));
+  }
+  return dirs;
+}
+
 /** Directory tree of the configured roots, directories only, loaded when a folder expands. */
 @Component({
   selector: "app-explorer",
-  imports: [HxTree],
+  imports: [HxTree, HxTreeNodeTemplate],
   templateUrl: "./explorer.html",
   styleUrl: "./explorer.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -53,6 +66,8 @@ export class Explorer {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState);
   private readonly settings = inject(SettingsStore);
+  private readonly store = inject(HerdrStore);
+  private readonly spaceActions = inject(SpaceActions);
   private readonly children = signal<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
   private readonly requested = new Set<string>();
 
@@ -62,6 +77,26 @@ export class Explorer {
   protected readonly nodes = computed(() =>
     explorerNodes(this.roots(), this.children(), this.ui.expandedDirs()),
   );
+
+  /** Directories that already have a space. */
+  protected readonly withSpace = computed(() => spaceDirs(this.store.snapshot().panes));
+  protected readonly menuAt = signal<{ path: string; x: number; y: number } | null>(null);
+
+  protected openMenu(event: MouseEvent, path: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.menuAt.set({ path, x: event.clientX, y: event.clientY });
+  }
+
+  protected closeMenu(): void {
+    this.menuAt.set(null);
+  }
+
+  /** Creates the space of a directory, or focuses the one it already has. */
+  protected createSpace(path: string): void {
+    this.closeMenu();
+    void this.spaceActions.create(path, "");
+  }
 
   constructor() {
     // Roots or the hidden switch changed: start over and reload the roots; remembered folders reload as their parents load.

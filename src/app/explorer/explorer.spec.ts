@@ -4,10 +4,12 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { HerdrStore } from "../core/herdr-store";
+import { SpaceActions } from "../core/space-actions";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UI_STATE_KEY, UI_STORAGE } from "../core/ui-state";
-import { Explorer, explorerNodes, type DirEntry } from "./explorer";
+import { Explorer, explorerNodes, spaceDirs, type DirEntry } from "./explorer";
 
 const dir = (path: string): DirEntry => ({ path, name: path.split("/").pop()! });
 
@@ -40,7 +42,8 @@ const tree: Record<string, DirEntry[]> = {
   "/r/locked": [],
 };
 
-async function setup(stored?: object, roots: string[] = ["/r"]) {
+async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: string[] = []) {
+  const create = vi.fn(async () => undefined);
   TestBed.resetTestingModule();
   const calls: { path: string; hidden: boolean }[] = [];
   const data = new Map<string, string>();
@@ -55,6 +58,13 @@ async function setup(stored?: object, roots: string[] = ["/r"]) {
             if (args.path === "/r/locked") throw new Error("permission denied");
             return tree[args.path] ?? [];
           }),
+        },
+      },
+      { provide: SpaceActions, useValue: { create } },
+      {
+        provide: HerdrStore,
+        useValue: {
+          snapshot: signal({ workspaces: [], tabs: [], panes: spaceCwds.map((cwd) => ({ cwd })) }),
         },
       },
       {
@@ -97,7 +107,11 @@ async function setup(stored?: object, roots: string[] = ["/r"]) {
     item!.querySelector<HTMLElement>(".hx-tree-node-toggle")!.click();
     await settle();
   };
-  return { calls, data, labels, toggle };
+  const item = (label: string) =>
+    [...root.querySelectorAll('[role="treeitem"]')].find(
+      (e) => e.querySelector(".hx-tree-node-label")?.textContent?.trim() === label,
+    )!;
+  return { calls, data, labels, toggle, create, item, root, settle };
 }
 
 describe("Explorer with the real hx-tree", () => {
@@ -135,5 +149,42 @@ describe("Explorer with the real hx-tree", () => {
     tree["/home/x/code"] = [dir("/home/x/code/app")];
     const { labels } = await setup({ expandedDirs: ["~", "/home/x/code"] }, ["~"]);
     expect(labels()).toEqual(["~", "code", "app"]);
+  });
+
+  it("marks directories that have a space", async () => {
+    const { toggle, item } = await setup(undefined, ["/r"], ["/r/a/"]);
+    await toggle("/r");
+    expect(item("a").querySelector(".has-space")).not.toBeNull();
+    expect(item("locked").querySelector(".has-space")).toBeNull();
+  });
+
+  it("creates a space from the context menu", async () => {
+    const { toggle, item, root, create, settle } = await setup();
+    await toggle("/r");
+    item("a")
+      .querySelector(".dir")!
+      .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await settle();
+    root.querySelector<HTMLElement>('[role="menuitem"]')!.click();
+    await settle();
+    expect(create).toHaveBeenCalledWith("/r/a", "");
+    expect(root.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("creates (or focuses) a space on double-click", async () => {
+    const { toggle, item, create } = await setup();
+    await toggle("/r");
+    item("a")
+      .querySelector(".dir")!
+      .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(create).toHaveBeenCalledWith("/r/a", "");
+  });
+});
+
+describe("spaceDirs", () => {
+  it("collects cwd and foreground cwd without trailing slashes and skips empty ones", () => {
+    expect(
+      spaceDirs([{ cwd: "/a/", foreground_cwd: "/a/b" }, { cwd: "" }, {}, { cwd: "/" }]),
+    ).toEqual(new Set(["/a", "/a/b", "/"]));
   });
 });
