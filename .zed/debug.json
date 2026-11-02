@@ -1,0 +1,17 @@
+// Zed debug scenarios: run with `debugger: start`.
+// Start the "ng serve (port 1420)" task first: a debug build loads the frontend from
+// devUrl (http://localhost:1420) and Zed has no background pre-launch task.
+[
+  {
+    "label": "Debug Rust",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "build": {
+      "command": "cargo",
+      "args": ["build", "--manifest-path=src-tauri/Cargo.toml", "--bin=poimen"],
+      "cwd": "$ZED_WORKTREE_ROOT"
+    },
+    "program": "$ZED_WORKTREE_ROOT/src-tauri/target/debug/poimen",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]
