@@ -42,6 +42,17 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
   }));
 }
 
+export const DOUBLE_CLICK_MS = 400;
+
+/** Whether a click on `key` at `now` completes a double click that started with `last`. */
+export function isDoubleClick(
+  last: { key: string; at: number } | null,
+  key: string,
+  now: number,
+): boolean {
+  return last !== null && last.key === key && now - last.at <= DOUBLE_CLICK_MS;
+}
+
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
 @Component({
   selector: "app-sidebar",
@@ -54,6 +65,9 @@ export class Sidebar {
   /** Ids of the panes that have an open view. */
   readonly openIds = input<ReadonlySet<string>>(new Set());
   readonly selected = output<Pane>();
+  /** A second click on the same row within {@link DOUBLE_CLICK_MS}: pin the tab. */
+  readonly pinned = output<Pane>();
+  private last: { key: string; at: number } | null = null;
 
   protected readonly store = inject(HerdrStore);
   protected readonly query = signal("");
@@ -76,7 +90,12 @@ export class Sidebar {
       .find((r) => r.pane.pane_id === key);
     // Reset so the same row can be picked again.
     this.selection.set(null);
-    if (row) this.selected.emit(row.pane);
+    if (!row) return;
+    const now = Date.now();
+    const double = isDoubleClick(this.last, key, now);
+    this.last = double ? null : { key, at: now };
+    if (double) this.pinned.emit(row.pane);
+    else this.selected.emit(row.pane);
   }
 
   protected setQuery(event: Event): void {

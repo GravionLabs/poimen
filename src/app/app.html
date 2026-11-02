@@ -1,7 +1,11 @@
 <app-activity-bar [expanded]="!ui.sidebarCollapsed()" (selected)="ui.toggleSidebar()" />
 @if (!ui.sidebarCollapsed()) {
   <div class="side" [style.width.px]="ui.sidebarWidth()">
-    <app-sidebar [openIds]="openIds()" (selected)="open($event)" />
+    <app-sidebar
+      [openIds]="editor.openIds()"
+      (selected)="open($event)"
+      (pinned)="open($event, true)"
+    />
   </div>
   <div
     class="resizer"
@@ -20,14 +24,49 @@
   ></div>
 }
 <main class="views">
-  @for (pane of views(); track pane.pane_id) {
-    <app-terminal-view [pane]="pane" (closed)="closed(pane.pane_id)" />
-  } @empty {
+  @if (editor.tabs().length) {
+    <app-tab-bar
+      [tabs]="tabItems()"
+      [activeId]="editor.activeId()"
+      (selected)="editor.activate($event)"
+      (closed)="editor.close($event)"
+      (pinned)="editor.pin($event)"
+      (moved)="editor.move($event.from, $event.to)"
+    >
+      <ng-template #tabContent let-tab>
+        @let p = tabPane(tab.id);
+        <span class="dot status-{{ p?.agent_status ?? 'unknown' }}"></span>
+        @if (editor.mode(tab.id) === "control") {
+          <span class="mode" title="Input mode: keystrokes go to the pane">IN</span>
+        } @else {
+          <span class="mode ro" title="Read-only">RO</span>
+        }
+      </ng-template>
+      @if (editor.activeId(); as id) {
+        <label class="mode-switch" title="Switch between read-only and input">
+          <span>{{ tabMode(id) }}</span>
+          <input
+            hx-switch
+            type="checkbox"
+            aria-label="Input mode"
+            [checked]="activeControl()"
+            (change)="setControl(id, $any($event.target).checked)"
+          />
+        </label>
+      }
+    </app-tab-bar>
+    @for (p of [activePane()]; track p?.pane_id) {
+      @if (p) {
+        <app-terminal-view [pane]="p" [mode]="editor.mode(p.pane_id)" />
+      }
+    }
+  } @else {
     <div class="empty">
       <p>Pick a pane on the left.</p>
       <p class="hint">
-        Panes open read-only. Switch a card to <em>Input</em> to type into it. Collapsing a card
-        only closes the view; the herdr pane keeps running.
+        A click previews a pane in a tab, a double click pins it. Panes open read-only; use the
+        switch in the tab bar to type into one. Closing a tab only closes the view; the herdr pane
+        keeps running.
       </p>
     </div>
   }

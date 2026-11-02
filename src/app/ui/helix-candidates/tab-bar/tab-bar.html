@@ -1,0 +1,40 @@
+<div class="strip" role="tablist" aria-orientation="horizontal">
+  @for (tab of tabs(); track tab.id; let i = $index) {
+    <div
+      class="tab"
+      role="tab"
+      draggable="true"
+      [class.active]="tab.id === activeId()"
+      [class.preview]="tab.preview"
+      [class.drop-before]="dropAt() === i && dragging() !== null && dragging()! > i"
+      [class.drop-after]="dropAt() === i && dragging() !== null && dragging()! < i"
+      [attr.aria-selected]="tab.id === activeId()"
+      [attr.tabindex]="tab.id === activeId() ? 0 : -1"
+      [title]="tab.title ?? tab.label"
+      (click)="selected.emit(tab.id)"
+      (dblclick)="pinned.emit(tab.id)"
+      (auxclick)="middleClick($event, tab.id)"
+      (keydown)="key($event, i)"
+      (dragstart)="dragStart($event, i)"
+      (dragover)="dragOver($event, i)"
+      (drop)="drop($event, i)"
+      (dragend)="dragEnd()"
+    >
+      @if (tabContent(); as tpl) {
+        <ng-container [ngTemplateOutlet]="tpl" [ngTemplateOutletContext]="{ $implicit: tab }" />
+      }
+      <span class="label">{{ tab.label }}</span>
+      <button
+        type="button"
+        class="close"
+        tabindex="-1"
+        [attr.aria-label]="'Close ' + tab.label"
+        (click)="$event.stopPropagation(); closed.emit(tab.id)"
+        (dblclick)="$event.stopPropagation()"
+      >
+        ✕
+      </button>
+    </div>
+  }
+</div>
+<div class="actions"><ng-content /></div>

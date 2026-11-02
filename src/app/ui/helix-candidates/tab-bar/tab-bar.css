@@ -1,0 +1,88 @@
+:host {
+  display: flex;
+  align-items: stretch;
+  min-height: 34px;
+  border-bottom: 1px solid var(--h-content-border-color);
+  background: var(--h-content-background);
+}
+
+.strip {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 0 6px 0 12px;
+  border-right: 1px solid var(--h-content-border-color);
+  color: var(--h-text-muted-color);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+.tab.active {
+  color: var(--h-text-color);
+  background: var(--term-bg, var(--h-content-background));
+  box-shadow: inset 0 -2px 0 var(--h-primary-color);
+}
+
+.tab.preview .label {
+  font-style: italic;
+}
+
+.tab.drop-before {
+  box-shadow: inset 2px 0 0 var(--h-primary-color);
+}
+
+.tab.drop-after {
+  box-shadow: inset -2px 0 0 var(--h-primary-color);
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close {
+  all: unset;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.tab:hover .close,
+.tab.active .close,
+.tab:focus-visible .close {
+  visibility: visible;
+}
+
+.close:hover {
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.tab:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}
+
+.actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
