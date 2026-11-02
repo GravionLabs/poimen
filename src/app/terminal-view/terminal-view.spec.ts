@@ -8,7 +8,12 @@ import type { Pane, StreamRecord } from "../core/herdr";
 import { SettingsStore, DEFAULT_SETTINGS, type Settings } from "../core/settings";
 import { TerminalStreamService } from "../core/terminal-stream";
 
-const fake = vi.hoisted(() => ({ cols: 80, rows: 24, nextCols: 80 }));
+const fake = vi.hoisted(() => ({
+  cols: 80,
+  rows: 24,
+  nextCols: 80,
+  observers: [] as (() => void)[],
+}));
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
@@ -46,6 +51,9 @@ beforeAll(() => {
     errorOnUnknownElements: false,
   });
   globalThis.ResizeObserver = class {
+    constructor(callback: () => void) {
+      fake.observers.push(callback);
+    }
     observe() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
@@ -56,6 +64,7 @@ afterEach(() => TestBed.resetTestingModule());
 async function setup(wanted: "control" | "observe") {
   fake.cols = 80;
   fake.nextCols = 80;
+  fake.observers = [];
   const settings = signal<Settings>(DEFAULT_SETTINGS);
   const session = { open: true, resize: vi.fn(), close: vi.fn(), input: vi.fn(), scroll: vi.fn() };
   const records: ((record: StreamRecord) => void)[] = [];
@@ -272,5 +281,37 @@ describe("isControllerHeld", () => {
     ).toBe(true);
     expect(isControllerHeld("pane w1:p1 not found")).toBe(false);
     expect(isControllerHeld("failed to spawn herdr: No such file")).toBe(false);
+  });
+});
+
+describe("TerminalView fit on layout change (#80)", () => {
+  it("refits after the body resized (sidebar toggle) once the layout settled", async () => {
+    const { sized } = await setup("control");
+    vi.useFakeTimers();
+    try {
+      fake.nextCols = 90;
+      for (const notify of fake.observers) {
+        notify();
+        notify(); // a burst while the layout moves is debounced into one fit
+      }
+      expect(sized).toHaveLength(1);
+      vi.advanceTimersByTime(200);
+      expect(sized).toEqual([
+        { cols: 80, rows: 24 },
+        { cols: 90, rows: 24 },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the padding off the element xterm fits into", () => {
+    // FitAddon reads that element's computed width, which includes padding under border-box, so
+    // padding there made the terminal wider than its content (clipped glyph).
+    const css = readFileSync("src/app/terminal-view/terminal-view.css", "utf8");
+    const rule = /\.view-body\s*\{([^}]*)\}/.exec(css)![1];
+    expect(rule).not.toMatch(/padding[^:]*:\s*[1-9]/);
+    const html = readFileSync("src/app/terminal-view/terminal-view.html", "utf8");
+    expect(html).toContain('<div class="view-pad"><div #body class="view-body">');
   });
 });
