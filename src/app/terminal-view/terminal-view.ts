@@ -19,6 +19,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { TauriBridge } from "../core/tauri";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
+import { splitKeyDirection } from "../core/editor-tabs";
 import { SettingsStore } from "../core/settings";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
 import { holdsLinkModifier, linkHandler } from "./links";
@@ -183,6 +184,8 @@ export class TerminalView implements OnDestroy {
     } catch {
       // DOM renderer fallback
     }
+    // The split shortcut belongs to the app: keep xterm from forwarding Ctrl+\\ to the pane (SIGQUIT).
+    term.attachCustomKeyEventHandler((event) => splitKeyDirection(event) === null);
     term.onData((data) => {
       if (this.mode() === "control") this.session?.input(data);
     });

@@ -16,6 +16,7 @@ const fake = vi.hoisted(() => ({
   observers: [] as (() => void)[],
   addons: [] as unknown[],
   openUrl: undefined as unknown,
+  keyHandler: undefined as ((event: KeyboardEvent) => boolean) | undefined,
 }));
 
 vi.mock("@xterm/xterm", () => ({
@@ -37,6 +38,9 @@ vi.mock("@xterm/xterm", () => ({
     open() {}
     onData() {}
     attachCustomWheelEventHandler() {}
+    attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
+      fake.keyHandler = handler;
+    }
     focus() {}
     write() {}
     dispose() {}
@@ -593,5 +597,22 @@ describe("TerminalView links", () => {
     hoverLink();
     body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, shiftKey: true }));
     expect(session.mouse).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("TerminalView split shortcut (#23)", () => {
+  const key = (k: string, init: KeyboardEventInit = {}) =>
+    new KeyboardEvent("keydown", { key: k, ...init });
+
+  it("keeps Ctrl+\\ and Ctrl+Shift+| from xterm so they are not sent to the pane", async () => {
+    await setup("control");
+    expect(fake.keyHandler?.(key("\\", { ctrlKey: true }))).toBe(false);
+    expect(fake.keyHandler?.(key("|", { ctrlKey: true, shiftKey: true }))).toBe(false);
+  });
+
+  it("lets other keys through to xterm", async () => {
+    await setup("control");
+    expect(fake.keyHandler?.(key("\\"))).toBe(true);
+    expect(fake.keyHandler?.(key("c", { ctrlKey: true }))).toBe(true);
   });
 });

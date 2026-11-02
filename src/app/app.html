@@ -27,35 +27,11 @@
     ></div>
   }
   <main class="views">
-    @if (editor.tabs().length) {
-      <app-tab-bar
-        [tabs]="tabItems()"
-        [activeId]="editor.activeId()"
-        (selected)="editor.activate($event)"
-        (closed)="editor.close($event)"
-        (pinned)="editor.pin($event)"
-        (moved)="editor.move($event.from, $event.to)"
-      >
-        <ng-template #tabContent let-tab>
-          @let p = tabPane(tab.id);
-          <span class="dot status-{{ p?.agent_status ?? 'unknown' }}"></span>
-          @if (editor.mode(tab.id) === "control") {
-            <span class="mode" title="Input mode: keystrokes go to the pane">IN</span>
-          } @else {
-            <span class="mode ro" title="Read-only">RO</span>
-          }
-        </ng-template>
-      </app-tab-bar>
-      @for (p of [activePane()]; track p?.pane_id) {
-        @if (p) {
-          <app-terminal-view
-            [pane]="p"
-            [wanted]="wanted(p.pane_id)"
-            (modeChange)="editor.report(p.pane_id, $event.mode, $event.blocked)"
-            (sized)="termSize.set($event)"
-          />
-        }
-      }
+    @if (editor.openIds().size) {
+      <ng-container
+        [ngTemplateOutlet]="nodeTpl"
+        [ngTemplateOutletContext]="{ $implicit: rootNode() }"
+      />
     } @else {
       <div class="empty">
         <p>Pick a pane on the left.</p>
@@ -80,3 +56,63 @@
   [info]="store.info()"
   (jump)="jumpToWaiting()"
 />
+
+<ng-template #nodeTpl let-node>
+  @if (node.kind === "split") {
+    <app-split-pane
+      [direction]="node.dir"
+      [count]="node.children.length"
+      [sizes]="node.sizes"
+      (sizesChange)="editor.setSizes(node.id, $event)"
+    >
+      <ng-template #pane let-i>
+        <ng-container
+          [ngTemplateOutlet]="nodeTpl"
+          [ngTemplateOutletContext]="{ $implicit: node.children[i] }"
+        />
+      </ng-template>
+    </app-split-pane>
+  } @else {
+    @if (group(node.id); as g) {
+      <section
+        class="group"
+        [class.focused]="editor.groups().length > 1 && g.id === editor.focusedId()"
+        (focusin)="editor.focusGroup(g.id)"
+        (pointerdown)="editor.focusGroup(g.id)"
+      >
+        <app-tab-bar
+          [tabs]="groupItems().get(g.id) ?? []"
+          [activeId]="g.activeId"
+          [groupId]="'' + g.id"
+          [menu]="menuFor(g)"
+          (selected)="editor.activate($event)"
+          (closed)="editor.close($event)"
+          (pinned)="editor.pin($event)"
+          (moved)="editor.move($event.from, $event.to, g.id)"
+          (received)="editor.moveToGroup($event.id, g.id, $event.index)"
+          (menuAction)="onTabMenu($event.id, $event.action)"
+        >
+          <ng-template #tabContent let-tab>
+            @let p = tabPane(tab.id);
+            <span class="dot status-{{ p?.agent_status ?? 'unknown' }}"></span>
+            @if (editor.mode(tab.id) === "control") {
+              <span class="mode" title="Input mode: keystrokes go to the pane">IN</span>
+            } @else {
+              <span class="mode ro" title="Read-only">RO</span>
+            }
+          </ng-template>
+        </app-tab-bar>
+        @for (p of [groupPane(g)]; track p?.pane_id) {
+          @if (p) {
+            <app-terminal-view
+              [pane]="p"
+              [wanted]="wanted(p.pane_id)"
+              (modeChange)="editor.report(p.pane_id, $event.mode, $event.blocked)"
+              (sized)="onSized(p.pane_id, $event)"
+            />
+          }
+        }
+      </section>
+    }
+  }
+</ng-template>
