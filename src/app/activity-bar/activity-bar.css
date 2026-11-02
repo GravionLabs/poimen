@@ -1,7 +1,9 @@
 :host {
   width: 48px;
   flex: none;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   border-right: 1px solid var(--h-content-border-color);
   background: var(--h-content-background);
 }
@@ -12,6 +14,7 @@ nav {
 }
 
 .item {
+  width: 100%;
   height: 48px;
   border: 0;
   border-left: 2px solid transparent;

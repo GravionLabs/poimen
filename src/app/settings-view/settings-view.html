@@ -1,0 +1,90 @@
+<div class="page">
+  <h1>Settings</h1>
+  <section aria-labelledby="appearance-h">
+    <h2 id="appearance-h">Appearance</h2>
+    <div class="radios" role="radiogroup" aria-label="Appearance">
+      @for (choice of themeChoices; track choice.value) {
+        <button
+          type="button"
+          role="radio"
+          class="choice"
+          [attr.aria-checked]="settings().theme === choice.value"
+          [class.on]="settings().theme === choice.value"
+          (click)="setTheme(choice.value)"
+        >
+          {{ choice.label }}
+        </button>
+      }
+    </div>
+    @if (appearanceFixed()) {
+      <p class="hint">
+        The color scheme fixes light or dark; use a light/dark pair to follow the appearance.
+      </p>
+    }
+  </section>
+
+  <section aria-labelledby="scheme-h">
+    <h2 id="scheme-h">Color scheme</h2>
+    <div class="radios" role="radiogroup" aria-label="Scheme mode">
+      <button
+        type="button"
+        role="radio"
+        class="choice"
+        [attr.aria-checked]="mode() === 'single'"
+        [class.on]="mode() === 'single'"
+        (click)="setMode('single')"
+      >
+        Single scheme
+      </button>
+      <button
+        type="button"
+        role="radio"
+        class="choice"
+        [attr.aria-checked]="mode() === 'pair'"
+        [class.on]="mode() === 'pair'"
+        (click)="setMode('pair')"
+      >
+        Light/dark pair
+      </button>
+    </div>
+    <p class="hint">Hover or focus a scheme to preview it; click or press Enter to save it.</p>
+
+    @for (side of sides; track side) {
+      <h3 [id]="'list-' + side">
+        {{ side === "dark" ? "Dark" : "Light" }}{{ mode() === "pair" ? " scheme" : " schemes" }}
+      </h3>
+      <div
+        class="list"
+        role="listbox"
+        [attr.aria-labelledby]="'list-' + side"
+        (mouseleave)="leave($event)"
+        (focusout)="blur($event)"
+      >
+        @for (scheme of groups()[side]; track scheme.name; let i = $index) {
+          <div
+            class="option"
+            role="option"
+            [attr.data-name]="scheme.name"
+            [attr.aria-selected]="selected(side) === scheme.name"
+            [class.on]="selected(side) === scheme.name"
+            [attr.tabindex]="tabStop(side, scheme.name, i) ? 0 : -1"
+            (mouseenter)="preview(scheme.name)"
+            (focus)="preview(scheme.name)"
+            (click)="save(side, scheme.name)"
+            (keydown)="key($event, side, scheme.name, i)"
+          >
+            <span class="label">{{ scheme.label }}</span>
+            <span class="swatches" aria-hidden="true">
+              <span class="sw big" [style.background]="scheme.background"></span>
+              <span class="sw big" [style.background]="scheme.foreground"></span>
+              @for (color of scheme.ansi; track $index) {
+                <span class="sw" [style.background]="color"></span>
+              }
+              <span class="sw big" [style.background]="scheme.ansi[5]"></span>
+            </span>
+          </div>
+        }
+      </div>
+    }
+  </section>
+</div>

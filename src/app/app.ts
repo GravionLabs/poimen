@@ -23,7 +23,8 @@ import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
-import { EditorTabs, type EditorGroup } from "./core/editor-tabs";
+import { EditorTabs, tabKind, type EditorGroup } from "./core/editor-tabs";
+import { SettingsView } from "./settings-view/settings-view";
 import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
@@ -52,6 +53,7 @@ const ZOOM_STEP = 1;
     Sidebar,
     Explorer,
     TerminalView,
+    SettingsView,
     TabBar,
     SplitPane,
     StatusBar,
@@ -97,6 +99,9 @@ export class App {
       this.editor.groups().map((group) => [
         group.id,
         group.tabs.map((tab): TabBarItem => {
+          if (tabKind(tab.paneId) === "settings") {
+            return { id: tab.paneId, label: "Settings", title: "Settings" };
+          }
           const pane = this.pane(tab.paneId);
           const tabLabel = pane
             ? snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label
@@ -136,6 +141,7 @@ export class App {
     effect(() => {
       const { theme: setting, colorSchema } = this.prefs.settings();
       const systemDark = this.systemDark();
+      this.schemes.restored();
       if (this.schemes.sync(pickSchemeName(colorSchema, setting, systemDark))) return;
       this.theme.setDark(setting === "system" ? systemDark : setting === "dark");
     });
@@ -290,11 +296,14 @@ export class App {
     if (action === "split-right") this.editor.split(id, "row");
     else if (action === "split-down") this.editor.split(id, "column");
     else if (action === "close") this.editor.close(id);
-    else if (action.startsWith("pane-")) this.paneAction(id, action.slice("pane-".length));
+    else if (action.startsWith("pane-") && tabKind(id) === "pane")
+      this.paneAction(id, action.slice("pane-".length));
   }
 
   protected groupPane(group: EditorGroup): Pane | undefined {
-    return group.activeId ? this.pane(group.activeId) : undefined;
+    return group.activeId && tabKind(group.activeId) === "pane"
+      ? this.pane(group.activeId)
+      : undefined;
   }
 
   protected group(id: number): EditorGroup | undefined {
@@ -336,6 +345,20 @@ export class App {
     this.editor.open(pane.pane_id, pin);
   }
 
+  /** The active tab's pane id; `null` for no tab or the settings tab. */
+  protected readonly activePaneId = computed(() => {
+    const id = this.editor.activeId();
+    return id !== null && tabKind(id) === "pane" ? id : null;
+  });
+
+  protected isSettings(id: string | null): boolean {
+    return id !== null && tabKind(id) === "settings";
+  }
+
+  protected openSettings(): void {
+    this.editor.openSettings();
+  }
+
   protected tabPane(id: string): Pane | undefined {
     return this.pane(id);
   }
@@ -347,7 +370,7 @@ export class App {
 
   /** The status bar switch for the active tab. */
   protected setControl(on: boolean): void {
-    const id = this.editor.activeId();
+    const id = this.activePaneId();
     if (id) this.editor.choose(id, on ? "control" : "observe");
   }
 

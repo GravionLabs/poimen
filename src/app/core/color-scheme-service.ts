@@ -1,4 +1,4 @@
-import { Injectable, inject } from "@angular/core";
+import { Injectable, inject, signal } from "@angular/core";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import { appearance, deriveTokens, resolveScheme, type ColorScheme } from "./color-scheme";
 import { UserSchemes } from "./user-schemes";
@@ -14,6 +14,8 @@ export class ColorSchemeService {
   private readonly user = inject(UserSchemes);
   private applied: string[] = [];
   private lastName: string | null | undefined;
+  /** Bumped when a preview ends, so the saved scheme (and light or dark) is applied again. */
+  readonly restored = signal(0);
 
   /**
    * Applies the scheme named by `colorSchema`. Returns whether a scheme now decides light or dark
@@ -29,6 +31,17 @@ export class ColorSchemeService {
     }
     this.apply(scheme);
     return true;
+  }
+
+  /** Shows a scheme without saving it; `revert` brings the saved one back. Unknown names are ignored. */
+  preview(name: string): void {
+    const scheme = resolveScheme(name, this.user.registry(), () => undefined);
+    if (scheme) this.apply(scheme);
+  }
+
+  /** Ends a preview: the saved scheme is applied again. */
+  revert(): void {
+    this.restored.update((n) => n + 1);
   }
 
   private apply(scheme: ColorScheme): void {

@@ -722,6 +722,33 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
     if !matches!(theme, "light" | "dark" | "system") {
         return Err(format!("invalid theme {theme:?}"));
     }
+    set_key_text(text, "theme", &format!("\"{theme}\""))
+}
+
+/// Returns `text` with `colorSchema` set to a scheme name or a `{light, dark}` pair, like
+/// `set_theme_text`: only that key changes, comments and the rest stay.
+pub fn set_color_schema_text(text: &str, schema: &serde_json::Value) -> Result<String, String> {
+    let name = |v: Option<&serde_json::Value>| {
+        v.and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .is_some()
+    };
+    let valid = match schema {
+        serde_json::Value::String(_) => name(Some(schema)),
+        serde_json::Value::Object(o) => o.len() == 2 && name(o.get("light")) && name(o.get("dark")),
+        _ => false,
+    };
+    if !valid {
+        return Err("colorSchema must be a name or a {light, dark} pair of names".into());
+    }
+    set_key_text(text, "colorSchema", &schema.to_string())
+}
+
+/// Sets the top-level `key` to the JSON `value` (already serialized), touching nothing else. A
+/// missing key is inserted as the first entry.
+fn set_key_text(text: &str, key: &str, value: &str) -> Result<String, String> {
+    let quoted = format!("\"{key}\"");
     let b = text.as_bytes();
     let open = skip_trivia(b, 0);
     if b.get(open) != Some(&b'{') {
@@ -734,7 +761,7 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
             None => break,
             Some(b'"') => {
                 let end = skip_string(b, i);
-                let is_key = depth == 1 && &text[i..end] == "\"theme\"";
+                let is_key = depth == 1 && text[i..end] == quoted;
                 i = end;
                 if is_key {
                     let colon = skip_trivia(b, i);
@@ -743,13 +770,24 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
                         let stop = if b.get(start) == Some(&b'"') {
                             skip_string(b, start)
                         } else {
-                            let mut e = start;
-                            while e < b.len() && !matches!(b[e], b',' | b'}' | b'\n') {
+                            let (mut e, mut nest) = (start, 0usize);
+                            while e < b.len() {
+                                match b[e] {
+                                    b'"' => {
+                                        e = skip_string(b, e);
+                                        continue;
+                                    }
+                                    b'{' | b'[' => nest += 1,
+                                    b'}' | b']' if nest == 0 => break,
+                                    b'}' | b']' => nest -= 1,
+                                    b',' | b'\n' if nest == 0 => break,
+                                    _ => {}
+                                }
                                 e += 1;
                             }
                             e
                         };
-                        return Ok(format!("{}\"{theme}\"{}", &text[..start], &text[stop..]));
+                        return Ok(format!("{}{value}{}", &text[..start], &text[stop..]));
                     }
                 }
             }
@@ -768,7 +806,7 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
         }
     }
     let first = skip_trivia(b, open + 1);
-    let entry = format!("\"theme\": \"{theme}\"");
+    let entry = format!("{quoted}: {value}");
     Ok(if b.get(first) == Some(&b'}') {
         format!("{}{entry}{}", &text[..=open], &text[first..])
     } else {
@@ -779,12 +817,19 @@ pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
 /// Writes the `theme` setting below `home` (creating the file when missing). The watcher then
 /// emits the new settings like for any external edit.
 pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
+    save_with(home, |text| set_theme_text(text, theme))
+}
+
+/// Writes the `colorSchema` setting below `home`, like `save_theme`.
+pub fn save_color_schema(home: &Path, schema: &serde_json::Value) -> Result<(), String> {
+    save_with(home, |text| set_color_schema_text(text, schema))
+}
+
+fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> Result<(), String> {
     let path = config_path(home);
     let next = match std::fs::read_to_string(&path) {
-        Ok(text) => set_theme_text(&text, theme)?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            set_theme_text("{}", theme).map(|t| t + "\n")?
-        }
+        Ok(text) => edit(&text)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => edit("{}").map(|t| t + "\n")?,
         Err(e) => return Err(format!("cannot read config.json: {e}")),
     };
     if let Some(dir) = path.parent() {
@@ -1170,6 +1215,62 @@ mod tests {
             "{\"theme\": \"dark\"}"
         );
         assert_eq!(resolve(Some(&out), none).theme, "light");
+    }
+
+    #[test]
+    fn set_color_schema_replaces_a_name_with_a_pair_and_keeps_comments() {
+        let text =
+            "{\n  // scheme\n  \"colorSchema\": \"dracula\", /* c */\n  \"theme\": \"dark\"\n}";
+        let pair = serde_json::json!({"light": "one-light", "dark": "one-dark"});
+        let out = set_color_schema_text(text, &pair).unwrap();
+        assert_eq!(
+            out,
+            "{\n  // scheme\n  \"colorSchema\": {\"dark\":\"one-dark\",\"light\":\"one-light\"}, /* c */\n  \"theme\": \"dark\"\n}"
+        );
+        let back = set_color_schema_text(&out, &serde_json::json!("vesper")).unwrap();
+        assert_eq!(
+            back,
+            "{\n  // scheme\n  \"colorSchema\": \"vesper\", /* c */\n  \"theme\": \"dark\"\n}"
+        );
+        let plain = set_color_schema_text("{}", &pair).unwrap();
+        assert_eq!(
+            resolve(Some(&plain), none).color_schema,
+            Some(ColorSchema::Pair {
+                light: "one-light".into(),
+                dark: "one-dark".into()
+            })
+        );
+        assert!(back.contains("// scheme"));
+    }
+
+    #[test]
+    fn set_color_schema_inserts_when_missing() {
+        let out =
+            set_color_schema_text("{\"theme\":\"dark\"}", &serde_json::json!("vesper")).unwrap();
+        assert_eq!(out, "{\n  \"colorSchema\": \"vesper\",\"theme\":\"dark\"}");
+    }
+
+    #[test]
+    fn set_color_schema_rejects_bad_input() {
+        for bad in [
+            serde_json::json!(""),
+            serde_json::json!(3),
+            serde_json::json!({"light": "a"}),
+            serde_json::json!({"light": "a", "dark": "b", "x": "c"}),
+        ] {
+            assert!(set_color_schema_text("{}", &bad).is_err(), "{bad}");
+        }
+        assert!(set_color_schema_text("[1]", &serde_json::json!("a")).is_err());
+    }
+
+    #[test]
+    fn save_color_schema_writes_a_temp_file() {
+        let home = std::env::temp_dir().join(format!("poimen-save-cs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        save_color_schema(&home, &serde_json::json!("dracula")).unwrap();
+        let text = std::fs::read_to_string(config_path(&home)).unwrap();
+        assert_eq!(text, "{\"colorSchema\": \"dracula\"}\n");
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]

@@ -10,6 +10,16 @@ import {
   type SplitDirection,
 } from "./editor-layout";
 
+/** The id of the settings tab; it is not a herdr pane, so it never reaches the terminal logic. */
+export const SETTINGS_TAB = "poimen:settings";
+
+/** What a tab shows: a herdr pane (live terminal) or the settings view. */
+export type TabKind = "pane" | "settings";
+
+export function tabKind(id: string): TabKind {
+  return id === SETTINGS_TAB ? "settings" : "pane";
+}
+
 /** An open editor tab. A preview tab (not pinned) is replaced by the next preview, as in VS Code. */
 export interface EditorTab {
   paneId: string;
@@ -150,7 +160,7 @@ export class EditorTabs {
    * returns their ids.
    */
   prune(existing: ReadonlySet<string>): string[] {
-    const gone = [...this.openIds()].filter((id) => !existing.has(id));
+    const gone = [...this.openIds()].filter((id) => tabKind(id) === "pane" && !existing.has(id));
     gone.forEach((id) => this.close(id));
     return gone;
   }
@@ -182,6 +192,19 @@ export class EditorTabs {
       tabs = [...group.tabs, tab];
     }
     this.patch(group.id, { tabs, activeId: paneId });
+  }
+
+  /** Opens the settings tab (at most one) as a pinned tab, or activates it when open. */
+  openSettings(): void {
+    if (this.groupOf(SETTINGS_TAB)) {
+      this.activate(SETTINGS_TAB);
+      return;
+    }
+    const group = this.focused();
+    this.patch(group.id, {
+      tabs: [...group.tabs, { paneId: SETTINGS_TAB, pinned: true }],
+      activeId: SETTINGS_TAB,
+    });
   }
 
   pin(paneId: string): void {
