@@ -1,5 +1,8 @@
 <div class="page">
   <h1>Settings</h1>
+  @if (writeError(); as reason) {
+    <p class="error" role="alert">{{ reason }}</p>
+  }
   <section aria-labelledby="appearance-h">
     <h2 id="appearance-h">Appearance</h2>
     <div class="radios" role="radiogroup" aria-label="Appearance">
@@ -86,5 +89,66 @@
         }
       </div>
     }
+  </section>
+
+  <section aria-labelledby="explorer-h">
+    <h2 id="explorer-h">Explorer</h2>
+    <p class="hint">
+      The folders the Explorer view starts from; folders under your home are saved as ~/….
+    </p>
+    <ul class="rows" aria-label="Explorer folders">
+      @for (
+        root of settings().explorerRoots;
+        track root;
+        let i = $index, first = $first, last = $last
+      ) {
+        <li class="row-item">
+          <span class="path" [title]="root">{{ root }}</span>
+          <span class="actions">
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Move ' + root + ' up'"
+              title="Move up"
+              [disabled]="first"
+              (click)="moveRoot(i, -1)"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Move ' + root + ' down'"
+              title="Move down"
+              [disabled]="last"
+              (click)="moveRoot(i, 1)"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Remove ' + root"
+              title="Remove"
+              [disabled]="first && last"
+              (click)="removeRoot(i)"
+            >
+              ×
+            </button>
+          </span>
+        </li>
+      }
+    </ul>
+    <div class="toolbar-row">
+      <button type="button" class="btn" (click)="addRoot()">Add folder…</button>
+      <label class="check">
+        <input
+          type="checkbox"
+          [checked]="settings().explorerShowHidden"
+          (change)="setShowHidden($event)"
+        />
+        Show hidden folders
+      </label>
+    </div>
   </section>
 </div>

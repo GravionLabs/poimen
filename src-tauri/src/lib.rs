@@ -270,6 +270,20 @@ fn set_sidebar_layout(layout: String) -> Result<(), String> {
     settings::save_sidebar_layout(&home, &layout)
 }
 
+/// Writes only `explorer.roots` (paths under the home directory as `~/…`); the watcher emits it.
+#[tauri::command]
+fn set_explorer_roots(roots: Vec<String>) -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::save_explorer_roots(&home, &roots)
+}
+
+/// Writes only `explorer.showHidden`; the settings watcher emits the change.
+#[tauri::command]
+fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::save_explorer_show_hidden(&home, show)
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(
@@ -553,6 +567,8 @@ pub fn run() {
             set_theme,
             set_color_schema,
             set_sidebar_layout,
+            set_explorer_roots,
+            set_explorer_show_hidden,
             repo_info,
             open_terminal,
             terminal_input,

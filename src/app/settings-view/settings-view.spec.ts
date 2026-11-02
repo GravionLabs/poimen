@@ -8,7 +8,16 @@ import { bundled } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { tauri } from "../core/tauri.mock";
-import { chosen, groupSchemes, pairOf, selectedIn, SettingsView } from "./settings-view";
+import { TauriBridge } from "../core/tauri";
+import {
+  chosen,
+  groupSchemes,
+  moved,
+  pairOf,
+  selectedIn,
+  SettingsView,
+  withRoot,
+} from "./settings-view";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -60,6 +69,19 @@ describe("scheme helpers", () => {
   });
 });
 
+describe("explorer root helpers", () => {
+  it("moves an item and clamps at the ends", () => {
+    expect(moved(["a", "b", "c"], 0, 1)).toEqual(["b", "a", "c"]);
+    expect(moved(["a", "b", "c"], 2, -1)).toEqual(["a", "c", "b"]);
+    expect(moved(["a", "b"], 0, -1)).toEqual(["a", "b"]);
+  });
+
+  it("appends a new root once", () => {
+    expect(withRoot(["~"], "/srv")).toEqual(["~", "/srv"]);
+    expect(withRoot(["~", "/srv"], "/srv")).toEqual(["~", "/srv"]);
+  });
+});
+
 const setDark = vi.fn();
 
 beforeAll(() => {
@@ -71,7 +93,10 @@ afterEach(() => {
   document.documentElement.removeAttribute("style");
 });
 
-function setup(colorSchema: string | { light: string; dark: string } | null = "dracula") {
+function setup(
+  colorSchema: string | { light: string; dark: string } | null = "dracula",
+  explorerRoots: string[] = ["~"],
+) {
   tauri.reset();
   setDark.mockReset();
   TestBed.resetTestingModule();
@@ -84,7 +109,7 @@ function setup(colorSchema: string | { light: string; dark: string } | null = "d
     },
   });
   const store = TestBed.inject(SettingsStore);
-  store["_settings"].set({ ...DEFAULT_SETTINGS, colorSchema });
+  store["_settings"].set({ ...DEFAULT_SETTINGS, colorSchema, explorerRoots });
   const schemes = TestBed.inject(ColorSchemeService);
   schemes.sync(typeof colorSchema === "string" ? colorSchema : null);
   const fixture = TestBed.createComponent(SettingsView);
@@ -212,5 +237,64 @@ describe("SettingsView", () => {
       .find((b) => b.textContent?.includes("Light"))!
       .click();
     expect(tauri.calls("set_theme")).toEqual([{ theme: "light" }]);
+  });
+});
+
+describe("SettingsView explorer section", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
+
+  const button = (host: HTMLElement, label: string) =>
+    host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+
+  it("lists the roots and keeps the last one", () => {
+    const { host } = setup(null, ["~"]);
+    expect(host.querySelector(".path")!.textContent).toBe("~");
+    expect(button(host, "Remove ~").disabled).toBe(true);
+    expect(button(host, "Move ~ up").disabled).toBe(true);
+  });
+
+  it("removes and reorders roots", () => {
+    const { host } = setup(null, ["~", "/srv"]);
+    button(host, "Move /srv up").click();
+    expect(tauri.calls("set_explorer_roots")).toEqual([{ roots: ["/srv", "~"] }]);
+  });
+
+  it("removes a root", () => {
+    const { host } = setup(null, ["~", "/srv"]);
+    button(host, "Remove ~").click();
+    expect(tauri.calls("set_explorer_roots")).toEqual([{ roots: ["/srv"] }]);
+  });
+
+  it("adds a folder from the picker and ignores a cancel", async () => {
+    const { host } = setup(null, ["~"]);
+    const pick = vi.spyOn(TestBed.inject(TauriBridge), "pickDirectory");
+    pick.mockResolvedValueOnce(null).mockResolvedValueOnce("/srv/projects");
+    const add = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
+      b.textContent?.includes("Add folder"),
+    )!;
+    add.click();
+    await Promise.resolve();
+    expect(tauri.calls("set_explorer_roots")).toEqual([]);
+    add.click();
+    await vi.waitFor(() =>
+      expect(tauri.calls("set_explorer_roots")).toEqual([{ roots: ["~", "/srv/projects"] }]),
+    );
+  });
+
+  it("saves the hidden folders option and shows a write error", async () => {
+    tauri.reset();
+    const { fixture, host } = setup(null, ["~"]);
+    tauri.answer("set_explorer_show_hidden", () => {
+      throw new Error("read-only");
+    });
+    const box = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    await vi.waitFor(() =>
+      expect(tauri.calls("set_explorer_show_hidden")).toEqual([{ show: true }]),
+    );
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(host.querySelector(".error")?.textContent).toContain("read-only");
   });
 });

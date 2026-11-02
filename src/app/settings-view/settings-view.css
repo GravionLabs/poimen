@@ -106,3 +106,94 @@ h3 {
 .sw.big {
   width: 18px;
 }
+
+/* Lists and buttons of the Explorer and layout sections: tints of the text color, readable in light and dark. */
+.error {
+  margin: 0 0 12px;
+  color: var(--status-blocked);
+  font-size: 12px;
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+}
+
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+}
+
+.row-item + .row-item {
+  border-top: 1px solid var(--h-content-border-color);
+}
+
+.path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+
+.icon-btn,
+.btn {
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.icon-btn {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+}
+
+.btn {
+  padding: 4px 10px;
+}
+
+.icon-btn:hover:not(:disabled),
+.btn:hover:not(:disabled),
+.icon-btn:focus-visible,
+.btn:focus-visible {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  outline: none;
+}
+
+.icon-btn:disabled,
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

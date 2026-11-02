@@ -846,26 +846,76 @@ fn set_key_text(text: &str, key: &str, value: &str) -> Result<String, String> {
     Ok(set_key_at(text, root_open(text)?, key, value))
 }
 
+/// Sets the value at the key `path` (outermost first) of the object opening at `open`. Missing
+/// objects on the way are created; a key on the way that is not an object is an error.
+fn set_path_at(text: &str, open: usize, path: &[&str], value: &str) -> Result<String, String> {
+    let (key, rest) = path.split_first().ok_or("empty key path")?;
+    if rest.is_empty() {
+        return Ok(set_key_at(text, open, key, value));
+    }
+    match find_value(text, open, key) {
+        None => {
+            let nested = rest.iter().rev().fold(value.to_owned(), |inner, k| {
+                format!("{{ \"{k}\": {inner} }}")
+            });
+            Ok(set_key_at(text, open, key, &nested))
+        }
+        Some((start, _)) if text.as_bytes().get(start) == Some(&b'{') => {
+            set_path_at(text, start, rest, value)
+        }
+        Some(_) => Err(format!("{key} in config.json is not an object")),
+    }
+}
+
+/// Sets the nested key `path` (e.g. `["sidebar", "layout"]`) to the JSON `value`, touching nothing
+/// else: other keys, comments and formatting stay.
+fn set_path_text(text: &str, path: &[&str], value: &str) -> Result<String, String> {
+    set_path_at(text, root_open(text)?, path, value)
+}
+
 /// Returns `text` with `sidebar.layout` set to `tree` or `split`, touching nothing else. A missing
 /// `sidebar` object is created; a `sidebar` that is not an object is an error.
 pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, String> {
     if !matches!(layout, "tree" | "split") {
         return Err(format!("invalid sidebar layout {layout:?}"));
     }
-    let value = format!("\"{layout}\"");
-    let open = root_open(text)?;
-    match find_value(text, open, "sidebar") {
-        None => Ok(set_key_at(
-            text,
-            open,
-            "sidebar",
-            &format!("{{ \"layout\": {value} }}"),
-        )),
-        Some((start, _)) if text.as_bytes().get(start) == Some(&b'{') => {
-            Ok(set_key_at(text, start, "layout", &value))
-        }
-        Some(_) => Err("sidebar in config.json is not an object".into()),
+    set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
+}
+
+/// Writes a path below `home` as `~` or `~/…`; other paths stay as they are.
+pub fn tilde_path(path: &str, home: &Path) -> String {
+    let path = path.trim();
+    let home = home.to_string_lossy();
+    let home = home.trim_end_matches('/');
+    if home.is_empty() {
+        return path.to_owned();
     }
+    match path.strip_prefix(home) {
+        Some("") | Some("/") => "~".to_owned(),
+        Some(rest) if rest.starts_with('/') => format!("~{}", rest.trim_end_matches('/')),
+        _ => path.to_owned(),
+    }
+}
+
+/// Returns `text` with `explorer.roots` set to `roots`, touching nothing else. Every root must be
+/// absolute or start with `~`, and the list must not be empty.
+pub fn set_explorer_roots_text(text: &str, roots: &[String]) -> Result<String, String> {
+    if roots.is_empty() {
+        return Err("explorer.roots needs at least one folder".into());
+    }
+    if let Some(bad) = roots
+        .iter()
+        .find(|p| !(p.starts_with('/') || *p == "~" || p.starts_with("~/")))
+    {
+        return Err(format!("{bad:?} is not an absolute path"));
+    }
+    let value = serde_json::to_string(roots).map_err(|e| e.to_string())?;
+    set_path_text(text, &["explorer", "roots"], &value)
+}
+
+/// Returns `text` with `explorer.showHidden` set, touching nothing else.
+pub fn set_explorer_show_hidden_text(text: &str, show: bool) -> Result<String, String> {
+    set_path_text(text, &["explorer", "showHidden"], &show.to_string())
 }
 
 /// Writes the `theme` setting below `home` (creating the file when missing). The watcher then
@@ -882,6 +932,17 @@ pub fn save_color_schema(home: &Path, schema: &serde_json::Value) -> Result<(), 
 /// Writes `sidebar.layout` below `home`, like `save_theme`.
 pub fn save_sidebar_layout(home: &Path, layout: &str) -> Result<(), String> {
     save_with(home, |text| set_sidebar_layout_text(text, layout))
+}
+
+/// Writes `explorer.roots` below `home`, like `save_theme`; paths under `home` become `~/…`.
+pub fn save_explorer_roots(home: &Path, roots: &[String]) -> Result<(), String> {
+    let roots: Vec<String> = roots.iter().map(|r| tilde_path(r, home)).collect();
+    save_with(home, |text| set_explorer_roots_text(text, &roots))
+}
+
+/// Writes `explorer.showHidden` below `home`, like `save_theme`.
+pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> {
+    save_with(home, |text| set_explorer_show_hidden_text(text, show))
 }
 
 fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> Result<(), String> {
@@ -1031,6 +1092,61 @@ mod tests {
         );
         let nested = set_sidebar_layout_text("{\"x\":{\"layout\":\"tree\"}}", "split").unwrap();
         assert!(nested.contains("\"x\":{\"layout\":\"tree\"}"));
+    }
+
+    #[test]
+    fn set_path_creates_and_descends_nested_objects() {
+        let text = "{\n  // keep\n  \"explorer\": { \"showHidden\": true }\n}";
+        let out = set_explorer_roots_text(text, &["~/Source".into()]).unwrap();
+        assert_eq!(
+            out,
+            "{\n  // keep\n  \"explorer\": {\n  \"roots\": [\"~/Source\"], \"showHidden\": true }\n}"
+        );
+        let replaced = set_explorer_roots_text(&out, &["~".into(), "/srv".into()]).unwrap();
+        assert!(replaced.contains("\"roots\": [\"~\",\"/srv\"], \"showHidden\": true"));
+        assert!(replaced.contains("// keep"));
+        let created = set_explorer_show_hidden_text("{\"theme\":\"dark\"}", true).unwrap();
+        assert_eq!(
+            created,
+            "{\n  \"explorer\": { \"showHidden\": true },\"theme\":\"dark\"}"
+        );
+        let plain = "{\"explorer\": { \"roots\": [\"~\"], \"showHidden\": true }}";
+        let plain = set_explorer_roots_text(plain, &["~".into(), "/srv".into()]).unwrap();
+        let r = resolve(Some(&plain), || None);
+        assert_eq!(r.explorer_roots, vec!["~", "/srv"]);
+        assert!(r.explorer_show_hidden);
+    }
+
+    #[test]
+    fn set_explorer_roots_rejects_bad_input() {
+        assert!(set_explorer_roots_text("{}", &[]).is_err());
+        assert!(set_explorer_roots_text("{}", &["relative".into()]).is_err());
+        assert!(set_explorer_roots_text("{\"explorer\":[1]}", &["~".into()]).is_err());
+        assert!(set_explorer_show_hidden_text("[]", true).is_err());
+    }
+
+    #[test]
+    fn tilde_path_shortens_paths_under_home() {
+        let home = Path::new("/Users/me");
+        assert_eq!(tilde_path("/Users/me", home), "~");
+        assert_eq!(tilde_path("/Users/me/", home), "~");
+        assert_eq!(tilde_path("/Users/me/Source/", home), "~/Source");
+        assert_eq!(tilde_path("/Users/meow", home), "/Users/meow");
+        assert_eq!(tilde_path("/srv/x", home), "/srv/x");
+        assert_eq!(tilde_path("~/x", home), "~/x");
+    }
+
+    #[test]
+    fn save_explorer_roots_writes_home_relative_paths() {
+        let home = std::env::temp_dir().join(format!("poimen-roots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let sub = home.join("Source").to_string_lossy().into_owned();
+        save_explorer_roots(&home, &[sub, "/srv".into()]).unwrap();
+        save_explorer_show_hidden(&home, true).unwrap();
+        let s = load(&home);
+        assert_eq!(s.explorer_roots, vec!["~/Source", "/srv"]);
+        assert!(s.explorer_show_hidden);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
