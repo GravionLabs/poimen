@@ -30,9 +30,6 @@ export interface Pane {
   label?: string;
   /** Free-form key/value tokens set by integrations (e.g. `deliver_step`). */
   tokens?: Record<string, string>;
-  /** Message or state label an integration reports for the pane, when present. */
-  status_message?: string;
-  state_label?: string;
   terminal_title_stripped?: string;
   focused?: boolean;
 }
@@ -126,12 +123,16 @@ export function agentKind(pane: Pane): string | undefined {
   return pane.agent?.trim() || undefined;
 }
 
-/** Last status message or state label; falls back to the integration tokens. */
+/**
+ * Row text of an agent pane: its state label (`agent_status`, as `herdr pane list` reports it)
+ * plus the `deliver_step` token when an integration set one. herdr reports no free-form status
+ * message, so plain terminals and agents with an unknown state have no text.
+ */
 export function statusText(pane: Pane): string | undefined {
-  const text = pane.status_message?.trim() || pane.state_label?.trim();
-  if (text) return text;
-  const tokens = Object.values(pane.tokens ?? {}).filter((v) => v.trim());
-  return tokens.length ? tokens.join(" · ") : undefined;
+  if (!agentKind(pane)) return undefined;
+  const state = pane.agent_status === "unknown" ? undefined : pane.agent_status;
+  const step = pane.tokens?.["deliver_step"]?.trim() || undefined;
+  return [state, step].filter(Boolean).join(" · ") || undefined;
 }
 
 /** The last two path segments, so rows stay short. */

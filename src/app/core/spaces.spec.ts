@@ -31,16 +31,28 @@ describe("pane details", () => {
     expect(agentKind(pane({}))).toBeUndefined();
   });
 
-  it("shows the status message, then the state label, then the tokens", () => {
-    expect(statusText(pane({ status_message: "Running tests", state_label: "busy" }))).toBe(
-      "Running tests",
-    );
-    expect(statusText(pane({ state_label: "busy" }))).toBe("busy");
-    expect(statusText(pane({ tokens: { deliver: "#20", step: "select: next" } }))).toBe(
-      "#20 · select: next",
-    );
-    expect(statusText(pane({ tokens: {} }))).toBeUndefined();
-    expect(statusText(pane({}))).toBeUndefined();
+  it("shows the agent state label plus the deliver_step token", () => {
+    expect(
+      statusText(
+        pane({
+          agent: "claude",
+          agent_status: "working",
+          tokens: { deliver: "#20", deliver_step: "select: next" },
+        }),
+      ),
+    ).toBe("working · select: next");
+    expect(statusText(pane({ agent: "claude", agent_status: "idle" }))).toBe("idle");
+    expect(statusText(pane({ agent: "claude", tokens: { deliver_step: "x" } }))).toBe("x");
+    expect(statusText(pane({ agent: "claude" }))).toBeUndefined();
+    expect(statusText(pane({ agent_status: "idle" }))).toBeUndefined();
+  });
+
+  it("parses a pinned real `herdr pane list` pane", () => {
+    const real = JSON.parse(
+      `{"agent":"claude","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"x"},"agent_status":"working","cwd":"/Users/u/poimen","focused":false,"foreground_cwd":"/Users/u/poimen","pane_id":"w3:p2","revision":10,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":62},"tab_id":"w3:t2","terminal_id":"term_1","terminal_title":"◐ Deliver milestone 0.1.0","terminal_title_stripped":"Deliver milestone 0.1.0","tokens":{"deliver":"#20","deliver_step":"select: next"},"workspace_id":"w3"}`,
+    ) as Pane;
+    expect(agentKind(real)).toBe("claude");
+    expect(statusText(real)).toBe("working · select: next");
   });
 
   it("shortens long paths to their last two segments", () => {
