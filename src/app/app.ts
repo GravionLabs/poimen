@@ -15,7 +15,8 @@ import { rowName, tabHeader, type Mode, type Pane } from "./core/herdr";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TauriBridge } from "./core/tauri";
-import { ActivityBar } from "./activity-bar/activity-bar";
+import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
+import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
@@ -45,6 +46,7 @@ const ZOOM_STEP = 1;
   imports: [
     ActivityBar,
     Sidebar,
+    Explorer,
     TerminalView,
     TabBar,
     SplitPane,
@@ -66,6 +68,14 @@ export class App {
   private readonly keymap = inject(Keymap);
   private readonly paneActions = inject(PaneActions);
   protected readonly ui = inject(UiState);
+
+  /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
+  protected selectView(id: string): void {
+    this.ui.selectView(
+      id,
+      ACTIVITY_VIEWS.map((v) => v.id),
+    );
+  }
   protected readonly minWidth = SIDEBAR_MIN_WIDTH;
   protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
   private drag: { startX: number; startWidth: number } | null = null;

@@ -1,0 +1,22 @@
+:host {
+  width: 100%;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--h-content-border-color);
+  background: var(--h-content-background);
+  overflow-y: auto;
+}
+
+.brand {
+  padding: 14px 14px 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.dirs {
+  padding: 0 4px;
+  --h-tree-gap: 0;
+  --h-tree-indent: 0.75rem;
+  --h-tree-node-padding: 2px 0.375rem;
+}

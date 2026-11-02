@@ -1,0 +1,12 @@
+<div class="head">
+  <div class="brand">Explorer</div>
+</div>
+<hx-tree
+  class="dirs"
+  ariaLabel="Directories"
+  selectionMode="none"
+  emptyMessage="No folders"
+  [value]="nodes()"
+  (nodeExpand)="onExpand($event)"
+  (nodeCollapse)="onCollapse($event)"
+/>

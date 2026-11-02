@@ -4,6 +4,7 @@ export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
 export const ZOOM_LIMIT = 20;
+export const DEFAULT_VIEW = "spaces";
 export const UI_STATE_KEY = "poimen.ui-state";
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
@@ -29,6 +30,10 @@ export interface LayoutState {
   sidebarCollapsed: boolean;
   /** The editor area (tabs, groups); validated by `EditorTabs`, absent when never stored. */
   editor?: unknown;
+  /** The view shown in the sidebar (an id of `ACTIVITY_VIEWS`). */
+  activeView: string;
+  /** Paths of the explorer folders that are expanded. */
+  expandedDirs: string[];
 }
 
 export function clampSidebarWidth(width: number): number {
@@ -41,14 +46,23 @@ export function parseLayout(raw: string | null): LayoutState {
   const state: LayoutState = {
     sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
     sidebarCollapsed: false,
+    activeView: DEFAULT_VIEW,
+    expandedDirs: [],
   };
   if (!raw) return state;
   try {
     const data: unknown = JSON.parse(raw);
     if (typeof data !== "object" || data === null) return state;
-    const { sidebarWidth, sidebarCollapsed, editor } = data as Record<string, unknown>;
+    const { sidebarWidth, sidebarCollapsed, editor, activeView, expandedDirs } = data as Record<
+      string,
+      unknown
+    >;
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
+    if (typeof activeView === "string" && activeView) state.activeView = activeView;
+    if (Array.isArray(expandedDirs)) {
+      state.expandedDirs = expandedDirs.filter((d): d is string => typeof d === "string");
+    }
     if (editor !== undefined) state.editor = editor;
   } catch {
     // corrupt state: use defaults
@@ -64,6 +78,8 @@ export class UiState {
 
   readonly sidebarWidth = signal(this.initial.sidebarWidth);
   readonly sidebarCollapsed = signal(this.initial.sidebarCollapsed);
+  readonly activeView = signal(this.initial.activeView);
+  readonly expandedDirs = signal<ReadonlySet<string>>(new Set(this.initial.expandedDirs));
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -94,6 +110,30 @@ export class UiState {
     this.save();
   }
 
+  /**
+   * A click on a view of the activity bar: the active view collapses the sidebar, any other view
+   * (also while collapsed) shows it. `known` are the valid view ids; an unknown id is ignored.
+   */
+  selectView(id: string, known: readonly string[]): void {
+    if (!known.includes(id)) return;
+    if (id === this.activeView() && !this.sidebarCollapsed()) {
+      this.sidebarCollapsed.set(true);
+    } else {
+      this.activeView.set(id);
+      this.sidebarCollapsed.set(false);
+    }
+    this.save();
+  }
+
+  /** Remembers whether the explorer folder at `path` is expanded. */
+  setDirExpanded(path: string, expanded: boolean): void {
+    const next = new Set(this.expandedDirs());
+    if (expanded) next.add(path);
+    else next.delete(path);
+    this.expandedDirs.set(next);
+    this.save();
+  }
+
   private read(): string | null {
     try {
       return this.storage?.getItem(UI_STATE_KEY) ?? null;
@@ -107,6 +147,8 @@ export class UiState {
       sidebarWidth: this.sidebarWidth(),
       sidebarCollapsed: this.sidebarCollapsed(),
       editor: this.editor,
+      activeView: this.activeView(),
+      expandedDirs: [...this.expandedDirs()],
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

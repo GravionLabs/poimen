@@ -25,6 +25,10 @@ export interface Settings {
   shortcuts: Shortcuts;
   /** Lines and tokens per row type: the defaults over the valid `sidebar.rows` of config.json. */
   sidebarRows: SidebarRows;
+  /** Roots of the explorer; a leading `~` is the home directory (resolved by the backend). */
+  explorerRoots: string[];
+  /** Whether the explorer shows hidden directories. */
+  explorerShowHidden: boolean;
   warnings: string[];
 }
 
@@ -41,6 +45,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoControl: true,
   shortcuts: DEFAULT_SHORTCUTS,
   sidebarRows: DEFAULT_SIDEBAR_ROWS,
+  explorerRoots: ["~"],
+  explorerShowHidden: false,
   warnings: [],
 };
 
@@ -70,6 +76,13 @@ function parseSidebarRows(raw: unknown): SidebarRows {
   return { workspace: pick("workspace"), agent: pick("agent"), terminal: pick("terminal") };
 }
 
+function parseRoots(raw: unknown): string[] {
+  const roots = Array.isArray(raw)
+    ? raw.filter((p): p is string => typeof p === "string" && p !== "")
+    : [];
+  return roots.length ? roots : DEFAULT_SETTINGS.explorerRoots;
+}
+
 /** Accepts a payload from the backend; anything malformed falls back to the defaults. */
 export function parseSettings(raw: unknown): Settings {
   if (typeof raw !== "object" || raw === null) return DEFAULT_SETTINGS;
@@ -90,6 +103,8 @@ export function parseSettings(raw: unknown): Settings {
     autoControl: r["autoControl"] !== false,
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
+    explorerRoots: parseRoots(r["explorerRoots"]),
+    explorerShowHidden: r["explorerShowHidden"] === true,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
       : [],

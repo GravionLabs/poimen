@@ -175,6 +175,16 @@ async fn list_dirs(input: String) -> Result<Vec<String>, String> {
     .map_err(|e| e.to_string())
 }
 
+/// The subdirectories of a directory for the explorer tree; unreadable ones have none.
+#[tauri::command]
+async fn list_child_dirs(path: String, hidden: bool) -> Result<Vec<spaces::DirEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        spaces::child_dirs(&path, home_dir().as_deref(), hidden)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Version and protocol of the running herdr; `None` when unreachable or too old.
 #[tauri::command]
 async fn herdr_info(client: State<'_, Client>) -> Result<Option<herdr::ServerInfo>, String> {
@@ -475,6 +485,7 @@ pub fn run() {
             terminal_create,
             create_space,
             list_dirs,
+            list_child_dirs,
             app_version,
             get_settings,
             set_theme,

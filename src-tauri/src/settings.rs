@@ -150,6 +150,10 @@ pub struct Settings {
     pub shortcuts: BTreeMap<String, String>,
     /// Lines and tokens of the sidebar rows from `sidebar.rows`; types left `None` use the default.
     pub sidebar_rows: SidebarRows,
+    /// Roots of the explorer (`explorer.roots`, a leading `~` is the home directory).
+    pub explorer_roots: Vec<String>,
+    /// Whether the explorer shows hidden directories (`explorer.showHidden`).
+    pub explorer_show_hidden: bool,
     pub warnings: Vec<String>,
 }
 
@@ -304,6 +308,8 @@ impl Default for Settings {
             auto_control: true,
             shortcuts: default_shortcuts(),
             sidebar_rows: SidebarRows::default(),
+            explorer_roots: vec!["~".into()],
+            explorer_show_hidden: false,
             warnings: Vec::new(),
         }
     }
@@ -349,6 +355,46 @@ pub fn parse_ghostty(text: &str) -> Ghostty {
     out
 }
 
+/// `explorer.roots` (non-empty list of absolute or `~` paths) and `explorer.showHidden`; invalid
+/// entries warn and keep the default.
+fn resolve_explorer(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("explorer must be an object".into());
+        return;
+    };
+    match obj.get("roots") {
+        None => {}
+        Some(Value::Array(items)) => {
+            let roots: Option<Vec<String>> = items
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(str::trim)
+                        .filter(|p| p.starts_with('/') || *p == "~" || p.starts_with("~/"))
+                        .map(str::to_owned)
+                })
+                .collect();
+            match roots {
+                Some(r) if !r.is_empty() => s.explorer_roots = r,
+                _ => s.warnings.push(
+                    "explorer.roots must be a non-empty list of absolute paths (or ~); using the home directory"
+                        .into(),
+                ),
+            }
+        }
+        Some(_) => s
+            .warnings
+            .push("explorer.roots must be a list; using the home directory".into()),
+    }
+    match obj.get("showHidden") {
+        None => {}
+        Some(Value::Bool(b)) => s.explorer_show_hidden = *b,
+        Some(_) => s
+            .warnings
+            .push("explorer.showHidden must be true or false".into()),
+    }
+}
+
 /// Resolves the settings from the file contents. `read_ghostty` is only called when the
 /// `terminal.ghostty` flag is set.
 pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>) -> Settings {
@@ -379,6 +425,10 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("sidebar") {
         s.sidebar_rows = resolve_sidebar_rows(value, &mut s.warnings);
+    }
+
+    if let Some(value) = root.get("explorer") {
+        resolve_explorer(value, &mut s);
     }
 
     let mut use_ghostty = false;
@@ -618,6 +668,32 @@ mod tests {
 
     fn rows(json: &str) -> Settings {
         resolve(Some(json), none)
+    }
+
+    #[test]
+    fn explorer_settings_default_and_override() {
+        let d = resolve(None, none);
+        assert_eq!(d.explorer_roots, ["~"]);
+        assert!(!d.explorer_show_hidden);
+        let s = rows(r#"{"explorer":{"roots":["/srv","~/code"],"showHidden":true}}"#);
+        assert_eq!(s.explorer_roots, ["/srv", "~/code"]);
+        assert!(s.explorer_show_hidden);
+        assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn explorer_settings_invalid_warn_and_keep_defaults() {
+        for json in [
+            r#"{"explorer":{"roots":[]}}"#,
+            r#"{"explorer":{"roots":["relative"]}}"#,
+            r#"{"explorer":{"roots":"/srv"}}"#,
+            r#"{"explorer":"x"}"#,
+        ] {
+            let s = rows(json);
+            assert_eq!(s.explorer_roots, ["~"], "{json}");
+            assert_eq!(s.warnings.len(), 1, "{json}");
+        }
+        assert_eq!(rows(r#"{"explorer":{"showHidden":1}}"#).warnings.len(), 1);
     }
 
     #[test]
