@@ -38,5 +38,26 @@
     >
       Create space here
     </button>
+    @if (!at.isRoot) {
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="setAsRoot(at)"
+        (keydown.escape)="closeMenu()"
+      >
+        Set as root
+      </button>
+    } @else if (at.path !== "/") {
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="showParent(at)"
+        (keydown.escape)="closeMenu()"
+      >
+        Show parent folder
+      </button>
+    }
   </div>
 }

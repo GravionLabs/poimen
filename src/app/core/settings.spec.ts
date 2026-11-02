@@ -136,6 +136,24 @@ describe("theme cycle and persistence", () => {
     expect(store.settings().theme).toBe("system");
   });
 
+  it("writes an explorer root through set_explorer_root and applies the saved roots", async () => {
+    tauri.answer("set_explorer_root", () => ["~/Source", "/srv"]);
+    const store = create();
+    await store.setExplorerRoot(0, "/home/x/Source");
+    expect(tauri.calls("set_explorer_root")).toEqual([{ index: 0, path: "/home/x/Source" }]);
+    expect(store.settings().explorerRoots).toEqual(["~/Source", "/srv"]);
+  });
+
+  it("keeps the explorer roots when the write fails", async () => {
+    tauri.answer("set_explorer_root", () => {
+      throw new Error("not a directory");
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const store = create();
+    await store.setExplorerRoot(0, "/gone");
+    expect(store.settings().explorerRoots).toEqual(["~"]);
+  });
+
   it("follows an external edit of the file", async () => {
     const store = create();
     await store.start();

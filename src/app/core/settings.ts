@@ -156,6 +156,19 @@ export class SettingsStore {
     }
   }
 
+  /**
+   * Replaces root `index` of `explorer.roots` in config.json with `path` (`..` moves it up) and
+   * applies the new roots at once; the file watcher confirms.
+   */
+  async setExplorerRoot(index: number, path: string): Promise<void> {
+    try {
+      const roots = await this.bridge.invoke<string[]>("set_explorer_root", { index, path });
+      this._settings.update((s) => ({ ...s, explorerRoots: roots }));
+    } catch (e) {
+      console.warn(`poimen settings: cannot save the explorer root: ${e}`);
+    }
+  }
+
   private apply(raw: unknown): void {
     const next = parseSettings(raw);
     for (const w of next.warnings) console.warn(`poimen settings: ${w}`);

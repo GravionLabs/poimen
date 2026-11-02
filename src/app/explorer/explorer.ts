@@ -43,6 +43,17 @@ export function explorerNodes(
   return roots.map((r) => build(r, r));
 }
 
+/** The open context menu: the folder, where it opened, and the root the folder lies under. */
+export interface ExplorerMenu {
+  path: string;
+  x: number;
+  y: number;
+  /** Index of the root in `explorerRoots`. */
+  root: number;
+  /** Whether the folder is that root itself. */
+  isRoot: boolean;
+}
+
 /** Directories (trailing slashes ignored) that are the working directory of a pane of some space. */
 export function spaceDirs(
   panes: readonly { cwd?: string; foreground_cwd?: string }[],
@@ -70,6 +81,8 @@ export class Explorer {
   private readonly spaceActions = inject(SpaceActions);
   private readonly children = signal<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
   private readonly requested = new Set<string>();
+  /** Index in `explorerRoots` of the root each listed folder lies under. */
+  private readonly rootOf = new Map<string, number>();
 
   private readonly roots = computed(() => this.settings.settings().explorerRoots);
   private readonly hidden = computed(() => this.settings.settings().explorerShowHidden);
@@ -80,12 +93,28 @@ export class Explorer {
 
   /** Directories that already have a space. */
   protected readonly withSpace = computed(() => spaceDirs(this.store.snapshot().panes));
-  protected readonly menuAt = signal<{ path: string; x: number; y: number } | null>(null);
+  protected readonly menuAt = signal<ExplorerMenu | null>(null);
 
   protected openMenu(event: MouseEvent, path: string): void {
     event.preventDefault();
     event.stopPropagation();
-    this.menuAt.set({ path, x: event.clientX, y: event.clientY });
+    const roots = this.roots();
+    const root = this.rootOf.get(path) ?? roots.indexOf(path);
+    if (root < 0) return;
+    const isRoot = roots[root] === path;
+    this.menuAt.set({ path, x: event.clientX, y: event.clientY, root, isRoot });
+  }
+
+  /** Makes the folder the root it lies under; config.json keeps it for the next session. */
+  protected setAsRoot(menu: ExplorerMenu): void {
+    this.closeMenu();
+    void this.settings.setExplorerRoot(menu.root, menu.path);
+  }
+
+  /** Moves a root up to its parent folder. */
+  protected showParent(menu: ExplorerMenu): void {
+    this.closeMenu();
+    void this.settings.setExplorerRoot(menu.root, `${menu.path.replace(/\/+$/, "")}/..`);
   }
 
   protected closeMenu(): void {
@@ -106,7 +135,11 @@ export class Explorer {
       untracked(() => {
         this.children.set(new Map());
         this.requested.clear();
-        for (const root of roots) void this.load(root, hidden);
+        this.rootOf.clear();
+        roots.forEach((root, i) => {
+          this.rootOf.set(root, i);
+          void this.load(root, hidden);
+        });
       });
     });
   }
@@ -131,6 +164,8 @@ export class Explorer {
       dirs = [];
     }
     if (hidden !== this.hidden()) return;
+    const root = this.rootOf.get(path);
+    if (root !== undefined) for (const d of dirs) this.rootOf.set(d.path, root);
     this.children.update((m) => new Map(m).set(path, dirs));
     // Remembered folders are keyed by absolute path, so follow the loaded tree instead of
     // matching a root prefix (a `~` root never prefixes them).

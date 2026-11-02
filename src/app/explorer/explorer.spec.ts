@@ -44,6 +44,7 @@ const tree: Record<string, DirEntry[]> = {
 
 async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: string[] = []) {
   const create = vi.fn(async () => undefined);
+  const setExplorerRoot = vi.fn(async () => undefined);
   TestBed.resetTestingModule();
   const calls: { path: string; hidden: boolean }[] = [];
   const data = new Map<string, string>();
@@ -69,7 +70,10 @@ async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: strin
       },
       {
         provide: SettingsStore,
-        useValue: { settings: signal({ ...DEFAULT_SETTINGS, explorerRoots: roots }) },
+        useValue: {
+          settings: signal({ ...DEFAULT_SETTINGS, explorerRoots: roots }),
+          setExplorerRoot,
+        },
       },
       {
         provide: UI_STORAGE,
@@ -111,7 +115,23 @@ async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: strin
     [...root.querySelectorAll('[role="treeitem"]')].find(
       (e) => e.querySelector(".hx-tree-node-label")?.textContent?.trim() === label,
     )!;
-  return { calls, data, labels, toggle, create, item, root, settle };
+  /** Opens the context menu of `label` and returns the texts of its items. */
+  const menu = async (label: string) => {
+    item(label)
+      .querySelector(".dir")!
+      .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await settle();
+    return [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((e) =>
+      e.textContent!.trim(),
+    );
+  };
+  const click = async (text: string) => {
+    [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((e) => e.textContent!.trim() === text)!
+      .click();
+    await settle();
+  };
+  return { calls, data, labels, toggle, create, item, root, settle, menu, click, setExplorerRoot };
 }
 
 describe("Explorer with the real hx-tree", () => {
@@ -169,6 +189,28 @@ describe("Explorer with the real hx-tree", () => {
     await settle();
     expect(create).toHaveBeenCalledWith("/r/a", "");
     expect(root.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("sets a folder as the root it lies under", async () => {
+    tree["~"] = [dir("/home/x/Source")];
+    const { toggle, menu, click, setExplorerRoot, root } = await setup(undefined, ["/r", "~"]);
+    await toggle("~");
+    expect(await menu("Source")).toEqual(["Create space here", "Set as root"]);
+    await click("Set as root");
+    expect(setExplorerRoot).toHaveBeenCalledWith(1, "/home/x/Source");
+    expect(root.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("moves a root up to its parent folder", async () => {
+    const { menu, click, setExplorerRoot } = await setup();
+    expect(await menu("/r")).toEqual(["Create space here", "Show parent folder"]);
+    await click("Show parent folder");
+    expect(setExplorerRoot).toHaveBeenCalledWith(0, "/r/..");
+  });
+
+  it("offers no parent folder for the file system root", async () => {
+    const { menu } = await setup(undefined, ["/"]);
+    expect(await menu("/")).toEqual(["Create space here"]);
   });
 
   it("creates (or focuses) a space on double-click", async () => {
