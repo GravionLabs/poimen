@@ -26,6 +26,16 @@ export interface TabBarMenuItem {
   label: string;
   shortcut?: string;
   disabled?: boolean;
+  /** Whether the entry is offered for the tab with this id; absent means for every tab. */
+  appliesTo?: (tabId: string) => boolean;
+}
+
+/** The menu entries offered for the tab `id`. */
+export function itemsForTab(
+  items: readonly TabBarMenuItem[],
+  id: string,
+): readonly TabBarMenuItem[] {
+  return items.filter((item) => !item.appliesTo || item.appliesTo(id));
 }
 
 /** The tab being dragged, shared by all bars so another bar can accept it. */
@@ -75,6 +85,11 @@ export class TabBar {
   protected readonly dropAt = signal<number | null>(null);
   /** Where a tab from another bar would land. */
   protected readonly foreignAt = signal<number | null>(null);
+  /** The entries offered for the tab `id`. */
+  protected menuItems(id: string): readonly TabBarMenuItem[] {
+    return itemsForTab(this.menu(), id);
+  }
+
   protected readonly menuAt = signal<{ id: string; x: number; y: number } | null>(null);
 
   protected dragStart(event: DragEvent, index: number): void {

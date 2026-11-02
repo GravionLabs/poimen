@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrowTarget, dropMove } from "./tab-bar";
+import { arrowTarget, dropMove, itemsForTab } from "./tab-bar";
 
 describe("dropMove", () => {
   it("moves the dragged tab to the drop index", () => {
@@ -23,5 +23,17 @@ describe("arrowTarget", () => {
   it("ignores other keys and an empty bar", () => {
     expect(arrowTarget("Enter", 0, 3)).toBeNull();
     expect(arrowTarget("ArrowRight", 0, 0)).toBeNull();
+  });
+});
+
+describe("itemsForTab", () => {
+  const items = [
+    { action: "close", label: "Close" },
+    { action: "only-p5", label: "Only p5", appliesTo: (id: string) => id === "p5" },
+  ];
+
+  it("offers a conditional entry only for the tabs it applies to", () => {
+    expect(itemsForTab(items, "p5").map((i) => i.action)).toEqual(["close", "only-p5"]);
+    expect(itemsForTab(items, "p1").map((i) => i.action)).toEqual(["close"]);
   });
 });

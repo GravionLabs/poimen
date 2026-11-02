@@ -6,6 +6,7 @@ import { HerdrStore } from "./herdr-store";
 import { Keymap } from "./keymap";
 import { PluginActions } from "./plugin-actions";
 import { PluginPanes } from "./plugin-panes";
+import { UI_STORAGE, UiState } from "./ui-state";
 import { SettingsStore } from "./settings";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -52,11 +53,13 @@ describe("CommandPalette", () => {
     ]);
     const injector = Injector.create({
       providers: [
+        { provide: UI_STORAGE, useValue: null },
         TauriBridge,
         HerdrStore,
         SettingsStore,
         Keymap,
         PluginActions,
+        UiState,
         PluginPanes,
         CommandPalette,
       ],

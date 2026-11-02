@@ -41,6 +41,8 @@ export interface LayoutState {
   splitWorkspace?: string;
   /** Shares of the Spaces and Agents sections in the split sidebar layout; they sum to 1. */
   splitSizes?: [number, number];
+  /** Plugin name per plugin pane id poimen opened (UI bookkeeping; pruned against live panes). */
+  pluginPanes?: Record<string, string>;
 }
 
 /** Two shares that sum to 1, each at least {@link SPLIT_MIN_SHARE}; anything else is `null`. */
@@ -80,6 +82,7 @@ export function parseLayout(raw: string | null): LayoutState {
       expandedDirs,
       splitWorkspace,
       splitSizes,
+      pluginPanes,
     } = data as Record<string, unknown>;
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
@@ -92,6 +95,13 @@ export function parseLayout(raw: string | null): LayoutState {
     }
     const sizes = clampSplitSizes(splitSizes);
     if (sizes) state.splitSizes = sizes;
+    if (typeof pluginPanes === "object" && pluginPanes !== null && !Array.isArray(pluginPanes)) {
+      state.pluginPanes = Object.fromEntries(
+        Object.entries(pluginPanes).filter(
+          (e): e is [string, string] => typeof e[1] === "string" && e[1] !== "",
+        ),
+      );
+    }
     if (editor !== undefined) state.editor = editor;
   } catch {
     // corrupt state: use defaults
@@ -115,6 +125,8 @@ export class UiState {
   readonly splitSizes = signal<readonly [number, number]>(
     this.initial.splitSizes ?? SPLIT_DEFAULT_SIZES,
   );
+  /** Plugin name per plugin pane id poimen opened; `PluginPanes` prunes it against live panes. */
+  readonly pluginPanes = signal<Readonly<Record<string, string>>>(this.initial.pluginPanes ?? {});
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -137,6 +149,12 @@ export class UiState {
     const next = clampSplitSizes(sizes);
     if (!next) return;
     this.splitSizes.set(next);
+    this.save();
+  }
+
+  /** Stores which plugin pane ids belong to which plugin. */
+  setPluginPanes(names: Readonly<Record<string, string>>): void {
+    this.pluginPanes.set(names);
     this.save();
   }
 
@@ -201,6 +219,7 @@ export class UiState {
       // Like splitWorkspace: stored only once it differs from the default.
       splitSizes:
         this.splitSizes()[0] === SPLIT_DEFAULT_SIZES[0] ? undefined : [...this.splitSizes()],
+      pluginPanes: Object.keys(this.pluginPanes()).length ? { ...this.pluginPanes() } : undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

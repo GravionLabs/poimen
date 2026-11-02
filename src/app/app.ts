@@ -5,6 +5,7 @@ import {
   HostListener,
   computed,
   effect,
+  untracked,
   signal,
   inject,
 } from "@angular/core";
@@ -162,6 +163,11 @@ export class App {
     void this.plugins.load();
     void this.prefs.start();
     void this.userSchemes.start();
+    // herdr may reuse pane ids: forget plugin panes that are gone once a snapshot is read.
+    effect(() => {
+      const panes = this.store.panes();
+      if (this.store.loaded()) untracked(() => this.pluginPanes.prune(panes));
+    });
     void this.store.start().then(() => this.dropMissing());
   }
 
@@ -312,7 +318,11 @@ export class App {
         disabled: single,
       },
       { action: "close", label: "Close" },
-      { action: "plugin-pane-close", label: "Close plugin pane" },
+      {
+        action: "plugin-pane-close",
+        label: "Close plugin pane",
+        appliesTo: (id) => this.pluginPanes.isPluginPane(id),
+      },
       { action: "pane-split-right", label: "New pane to the right" },
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },

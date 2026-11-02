@@ -5,6 +5,7 @@ import { HerdrStore } from "./herdr-store";
 import { PluginPanes, type PluginPaneDef } from "./plugin-panes";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
+import { UI_STATE_KEY, UI_STORAGE, UiState, type UiStorage } from "./ui-state";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./tauri.mock")).tauri.invoke,
@@ -29,6 +30,25 @@ const review: PluginPaneDef = {
   title: "Review",
 };
 
+function fakeStorage(): UiStorage {
+  const data = new Map<string, string>();
+  return {
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => void data.set(key, value),
+  };
+}
+
+const startOn = (storage: UiStorage) =>
+  Injector.create({
+    providers: [
+      { provide: UI_STORAGE, useValue: storage },
+      TauriBridge,
+      HerdrStore,
+      UiState,
+      PluginPanes,
+    ],
+  }).get(PluginPanes);
+
 describe("PluginPanes", () => {
   let panes: PluginPanes;
 
@@ -41,7 +61,15 @@ describe("PluginPanes", () => {
       entrypoint: args?.["entrypoint"],
       pane_id: args?.["entrypoint"] === "board" ? "w1:p5" : "w1:p6",
     }));
-    const injector = Injector.create({ providers: [TauriBridge, HerdrStore, PluginPanes] });
+    const injector = Injector.create({
+      providers: [
+        { provide: UI_STORAGE, useValue: fakeStorage() },
+        TauriBridge,
+        HerdrStore,
+        UiState,
+        PluginPanes,
+      ],
+    });
     panes = injector.get(PluginPanes);
   });
 
@@ -106,5 +134,31 @@ describe("PluginPanes", () => {
     });
     expect(await panes.close("w1:p6")).toBe("plugin_pane_not_found");
     expect(panes.isPluginPane("w1:p6")).toBe(true);
+  });
+
+  it("keeps the mapping across a restart", async () => {
+    const storage = fakeStorage();
+    await startOn(storage).open(board);
+    expect(JSON.parse(storage.getItem(UI_STATE_KEY)!).pluginPanes).toEqual({
+      "w1:p5": "deliver-board",
+    });
+    const restarted = startOn(storage);
+    expect(restarted.names().get("w1:p5")).toBe("deliver-board");
+    await restarted.focus("w1:p5");
+    expect(tauri.calls("plugin_pane_focus")).toEqual([{ paneId: "w1:p5" }]);
+  });
+
+  it("prunes panes herdr no longer has, also from the stored state", async () => {
+    const storage = fakeStorage();
+    const first = startOn(storage);
+    await first.open(board);
+    await first.open(review);
+    first.prune(new Map([["w1:p6", {}]]));
+    expect(first.isPluginPane("w1:p5")).toBe(false);
+    expect(first.isPluginPane("w1:p6")).toBe(true);
+    expect(JSON.parse(storage.getItem(UI_STATE_KEY)!).pluginPanes).toEqual({
+      "w1:p6": "review-popup",
+    });
+    expect(startOn(storage).isPluginPane("w1:p5")).toBe(false);
   });
 });

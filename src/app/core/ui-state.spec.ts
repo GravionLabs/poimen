@@ -205,3 +205,15 @@ describe("view switching", () => {
     expect([...state.expandedDirs()]).toEqual(["/a"]);
   });
 });
+
+describe("stored plugin panes", () => {
+  it("reads the name per pane id and drops malformed entries", () => {
+    expect(
+      parseLayout('{"pluginPanes":{"w1:p5":"board","w1:p6":3,"w1:p7":""}}').pluginPanes,
+    ).toEqual({
+      "w1:p5": "board",
+    });
+    expect(parseLayout('{"pluginPanes":["x"]}').pluginPanes).toBeUndefined();
+    expect(parseLayout("{}").pluginPanes).toBeUndefined();
+  });
+});

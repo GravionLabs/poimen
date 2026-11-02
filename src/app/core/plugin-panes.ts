@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { HerdrStore } from "./herdr-store";
 import { TauriBridge } from "./tauri";
+import { UiState } from "./ui-state";
 
 /** A pane a plugin declares (`panes[]` of `plugin.list`). */
 export interface PluginPaneDef {
@@ -23,14 +24,17 @@ export type PluginPaneNames = ReadonlyMap<string, string>;
 /**
  * Plugin panes as tabs. herdr owns the panes: this only remembers which pane id belongs to which
  * plugin (herdr 22 does not mark them in the snapshot) so the tab can carry the plugin name, and
- * forwards focus and close to `plugin.pane.focus` / `plugin.pane.close`.
+ * forwards focus and close to `plugin.pane.focus` / `plugin.pane.close`. The mapping is UI state:
+ * it survives a restart (`UiState`) and {@link prune} drops ids herdr no longer has, since herdr
+ * may reuse a pane id. Only panes poimen opened itself are known.
  */
 @Injectable({ providedIn: "root" })
 export class PluginPanes {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(HerdrStore);
+  private readonly ui = inject(UiState);
   private readonly _defs = signal<PluginPaneDef[]>([]);
-  private readonly _names = signal<PluginPaneNames>(new Map());
+  private readonly _names = signal<PluginPaneNames>(new Map(Object.entries(this.ui.pluginPanes())));
 
   /** The panes the enabled plugins declare; empty when herdr could not list them. */
   readonly defs = this._defs.asReadonly();
@@ -48,7 +52,18 @@ export class PluginPanes {
 
   /** Remembers that `paneId` belongs to the plugin `name` . */
   track(paneId: string, name: string): void {
-    this._names.update((names) => new Map(names).set(paneId, name));
+    this.setNames(new Map(this._names()).set(paneId, name));
+  }
+
+  /** Forgets the plugin panes whose id is not among `live` (closed, or the id may be reused). */
+  prune(live: ReadonlyMap<string, unknown>): void {
+    const kept = [...this._names()].filter(([id]) => live.has(id));
+    if (kept.length !== this._names().size) this.setNames(new Map(kept));
+  }
+
+  private setNames(names: PluginPaneNames): void {
+    this._names.set(names);
+    this.ui.setPluginPanes(Object.fromEntries(names));
   }
 
   /** Whether `paneId` is a plugin pane poimen knows. */
@@ -93,11 +108,9 @@ export class PluginPanes {
     if (!this.isPluginPane(paneId)) return null;
     try {
       await this.bridge.invoke("plugin_pane_close", { paneId });
-      this._names.update((names) => {
-        const next = new Map(names);
-        next.delete(paneId);
-        return next;
-      });
+      const next = new Map(this._names());
+      next.delete(paneId);
+      this.setNames(next);
       return null;
     } catch (err) {
       return String(err);
