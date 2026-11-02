@@ -129,9 +129,19 @@ describe("TerminalStreamService", () => {
     expect(tauri.calls("terminal_scroll")).toEqual([{ id: 7, up: true, lines: 3 }]);
   });
 
+  it("sends a mouse event for the session id", async () => {
+    const session = await service.open(OBSERVE, () => {});
+    const event = { action: "down", button: "left", column: 12, row: 5, modifiers: 0 } as const;
+
+    session.mouse(event);
+
+    expect(tauri.calls("terminal_mouse")).toEqual([{ id: 7, ...event }]);
+  });
+
   it("sends nothing on a closed session", async () => {
     const session = await service.open(OBSERVE, () => {});
     session.close();
+    session.mouse({ action: "up", button: "left", column: 0, row: 0, modifiers: 0 });
 
     session.input("x");
     session.resize(100, 30);
@@ -140,6 +150,7 @@ describe("TerminalStreamService", () => {
     expect(tauri.calls("terminal_input")).toEqual([]);
     expect(tauri.calls("terminal_resize")).toEqual([]);
     expect(tauri.calls("terminal_scroll")).toEqual([]);
+    expect(tauri.calls("terminal_mouse")).toEqual([]);
   });
 
   it("delivers a record that arrives before open resolves", async () => {

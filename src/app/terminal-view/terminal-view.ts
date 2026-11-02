@@ -18,7 +18,8 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
-import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
+import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
+import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
 
@@ -82,6 +83,8 @@ export class TerminalView implements OnDestroy {
   private size = { cols: 0, rows: 0 };
   private destroyed = false;
   private framed = false;
+  private detachMouse?: () => void;
+  private endDrag?: () => void;
   /** Counts connects; a result of an older one is dropped. */
   private generation = 0;
   /** The mode of the stream being opened or running (what the CLI child was spawned with). */
@@ -162,8 +165,94 @@ export class TerminalView implements OnDestroy {
     });
     this.term = term;
     this.fit = fit;
+    this.detachMouse = this.attachMouse(this.body().nativeElement);
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(this.body().nativeElement);
+  }
+
+  /**
+   * herdr's stream is a rendered screen: it carries no DECSET 1000/1002/1003/1006, so xterm never
+   * enables mouse tracking and would never report anything. The mouse is therefore forwarded as
+   * `terminal.mouse` cells; herdr encodes them for the pane application's mouse mode and drops
+   * them when the application did not ask for the mouse. herdr does not expose that mode to
+   * clients, so it cannot be checked here; a held Shift (as in other terminals) bypasses the
+   * forwarding and leaves xterm's text selection and the native context menu. Read-only tabs send
+   * nothing. Returns the function that removes every listener.
+   */
+  private attachMouse(host: HTMLElement): () => void {
+    let pressed: MouseCommand["button"] | null = null;
+    let last = "";
+    let at = { column: 0, row: 0 };
+    const send = (event: MouseEvent, action: MouseCommand["action"], button: number) => {
+      const session = this.session;
+      const term = this.term;
+      // Gate on the mode the stream was opened with, not on the (earlier) requested mode.
+      if (!term || !session?.open || this.attempt !== "control") return;
+      const screen = host.querySelector(".xterm-screen") ?? host;
+      at = cellAt(
+        screen.getBoundingClientRect(),
+        term.cols,
+        term.rows,
+        event.clientX,
+        event.clientY,
+      );
+      const key = `${action}:${at.column}:${at.row}`;
+      if ((action === "move" || action === "drag") && key === last) return;
+      last = key;
+      session.mouse({
+        action,
+        button: buttonName(button),
+        ...at,
+        modifiers: modifierBits(event),
+      });
+    };
+    const onMove = (event: MouseEvent) => {
+      if (pressed) send(event, "drag", event.button);
+      else if (!event.shiftKey) send(event, "move", 0);
+    };
+    const onHostMove = (event: MouseEvent) => {
+      if (!pressed) onMove(event);
+    };
+    const release = () => {
+      window.removeEventListener("mouseup", onUp, true);
+      window.removeEventListener("mousemove", onMove, true);
+      pressed = null;
+      last = "";
+    };
+    function onUp(event: MouseEvent) {
+      if (pressed) send(event, "up", event.button);
+      release();
+    }
+    const onDown = (event: MouseEvent) => {
+      if (this.attempt !== "control" || event.shiftKey) return; // Shift: xterm selects text
+      event.stopPropagation(); // no text selection while the pane application owns the mouse
+      event.preventDefault();
+      this.term?.focus();
+      pressed = buttonName(event.button);
+      last = "";
+      send(event, "down", event.button);
+      window.addEventListener("mouseup", onUp, true);
+      window.addEventListener("mousemove", onMove, true);
+    };
+    const onContext = (event: MouseEvent) => {
+      if (this.attempt === "control" && !event.shiftKey) event.preventDefault();
+    };
+    host.addEventListener("mousedown", onDown, true);
+    host.addEventListener("mousemove", onHostMove, true);
+    host.addEventListener("contextmenu", onContext);
+    // A drag still held when the stream ends (tab closed, mode switch) is released first.
+    this.endDrag = () => {
+      if (pressed && this.session?.open && this.attempt === "control") {
+        this.session.mouse({ action: "up", button: pressed, ...at, modifiers: 0 });
+      }
+      release();
+    };
+    return () => {
+      release();
+      host.removeEventListener("mousedown", onDown, true);
+      host.removeEventListener("mousemove", onHostMove, true);
+      host.removeEventListener("contextmenu", onContext);
+    };
   }
 
   private async start(takeover: boolean): Promise<void> {
@@ -241,6 +330,7 @@ export class TerminalView implements OnDestroy {
   }
 
   private closeStream(): void {
+    this.endDrag?.();
     this.session?.close();
     this.session = undefined;
   }
@@ -253,6 +343,9 @@ export class TerminalView implements OnDestroy {
 
   private stop(): void {
     this.closeStream();
+    this.detachMouse?.();
+    this.detachMouse = undefined;
+    this.endDrag = undefined;
     clearTimeout(this.resizeTimer);
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;

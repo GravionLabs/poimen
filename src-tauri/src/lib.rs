@@ -119,6 +119,23 @@ fn terminal_scroll(
 }
 
 #[tauri::command]
+fn terminal_mouse(
+    sessions: State<'_, Sessions>,
+    id: u32,
+    action: String,
+    button: String,
+    column: u16,
+    row: u16,
+    modifiers: u8,
+) -> Result<(), String> {
+    stream::validate_mouse(&action, &button)?;
+    sessions.send(
+        id,
+        &stream::mouse_command(&action, &button, column, row, modifiers),
+    )
+}
+
+#[tauri::command]
 fn close_terminal(sessions: State<'_, Sessions>, id: u32) {
     sessions.close(id);
 }
@@ -186,6 +203,7 @@ pub fn run() {
             terminal_input,
             terminal_resize,
             terminal_scroll,
+            terminal_mouse,
             close_terminal
         ])
         .build(tauri::generate_context!())
