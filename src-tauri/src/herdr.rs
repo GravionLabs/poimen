@@ -110,16 +110,20 @@ pub const SUPPORTED_PROTOCOL: u32 = 22;
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ServerInfo {
     pub version: String,
-    pub protocol: u32,
+    /// `None` when the server reports a version but no protocol: shown, but not checked.
+    pub protocol: Option<u32>,
     /// The protocol poimen supports, so the frontend can flag a mismatch.
     pub supported: u32,
 }
 
-/// Reads `{"type":"pong","version":"0.9.5","protocol":22}`; `None` when the server is too old to report them.
+/// Reads `{"type":"pong","version":"0.9.5","protocol":22}`; `None` when the server reports no version.
 pub fn parse_ping(result: &Value) -> Option<ServerInfo> {
     Some(ServerInfo {
         version: result.get("version")?.as_str()?.to_string(),
-        protocol: u32::try_from(result.get("protocol")?.as_u64()?).ok()?,
+        protocol: result
+            .get("protocol")
+            .and_then(Value::as_u64)
+            .and_then(|p| u32::try_from(p).ok()),
         supported: SUPPORTED_PROTOCOL,
     })
 }
@@ -279,7 +283,7 @@ mod tests {
             parse_ping(&pong),
             Some(ServerInfo {
                 version: "0.9.5".into(),
-                protocol: 22,
+                protocol: Some(22),
                 supported: SUPPORTED_PROTOCOL
             })
         );
@@ -288,6 +292,18 @@ mod tests {
     #[test]
     fn parse_ping_is_none_for_an_old_server() {
         assert_eq!(parse_ping(&json!({"type":"pong"})), None);
-        assert_eq!(parse_ping(&json!({"version":"0.1","protocol":"x"})), None);
+        assert_eq!(parse_ping(&json!({"protocol":22})), None);
+    }
+
+    #[test]
+    fn parse_ping_keeps_the_version_without_a_protocol() {
+        assert_eq!(
+            parse_ping(&json!({"type":"pong","version":"0.1"})),
+            Some(ServerInfo {
+                version: "0.1".into(),
+                protocol: None,
+                supported: SUPPORTED_PROTOCOL
+            })
+        );
     }
 }

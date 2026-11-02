@@ -158,6 +158,7 @@ describe("version labels", () => {
     expect(appVersionLabel("0.2.0")).toBe("poimen 0.2.0");
   });
   it("shows ? when unknown", () => {
+    expect(herdrVersionLabel({ version: "0.1", supported: 22 })).toBe("herdr 0.1");
     expect(herdrVersionLabel(null)).toBe("herdr ?");
     expect(herdrVersionLabel(undefined)).toBe("herdr ?");
     expect(appVersionLabel(null)).toBe("poimen ?");
@@ -165,6 +166,7 @@ describe("version labels", () => {
   it("warns only on a protocol mismatch", () => {
     expect(protocolWarning(info)).toBe("");
     expect(protocolWarning(null)).toBe("");
+    expect(protocolWarning({ version: "0.1", supported: 22 })).toBe("");
     expect(protocolWarning({ ...info, protocol: 23 })).toBe(
       "herdr protocol 23, poimen supports 22",
     );

@@ -244,7 +244,8 @@ export function decodeBase64(text: string): Uint8Array {
 /** The herdr version and protocol reported by `ping`; `supported` is the protocol poimen is written for. */
 export interface HerdrInfo {
   version: string;
-  protocol: number;
+  /** Absent when herdr reports a version but no protocol: nothing to check. */
+  protocol?: number | null;
   supported: number;
 }
 
@@ -260,6 +261,6 @@ export function appVersionLabel(version: string | null | undefined): string {
 
 /** The tooltip warning for a herdr protocol other than the supported one; empty when it matches or is unknown. */
 export function protocolWarning(info: HerdrInfo | null | undefined): string {
-  if (!info || info.protocol === info.supported) return "";
+  if (!info || info.protocol == null || info.protocol === info.supported) return "";
   return `herdr protocol ${info.protocol}, poimen supports ${info.supported}`;
 }
