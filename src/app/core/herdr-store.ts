@@ -37,10 +37,13 @@ export class HerdrStore {
   private readonly _watchLost = signal(false);
   private readonly _repos = signal<ReadonlyMap<string, RepoInfo>>(new Map());
 
+  private readonly _loaded = signal(false);
   private readonly _info = signal<HerdrInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
 
   readonly snapshot = this._snapshot.asReadonly();
+  /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
+  readonly loaded = this._loaded.asReadonly();
   /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
   readonly info = this._info.asReadonly();
   /** The version of this poimen build. */
@@ -99,6 +102,7 @@ export class HerdrStore {
     try {
       const snapshot = await this.bridge.invoke<Snapshot>("snapshot");
       this._snapshot.set(snapshot);
+      this._loaded.set(true);
       if (!this._watchLost()) this._connectionError.set(null);
       if (!this._info()) await this.readInfo();
       await this.readRepos(snapshot);

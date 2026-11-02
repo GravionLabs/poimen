@@ -13,6 +13,7 @@ import {
   type PaletteItem,
   type PoimenCommand,
 } from "../core/command-palette";
+import type { PluginPaneDef } from "../core/plugin-panes";
 
 /** The command palette dialog: type to filter, arrows to move, Enter to run, Escape to close. */
 @Component({
@@ -27,6 +28,8 @@ export class CommandPalette {
   readonly activePaneId = input<string | null>(null);
   /** A poimen command was chosen; the host runs it. */
   readonly commandChosen = output<PoimenCommand["id"]>();
+  /** A plugin pane was chosen; the host opens it as a tab. */
+  readonly paneChosen = output<PluginPaneDef>();
   /** A plugin action failed; the host shows the message as a notice. */
   readonly failed = output<string>();
   private readonly field = viewChild<ElementRef<HTMLInputElement>>("field");
@@ -56,6 +59,10 @@ export class CommandPalette {
     this.palette.close();
     if (item.kind === "command") {
       this.commandChosen.emit(item.command);
+      return;
+    }
+    if (item.kind === "pane") {
+      this.paneChosen.emit(item.def);
       return;
     }
     const error = await this.palette.invoke(item.action, this.activePaneId());

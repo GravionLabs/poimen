@@ -4,6 +4,7 @@ import type { PluginAction } from "./herdr";
 import { Keymap } from "./keymap";
 import type { ShortcutAction } from "./shortcuts";
 import { PluginActions } from "./plugin-actions";
+import { PluginPanes, type PluginPaneDef } from "./plugin-panes";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
 export interface PoimenCommand {
@@ -31,7 +32,8 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
 /** A row of the palette: a poimen command or a herdr plugin action. */
 export type PaletteItem =
   | { kind: "command"; key: string; title: string; hint: string; command: PoimenCommand["id"] }
-  | { kind: "plugin"; key: string; title: string; hint: string; action: PluginAction };
+  | { kind: "plugin"; key: string; title: string; hint: string; action: PluginAction }
+  | { kind: "pane"; key: string; title: string; hint: string; def: PluginPaneDef };
 
 /**
  * The command palette: poimen commands plus every herdr plugin action (`plugin.action.list`),
@@ -40,6 +42,7 @@ export type PaletteItem =
 @Injectable({ providedIn: "root" })
 export class CommandPalette {
   private readonly plugins = inject(PluginActions);
+  private readonly panes = inject(PluginPanes);
   private readonly keymap = inject(Keymap);
 
   private readonly _open = signal(false);
@@ -66,12 +69,19 @@ export class CommandPalette {
       hint: a.plugin_id,
       action: a,
     })),
+    ...this.panes.defs().map((d): PaletteItem => ({
+      kind: "pane",
+      key: `pane:${d.plugin_id}:${d.entrypoint}`,
+      title: `Open ${d.title} as tab`,
+      hint: d.plugin_name,
+      def: d,
+    })),
   ]);
 
   /** The rows matching the query, best first. */
   readonly items = computed(() =>
     fuzzyFilter(this.all(), this._query(), (i) =>
-      i.kind === "plugin" ? `${i.title} ${i.hint}` : i.title,
+      i.kind === "command" ? i.title : `${i.title} ${i.hint}`,
     ),
   );
 
@@ -85,7 +95,7 @@ export class CommandPalette {
     this._query.set("");
     this._selected.set(0);
     this._open.set(true);
-    await this.plugins.load();
+    await Promise.all([this.plugins.load(), this.panes.load()]);
   }
 
   close(): void {
