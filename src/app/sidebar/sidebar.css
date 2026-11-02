@@ -23,12 +23,29 @@
   width: calc(100% - 20px);
 }
 
+/*
+ * Row metrics (all rows share them, so height depends only on the line count):
+ *   line 1 (name, workspace title): 16px; line 2: 14px; vertical padding of every row: 2px
+ *   gap between rows and groups: 0 (the padding is the only spacing); indent per level: 0.75rem
+ * The terminal/agent badge is 16px tall (14px line + 1px borders), exactly the name line.
+ */
 .spaces {
   padding: 0 4px;
   --h-tree-gap: 0;
-  --h-tree-indent: 1.25rem;
+  --h-tree-indent: 0.75rem;
   --h-tree-node-gap: 0.25rem;
-  --h-tree-node-padding: 0 0.375rem;
+  --h-tree-node-padding: 2px 0.375rem;
+}
+
+/* No expand/collapse icon (workspaces are always expanded); its 1.75rem box made rows taller. */
+.spaces ::ng-deep .hx-tree-node-toggle {
+  display: none;
+}
+
+/* The pane of the active tab: bar at the left edge and a stronger background. */
+.spaces ::ng-deep .hx-tree-node-content:has(.row.active) {
+  background: color-mix(in srgb, var(--h-highlight-background) 22%, transparent);
+  box-shadow: inset 3px 0 0 var(--h-highlight-background);
 }
 
 .space {
@@ -36,6 +53,8 @@
   min-width: 0;
   gap: 6px;
   align-items: center;
+  min-height: 16px;
+  line-height: 16px;
   color: var(--h-text-muted-color);
   font-size: 11px;
   text-transform: uppercase;
@@ -52,6 +71,7 @@
 
 .name {
   font-weight: 500;
+  line-height: 16px;
 }
 
 .row.open .name {
@@ -61,7 +81,9 @@
 
 .icon {
   flex: none;
+  box-sizing: border-box;
   min-width: 20px;
+  height: 16px;
   padding: 0 2px;
   border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
@@ -104,6 +126,7 @@
 .space-meta {
   color: var(--h-text-muted-color);
   font-size: 11px;
+  line-height: 14px;
 }
 
 .space-meta {

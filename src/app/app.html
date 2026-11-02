@@ -4,6 +4,7 @@
     <div class="side" [style.width.px]="ui.sidebarWidth()">
       <app-sidebar
         [openIds]="editor.openIds()"
+        [activeId]="editor.activeId()"
         (selected)="open($event)"
         (pinned)="open($event, true)"
       />

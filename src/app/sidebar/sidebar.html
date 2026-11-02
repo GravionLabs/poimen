@@ -36,7 +36,8 @@
         }
       </span>
     } @else {
-      <span class="row" [class.open]="openIds().has(d.row.pane.pane_id)" [title]="rowTitle(d.row)">
+      @let m = marks(d.row);
+      <span class="row" [class.open]="m.open" [class.active]="m.active" [title]="rowTitle(d.row)">
         <span
           class="icon"
           [class.agent]="d.row.agent"

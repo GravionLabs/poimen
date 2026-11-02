@@ -1,6 +1,8 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
+  ElementRef,
   Injector,
   afterNextRender,
   computed,
@@ -20,7 +22,14 @@ import {
   type Workspace,
 } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
-import { aggregateStatus, paneLine2, spaceContext, spaceMeta, stateLabel } from "./spaces";
+import {
+  aggregateStatus,
+  paneLine2,
+  paneMarks,
+  spaceContext,
+  spaceMeta,
+  stateLabel,
+} from "./spaces";
 
 /** What a tree node carries back to the template. */
 export type SpaceData =
@@ -61,6 +70,11 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
   });
 }
 
+/** Whether a key press would collapse an expanded tree item (ArrowLeft on an open parent). */
+export function blocksCollapse(key: string, item: Element | null): boolean {
+  return key === "ArrowLeft" && item?.getAttribute("aria-expanded") === "true";
+}
+
 export const DOUBLE_CLICK_MS = 400;
 
 /** Whether a click on `key` at `now` completes a double click that started with `last`. */
@@ -83,6 +97,8 @@ export function isDoubleClick(
 export class Sidebar {
   /** Ids of the panes that have an open view. */
   readonly openIds = input<ReadonlySet<string>>(new Set());
+  /** Id of the pane whose tab is active in the editor. */
+  readonly activeId = input<string | null>(null);
   readonly selected = output<Pane>();
   /** A second click on the same row within {@link DOUBLE_CLICK_MS}: pin the tab. */
   readonly pinned = output<Pane>();
@@ -92,6 +108,23 @@ export class Sidebar {
   protected readonly store = inject(HerdrStore);
   protected readonly query = signal("");
   protected readonly selection = signal<string | null>(null);
+
+  constructor() {
+    // Workspaces stay expanded: swallow the tree's collapse key before the tree sees it.
+    const host: HTMLElement = inject(ElementRef).nativeElement;
+    const onKey = (event: KeyboardEvent) => {
+      const item = (event.target as HTMLElement).closest("[role=treeitem]");
+      if (!blocksCollapse(event.key, item)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    host.addEventListener("keydown", onKey, true);
+    inject(DestroyRef).onDestroy(() => host.removeEventListener("keydown", onKey, true));
+  }
+
+  protected marks(row: PaneRow) {
+    return paneMarks(row.pane.pane_id, this.openIds(), this.activeId());
+  }
 
   protected readonly nodes = computed(() =>
     spaceNodes(filterSpaces(this.store.spaces(), this.query())),
