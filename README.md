@@ -104,6 +104,7 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 - While the version is 0.x, use **no** `!` and no `BREAKING CHANGE:` until 1.0 is intended: either one jumps the version to 1.0.0.
 - On the push to `main`, `.github/workflows/release.yml` runs the CI checks, determines the version, commits `CHANGELOG.md` (git-cliff, `cliff.toml`) to `main`, tags `v<version>`, creates the GitHub Release and closes the issues the release delivered. The changelog commit is pushed with the `GH_PAT` secret (a repository admin, bypass actor of the `main` ruleset).
 - The versions in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` are placeholders; the tag carries the released version.
+- The status bar shows `poimen <version>` (the Tauri app version from `tauri.conf.json`) and `herdr <version>` (socket `ping`; `herdr ?` when unreachable or too old; warning colour and tooltip when the protocol differs from the supported 22). The git tag is the source of truth for the poimen version, so the bundling step (not yet in the release workflow) must build with `tauri build --config '{"version":"<version>"}'`; an unbundled build shows the placeholder.
 - Tags are `v<major>.<minor>.<patch>`, as in the other GravionLabs repositories; milestones carry the same names.
 - The rulesets `main` and `release` are created by `scripts/setup-rulesets.sh`.
 

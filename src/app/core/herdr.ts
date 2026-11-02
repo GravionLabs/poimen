@@ -240,3 +240,26 @@ export function decodeBase64(text: string): Uint8Array {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
+
+/** The herdr version and protocol reported by `ping`; `supported` is the protocol poimen is written for. */
+export interface HerdrInfo {
+  version: string;
+  protocol: number;
+  supported: number;
+}
+
+/** `herdr <version>`, or `herdr ?` when herdr is unreachable or too old to report it. */
+export function herdrVersionLabel(info: HerdrInfo | null | undefined): string {
+  return info?.version ? `herdr ${info.version}` : "herdr ?";
+}
+
+/** `poimen <version>`, or `poimen ?` until the build version is known. */
+export function appVersionLabel(version: string | null | undefined): string {
+  return version ? `poimen ${version}` : "poimen ?";
+}
+
+/** The tooltip warning for a herdr protocol other than the supported one; empty when it matches or is unknown. */
+export function protocolWarning(info: HerdrInfo | null | undefined): string {
+  if (!info || info.protocol === info.supported) return "";
+  return `herdr protocol ${info.protocol}, poimen supports ${info.supported}`;
+}

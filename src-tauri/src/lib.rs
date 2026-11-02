@@ -33,6 +33,21 @@ async fn snapshot(client: State<'_, Client>) -> Result<Value, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Version and protocol of the running herdr; `None` when unreachable or too old.
+#[tauri::command]
+async fn herdr_info(client: State<'_, Client>) -> Result<Option<herdr::ServerInfo>, String> {
+    let client = client.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || client.info())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The running poimen build's version (Tauri app version).
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
@@ -163,6 +178,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
+            herdr_info,
+            app_version,
             get_settings,
             repo_info,
             open_terminal,

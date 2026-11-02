@@ -103,6 +103,27 @@ pub struct Client {
     socket: PathBuf,
 }
 
+/// The herdr protocol version poimen is written against.
+pub const SUPPORTED_PROTOCOL: u32 = 22;
+
+/// Version and protocol of the running herdr, from the `ping` reply.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ServerInfo {
+    pub version: String,
+    pub protocol: u32,
+    /// The protocol poimen supports, so the frontend can flag a mismatch.
+    pub supported: u32,
+}
+
+/// Reads `{"type":"pong","version":"0.9.5","protocol":22}`; `None` when the server is too old to report them.
+pub fn parse_ping(result: &Value) -> Option<ServerInfo> {
+    Some(ServerInfo {
+        version: result.get("version")?.as_str()?.to_string(),
+        protocol: u32::try_from(result.get("protocol")?.as_u64()?).ok()?,
+        supported: SUPPORTED_PROTOCOL,
+    })
+}
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 fn next_id() -> String {
@@ -129,6 +150,11 @@ impl Client {
             return Err(Error::Protocol("connection closed before response".into()));
         }
         parse_response(&line)
+    }
+
+    /// The running herdr's version, or `None` when it is unreachable or too old to say.
+    pub fn info(&self) -> Option<ServerInfo> {
+        parse_ping(&self.request("ping", json!({})).ok()?)
     }
 
     pub fn subscribe(&self, subscriptions: Vec<Value>) -> Result<Subscription, Error> {
@@ -244,5 +270,24 @@ mod tests {
         let err = parse_event(r#"{"id":"sub","error":{"code":"events_lost","message":"behind"}}"#)
             .unwrap_err();
         assert!(matches!(err, Error::Api { ref code, .. } if code == "events_lost"));
+    }
+
+    #[test]
+    fn parse_ping_reads_version_and_protocol() {
+        let pong = json!({"type":"pong","version":"0.9.5","protocol":22,"capabilities":{}});
+        assert_eq!(
+            parse_ping(&pong),
+            Some(ServerInfo {
+                version: "0.9.5".into(),
+                protocol: 22,
+                supported: SUPPORTED_PROTOCOL
+            })
+        );
+    }
+
+    #[test]
+    fn parse_ping_is_none_for_an_old_server() {
+        assert_eq!(parse_ping(&json!({"type":"pong"})), None);
+        assert_eq!(parse_ping(&json!({"version":"0.1","protocol":"x"})), None);
     }
 }

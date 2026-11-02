@@ -41,6 +41,11 @@
   background: #f85149;
 }
 
+.version.warn {
+  color: #d29922;
+  font-weight: 600;
+}
+
 button.item {
   font: inherit;
   color: inherit;

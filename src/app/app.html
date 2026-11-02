@@ -84,5 +84,7 @@
   [paneId]="editor.activeId()"
   [mode]="editor.activeId() ? tabMode(editor.activeId()!) : null"
   [size]="termSize()"
+  [appVersion]="store.appVersion()"
+  [info]="store.info()"
   (jump)="jumpToWaiting()"
 />
