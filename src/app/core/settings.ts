@@ -9,6 +9,8 @@ import {
   type SidebarRows,
 } from "../sidebar/spaces";
 
+export type SidebarLayout = "tree" | "split";
+
 export type ThemeSetting = "light" | "dark" | "system";
 
 /** A scheme name, or a pair of names that `theme` picks from. */
@@ -40,6 +42,8 @@ export interface Settings {
   shortcuts: Shortcuts;
   /** Lines and tokens per row type: the defaults over the valid `sidebar.rows` of config.json. */
   sidebarRows: SidebarRows;
+  /** `sidebar.layout`: the Spaces view as a tree or as two lists (Spaces, Agents). */
+  sidebarLayout: SidebarLayout;
   /** Roots of the explorer; a leading `~` is the home directory (resolved by the backend). */
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
@@ -61,6 +65,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoControl: true,
   shortcuts: DEFAULT_SHORTCUTS,
   sidebarRows: DEFAULT_SIDEBAR_ROWS,
+  sidebarLayout: "tree",
   explorerRoots: ["~"],
   explorerShowHidden: false,
   warnings: [],
@@ -139,6 +144,7 @@ export function parseSettings(raw: unknown): Settings {
     autoControl: r["autoControl"] !== false,
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
+    sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     warnings: Array.isArray(r["warnings"])
@@ -153,6 +159,9 @@ export class SettingsStore {
   private readonly bridge = inject(TauriBridge);
   private readonly _settings = signal<Settings>(DEFAULT_SETTINGS);
   readonly settings = this._settings.asReadonly();
+  private readonly _writeError = signal<string | null>(null);
+  /** Why the last write of a setting from the UI failed; cleared by the next successful write. */
+  readonly writeError = this._writeError.asReadonly();
 
   async start(): Promise<void> {
     await this.bridge.listen<unknown>("settings", (s) => this.apply(s));
@@ -184,6 +193,20 @@ export class SettingsStore {
     } catch (e) {
       this._settings.set(previous);
       console.warn(`poimen settings: cannot save colorSchema: ${e}`);
+    }
+  }
+
+  /** Writes `sidebar.layout` of config.json and applies it at once; the watcher confirms. */
+  async setSidebarLayout(sidebarLayout: SidebarLayout): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, sidebarLayout });
+    try {
+      await this.bridge.invoke("set_sidebar_layout", { layout: sidebarLayout });
+      this._writeError.set(null);
+    } catch (e) {
+      this._settings.set(previous);
+      this._writeError.set(`Cannot save the sidebar layout: ${e}`);
+      console.warn(`poimen settings: cannot save sidebar.layout: ${e}`);
     }
   }
 

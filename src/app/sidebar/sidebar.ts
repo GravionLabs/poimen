@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -31,11 +32,19 @@ import {
   type SidebarRows,
 } from "./spaces";
 import { SettingsStore } from "../core/settings";
+import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
 
 /** What a tree node carries back to the template. */
 export type SpaceData =
-  | { kind: "workspace"; workspace: Workspace; status: AgentStatus; lines: Line[] }
+  | {
+      kind: "workspace";
+      workspace: Workspace;
+      status: AgentStatus;
+      lines: Line[];
+      /** Split layout only: the workspace whose terminals are listed. */
+      selected?: boolean;
+    }
   | { kind: "pane"; row: PaneRow; lines: Line[] };
 
 const rowType = (row: PaneRow): RowType => (row.agent ? "agent" : "terminal");
@@ -85,6 +94,91 @@ export function spaceNodes(
   });
 }
 
+/** The two lists of the `split` layout. */
+export interface SplitSections {
+  /** Workspaces; the selected one lists its terminal panes below it. */
+  spaces: HxTreeNode<SpaceData>[];
+  /** Every agent pane across the workspaces in herdr order, with its workspace name. */
+  agents: HxTreeNode<SpaceData>[];
+  /** The workspace whose panes are listed (the wanted one, else the first). */
+  selectedId: string | null;
+}
+
+/**
+ * Structure of the `split` layout (as in the herdr sidebar): a flat list of workspaces where the
+ * `selectedId` one (else the first) has its terminal panes as children, and a flat list of all
+ * agent panes, each rendered like in the tree plus a last line with the workspace name.
+ */
+export function splitSections(
+  spaces: SpaceNode[],
+  selectedId: string | null,
+  rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
+): SplitSections {
+  const selected =
+    spaces.find((s) => s.workspace.workspace_id === selectedId) ?? spaces[0] ?? undefined;
+  const spaceList = spaces.map<HxTreeNode<SpaceData>>((space) => {
+    const ctx = spaceContext(space);
+    const isSelected = space === selected;
+    return {
+      key: WORKSPACE_PREFIX + space.workspace.workspace_id,
+      label: space.workspace.label,
+      // helix applies `expanded` once per key, so every workspace starts open; only the selected
+      // one has children, the others are leaves until they are selected.
+      expanded: true,
+      leaf: !isSelected,
+      data: {
+        kind: "workspace",
+        workspace: space.workspace,
+        status: aggregateStatus(space),
+        lines: renderRow("workspace", rows.workspace, space, ctx),
+        selected: isSelected,
+      },
+      children: isSelected
+        ? space.rows
+            .filter((row) => !row.agent)
+            .map((row) => ({
+              key: row.pane.pane_id,
+              label: row.name,
+              leaf: true,
+              data: {
+                kind: "pane" as const,
+                row,
+                lines: renderRow("terminal", rows.terminal, row, ctx),
+              },
+            }))
+        : undefined,
+    };
+  });
+  const agents = spaces.flatMap((space) => {
+    const ctx = spaceContext(space);
+    return space.rows
+      .filter((row) => row.agent)
+      .map<HxTreeNode<SpaceData>>((row) => ({
+        key: row.pane.pane_id,
+        label: row.name,
+        leaf: true,
+        data: {
+          kind: "pane",
+          row,
+          lines: [
+            ...renderRow("agent", rows.agent, row, ctx),
+            [
+              {
+                kind: "text",
+                text: space.workspace.label,
+                status: row.pane.agent_status,
+                bold: false,
+                dim: false,
+                sep: false,
+              },
+            ],
+          ],
+        },
+      }));
+  });
+  return { spaces: spaceList, agents, selectedId: selected?.workspace.workspace_id ?? null };
+}
+
 /** A row's context menu: `kind` says what was clicked, `action` what was picked. */
 export interface SidebarMenuAction {
   kind: "workspace" | "pane";
@@ -121,7 +215,7 @@ export function isDoubleClick(
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
 @Component({
   selector: "app-sidebar",
-  imports: [HxMessage, HxTree, HxTreeNodeTemplate, HxInput],
+  imports: [HxMessage, HxTree, HxTreeNodeTemplate, HxInput, NgTemplateOutlet],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -180,15 +274,28 @@ export class Sidebar {
   private readonly settings = inject(SettingsStore);
   private readonly rows = computed(() => this.settings.settings().sidebarRows);
 
-  protected readonly nodes = computed(() => {
+  private readonly ui = inject(UiState);
+  protected readonly layout = computed(() => this.settings.settings().sidebarLayout);
+  protected readonly writeError = this.settings.writeError;
+  /** The layout a click on the toggle switches to. */
+  protected readonly otherLayout = computed(() => (this.layout() === "tree" ? "split" : "tree"));
+
+  protected toggleLayout(): void {
+    void this.settings.setSidebarLayout(this.otherLayout());
+  }
+
+  private readonly filtered = computed(() => {
     const rows = this.rows();
     const spaces = this.store.spaces();
     const bySpace = new Map(spaces.flatMap((s) => s.rows.map((r) => [r, s] as const)));
-    return spaceNodes(
-      filterSpaces(spaces, this.query(), (row) => filterValues(bySpace.get(row)!, row, rows)),
-      rows,
-    );
+    return filterSpaces(spaces, this.query(), (row) => filterValues(bySpace.get(row)!, row, rows));
   });
+
+  protected readonly nodes = computed(() => spaceNodes(this.filtered(), this.rows()));
+
+  protected readonly split = computed(() =>
+    splitSections(this.filtered(), this.ui.splitWorkspace(), this.rows()),
+  );
 
   protected data(node: HxTreeNode): SpaceData {
     return node.data as SpaceData;
@@ -196,21 +303,32 @@ export class Sidebar {
 
   protected onSelect(key: string | readonly string[] | null): void {
     if (typeof key !== "string") return;
+    if (key.startsWith(WORKSPACE_PREFIX)) {
+      if (this.layout() === "split") this.ui.setSplitWorkspace(key.slice(WORKSPACE_PREFIX.length));
+      this.hold(key);
+      return;
+    }
     const row = this.store
       .spaces()
       .flatMap((s) => s.rows)
       .find((r) => r.pane.pane_id === key);
-    // hx-tree skips equal values, so it reports a row once while it stays selected. Hold the key in
-    // the binding for one render (the tree sees it), then clear it: the tree is reset to null and
-    // reports the same row again. Setting null right here would be a no-op for the binding.
-    this.selection.set(key);
-    afterNextRender(() => this.selection.set(null), { injector: this.injector });
+    this.hold(key);
     if (!row) return;
     const now = Date.now();
     const double = isDoubleClick(this.last, key, now);
     this.last = double ? null : { key, at: now };
     if (double) this.pinned.emit(row.pane);
     else this.selected.emit(row.pane);
+  }
+
+  /**
+   * hx-tree skips equal values, so it reports a row once while it stays selected. Hold the key in
+   * the binding for one render (the tree sees it), then clear it: the tree is reset to null and
+   * reports the same row again. Setting null right here would be a no-op for the binding.
+   */
+  private hold(key: string): void {
+    this.selection.set(key);
+    afterNextRender(() => this.selection.set(null), { injector: this.injector });
   }
 
   protected setQuery(event: Event): void {

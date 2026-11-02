@@ -34,6 +34,8 @@ export interface LayoutState {
   activeView: string;
   /** Paths of the explorer folders that are expanded. */
   expandedDirs: string[];
+  /** The workspace selected in the split sidebar layout; absent until one is picked. */
+  splitWorkspace?: string;
 }
 
 export function clampSidebarWidth(width: number): number {
@@ -53,15 +55,16 @@ export function parseLayout(raw: string | null): LayoutState {
   try {
     const data: unknown = JSON.parse(raw);
     if (typeof data !== "object" || data === null) return state;
-    const { sidebarWidth, sidebarCollapsed, editor, activeView, expandedDirs } = data as Record<
-      string,
-      unknown
-    >;
+    const { sidebarWidth, sidebarCollapsed, editor, activeView, expandedDirs, splitWorkspace } =
+      data as Record<string, unknown>;
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
     if (typeof activeView === "string" && activeView) state.activeView = activeView;
     if (Array.isArray(expandedDirs)) {
       state.expandedDirs = expandedDirs.filter((d): d is string => typeof d === "string");
+    }
+    if (typeof splitWorkspace === "string" && splitWorkspace) {
+      state.splitWorkspace = splitWorkspace;
     }
     if (editor !== undefined) state.editor = editor;
   } catch {
@@ -80,6 +83,8 @@ export class UiState {
   readonly sidebarCollapsed = signal(this.initial.sidebarCollapsed);
   readonly activeView = signal(this.initial.activeView);
   readonly expandedDirs = signal<ReadonlySet<string>>(new Set(this.initial.expandedDirs));
+  /** The workspace selected in the split sidebar layout (UI state, not a setting). */
+  readonly splitWorkspace = signal<string | null>(this.initial.splitWorkspace ?? null);
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -89,6 +94,11 @@ export class UiState {
 
   setSidebarWidth(width: number): void {
     this.sidebarWidth.set(clampSidebarWidth(width));
+    this.save();
+  }
+
+  setSplitWorkspace(id: string): void {
+    this.splitWorkspace.set(id);
     this.save();
   }
 
@@ -149,6 +159,7 @@ export class UiState {
       editor: this.editor,
       activeView: this.activeView(),
       expandedDirs: [...this.expandedDirs()],
+      splitWorkspace: this.splitWorkspace() ?? undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));
