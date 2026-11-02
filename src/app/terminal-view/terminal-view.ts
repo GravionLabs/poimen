@@ -165,7 +165,14 @@ export class TerminalView implements OnDestroy {
   }
 
   private createTerminal(): void {
+    const openLink = linkHandler((url) => this.tauri.openUrl(url));
     const term = new Terminal({
+      // OSC 8 hyperlinks: xterm's default would confirm() and window.open(); use the opener instead.
+      linkHandler: {
+        activate: openLink,
+        hover: () => (this.linkHovered = true),
+        leave: () => (this.linkHovered = false),
+      },
       scrollback: 0, // herdr owns scrollback; wheel events are forwarded instead
       cursorBlink: true,
       allowProposedApi: true,
@@ -176,13 +183,10 @@ export class TerminalView implements OnDestroy {
     // xterm marks a hovered link itself (underline, pointer); the view only needs to know about it.
     this.linkHovered = false;
     term.loadAddon(
-      new WebLinksAddon(
-        linkHandler((url) => this.tauri.openUrl(url)),
-        {
-          hover: () => (this.linkHovered = true),
-          leave: () => (this.linkHovered = false),
-        },
-      ),
+      new WebLinksAddon(openLink, {
+        hover: () => (this.linkHovered = true),
+        leave: () => (this.linkHovered = false),
+      }),
     );
     term.open(this.body().nativeElement);
     try {
