@@ -3,6 +3,7 @@ import {
   applyStatus,
   buildTree,
   decodeBase64,
+  nextWaiting,
   paneLabel,
   waitingCount,
   type Pane,
@@ -71,5 +72,26 @@ describe("decodeBase64", () => {
   it("decodes ANSI bytes including non-ASCII", () => {
     // "\x1b[2J" followed by "λ" (UTF-8 0xCE 0xBB)
     expect(Array.from(decodeBase64("G1sySs67"))).toEqual([0x1b, 0x5b, 0x32, 0x4a, 0xce, 0xbb]);
+  });
+});
+
+describe("nextWaiting", () => {
+  const panes = [
+    pane({ pane_id: "a", agent_status: "blocked" }),
+    pane({ pane_id: "b", agent_status: "idle" }),
+    pane({ pane_id: "c", agent_status: "blocked" }),
+  ];
+  it("picks the next blocked pane after the active one", () => {
+    expect(nextWaiting(panes, "a")?.pane_id).toBe("c");
+  });
+  it("wraps around", () => {
+    expect(nextWaiting(panes, "c")?.pane_id).toBe("a");
+  });
+  it("starts at the first blocked pane without an active one", () => {
+    expect(nextWaiting(panes, null)?.pane_id).toBe("a");
+    expect(nextWaiting(panes, "gone")?.pane_id).toBe("a");
+  });
+  it("is undefined when nothing waits", () => {
+    expect(nextWaiting([pane({ pane_id: "b" })], "b")).toBeUndefined();
   });
 });

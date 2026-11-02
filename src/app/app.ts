@@ -5,6 +5,8 @@ import {
   HostListener,
   computed,
   effect,
+  signal,
+  untracked,
   inject,
 } from "@angular/core";
 import { Title } from "@angular/platform-browser";
@@ -17,6 +19,7 @@ import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, isToggleSidebarKey } fro
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 import { EditorTabs } from "./core/editor-tabs";
+import { StatusBar } from "./status-bar/status-bar";
 import { TabBar, type TabBarItem } from "./ui/helix-candidates/tab-bar/tab-bar";
 
 /** Ids the native menu emits on the `menu` event (see `src-tauri/src/lib.rs`). */
@@ -25,7 +28,7 @@ type MenuAction = "close_all" | "refresh";
 /** The window: the activity bar, the sidebar and the editor group (tab bar over the live terminal). */
 @Component({
   selector: "app-root",
-  imports: [ActivityBar, Sidebar, TerminalView, TabBar, HxSwitch],
+  imports: [ActivityBar, Sidebar, TerminalView, TabBar, HxSwitch, StatusBar],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -63,7 +66,14 @@ export class App {
     return !!id && this.editor.mode(id) === "control";
   });
 
+  /** Size of the active terminal; undefined until it is measured. */
+  protected readonly termSize = signal<{ cols: number; rows: number } | undefined>(undefined);
+
   constructor() {
+    effect(() => {
+      this.editor.activeId();
+      untracked(() => this.termSize.set(undefined));
+    });
     const title = inject(Title);
     effect(() => {
       const waiting = this.store.waiting();
@@ -126,6 +136,12 @@ export class App {
 
   protected tabMode(id: string): string {
     return this.editor.mode(id) === "control" ? "Input" : "Read-only";
+  }
+
+  /** Opens the next blocked pane after the active one. */
+  protected jumpToWaiting(): void {
+    const next = this.store.nextWaiting(this.editor.activeId());
+    if (next) this.open(next);
   }
 
   private pane(id: string): Pane | undefined {

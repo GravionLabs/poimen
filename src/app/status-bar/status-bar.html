@@ -1,0 +1,23 @@
+<footer class="bar" role="status">
+  <span class="item conn {{ connection().state }}" [title]="label(connection())">
+    <span class="dot"></span>{{ label(connection()) }}
+  </span>
+  <button
+    type="button"
+    class="item waiting"
+    [class.any]="waiting() > 0"
+    [disabled]="waiting() === 0"
+    title="Jump to the next waiting agent"
+    (click)="jump.emit()"
+  >
+    {{ waiting() }} waiting
+  </button>
+  <span class="spacer"></span>
+  @if (paneId(); as id) {
+    <span class="item">{{ id }}</span>
+    <span class="item">{{ mode() }}</span>
+    @if (size()) {
+      <span class="item">{{ sizeText(size()) }}</span>
+    }
+  }
+</footer>
