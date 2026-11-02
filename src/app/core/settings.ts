@@ -11,11 +11,14 @@ import {
 
 export type ThemeSetting = "light" | "dark" | "system";
 
+/** A scheme name, or a pair of names that `theme` picks from. */
+export type ColorSchemeSetting = string | { light: string; dark: string };
+
 /** The resolved user settings from `~/.config/poimen/config.json` (wire shape of `settings.rs`). */
 export interface Settings {
   theme: ThemeSetting;
-  /** Name of the color scheme (`colorSchema`); `null` is the `poimen` scheme that follows `theme`. */
-  colorSchema: string | null;
+  /** The `colorSchema`: a name or a light/dark pair; `null` is the `poimen` scheme that follows `theme`. */
+  colorSchema: ColorSchemeSetting | null;
   /** `null` keeps the app's default monospace stack. */
   fontFamily: string | null;
   fontSize: number;
@@ -86,6 +89,16 @@ function parseRoots(raw: unknown): string[] {
   return roots.length ? roots : DEFAULT_SETTINGS.explorerRoots;
 }
 
+function parseColorSchema(raw: unknown): ColorSchemeSetting | null {
+  const name = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
+  if (typeof raw === "object" && raw !== null) {
+    const light = name((raw as Record<string, unknown>)["light"]);
+    const dark = name((raw as Record<string, unknown>)["dark"]);
+    return light && dark ? { light, dark } : null;
+  }
+  return name(raw);
+}
+
 /** Accepts a payload from the backend; anything malformed falls back to the defaults. */
 export function parseSettings(raw: unknown): Settings {
   if (typeof raw !== "object" || raw === null) return DEFAULT_SETTINGS;
@@ -94,10 +107,7 @@ export function parseSettings(raw: unknown): Settings {
   const color = (v: unknown) => (typeof v === "string" ? v : null);
   return {
     theme: r["theme"] === "light" || r["theme"] === "dark" ? r["theme"] : "system",
-    colorSchema:
-      typeof r["colorSchema"] === "string" && r["colorSchema"].trim() !== ""
-        ? r["colorSchema"].trim()
-        : null,
+    colorSchema: parseColorSchema(r["colorSchema"]),
     fontFamily: typeof r["fontFamily"] === "string" ? r["fontFamily"] : null,
     fontSize:
       typeof r["fontSize"] === "number" && Number.isFinite(r["fontSize"])

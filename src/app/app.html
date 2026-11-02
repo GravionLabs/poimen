@@ -1,4 +1,4 @@
-<app-toolbar [theme]="theme$()" (themeChange)="setTheme($event)" />
+<app-toolbar [theme]="theme$()" [fixedBy]="fixedBy()" (themeChange)="setTheme($event)" />
 <div class="work">
   <app-activity-bar
     [active]="ui.activeView()"
