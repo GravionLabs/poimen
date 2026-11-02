@@ -77,6 +77,11 @@ describe("Sidebar with the real hx-tree", () => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
   });
 
+  it("titles the sidebar Spaces", async () => {
+    const { root } = await setup();
+    expect(root.querySelector(".brand")?.textContent?.trim()).toBe("Spaces");
+  });
+
   it("emits again when the same row is clicked a second time", async () => {
     const { click, selected, pinned } = await setup();
     await click("claude");

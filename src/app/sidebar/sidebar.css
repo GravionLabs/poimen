@@ -42,10 +42,10 @@
   display: none;
 }
 
-/* The pane of the active tab: bar at the left edge and a stronger background. */
+/* The pane of the active tab: 4px bar at the left edge and a clearly stronger background. */
 .spaces ::ng-deep .hx-tree-node-content:has(.row.active) {
-  background: color-mix(in srgb, var(--h-highlight-background) 22%, transparent);
-  box-shadow: inset 3px 0 0 var(--h-primary-color);
+  background: color-mix(in srgb, var(--h-primary-color) 28%, transparent);
+  box-shadow: inset 4px 0 0 var(--h-primary-color);
 }
 
 .space {

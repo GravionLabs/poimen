@@ -11,7 +11,7 @@ import {
 } from "@angular/core";
 import { Title } from "@angular/platform-browser";
 import { HxSwitch, HxTheme } from "@gravionlabs/helix-ui";
-import { paneLabel, type Pane } from "./core/herdr";
+import { rowName, tabHeader, type Pane } from "./core/herdr";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore } from "./core/settings";
 import { TauriBridge } from "./core/tauri";
@@ -50,11 +50,18 @@ export class App {
   protected readonly tabItems = computed<TabBarItem[]>(() =>
     this.editor.tabs().map((tab) => {
       const pane = this.pane(tab.paneId);
+      const snap = this.store.snapshot();
+      const tabLabel = pane ? snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label : undefined;
+      const workspace = pane
+        ? snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label
+        : undefined;
+      const header = tabHeader(workspace, pane ? rowName(pane, tabLabel) : tab.paneId);
       return {
         id: tab.paneId,
-        label: pane ? paneLabel(pane) : tab.paneId,
+        label: header.label,
+        group: header.group,
         preview: !tab.pinned,
-        title: `${tab.paneId}${tab.pinned ? "" : " (preview)"}`,
+        title: `${header.title}${tab.pinned ? "" : " (preview)"}`,
       };
     }),
   );

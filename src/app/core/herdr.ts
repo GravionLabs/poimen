@@ -114,6 +114,15 @@ export function rowName(pane: Pane, tabLabel?: string): string {
   );
 }
 
+/** Tab header of a pane: workspace (shown uppercase), a slash, the pane name last; `title` is the full text. */
+export function tabHeader(
+  workspace: string | undefined,
+  name: string,
+): { group?: string; label: string; title: string } {
+  const group = workspace?.trim() || undefined;
+  return { group, label: name, title: group ? `${group.toUpperCase()} / ${name}` : name };
+}
+
 /** Panes whose agent waits for the user. */
 export function waitingCount(panes: Pane[]): number {
   return panes.filter((pane) => pane.agent_status === "blocked").length;
