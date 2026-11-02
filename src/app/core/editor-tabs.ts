@@ -23,15 +23,6 @@ export interface EditorGroup {
   activeId: string | null;
 }
 
-/** `Cmd+\` / `Ctrl+\` splits right, with Shift down; `null` for other keys. */
-export function splitKeyDirection(
-  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
-): SplitDirection | null {
-  const backslash = event.key === "\\" || event.key === "|";
-  if (!backslash || !(event.metaKey || event.ctrlKey) || event.altKey) return null;
-  return event.shiftKey ? "column" : "row";
-}
-
 /** Moves the item at `from` to index `to`; out-of-range or no-op moves return the same array. */
 export function moveItem<T>(list: readonly T[], from: number, to: number): readonly T[] {
   if (from === to || from < 0 || from >= list.length || to < 0 || to >= list.length) return list;
@@ -207,6 +198,15 @@ export class EditorTabs {
     if (!group) return;
     this.patch(group.id, { activeId: paneId });
     this.focusedId.set(group.id);
+  }
+
+  /** Activates the tab `delta` places after the active one in the focused group, wrapping around. */
+  cycle(delta: number): void {
+    const group = this.focused();
+    if (group.tabs.length < 2) return;
+    const at = group.tabs.findIndex((t) => t.paneId === group.activeId);
+    const next = (at + delta + group.tabs.length) % group.tabs.length;
+    this.patch(group.id, { activeId: group.tabs[next].paneId });
   }
 
   focusGroup(groupId: number): void {

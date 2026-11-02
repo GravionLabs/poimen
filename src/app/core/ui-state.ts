@@ -3,6 +3,7 @@ import { Injectable, InjectionToken, inject, signal } from "@angular/core";
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
+export const ZOOM_LIMIT = 20;
 export const UI_STATE_KEY = "poimen.ui-state";
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
@@ -55,18 +56,6 @@ export function parseLayout(raw: string | null): LayoutState {
   return state;
 }
 
-/** `Cmd+B` (macOS) or `Ctrl+B` toggles the sidebar; hard-wired like VS Code until #26. */
-export function isToggleSidebarKey(
-  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
-): boolean {
-  return (
-    event.key.toLowerCase() === "b" &&
-    (event.metaKey || event.ctrlKey) &&
-    !event.altKey &&
-    !event.shiftKey
-  );
-}
-
 /** Window layout that survives restarts. UI state only; pane state stays with herdr. */
 @Injectable({ providedIn: "root" })
 export class UiState {
@@ -75,6 +64,8 @@ export class UiState {
 
   readonly sidebarWidth = signal(this.initial.sidebarWidth);
   readonly sidebarCollapsed = signal(this.initial.sidebarCollapsed);
+  /** Terminal font size offset in points from the View > Zoom items; not persisted. */
+  readonly zoom = signal(0);
 
   /** The stored editor area, read once at start; `EditorTabs` validates it. */
   readonly storedEditor: unknown = this.initial.editor;
@@ -89,6 +80,13 @@ export class UiState {
   saveEditor(editor: unknown): void {
     this.editor = editor;
     this.save();
+  }
+
+  /** Zooms the terminals by `delta` points, or back to the configured size when `delta` is null. */
+  zoomBy(delta: number | null): void {
+    this.zoom.update((z) =>
+      delta === null ? 0 : Math.max(-ZOOM_LIMIT, Math.min(ZOOM_LIMIT, z + delta)),
+    );
   }
 
   toggleSidebar(): void {

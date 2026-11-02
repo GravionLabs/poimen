@@ -31,8 +31,18 @@ describe("parseSettings", () => {
       fontSize: 15,
       colors: { background: "#000000", foreground: null },
       autoControl: false,
+      shortcuts: DEFAULT_SETTINGS.shortcuts,
       warnings: ["w"],
     });
+  });
+
+  it("merges the shortcuts over the defaults and ignores bad entries", () => {
+    const parsed = parseSettings({
+      shortcuts: { toggleSidebar: "Ctrl+Alt+B", closeTab: 5, x: "y" },
+    });
+    expect(parsed.shortcuts.toggleSidebar).toBe("Ctrl+Alt+B");
+    expect(parsed.shortcuts.closeTab).toBe("CmdOrCtrl+W");
+    expect(parseSettings({ shortcuts: "no" }).shortcuts).toEqual(DEFAULT_SETTINGS.shortcuts);
   });
 
   it("falls back to the defaults on malformed input", () => {
