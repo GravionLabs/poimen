@@ -13,6 +13,7 @@ import { Title } from "@angular/platform-browser";
 import { HxSwitch, HxTheme } from "@gravionlabs/helix-ui";
 import { paneLabel, type Pane } from "./core/herdr";
 import { HerdrStore } from "./core/herdr-store";
+import { SettingsStore } from "./core/settings";
 import { TauriBridge } from "./core/tauri";
 import { ActivityBar } from "./activity-bar/activity-bar";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, isToggleSidebarKey } from "./core/ui-state";
@@ -37,6 +38,7 @@ export class App {
   protected readonly store = inject(HerdrStore);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
+  private readonly prefs = inject(SettingsStore);
   protected readonly ui = inject(UiState);
   protected readonly minWidth = SIDEBAR_MIN_WIDTH;
   protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
@@ -83,7 +85,15 @@ export class App {
     const destroyRef = inject(DestroyRef);
     const menu = this.bridge.listen<MenuAction>("menu", (action) => this.onMenu(action));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
-    this.followSystemTheme(destroyRef);
+    effect((onCleanup) => {
+      const setting = this.prefs.settings().theme;
+      if (setting !== "system") {
+        this.theme.setDark(setting === "dark");
+        return;
+      }
+      onCleanup(this.followSystemTheme());
+    });
+    void this.prefs.start();
     void this.store.start();
   }
 
@@ -154,12 +164,12 @@ export class App {
   }
 
   /** HxTheme reads the system setting once; keep light/dark in step when it changes. */
-  private followSystemTheme(destroyRef: DestroyRef): void {
-    if (typeof matchMedia !== "function") return;
+  private followSystemTheme(): () => void {
+    if (typeof matchMedia !== "function") return () => undefined;
     const query = matchMedia("(prefers-color-scheme: dark)");
     const update = () => this.theme.setDark(query.matches);
     update();
     query.addEventListener("change", update);
-    destroyRef.onDestroy(() => query.removeEventListener("change", update));
+    return () => query.removeEventListener("change", update);
   }
 }

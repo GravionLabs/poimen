@@ -17,6 +17,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
+import { SettingsStore } from "../core/settings";
 import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -46,6 +47,7 @@ export class TerminalView implements OnDestroy {
   readonly banner = signal<string | null>(null);
 
   private readonly streams = inject(TerminalStreamService);
+  private readonly prefs = inject(SettingsStore);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
   private term?: Terminal;
@@ -58,6 +60,15 @@ export class TerminalView implements OnDestroy {
 
   constructor() {
     afterNextRender(() => void this.start(false));
+    // Settings edits (and theme switches) apply to the open terminal without a restart.
+    effect(() => {
+      this.prefs.settings();
+      untracked(() => {
+        if (!this.term) return;
+        Object.assign(this.term.options, this.look());
+        this.fit?.fit();
+      });
+    });
     // A mode switch reopens the stream; a switch to input never takes over a controller by itself.
     let seen = this.mode();
     effect(() => {
@@ -68,6 +79,21 @@ export class TerminalView implements OnDestroy {
         if (this.term) void this.restartStream(false);
       });
     });
+  }
+
+  /** Font and colors from the settings, over the theme tokens. */
+  private look() {
+    const { fontFamily, fontSize, colors } = this.prefs.settings();
+    const foreground = colors?.foreground ?? cssVar("--term-fg");
+    return {
+      fontFamily: fontFamily ?? (cssVar("--font-mono") || "Menlo, monospace"),
+      fontSize,
+      theme: {
+        background: colors?.background ?? cssVar("--term-bg"),
+        foreground,
+        cursor: foreground,
+      },
+    };
   }
 
   ngOnDestroy(): void {
@@ -82,15 +108,9 @@ export class TerminalView implements OnDestroy {
   private createTerminal(): void {
     const term = new Terminal({
       scrollback: 0, // herdr owns scrollback; wheel events are forwarded instead
-      fontFamily: cssVar("--font-mono") || "Menlo, monospace",
-      fontSize: 13,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: {
-        background: cssVar("--term-bg"),
-        foreground: cssVar("--term-fg"),
-        cursor: cssVar("--term-fg"),
-      },
+      ...this.look(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);

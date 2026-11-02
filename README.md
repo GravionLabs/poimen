@@ -80,6 +80,21 @@ rm -rf src-tauri/icons/android src-tauri/icons/ios
 | ⌘⇧W | Close all views |
 | ⌘R | Refresh |
 
+## Settings
+
+Optional `~/.config/poimen/config.json`, watched and applied without a restart. Invalid entries log a warning and fall back to the default. It holds preferences only; UI state (sidebar width, open tabs) is kept by the app.
+
+```json
+{
+  "theme": "system",
+  "terminal": { "fontFamily": "JetBrains Mono", "fontSize": 13, "ghostty": false }
+}
+```
+
+- `theme`: `light`, `dark` or `system` (default).
+- `terminal.fontFamily` / `terminal.fontSize` (6 to 72, default 13).
+- `terminal.ghostty`: `true` takes font family, size and background/foreground from `~/.config/ghostty/config`; explicit entries above win.
+
 ## Releases
 
 - Work branches are cut from `release/next` and merge into it; the `Release branch` workflow keeps the release PR `release/next` → `main` open and current (`github-release` skill).
