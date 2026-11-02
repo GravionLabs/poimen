@@ -2,6 +2,7 @@ mod git;
 mod herdr;
 #[cfg(test)]
 mod live;
+mod settings;
 mod stream;
 mod watch;
 
@@ -30,6 +31,16 @@ async fn snapshot(client: State<'_, Client>) -> Result<Value, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+/// The resolved user settings (`~/.config/poimen/config.json`); changes arrive as `settings` events.
+#[tauri::command]
+fn get_settings() -> settings::Settings {
+    home_dir().map(|h| settings::load(&h)).unwrap_or_default()
 }
 
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
@@ -135,6 +146,14 @@ pub fn run() {
             app.on_menu_event(|app, event| {
                 let _ = app.emit("menu", event.id().0.clone());
             });
+            if let Some(home) = home_dir() {
+                let handle = handle.clone();
+                std::thread::spawn(move || {
+                    settings::watch(&home, std::time::Duration::from_secs(1), |s| {
+                        let _ = handle.emit("settings", s);
+                    });
+                });
+            }
             std::thread::spawn(move || {
                 watch::run(client, |event| {
                     let _ = handle.emit("herdr", event);
@@ -144,6 +163,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
+            get_settings,
             repo_info,
             open_terminal,
             terminal_input,
