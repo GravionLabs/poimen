@@ -25,7 +25,7 @@
       "name": "Debug Rust tests",
       "cargo": {
         "args": ["test", "--no-run", "--lib", "--manifest-path=src-tauri/Cargo.toml"],
-        "filter": { "kind": "lib" }
+        "filter": { "name": "poimen_lib" }
       },
       "cwd": "${workspaceFolder}/src-tauri"
     }
