@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  HostListener,
   computed,
   effect,
   inject,
@@ -13,6 +14,8 @@ import { HxTheme } from "@gravionlabs/helix-ui";
 import type { Pane } from "./core/herdr";
 import { HerdrStore } from "./core/herdr-store";
 import { TauriBridge } from "./core/tauri";
+import { ActivityBar } from "./activity-bar/activity-bar";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, isToggleSidebarKey } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 
@@ -22,7 +25,7 @@ type MenuAction = "expand_all" | "collapse_all" | "close_all" | "refresh";
 /** The window: the sidebar and the list of open terminal cards. */
 @Component({
   selector: "app-root",
-  imports: [Sidebar, TerminalView],
+  imports: [ActivityBar, Sidebar, TerminalView],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -31,6 +34,10 @@ export class App {
   protected readonly store = inject(HerdrStore);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
+  protected readonly ui = inject(UiState);
+  protected readonly minWidth = SIDEBAR_MIN_WIDTH;
+  protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
+  private drag: { startX: number; startWidth: number } | null = null;
 
   /** The opened panes in opening order, as they were when opened. */
   private readonly opened = signal<Pane[]>([]);
@@ -53,6 +60,39 @@ export class App {
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     this.followSystemTheme(destroyRef);
     void this.store.start();
+  }
+
+  /** `Cmd+B` / `Ctrl+B` toggles the sidebar. */
+  @HostListener("window:keydown", ["$event"])
+  protected onKey(event: KeyboardEvent): void {
+    if (!isToggleSidebarKey(event)) return;
+    event.preventDefault();
+    this.ui.toggleSidebar();
+  }
+
+  protected dragStart(event: PointerEvent): void {
+    const handle = event.target as HTMLElement;
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+    this.drag = { startX: event.clientX, startWidth: this.ui.sidebarWidth() };
+  }
+
+  protected dragMove(event: PointerEvent): void {
+    if (!this.drag) return;
+    this.ui.setSidebarWidth(this.drag.startWidth + event.clientX - this.drag.startX);
+  }
+
+  protected dragEnd(event: PointerEvent): void {
+    this.drag = null;
+    (event.target as HTMLElement).classList.remove("dragging");
+  }
+
+  protected resizeKey(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 40 : 10;
+    if (event.key === "ArrowLeft") this.ui.setSidebarWidth(this.ui.sidebarWidth() - step);
+    else if (event.key === "ArrowRight") this.ui.setSidebarWidth(this.ui.sidebarWidth() + step);
+    else return;
+    event.preventDefault();
   }
 
   protected open(pane: Pane): void {

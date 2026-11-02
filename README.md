@@ -25,6 +25,7 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
 - **herdr stays the backend.** Closing poimen, or collapsing a card, only closes the view; the pane and its agent keep running. The herdr TUI keeps working next to poimen.
 - **Read-only by default.** A card opens as an observer (any number allowed). Switch it to *Input* to become the terminal's controller (one per terminal). If another controller holds it, the card offers *Take over*.
 - **Angular frontend.** The UI is Angular 22 with helix-ui (light and dark follow the system); `src/app/core` is the bridge to the Tauri commands and events, `src-tauri` stays a thin shell ([ADR 0001](docs/adr/0001-frontend-stack.md)).
+- **Layout.** An activity bar (Spaces) sits left of a sidebar you resize by dragging its edge (arrow keys work too) and toggle with `Cmd+B` (`Ctrl+B` elsewhere). Width and collapsed state persist in poimen's own UI state (webview local storage, not the user settings file); the layout works from 720 px window width.
 - **Events are invalidation signals.** Every herdr event triggers a debounced re-read of the workspace, tab and pane lists, as the herdr socket API docs recommend. `pane.agent_status_changed` is applied right away.
 
 ## Requirements

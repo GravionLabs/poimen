@@ -7,7 +7,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - `src-tauri/src/herdr.rs`: socket API client (NDJSON over the Unix socket). Requests use short-lived connections; subscriptions keep theirs.
 - `src-tauri/src/watch.rs`: one long-lived `events.subscribe`. `pane.agent_status_changed` needs a `pane_id`, and herdr rejects the whole subscription when a referenced pane is gone, so the watcher resubscribes on pane-set changes.
 - `src-tauri/src/stream.rs`: live terminals by spawning `herdr terminal session observe|control`. Use this public CLI contract; do not reimplement herdr's internal binary client protocol.
-- `src/`: Angular 22 (standalone components, signals) on helix-ui, built with `@angular/build` (`angular.json`), tested with Vitest. `src/app/core/` is the Tauri bridge and state: `tauri.ts` (the only `invoke`/`listen` caller), `herdr.ts` (wire types, pure helpers), `herdr-store.ts` (snapshot signals, debounced re-read), `terminal-stream.ts` (routes `terminal` records by session id). `src/app/terminal-view/` wraps xterm.js in one collapsible card; `src/app/sidebar/` lists the panes.
+- `src/`: Angular 22 (standalone components, signals) on helix-ui, built with `@angular/build` (`angular.json`), tested with Vitest. `src/app/core/` is the Tauri bridge and state: `tauri.ts` (the only `invoke`/`listen` caller), `herdr.ts` (wire types, pure helpers), `herdr-store.ts` (snapshot signals, debounced re-read), `terminal-stream.ts` (routes `terminal` records by session id). `src/app/terminal-view/` wraps xterm.js in one collapsible card; `src/app/sidebar/` lists the panes; `src/app/activity-bar/` is the view rail; `core/ui-state.ts` holds persisted UI state (sidebar width/collapsed), never pane state.
 
 ## Rules
 
