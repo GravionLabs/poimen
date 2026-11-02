@@ -203,6 +203,47 @@ describe("TerminalView input mode decision", () => {
     expect(fixture.componentInstance.mode()).toBe("observe");
   });
 
+  it("keeps the blocked state, banner and take over when a held tab is resized", async () => {
+    const held = "terminal 6 already has an attached client; retry with --takeover";
+    const { send, fixture, settings, modes } = await setup("control");
+    await send(0, closed(held));
+    fake.nextCols = 100;
+    settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(fixture.componentInstance.blocked()).toBe(held);
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: held });
+    expect(fixture.nativeElement.textContent).toContain("Take over");
+  });
+
+  it("presents a lost stream with a non-takeover reason as an error, not as held", async () => {
+    const { modes, send, fixture } = await setup("control");
+    await send(0, frame);
+    await send(0, closed("pane w1:p1 not found"));
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
+    expect(fixture.componentInstance.banner()).toBe("pane w1:p1 not found");
+  });
+
+  it("closes a stale open that a newer restart superseded", async () => {
+    const { fixture, open } = await setup("control");
+    const sessions: { close: ReturnType<typeof vi.fn> }[] = [];
+    let release!: () => void;
+    open.mockImplementationOnce(async () => {
+      await new Promise<void>((r) => (release = r));
+      const s = { open: true, close: vi.fn(), resize: vi.fn(), input: vi.fn(), scroll: vi.fn() };
+      sessions.push(s);
+      return s;
+    });
+    fixture.componentInstance.reconnect(false); // slow open
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.componentInstance.reconnect(false); // newer one wins
+    await new Promise((resolve) => setTimeout(resolve));
+    release();
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(sessions[0].close).toHaveBeenCalled();
+  });
+
   it("shows an error, not a held controller, when the pane is gone before the first frame", async () => {
     const { modes, send, fixture } = await setup("control");
     await send(0, closed("pane w1:p1 not found"));

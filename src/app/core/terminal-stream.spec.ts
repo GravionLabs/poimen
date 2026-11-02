@@ -155,6 +155,20 @@ describe("TerminalStreamService", () => {
     expect(session.open).toBe(false);
   });
 
+  it("drops held records when an open rejects, so a later open does not get them", async () => {
+    tauri.answer("open_terminal", () => {
+      tauri.emit("terminal", { id: 7, record: frame("c3RhbGU=") });
+      throw new Error("terminal has a controller");
+    });
+    await expect(service.open(OBSERVE, () => {})).rejects.toThrow("controller");
+    tauri.answer("open_terminal", () => 7);
+    const got: StreamRecord[] = [];
+
+    await service.open(OBSERVE, (r) => got.push(r));
+
+    expect(got).toEqual([]);
+  });
+
   it("rejects with the backend error and routes nothing", async () => {
     tauri.answer("open_terminal", () => {
       throw new Error("terminal has a controller");
