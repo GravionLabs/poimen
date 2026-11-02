@@ -14,6 +14,16 @@ export type ThemeSetting = "light" | "dark" | "system";
 /** A scheme name, or a pair of names that `theme` picks from. */
 export type ColorSchemeSetting = string | { light: string; dark: string };
 
+/** Terminal colors of the Ghostty config; `palette` is empty or holds the 16 ANSI colors. */
+export interface GhosttyColors {
+  background: string | null;
+  foreground: string | null;
+  cursor: string | null;
+  selectionBackground: string | null;
+  selectionForeground: string | null;
+  palette: (string | null)[];
+}
+
 /** The resolved user settings from `~/.config/poimen/config.json` (wire shape of `settings.rs`). */
 export interface Settings {
   theme: ThemeSetting;
@@ -23,7 +33,7 @@ export interface Settings {
   fontFamily: string | null;
   fontSize: number;
   /** Terminal colors taken from Ghostty; `null` keeps the theme colors. */
-  colors: { background: string | null; foreground: string | null } | null;
+  colors: GhosttyColors | null;
   /** Open panes for input when no other client controls them (`terminal.autoControl`). */
   autoControl: boolean;
   /** Accelerator per action: the defaults over the valid `shortcuts` of config.json. */
@@ -115,7 +125,16 @@ export function parseSettings(raw: unknown): Settings {
         : DEFAULT_SETTINGS.fontSize,
     colors:
       colors && typeof colors === "object"
-        ? { background: color(colors["background"]), foreground: color(colors["foreground"]) }
+        ? {
+            background: color(colors["background"]),
+            foreground: color(colors["foreground"]),
+            cursor: color(colors["cursor"]),
+            selectionBackground: color(colors["selectionBackground"]),
+            selectionForeground: color(colors["selectionForeground"]),
+            palette: Array.isArray(colors["palette"])
+              ? colors["palette"].slice(0, 16).map(color)
+              : [],
+          }
         : null,
     autoControl: r["autoControl"] !== false,
     shortcuts: parseShortcuts(r["shortcuts"]),

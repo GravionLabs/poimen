@@ -68,11 +68,13 @@ const ANSI_NAMES = [
   "brightWhite",
 ] as const;
 
-/** The 16 ANSI colors from `--term-ansi-0..15`; a missing token leaves xterm's default. */
-function ansiColors(): Partial<Record<(typeof ANSI_NAMES)[number], string>> {
+/** The 16 ANSI colors: Ghostty's `palette` entries over `--term-ansi-0..15`; a missing token leaves xterm's default. */
+function ansiColors(
+  palette: readonly (string | null)[] = [],
+): Partial<Record<(typeof ANSI_NAMES)[number], string>> {
   const colors: Partial<Record<(typeof ANSI_NAMES)[number], string>> = {};
   ANSI_NAMES.forEach((name, i) => {
-    const value = cssVar(`--term-ansi-${i}`);
+    const value = palette[i] || cssVar(`--term-ansi-${i}`);
     if (value) colors[name] = value;
   });
   return colors;
@@ -178,10 +180,12 @@ export class TerminalView implements OnDestroy {
       theme: {
         background: colors?.background ?? cssVar("--term-bg"),
         foreground,
-        cursor: cssVar("--term-cursor") || foreground,
-        selectionBackground: cssVar("--term-selection-bg") || undefined,
-        selectionForeground: cssVar("--term-selection-fg") || undefined,
-        ...ansiColors(),
+        cursor: colors?.cursor ?? (cssVar("--term-cursor") || foreground),
+        selectionBackground:
+          colors?.selectionBackground ?? (cssVar("--term-selection-bg") || undefined),
+        selectionForeground:
+          colors?.selectionForeground ?? (cssVar("--term-selection-fg") || undefined),
+        ...ansiColors(colors?.palette),
       },
     };
   }
