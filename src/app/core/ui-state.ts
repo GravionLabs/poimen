@@ -6,6 +6,9 @@ export const SIDEBAR_DEFAULT_WIDTH = 260;
 export const ZOOM_LIMIT = 20;
 export const DEFAULT_VIEW = "spaces";
 export const UI_STATE_KEY = "poimen.ui-state";
+/** Smallest share of a section of the split sidebar layout, so its title stays visible. */
+export const SPLIT_MIN_SHARE = 0.15;
+export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
 export interface UiStorage {
@@ -36,6 +39,20 @@ export interface LayoutState {
   expandedDirs: string[];
   /** The workspace selected in the split sidebar layout; absent until one is picked. */
   splitWorkspace?: string;
+  /** Shares of the Spaces and Agents sections in the split sidebar layout; they sum to 1. */
+  splitSizes?: [number, number];
+}
+
+/** Two shares that sum to 1, each at least {@link SPLIT_MIN_SHARE}; anything else is `null`. */
+export function clampSplitSizes(sizes: unknown): [number, number] | null {
+  if (!Array.isArray(sizes) || sizes.length !== 2) return null;
+  const [a, b] = sizes as unknown[];
+  if (typeof a !== "number" || typeof b !== "number") return null;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0 || a + b <= 0) return null;
+  const share = Math.min(1 - SPLIT_MIN_SHARE, Math.max(SPLIT_MIN_SHARE, a / (a + b)));
+  // Rounded to 0.1 % so the stored state stays readable (no 0.15000000000000002).
+  const first = Math.round(share * 1000) / 1000;
+  return [first, Math.round((1 - first) * 1000) / 1000];
 }
 
 export function clampSidebarWidth(width: number): number {
@@ -55,8 +72,15 @@ export function parseLayout(raw: string | null): LayoutState {
   try {
     const data: unknown = JSON.parse(raw);
     if (typeof data !== "object" || data === null) return state;
-    const { sidebarWidth, sidebarCollapsed, editor, activeView, expandedDirs, splitWorkspace } =
-      data as Record<string, unknown>;
+    const {
+      sidebarWidth,
+      sidebarCollapsed,
+      editor,
+      activeView,
+      expandedDirs,
+      splitWorkspace,
+      splitSizes,
+    } = data as Record<string, unknown>;
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
     if (typeof activeView === "string" && activeView) state.activeView = activeView;
@@ -66,6 +90,8 @@ export function parseLayout(raw: string | null): LayoutState {
     if (typeof splitWorkspace === "string" && splitWorkspace) {
       state.splitWorkspace = splitWorkspace;
     }
+    const sizes = clampSplitSizes(splitSizes);
+    if (sizes) state.splitSizes = sizes;
     if (editor !== undefined) state.editor = editor;
   } catch {
     // corrupt state: use defaults
@@ -85,6 +111,10 @@ export class UiState {
   readonly expandedDirs = signal<ReadonlySet<string>>(new Set(this.initial.expandedDirs));
   /** The workspace selected in the split sidebar layout (UI state, not a setting). */
   readonly splitWorkspace = signal<string | null>(this.initial.splitWorkspace ?? null);
+  /** Shares of the Spaces and Agents sections of the split sidebar layout. */
+  readonly splitSizes = signal<readonly [number, number]>(
+    this.initial.splitSizes ?? SPLIT_DEFAULT_SIZES,
+  );
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -99,6 +129,14 @@ export class UiState {
 
   setSplitWorkspace(id: string): void {
     this.splitWorkspace.set(id);
+    this.save();
+  }
+
+  /** Resizes the sections of the split sidebar layout; malformed sizes are ignored. */
+  setSplitSizes(sizes: readonly number[]): void {
+    const next = clampSplitSizes(sizes);
+    if (!next) return;
+    this.splitSizes.set(next);
     this.save();
   }
 
@@ -160,6 +198,9 @@ export class UiState {
       activeView: this.activeView(),
       expandedDirs: [...this.expandedDirs()],
       splitWorkspace: this.splitWorkspace() ?? undefined,
+      // Like splitWorkspace: stored only once it differs from the default.
+      splitSizes:
+        this.splitSizes()[0] === SPLIT_DEFAULT_SIZES[0] ? undefined : [...this.splitSizes()],
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

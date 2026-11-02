@@ -180,46 +180,59 @@
     </ng-template>
   </hx-tree>
 } @else {
-  <section class="section" aria-labelledby="split-spaces">
-    <h2 id="split-spaces" class="section-title">Spaces</h2>
-    <hx-tree
-      #tree
-      class="spaces"
-      ariaLabel="Spaces"
-      emptyMessage="No matching spaces"
-      selectionMode="single"
-      [value]="split().spaces"
-      [selection]="selection()"
-      (selectionChange)="onSelect($event)"
-    >
-      <ng-template hxTreeNode let-node let-expanded="expanded">
-        <ng-container
-          [ngTemplateOutlet]="nodeTpl"
-          [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
-        />
-      </ng-template>
-    </hx-tree>
-  </section>
-  <section class="section" aria-labelledby="split-agents">
-    <h2 id="split-agents" class="section-title">Agents</h2>
-    <hx-tree
-      #tree
-      class="spaces"
-      ariaLabel="Agents"
-      emptyMessage="No matching agents"
-      selectionMode="single"
-      [value]="split().agents"
-      [selection]="selection()"
-      (selectionChange)="onSelect($event)"
-    >
-      <ng-template hxTreeNode let-node let-expanded="expanded">
-        <ng-container
-          [ngTemplateOutlet]="nodeTpl"
-          [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
-        />
-      </ng-template>
-    </hx-tree>
-  </section>
+  <app-split-pane
+    class="sections"
+    direction="column"
+    [count]="2"
+    [sizes]="ui.splitSizes()"
+    (sizesChange)="ui.setSplitSizes($event)"
+  >
+    <ng-template #pane let-i>
+      @if (i === 0) {
+        <section class="section" aria-labelledby="split-spaces">
+          <h2 id="split-spaces" class="section-title">Spaces</h2>
+          <hx-tree
+            #tree
+            class="spaces"
+            ariaLabel="Spaces"
+            emptyMessage="No matching spaces"
+            selectionMode="single"
+            [value]="split().spaces"
+            [selection]="selection()"
+            (selectionChange)="onSelect($event)"
+          >
+            <ng-template hxTreeNode let-node let-expanded="expanded">
+              <ng-container
+                [ngTemplateOutlet]="nodeTpl"
+                [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
+              />
+            </ng-template>
+          </hx-tree>
+        </section>
+      } @else {
+        <section class="section" aria-labelledby="split-agents">
+          <h2 id="split-agents" class="section-title">Agents</h2>
+          <hx-tree
+            #tree
+            class="spaces"
+            ariaLabel="Agents"
+            emptyMessage="No matching agents"
+            selectionMode="single"
+            [value]="split().agents"
+            [selection]="selection()"
+            (selectionChange)="onSelect($event)"
+          >
+            <ng-template hxTreeNode let-node let-expanded="expanded">
+              <ng-container
+                [ngTemplateOutlet]="nodeTpl"
+                [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
+              />
+            </ng-template>
+          </hx-tree>
+        </section>
+      }
+    </ng-template>
+  </app-split-pane>
 }
 @if (menuAt(); as at) {
   <button

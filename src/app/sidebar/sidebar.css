@@ -305,9 +305,48 @@
   flex: 1;
 }
 
-/* Split layout: two labelled lists, the second one below the first. */
+/*
+ * Split layout: two labelled lists stacked in a split pane with a draggable divider between them
+ * (sizes are UI state). The host stops scrolling; each section scrolls its own list below its title.
+ */
+:host(.split) {
+  overflow: hidden;
+}
+
+.sections {
+  min-height: 0;
+}
+
+/* Each section keeps room for its title and a row; `clampSplitSizes` keeps the shares >= 15 %. */
+.sections ::ng-deep > .pane {
+  min-height: 56px;
+}
+
+/* A visible 1px line in the middle of the 5px drag handle; hover and focus still tint the handle. */
+.sections ::ng-deep > .divider::before {
+  content: "";
+  display: block;
+  height: 1px;
+  margin-top: 2px;
+  background: var(--h-content-border-color);
+}
+
+.section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.section .spaces {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .section-title {
-  margin: 4px 0 2px;
+  flex: none;
+  margin: 8px 0 4px;
   padding: 0 14px;
   color: var(--h-text-muted-color);
   font-size: 11px;

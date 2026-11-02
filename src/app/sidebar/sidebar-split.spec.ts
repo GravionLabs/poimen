@@ -8,6 +8,8 @@ import type { Pane, SpaceNode } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { DEFAULT_SETTINGS, SettingsStore, type SidebarLayout } from "../core/settings";
 import { UI_STORAGE } from "../core/ui-state";
+import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
+import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar, splitSections } from "./sidebar";
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
 
@@ -95,6 +97,10 @@ async function setup(layout: SidebarLayout) {
       template: readFileSync("src/app/sidebar/sidebar.html", "utf8"),
     },
   });
+  TestBed.overrideComponent(Sidebar, {
+    remove: { imports: [SplitPane] },
+    add: { imports: [SplitPaneStub] },
+  });
   const fixture = TestBed.createComponent(Sidebar);
   const selected: string[] = [];
   const pinned: string[] = [];
@@ -177,6 +183,24 @@ describe("Sidebar toggle", () => {
 });
 
 describe("Sidebar in the split layout", () => {
+  it("separates Spaces and Agents with a resize splitter, the tree layout has none", async () => {
+    const s = await setup("split");
+    const dividers = s.root.querySelectorAll<HTMLElement>('app-split-pane [role="separator"]');
+    expect(dividers).toHaveLength(1);
+    const panes = s.root.querySelectorAll("app-split-pane > .pane");
+    expect(panes[0].querySelector('[aria-label="Spaces"]')).not.toBeNull();
+    expect(panes[1].querySelector('[aria-label="Agents"]')).not.toBeNull();
+    expect(s.root.classList.contains("split")).toBe(true);
+
+    dividers[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", shiftKey: true }));
+    await s.settle();
+    expect(panes[0].getAttribute("style")).toContain("flex-grow: 0.6");
+
+    const tree = await setup("tree");
+    expect(tree.root.querySelector("app-split-pane")).toBeNull();
+    expect(tree.root.classList.contains("split")).toBe(false);
+  });
+
   it("has two labelled lists, Spaces with the first workspace's terminals and Agents", async () => {
     const s = await setup("split");
     expect(s.labels()).toEqual(["Spaces", "Agents"]);
