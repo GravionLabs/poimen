@@ -1,0 +1,129 @@
+import { Injector } from "@angular/core";
+import { describe, expect, it } from "vitest";
+import {
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  UI_STATE_KEY,
+  UI_STORAGE,
+  UiState,
+  clampSidebarWidth,
+  isToggleSidebarKey,
+  parseLayout,
+  type UiStorage,
+} from "./ui-state";
+
+function fakeStorage(initial?: string): UiStorage & { data: Map<string, string> } {
+  const data = new Map<string, string>();
+  if (initial !== undefined) data.set(UI_STATE_KEY, initial);
+  return {
+    data,
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => void data.set(key, value),
+  };
+}
+
+const stateOn = (storage: UiStorage | null) =>
+  Injector.create({
+    providers: [{ provide: UI_STORAGE, useValue: storage }, UiState],
+  }).get(UiState);
+
+describe("clampSidebarWidth", () => {
+  it("keeps a width in range", () => expect(clampSidebarWidth(300)).toBe(300));
+  it("raises to the minimum", () => expect(clampSidebarWidth(10)).toBe(SIDEBAR_MIN_WIDTH));
+  it("lowers to the maximum", () => expect(clampSidebarWidth(9000)).toBe(SIDEBAR_MAX_WIDTH));
+  it("falls back to the default for NaN", () =>
+    expect(clampSidebarWidth(NaN)).toBe(SIDEBAR_DEFAULT_WIDTH));
+});
+
+describe("parseLayout", () => {
+  it("returns defaults without stored state", () =>
+    expect(parseLayout(null)).toEqual({ sidebarWidth: 260, sidebarCollapsed: false }));
+  it("reads stored values", () =>
+    expect(parseLayout('{"sidebarWidth":320,"sidebarCollapsed":true}')).toEqual({
+      sidebarWidth: 320,
+      sidebarCollapsed: true,
+    }));
+  it("clamps a stored width", () =>
+    expect(parseLayout('{"sidebarWidth":5}').sidebarWidth).toBe(SIDEBAR_MIN_WIDTH));
+  it("ignores corrupt json and wrong types", () => {
+    const defaults = { sidebarWidth: 260, sidebarCollapsed: false };
+    expect(parseLayout("{nope")).toEqual(defaults);
+    expect(parseLayout("42")).toEqual(defaults);
+    expect(parseLayout('{"sidebarWidth":"wide","sidebarCollapsed":1}')).toEqual(defaults);
+  });
+});
+
+describe("isToggleSidebarKey", () => {
+  const key = (over: Partial<Parameters<typeof isToggleSidebarKey>[0]>) => ({
+    key: "b",
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    ...over,
+  });
+
+  it("accepts Cmd+B and Ctrl+B", () => {
+    expect(isToggleSidebarKey(key({ metaKey: true }))).toBe(true);
+    expect(isToggleSidebarKey(key({ ctrlKey: true, key: "B" }))).toBe(true);
+  });
+
+  it("rejects a bare B, other keys and extra modifiers", () => {
+    expect(isToggleSidebarKey(key({}))).toBe(false);
+    expect(isToggleSidebarKey(key({ metaKey: true, key: "n" }))).toBe(false);
+    expect(isToggleSidebarKey(key({ metaKey: true, shiftKey: true }))).toBe(false);
+    expect(isToggleSidebarKey(key({ metaKey: true, altKey: true }))).toBe(false);
+  });
+});
+
+describe("UiState", () => {
+  it("starts from defaults and persists width and collapse", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    expect(state.sidebarWidth()).toBe(260);
+    expect(state.sidebarCollapsed()).toBe(false);
+
+    state.setSidebarWidth(340);
+    state.toggleSidebar();
+
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!)).toEqual({
+      sidebarWidth: 340,
+      sidebarCollapsed: true,
+    });
+  });
+
+  it("restores the persisted layout on the next start", () => {
+    const state = stateOn(fakeStorage('{"sidebarWidth":400,"sidebarCollapsed":true}'));
+    expect(state.sidebarWidth()).toBe(400);
+    expect(state.sidebarCollapsed()).toBe(true);
+  });
+
+  it("toggles back to expanded and clamps dragged widths", () => {
+    const state = stateOn(fakeStorage());
+    state.toggleSidebar();
+    state.toggleSidebar();
+    expect(state.sidebarCollapsed()).toBe(false);
+    state.setSidebarWidth(1);
+    expect(state.sidebarWidth()).toBe(SIDEBAR_MIN_WIDTH);
+  });
+
+  it("works without storage", () => {
+    const state = stateOn(null);
+    state.setSidebarWidth(300);
+    expect(state.sidebarWidth()).toBe(300);
+  });
+
+  it("survives a storage that throws", () => {
+    const state = stateOn({
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("full");
+      },
+    });
+    state.toggleSidebar();
+    expect(state.sidebarCollapsed()).toBe(true);
+  });
+});

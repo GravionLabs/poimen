@@ -1,16 +1,46 @@
 :host {
   display: flex;
+  flex-direction: column;
   height: 100%;
+}
+
+.work {
+  flex: 1;
+  display: flex;
+  min-height: 0;
 }
 
 .views {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px;
   min-width: 0;
-  overflow-y: auto;
+  min-height: 0;
+}
+
+.mode {
+  font: 600 9px var(--font-mono);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--h-primary-color);
+  color: var(--h-primary-contrast-color, #fff);
+}
+
+.mode.ro {
+  background: color-mix(in srgb, currentColor 15%, transparent);
+  color: inherit;
+}
+
+.mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+}
+
+.mode-switch input {
+  font-size: 11px;
 }
 
 .empty {
@@ -22,4 +52,27 @@
 
 .empty .hint {
   font-size: 12px;
+}
+
+.side {
+  flex: none;
+  display: flex;
+  min-width: 0;
+  max-width: calc(100vw - 48px - 320px);
+}
+
+.resizer {
+  flex: none;
+  width: 5px;
+  margin: 0 -2px 0 -3px;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizer:hover,
+.resizer:focus-visible,
+.resizer.dragging {
+  background: color-mix(in srgb, var(--status-working) 50%, transparent);
+  outline: none;
 }

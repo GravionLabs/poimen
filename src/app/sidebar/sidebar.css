@@ -1,5 +1,5 @@
 :host {
-  width: 260px;
+  width: 100%;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -18,62 +18,95 @@
   margin: 0 10px 8px;
 }
 
-.workspace > summary {
-  display: flex;
+.filter {
+  margin: 0 10px 8px;
+  width: calc(100% - 20px);
+}
+
+.spaces {
+  padding: 0 4px;
+}
+
+.space {
+  display: inline-flex;
   gap: 8px;
   align-items: center;
-  padding: 6px 14px;
   color: var(--h-text-muted-color);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  cursor: pointer;
-  list-style: none;
 }
 
-.pane-row {
-  display: grid;
-  grid-template-columns: 10px 1fr;
-  column-gap: 8px;
-  width: 100%;
-  padding: 5px 14px 5px 22px;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 2px 0;
 }
 
-.pane-row:hover {
-  background: var(--h-content-hover-background);
+.row.open .name {
+  font-weight: 600;
 }
 
-.pane-row.open {
+.icon {
+  flex: none;
+  min-width: 22px;
+  padding: 1px 3px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  color: var(--h-text-muted-color);
+  font:
+    600 10px/14px ui-monospace,
+    monospace;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.icon.agent {
+  border-color: var(--h-highlight-background);
   background: var(--h-highlight-background);
   color: var(--h-highlight-color);
 }
 
-.pane-row:focus-visible {
-  outline: var(--h-focus-ring-width) var(--h-focus-ring-style) var(--h-focus-ring-color);
-  outline-offset: calc(-1 * var(--h-focus-ring-width));
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.pane-row .dot {
-  margin-top: 5px;
+.line {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
 }
 
-.pane-row .label {
+.name,
+.meta > *,
+.text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.pane-row .tab {
-  grid-column: 2;
+.tab,
+.meta,
+.text {
   color: var(--h-text-muted-color);
   font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.tab {
+  flex: none;
+}
+
+.meta {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.text {
+  font-style: italic;
 }

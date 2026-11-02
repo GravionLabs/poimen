@@ -1,0 +1,31 @@
+:host {
+  width: 48px;
+  flex: none;
+  display: block;
+  border-right: 1px solid var(--h-content-border-color);
+  background: var(--h-content-background);
+}
+
+nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.item {
+  height: 48px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--h-text-muted-color);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.item:hover,
+.item.active {
+  color: var(--h-text-color);
+}
+
+.item.active {
+  border-left-color: var(--status-working);
+}

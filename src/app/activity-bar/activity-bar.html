@@ -1,0 +1,15 @@
+<nav aria-label="Views">
+  @for (view of views(); track view.id) {
+    <button
+      type="button"
+      class="item"
+      [class.active]="expanded() && view.id === active()"
+      [attr.aria-pressed]="expanded() && view.id === active()"
+      [title]="view.label"
+      [attr.aria-label]="view.label"
+      (click)="selected.emit(view.id)"
+    >
+      <span aria-hidden="true">{{ view.icon }}</span>
+    </button>
+  }
+</nav>

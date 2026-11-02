@@ -3,11 +3,12 @@ import {
   Component,
   ElementRef,
   afterNextRender,
-  computed,
+  effect,
   inject,
   input,
   output,
   signal,
+  untracked,
   viewChild,
   type OnDestroy,
 } from "@angular/core";
@@ -15,7 +16,8 @@ import { HxButton } from "@gravionlabs/helix-ui";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
-import { decodeBase64, paneLabel, type Mode, type Pane, type StreamRecord } from "../core/herdr";
+import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
+import { SettingsStore } from "../core/settings";
 import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -25,8 +27,8 @@ function cssVar(name: string): string {
 }
 
 /**
- * One open pane: a collapsible card. Expanded = live herdr stream in xterm.js. Collapsed = stream
- * closed and terminal disposed; the herdr pane keeps running.
+ * The live terminal of the active tab. It exists only while its tab is visible: hiding the tab
+ * destroys it, which closes the stream and disposes xterm; the herdr pane keeps running.
  */
 @Component({
   selector: "app-terminal-view",
@@ -34,25 +36,18 @@ function cssVar(name: string): string {
   templateUrl: "./terminal-view.html",
   styleUrl: "./terminal-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: {
-    class: "view",
-    "[class.collapsed]": "collapsed()",
-    "[class.controlling]": "mode() === 'control'",
-  },
+  host: { "[class.controlling]": "mode() === 'control'" },
 })
 export class TerminalView implements OnDestroy {
   readonly pane = input.required<Pane>();
-  /** The user closed the view (the herdr pane keeps running). */
-  readonly closed = output<void>();
-
-  readonly collapsed = signal(false);
-  readonly mode = signal<Mode>("observe");
+  readonly mode = input<Mode>("observe");
   /** Why the stream closed; `null` while it runs. */
+  /** The terminal size in cells, emitted on every change. */
+  readonly sized = output<{ cols: number; rows: number }>();
   readonly banner = signal<string | null>(null);
-  protected readonly label = computed(() => paneLabel(this.pane()));
 
   private readonly streams = inject(TerminalStreamService);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly prefs = inject(SettingsStore);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
   private term?: Terminal;
@@ -65,47 +60,46 @@ export class TerminalView implements OnDestroy {
 
   constructor() {
     afterNextRender(() => void this.start(false));
+    // Settings edits (and theme switches) apply to the open terminal without a restart.
+    effect(() => {
+      this.prefs.settings();
+      untracked(() => {
+        if (!this.term) return;
+        Object.assign(this.term.options, this.look());
+        // A new font changes the cell size, so cols/rows change without a body resize.
+        this.applySize();
+      });
+    });
+    // A mode switch reopens the stream; a switch to input never takes over a controller by itself.
+    let seen = this.mode();
+    effect(() => {
+      const mode = this.mode();
+      if (mode === seen) return;
+      seen = mode;
+      untracked(() => {
+        if (this.term) void this.restartStream(false);
+      });
+    });
+  }
+
+  /** Font and colors from the settings, over the theme tokens. */
+  private look() {
+    const { fontFamily, fontSize, colors } = this.prefs.settings();
+    const foreground = colors?.foreground ?? cssVar("--term-fg");
+    return {
+      fontFamily: fontFamily ?? (cssVar("--font-mono") || "Menlo, monospace"),
+      fontSize,
+      theme: {
+        background: colors?.background ?? cssVar("--term-bg"),
+        foreground,
+        cursor: foreground,
+      },
+    };
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
     this.stop();
-  }
-
-  toggle(): void {
-    if (this.collapsed()) this.expand();
-    else this.collapse();
-  }
-
-  expand(): void {
-    if (!this.collapsed()) return;
-    this.collapsed.set(false);
-    // Wait for layout so fit() sees the real size.
-    requestAnimationFrame(() => void this.start(false));
-  }
-
-  collapse(): void {
-    if (this.collapsed()) return;
-    this.collapsed.set(true);
-    this.stop();
-  }
-
-  close(): void {
-    this.stop();
-    this.closed.emit();
-  }
-
-  scrollIntoView(): void {
-    this.host.nativeElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-
-  toggleMode(): void {
-    this.setMode(this.mode() === "observe" ? "control" : "observe");
-  }
-
-  setMode(mode: Mode, takeover = false): void {
-    this.mode.set(mode);
-    if (!this.collapsed()) void this.restartStream(takeover);
   }
 
   reconnect(takeover: boolean): void {
@@ -115,15 +109,9 @@ export class TerminalView implements OnDestroy {
   private createTerminal(): void {
     const term = new Terminal({
       scrollback: 0, // herdr owns scrollback; wheel events are forwarded instead
-      fontFamily: cssVar("--font-mono") || "Menlo, monospace",
-      fontSize: 13,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: {
-        background: cssVar("--term-bg"),
-        foreground: cssVar("--term-fg"),
-        cursor: cssVar("--term-fg"),
-      },
+      ...this.look(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -150,10 +138,11 @@ export class TerminalView implements OnDestroy {
   }
 
   private async start(takeover: boolean): Promise<void> {
-    if (this.collapsed() || this.destroyed) return;
+    if (this.destroyed) return;
     if (!this.term) this.createTerminal();
     this.fit!.fit();
     this.size = { cols: this.term!.cols, rows: this.term!.rows };
+    this.sized.emit(this.size);
     await this.openStream(takeover);
     this.term?.focus();
   }
@@ -171,8 +160,8 @@ export class TerminalView implements OnDestroy {
         },
         (record) => this.onRecord(session, record),
       );
-      // The view was collapsed or closed while the stream opened.
-      if (this.collapsed() || this.destroyed) {
+      // The tab was hidden or closed while the stream opened.
+      if (this.destroyed) {
         session.close();
         return;
       }
@@ -215,19 +204,23 @@ export class TerminalView implements OnDestroy {
 
   private scheduleResize(): void {
     clearTimeout(this.resizeTimer);
-    this.resizeTimer = setTimeout(() => {
-      if (!this.term || !this.fit || this.collapsed()) return;
-      this.fit.fit();
-      const { cols, rows } = this.term;
-      if (cols === this.size.cols && rows === this.size.rows) return;
-      this.size = { cols, rows };
-      if (!this.session?.open) return;
-      if (this.mode() === "control") {
-        this.session.resize(cols, rows);
-      } else {
-        // Observers have a fixed viewport; reopen with the new size.
-        void this.restartStream(false);
-      }
-    }, RESIZE_DEBOUNCE_MS);
+    this.resizeTimer = setTimeout(() => this.applySize(), RESIZE_DEBOUNCE_MS);
+  }
+
+  /** Refits, and when cols/rows changed tells the status bar and herdr (resize or reopen). */
+  private applySize(): void {
+    if (!this.term || !this.fit) return;
+    this.fit.fit();
+    const { cols, rows } = this.term;
+    if (cols === this.size.cols && rows === this.size.rows) return;
+    this.size = { cols, rows };
+    this.sized.emit(this.size);
+    if (!this.session?.open) return;
+    if (this.mode() === "control") {
+      this.session.resize(cols, rows);
+    } else {
+      // Observers have a fixed viewport; reopen with the new size.
+      void this.restartStream(false);
+    }
   }
 }

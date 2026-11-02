@@ -133,11 +133,13 @@ describe("HerdrStore", () => {
     tauri.emit("herdr", { kind: "poimen.disconnected", data: { reason: "socket gone" } });
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
     expect(store.connectionError()).toBe("socket gone");
+    expect(store.connection()).toEqual({ state: "reconnecting", reason: "socket gone" });
     expect(tauri.calls("snapshot")).toHaveLength(0);
 
     tauri.emit("herdr", { kind: "poimen.connected", data: null });
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
     expect(store.connectionError()).toBeNull();
+    expect(store.connection()).toEqual({ state: "connected" });
     expect(tauri.calls("snapshot")).toHaveLength(1);
   });
 
@@ -150,6 +152,7 @@ describe("HerdrStore", () => {
     await store.refresh();
 
     expect(store.connectionError()).toBe("connection refused");
+    expect(store.connection()).toEqual({ state: "unreachable", reason: "connection refused" });
     expect(store.snapshot().panes.map((p) => p.pane_id)).toEqual(["w1:p1"]);
   });
 

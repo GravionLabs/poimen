@@ -24,8 +24,20 @@ export interface Pane {
   agent?: string;
   agent_status: AgentStatus;
   cwd?: string;
+  /** Directory of the foreground process; follows `cd` and is more precise than `cwd`. */
+  foreground_cwd?: string;
+  /** User-set pane label (e.g. "terminal"). */
+  label?: string;
+  /** Free-form key/value tokens set by integrations (e.g. `deliver_step`). */
+  tokens?: Record<string, string>;
   terminal_title_stripped?: string;
   focused?: boolean;
+}
+
+/** Branch and worktree flag of a directory (answer of the `repo_info` command). */
+export interface RepoInfo {
+  branch: string | null;
+  worktree: boolean;
 }
 
 export interface Snapshot {
@@ -91,6 +103,15 @@ export function waitingCount(panes: Pane[]): number {
   return panes.filter((pane) => pane.agent_status === "blocked").length;
 }
 
+/** The blocked pane after `activeId` in list order, wrapping around; undefined when none waits. */
+export function nextWaiting(panes: Pane[], activeId: string | null): Pane | undefined {
+  const waiting = panes.filter((pane) => pane.agent_status === "blocked");
+  if (!waiting.length) return undefined;
+  const index = panes.findIndex((pane) => pane.pane_id === activeId);
+  const after = panes.slice(index + 1).find((pane) => pane.agent_status === "blocked");
+  return after ?? waiting[0];
+}
+
 /** Applies a pane.agent_status_changed event without a full refresh. */
 export function applyStatus(snapshot: Snapshot, paneId: string, status: AgentStatus): Snapshot {
   return {
@@ -99,6 +120,93 @@ export function applyStatus(snapshot: Snapshot, paneId: string, status: AgentSta
       pane.pane_id === paneId ? { ...pane, agent_status: status } : pane,
     ),
   };
+}
+
+/** The directory to show for a pane. */
+export function paneDir(pane: Pane): string | undefined {
+  return pane.foreground_cwd || pane.cwd || undefined;
+}
+
+/** Agent kind of a pane (`claude`, `codex`, ...); `undefined` for a plain terminal. */
+export function agentKind(pane: Pane): string | undefined {
+  return pane.agent?.trim() || undefined;
+}
+
+/**
+ * Row text of an agent pane: its state label (`agent_status`, as `herdr pane list` reports it)
+ * plus the `deliver_step` token when an integration set one. herdr reports no free-form status
+ * message, so plain terminals and agents with an unknown state have no text.
+ */
+export function statusText(pane: Pane): string | undefined {
+  if (!agentKind(pane)) return undefined;
+  const state = pane.agent_status === "unknown" ? undefined : pane.agent_status;
+  const step = pane.tokens?.["deliver_step"]?.trim() || undefined;
+  return [state, step].filter(Boolean).join(" · ") || undefined;
+}
+
+/** The last two path segments, so rows stay short. */
+export function shortPath(path: string): string {
+  const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
+  return parts.length <= 2 ? path : "…/" + parts.slice(-2).join("/");
+}
+
+/** What a sidebar row shows for one pane. */
+export interface PaneRow {
+  pane: Pane;
+  tab: string;
+  name: string;
+  agent?: string;
+  branch?: string;
+  worktree: boolean;
+  dir?: string;
+  text?: string;
+}
+
+export interface SpaceNode {
+  workspace: Workspace;
+  rows: PaneRow[];
+}
+
+/** Workspaces with their pane rows (tab label as secondary text), enriched with repo info. */
+export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoInfo>): SpaceNode[] {
+  return buildTree(snapshot).map(({ workspace, tabs }) => ({
+    workspace,
+    rows: tabs.flatMap(({ tab, panes }) =>
+      panes.map((pane): PaneRow => {
+        const dir = paneDir(pane);
+        const repo = dir ? repos.get(dir) : undefined;
+        return {
+          pane,
+          tab: tab.label,
+          name: paneLabel(pane),
+          agent: agentKind(pane),
+          branch: repo?.branch ?? undefined,
+          worktree: repo?.worktree ?? false,
+          dir,
+          text: statusText(pane),
+        };
+      }),
+    ),
+  }));
+}
+
+/** Keeps rows matching `query` (name, agent, branch, tab, directory, text; every word must match). */
+export function filterSpaces(spaces: SpaceNode[], query: string): SpaceNode[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return spaces;
+  const matches = (row: PaneRow, space: string) => {
+    const hay = [row.name, row.agent, row.branch, row.tab, row.dir, row.text, space]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase();
+    return words.every((w) => hay.includes(w));
+  };
+  return spaces
+    .map((space) => ({
+      ...space,
+      rows: space.rows.filter((r) => matches(r, space.workspace.label)),
+    }))
+    .filter((space) => space.rows.length > 0);
 }
 
 export function decodeBase64(text: string): Uint8Array {
