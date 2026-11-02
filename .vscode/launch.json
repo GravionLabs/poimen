@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Tauri Dev",
+      "command": "pnpm tauri dev",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Rust",
+      "cargo": {
+        "args": ["build", "--manifest-path=src-tauri/Cargo.toml", "--bin=poimen"],
+        "filter": { "kind": "bin" }
+      },
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "ui:dev"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Rust tests",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib", "--manifest-path=src-tauri/Cargo.toml"],
+        "filter": { "kind": "lib" }
+      },
+      "cwd": "${workspaceFolder}/src-tauri"
+    }
+  ]
+}

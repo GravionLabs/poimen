@@ -52,6 +52,12 @@ pnpm tauri dev
 
 CI (`.github/workflows/ci.yml`, built on GravionLabs/ci) runs the frontend checks and `cargo fmt`, `clippy` and `test` of `src-tauri` on every pull request; its gate job `ci` and the `pr-checks / PR checks` job are the required checks. The Rust toolchain is pinned in `rust-toolchain.toml`, Node.js in `.nvmrc`.
 
+### Editors
+
+- **VS Code** (`.vscode/`, install the recommended extensions): the launch configuration "Tauri Dev" runs `pnpm tauri dev`; "Debug Rust" starts the background task `ui:dev` (`ng serve` on port 1420), waits until it is ready and debugs `src-tauri/target/debug/poimen` under CodeLLDB; "Debug Rust tests" debugs the `src-tauri` unit tests. The tasks `check`, `test` and `cargo test` run the checks.
+- **Zed** (`.zed/`): `task: spawn` offers `pnpm tauri dev`, `ng serve`, `pnpm test` and `cargo test`; `debugger: start` offers "Debug Rust" under CodeLLDB. Start the `ng serve` task first, Zed has no background pre-launch task.
+- **Frontend**: a debug build loads the UI from `http://localhost:1420`; debug it in the webview DevTools (right click > Inspect, or `Cmd+Option+I` / `Ctrl+Shift+I`).
+
 ### App icon
 
 The icon source is `src-tauri/icons/source/icon.svg` (1024 x 1024, a shepherd's crook over a terminal prompt). After changing it, regenerate all sizes and drop the mobile outputs:
