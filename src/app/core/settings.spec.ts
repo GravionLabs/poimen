@@ -31,6 +31,7 @@ describe("parseSettings", () => {
         },
         autoControl: false,
         spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+        home: "/Users/x",
         warnings: ["w"],
       }),
     ).toEqual({
@@ -53,6 +54,7 @@ describe("parseSettings", () => {
       explorerRoots: ["~"],
       explorerShowHidden: false,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+      home: "/Users/x",
       warnings: ["w"],
     });
   });

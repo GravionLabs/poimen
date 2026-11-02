@@ -81,6 +81,15 @@ describe("explorer root helpers", () => {
     expect(withRoot(["~"], "/srv")).toEqual(["~", "/srv"]);
     expect(withRoot(["~", "/srv"], "/srv")).toEqual(["~", "/srv"]);
   });
+
+  it("treats the absolute and the ~ spelling of a root as the same", () => {
+    const home = "/Users/x";
+    expect(withRoot(["~/Source"], "/Users/x/Source", home)).toEqual(["~/Source"]);
+    expect(withRoot(["~"], "/Users/x", home)).toEqual(["~"]);
+    expect(withRoot(["~"], "/Users/x/", home)).toEqual(["~"]);
+    expect(withRoot(["/Users/x/Source"], "/Users/x/Source/", home)).toEqual(["/Users/x/Source"]);
+    expect(withRoot(["~"], "/Users/xy", home)).toEqual(["~", "/Users/xy"]);
+  });
 });
 
 const setDark = vi.fn();

@@ -74,9 +74,23 @@ export function moved<T>(list: readonly T[], index: number, delta: number): T[] 
   return next;
 }
 
-/** `roots` with `dir` appended, unless it is already listed. */
-export function withRoot(roots: readonly string[], dir: string): string[] {
-  return roots.includes(dir) ? [...roots] : [...roots, dir];
+/** `path` as the backend stores it: below `home` as `~` or `~/…`, without a trailing slash. */
+function tilded(path: string, home: string | null): string {
+  const p = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  const h = home && home.length > 1 ? home.replace(/\/+$/, "") : home;
+  if (!h) return p;
+  if (p === h) return "~";
+  return p.startsWith(`${h}/`) ? `~${p.slice(h.length)}` : p;
+}
+
+/** `roots` with `dir` appended, unless it is already listed (`~/…` and absolute spellings match). */
+export function withRoot(
+  roots: readonly string[],
+  dir: string,
+  home: string | null = null,
+): string[] {
+  const seen = roots.map((r) => tilded(r, home));
+  return seen.includes(tilded(dir, home)) ? [...roots] : [...roots, dir];
 }
 
 /** The settings view (an editor tab): appearance and the color scheme picker with live preview. */
@@ -126,7 +140,10 @@ export class SettingsView {
   /** Adds a folder chosen in the native picker to `explorer.roots`. */
   protected async addRoot(): Promise<void> {
     const dir = await this.bridge.pickDirectory();
-    if (dir) await this.store.setExplorerRoots(withRoot(this.settings().explorerRoots, dir));
+    if (dir)
+      await this.store.setExplorerRoots(
+        withRoot(this.settings().explorerRoots, dir, this.settings().home),
+      );
   }
 
   protected removeRoot(index: number): void {

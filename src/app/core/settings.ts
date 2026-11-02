@@ -51,6 +51,8 @@ export interface Settings {
   explorerShowHidden: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
+  /** The home directory `~` stands for; `null` until the backend knows it. */
+  home: string | null;
   warnings: string[];
 }
 
@@ -72,6 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   explorerRoots: ["~"],
   explorerShowHidden: false,
   spacesLayout: null,
+  home: null,
   warnings: [],
 };
 
@@ -152,6 +155,7 @@ export function parseSettings(raw: unknown): Settings {
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
+    home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
       : [],

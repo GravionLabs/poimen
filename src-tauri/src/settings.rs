@@ -174,6 +174,8 @@ pub struct Settings {
     pub explorer_show_hidden: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
+    /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
+    pub home: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -333,6 +335,7 @@ impl Default for Settings {
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
             spaces_layout: None,
+            home: None,
             warnings: Vec::new(),
         }
     }
@@ -678,7 +681,10 @@ pub fn load(home: &Path) -> Settings {
         Ok(text) => Some(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => {
-            let mut s = Settings::default();
+            let mut s = Settings {
+                home: Some(home.to_string_lossy().into_owned()),
+                ..Settings::default()
+            };
             s.warnings.push(format!("cannot read config.json: {e}"));
             return s;
         }
@@ -690,6 +696,7 @@ pub fn load(home: &Path) -> Settings {
         let toml = std::fs::read_to_string(herdr_config_path(home)).ok();
         apply_herdr(&mut s, toml.as_deref());
     }
+    s.home = Some(home.to_string_lossy().into_owned());
     s
 }
 
@@ -998,7 +1005,13 @@ pub fn save_sidebar_layout(home: &Path, layout: &str) -> Result<(), String> {
 
 /// Writes `explorer.roots` below `home`, like `save_theme`; paths under `home` become `~/…`.
 pub fn save_explorer_roots(home: &Path, roots: &[String]) -> Result<(), String> {
-    let roots: Vec<String> = roots.iter().map(|r| tilde_path(r, home)).collect();
+    let mut shortened: Vec<String> = Vec::new();
+    for root in roots.iter().map(|r| tilde_path(r, home)) {
+        if !shortened.contains(&root) {
+            shortened.push(root);
+        }
+    }
+    let roots = shortened;
     save_with(home, |text| set_explorer_roots_text(text, &roots))
 }
 
@@ -1221,6 +1234,22 @@ mod tests {
         let s = load(&home);
         assert_eq!(s.explorer_roots, vec!["~/Source", "/srv"]);
         assert!(s.explorer_show_hidden);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn save_explorer_roots_drops_duplicates_after_shortening() {
+        let home = std::env::temp_dir().join(format!("poimen-dedupe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let abs = home.join("Source").to_string_lossy().into_owned();
+        let h = home.to_string_lossy().into_owned();
+        save_explorer_roots(
+            &home,
+            &["~/Source".into(), abs, "~".into(), h, "/srv".into()],
+        )
+        .unwrap();
+        assert_eq!(load(&home).explorer_roots, vec!["~/Source", "~", "/srv"]);
+        assert_eq!(load(&home).home, Some(home.to_string_lossy().into_owned()));
         let _ = std::fs::remove_dir_all(&home);
     }
 
@@ -1500,7 +1529,13 @@ mod tests {
         std::fs::write(config_path(&home), r#"{"theme":"light"}"#).unwrap();
         assert_eq!(load(&home).theme, "light");
         std::fs::remove_dir_all(&home).unwrap();
-        assert_eq!(load(&home), Settings::default());
+        assert_eq!(
+            load(&home),
+            Settings {
+                home: Some(home.to_string_lossy().into_owned()),
+                ..Settings::default()
+            }
+        );
     }
 
     #[test]
