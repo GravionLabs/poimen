@@ -284,6 +284,26 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
+/// Writes only `spaces.layout` after validating it; the settings watcher emits the change.
+#[tauri::command]
+fn set_spaces_layout(layout: serde_json::Value) -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::save_spaces_layout(&home, &layout)
+}
+
+/// Removes `spaces.layout`, so new spaces use the built-in default again.
+#[tauri::command]
+fn remove_spaces_layout() -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::remove_spaces_layout(&home)
+}
+
+/// The built-in pane layout of a new space, shown by the settings view when none is configured.
+#[tauri::command]
+fn default_spaces_layout() -> layout::Layout {
+    layout::default_layout()
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(
@@ -569,6 +589,9 @@ pub fn run() {
             set_sidebar_layout,
             set_explorer_roots,
             set_explorer_show_hidden,
+            set_spaces_layout,
+            remove_spaces_layout,
+            default_spaces_layout,
             repo_info,
             open_terminal,
             terminal_input,

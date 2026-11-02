@@ -30,6 +30,7 @@ describe("parseSettings", () => {
           palette: ["#111111", null, 5],
         },
         autoControl: false,
+        spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
         warnings: ["w"],
       }),
     ).toEqual({
@@ -51,6 +52,7 @@ describe("parseSettings", () => {
       sidebarLayout: "tree",
       explorerRoots: ["~"],
       explorerShowHidden: false,
+      spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       warnings: ["w"],
     });
   });

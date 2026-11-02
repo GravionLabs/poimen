@@ -9,6 +9,7 @@ import { ColorSchemeService } from "../core/color-scheme-service";
 import { SettingsStore, type ColorSchemeSetting, type ThemeSetting } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UserSchemes } from "../core/user-schemes";
+import { SpaceLayoutEditor } from "./space-layout-editor";
 
 export type SchemeMode = "single" | "pair";
 
@@ -81,6 +82,7 @@ export function withRoot(roots: readonly string[], dir: string): string[] {
 /** The settings view (an editor tab): appearance and the color scheme picker with live preview. */
 @Component({
   selector: "app-settings-view",
+  imports: [SpaceLayoutEditor],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

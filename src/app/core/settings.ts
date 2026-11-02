@@ -1,5 +1,6 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
+import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
 import { TauriBridge } from "./tauri";
 import {
   DEFAULT_SIDEBAR_ROWS,
@@ -48,6 +49,8 @@ export interface Settings {
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
   explorerShowHidden: boolean;
+  /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
+  spacesLayout: SpaceLayout | null;
   warnings: string[];
 }
 
@@ -68,6 +71,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarLayout: "tree",
   explorerRoots: ["~"],
   explorerShowHidden: false,
+  spacesLayout: null,
   warnings: [],
 };
 
@@ -147,6 +151,7 @@ export function parseSettings(raw: unknown): Settings {
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
+    spacesLayout: parseSpaceLayout(r["spacesLayout"]),
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
       : [],
@@ -225,6 +230,27 @@ export class SettingsStore {
       "set_explorer_show_hidden",
       { show: explorerShowHidden },
     );
+  }
+
+  /** Writes `spaces.layout` (validated again by the backend); `false` when the write failed. */
+  setSpacesLayout(layout: SpaceLayout, config: Record<string, unknown>): Promise<boolean> {
+    return this.write({ spacesLayout: layout }, "the new space layout", "set_spaces_layout", {
+      layout: config,
+    });
+  }
+
+  /** Removes `spaces.layout`, so new spaces use the built-in default again. */
+  resetSpacesLayout(): Promise<boolean> {
+    return this.write({ spacesLayout: null }, "the new space layout", "remove_spaces_layout", {});
+  }
+
+  /** The built-in layout of a new space; `null` when the backend cannot be asked. */
+  async defaultSpacesLayout(): Promise<SpaceLayout | null> {
+    try {
+      return parseSpaceLayout(await this.bridge.invoke("default_spaces_layout"));
+    } catch {
+      return null;
+    }
   }
 
   /** Optimistic write: applies `patch`, calls `command`, goes back and reports a failure. */

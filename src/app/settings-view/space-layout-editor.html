@@ -1,0 +1,118 @@
+<section aria-labelledby="layout-h">
+  <h2 id="layout-h">
+    New space layout
+    @if (isDefault()) {
+      <span class="badge">Default</span>
+    }
+  </h2>
+  <p class="hint">
+    The panes a new space opens with, each started in the space directory. A
+    <code>.agents/herdr-layout.json</code> in the repository takes priority over this layout.
+  </p>
+  <ol class="rows panes" aria-label="Panes of a new space">
+    @for (pane of draft(); track $index; let i = $index, first = $first, last = $last) {
+      @let error = errors()[i];
+      <li class="pane-row" [class.invalid]="error">
+        <div class="pane-fields">
+          <label class="field">
+            <span>Name</span>
+            <input
+              type="text"
+              [value]="pane.name"
+              [attr.aria-invalid]="error ? true : null"
+              (input)="setName(i, $event)"
+            />
+          </label>
+          <label class="field grow">
+            <span>Command</span>
+            <input
+              type="text"
+              placeholder="shell"
+              [value]="pane.command ?? ''"
+              (input)="setCommand(i, $event)"
+            />
+          </label>
+          @if (pane.split; as split) {
+            <label class="field">
+              <span>Split from</span>
+              <select (change)="setFrom(i, $event)">
+                @for (name of earlier(i); track $index) {
+                  <option [value]="name" [selected]="name === split.from">{{ name }}</option>
+                }
+                @if (!earlier(i).includes(split.from)) {
+                  <option [value]="split.from" selected disabled>{{ split.from }}</option>
+                }
+              </select>
+            </label>
+            <label class="field">
+              <span>Direction</span>
+              <select (change)="setDirection(i, $event)">
+                <option value="right" [selected]="split.direction === 'right'">right</option>
+                <option value="down" [selected]="split.direction === 'down'">down</option>
+              </select>
+            </label>
+            <label class="field ratio">
+              <span>Keeps</span>
+              <input
+                type="number"
+                step="0.05"
+                [min]="minRatio"
+                [max]="maxRatio"
+                [value]="split.ratio"
+                (input)="setRatio(i, $event)"
+              />
+            </label>
+          } @else {
+            <span class="root-note">root pane</span>
+          }
+          <span class="actions">
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Move pane ' + pane.name + ' up'"
+              title="Move up"
+              [disabled]="first"
+              (click)="move(i, -1)"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Move pane ' + pane.name + ' down'"
+              title="Move down"
+              [disabled]="last"
+              (click)="move(i, 1)"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Remove pane ' + pane.name"
+              title="Remove"
+              [disabled]="first && last"
+              (click)="remove(i)"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+        @if (error) {
+          <p class="field-error">{{ error }}</p>
+        }
+      </li>
+    }
+  </ol>
+  <div class="toolbar-row">
+    <button type="button" class="btn" (click)="add()">Add pane</button>
+    <span class="spacer"></span>
+    <button type="button" class="btn" [disabled]="!dirty()" (click)="discard()">Discard</button>
+    <button type="button" class="btn" [disabled]="isDefault()" (click)="reset()">
+      Reset to default
+    </button>
+    <button type="button" class="btn primary" [disabled]="!dirty() || !valid()" (click)="save()">
+      Save
+    </button>
+  </div>
+</section>
