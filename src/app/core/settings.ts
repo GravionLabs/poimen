@@ -11,6 +11,8 @@ export interface Settings {
   fontSize: number;
   /** Terminal colors taken from Ghostty; `null` keeps the theme colors. */
   colors: { background: string | null; foreground: string | null } | null;
+  /** Open panes for input when no other client controls them (`terminal.autoControl`). */
+  autoControl: boolean;
   warnings: string[];
 }
 
@@ -19,6 +21,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fontFamily: null,
   fontSize: 13,
   colors: null,
+  autoControl: true,
   warnings: [],
 };
 
@@ -39,6 +42,7 @@ export function parseSettings(raw: unknown): Settings {
       colors && typeof colors === "object"
         ? { background: color(colors["background"]), foreground: color(colors["foreground"]) }
         : null,
+    autoControl: r["autoControl"] !== false,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
       : [],

@@ -31,6 +31,8 @@ pub struct Settings {
     pub font_size: f64,
     /// Terminal colors taken from Ghostty; `None` keeps the theme colors.
     pub colors: Option<Colors>,
+    /// Open panes for input when no other client controls them (`terminal.autoControl`).
+    pub auto_control: bool,
     pub warnings: Vec<String>,
 }
 
@@ -41,6 +43,7 @@ impl Default for Settings {
             font_family: None,
             font_size: DEFAULT_FONT_SIZE,
             colors: None,
+            auto_control: true,
             warnings: Vec::new(),
         }
     }
@@ -135,6 +138,13 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
                         "terminal.fontSize {v} must be a number from {MIN_FONT_SIZE} to {MAX_FONT_SIZE}"
                     )),
                 }
+            }
+            match term.get("autoControl") {
+                None => {}
+                Some(Value::Bool(b)) => s.auto_control = *b,
+                Some(other) => s.warnings.push(format!(
+                    "terminal.autoControl {other} must be true or false"
+                )),
             }
             match term.get("ghostty") {
                 None => {}
@@ -242,6 +252,18 @@ mod tests {
     }
 
     #[test]
+    fn auto_control_defaults_to_true_and_can_be_turned_off() {
+        assert!(resolve(None, none).auto_control);
+        assert!(resolve(Some(r#"{"terminal":{}}"#), none).auto_control);
+        let off = resolve(Some(r#"{"terminal":{"autoControl":false}}"#), none);
+        assert!(!off.auto_control);
+        assert!(off.warnings.is_empty());
+        let bad = resolve(Some(r#"{"terminal":{"autoControl":"no"}}"#), none);
+        assert!(bad.auto_control);
+        assert_eq!(bad.warnings.len(), 1);
+    }
+
+    #[test]
     fn invalid_entries_warn_and_fall_back() {
         let s = resolve(
             Some(r#"{"theme":"blue","terminal":{"fontFamily":3,"fontSize":500,"ghostty":"yes"}}"#),
@@ -319,5 +341,6 @@ mod tests {
         let v = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(v["fontSize"], 13.0);
         assert!(v["fontFamily"].is_null());
+        assert_eq!(v["autoControl"], true);
     }
 }

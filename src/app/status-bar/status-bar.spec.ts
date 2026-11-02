@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectionLabel, sizeLabel } from "./status-bar";
+import { connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
 
 describe("connectionLabel", () => {
   it("names a connected herdr", () => {
@@ -24,5 +24,19 @@ describe("sizeLabel", () => {
   });
   it("is empty until measured", () => {
     expect(sizeLabel(undefined)).toBe("");
+  });
+});
+
+describe("modeLabel", () => {
+  it("names input and plain read-only", () => {
+    expect(modeLabel("control", null)).toBe("Input");
+    expect(modeLabel("observe", null)).toBe("Read-only");
+  });
+  it("says when another controller is the reason", () => {
+    expect(modeLabel("observe", "controller held")).toBe("Read-only (controlled elsewhere)");
+  });
+  it("explains the disabled switch in the tooltip", () => {
+    expect(modeTitle("controller held")).toContain("controller held");
+    expect(modeTitle(null)).toBe("Switch between read-only and input");
   });
 });

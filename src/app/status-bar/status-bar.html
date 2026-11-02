@@ -15,7 +15,19 @@
   <span class="spacer"></span>
   @if (paneId(); as id) {
     <span class="item">{{ id }}</span>
-    <span class="item">{{ mode() }}</span>
+    @if (mode(); as m) {
+      <label class="item mode-switch" [title]="modeHint(blocked())">
+        <span>{{ modeText(m, blocked()) }}</span>
+        <input
+          hx-switch
+          type="checkbox"
+          aria-label="Input mode"
+          [checked]="m === 'control'"
+          [disabled]="!!blocked()"
+          (change)="control.emit($any($event.target).checked)"
+        />
+      </label>
+    }
     @if (size()) {
       <span class="item">{{ sizeText(size()) }}</span>
     }
