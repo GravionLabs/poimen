@@ -127,3 +127,24 @@ describe("UiState", () => {
     expect(state.sidebarCollapsed()).toBe(true);
   });
 });
+
+describe("editor state persistence", () => {
+  it("round-trips the editor area next to the layout", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    state.setSidebarWidth(300);
+    state.saveEditor({ focusedId: 2 });
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!)).toEqual({
+      sidebarWidth: 300,
+      sidebarCollapsed: false,
+      editor: { focusedId: 2 },
+    });
+    expect(stateOn(storage).storedEditor).toEqual({ focusedId: 2 });
+  });
+
+  it("keeps the editor area when the sidebar changes", () => {
+    const storage = fakeStorage(JSON.stringify({ editor: { focusedId: 5 } }));
+    stateOn(storage).toggleSidebar();
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).editor).toEqual({ focusedId: 5 });
+  });
+});

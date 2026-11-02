@@ -1,4 +1,5 @@
-import { Injectable, computed, signal } from "@angular/core";
+import { Injectable, computed, effect, inject, signal } from "@angular/core";
+import { UiState } from "./ui-state";
 import type { Mode } from "./herdr";
 import {
   groupIds,
@@ -40,6 +41,69 @@ export function moveItem<T>(list: readonly T[], from: number, to: number): reado
   return next;
 }
 
+/** The persisted part of the editor area; modes are not kept (they follow the settings). */
+export interface EditorSnapshot {
+  groups: readonly EditorGroup[];
+  layout: LayoutNode;
+  focusedId: number;
+}
+
+function validLayout(node: unknown, seen: number[]): node is LayoutNode {
+  if (typeof node !== "object" || node === null) return false;
+  const n = node as Record<string, unknown>;
+  if (!Number.isInteger(n["id"])) return false;
+  if (n["kind"] === "group") {
+    seen.push(n["id"] as number);
+    return true;
+  }
+  const { children, sizes, dir } = n;
+  return (
+    n["kind"] === "split" &&
+    (dir === "row" || dir === "column") &&
+    Array.isArray(children) &&
+    children.length >= 2 &&
+    Array.isArray(sizes) &&
+    sizes.length === children.length &&
+    sizes.every((s) => typeof s === "number" && Number.isFinite(s) && s > 0) &&
+    children.every((c) => validLayout(c, seen))
+  );
+}
+
+/** Checks stored editor state; anything inconsistent yields `null` (start with a blank editor). */
+export function parseEditor(raw: unknown): EditorSnapshot | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const { groups, layout, focusedId } = raw as Record<string, unknown>;
+  if (!Array.isArray(groups) || groups.length === 0) return null;
+  const panes = new Set<string>();
+  const ids: number[] = [];
+  const clean: EditorGroup[] = [];
+  for (const g of groups as Record<string, unknown>[]) {
+    if (typeof g !== "object" || g === null || !Number.isInteger(g["id"])) return null;
+    if (!Array.isArray(g["tabs"])) return null;
+    const tabs: EditorTab[] = [];
+    for (const t of g["tabs"] as Record<string, unknown>[]) {
+      if (typeof t?.["paneId"] !== "string" || typeof t["pinned"] !== "boolean") return null;
+      if (panes.has(t["paneId"])) return null;
+      panes.add(t["paneId"]);
+      tabs.push({ paneId: t["paneId"], pinned: t["pinned"] });
+    }
+    const active = g["activeId"];
+    if (active !== null && !tabs.some((t) => t.paneId === active)) return null;
+    ids.push(g["id"] as number);
+    clean.push({ id: g["id"] as number, tabs, activeId: active as string | null });
+  }
+  const leaves: number[] = [];
+  if (!validLayout(layout, leaves)) return null;
+  const sorted = (a: number[]) => [...a].sort((x, y) => x - y).join();
+  if (new Set(ids).size !== ids.length || sorted(ids) !== sorted(leaves)) return null;
+  if (typeof focusedId !== "number" || !ids.includes(focusedId)) return null;
+  return { groups: clean, layout, focusedId };
+}
+
+function maxId(node: LayoutNode): number {
+  return node.kind === "group" ? node.id : Math.max(node.id, ...node.children.map(maxId));
+}
+
 function without<V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<string, V> {
   const next = new Map(map);
   next.delete(key);
@@ -53,10 +117,16 @@ function without<V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<strin
  */
 @Injectable({ providedIn: "root" })
 export class EditorTabs {
-  readonly groups = signal<readonly EditorGroup[]>([{ id: 1, tabs: [], activeId: null }]);
-  readonly layout = signal<LayoutNode>({ kind: "group", id: 1 });
-  readonly focusedId = signal(1);
-  private nextId = 2;
+  private readonly ui = inject(UiState);
+  private readonly restored = parseEditor(this.ui.storedEditor);
+  readonly groups = signal<readonly EditorGroup[]>(
+    this.restored?.groups ?? [{ id: 1, tabs: [], activeId: null }],
+  );
+  readonly layout = signal<LayoutNode>(this.restored?.layout ?? { kind: "group", id: 1 });
+  readonly focusedId = signal(this.restored?.focusedId ?? 1);
+  private nextId = this.restored
+    ? Math.max(...this.groups().map((g) => g.id), maxId(this.layout())) + 1
+    : 2;
 
   private readonly focused = computed(
     () => this.groups().find((g) => g.id === this.focusedId()) ?? this.groups()[0],
@@ -73,6 +143,26 @@ export class EditorTabs {
   readonly openIds = computed(
     () => new Set(this.groups().flatMap((g) => g.tabs.map((t) => t.paneId))),
   );
+
+  constructor() {
+    effect(() =>
+      this.ui.saveEditor({
+        groups: this.groups(),
+        layout: this.layout(),
+        focusedId: this.focusedId(),
+      } satisfies EditorSnapshot),
+    );
+  }
+
+  /**
+   * Closes the tabs whose pane is not in `existing` (after a restart herdr may have lost them) and
+   * returns their ids.
+   */
+  prune(existing: ReadonlySet<string>): string[] {
+    const gone = [...this.openIds()].filter((id) => !existing.has(id));
+    gone.forEach((id) => this.close(id));
+    return gone;
+  }
 
   /** The group a pane is open in. */
   groupOf(paneId: string): EditorGroup | undefined {
