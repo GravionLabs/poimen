@@ -20,4 +20,11 @@
       <span class="item">{{ sizeText(size()) }}</span>
     }
   }
+  <span class="item version">{{ appLabel(appVersion()) }}</span>
+  <span
+    class="item version"
+    [class.warn]="warning(info()) !== ''"
+    [title]="warning(info()) || herdrLabel(info())"
+    >{{ herdrLabel(info()) }}</span
+  >
 </footer>

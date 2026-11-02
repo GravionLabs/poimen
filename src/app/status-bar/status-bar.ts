@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output } from "@angular/core";
 import type { ConnectionState } from "../core/herdr-store";
+import { appVersionLabel, herdrVersionLabel, protocolWarning, type HerdrInfo } from "../core/herdr";
 
 /** The connection as one line of text. */
 export function connectionLabel(c: ConnectionState): string {
@@ -31,8 +32,13 @@ export class StatusBar {
   readonly paneId = input<string | null>(null);
   readonly mode = input<string | null>(null);
   readonly size = input<{ cols: number; rows: number }>();
+  readonly appVersion = input<string | null>(null);
+  readonly info = input<HerdrInfo | null>(null);
   readonly jump = output<void>();
 
   protected readonly label = connectionLabel;
   protected readonly sizeText = sizeLabel;
+  protected readonly appLabel = appVersionLabel;
+  protected readonly herdrLabel = herdrVersionLabel;
+  protected readonly warning = protocolWarning;
 }

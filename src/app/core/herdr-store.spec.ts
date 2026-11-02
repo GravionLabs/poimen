@@ -67,6 +67,27 @@ describe("HerdrStore", () => {
     expect(tauri.calls("snapshot")).toHaveLength(1);
   });
 
+  it("reads the herdr and app versions, herdr once per connection", async () => {
+    tauri.answer("herdr_info", () => ({ version: "0.9.5", protocol: 22, supported: 22 }));
+    tauri.answer("app_version", () => "0.2.0");
+    await store.start();
+    await store.refresh();
+
+    expect(store.info()?.version).toBe("0.9.5");
+    await vi.waitFor(() => expect(store.appVersion()).toBe("0.2.0"));
+    expect(tauri.calls("herdr_info")).toHaveLength(1);
+  });
+
+  it("leaves the version unknown without an error when herdr cannot say", async () => {
+    tauri.answer("herdr_info", () => {
+      throw new Error("no socket");
+    });
+    await store.start();
+
+    expect(store.info()).toBeNull();
+    expect(store.connectionError()).toBeNull();
+  });
+
   it("collapses a burst of events into one re-read after the debounce", async () => {
     await store.start();
     tauri.invoke.mockClear();

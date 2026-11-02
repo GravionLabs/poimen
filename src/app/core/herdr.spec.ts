@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  appVersionLabel,
+  herdrVersionLabel,
+  protocolWarning,
   applyStatus,
   buildTree,
   decodeBase64,
@@ -145,5 +148,27 @@ describe("tabHeader", () => {
       title: "claude",
     });
     expect(tabHeader("  ", "claude").group).toBeUndefined();
+  });
+});
+
+describe("version labels", () => {
+  const info = { version: "0.9.5", protocol: 22, supported: 22 };
+  it("names the versions", () => {
+    expect(herdrVersionLabel(info)).toBe("herdr 0.9.5");
+    expect(appVersionLabel("0.2.0")).toBe("poimen 0.2.0");
+  });
+  it("shows ? when unknown", () => {
+    expect(herdrVersionLabel({ version: "0.1", supported: 22 })).toBe("herdr 0.1");
+    expect(herdrVersionLabel(null)).toBe("herdr ?");
+    expect(herdrVersionLabel(undefined)).toBe("herdr ?");
+    expect(appVersionLabel(null)).toBe("poimen ?");
+  });
+  it("warns only on a protocol mismatch", () => {
+    expect(protocolWarning(info)).toBe("");
+    expect(protocolWarning(null)).toBe("");
+    expect(protocolWarning({ version: "0.1", supported: 22 })).toBe("");
+    expect(protocolWarning({ ...info, protocol: 23 })).toBe(
+      "herdr protocol 23, poimen supports 22",
+    );
   });
 });
