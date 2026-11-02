@@ -26,6 +26,8 @@ export const UI_STORAGE = new InjectionToken<UiStorage | null>("UI_STORAGE", {
 export interface LayoutState {
   sidebarWidth: number;
   sidebarCollapsed: boolean;
+  /** The editor area (tabs, groups); validated by `EditorTabs`, absent when never stored. */
+  editor?: unknown;
 }
 
 export function clampSidebarWidth(width: number): number {
@@ -35,14 +37,18 @@ export function clampSidebarWidth(width: number): number {
 
 /** Reads stored layout JSON; anything missing or malformed falls back to the defaults. */
 export function parseLayout(raw: string | null): LayoutState {
-  const state: LayoutState = { sidebarWidth: SIDEBAR_DEFAULT_WIDTH, sidebarCollapsed: false };
+  const state: LayoutState = {
+    sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+    sidebarCollapsed: false,
+  };
   if (!raw) return state;
   try {
     const data: unknown = JSON.parse(raw);
     if (typeof data !== "object" || data === null) return state;
-    const { sidebarWidth, sidebarCollapsed } = data as Record<string, unknown>;
+    const { sidebarWidth, sidebarCollapsed, editor } = data as Record<string, unknown>;
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
+    if (editor !== undefined) state.editor = editor;
   } catch {
     // corrupt state: use defaults
   }
@@ -70,8 +76,18 @@ export class UiState {
   readonly sidebarWidth = signal(this.initial.sidebarWidth);
   readonly sidebarCollapsed = signal(this.initial.sidebarCollapsed);
 
+  /** The stored editor area, read once at start; `EditorTabs` validates it. */
+  readonly storedEditor: unknown = this.initial.editor;
+  private editor: unknown = this.initial.editor;
+
   setSidebarWidth(width: number): void {
     this.sidebarWidth.set(clampSidebarWidth(width));
+    this.save();
+  }
+
+  /** Persists the editor area (open tabs, groups, split sizes, focus). */
+  saveEditor(editor: unknown): void {
+    this.editor = editor;
     this.save();
   }
 
@@ -92,6 +108,7 @@ export class UiState {
     const state: LayoutState = {
       sidebarWidth: this.sidebarWidth(),
       sidebarCollapsed: this.sidebarCollapsed(),
+      editor: this.editor,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

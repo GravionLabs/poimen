@@ -115,7 +115,26 @@ export class App {
       onCleanup(this.followSystemTheme());
     });
     void this.prefs.start();
-    void this.store.start();
+    void this.store.start().then(() => this.dropMissing());
+  }
+
+  /** Set when restored tabs lost their pane, until dismissed. */
+  protected readonly notice = signal<string | null>(null);
+
+  protected dismissNotice(): void {
+    this.notice.set(null);
+  }
+
+  /** After the first snapshot, closes restored tabs whose pane is gone, and says so. */
+  private dropMissing(): void {
+    if (this.store.connectionError() !== null) return;
+    const gone = this.editor.prune(new Set(this.store.panes().keys()));
+    if (gone.length === 0) return;
+    this.notice.set(
+      gone.length === 1
+        ? "1 tab was closed because its pane no longer exists."
+        : `${gone.length} tabs were closed because their panes no longer exist.`,
+    );
   }
 
   protected readonly rootNode = computed<LayoutNode>(() => this.editor.layout());

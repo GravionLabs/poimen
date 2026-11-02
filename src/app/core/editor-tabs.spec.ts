@@ -1,6 +1,9 @@
-import { Injector } from "@angular/core";
-import { beforeEach, describe, expect, it } from "vitest";
-import { EditorTabs, moveItem, splitKeyDirection } from "./editor-tabs";
+// @vitest-environment jsdom
+import { TestBed, getTestBed } from "@angular/core/testing";
+import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { EditorTabs, moveItem, parseEditor, splitKeyDirection } from "./editor-tabs";
+import { UI_STATE_KEY, UI_STORAGE } from "./ui-state";
 
 describe("moveItem", () => {
   it("moves an item to a new index", () => {
@@ -16,12 +19,18 @@ describe("moveItem", () => {
   });
 });
 
+beforeAll(() => {
+  getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
+});
+
 describe("EditorTabs", () => {
   let tabs: EditorTabs;
   const ids = () => tabs.tabs().map((t) => t.paneId);
 
   beforeEach(() => {
-    tabs = Injector.create({ providers: [EditorTabs] }).get(EditorTabs);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: null }] });
+    tabs = TestBed.inject(EditorTabs);
   });
 
   it("opens a pane as an active preview tab", () => {
@@ -251,5 +260,100 @@ describe("splitKeyDirection", () => {
     expect(splitKeyDirection(key("\\"))).toBeNull();
     expect(splitKeyDirection(key("b", { metaKey: true }))).toBeNull();
     expect(splitKeyDirection(key("\\", { metaKey: true, altKey: true }))).toBeNull();
+  });
+});
+
+describe("restoring the editor area", () => {
+  const stored = {
+    groups: [
+      { id: 1, tabs: [{ paneId: "a", pinned: true }], activeId: "a" },
+      {
+        id: 3,
+        tabs: [
+          { paneId: "b", pinned: true },
+          { paneId: "c", pinned: false },
+        ],
+        activeId: "c",
+      },
+    ],
+    layout: {
+      kind: "split",
+      id: 2,
+      dir: "row",
+      children: [
+        { kind: "group", id: 1 },
+        { kind: "group", id: 3 },
+      ],
+      sizes: [0.3, 0.7],
+    },
+    focusedId: 3,
+  };
+  const data = new Map<string, string>();
+  const open = (editor: unknown) => {
+    data.set(UI_STATE_KEY, JSON.stringify({ editor }));
+    const storage = {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, v),
+    };
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: storage }] });
+    return TestBed.inject(EditorTabs);
+  };
+
+  it("restores tabs, active tab, groups, sizes and focus", () => {
+    const tabs = open(stored);
+    expect(tabs.groups().map((g) => g.tabs.map((t) => t.paneId))).toEqual([["a"], ["b", "c"]]);
+    expect(tabs.activeId()).toBe("c");
+    expect(tabs.focusedId()).toBe(3);
+    expect(tabs.layout()).toEqual(stored.layout);
+  });
+
+  it("keeps new group ids unique after a restore", () => {
+    const tabs = open(stored);
+    tabs.split("c", "column");
+    const ids = tabs.groups().map((g) => g.id);
+    expect(ids.slice(0, 2)).toEqual([1, 3]);
+    expect(ids[2]).toBeGreaterThan(3);
+  });
+
+  it("starts blank when nothing or garbage is stored", () => {
+    expect(open(undefined).tabs()).toEqual([]);
+    expect(open({ groups: "x" }).tabs()).toEqual([]);
+  });
+
+  it("rejects inconsistent state", () => {
+    expect(parseEditor({ ...stored, focusedId: 9 })).toBeNull();
+    expect(parseEditor({ ...stored, layout: { kind: "group", id: 1 } })).toBeNull();
+    const dup = structuredClone(stored);
+    dup.groups[1].tabs[0].paneId = "a";
+    expect(parseEditor(dup)).toBeNull();
+    const badActive = structuredClone(stored);
+    badActive.groups[0].activeId = "zzz";
+    expect(parseEditor(badActive)).toBeNull();
+  });
+
+  it("prunes tabs whose pane is gone and reports them", () => {
+    const tabs = open(stored);
+    expect(tabs.prune(new Set(["a", "b"]))).toEqual(["c"]);
+    expect(tabs.openIds()).toEqual(new Set(["a", "b"]));
+    expect(tabs.prune(new Set(["a", "b"]))).toEqual([]);
+  });
+
+  it("drops a group whose panes are all gone", () => {
+    const tabs = open(stored);
+    tabs.prune(new Set(["a"]));
+    expect(tabs.groups().map((g) => g.id)).toEqual([1]);
+    expect(tabs.layout()).toEqual({ kind: "group", id: 1 });
+  });
+
+  it("saves changes so the next start restores them", () => {
+    const tabs = open(undefined);
+    tabs.open("x", true);
+    tabs.open("y", true);
+    tabs.split("y", "row");
+    TestBed.tick();
+    const next = open(JSON.parse(data.get(UI_STATE_KEY)!).editor);
+    expect(next.groups().map((g) => g.tabs.map((t) => t.paneId))).toEqual([["x"], ["y"]]);
+    expect(next.focusedId()).toBe(tabs.focusedId());
   });
 });
