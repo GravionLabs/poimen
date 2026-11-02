@@ -28,6 +28,7 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
 - **Angular frontend.** The UI is Angular 22 with helix-ui (light and dark follow the system); `src/app/core` is the bridge to the Tauri commands and events, `src-tauri` stays a thin shell ([ADR 0001](docs/adr/0001-frontend-stack.md)).
 - **Spaces tree.** The sidebar is a helix `hx-tree` of workspaces and their panes (the herdr tab is secondary text). A badge tells agents (by kind, e.g. `cl` for claude) from plain terminals (`>_`); each row shows the status dot, git branch (`wt` for a linked worktree), directory (`foreground_cwd`) and the status message, state label or integration tokens when present. The filter field matches name, agent, branch, tab, directory and text; arrow keys, Home/End and type-ahead navigate, Enter opens. Branch and worktree come from a read-only `git rev-parse` in the pane directory (herdr's pane list has none).
 - **Layout.** An activity bar (Spaces) sits left of a sidebar you resize by dragging its edge (arrow keys work too) and toggle with `Cmd+B` (`Ctrl+B` elsewhere). Width and collapsed state persist in poimen's own UI state (webview local storage, not the user settings file); the layout works from 720 px window width.
+- **Toolbar.** A thin bar at the top has a flat theme button on the right (icon and text: auto, sun or moon for `system`, `light`, `dark`). A click cycles system → light → dark; the tooltip and accessible name read like `Theme: system (click for light)`. The choice is written to the `theme` entry of `config.json` (other keys and comments stay) and applies at once; `system` follows the OS appearance live, and an external edit of the file updates the button.
 - **Status bar.** The bottom bar shows the herdr connection (connected, reconnecting when the event watcher lost herdr, unreachable when a snapshot read failed, each with the reason), the count of waiting (blocked) agents (a click opens the next one) and the active tab: pane id, the mode button (input, or read-only with the reason when another client controls the pane) and terminal size.
 - **Events are invalidation signals.** Every herdr event triggers a debounced re-read of the workspace, tab and pane lists, as the herdr socket API docs recommend. `pane.agent_status_changed` is applied right away.
 
@@ -91,7 +92,7 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 }
 ```
 
-- `theme`: `light`, `dark` or `system` (default).
+- `theme`: `light`, `dark` or `system` (default). The toolbar button writes this entry; poimen writes no other setting.
 - `terminal.fontFamily` / `terminal.fontSize` (6 to 72, default 13).
 - `terminal.autoControl`: `true` (default) opens panes for input when no other client controls them; `false` opens every tab read-only.
 - `terminal.ghostty`: `true` takes font family, size and background/foreground from `~/.config/ghostty/config`; explicit entries above win.

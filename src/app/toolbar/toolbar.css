@@ -1,0 +1,47 @@
+.bar {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--h-border-color);
+  color: var(--h-text-muted-color);
+}
+
+.spacer {
+  flex: 1;
+}
+
+button.item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 3px;
+  font: inherit;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+button.item:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+button.item:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}
+
+.icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}

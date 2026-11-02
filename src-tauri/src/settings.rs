@@ -1,7 +1,8 @@
 //! User settings file (`~/.config/poimen/config.json`) and the optional Ghostty config.
 //!
 //! Preferences only: UI state (sidebar width, open tabs) lives in the frontend UI state.
-//! Invalid entries produce a warning and fall back to the default; the file is never written.
+//! Invalid entries produce a warning and fall back to the default. The only write is `save_theme`
+//! (the toolbar button), which edits the `theme` value in place and keeps everything else.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -208,6 +209,120 @@ pub fn load(home: &Path) -> Settings {
     })
 }
 
+/// Index after a `"..."` string that starts at `i`.
+fn skip_string(b: &[u8], mut i: usize) -> usize {
+    i += 1;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 2,
+            b'"' => return i + 1,
+            _ => i += 1,
+        }
+    }
+    b.len()
+}
+
+/// Index after whitespace and `//` / `/* */` comments starting at `i`.
+fn skip_trivia(b: &[u8], mut i: usize) -> usize {
+    loop {
+        match b.get(i) {
+            Some(c) if c.is_ascii_whitespace() => i += 1,
+            Some(b'/') if b.get(i + 1) == Some(&b'/') => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            Some(b'/') if b.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i < b.len() && !b[i..].starts_with(b"*/") {
+                    i += 1;
+                }
+                i = (i + 2).min(b.len());
+            }
+            _ => return i,
+        }
+    }
+}
+
+/// Returns `text` with the top-level `theme` set to `theme`, touching nothing else: other keys,
+/// comments and formatting stay. A missing `theme` is inserted as the first entry.
+pub fn set_theme_text(text: &str, theme: &str) -> Result<String, String> {
+    if !matches!(theme, "light" | "dark" | "system") {
+        return Err(format!("invalid theme {theme:?}"));
+    }
+    let b = text.as_bytes();
+    let open = skip_trivia(b, 0);
+    if b.get(open) != Some(&b'{') {
+        return Err("config.json is not a JSON object".into());
+    }
+    let (mut i, mut depth) = (open + 1, 1usize);
+    while i < b.len() {
+        i = skip_trivia(b, i);
+        match b.get(i) {
+            None => break,
+            Some(b'"') => {
+                let end = skip_string(b, i);
+                let is_key = depth == 1 && &text[i..end] == "\"theme\"";
+                i = end;
+                if is_key {
+                    let colon = skip_trivia(b, i);
+                    if b.get(colon) == Some(&b':') {
+                        let start = skip_trivia(b, colon + 1);
+                        let stop = if b.get(start) == Some(&b'"') {
+                            skip_string(b, start)
+                        } else {
+                            let mut e = start;
+                            while e < b.len() && !matches!(b[e], b',' | b'}' | b'\n') {
+                                e += 1;
+                            }
+                            e
+                        };
+                        return Ok(format!("{}\"{theme}\"{}", &text[..start], &text[stop..]));
+                    }
+                }
+            }
+            Some(b'{' | b'[') => {
+                depth += 1;
+                i += 1;
+            }
+            Some(b'}' | b']') => {
+                depth -= 1;
+                i += 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            Some(_) => i += 1,
+        }
+    }
+    let first = skip_trivia(b, open + 1);
+    let entry = format!("\"theme\": \"{theme}\"");
+    Ok(if b.get(first) == Some(&b'}') {
+        format!("{}{entry}{}", &text[..=open], &text[first..])
+    } else {
+        format!("{}\n  {entry},{}", &text[..=open], &text[open + 1..])
+    })
+}
+
+/// Writes the `theme` setting below `home` (creating the file when missing). The watcher then
+/// emits the new settings like for any external edit.
+pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
+    let path = config_path(home);
+    let next = match std::fs::read_to_string(&path) {
+        Ok(text) => set_theme_text(&text, theme)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            set_theme_text("{}", theme).map(|t| t + "\n")?
+        }
+        Err(e) => return Err(format!("cannot read config.json: {e}")),
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, next).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
 fn stamp(home: &Path) -> [Option<SystemTime>; 2] {
     [config_path(home), ghostty_path(home)]
         .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
@@ -334,6 +449,53 @@ mod tests {
         assert_eq!(load(&home).theme, "light");
         std::fs::remove_dir_all(&home).unwrap();
         assert_eq!(load(&home), Settings::default());
+    }
+
+    #[test]
+    fn set_theme_replaces_the_value_and_keeps_the_rest() {
+        let text = "{\n  // my theme\n  \"theme\": \"system\", /* c */\n  \"terminal\": {\"theme\": \"x\"}\n}";
+        let out = set_theme_text(text, "dark").unwrap();
+        assert_eq!(
+            out,
+            "{\n  // my theme\n  \"theme\": \"dark\", /* c */\n  \"terminal\": {\"theme\": \"x\"}\n}"
+        );
+    }
+
+    #[test]
+    fn set_theme_inserts_when_missing_and_ignores_nested_keys() {
+        let out = set_theme_text("{\"terminal\":{\"theme\":\"x\"}}", "light").unwrap();
+        assert_eq!(
+            out,
+            "{\n  \"theme\": \"light\",\"terminal\":{\"theme\":\"x\"}}"
+        );
+        assert_eq!(
+            set_theme_text("{ }", "dark").unwrap(),
+            "{\"theme\": \"dark\"}"
+        );
+        assert_eq!(resolve(Some(&out), none).theme, "light");
+    }
+
+    #[test]
+    fn set_theme_rejects_bad_input() {
+        assert!(set_theme_text("{}", "blue").is_err());
+        assert!(set_theme_text("[1]", "dark").is_err());
+    }
+
+    #[test]
+    fn save_theme_writes_and_creates_the_file() {
+        let home = std::env::temp_dir().join(format!("poimen-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        save_theme(&home, "dark").unwrap();
+        assert_eq!(load(&home).theme, "dark");
+        std::fs::write(
+            config_path(&home),
+            r#"{"terminal":{"fontSize":15},"theme":"dark"}"#,
+        )
+        .unwrap();
+        save_theme(&home, "light").unwrap();
+        let s = load(&home);
+        assert_eq!((s.theme.as_str(), s.font_size), ("light", 15.0));
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
