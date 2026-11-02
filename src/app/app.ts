@@ -16,10 +16,12 @@ import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TauriBridge } from "./core/tauri";
 import { ActivityBar } from "./activity-bar/activity-bar";
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, isToggleSidebarKey } from "./core/ui-state";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
-import { EditorTabs, splitKeyDirection, type EditorGroup } from "./core/editor-tabs";
+import { EditorTabs, type EditorGroup } from "./core/editor-tabs";
+import { Keymap } from "./core/keymap";
+import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { Toolbar } from "./toolbar/toolbar";
 import { StatusBar } from "./status-bar/status-bar";
@@ -30,8 +32,8 @@ import {
   type TabBarMenuItem,
 } from "./ui/helix-candidates/tab-bar/tab-bar";
 
-/** Ids the native menu emits on the `menu` event (see `src-tauri/src/lib.rs`). */
-type MenuAction = "close_all" | "refresh";
+/** The terminal font changes by this many points per zoom step. */
+const ZOOM_STEP = 1;
 
 /** The window: the activity bar, the sidebar and the editor group (tab bar over the live terminal). */
 @Component({
@@ -55,6 +57,7 @@ export class App {
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly prefs = inject(SettingsStore);
+  private readonly keymap = inject(Keymap);
   protected readonly ui = inject(UiState);
   protected readonly minWidth = SIDEBAR_MIN_WIDTH;
   protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
@@ -104,7 +107,7 @@ export class App {
     });
 
     const destroyRef = inject(DestroyRef);
-    const menu = this.bridge.listen<MenuAction>("menu", (action) => this.onMenu(action));
+    const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     effect((onCleanup) => {
       const setting = this.prefs.settings().theme;
@@ -145,29 +148,82 @@ export class App {
     void this.prefs.setTheme(theme);
   }
 
-  /** `Cmd+B` / `Ctrl+B` toggles the sidebar. */
+  /**
+   * Keyboard shortcuts (editable in the settings file). A focused terminal only yields the ones
+   * that use Cmd; the rest of its keys belong to the program in the pane.
+   */
   @HostListener("window:keydown", ["$event"])
   protected onKey(event: KeyboardEvent): void {
-    const dir = splitKeyDirection(event);
-    if (dir) {
-      const id = this.editor.activeId();
-      if (!id) return;
-      event.preventDefault();
-      this.editor.split(id, dir);
-      return;
-    }
-    if (!isToggleSidebarKey(event)) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const action = this.keymap.match(event, target?.closest(".xterm") != null);
+    if (!action) return;
     event.preventDefault();
-    this.ui.toggleSidebar();
+    this.run(action);
+  }
+
+  /** Runs a menu or shortcut action; ids come from the native menu and the shortcut table. */
+  protected run(id: string): void {
+    const action = id as ShortcutAction;
+    const active = this.editor.activeId();
+    switch (action) {
+      case "closeTab":
+        if (active) this.editor.close(active);
+        break;
+      case "closeAll":
+        this.editor.closeAll();
+        break;
+      case "refresh":
+        void this.store.refresh();
+        break;
+      case "toggleSidebar":
+        this.ui.toggleSidebar();
+        break;
+      case "splitRight":
+        if (active) this.editor.split(active, "row");
+        break;
+      case "splitDown":
+        if (active) this.editor.split(active, "column");
+        break;
+      case "zoomIn":
+        this.ui.zoomBy(ZOOM_STEP);
+        break;
+      case "zoomOut":
+        this.ui.zoomBy(-ZOOM_STEP);
+        break;
+      case "zoomReset":
+        this.ui.zoomBy(null);
+        break;
+      case "nextWaiting":
+        this.jumpToWaiting();
+        break;
+      case "nextTab":
+        this.editor.cycle(1);
+        break;
+      case "previousTab":
+        this.editor.cycle(-1);
+        break;
+      case "newTerminal":
+        // Needs pane creation (#32); the menu item is disabled until then.
+        break;
+    }
   }
 
   /** Context menu of a group's tabs; splitting needs a second tab in the group. */
   protected menuFor(group: EditorGroup): TabBarMenuItem[] {
     const single = group.tabs.length < 2;
-    const mod = /Mac/i.test(navigator.platform) ? "⌘" : "Ctrl+";
     return [
-      { action: "split-right", label: "Split right", shortcut: `${mod}\\`, disabled: single },
-      { action: "split-down", label: "Split down", shortcut: `${mod}⇧\\`, disabled: single },
+      {
+        action: "split-right",
+        label: "Split right",
+        shortcut: this.keymap.label("splitRight"),
+        disabled: single,
+      },
+      {
+        action: "split-down",
+        label: "Split down",
+        shortcut: this.keymap.label("splitDown"),
+        disabled: single,
+      },
       { action: "close", label: "Close" },
     ];
   }
@@ -244,11 +300,6 @@ export class App {
 
   private pane(id: string): Pane | undefined {
     return this.store.panes().get(id) ?? this.known.get(id);
-  }
-
-  private onMenu(action: MenuAction): void {
-    if (action === "close_all") this.editor.closeAll();
-    else void this.store.refresh();
   }
 
   /** HxTheme reads the system setting once; keep light/dark in step when it changes. */

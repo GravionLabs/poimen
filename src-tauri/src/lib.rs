@@ -6,6 +6,7 @@ mod settings;
 mod stream;
 mod watch;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -147,25 +148,137 @@ fn close_terminal(sessions: State<'_, Sessions>, id: u32) {
     sessions.close(id);
 }
 
-fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let menu = Menu::default(app)?;
-    let view = Submenu::with_items(
+/// The accelerator the native menu carries. Only Cmd bindings on macOS: elsewhere (and for Ctrl
+/// or Alt bindings) the webview matches the keys itself, so a terminal that has focus keeps them.
+fn native_accelerator(accelerator: &str) -> Option<String> {
+    let cmd = accelerator
+        .split('+')
+        .any(|t| matches!(t, "Cmd" | "CmdOrCtrl"));
+    if !cfg!(target_os = "macos") || !cmd {
+        return None;
+    }
+    Some(
+        accelerator
+            .split('+')
+            .map(|t| match t {
+                "Left" => "ArrowLeft",
+                "Right" => "ArrowRight",
+                "Up" => "ArrowUp",
+                "Down" => "ArrowDown",
+                other => other,
+            })
+            .collect::<Vec<_>>()
+            .join("+"),
+    )
+}
+
+fn action_item(
+    app: &AppHandle,
+    shortcuts: &BTreeMap<String, String>,
+    id: &str,
+    text: &str,
+    enabled: bool,
+) -> tauri::Result<MenuItem<tauri::Wry>> {
+    let accelerator = shortcuts.get(id).and_then(|a| native_accelerator(a));
+    // An accelerator muda cannot parse leaves the item without one instead of failing the menu.
+    MenuItem::with_id(app, id, text, enabled, accelerator.as_deref())
+        .or_else(|_| MenuItem::with_id(app, id, text, enabled, None::<&str>))
+}
+
+fn build_menu(
+    app: &AppHandle,
+    shortcuts: &BTreeMap<String, String>,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let item = |id: &str, text: &str| action_item(app, shortcuts, id, text, true);
+    let sep = || PredefinedMenuItem::separator(app);
+    let menu = Menu::new(app)?;
+    if cfg!(target_os = "macos") {
+        menu.append(&Submenu::with_items(
+            app,
+            "poimen",
+            true,
+            &[
+                &PredefinedMenuItem::about(app, None, None)?,
+                &sep()?,
+                &PredefinedMenuItem::hide(app, None)?,
+                &PredefinedMenuItem::hide_others(app, None)?,
+                &PredefinedMenuItem::show_all(app, None)?,
+                &sep()?,
+                &PredefinedMenuItem::quit(app, None)?,
+            ],
+        )?)?;
+    }
+    // "New Terminal" waits for pane creation (#32): shown, but disabled.
+    let new_terminal = action_item(app, shortcuts, "newTerminal", "New Terminal", false)?;
+    let file = Submenu::with_items(
         app,
-        "Panes",
+        "File",
         true,
         &[
-            &MenuItem::with_id(
-                app,
-                "close_all",
-                "Close All Tabs",
-                true,
-                Some("CmdOrCtrl+Shift+W"),
-            )?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "refresh", "Refresh", true, Some("CmdOrCtrl+R"))?,
+            &new_terminal,
+            &sep()?,
+            &item("closeTab", "Close Tab")?,
+            &item("closeAll", "Close All Tabs")?,
         ],
     )?;
-    menu.append(&view)?;
+    if !cfg!(target_os = "macos") {
+        file.append(&sep()?)?;
+        file.append(&PredefinedMenuItem::quit(app, None)?)?;
+    }
+    menu.append(&file)?;
+    menu.append(&Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &sep()?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?)?;
+    menu.append(&Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[
+            &item("toggleSidebar", "Toggle Sidebar")?,
+            &sep()?,
+            &item("splitRight", "Split Right")?,
+            &item("splitDown", "Split Down")?,
+            &sep()?,
+            &item("zoomIn", "Zoom In")?,
+            &item("zoomOut", "Zoom Out")?,
+            &item("zoomReset", "Actual Size")?,
+            &sep()?,
+            &item("refresh", "Refresh")?,
+            &PredefinedMenuItem::fullscreen(app, None)?,
+        ],
+    )?)?;
+    menu.append(&Submenu::with_items(
+        app,
+        "Go",
+        true,
+        &[
+            &item("nextWaiting", "Next Waiting Agent")?,
+            &sep()?,
+            &item("nextTab", "Next Tab")?,
+            &item("previousTab", "Previous Tab")?,
+        ],
+    )?)?;
+    menu.append(&Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?)?;
     Ok(menu)
 }
 
@@ -181,7 +294,10 @@ pub fn run() {
         .manage(HerdrBin(bin))
         .setup(move |app| {
             let handle = app.handle().clone();
-            app.set_menu(build_menu(&handle)?)?;
+            let shortcuts = home_dir()
+                .map(|h| settings::load(&h).shortcuts)
+                .unwrap_or_else(settings::default_shortcuts);
+            app.set_menu(build_menu(&handle, &shortcuts)?)?;
             app.on_menu_event(|app, event| {
                 let _ = app.emit("menu", event.id().0.clone());
             });
@@ -190,6 +306,13 @@ pub fn run() {
                 std::thread::spawn(move || {
                     settings::watch(&home, std::time::Duration::from_secs(1), |s| {
                         let _ = handle.emit("settings", s);
+                        // Menu items carry the accelerators; rebuild them on the main thread.
+                        let (app, shortcuts) = (handle.clone(), s.shortcuts.clone());
+                        let _ = handle.run_on_main_thread(move || {
+                            if let Ok(menu) = build_menu(&app, &shortcuts) {
+                                let _ = app.set_menu(menu);
+                            }
+                        });
                     });
                 });
             }

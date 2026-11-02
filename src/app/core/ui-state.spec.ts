@@ -8,9 +8,9 @@ import {
   UI_STORAGE,
   UiState,
   clampSidebarWidth,
-  isToggleSidebarKey,
   parseLayout,
   type UiStorage,
+  ZOOM_LIMIT,
 } from "./ui-state";
 
 function fakeStorage(initial?: string): UiStorage & { data: Map<string, string> } {
@@ -54,30 +54,20 @@ describe("parseLayout", () => {
   });
 });
 
-describe("isToggleSidebarKey", () => {
-  const key = (over: Partial<Parameters<typeof isToggleSidebarKey>[0]>) => ({
-    key: "b",
-    metaKey: false,
-    ctrlKey: false,
-    altKey: false,
-    shiftKey: false,
-    ...over,
-  });
-
-  it("accepts Cmd+B and Ctrl+B", () => {
-    expect(isToggleSidebarKey(key({ metaKey: true }))).toBe(true);
-    expect(isToggleSidebarKey(key({ ctrlKey: true, key: "B" }))).toBe(true);
-  });
-
-  it("rejects a bare B, other keys and extra modifiers", () => {
-    expect(isToggleSidebarKey(key({}))).toBe(false);
-    expect(isToggleSidebarKey(key({ metaKey: true, key: "n" }))).toBe(false);
-    expect(isToggleSidebarKey(key({ metaKey: true, shiftKey: true }))).toBe(false);
-    expect(isToggleSidebarKey(key({ metaKey: true, altKey: true }))).toBe(false);
-  });
-});
-
 describe("UiState", () => {
+  it("zooms in steps, clamps and resets without persisting", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    state.zoomBy(2);
+    state.zoomBy(-5);
+    expect(state.zoom()).toBe(-3);
+    state.zoomBy(100);
+    expect(state.zoom()).toBe(ZOOM_LIMIT);
+    state.zoomBy(null);
+    expect(state.zoom()).toBe(0);
+    expect(storage.data.size).toBe(0);
+  });
+
   it("starts from defaults and persists width and collapse", () => {
     const storage = fakeStorage();
     const state = stateOn(storage);

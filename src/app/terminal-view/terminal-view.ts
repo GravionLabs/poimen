@@ -19,8 +19,9 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { TauriBridge } from "../core/tauri";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
-import { splitKeyDirection } from "../core/editor-tabs";
 import { SettingsStore } from "../core/settings";
+import { Keymap } from "../core/keymap";
+import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
 import { holdsLinkModifier, linkHandler } from "./links";
 import { buttonName, cellAt, modifierBits } from "./mouse";
@@ -77,6 +78,8 @@ export class TerminalView implements OnDestroy {
 
   private readonly streams = inject(TerminalStreamService);
   private readonly prefs = inject(SettingsStore);
+  private readonly keymap = inject(Keymap);
+  private readonly ui = inject(UiState);
   private readonly tauri = inject(TauriBridge);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
@@ -112,6 +115,7 @@ export class TerminalView implements OnDestroy {
     // Settings edits (and theme switches) apply to the open terminal without a restart.
     effect(() => {
       this.prefs.settings();
+      this.ui.zoom();
       untracked(() => this.applyLook());
     });
     // A change of the wanted mode reopens the stream; it never takes over a controller by itself.
@@ -135,7 +139,8 @@ export class TerminalView implements OnDestroy {
 
   /** Font and colors from the settings, over the theme tokens. */
   private look() {
-    const { fontFamily, fontSize, colors } = this.prefs.settings();
+    const { fontFamily, fontSize: configured, colors } = this.prefs.settings();
+    const fontSize = Math.min(72, Math.max(6, configured + this.ui.zoom()));
     const foreground = colors?.foreground ?? cssVar("--term-fg");
     return {
       fontFamily: fontFamily ?? (cssVar("--font-mono") || "Menlo, monospace"),
@@ -184,8 +189,9 @@ export class TerminalView implements OnDestroy {
     } catch {
       // DOM renderer fallback
     }
-    // The split shortcut belongs to the app: keep xterm from forwarding Ctrl+\\ to the pane (SIGQUIT).
-    term.attachCustomKeyEventHandler((event) => splitKeyDirection(event) === null);
+    // App shortcuts belong to the app: keep xterm from forwarding them to the pane. Only Cmd
+    // shortcuts match here; other keys go to the program in the pane.
+    term.attachCustomKeyEventHandler((event) => this.keymap.match(event, true) === null);
     term.onData((data) => {
       if (this.mode() === "control") this.session?.input(data);
     });

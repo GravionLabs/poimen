@@ -75,12 +75,21 @@ rm -rf src-tauri/icons/android src-tauri/icons/ios
 
 ## Keyboard
 
-| Shortcut | Action |
-|---|---|
-| ⌘⇧E | Expand all cards |
-| ⌘⇧C | Collapse all cards |
-| ⌘⇧W | Close all views |
-| ⌘R | Refresh |
+The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoom, refresh), Go (next waiting agent, tab switching) and Window. Defaults follow VS Code; `CmdOrCtrl` is Cmd on macOS and Ctrl elsewhere. Every shortcut can be changed in the settings file (see below).
+
+| Action | Setting key | Default |
+|---|---|---|
+| New terminal (disabled until pane creation, #32) | `newTerminal` | CmdOrCtrl+T |
+| Close tab | `closeTab` | CmdOrCtrl+W |
+| Close all tabs | `closeAll` | CmdOrCtrl+Shift+W |
+| Refresh | `refresh` | CmdOrCtrl+R |
+| Toggle sidebar | `toggleSidebar` | CmdOrCtrl+B |
+| Split right / down | `splitRight` / `splitDown` | CmdOrCtrl+\\ / CmdOrCtrl+Shift+\\ |
+| Zoom in / out / actual size (terminal font) | `zoomIn` / `zoomOut` / `zoomReset` | CmdOrCtrl+= / CmdOrCtrl+- / CmdOrCtrl+0 |
+| Next waiting agent | `nextWaiting` | CmdOrCtrl+Shift+A |
+| Next / previous tab | `nextTab` / `previousTab` | CmdOrCtrl+Alt+Right / CmdOrCtrl+Alt+Left |
+
+While a terminal has focus, only shortcuts that use Cmd are captured; every other key (Ctrl combinations on Linux and Windows included) goes to the program in the pane. Use the menu, or bind a `Cmd+` (Super) shortcut, to reach an action from a focused terminal there.
 
 ## Settings
 
@@ -89,13 +98,15 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 ```json
 {
   "theme": "system",
-  "terminal": { "fontFamily": "JetBrains Mono", "fontSize": 13, "ghostty": false, "autoControl": true }
+  "terminal": { "fontFamily": "JetBrains Mono", "fontSize": 13, "ghostty": false, "autoControl": true },
+  "shortcuts": { "toggleSidebar": "Ctrl+Alt+B", "refresh": "" }
 }
 ```
 
 - `theme`: `light`, `dark` or `system` (default). The toolbar button writes this entry; poimen writes no other setting.
 - `terminal.fontFamily` / `terminal.fontSize` (6 to 72, default 13).
 - `terminal.autoControl`: `true` (default) opens panes for input when no other client controls them; `false` opens every tab read-only.
+- `shortcuts`: accelerator per action (keys in the table above), such as `Cmd+Shift+K`, `CmdOrCtrl+Alt+Left` or `F5`. It needs Cmd, Ctrl or Alt (or is an F key); an empty string unbinds the action. Unknown actions, invalid accelerators and ones already used by another action log a warning and keep the default.
 - `terminal.ghostty`: `true` takes font family, size and background/foreground from `~/.config/ghostty/config`; explicit entries above win.
 
 ## Releases

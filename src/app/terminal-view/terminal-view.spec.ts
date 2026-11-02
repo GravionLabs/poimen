@@ -600,14 +600,23 @@ describe("TerminalView links", () => {
   });
 });
 
-describe("TerminalView split shortcut (#23)", () => {
+describe("TerminalView app shortcuts (#23, #26)", () => {
   const key = (k: string, init: KeyboardEventInit = {}) =>
     new KeyboardEvent("keydown", { key: k, ...init });
 
-  it("keeps Ctrl+\\ and Ctrl+Shift+| from xterm so they are not sent to the pane", async () => {
+  it("keeps Cmd shortcuts from xterm so they are not sent to the pane", async () => {
+    const { settings } = await setup("control");
+    settings.set({
+      ...DEFAULT_SETTINGS,
+      shortcuts: { ...DEFAULT_SETTINGS.shortcuts, splitRight: "Cmd+\\" },
+    });
+    expect(fake.keyHandler?.(key("\\", { metaKey: true }))).toBe(false);
+  });
+
+  it("sends Ctrl+\\ to the pane: a focused terminal only yields shortcuts that use Cmd", async () => {
     await setup("control");
-    expect(fake.keyHandler?.(key("\\", { ctrlKey: true }))).toBe(false);
-    expect(fake.keyHandler?.(key("|", { ctrlKey: true, shiftKey: true }))).toBe(false);
+    expect(fake.keyHandler?.(key("\\", { ctrlKey: true }))).toBe(true);
+    expect(fake.keyHandler?.(key("b", { ctrlKey: true }))).toBe(true);
   });
 
   it("lets other keys through to xterm", async () => {

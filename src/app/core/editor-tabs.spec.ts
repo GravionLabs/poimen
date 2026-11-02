@@ -2,7 +2,7 @@
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { EditorTabs, moveItem, parseEditor, splitKeyDirection } from "./editor-tabs";
+import { EditorTabs, moveItem, parseEditor } from "./editor-tabs";
 import { UI_STATE_KEY, UI_STORAGE } from "./ui-state";
 
 describe("moveItem", () => {
@@ -31,6 +31,26 @@ describe("EditorTabs", () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: null }] });
     tabs = TestBed.inject(EditorTabs);
+  });
+
+  it("cycles the active tab of the focused group and wraps around", () => {
+    ["a", "b", "c"].forEach((id) => tabs.open(id, true));
+    tabs.activate("a");
+    tabs.cycle(1);
+    expect(tabs.activeId()).toBe("b");
+    tabs.cycle(-1);
+    tabs.cycle(-1);
+    expect(tabs.activeId()).toBe("c");
+    tabs.cycle(1);
+    expect(tabs.activeId()).toBe("a");
+  });
+
+  it("does not cycle with fewer than two tabs", () => {
+    tabs.cycle(1);
+    expect(tabs.activeId()).toBeNull();
+    tabs.open("a");
+    tabs.cycle(1);
+    expect(tabs.activeId()).toBe("a");
   });
 
   it("opens a pane as an active preview tab", () => {
@@ -237,29 +257,6 @@ describe("EditorTabs", () => {
       expect(tabs.layout()).toEqual({ kind: "group", id: 1 });
       expect(tabs.focusedId()).toBe(1);
     });
-  });
-});
-
-describe("splitKeyDirection", () => {
-  const key = (k: string, extra: Partial<KeyboardEvent> = {}) => ({
-    key: k,
-    metaKey: false,
-    ctrlKey: false,
-    altKey: false,
-    shiftKey: false,
-    ...extra,
-  });
-
-  it("splits right with Cmd or Ctrl and backslash, down with Shift", () => {
-    expect(splitKeyDirection(key("\\", { metaKey: true }))).toBe("row");
-    expect(splitKeyDirection(key("\\", { ctrlKey: true }))).toBe("row");
-    expect(splitKeyDirection(key("|", { ctrlKey: true, shiftKey: true }))).toBe("column");
-  });
-
-  it("ignores other keys, a missing modifier and Alt", () => {
-    expect(splitKeyDirection(key("\\"))).toBeNull();
-    expect(splitKeyDirection(key("b", { metaKey: true }))).toBeNull();
-    expect(splitKeyDirection(key("\\", { metaKey: true, altKey: true }))).toBeNull();
   });
 });
 

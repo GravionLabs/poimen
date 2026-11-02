@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from "@angular/core";
+import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { TauriBridge } from "./tauri";
 
 export type ThemeSetting = "light" | "dark" | "system";
@@ -13,6 +14,8 @@ export interface Settings {
   colors: { background: string | null; foreground: string | null } | null;
   /** Open panes for input when no other client controls them (`terminal.autoControl`). */
   autoControl: boolean;
+  /** Accelerator per action: the defaults over the valid `shortcuts` of config.json. */
+  shortcuts: Shortcuts;
   warnings: string[];
 }
 
@@ -27,6 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fontSize: 13,
   colors: null,
   autoControl: true,
+  shortcuts: DEFAULT_SHORTCUTS,
   warnings: [],
 };
 
@@ -48,6 +52,7 @@ export function parseSettings(raw: unknown): Settings {
         ? { background: color(colors["background"]), foreground: color(colors["foreground"]) }
         : null,
     autoControl: r["autoControl"] !== false,
+    shortcuts: parseShortcuts(r["shortcuts"]),
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
       : [],
