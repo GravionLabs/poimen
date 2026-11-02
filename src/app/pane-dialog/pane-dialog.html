@@ -1,0 +1,65 @@
+@if (actions.dialog(); as d) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Cancel"
+    (click)="cancel()"
+  ></button>
+  @if (d.kind === "new") {
+    <form
+      class="dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="New terminal"
+      (submit)="$event.preventDefault(); create(d.cwd)"
+      (keydown.escape)="cancel()"
+    >
+      <h2>New terminal</h2>
+      <label>
+        Directory
+        <input
+          class="cwd"
+          type="text"
+          list="pane-dialog-dirs"
+          placeholder="Default directory of the workspace"
+          [value]="cwd(d.cwd)"
+          (input)="type($event)"
+        />
+      </label>
+      <datalist id="pane-dialog-dirs">
+        @for (dir of d.dirs; track dir) {
+          <option [value]="dir"></option>
+        }
+      </datalist>
+      <div class="buttons">
+        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
+        <button type="submit" class="confirm">Create</button>
+      </div>
+    </form>
+  } @else {
+    <div
+      class="dialog"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Close pane"
+      (keydown.escape)="cancel()"
+    >
+      <h2>Close pane</h2>
+      <p>
+        Close <strong>{{ d.name }}</strong
+        >? {{ d.warning }}
+      </p>
+      <div class="buttons">
+        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
+        <button type="button" class="confirm danger" (click)="close()">Close pane</button>
+      </div>
+    </div>
+  }
+}
+@if (actions.error(); as message) {
+  <div class="error" role="alert">
+    <span>{{ message }}</span>
+    <button type="button" aria-label="Dismiss" (click)="actions.dismissError()">x</button>
+  </div>
+}

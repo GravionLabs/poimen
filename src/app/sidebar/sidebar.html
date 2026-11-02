@@ -26,7 +26,7 @@
   <ng-template hxTreeNode let-node let-expanded="expanded">
     @let d = data(node);
     @if (d.kind === "workspace") {
-      <span class="space">
+      <span class="space" (contextmenu)="openMenu($event, 'workspace', d.workspace.workspace_id)">
         <span class="dot status-{{ d.status }}"></span>
         <span class="space-name">{{ d.workspace.label }}</span>
         @if (d.state) {
@@ -44,7 +44,13 @@
       </span>
     } @else {
       @let m = marks(d.row);
-      <span class="row" [class.open]="m.open" [class.active]="m.active" [title]="rowTitle(d.row)">
+      <span
+        class="row"
+        [class.open]="m.open"
+        [class.active]="m.active"
+        [title]="rowTitle(d.row)"
+        (contextmenu)="openMenu($event, 'pane', d.row.pane.pane_id)"
+      >
         <span
           class="icon"
           [class.agent]="d.row.agent"
@@ -67,3 +73,26 @@
     }
   </ng-template>
 </hx-tree>
+@if (menuAt(); as at) {
+  <button
+    type="button"
+    class="menu-backdrop"
+    tabindex="-1"
+    aria-label="Close menu"
+    (click)="closeMenu()"
+    (contextmenu)="$event.preventDefault(); closeMenu()"
+  ></button>
+  <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
+    @for (item of menuItems(at.kind); track item.action) {
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="choose(item.action)"
+        (keydown.escape)="closeMenu()"
+      >
+        {{ item.label }}
+      </button>
+    }
+  </div>
+}

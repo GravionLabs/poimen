@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpaceNode } from "../core/herdr";
-import { isDoubleClick, spaceNodes } from "./sidebar";
+import { isDoubleClick, sidebarMenuItems, spaceNodes } from "./sidebar";
 
 const space: SpaceNode = {
   workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
@@ -25,6 +25,20 @@ describe("spaceNodes", () => {
 
   it("is empty without spaces", () => {
     expect(spaceNodes([])).toEqual([]);
+  });
+});
+
+describe("sidebarMenuItems", () => {
+  it("offers a new terminal on a workspace", () => {
+    expect(sidebarMenuItems("workspace").map((i) => i.action)).toEqual(["new-terminal"]);
+  });
+
+  it("offers split and close on a pane", () => {
+    expect(sidebarMenuItems("pane").map((i) => i.action)).toEqual([
+      "split-right",
+      "split-down",
+      "close",
+    ]);
   });
 });
 
