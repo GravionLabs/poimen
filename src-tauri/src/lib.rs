@@ -58,6 +58,13 @@ fn get_settings() -> settings::Settings {
     home_dir().map(|h| settings::load(&h)).unwrap_or_default()
 }
 
+/// Writes only the `theme` setting (the toolbar button); the settings watcher emits the change.
+#[tauri::command]
+fn set_theme(theme: String) -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::save_theme(&home, &theme)
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(
@@ -198,6 +205,7 @@ pub fn run() {
             herdr_info,
             app_version,
             get_settings,
+            set_theme,
             repo_info,
             open_terminal,
             terminal_input,

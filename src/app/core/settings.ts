@@ -16,6 +16,11 @@ export interface Settings {
   warnings: string[];
 }
 
+/** The theme a click on the toolbar button selects: system, then light, then dark. */
+export function nextTheme(theme: ThemeSetting): ThemeSetting {
+  return theme === "system" ? "light" : theme === "light" ? "dark" : "system";
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   fontFamily: null,
@@ -62,6 +67,18 @@ export class SettingsStore {
       this.apply(await this.bridge.invoke("get_settings"));
     } catch {
       // keep the defaults
+    }
+  }
+
+  /** Writes the `theme` entry of config.json and applies it at once; the file watcher confirms. */
+  async setTheme(theme: ThemeSetting): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, theme });
+    try {
+      await this.bridge.invoke("set_theme", { theme });
+    } catch (e) {
+      this._settings.set(previous);
+      console.warn(`poimen settings: cannot save theme: ${e}`);
     }
   }
 

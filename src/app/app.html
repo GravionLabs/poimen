@@ -1,3 +1,4 @@
+<app-toolbar [theme]="theme$()" (themeChange)="setTheme($event)" />
 <div class="work">
   <app-activity-bar [expanded]="!ui.sidebarCollapsed()" (selected)="ui.toggleSidebar()" />
   @if (!ui.sidebarCollapsed()) {

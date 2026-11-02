@@ -13,13 +13,14 @@ import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import { rowName, tabHeader, type Mode, type Pane } from "./core/herdr";
 import { HerdrStore } from "./core/herdr-store";
-import { SettingsStore } from "./core/settings";
+import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TauriBridge } from "./core/tauri";
 import { ActivityBar } from "./activity-bar/activity-bar";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, isToggleSidebarKey } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 import { EditorTabs } from "./core/editor-tabs";
+import { Toolbar } from "./toolbar/toolbar";
 import { StatusBar } from "./status-bar/status-bar";
 import { TabBar, type TabBarItem } from "./ui/helix-candidates/tab-bar/tab-bar";
 
@@ -29,7 +30,7 @@ type MenuAction = "close_all" | "refresh";
 /** The window: the activity bar, the sidebar and the editor group (tab bar over the live terminal). */
 @Component({
   selector: "app-root",
-  imports: [ActivityBar, Sidebar, TerminalView, TabBar, StatusBar],
+  imports: [ActivityBar, Sidebar, TerminalView, TabBar, StatusBar, Toolbar],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -97,6 +98,12 @@ export class App {
     });
     void this.prefs.start();
     void this.store.start();
+  }
+
+  protected readonly theme$ = computed(() => this.prefs.settings().theme);
+
+  protected setTheme(theme: ThemeSetting): void {
+    void this.prefs.setTheme(theme);
   }
 
   /** `Cmd+B` / `Ctrl+B` toggles the sidebar. */
