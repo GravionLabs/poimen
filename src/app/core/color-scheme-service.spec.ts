@@ -3,7 +3,9 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { bundled } from "./color-scheme";
 import { ColorSchemeService } from "./color-scheme-service";
+import { UserSchemes } from "./user-schemes";
 
 const setDark = vi.fn();
 
@@ -68,5 +70,23 @@ describe("ColorSchemeService", () => {
     expect(s.sync("nope")).toBe(false);
     expect(warn).toHaveBeenCalledOnce();
     expect(root().length).toBe(0);
+  });
+});
+
+describe("ColorSchemeService with user schemes", () => {
+  const mine = { ...bundled.get("dracula")!, name: "mine", background: "#010203" };
+
+  it("applies a user scheme by name", () => {
+    const s = service();
+    TestBed.inject(UserSchemes)["_schemes"].set([mine]);
+    expect(s.sync("mine")).toBe(true);
+    expect(root().getPropertyValue("--term-bg")).toBe("#010203");
+  });
+
+  it("lets a user scheme replace a bundled one", () => {
+    const s = service();
+    TestBed.inject(UserSchemes)["_schemes"].set([{ ...mine, name: "dracula" }]);
+    s.sync("dracula");
+    expect(root().getPropertyValue("--term-bg")).toBe("#010203");
   });
 });
