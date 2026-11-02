@@ -7,6 +7,7 @@ import {
 } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import { SettingsStore, type ColorSchemeSetting, type ThemeSetting } from "../core/settings";
+import { TauriBridge } from "../core/tauri";
 import { UserSchemes } from "../core/user-schemes";
 
 export type SchemeMode = "single" | "pair";
@@ -63,6 +64,20 @@ export function chosen(
   return mode === "single" ? name : { ...pairOf(schema, side), [side]: name };
 }
 
+/** `list` with the item at `index` moved by `delta` places (clamped); a copy. */
+export function moved<T>(list: readonly T[], index: number, delta: number): T[] {
+  const next = [...list];
+  const target = Math.min(Math.max(index + delta, 0), next.length - 1);
+  const [item] = next.splice(index, 1);
+  next.splice(target, 0, item);
+  return next;
+}
+
+/** `roots` with `dir` appended, unless it is already listed. */
+export function withRoot(roots: readonly string[], dir: string): string[] {
+  return roots.includes(dir) ? [...roots] : [...roots, dir];
+}
+
 /** The settings view (an editor tab): appearance and the color scheme picker with live preview. */
 @Component({
   selector: "app-settings-view",
@@ -74,6 +89,7 @@ export class SettingsView {
   private readonly store = inject(SettingsStore);
   private readonly schemes = inject(ColorSchemeService);
   private readonly user = inject(UserSchemes);
+  private readonly bridge = inject(TauriBridge);
 
   protected readonly themeChoices = THEME_CHOICES;
   protected readonly settings = this.store.settings;
@@ -101,6 +117,27 @@ export class SettingsView {
 
   protected setTheme(theme: ThemeSetting): void {
     void this.store.setTheme(theme);
+  }
+
+  protected readonly writeError = this.store.writeError;
+
+  /** Adds a folder chosen in the native picker to `explorer.roots`. */
+  protected async addRoot(): Promise<void> {
+    const dir = await this.bridge.pickDirectory();
+    if (dir) await this.store.setExplorerRoots(withRoot(this.settings().explorerRoots, dir));
+  }
+
+  protected removeRoot(index: number): void {
+    const roots = this.settings().explorerRoots;
+    if (roots.length > 1) void this.store.setExplorerRoots(roots.filter((_, i) => i !== index));
+  }
+
+  protected moveRoot(index: number, delta: number): void {
+    void this.store.setExplorerRoots(moved(this.settings().explorerRoots, index, delta));
+  }
+
+  protected setShowHidden(event: Event): void {
+    void this.store.setExplorerShowHidden((event.target as HTMLInputElement).checked);
   }
 
   protected setMode(mode: SchemeMode): void {

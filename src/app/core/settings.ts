@@ -210,6 +210,44 @@ export class SettingsStore {
     }
   }
 
+  /** Writes `explorer.roots` of config.json (home paths as `~/…`) and applies it at once. */
+  async setExplorerRoots(explorerRoots: string[]): Promise<void> {
+    await this.write({ explorerRoots }, "the explorer folders", "set_explorer_roots", {
+      roots: explorerRoots,
+    });
+  }
+
+  /** Writes `explorer.showHidden` of config.json and applies it at once. */
+  async setExplorerShowHidden(explorerShowHidden: boolean): Promise<void> {
+    await this.write(
+      { explorerShowHidden },
+      "the hidden folders option",
+      "set_explorer_show_hidden",
+      { show: explorerShowHidden },
+    );
+  }
+
+  /** Optimistic write: applies `patch`, calls `command`, goes back and reports a failure. */
+  private async write(
+    patch: Partial<Settings>,
+    what: string,
+    command: string,
+    args: Record<string, unknown>,
+  ): Promise<boolean> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, ...patch });
+    try {
+      await this.bridge.invoke(command, args);
+      this._writeError.set(null);
+      return true;
+    } catch (e) {
+      this._settings.set(previous);
+      this._writeError.set(`Cannot save ${what}: ${e}`);
+      console.warn(`poimen settings: cannot save ${what}: ${e}`);
+      return false;
+    }
+  }
+
   private apply(raw: unknown): void {
     const next = parseSettings(raw);
     for (const w of next.warnings) console.warn(`poimen settings: ${w}`);
