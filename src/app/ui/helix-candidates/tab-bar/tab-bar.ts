@@ -13,6 +13,8 @@ import {
 export interface TabBarItem {
   id: string;
   label: string;
+  /** Shown uppercase before the label, separated by a slash (e.g. the workspace). */
+  group?: string;
   /** Shown in italics, as VS Code does for a preview tab. */
   preview?: boolean;
   title?: string;

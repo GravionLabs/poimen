@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { connectionLabel, sizeLabel } from "./status-bar";
+// @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { Component } from "@angular/core";
+import { TestBed, getTestBed } from "@angular/core/testing";
+import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
+import { beforeAll, describe, expect, it } from "vitest";
+import { connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
+
+beforeAll(() => {
+  try {
+    getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
+  } catch {
+    // already initialized by the shared setup
+  }
+});
 
 describe("connectionLabel", () => {
   it("names a connected herdr", () => {
@@ -24,5 +37,78 @@ describe("sizeLabel", () => {
   });
   it("is empty until measured", () => {
     expect(sizeLabel(undefined)).toBe("");
+  });
+});
+
+describe("modeLabel", () => {
+  it("names input and plain read-only", () => {
+    expect(modeLabel("control", null)).toBe("Input");
+    expect(modeLabel("observe", null)).toBe("Read-only");
+  });
+  it("says when another controller is the reason", () => {
+    expect(modeLabel("observe", "controller held")).toBe("Read-only (controlled elsewhere)");
+  });
+  it("explains the disabled switch in the tooltip", () => {
+    expect(modeTitle("controller held")).toContain("controller held");
+    expect(modeTitle(null)).toBe("Switch between read-only and input");
+  });
+});
+
+describe("mode button", () => {
+  const render = (mode: "control" | "observe", blocked: string | null) => {
+    const emitted: boolean[] = [];
+    @Component({
+      selector: "app-host",
+      template: readFileSync("src/app/status-bar/status-bar.html", "utf8"),
+    })
+    class Host {
+      connection = () => ({ state: "connected" }) as const;
+      waiting = () => 0;
+      paneId = () => "p1";
+      mode = () => mode;
+      blocked = () => blocked;
+      size = () => undefined;
+      appVersion = () => null;
+      info = () => null;
+      jump = { emit: () => {} };
+      control = { emit: (v: boolean) => emitted.push(v) };
+      label = connectionLabel;
+      modeText = modeLabel;
+      modeHint = modeTitle;
+      sizeText = sizeLabel;
+      appLabel = () => "";
+      herdrLabel = () => "";
+      warning = () => "";
+    }
+    TestBed.resetTestingModule();
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      "button.mode-button",
+    )!;
+    return { button, emitted };
+  };
+
+  it("shows Input with a pencil and asks for read-only on click", () => {
+    const { button, emitted } = render("control", null);
+    expect(button.textContent?.trim()).toBe("Input");
+    expect(button.querySelector(".pencil")).not.toBeNull();
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(emitted).toEqual([false]);
+  });
+  it("shows Read-only with a lock and asks for input on click", () => {
+    const { button, emitted } = render("observe", null);
+    expect(button.textContent?.trim()).toBe("Read-only");
+    expect(button.querySelector(".lock")).not.toBeNull();
+    button.click();
+    expect(emitted).toEqual([true]);
+  });
+  it("is disabled with an explaining tooltip while another client controls", () => {
+    const { button, emitted } = render("observe", "controller held");
+    expect(button.disabled).toBe(true);
+    expect(button.title).toContain("controller held");
+    button.click();
+    expect(emitted).toEqual([]);
   });
 });

@@ -7,6 +7,7 @@ import {
   nextWaiting,
   waitingCount,
   type HerdrEvent,
+  type HerdrInfo,
   type Pane,
   type RepoInfo,
   type Snapshot,
@@ -36,7 +37,14 @@ export class HerdrStore {
   private readonly _watchLost = signal(false);
   private readonly _repos = signal<ReadonlyMap<string, RepoInfo>>(new Map());
 
+  private readonly _info = signal<HerdrInfo | null>(null);
+  private readonly _appVersion = signal<string | null>(null);
+
   readonly snapshot = this._snapshot.asReadonly();
+  /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
+  readonly info = this._info.asReadonly();
+  /** The version of this poimen build. */
+  readonly appVersion = this._appVersion.asReadonly();
   /** Why herdr is not reachable; `null` while connected. */
   readonly connectionError = this._connectionError.asReadonly();
   /** Branch and worktree flag per pane directory; poimen asks git, herdr does not know them. */
@@ -68,6 +76,7 @@ export class HerdrStore {
     if (this.unlisten) return;
     this.unlisten = this.bridge.listen<HerdrEvent>("herdr", (event) => this.handle(event));
     await this.unlisten;
+    void this.readAppVersion();
     await this.refresh();
   }
 
@@ -91,16 +100,37 @@ export class HerdrStore {
       const snapshot = await this.bridge.invoke<Snapshot>("snapshot");
       this._snapshot.set(snapshot);
       if (!this._watchLost()) this._connectionError.set(null);
+      if (!this._info()) await this.readInfo();
       await this.readRepos(snapshot);
     } catch (err) {
       this._watchLost.set(false);
       this._connectionError.set(String(err));
+      this._info.set(null);
     } finally {
       this.refreshing = false;
       if (this.refreshAgain) {
         this.refreshAgain = false;
         void this.refresh();
       }
+    }
+  }
+
+  private async readAppVersion(): Promise<void> {
+    try {
+      this._appVersion.set((await this.bridge.invoke<string | undefined>("app_version")) ?? null);
+    } catch {
+      // stays unknown
+    }
+  }
+
+  /** Asks herdr for its version; a failure leaves it unknown and raises no error. */
+  private async readInfo(): Promise<void> {
+    try {
+      this._info.set(
+        (await this.bridge.invoke<HerdrInfo | null | undefined>("herdr_info")) ?? null,
+      );
+    } catch {
+      this._info.set(null);
     }
   }
 
@@ -126,6 +156,7 @@ export class HerdrStore {
       case "poimen.disconnected":
         this._watchLost.set(true);
         this._connectionError.set(event.data?.reason ?? "");
+        this._info.set(null);
         return;
       case "pane.agent_status_changed":
         if (event.data?.pane_id && event.data.agent_status) {

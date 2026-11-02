@@ -11,7 +11,14 @@ export interface Settings {
   fontSize: number;
   /** Terminal colors taken from Ghostty; `null` keeps the theme colors. */
   colors: { background: string | null; foreground: string | null } | null;
+  /** Open panes for input when no other client controls them (`terminal.autoControl`). */
+  autoControl: boolean;
   warnings: string[];
+}
+
+/** The theme a click on the toolbar button selects: system, then light, then dark. */
+export function nextTheme(theme: ThemeSetting): ThemeSetting {
+  return theme === "system" ? "light" : theme === "light" ? "dark" : "system";
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -19,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fontFamily: null,
   fontSize: 13,
   colors: null,
+  autoControl: true,
   warnings: [],
 };
 
@@ -39,6 +47,7 @@ export function parseSettings(raw: unknown): Settings {
       colors && typeof colors === "object"
         ? { background: color(colors["background"]), foreground: color(colors["foreground"]) }
         : null,
+    autoControl: r["autoControl"] !== false,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
       : [],
@@ -58,6 +67,18 @@ export class SettingsStore {
       this.apply(await this.bridge.invoke("get_settings"));
     } catch {
       // keep the defaults
+    }
+  }
+
+  /** Writes the `theme` entry of config.json and applies it at once; the file watcher confirms. */
+  async setTheme(theme: ThemeSetting): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, theme });
+    try {
+      await this.bridge.invoke("set_theme", { theme });
+    } catch (e) {
+      this._settings.set(previous);
+      console.warn(`poimen settings: cannot save theme: ${e}`);
     }
   }
 

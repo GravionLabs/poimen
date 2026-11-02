@@ -1,6 +1,6 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, SettingsStore, parseSettings } from "./settings";
+import { DEFAULT_SETTINGS, SettingsStore, nextTheme, parseSettings } from "./settings";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -22,6 +22,7 @@ describe("parseSettings", () => {
         fontFamily: "Hack",
         fontSize: 15,
         colors: { background: "#000000", foreground: null },
+        autoControl: false,
         warnings: ["w"],
       }),
     ).toEqual({
@@ -29,6 +30,7 @@ describe("parseSettings", () => {
       fontFamily: "Hack",
       fontSize: 15,
       colors: { background: "#000000", foreground: null },
+      autoControl: false,
       warnings: ["w"],
     });
   });
@@ -65,5 +67,39 @@ describe("SettingsStore", () => {
     const store = create();
     await store.start();
     expect(store.settings()).toEqual(DEFAULT_SETTINGS);
+  });
+});
+
+describe("theme cycle and persistence", () => {
+  beforeEach(() => tauri.reset());
+
+  it("cycles system, light, dark, system", () => {
+    expect(nextTheme("system")).toBe("light");
+    expect(nextTheme("light")).toBe("dark");
+    expect(nextTheme("dark")).toBe("system");
+  });
+
+  it("writes the theme through set_theme and applies it at once", async () => {
+    const store = create();
+    await store.setTheme("dark");
+    expect(tauri.calls("set_theme")).toEqual([{ theme: "dark" }]);
+    expect(store.settings().theme).toBe("dark");
+  });
+
+  it("goes back when the write fails", async () => {
+    tauri.answer("set_theme", () => {
+      throw new Error("disk full");
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const store = create();
+    await store.setTheme("light");
+    expect(store.settings().theme).toBe("system");
+  });
+
+  it("follows an external edit of the file", async () => {
+    const store = create();
+    await store.start();
+    tauri.emit("settings", { ...DEFAULT_SETTINGS, theme: "light" });
+    expect(store.settings().theme).toBe("light");
   });
 });

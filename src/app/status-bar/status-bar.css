@@ -41,6 +41,11 @@
   background: #f85149;
 }
 
+.version.warn {
+  color: #d29922;
+  font-weight: 600;
+}
+
 button.item {
   font: inherit;
   color: inherit;
@@ -57,4 +62,34 @@ button.item:disabled {
 button.item.any {
   color: #d29922;
   font-weight: 600;
+}
+
+button.item.mode-button {
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 3px;
+}
+
+button.item.mode-button:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+button.item.mode-button:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}
+
+button.item.mode-button:disabled {
+  opacity: 0.5;
+}
+
+.icon {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
 }

@@ -1,9 +1,11 @@
+<app-toolbar [theme]="theme$()" (themeChange)="setTheme($event)" />
 <div class="work">
   <app-activity-bar [expanded]="!ui.sidebarCollapsed()" (selected)="ui.toggleSidebar()" />
   @if (!ui.sidebarCollapsed()) {
     <div class="side" [style.width.px]="ui.sidebarWidth()">
       <app-sidebar
         [openIds]="editor.openIds()"
+        [activeId]="editor.activeId()"
         (selected)="open($event)"
         (pinned)="open($event, true)"
       />
@@ -43,24 +45,13 @@
             <span class="mode ro" title="Read-only">RO</span>
           }
         </ng-template>
-        @if (editor.activeId(); as id) {
-          <label class="mode-switch" title="Switch between read-only and input">
-            <span>{{ tabMode(id) }}</span>
-            <input
-              hx-switch
-              type="checkbox"
-              aria-label="Input mode"
-              [checked]="activeControl()"
-              (change)="setControl(id, $any($event.target).checked)"
-            />
-          </label>
-        }
       </app-tab-bar>
       @for (p of [activePane()]; track p?.pane_id) {
         @if (p) {
           <app-terminal-view
             [pane]="p"
-            [mode]="editor.mode(p.pane_id)"
+            [wanted]="wanted(p.pane_id)"
+            (modeChange)="editor.report(p.pane_id, $event.mode, $event.blocked)"
             (sized)="termSize.set($event)"
           />
         }
@@ -69,9 +60,9 @@
       <div class="empty">
         <p>Pick a pane on the left.</p>
         <p class="hint">
-          A click previews a pane in a tab, a double click pins it. Panes open read-only; use the
-          switch in the tab bar to type into one. Closing a tab only closes the view; the herdr pane
-          keeps running.
+          A click previews a pane in a tab, a double click pins it. A pane opens for input unless
+          another client controls it; the switch in the status bar makes it read-only. Closing a tab
+          only closes the view; the herdr pane keeps running.
         </p>
       </div>
     }
@@ -81,7 +72,11 @@
   [connection]="store.connection()"
   [waiting]="store.waiting()"
   [paneId]="editor.activeId()"
-  [mode]="editor.activeId() ? tabMode(editor.activeId()!) : null"
+  [mode]="editor.activeId() ? editor.mode(editor.activeId()!) : null"
+  [blocked]="editor.activeId() ? editor.blocked(editor.activeId()!) : null"
+  (control)="setControl($event)"
   [size]="termSize()"
+  [appVersion]="store.appVersion()"
+  [info]="store.info()"
   (jump)="jumpToWaiting()"
 />

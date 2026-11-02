@@ -12,6 +12,15 @@ export interface OpenTerminal {
   takeover: boolean;
 }
 
+/** A `terminal.mouse` command; `modifiers` combines Shift = 1, Ctrl = 2, Alt = 4. */
+export interface MouseCommand {
+  action: "down" | "up" | "drag" | "move";
+  button: "left" | "middle" | "right";
+  column: number;
+  row: number;
+  modifiers: number;
+}
+
 /** Payload of the `terminal` Tauri event. */
 interface TerminalEvent {
   id: number;
@@ -51,6 +60,12 @@ export class TerminalSession {
     void this.bridge.invoke("terminal_scroll", { id: this.id, up, lines });
   }
 
+  /** One mouse event at a zero-based cell; herdr drops it unless the pane app tracks the mouse. */
+  mouse(event: MouseCommand): void {
+    if (this.closed) return;
+    void this.bridge.invoke("terminal_mouse", { id: this.id, ...event });
+  }
+
   /** Stops the stream. Safe to call twice or after the backend closed it. */
   close(): void {
     if (this.closed) return;
@@ -74,16 +89,25 @@ export class TerminalSession {
 export class TerminalStreamService {
   private readonly bridge = inject(TauriBridge);
   private readonly routes = new Map<number, (record: StreamRecord) => void>();
+  /** Streams being opened: records of ids not routed yet are held for them. */
+  private opening = 0;
+  private readonly early = new Map<number, StreamRecord[]>();
   private readonly ready: Promise<Unlisten>;
 
   constructor() {
     this.ready = this.bridge.listen<TerminalEvent>("terminal", ({ id, record }) =>
-      this.routes.get(id)?.(record),
+      this.deliver(id, record),
     );
     inject(DestroyRef).onDestroy(() => {
       this.routes.clear();
       void this.ready.then((stop) => stop());
     });
+  }
+
+  private deliver(id: number, record: StreamRecord): void {
+    const route = this.routes.get(id);
+    if (route) route(record);
+    else if (this.opening > 0) this.early.set(id, [...(this.early.get(id) ?? []), record]);
   }
 
   /** Number of streams that currently receive records. */
@@ -100,12 +124,26 @@ export class TerminalStreamService {
     onRecord: (record: StreamRecord) => void,
   ): Promise<TerminalSession> {
     await this.ready;
-    const id = await this.bridge.invoke<number>("open_terminal", { ...options });
+    this.opening++;
+    let id: number;
+    try {
+      // The backend emits as soon as the child runs, possibly before this call resolves.
+      id = await this.bridge.invoke<number>("open_terminal", { ...options });
+    } catch (err) {
+      this.opening--;
+      if (this.opening === 0) this.early.clear();
+      throw err;
+    }
+    this.opening--;
     const session = new TerminalSession(id, this.bridge, (gone) => this.routes.delete(gone));
     this.routes.set(id, (record) => {
       if (record.type === "closed") session.ended();
       onRecord(record);
     });
+    const held = this.early.get(id) ?? [];
+    this.early.delete(id);
+    if (this.opening === 0) this.early.clear();
+    for (const record of held) this.routes.get(id)?.(record);
     return session;
   }
 }

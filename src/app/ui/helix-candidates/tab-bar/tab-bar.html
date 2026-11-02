@@ -23,12 +23,15 @@
       @if (tabContent(); as tpl) {
         <ng-container [ngTemplateOutlet]="tpl" [ngTemplateOutletContext]="{ $implicit: tab }" />
       }
+      @if (tab.group) {
+        <span class="group">{{ tab.group }} /</span>
+      }
       <span class="label">{{ tab.label }}</span>
       <button
         type="button"
         class="close"
         tabindex="-1"
-        [attr.aria-label]="'Close ' + tab.label"
+        [attr.aria-label]="'Close ' + (tab.group ? tab.group + ' / ' : '') + tab.label"
         (click)="$event.stopPropagation(); closed.emit(tab.id)"
         (dblclick)="$event.stopPropagation()"
       >

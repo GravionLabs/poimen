@@ -4,7 +4,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 
 ## Architecture
 
-- `src-tauri/src/herdr.rs`: socket API client (NDJSON over the Unix socket). Requests use short-lived connections; subscriptions keep theirs.
+- `src-tauri/src/herdr.rs`: socket API client (NDJSON over the Unix socket); `SUPPORTED_PROTOCOL` (the protocol poimen is written for) lives here. Requests use short-lived connections; subscriptions keep theirs.
 - `src-tauri/src/watch.rs`: one long-lived `events.subscribe`. `pane.agent_status_changed` needs a `pane_id`, and herdr rejects the whole subscription when a referenced pane is gone, so the watcher resubscribes on pane-set changes.
 - `src-tauri/src/settings.rs`: user settings (`~/.config/poimen/config.json`, optional Ghostty config); `get_settings` command plus a polling watcher emitting `settings`. Preferences only, never UI state; frontend side is `core/settings.ts`.
 - `src-tauri/src/stream.rs`: live terminals by spawning `herdr terminal session observe|control`. Use this public CLI contract; do not reimplement herdr's internal binary client protocol.

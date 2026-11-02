@@ -5,8 +5,8 @@
 #   and commits it to main ([skip ci]), tags v<version>, creates the GitHub Release and closes the issues delivered by
 #   the release PR. Bundling and signing the macOS application are not part of this workflow yet.
 #
-# The version numbers in package.json, src-tauri/Cargo.toml and src-tauri/tauri.conf.json are placeholders; the tag
-# carries the released version.
+# The release job writes the released version into package.json, src-tauri/Cargo.toml (and Cargo.lock) and
+# src-tauri/tauri.conf.json before the changelog commit, so a build of the tag reports the released version.
 #
 # GH_PAT: classic PAT with scope `repo` of a repository admin. The `main` ruleset requires a pull request and the
 # `ci` check; admins (RepositoryRole 5) are bypass actors, so the changelog commit is pushed with GH_PAT. The
@@ -43,12 +43,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # required by GitVersion
+          token: ${{ secrets.GH_PAT }} # pushes the version commit past the main ruleset
 
       - name: Determine version
         id: version
         uses: GravionLabs/ci/versioning/determine-version@v1
         with:
           gitversion-config-file: GitVersion.yml
+
+      # The status bar shows the Tauri app version (tauri.conf.json), so the released version is written into the
+      # manifests and committed to main before gh-release adds the changelog commit and tags that HEAD.
+      - name: Set version in manifests
+        env:
+          VERSION: ${{ steps.version.outputs.semver }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version: $VERSION" >&2; exit 1; }
+          sed -i -E '0,/^version = "[^"]*"/s//version = "'"$VERSION"'"/' src-tauri/Cargo.toml
+          sed -i -E '/^name = "poimen"$/{n;s/^version = "[^"]*"/version = "'"$VERSION"'"/}' src-tauri/Cargo.lock
+          sed -i -E '0,/"version": "[^"]*"/s//"version": "'"$VERSION"'"/' package.json src-tauri/tauri.conf.json
+          git diff --quiet || {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore(release): set version $VERSION [skip ci]"
+            git push origin HEAD:main
+          }
 
       # Commits CHANGELOG.md to main, then tags that commit (create-version-tag runs inside gh-release; a tag created
       # before it would leave git-cliff's --unreleased notes empty), creates the release and closes the issues.

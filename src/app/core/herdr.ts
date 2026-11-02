@@ -98,6 +98,31 @@ export function paneLabel(pane: Pane): string {
   );
 }
 
+/**
+ * Sidebar name of a pane row. herdr's own sidebar shows an agent pane by its session title and a
+ * plain terminal by its label: the pane label, else the tab label (`herdr tab list`, e.g.
+ * "terminal"). The shell's terminal title (`user@host:~/path`) is never shown. With no label at
+ * all, the directory name stands in.
+ */
+export function rowName(pane: Pane, tabLabel?: string): string {
+  if (agentKind(pane)) return paneLabel(pane);
+  return (
+    pane.label?.trim() ||
+    tabLabel?.trim() ||
+    (paneDir(pane) ? basename(paneDir(pane)!) : "") ||
+    pane.pane_id
+  );
+}
+
+/** Tab header of a pane: workspace (shown uppercase), a slash, the pane name last; `title` is the full text. */
+export function tabHeader(
+  workspace: string | undefined,
+  name: string,
+): { group?: string; label: string; title: string } {
+  const group = workspace?.trim() || undefined;
+  return { group, label: name, title: group ? `${group.toUpperCase()} / ${name}` : name };
+}
+
 /** Panes whose agent waits for the user. */
 export function waitingCount(panes: Pane[]): number {
   return panes.filter((pane) => pane.agent_status === "blocked").length;
@@ -178,7 +203,7 @@ export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoI
         return {
           pane,
           tab: tab.label,
-          name: paneLabel(pane),
+          name: rowName(pane, tab.label),
           agent: agentKind(pane),
           branch: repo?.branch ?? undefined,
           worktree: repo?.worktree ?? false,
@@ -214,4 +239,28 @@ export function decodeBase64(text: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+/** The herdr version and protocol reported by `ping`; `supported` is the protocol poimen is written for. */
+export interface HerdrInfo {
+  version: string;
+  /** Absent when herdr reports a version but no protocol: nothing to check. */
+  protocol?: number | null;
+  supported: number;
+}
+
+/** `herdr <version>`, or `herdr ?` when herdr is unreachable or too old to report it. */
+export function herdrVersionLabel(info: HerdrInfo | null | undefined): string {
+  return info?.version ? `herdr ${info.version}` : "herdr ?";
+}
+
+/** `poimen <version>`, or `poimen ?` until the build version is known. */
+export function appVersionLabel(version: string | null | undefined): string {
+  return version ? `poimen ${version}` : "poimen ?";
+}
+
+/** The tooltip warning for a herdr protocol other than the supported one; empty when it matches or is unknown. */
+export function protocolWarning(info: HerdrInfo | null | undefined): string {
+  if (!info || info.protocol == null || info.protocol === info.supported) return "";
+  return `herdr protocol ${info.protocol}, poimen supports ${info.supported}`;
 }

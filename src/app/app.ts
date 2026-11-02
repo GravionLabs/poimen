@@ -10,16 +10,17 @@ import {
   inject,
 } from "@angular/core";
 import { Title } from "@angular/platform-browser";
-import { HxSwitch, HxTheme } from "@gravionlabs/helix-ui";
-import { paneLabel, type Pane } from "./core/herdr";
+import { HxTheme } from "@gravionlabs/helix-ui";
+import { rowName, tabHeader, type Mode, type Pane } from "./core/herdr";
 import { HerdrStore } from "./core/herdr-store";
-import { SettingsStore } from "./core/settings";
+import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TauriBridge } from "./core/tauri";
 import { ActivityBar } from "./activity-bar/activity-bar";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, isToggleSidebarKey } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 import { EditorTabs } from "./core/editor-tabs";
+import { Toolbar } from "./toolbar/toolbar";
 import { StatusBar } from "./status-bar/status-bar";
 import { TabBar, type TabBarItem } from "./ui/helix-candidates/tab-bar/tab-bar";
 
@@ -29,7 +30,7 @@ type MenuAction = "close_all" | "refresh";
 /** The window: the activity bar, the sidebar and the editor group (tab bar over the live terminal). */
 @Component({
   selector: "app-root",
-  imports: [ActivityBar, Sidebar, TerminalView, TabBar, HxSwitch, StatusBar],
+  imports: [ActivityBar, Sidebar, TerminalView, TabBar, StatusBar, Toolbar],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -50,11 +51,18 @@ export class App {
   protected readonly tabItems = computed<TabBarItem[]>(() =>
     this.editor.tabs().map((tab) => {
       const pane = this.pane(tab.paneId);
+      const snap = this.store.snapshot();
+      const tabLabel = pane ? snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label : undefined;
+      const workspace = pane
+        ? snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label
+        : undefined;
+      const header = tabHeader(workspace, pane ? rowName(pane, tabLabel) : tab.paneId);
       return {
         id: tab.paneId,
-        label: pane ? paneLabel(pane) : tab.paneId,
+        label: header.label,
+        group: header.group,
         preview: !tab.pinned,
-        title: `${tab.paneId}${tab.pinned ? "" : " (preview)"}`,
+        title: `${header.title}${tab.pinned ? "" : " (preview)"}`,
       };
     }),
   );
@@ -63,11 +71,6 @@ export class App {
     const id = this.editor.activeId();
     return id ? this.pane(id) : undefined;
   });
-  protected readonly activeControl = computed(() => {
-    const id = this.editor.activeId();
-    return !!id && this.editor.mode(id) === "control";
-  });
-
   /** Size of the active terminal; undefined until it is measured. */
   protected readonly termSize = signal<{ cols: number; rows: number } | undefined>(undefined);
 
@@ -95,6 +98,12 @@ export class App {
     });
     void this.prefs.start();
     void this.store.start();
+  }
+
+  protected readonly theme$ = computed(() => this.prefs.settings().theme);
+
+  protected setTheme(theme: ThemeSetting): void {
+    void this.prefs.setTheme(theme);
   }
 
   /** `Cmd+B` / `Ctrl+B` toggles the sidebar. */
@@ -140,12 +149,15 @@ export class App {
     return this.pane(id);
   }
 
-  protected setControl(paneId: string, on: boolean): void {
-    this.editor.setMode(paneId, on ? "control" : "observe");
+  /** The mode a tab asks for; the terminal view falls back to read-only when it is not free. */
+  protected wanted(paneId: string): Mode {
+    return this.editor.wanted(paneId, this.prefs.settings().autoControl);
   }
 
-  protected tabMode(id: string): string {
-    return this.editor.mode(id) === "control" ? "Input" : "Read-only";
+  /** The status bar switch for the active tab. */
+  protected setControl(on: boolean): void {
+    const id = this.editor.activeId();
+    if (id) this.editor.choose(id, on ? "control" : "observe");
   }
 
   /** Opens the next blocked pane after the active one. */

@@ -23,12 +23,13 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
 ```
 
 - **herdr stays the backend.** Closing poimen, or closing a tab, only closes the view; the pane and its agent keep running. The herdr TUI keeps working next to poimen.
-- **Read-only by default.** A pane opens as an observer (any number allowed). The switch in the tab bar (the tab shows `RO` or `IN`) makes you the terminal's controller (one per terminal). If another controller holds it, the view offers *Take over*.
+- **Input by default.** A pane opens for input: poimen first tries `herdr terminal session control` without `--takeover` and, as the only controller, sets the terminal size itself so the output width follows the window. If another client already holds the controller (for example the herdr terminal UI), the tab falls back to an observer (read-only) and says why, with an explicit *Take over* button (never automatic). The flat mode button in the status bar (text `Input` or `Read-only` with a pencil or lock icon; the tab shows `RO` or `IN`) toggles between input and forced read-only per tab while it is open; it is dimmed and disabled while another client controls the terminal. If another client takes the controller later, the tab goes read-only with a banner and going back to input stays your action. `terminal.autoControl: false` opens all tabs read-only again.
 - **Editor tabs.** Opening a pane adds a tab to one tab bar above the terminal: a click opens a preview tab (italic, replaced by the next preview), a double click pins it, a second click on an open pane activates its tab. Tabs close with the x or a middle click and reorder by drag. Only the active tab keeps a stream open; hidden tabs close theirs, the pane keeps running.
 - **Angular frontend.** The UI is Angular 22 with helix-ui (light and dark follow the system); `src/app/core` is the bridge to the Tauri commands and events, `src-tauri` stays a thin shell ([ADR 0001](docs/adr/0001-frontend-stack.md)).
 - **Spaces tree.** The sidebar is a helix `hx-tree` of workspaces and their panes (the herdr tab is secondary text). A badge tells agents (by kind, e.g. `cl` for claude) from plain terminals (`>_`); each row shows the status dot, git branch (`wt` for a linked worktree), directory (`foreground_cwd`) and the status message, state label or integration tokens when present. The filter field matches name, agent, branch, tab, directory and text; arrow keys, Home/End and type-ahead navigate, Enter opens. Branch and worktree come from a read-only `git rev-parse` in the pane directory (herdr's pane list has none).
 - **Layout.** An activity bar (Spaces) sits left of a sidebar you resize by dragging its edge (arrow keys work too) and toggle with `Cmd+B` (`Ctrl+B` elsewhere). Width and collapsed state persist in poimen's own UI state (webview local storage, not the user settings file); the layout works from 720 px window width.
-- **Status bar.** The bottom bar shows the herdr connection (connected, reconnecting when the event watcher lost herdr, unreachable when a snapshot read failed, each with the reason), the count of waiting (blocked) agents (a click opens the next one) and the active tab: pane id, mode (read-only or input) and terminal size.
+- **Toolbar.** A thin bar at the top has a flat theme button on the right (icon and text: auto, sun or moon for `system`, `light`, `dark`). A click cycles system → light → dark; the tooltip and accessible name read like `Theme: system (click for light)`. The choice is written to the `theme` entry of `config.json` (other keys and comments stay) and applies at once; `system` follows the OS appearance live, and an external edit of the file updates the button.
+- **Status bar.** The bottom bar shows the herdr connection (connected, reconnecting when the event watcher lost herdr, unreachable when a snapshot read failed, each with the reason), the count of waiting (blocked) agents (a click opens the next one) and the active tab: pane id, the mode button (input, or read-only with the reason when another client controls the pane) and terminal size.
 - **Events are invalidation signals.** Every herdr event triggers a debounced re-read of the workspace, tab and pane lists, as the herdr socket API docs recommend. `pane.agent_status_changed` is applied right away.
 
 ## Requirements
@@ -87,12 +88,13 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 ```json
 {
   "theme": "system",
-  "terminal": { "fontFamily": "JetBrains Mono", "fontSize": 13, "ghostty": false }
+  "terminal": { "fontFamily": "JetBrains Mono", "fontSize": 13, "ghostty": false, "autoControl": true }
 }
 ```
 
-- `theme`: `light`, `dark` or `system` (default).
+- `theme`: `light`, `dark` or `system` (default). The toolbar button writes this entry; poimen writes no other setting.
 - `terminal.fontFamily` / `terminal.fontSize` (6 to 72, default 13).
+- `terminal.autoControl`: `true` (default) opens panes for input when no other client controls them; `false` opens every tab read-only.
 - `terminal.ghostty`: `true` takes font family, size and background/foreground from `~/.config/ghostty/config`; explicit entries above win.
 
 ## Releases
@@ -103,7 +105,8 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 - The version comes from Conventional Commits (`versioning/determine-version` of GravionLabs/ci, `GitVersion.yml`): `fix:`/`perf:`/`revert:` → patch, `feat:` → minor, `type!:` or `BREAKING CHANGE:` → major. A release with only fixes is a patch, one with a `feat:` a minor.
 - While the version is 0.x, use **no** `!` and no `BREAKING CHANGE:` until 1.0 is intended: either one jumps the version to 1.0.0.
 - On the push to `main`, `.github/workflows/release.yml` runs the CI checks, determines the version, commits `CHANGELOG.md` (git-cliff, `cliff.toml`) to `main`, tags `v<version>`, creates the GitHub Release and closes the issues the release delivered. The changelog commit is pushed with the `GH_PAT` secret (a repository admin, bypass actor of the `main` ruleset).
-- The versions in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` are placeholders; the tag carries the released version.
+- `release.yml` writes the released version into `package.json`, `src-tauri/Cargo.toml`, `Cargo.lock` and `src-tauri/tauri.conf.json` and commits it (`chore(release): set version <v> [skip ci]`) before the changelog commit, so the tag points at manifests carrying the released version. Between releases they hold the previous release's version.
+- The status bar shows `poimen <version>` (the Tauri app version from `tauri.conf.json`) and `herdr <version>` (socket `ping`; `herdr ?` when unreachable or too old; warning colour and tooltip when the protocol differs from the supported 22). The `tauri.conf.json` version, set by `release.yml`, is the source of truth; `herdr <version>` is shown without a protocol check when herdr reports no protocol. Local builds show the last released version.
 - Tags are `v<major>.<minor>.<patch>`, as in the other GravionLabs repositories; milestones carry the same names.
 - The rulesets `main` and `release` are created by `scripts/setup-rulesets.sh`.
 

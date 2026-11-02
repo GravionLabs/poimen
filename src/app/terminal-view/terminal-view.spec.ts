@@ -4,11 +4,19 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Pane } from "../core/herdr";
+import type { Pane, StreamRecord } from "../core/herdr";
 import { SettingsStore, DEFAULT_SETTINGS, type Settings } from "../core/settings";
+import { TauriBridge } from "../core/tauri";
 import { TerminalStreamService } from "../core/terminal-stream";
 
-const fake = vi.hoisted(() => ({ cols: 80, rows: 24, nextCols: 80 }));
+const fake = vi.hoisted(() => ({
+  cols: 80,
+  rows: 24,
+  nextCols: 80,
+  observers: [] as (() => void)[],
+  addons: [] as unknown[],
+  openUrl: undefined as unknown,
+}));
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
@@ -19,7 +27,9 @@ vi.mock("@xterm/xterm", () => ({
     get rows() {
       return fake.rows;
     }
-    loadAddon() {}
+    loadAddon(addon: unknown) {
+      fake.addons.push(addon);
+    }
     open() {}
     onData() {}
     attachCustomWheelEventHandler() {}
@@ -35,9 +45,14 @@ vi.mock("@xterm/addon-fit", () => ({
     }
   },
 }));
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: class {
+    constructor(public handler: (event: MouseEvent, uri: string) => void) {}
+  },
+}));
 vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class {} }));
 
-import { TerminalView } from "./terminal-view";
+import { TerminalView, isControllerHeld } from "./terminal-view";
 
 const pane: Pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "idle" };
 
@@ -46,6 +61,9 @@ beforeAll(() => {
     errorOnUnknownElements: false,
   });
   globalThis.ResizeObserver = class {
+    constructor(callback: () => void) {
+      fake.observers.push(callback);
+    }
     observe() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
@@ -53,16 +71,31 @@ beforeAll(() => {
 
 afterEach(() => TestBed.resetTestingModule());
 
-async function setup(mode: "control" | "observe") {
+async function setup(wanted: "control" | "observe") {
   fake.cols = 80;
   fake.nextCols = 80;
+  fake.observers = [];
+  fake.addons = [];
+  const openUrl = vi.fn(async () => undefined);
   const settings = signal<Settings>(DEFAULT_SETTINGS);
-  const session = { open: true, resize: vi.fn(), close: vi.fn(), input: vi.fn(), scroll: vi.fn() };
-  const open = vi.fn<(opts: unknown) => Promise<typeof session>>(async () => session);
+  const session = {
+    open: true,
+    resize: vi.fn(),
+    close: vi.fn(),
+    input: vi.fn(),
+    scroll: vi.fn(),
+    mouse: vi.fn(),
+  };
+  const records: ((record: StreamRecord) => void)[] = [];
+  const open = vi.fn(async (_opts: unknown, onRecord: (record: StreamRecord) => void) => {
+    records.push(onRecord);
+    return { ...session };
+  });
   TestBed.configureTestingModule({
     providers: [
       { provide: SettingsStore, useValue: { settings } },
       { provide: TerminalStreamService, useValue: { open } },
+      { provide: TauriBridge, useValue: { openUrl } },
     ],
   });
   TestBed.overrideComponent(TerminalView, {
@@ -80,14 +113,21 @@ async function setup(mode: "control" | "observe") {
   Object.assign(fixture.componentInstance, {
     body: () => ({ nativeElement: body }),
     pane: signal(pane),
-    mode: signal(mode),
+    wanted: signal(wanted),
   });
+  const modes: { mode: string; blocked: string | null }[] = [];
+  fixture.componentInstance.modeChange.subscribe((m) => modes.push(m));
   const sized: { cols: number; rows: number }[] = [];
   fixture.componentInstance.sized.subscribe((s) => sized.push(s));
   fixture.detectChanges();
   await fixture.whenStable();
   await new Promise((resolve) => setTimeout(resolve)); // the stream open resolves
-  return { fixture, settings, session, open, sized };
+  /** Delivers a record to the n-th opened stream, as the backend event would. */
+  const send = async (n: number, record: StreamRecord) => {
+    records[n](record);
+    await new Promise((resolve) => setTimeout(resolve));
+  };
+  return { fixture, settings, session, open, sized, modes, send, body, openUrl };
 }
 
 describe("TerminalView font change", () => {
@@ -117,5 +157,307 @@ describe("TerminalView font change", () => {
     fixture.detectChanges();
     expect(sized).toHaveLength(1);
     expect(session.resize).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalView input mode decision", () => {
+  const closed = (reason: string): StreamRecord => ({ type: "closed", reason });
+  const frame: StreamRecord = {
+    type: "frame",
+    seq: 1,
+    full: true,
+    width: 80,
+    height: 24,
+    bytes: "",
+  };
+  const modeOf = (call: unknown) => call as { mode: string; takeover: boolean };
+
+  it("opens in input mode without a takeover when control succeeds", async () => {
+    const { open, modes, fixture, send } = await setup("control");
+    await send(0, frame);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(modeOf(open.mock.calls[0][0])).toMatchObject({ mode: "control", takeover: false });
+    expect(modes.at(-1)).toEqual({ mode: "control", blocked: null });
+    expect(fixture.componentInstance.blocked()).toBeNull();
+  });
+
+  it("falls back to read-only with the reason when another client holds the controller", async () => {
+    const { open, modes, send, fixture } = await setup("control");
+    await send(0, closed("terminal is controlled by another client"));
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(modeOf(open.mock.calls[1][0])).toMatchObject({ mode: "observe", takeover: false });
+    expect(modes.at(-1)).toEqual({
+      mode: "observe",
+      blocked: "terminal is controlled by another client",
+    });
+    expect(fixture.componentInstance.banner()).toBeNull();
+  });
+
+  it("never takes over by itself, only on the explicit action", async () => {
+    const { open, send, fixture } = await setup("control");
+    await send(0, closed("held"));
+    expect(open.mock.calls.every((c) => !modeOf(c[0]).takeover)).toBe(true);
+    fixture.componentInstance.reconnect(true);
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(modeOf(open.mock.calls.at(-1)![0])).toMatchObject({ mode: "control", takeover: true });
+    expect(fixture.componentInstance.blocked()).toBeNull();
+  });
+
+  it("opens read-only without trying control when input is not wanted (setting off)", async () => {
+    const { open, modes } = await setup("observe");
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(modeOf(open.mock.calls[0][0]).mode).toBe("observe");
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
+  });
+
+  it("goes read-only with the banner when another client takes the controller", async () => {
+    const { open, modes, send, fixture } = await setup("control");
+    await send(0, frame);
+    await send(0, closed("controller taken over"));
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: "controller taken over" });
+    expect(fixture.componentInstance.banner()).toBe("controller taken over");
+    expect(modeOf(open.mock.calls.at(-1)![0]).mode).toBe("observe");
+  });
+
+  it("does not retry control when a read-only fallback tab is resized", async () => {
+    const { open, send, fixture, settings } = await setup("control");
+    await send(0, closed("terminal 6 already has an attached client; retry with --takeover"));
+    fake.nextCols = 100;
+    settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(open).toHaveBeenCalledTimes(3);
+    expect(open.mock.calls.slice(1).every((c) => modeOf(c[0]).mode === "observe")).toBe(true);
+    expect(fixture.componentInstance.mode()).toBe("observe");
+  });
+
+  it("keeps the blocked state, banner and take over when a held tab is resized", async () => {
+    const held = "terminal 6 already has an attached client; retry with --takeover";
+    const { send, fixture, settings, modes } = await setup("control");
+    await send(0, closed(held));
+    fake.nextCols = 100;
+    settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(fixture.componentInstance.blocked()).toBe(held);
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: held });
+    expect(fixture.nativeElement.textContent).toContain("Take over");
+  });
+
+  it("presents a lost stream with a non-takeover reason as an error, not as held", async () => {
+    const { modes, send, fixture } = await setup("control");
+    await send(0, frame);
+    await send(0, closed("pane w1:p1 not found"));
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
+    expect(fixture.componentInstance.banner()).toBe("pane w1:p1 not found");
+  });
+
+  it("closes a stale open that a newer restart superseded", async () => {
+    const { fixture, open } = await setup("control");
+    const sessions: { close: ReturnType<typeof vi.fn> }[] = [];
+    let release!: () => void;
+    open.mockImplementationOnce(async () => {
+      await new Promise<void>((r) => (release = r));
+      const s = {
+        open: true,
+        close: vi.fn(),
+        resize: vi.fn(),
+        input: vi.fn(),
+        scroll: vi.fn(),
+        mouse: vi.fn(),
+      };
+      sessions.push(s);
+      return s;
+    });
+    fixture.componentInstance.reconnect(false); // slow open
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.componentInstance.reconnect(false); // newer one wins
+    await new Promise((resolve) => setTimeout(resolve));
+    release();
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(sessions[0].close).toHaveBeenCalled();
+  });
+
+  it("shows an error, not a held controller, when the pane is gone before the first frame", async () => {
+    const { modes, send, fixture } = await setup("control");
+    await send(0, closed("pane w1:p1 not found"));
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
+    expect(fixture.componentInstance.banner()).toBe("pane w1:p1 not found");
+  });
+
+  it("reports read-only until the first frame, then input", async () => {
+    const { modes, send } = await setup("control");
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
+    await send(0, frame);
+    expect(modes.at(-1)).toEqual({ mode: "control", blocked: null });
+  });
+
+  it("does not fall back when the stream was detached on purpose", async () => {
+    const { open, send } = await setup("control");
+    await send(0, closed("detached"));
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("isControllerHeld", () => {
+  it("matches herdr's held message and not other failures", () => {
+    expect(
+      isControllerHeld("terminal 6 already has an attached client; retry with --takeover"),
+    ).toBe(true);
+    expect(isControllerHeld("pane w1:p1 not found")).toBe(false);
+    expect(isControllerHeld("failed to spawn herdr: No such file")).toBe(false);
+  });
+});
+
+describe("TerminalView fit on layout change (#80)", () => {
+  it("refits after the body resized (sidebar toggle) once the layout settled", async () => {
+    const { sized } = await setup("control");
+    vi.useFakeTimers();
+    try {
+      fake.nextCols = 90;
+      for (const notify of fake.observers) {
+        notify();
+        notify(); // a burst while the layout moves is debounced into one fit
+      }
+      expect(sized).toHaveLength(1);
+      vi.advanceTimersByTime(200);
+      expect(sized).toEqual([
+        { cols: 80, rows: 24 },
+        { cols: 90, rows: 24 },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the padding off the element xterm fits into", () => {
+    // FitAddon reads that element's computed width, which includes padding under border-box, so
+    // padding there made the terminal wider than its content (clipped glyph).
+    const css = readFileSync("src/app/terminal-view/terminal-view.css", "utf8");
+    const rule = /\.view-body\s*\{([^}]*)\}/.exec(css)![1];
+    expect(rule).not.toMatch(/padding[^:]*:\s*[1-9]/);
+    const html = readFileSync("src/app/terminal-view/terminal-view.html", "utf8");
+    expect(html).toContain('<div class="view-pad"><div #body class="view-body">');
+  });
+});
+
+describe("TerminalView mouse input", () => {
+  const frame: StreamRecord = {
+    type: "frame",
+    seq: 1,
+    full: true,
+    width: 80,
+    height: 24,
+    bytes: "",
+  };
+  /** 800x480 px body: 80x24 cells of 10x20 px. */
+  const rect = () => ({ left: 0, top: 0, width: 800, height: 480 }) as DOMRect;
+  const mouse = (type: string, x: number, y: number, init: MouseEventInit = {}) =>
+    new MouseEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true, ...init });
+
+  async function controlling() {
+    const ctx = await setup("control");
+    ctx.body.getBoundingClientRect = rect;
+    await ctx.send(0, frame); // the first frame confirms control
+    return ctx;
+  }
+
+  it("forwards a click as down and up at the cell under the pointer", async () => {
+    const { session, body } = await controlling();
+    body.dispatchEvent(mouse("mousedown", 125, 45));
+    window.dispatchEvent(mouse("mouseup", 125, 45));
+    expect(session.mouse.mock.calls.map(([e]) => e)).toEqual([
+      { action: "down", button: "left", column: 12, row: 2, modifiers: 0 },
+      { action: "up", button: "left", column: 12, row: 2, modifiers: 0 },
+    ]);
+  });
+
+  it("forwards a drag to a new cell once, with the pressed button and modifiers", async () => {
+    const { session, body } = await controlling();
+    body.dispatchEvent(mouse("mousedown", 5, 5, { button: 2, ctrlKey: true }));
+    window.dispatchEvent(mouse("mousemove", 35, 5, { button: 2, ctrlKey: true }));
+    window.dispatchEvent(mouse("mousemove", 36, 6, { button: 2, ctrlKey: true })); // same cell
+    window.dispatchEvent(mouse("mouseup", 35, 5, { button: 2, ctrlKey: true }));
+    expect(session.mouse.mock.calls.map(([e]) => e.action)).toEqual(["down", "drag", "up"]);
+    expect(session.mouse.mock.calls[1][0]).toEqual({
+      action: "drag",
+      button: "right",
+      column: 3,
+      row: 0,
+      modifiers: 2,
+    });
+  });
+
+  it("leaves selection and the context menu to the browser while Shift is held", async () => {
+    const { session, body } = await controlling();
+    const down = mouse("mousedown", 5, 5, { shiftKey: true });
+    body.dispatchEvent(down);
+    window.dispatchEvent(mouse("mousemove", 50, 50, { shiftKey: true }));
+    window.dispatchEvent(mouse("mouseup", 50, 50, { shiftKey: true }));
+    const menu = mouse("contextmenu", 5, 5, { shiftKey: true });
+    body.dispatchEvent(menu);
+    expect(session.mouse).not.toHaveBeenCalled();
+    expect(down.defaultPrevented).toBe(false);
+    expect(menu.defaultPrevented).toBe(false);
+    const plain = mouse("contextmenu", 5, 5);
+    body.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+  });
+
+  it("releases a held button when the tab is destroyed mid-drag and drops the listeners", async () => {
+    const { session, body, fixture } = await controlling();
+    body.dispatchEvent(mouse("mousedown", 125, 45));
+    fixture.destroy();
+    expect(session.mouse.mock.calls.map(([e]) => e.action)).toEqual(["down", "up"]);
+    expect(session.mouse.mock.calls[1][0]).toMatchObject({ column: 12, row: 2 });
+    body.dispatchEvent(mouse("mousedown", 5, 5));
+    window.dispatchEvent(mouse("mouseup", 5, 5));
+    expect(session.mouse).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends nothing from a read-only tab and leaves selection alone", async () => {
+    const { session, body, send } = await setup("observe");
+    body.getBoundingClientRect = rect;
+    await send(0, frame);
+    const down = mouse("mousedown", 5, 5);
+    body.dispatchEvent(down);
+    body.dispatchEvent(mouse("mousemove", 50, 50));
+    window.dispatchEvent(mouse("mouseup", 50, 50));
+    expect(session.mouse).not.toHaveBeenCalled();
+    expect(down.defaultPrevented).toBe(false);
+  });
+
+  it("sends nothing while another client holds the controller", async () => {
+    const { session, body, send } = await setup("control");
+    body.getBoundingClientRect = rect;
+    await send(0, { type: "closed", reason: "terminal already has an attached client" });
+    body.dispatchEvent(mouse("mousedown", 5, 5));
+    expect(session.mouse).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalView links", () => {
+  it("opens an http(s) link through the opener and nothing else", async () => {
+    const { openUrl } = await setup("control");
+    const addon = fake.addons.find((a) => a && typeof a === "object" && "handler" in a) as {
+      handler: (event: MouseEvent, uri: string) => void;
+    };
+    addon.handler(new MouseEvent("click"), "https://github.com/GravionLabs/poimen/pull/69");
+    addon.handler(new MouseEvent("click"), "javascript:alert(1)");
+    expect(openUrl.mock.calls).toEqual([["https://github.com/GravionLabs/poimen/pull/69"]]);
+  });
+
+  it("lets a Cmd mousedown reach xterm in input mode, but captures a plain one", async () => {
+    const { session, body } = await setup("control");
+    await new Promise((resolve) => setTimeout(resolve));
+    const reached = vi.fn();
+    body.addEventListener("mousedown", reached);
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+    expect(reached).toHaveBeenCalledTimes(1);
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(reached).toHaveBeenCalledTimes(1);
+    expect(session.mouse).toHaveBeenCalledTimes(1); // only the plain press
   });
 });

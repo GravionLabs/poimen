@@ -33,6 +33,21 @@ async fn snapshot(client: State<'_, Client>) -> Result<Value, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Version and protocol of the running herdr; `None` when unreachable or too old.
+#[tauri::command]
+async fn herdr_info(client: State<'_, Client>) -> Result<Option<herdr::ServerInfo>, String> {
+    let client = client.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || client.info())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The running poimen build's version (Tauri app version).
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
@@ -41,6 +56,13 @@ fn home_dir() -> Option<PathBuf> {
 #[tauri::command]
 fn get_settings() -> settings::Settings {
     home_dir().map(|h| settings::load(&h)).unwrap_or_default()
+}
+
+/// Writes only the `theme` setting (the toolbar button); the settings watcher emits the change.
+#[tauri::command]
+fn set_theme(theme: String) -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::save_theme(&home, &theme)
 }
 
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
@@ -104,6 +126,23 @@ fn terminal_scroll(
 }
 
 #[tauri::command]
+fn terminal_mouse(
+    sessions: State<'_, Sessions>,
+    id: u32,
+    action: String,
+    button: String,
+    column: u16,
+    row: u16,
+    modifiers: u8,
+) -> Result<(), String> {
+    stream::validate_mouse(&action, &button)?;
+    sessions.send(
+        id,
+        &stream::mouse_command(&action, &button, column, row, modifiers),
+    )
+}
+
+#[tauri::command]
 fn close_terminal(sessions: State<'_, Sessions>, id: u32) {
     sessions.close(id);
 }
@@ -163,12 +202,16 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
+            herdr_info,
+            app_version,
             get_settings,
+            set_theme,
             repo_info,
             open_terminal,
             terminal_input,
             terminal_resize,
             terminal_scroll,
+            terminal_mouse,
             close_terminal
         ])
         .build(tauri::generate_context!())
