@@ -1,6 +1,7 @@
 import { Injectable, inject } from "@angular/core";
 import { HxTheme } from "@gravionlabs/helix-ui";
-import { appearance, bundled, deriveTokens, resolveScheme, type ColorScheme } from "./color-scheme";
+import { appearance, deriveTokens, resolveScheme, type ColorScheme } from "./color-scheme";
+import { UserSchemes } from "./user-schemes";
 
 /**
  * Puts a scheme's derived tokens on `<html>` and sets helix' light/dark class from its background.
@@ -10,6 +11,7 @@ import { appearance, bundled, deriveTokens, resolveScheme, type ColorScheme } fr
 @Injectable({ providedIn: "root" })
 export class ColorSchemeService {
   private readonly theme = inject(HxTheme);
+  private readonly user = inject(UserSchemes);
   private applied: string[] = [];
   private lastName: string | null | undefined;
 
@@ -20,7 +22,7 @@ export class ColorSchemeService {
   sync(name: string | null): boolean {
     const changed = name !== this.lastName;
     this.lastName = name;
-    const scheme = resolveScheme(name, bundled, changed ? undefined : () => undefined);
+    const scheme = resolveScheme(name, this.user.registry(), changed ? undefined : () => undefined);
     if (!scheme) {
       this.clear();
       return false;

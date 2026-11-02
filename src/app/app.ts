@@ -16,6 +16,7 @@ import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
+import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
@@ -68,6 +69,7 @@ export class App {
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
+  private readonly userSchemes = inject(UserSchemes);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
   private readonly paneActions = inject(PaneActions);
@@ -139,6 +141,7 @@ export class App {
     });
     destroyRef.onDestroy(this.followSystemTheme());
     void this.prefs.start();
+    void this.userSchemes.start();
     void this.store.start().then(() => this.dropMissing());
   }
 
@@ -166,7 +169,9 @@ export class App {
   protected readonly theme$ = computed(() => this.prefs.settings().theme);
 
   /** The scheme that fixes light or dark, so the theme button cannot act; `null` when it can. */
-  protected readonly fixedBy = computed(() => fixedSchemeName(this.prefs.settings().colorSchema));
+  protected readonly fixedBy = computed(() =>
+    fixedSchemeName(this.prefs.settings().colorSchema, this.userSchemes.registry()),
+  );
 
   protected setTheme(theme: ThemeSetting): void {
     void this.prefs.setTheme(theme);

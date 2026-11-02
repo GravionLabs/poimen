@@ -3,6 +3,7 @@ mod herdr;
 mod layout;
 #[cfg(test)]
 mod live;
+mod schemes;
 mod settings;
 mod spaces;
 mod stream;
@@ -240,6 +241,12 @@ fn home_dir() -> Option<PathBuf> {
 #[tauri::command]
 fn get_settings() -> settings::Settings {
     home_dir().map(|h| settings::load(&h)).unwrap_or_default()
+}
+
+/// The user color schemes (`~/.config/poimen/themes/*.toml`); changes arrive as `color-schemes` events.
+#[tauri::command]
+fn get_color_schemes() -> schemes::Schemes {
+    home_dir().map(|h| schemes::load(&h)).unwrap_or_default()
 }
 
 /// Writes only the `theme` setting (the toolbar button); the settings watcher emits the change.
@@ -487,6 +494,14 @@ pub fn run() {
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
                 std::thread::spawn(move || {
+                    schemes::watch(&home, std::time::Duration::from_secs(1), |s| {
+                        let _ = handle.emit("color-schemes", s);
+                    });
+                });
+            }
+            if let Some(home) = home_dir() {
+                let handle = handle.clone();
+                std::thread::spawn(move || {
                     settings::watch(&home, std::time::Duration::from_secs(1), |s| {
                         let _ = handle.emit("settings", s);
                         // Menu items carry the accelerators; rebuild them on the main thread.
@@ -520,6 +535,7 @@ pub fn run() {
             list_child_dirs,
             app_version,
             get_settings,
+            get_color_schemes,
             set_theme,
             repo_info,
             open_terminal,

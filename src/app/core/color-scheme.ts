@@ -62,6 +62,16 @@ const list: ColorScheme[] = [
 /** The bundled schemes by name; user schemes are merged over it (same name wins). */
 export const bundled: ReadonlyMap<string, ColorScheme> = new Map(list.map((s) => [s.name, s]));
 
+/** The bundled schemes with the user's on top: a user scheme with a bundled name replaces it. */
+export function mergeSchemes(
+  user: readonly ColorScheme[],
+  base: ReadonlyMap<string, ColorScheme> = bundled,
+): ReadonlyMap<string, ColorScheme> {
+  const merged = new Map(base);
+  for (const scheme of user) merged.set(scheme.name, scheme);
+  return merged;
+}
+
 /**
  * The scheme a `colorSchema` name selects. `null` means the default look: `null`, `poimen`, or an
  * unknown name (which also warns), so the CSS tokens of `styles.css` stay in charge.
@@ -96,9 +106,12 @@ export function pickSchemeName(
  * The scheme name that fixes light or dark (a single known scheme other than `poimen`), or `null`
  * when `theme` still decides (a pair, no scheme, `poimen`, or an unknown name that falls back).
  */
-export function fixedSchemeName(schema: ColorSchemeSetting | null): string | null {
+export function fixedSchemeName(
+  schema: ColorSchemeSetting | null,
+  registry: ReadonlyMap<string, ColorScheme> = bundled,
+): string | null {
   if (typeof schema !== "string") return null;
-  return resolveScheme(schema, bundled, () => undefined) ? schema : null;
+  return resolveScheme(schema, registry, () => undefined) ? schema : null;
 }
 
 // --- color math ------------------------------------------------------------------------------
