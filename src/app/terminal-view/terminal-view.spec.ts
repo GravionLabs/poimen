@@ -6,6 +6,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Pane, StreamRecord } from "../core/herdr";
 import { SettingsStore, DEFAULT_SETTINGS, type Settings } from "../core/settings";
+import { TauriBridge } from "../core/tauri";
 import { TerminalStreamService } from "../core/terminal-stream";
 
 const fake = vi.hoisted(() => ({
@@ -13,6 +14,8 @@ const fake = vi.hoisted(() => ({
   rows: 24,
   nextCols: 80,
   observers: [] as (() => void)[],
+  addons: [] as unknown[],
+  openUrl: undefined as unknown,
 }));
 
 vi.mock("@xterm/xterm", () => ({
@@ -24,7 +27,9 @@ vi.mock("@xterm/xterm", () => ({
     get rows() {
       return fake.rows;
     }
-    loadAddon() {}
+    loadAddon(addon: unknown) {
+      fake.addons.push(addon);
+    }
     open() {}
     onData() {}
     attachCustomWheelEventHandler() {}
@@ -38,6 +43,11 @@ vi.mock("@xterm/addon-fit", () => ({
     fit() {
       fake.cols = fake.nextCols;
     }
+  },
+}));
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: class {
+    constructor(public handler: (event: MouseEvent, uri: string) => void) {}
   },
 }));
 vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class {} }));
@@ -65,6 +75,8 @@ async function setup(wanted: "control" | "observe") {
   fake.cols = 80;
   fake.nextCols = 80;
   fake.observers = [];
+  fake.addons = [];
+  const openUrl = vi.fn(async () => undefined);
   const settings = signal<Settings>(DEFAULT_SETTINGS);
   const session = {
     open: true,
@@ -83,6 +95,7 @@ async function setup(wanted: "control" | "observe") {
     providers: [
       { provide: SettingsStore, useValue: { settings } },
       { provide: TerminalStreamService, useValue: { open } },
+      { provide: TauriBridge, useValue: { openUrl } },
     ],
   });
   TestBed.overrideComponent(TerminalView, {
@@ -114,7 +127,7 @@ async function setup(wanted: "control" | "observe") {
     records[n](record);
     await new Promise((resolve) => setTimeout(resolve));
   };
-  return { fixture, settings, session, open, sized, modes, send, body };
+  return { fixture, settings, session, open, sized, modes, send, body, openUrl };
 }
 
 describe("TerminalView font change", () => {
@@ -422,5 +435,29 @@ describe("TerminalView mouse input", () => {
     await send(0, { type: "closed", reason: "terminal already has an attached client" });
     body.dispatchEvent(mouse("mousedown", 5, 5));
     expect(session.mouse).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalView links", () => {
+  it("opens an http(s) link through the opener and nothing else", async () => {
+    const { openUrl } = await setup("control");
+    const addon = fake.addons.find((a) => a && typeof a === "object" && "handler" in a) as {
+      handler: (event: MouseEvent, uri: string) => void;
+    };
+    addon.handler(new MouseEvent("click"), "https://github.com/GravionLabs/poimen/pull/69");
+    addon.handler(new MouseEvent("click"), "javascript:alert(1)");
+    expect(openUrl.mock.calls).toEqual([["https://github.com/GravionLabs/poimen/pull/69"]]);
+  });
+
+  it("lets a Cmd mousedown reach xterm in input mode, but captures a plain one", async () => {
+    const { session, body } = await setup("control");
+    await new Promise((resolve) => setTimeout(resolve));
+    const reached = vi.fn();
+    body.addEventListener("mousedown", reached);
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+    expect(reached).toHaveBeenCalledTimes(1);
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(reached).toHaveBeenCalledTimes(1);
+    expect(session.mouse).toHaveBeenCalledTimes(1); // only the plain press
   });
 });
