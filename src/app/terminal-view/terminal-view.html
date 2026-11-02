@@ -1,3 +1,20 @@
+@if (blocked(); as why) {
+  @if (!banner()) {
+    <div class="view-banner" role="status">
+      <span>Read-only: another client controls this terminal ({{ why }})</span>
+      <button
+        hx-button
+        variant="outlined"
+        severity="warn"
+        size="small"
+        title="Replace the current controller of this terminal"
+        (click)="reconnect(true)"
+      >
+        Take over
+      </button>
+    </div>
+  }
+}
 @if (banner(); as reason) {
   <div class="view-banner" role="status">
     <span>Stream closed: {{ reason }}</span>
@@ -10,7 +27,7 @@
     >
       Reconnect
     </button>
-    @if (mode() === "control") {
+    @if (mode() === "control" || blocked()) {
       <button
         hx-button
         variant="outlined"

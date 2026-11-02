@@ -22,6 +22,11 @@ import { TerminalSession, TerminalStreamService } from "../core/terminal-stream"
 
 const RESIZE_DEBOUNCE_MS = 150;
 
+export interface ModeState {
+  mode: Mode;
+  blocked: string | null;
+}
+
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -40,10 +45,17 @@ function cssVar(name: string): string {
 })
 export class TerminalView implements OnDestroy {
   readonly pane = input.required<Pane>();
-  readonly mode = input<Mode>("observe");
-  /** Why the stream closed; `null` while it runs. */
+  /** The mode the tab asks for; `control` is tried without a takeover and may fall back. */
+  readonly wanted = input<Mode>("observe");
+  /** The mode the stream really has. */
+  readonly mode = signal<Mode>("observe");
+  /** Why the tab is read-only although input was wanted (another client holds the controller). */
+  readonly blocked = signal<string | null>(null);
+  /** The real mode and the reason it is read-only, emitted on every change. */
+  readonly modeChange = output<ModeState>();
   /** The terminal size in cells, emitted on every change. */
   readonly sized = output<{ cols: number; rows: number }>();
+  /** Why the stream closed; `null` while it runs. */
   readonly banner = signal<string | null>(null);
 
   private readonly streams = inject(TerminalStreamService);
@@ -57,6 +69,7 @@ export class TerminalView implements OnDestroy {
   private resizeTimer?: ReturnType<typeof setTimeout>;
   private size = { cols: 0, rows: 0 };
   private destroyed = false;
+  private framed = false;
 
   constructor() {
     afterNextRender(() => void this.start(false));
@@ -70,12 +83,12 @@ export class TerminalView implements OnDestroy {
         this.applySize();
       });
     });
-    // A mode switch reopens the stream; a switch to input never takes over a controller by itself.
-    let seen = this.mode();
+    // A change of the wanted mode reopens the stream; it never takes over a controller by itself.
+    let seen = this.wanted();
     effect(() => {
-      const mode = this.mode();
-      if (mode === seen) return;
-      seen = mode;
+      const wanted = this.wanted();
+      if (wanted === seen) return;
+      seen = wanted;
       untracked(() => {
         if (this.term) void this.restartStream(false);
       });
@@ -147,12 +160,25 @@ export class TerminalView implements OnDestroy {
     this.term?.focus();
   }
 
+  private setState(mode: Mode, blocked: string | null): void {
+    this.mode.set(mode);
+    this.blocked.set(blocked);
+    this.modeChange.emit({ mode, blocked });
+  }
+
   private async openStream(takeover: boolean): Promise<void> {
     this.banner.set(null);
+    const mode = this.wanted();
+    this.setState(mode, null);
+    await this.connect(mode, takeover);
+  }
+
+  private async connect(mode: Mode, takeover: boolean): Promise<void> {
+    this.framed = false;
     try {
       const session = await this.streams.open(
         {
-          mode: this.mode(),
+          mode,
           target: this.pane().pane_id,
           cols: this.size.cols,
           rows: this.size.rows,
@@ -195,11 +221,22 @@ export class TerminalView implements OnDestroy {
   private onRecord(session: TerminalSession, record: StreamRecord): void {
     if (session !== this.session) return;
     if (record.type === "frame") {
+      this.framed = true;
       this.term?.write(decodeBase64(record.bytes));
       return;
     }
     this.session = undefined;
-    if (record.reason !== "detached") this.banner.set(record.reason);
+    if (record.reason === "detached") return;
+    if (this.mode() === "control") {
+      // Control failed (another client holds the controller) or was lost to another client:
+      // stay usable as an observer; going back to input is an explicit user action.
+      const lost = this.framed;
+      this.setState("observe", record.reason);
+      if (lost) this.banner.set(record.reason);
+      void this.connect("observe", false);
+      return;
+    }
+    this.banner.set(record.reason);
   }
 
   private scheduleResize(): void {

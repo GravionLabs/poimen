@@ -16,6 +16,12 @@ export function moveItem<T>(list: readonly T[], from: number, to: number): reado
   return next;
 }
 
+function without<V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<string, V> {
+  const next = new Map(map);
+  next.delete(key);
+  return next;
+}
+
 /**
  * Open tabs of the single editor group, the active one and each tab's read-only/input mode.
  * UI state only: closing a tab never touches the herdr pane.
@@ -24,7 +30,12 @@ export function moveItem<T>(list: readonly T[], from: number, to: number): reado
 export class EditorTabs {
   readonly tabs = signal<readonly EditorTab[]>([]);
   readonly activeId = signal<string | null>(null);
+  /** The mode each stream really has, reported by its terminal view. */
   private readonly modes = signal<ReadonlyMap<string, Mode>>(new Map());
+  /** Why a tab is read-only although input was wanted (another client holds the controller). */
+  private readonly blockedBy = signal<ReadonlyMap<string, string>>(new Map());
+  /** Modes the user chose per tab; a tab without an entry follows the `autoControl` setting. */
+  private readonly choices = signal<ReadonlyMap<string, Mode>>(new Map());
 
   readonly openIds = computed(() => new Set(this.tabs().map((t) => t.paneId)));
 
@@ -77,6 +88,8 @@ export class EditorTabs {
     this.tabs.set([]);
     this.activeId.set(null);
     this.modes.set(new Map());
+    this.blockedBy.set(new Map());
+    this.choices.set(new Map());
   }
 
   move(from: number, to: number): void {
@@ -87,15 +100,35 @@ export class EditorTabs {
     return this.modes().get(paneId) ?? "observe";
   }
 
-  setMode(paneId: string, mode: Mode): void {
+  /** The mode a tab asks for: the user's choice, else input when `autoControl` is on. */
+  wanted(paneId: string, autoControl: boolean): Mode {
+    return this.choices().get(paneId) ?? (autoControl ? "control" : "observe");
+  }
+
+  /** The user's choice for this tab; kept while the tab is open. */
+  choose(paneId: string, mode: Mode): void {
+    this.choices.update((m) => new Map(m).set(paneId, mode));
+  }
+
+  /** The reason the tab is read-only although input was wanted, else `null`. */
+  blocked(paneId: string): string | null {
+    return this.blockedBy().get(paneId) ?? null;
+  }
+
+  /** Records the real mode of a tab's stream. */
+  report(paneId: string, mode: Mode, blocked: string | null): void {
     this.modes.update((m) => new Map(m).set(paneId, mode));
+    this.blockedBy.update((m) => {
+      const next = new Map(m);
+      if (blocked) next.set(paneId, blocked);
+      else next.delete(paneId);
+      return next;
+    });
   }
 
   private forget(paneId: string): void {
-    this.modes.update((m) => {
-      const next = new Map(m);
-      next.delete(paneId);
-      return next;
-    });
+    this.modes.update((m) => without(m, paneId));
+    this.blockedBy.update((m) => without(m, paneId));
+    this.choices.update((m) => without(m, paneId));
   }
 }

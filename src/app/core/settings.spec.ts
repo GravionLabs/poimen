@@ -22,6 +22,7 @@ describe("parseSettings", () => {
         fontFamily: "Hack",
         fontSize: 15,
         colors: { background: "#000000", foreground: null },
+        autoControl: false,
         warnings: ["w"],
       }),
     ).toEqual({
@@ -29,6 +30,7 @@ describe("parseSettings", () => {
       fontFamily: "Hack",
       fontSize: 15,
       colors: { background: "#000000", foreground: null },
+      autoControl: false,
       warnings: ["w"],
     });
   });

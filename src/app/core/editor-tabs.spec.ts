@@ -93,13 +93,28 @@ describe("EditorTabs", () => {
     expect(ids()).toEqual(["c", "a", "b"]);
   });
 
-  it("defaults to read-only and forgets the mode when the tab closes", () => {
+  it("reports the real mode and forgets it when the tab closes", () => {
     tabs.open("a", true);
     expect(tabs.mode("a")).toBe("observe");
-    tabs.setMode("a", "control");
+    tabs.report("a", "control", null);
     expect(tabs.mode("a")).toBe("control");
+    tabs.report("a", "observe", "held by another client");
+    expect(tabs.blocked("a")).toBe("held by another client");
     tabs.close("a");
     expect(tabs.mode("a")).toBe("observe");
+    expect(tabs.blocked("a")).toBeNull();
+  });
+
+  it("wants input by default, read-only when autoControl is off, and keeps the user's choice", () => {
+    tabs.open("a", true);
+    expect(tabs.wanted("a", true)).toBe("control");
+    expect(tabs.wanted("a", false)).toBe("observe");
+    tabs.choose("a", "observe");
+    expect(tabs.wanted("a", true)).toBe("observe");
+    tabs.choose("a", "control");
+    expect(tabs.wanted("a", false)).toBe("control");
+    tabs.close("a");
+    expect(tabs.wanted("a", true)).toBe("control");
   });
 
   it("closeAll empties the group", () => {
