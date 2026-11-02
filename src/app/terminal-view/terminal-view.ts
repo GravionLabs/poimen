@@ -66,7 +66,8 @@ export class TerminalView implements OnDestroy {
       untracked(() => {
         if (!this.term) return;
         Object.assign(this.term.options, this.look());
-        this.fit?.fit();
+        // A new font changes the cell size, so cols/rows change without a body resize.
+        this.applySize();
       });
     });
     // A mode switch reopens the stream; a switch to input never takes over a controller by itself.
@@ -203,20 +204,23 @@ export class TerminalView implements OnDestroy {
 
   private scheduleResize(): void {
     clearTimeout(this.resizeTimer);
-    this.resizeTimer = setTimeout(() => {
-      if (!this.term || !this.fit) return;
-      this.fit.fit();
-      const { cols, rows } = this.term;
-      if (cols === this.size.cols && rows === this.size.rows) return;
-      this.size = { cols, rows };
-      this.sized.emit(this.size);
-      if (!this.session?.open) return;
-      if (this.mode() === "control") {
-        this.session.resize(cols, rows);
-      } else {
-        // Observers have a fixed viewport; reopen with the new size.
-        void this.restartStream(false);
-      }
-    }, RESIZE_DEBOUNCE_MS);
+    this.resizeTimer = setTimeout(() => this.applySize(), RESIZE_DEBOUNCE_MS);
+  }
+
+  /** Refits, and when cols/rows changed tells the status bar and herdr (resize or reopen). */
+  private applySize(): void {
+    if (!this.term || !this.fit) return;
+    this.fit.fit();
+    const { cols, rows } = this.term;
+    if (cols === this.size.cols && rows === this.size.rows) return;
+    this.size = { cols, rows };
+    this.sized.emit(this.size);
+    if (!this.session?.open) return;
+    if (this.mode() === "control") {
+      this.session.resize(cols, rows);
+    } else {
+      // Observers have a fixed viewport; reopen with the new size.
+      void this.restartStream(false);
+    }
   }
 }
