@@ -18,7 +18,8 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
-import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
+import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
+import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
 
@@ -82,6 +83,7 @@ export class TerminalView implements OnDestroy {
   private size = { cols: 0, rows: 0 };
   private destroyed = false;
   private framed = false;
+  private dropMouse?: () => void;
   /** Counts connects; a result of an older one is dropped. */
   private generation = 0;
   /** The mode of the stream being opened or running (what the CLI child was spawned with). */
@@ -162,8 +164,79 @@ export class TerminalView implements OnDestroy {
     });
     this.term = term;
     this.fit = fit;
+    this.attachMouse(this.body().nativeElement);
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(this.body().nativeElement);
+  }
+
+  /**
+   * herdr's stream is a rendered screen: it carries no DECSET 1000/1002/1003/1006, so xterm never
+   * enables mouse tracking and would never report anything. The mouse is therefore forwarded as
+   * `terminal.mouse` cells; herdr encodes them for the pane application's mouse mode and drops
+   * them when the application did not ask for the mouse. Read-only tabs send nothing.
+   */
+  private attachMouse(host: HTMLElement): void {
+    let pressed: MouseCommand["button"] | null = null;
+    let last = "";
+    const send = (event: MouseEvent, action: MouseCommand["action"], button: number) => {
+      const session = this.session;
+      const term = this.term;
+      if (!term || !session?.open) return;
+      const screen = host.querySelector(".xterm-screen") ?? host;
+      const { column, row } = cellAt(
+        screen.getBoundingClientRect(),
+        term.cols,
+        term.rows,
+        event.clientX,
+        event.clientY,
+      );
+      const key = `${action}:${column}:${row}`;
+      if ((action === "move" || action === "drag") && key === last) return;
+      last = key;
+      session.mouse({
+        action,
+        button: buttonName(button),
+        column,
+        row,
+        modifiers: modifierBits(event),
+      });
+    };
+    const onMove = (event: MouseEvent) => {
+      if (this.mode() !== "control") return;
+      if (pressed) send(event, "drag", event.button);
+      else send(event, "move", 0);
+    };
+    const onUp = (event: MouseEvent) => {
+      window.removeEventListener("mouseup", onUp, true);
+      window.removeEventListener("mousemove", onMove, true);
+      if (!pressed) return;
+      pressed = null;
+      last = "";
+      if (this.mode() === "control") send(event, "up", event.button);
+    };
+    host.addEventListener(
+      "mousedown",
+      (event) => {
+        if (this.mode() !== "control") return;
+        event.stopPropagation(); // no text selection while the pane application owns the mouse
+        event.preventDefault();
+        this.term?.focus();
+        pressed = buttonName(event.button);
+        last = "";
+        send(event, "down", event.button);
+        window.addEventListener("mouseup", onUp, true);
+        window.addEventListener("mousemove", onMove, true);
+        this.dropMouse = () => {
+          window.removeEventListener("mouseup", onUp, true);
+          window.removeEventListener("mousemove", onMove, true);
+        };
+      },
+      true,
+    );
+    host.addEventListener("mousemove", (event) => !pressed && onMove(event), true);
+    host.addEventListener("contextmenu", (event) => {
+      if (this.mode() === "control") event.preventDefault();
+    });
   }
 
   private async start(takeover: boolean): Promise<void> {
@@ -253,6 +326,7 @@ export class TerminalView implements OnDestroy {
 
   private stop(): void {
     this.closeStream();
+    this.dropMouse?.();
     clearTimeout(this.resizeTimer);
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;

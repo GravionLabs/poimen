@@ -66,7 +66,14 @@ async function setup(wanted: "control" | "observe") {
   fake.nextCols = 80;
   fake.observers = [];
   const settings = signal<Settings>(DEFAULT_SETTINGS);
-  const session = { open: true, resize: vi.fn(), close: vi.fn(), input: vi.fn(), scroll: vi.fn() };
+  const session = {
+    open: true,
+    resize: vi.fn(),
+    close: vi.fn(),
+    input: vi.fn(),
+    scroll: vi.fn(),
+    mouse: vi.fn(),
+  };
   const records: ((record: StreamRecord) => void)[] = [];
   const open = vi.fn(async (_opts: unknown, onRecord: (record: StreamRecord) => void) => {
     records.push(onRecord);
@@ -107,7 +114,7 @@ async function setup(wanted: "control" | "observe") {
     records[n](record);
     await new Promise((resolve) => setTimeout(resolve));
   };
-  return { fixture, settings, session, open, sized, modes, send };
+  return { fixture, settings, session, open, sized, modes, send, body };
 }
 
 describe("TerminalView font change", () => {
@@ -240,7 +247,14 @@ describe("TerminalView input mode decision", () => {
     let release!: () => void;
     open.mockImplementationOnce(async () => {
       await new Promise<void>((r) => (release = r));
-      const s = { open: true, close: vi.fn(), resize: vi.fn(), input: vi.fn(), scroll: vi.fn() };
+      const s = {
+        open: true,
+        close: vi.fn(),
+        resize: vi.fn(),
+        input: vi.fn(),
+        scroll: vi.fn(),
+        mouse: vi.fn(),
+      };
       sessions.push(s);
       return s;
     });
@@ -313,5 +327,73 @@ describe("TerminalView fit on layout change (#80)", () => {
     expect(rule).not.toMatch(/padding[^:]*:\s*[1-9]/);
     const html = readFileSync("src/app/terminal-view/terminal-view.html", "utf8");
     expect(html).toContain('<div class="view-pad"><div #body class="view-body">');
+  });
+});
+
+describe("TerminalView mouse input", () => {
+  const frame: StreamRecord = {
+    type: "frame",
+    seq: 1,
+    full: true,
+    width: 80,
+    height: 24,
+    bytes: "",
+  };
+  /** 800x480 px body: 80x24 cells of 10x20 px. */
+  const rect = () => ({ left: 0, top: 0, width: 800, height: 480 }) as DOMRect;
+  const mouse = (type: string, x: number, y: number, init: MouseEventInit = {}) =>
+    new MouseEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true, ...init });
+
+  async function controlling() {
+    const ctx = await setup("control");
+    ctx.body.getBoundingClientRect = rect;
+    await ctx.send(0, frame); // the first frame confirms control
+    return ctx;
+  }
+
+  it("forwards a click as down and up at the cell under the pointer", async () => {
+    const { session, body } = await controlling();
+    body.dispatchEvent(mouse("mousedown", 125, 45));
+    window.dispatchEvent(mouse("mouseup", 125, 45));
+    expect(session.mouse.mock.calls.map(([e]) => e)).toEqual([
+      { action: "down", button: "left", column: 12, row: 2, modifiers: 0 },
+      { action: "up", button: "left", column: 12, row: 2, modifiers: 0 },
+    ]);
+  });
+
+  it("forwards a drag to a new cell once, with the pressed button and modifiers", async () => {
+    const { session, body } = await controlling();
+    body.dispatchEvent(mouse("mousedown", 5, 5, { button: 2, shiftKey: true }));
+    window.dispatchEvent(mouse("mousemove", 35, 5, { button: 2, shiftKey: true }));
+    window.dispatchEvent(mouse("mousemove", 36, 6, { button: 2, shiftKey: true })); // same cell
+    window.dispatchEvent(mouse("mouseup", 35, 5, { button: 2, shiftKey: true }));
+    expect(session.mouse.mock.calls.map(([e]) => e.action)).toEqual(["down", "drag", "up"]);
+    expect(session.mouse.mock.calls[1][0]).toEqual({
+      action: "drag",
+      button: "right",
+      column: 3,
+      row: 0,
+      modifiers: 1,
+    });
+  });
+
+  it("sends nothing from a read-only tab and leaves selection alone", async () => {
+    const { session, body, send } = await setup("observe");
+    body.getBoundingClientRect = rect;
+    await send(0, frame);
+    const down = mouse("mousedown", 5, 5);
+    body.dispatchEvent(down);
+    body.dispatchEvent(mouse("mousemove", 50, 50));
+    window.dispatchEvent(mouse("mouseup", 50, 50));
+    expect(session.mouse).not.toHaveBeenCalled();
+    expect(down.defaultPrevented).toBe(false);
+  });
+
+  it("sends nothing while another client holds the controller", async () => {
+    const { session, body, send } = await setup("control");
+    body.getBoundingClientRect = rect;
+    await send(0, { type: "closed", reason: "terminal already has an attached client" });
+    body.dispatchEvent(mouse("mousedown", 5, 5));
+    expect(session.mouse).not.toHaveBeenCalled();
   });
 });

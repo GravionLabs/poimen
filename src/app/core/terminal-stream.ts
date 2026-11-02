@@ -12,6 +12,15 @@ export interface OpenTerminal {
   takeover: boolean;
 }
 
+/** A `terminal.mouse` command; `modifiers` combines Shift = 1, Ctrl = 2, Alt = 4. */
+export interface MouseCommand {
+  action: "down" | "up" | "drag" | "move";
+  button: "left" | "middle" | "right";
+  column: number;
+  row: number;
+  modifiers: number;
+}
+
 /** Payload of the `terminal` Tauri event. */
 interface TerminalEvent {
   id: number;
@@ -49,6 +58,12 @@ export class TerminalSession {
   scroll(up: boolean, lines: number): void {
     if (this.closed) return;
     void this.bridge.invoke("terminal_scroll", { id: this.id, up, lines });
+  }
+
+  /** One mouse event at a zero-based cell; herdr drops it unless the pane app tracks the mouse. */
+  mouse(event: MouseCommand): void {
+    if (this.closed) return;
+    void this.bridge.invoke("terminal_mouse", { id: this.id, ...event });
   }
 
   /** Stops the stream. Safe to call twice or after the backend closed it. */
