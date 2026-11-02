@@ -48,6 +48,7 @@ describe("parseSettings", () => {
       autoControl: false,
       shortcuts: DEFAULT_SETTINGS.shortcuts,
       sidebarRows: DEFAULT_SETTINGS.sidebarRows,
+      sidebarLayout: "tree",
       explorerRoots: ["~"],
       explorerShowHidden: false,
       warnings: ["w"],

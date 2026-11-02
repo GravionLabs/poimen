@@ -166,6 +166,8 @@ pub struct Settings {
     pub shortcuts: BTreeMap<String, String>,
     /// Lines and tokens of the sidebar rows from `sidebar.rows`; types left `None` use the default.
     pub sidebar_rows: SidebarRows,
+    /// `sidebar.layout`: `tree` (default) or `split`.
+    pub sidebar_layout: String,
     /// Roots of the explorer (`explorer.roots`, a leading `~` is the home directory).
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
@@ -327,6 +329,7 @@ impl Default for Settings {
             auto_control: true,
             shortcuts: default_shortcuts(),
             sidebar_rows: SidebarRows::default(),
+            sidebar_layout: "tree".into(),
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
             spaces_layout: None,
@@ -504,6 +507,15 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("sidebar") {
         s.sidebar_rows = resolve_sidebar_rows(value, &mut s.warnings);
+        match value.get("layout") {
+            None => {}
+            Some(Value::String(l)) if matches!(l.as_str(), "tree" | "split") => {
+                s.sidebar_layout = l.clone();
+            }
+            Some(other) => s.warnings.push(format!(
+                "sidebar.layout {other} must be \"tree\" or \"split\"; using tree"
+            )),
+        }
     }
 
     if let Some(value) = root.get("explorer") {
@@ -745,15 +757,10 @@ pub fn set_color_schema_text(text: &str, schema: &serde_json::Value) -> Result<S
     set_key_text(text, "colorSchema", &schema.to_string())
 }
 
-/// Sets the top-level `key` to the JSON `value` (already serialized), touching nothing else. A
-/// missing key is inserted as the first entry.
-fn set_key_text(text: &str, key: &str, value: &str) -> Result<String, String> {
+/// Byte range of the value of `key` in the object that opens at `open` (a `{`), if present.
+fn find_value(text: &str, open: usize, key: &str) -> Option<(usize, usize)> {
     let quoted = format!("\"{key}\"");
     let b = text.as_bytes();
-    let open = skip_trivia(b, 0);
-    if b.get(open) != Some(&b'{') {
-        return Err("config.json is not a JSON object".into());
-    }
     let (mut i, mut depth) = (open + 1, 1usize);
     while i < b.len() {
         i = skip_trivia(b, i);
@@ -787,7 +794,7 @@ fn set_key_text(text: &str, key: &str, value: &str) -> Result<String, String> {
                             }
                             e
                         };
-                        return Ok(format!("{}{value}{}", &text[..start], &text[stop..]));
+                        return Some((start, stop));
                     }
                 }
             }
@@ -805,13 +812,60 @@ fn set_key_text(text: &str, key: &str, value: &str) -> Result<String, String> {
             Some(_) => i += 1,
         }
     }
-    let first = skip_trivia(b, open + 1);
-    let entry = format!("{quoted}: {value}");
-    Ok(if b.get(first) == Some(&b'}') {
+    None
+}
+
+/// Sets `key` of the object opening at `open` to the JSON `value`; a missing key is inserted as
+/// the first entry.
+fn set_key_at(text: &str, open: usize, key: &str, value: &str) -> String {
+    if let Some((start, stop)) = find_value(text, open, key) {
+        return format!("{}{value}{}", &text[..start], &text[stop..]);
+    }
+    let first = skip_trivia(text.as_bytes(), open + 1);
+    let entry = format!("\"{key}\": {value}");
+    if text.as_bytes().get(first) == Some(&b'}') {
         format!("{}{entry}{}", &text[..=open], &text[first..])
     } else {
         format!("{}\n  {entry},{}", &text[..=open], &text[open + 1..])
-    })
+    }
+}
+
+/// Start of the top-level object, or an error when the text is something else.
+fn root_open(text: &str) -> Result<usize, String> {
+    let open = skip_trivia(text.as_bytes(), 0);
+    if text.as_bytes().get(open) == Some(&b'{') {
+        Ok(open)
+    } else {
+        Err("config.json is not a JSON object".into())
+    }
+}
+
+/// Sets the top-level `key` to the JSON `value` (already serialized), touching nothing else. A
+/// missing key is inserted as the first entry.
+fn set_key_text(text: &str, key: &str, value: &str) -> Result<String, String> {
+    Ok(set_key_at(text, root_open(text)?, key, value))
+}
+
+/// Returns `text` with `sidebar.layout` set to `tree` or `split`, touching nothing else. A missing
+/// `sidebar` object is created; a `sidebar` that is not an object is an error.
+pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, String> {
+    if !matches!(layout, "tree" | "split") {
+        return Err(format!("invalid sidebar layout {layout:?}"));
+    }
+    let value = format!("\"{layout}\"");
+    let open = root_open(text)?;
+    match find_value(text, open, "sidebar") {
+        None => Ok(set_key_at(
+            text,
+            open,
+            "sidebar",
+            &format!("{{ \"layout\": {value} }}"),
+        )),
+        Some((start, _)) if text.as_bytes().get(start) == Some(&b'{') => {
+            Ok(set_key_at(text, start, "layout", &value))
+        }
+        Some(_) => Err("sidebar in config.json is not an object".into()),
+    }
 }
 
 /// Writes the `theme` setting below `home` (creating the file when missing). The watcher then
@@ -823,6 +877,11 @@ pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
 /// Writes the `colorSchema` setting below `home`, like `save_theme`.
 pub fn save_color_schema(home: &Path, schema: &serde_json::Value) -> Result<(), String> {
     save_with(home, |text| set_color_schema_text(text, schema))
+}
+
+/// Writes `sidebar.layout` below `home`, like `save_theme`.
+pub fn save_sidebar_layout(home: &Path, layout: &str) -> Result<(), String> {
+    save_with(home, |text| set_sidebar_layout_text(text, layout))
 }
 
 fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> Result<(), String> {
@@ -939,6 +998,57 @@ mod tests {
             ])
         );
         assert_eq!(s.sidebar_rows.workspace, None);
+    }
+
+    #[test]
+    fn sidebar_layout_parses_and_invalid_warns() {
+        assert_eq!(rows("{}").sidebar_layout, "tree");
+        assert_eq!(
+            rows(r#"{"sidebar":{"layout":"split"}}"#).sidebar_layout,
+            "split"
+        );
+        let s = rows(r#"{"sidebar":{"layout":"grid"}}"#);
+        assert_eq!(s.sidebar_layout, "tree");
+        assert!(s.warnings[0].contains("sidebar.layout"));
+    }
+
+    #[test]
+    fn set_sidebar_layout_replaces_inserts_and_keeps_the_rest() {
+        let text = "{\n  // c\n  \"theme\": \"dark\",\n  \"sidebar\": { \"layout\": \"tree\", \"rows\": {} }\n}";
+        let out = set_sidebar_layout_text(text, "split").unwrap();
+        assert_eq!(out, text.replace("\"tree\"", "\"split\""));
+        let into = set_sidebar_layout_text("{\"sidebar\":{\"rows\":{}}}", "split").unwrap();
+        assert_eq!(
+            into,
+            "{\"sidebar\":{\n  \"layout\": \"split\",\"rows\":{}}}"
+        );
+        let empty = set_sidebar_layout_text("{\"sidebar\":{}}", "split").unwrap();
+        assert_eq!(empty, "{\"sidebar\":{\"layout\": \"split\"}}");
+        let none = set_sidebar_layout_text("{\"theme\":\"dark\"}", "split").unwrap();
+        assert_eq!(
+            none,
+            "{\n  \"sidebar\": { \"layout\": \"split\" },\"theme\":\"dark\"}"
+        );
+        let nested = set_sidebar_layout_text("{\"x\":{\"layout\":\"tree\"}}", "split").unwrap();
+        assert!(nested.contains("\"x\":{\"layout\":\"tree\"}"));
+    }
+
+    #[test]
+    fn set_sidebar_layout_rejects_bad_input() {
+        assert!(set_sidebar_layout_text("{}", "grid").is_err());
+        assert!(set_sidebar_layout_text("[1]", "tree").is_err());
+        assert!(set_sidebar_layout_text("{\"sidebar\":3}", "tree").is_err());
+    }
+
+    #[test]
+    fn save_sidebar_layout_writes_a_temp_file() {
+        let home = std::env::temp_dir().join(format!("poimen-layout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        save_sidebar_layout(&home, "split").unwrap();
+        assert_eq!(load(&home).sidebar_layout, "split");
+        save_sidebar_layout(&home, "tree").unwrap();
+        assert_eq!(load(&home).sidebar_layout, "tree");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
