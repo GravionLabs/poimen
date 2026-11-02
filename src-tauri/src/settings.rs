@@ -20,6 +20,11 @@ const MAX_FONT_SIZE: f64 = 72.0;
 pub struct Colors {
     pub background: Option<String>,
     pub foreground: Option<String>,
+    pub cursor: Option<String>,
+    pub selection_background: Option<String>,
+    pub selection_foreground: Option<String>,
+    /// ANSI colors 0-15 (`palette = N=#rrggbb`); empty when Ghostty sets none, else 16 entries.
+    pub palette: Vec<Option<String>>,
 }
 
 /// A token on a sidebar row line (`sidebar.rows`).
@@ -336,6 +341,11 @@ pub struct Ghostty {
     pub font_size: Option<f64>,
     pub background: Option<String>,
     pub foreground: Option<String>,
+    pub cursor: Option<String>,
+    pub selection_background: Option<String>,
+    pub selection_foreground: Option<String>,
+    /// Empty, or 16 entries once a `palette` line was read.
+    pub palette: Vec<Option<String>>,
 }
 
 fn valid_size(size: f64) -> bool {
@@ -364,6 +374,19 @@ pub fn parse_ghostty(text: &str) -> Ghostty {
             "font-size" => out.font_size = value.parse().ok().filter(|s| valid_size(*s)),
             "background" => out.background = hex_color(value),
             "foreground" => out.foreground = hex_color(value),
+            "cursor-color" => out.cursor = hex_color(value),
+            "selection-background" => out.selection_background = hex_color(value),
+            "selection-foreground" => out.selection_foreground = hex_color(value),
+            "palette" => {
+                if let Some((index, color)) = value.split_once('=')
+                    && let Ok(index) = index.trim().parse::<usize>()
+                    && index < 16
+                    && let Some(color) = hex_color(color.trim().trim_matches('"'))
+                {
+                    out.palette.resize(16, None);
+                    out.palette[index] = Some(color);
+                }
+            }
             _ => {}
         }
     }
@@ -550,10 +573,20 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
                 if !explicit_size && let Some(size) = g.font_size {
                     s.font_size = size;
                 }
-                if g.background.is_some() || g.foreground.is_some() {
+                if g.background.is_some()
+                    || g.foreground.is_some()
+                    || g.cursor.is_some()
+                    || g.selection_background.is_some()
+                    || g.selection_foreground.is_some()
+                    || !g.palette.is_empty()
+                {
                     s.colors = Some(Colors {
                         background: g.background,
                         foreground: g.foreground,
+                        cursor: g.cursor,
+                        selection_background: g.selection_background,
+                        selection_foreground: g.selection_foreground,
+                        palette: g.palette,
                     });
                 }
             }
@@ -997,12 +1030,19 @@ mod tests {
     #[test]
     fn parses_ghostty_config() {
         let g = parse_ghostty(
-            "# comment\nfont-family = \"JetBrains Mono\"\nfont-family = Menlo\nfont-size = 14\nbackground = #1e1e2e\nforeground = cdd6f4\nbad line\n",
+            "# comment\nfont-family = \"JetBrains Mono\"\nfont-family = Menlo\nfont-size = 14\nbackground = #1e1e2e\nforeground = cdd6f4\ncursor-color = #f5e0dc\nselection-background = #585b70\nselection-foreground = #cdd6f4\npalette = 1=#f38ba8\npalette = 15 = \"a6adc8\"\npalette = 16=#000000\npalette = 2=red\nbad line\n",
         );
         assert_eq!(g.font_family.as_deref(), Some("JetBrains Mono"));
         assert_eq!(g.font_size, Some(14.0));
         assert_eq!(g.background.as_deref(), Some("#1e1e2e"));
         assert_eq!(g.foreground.as_deref(), Some("#cdd6f4"));
+        assert_eq!(g.cursor.as_deref(), Some("#f5e0dc"));
+        assert_eq!(g.selection_background.as_deref(), Some("#585b70"));
+        assert_eq!(g.selection_foreground.as_deref(), Some("#cdd6f4"));
+        assert_eq!(g.palette.len(), 16);
+        assert_eq!(g.palette[1].as_deref(), Some("#f38ba8"));
+        assert_eq!(g.palette[15].as_deref(), Some("#a6adc8"));
+        assert_eq!(g.palette.iter().flatten().count(), 2);
         assert_eq!(
             parse_ghostty("background = red\nfont-size = x"),
             Ghostty::default()
@@ -1011,8 +1051,12 @@ mod tests {
 
     #[test]
     fn ghostty_fills_gaps_but_explicit_wins() {
-        let ghostty =
-            || Some("font-family = Hack\nfont-size = 16\nbackground = #000000".to_owned());
+        let ghostty = || {
+            Some(
+                "font-family = Hack\nfont-size = 16\nbackground = #000000\ncursor-color = #ffffff\npalette = 0=#111111"
+                    .to_owned(),
+            )
+        };
         let s = resolve(
             Some(r#"{"terminal":{"ghostty":true,"fontSize":12}}"#),
             ghostty,
@@ -1023,7 +1067,15 @@ mod tests {
             s.colors,
             Some(Colors {
                 background: Some("#000000".into()),
-                foreground: None
+                foreground: None,
+                cursor: Some("#ffffff".into()),
+                selection_background: None,
+                selection_foreground: None,
+                palette: {
+                    let mut p = vec![None; 16];
+                    p[0] = Some("#111111".into());
+                    p
+                },
             })
         );
     }

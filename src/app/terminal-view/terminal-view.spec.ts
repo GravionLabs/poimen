@@ -158,6 +158,15 @@ async function setup(wanted: "control" | "observe") {
   return { fixture, settings, session, open, sized, modes, send, body, openUrl };
 }
 
+const GHOSTTY = {
+  background: "#000001",
+  foreground: "#fffffe",
+  cursor: null,
+  selectionBackground: null,
+  selectionForeground: null,
+  palette: [],
+};
+
 describe("TerminalView theme", () => {
   const css = readFileSync("src/styles.css", "utf8");
   const block = (selector: string) =>
@@ -238,7 +247,7 @@ describe("TerminalView theme", () => {
     const root = document.documentElement;
     root.style.setProperty("--term-ansi-1", "#aa0000");
     const { fixture, settings } = await setup("observe");
-    settings.set({ ...DEFAULT_SETTINGS, colors: { background: "#000001", foreground: "#fffffe" } });
+    settings.set({ ...DEFAULT_SETTINGS, colors: GHOSTTY });
     fixture.detectChanges();
     const term = (
       fixture.componentInstance as unknown as {
@@ -277,7 +286,7 @@ describe("TerminalView theme", () => {
     const root = document.documentElement;
     root.style.setProperty("--term-bg", "#fbfbf9");
     const { fixture, settings } = await setup("observe");
-    settings.set({ ...DEFAULT_SETTINGS, colors: { background: "#000001", foreground: "#fffffe" } });
+    settings.set({ ...DEFAULT_SETTINGS, colors: GHOSTTY });
     fixture.detectChanges();
     const term = (
       fixture.componentInstance as unknown as {
@@ -289,6 +298,43 @@ describe("TerminalView theme", () => {
     await new Promise((resolve) => setTimeout(resolve));
     expect(term.options.theme.background).toBe("#000001");
     root.classList.remove("app-dark");
+    root.removeAttribute("style");
+  });
+});
+
+describe("TerminalView Ghostty palette", () => {
+  it("lays palette, cursor and selection over the scheme tokens and keeps the rest", async () => {
+    const root = document.documentElement;
+    root.style.setProperty("--term-ansi-1", "#aa0000");
+    root.style.setProperty("--term-ansi-2", "#00aa00");
+    root.style.setProperty("--term-cursor", "#123456");
+    root.style.setProperty("--term-selection-bg", "#222222");
+    root.style.setProperty("--term-selection-fg", "#333333");
+    const { fixture, settings } = await setup("observe");
+    settings.set({
+      ...DEFAULT_SETTINGS,
+      colors: {
+        ...GHOSTTY,
+        cursor: "#abcdef",
+        selectionBackground: "#010203",
+        selectionForeground: null,
+        palette: ["#0a0a0a", null, ...Array<null>(14).fill(null)],
+      },
+    });
+    fixture.detectChanges();
+    const term = (
+      fixture.componentInstance as unknown as {
+        term: { options: { theme: Record<string, string> } };
+      }
+    ).term;
+    expect(term.options.theme).toMatchObject({
+      black: "#0a0a0a",
+      red: "#aa0000",
+      green: "#00aa00",
+      cursor: "#abcdef",
+      selectionBackground: "#010203",
+      selectionForeground: "#333333",
+    });
     root.removeAttribute("style");
   });
 });
