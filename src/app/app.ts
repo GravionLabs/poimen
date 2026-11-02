@@ -6,26 +6,26 @@ import {
   computed,
   effect,
   inject,
-  signal,
-  viewChildren,
 } from "@angular/core";
 import { Title } from "@angular/platform-browser";
-import { HxTheme } from "@gravionlabs/helix-ui";
-import type { Pane } from "./core/herdr";
+import { HxSwitch, HxTheme } from "@gravionlabs/helix-ui";
+import { paneLabel, type Pane } from "./core/herdr";
 import { HerdrStore } from "./core/herdr-store";
 import { TauriBridge } from "./core/tauri";
 import { ActivityBar } from "./activity-bar/activity-bar";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, isToggleSidebarKey } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
+import { EditorTabs } from "./core/editor-tabs";
+import { TabBar, type TabBarItem } from "./ui/helix-candidates/tab-bar/tab-bar";
 
 /** Ids the native menu emits on the `menu` event (see `src-tauri/src/lib.rs`). */
-type MenuAction = "expand_all" | "collapse_all" | "close_all" | "refresh";
+type MenuAction = "close_all" | "refresh";
 
-/** The window: the sidebar and the list of open terminal cards. */
+/** The window: the activity bar, the sidebar and the editor group (tab bar over the live terminal). */
 @Component({
   selector: "app-root",
-  imports: [ActivityBar, Sidebar, TerminalView],
+  imports: [ActivityBar, Sidebar, TerminalView, TabBar, HxSwitch],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -39,14 +39,29 @@ export class App {
   protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
   private drag: { startX: number; startWidth: number } | null = null;
 
-  /** The opened panes in opening order, as they were when opened. */
-  private readonly opened = signal<Pane[]>([]);
-  /** The opened panes with their current herdr state (the last known one once herdr drops them). */
-  protected readonly views = computed(() =>
-    this.opened().map((pane) => this.store.panes().get(pane.pane_id) ?? pane),
+  protected readonly editor = inject(EditorTabs);
+  /** Last known state of each open pane, kept when herdr drops the pane. */
+  private readonly known = new Map<string, Pane>();
+  protected readonly tabItems = computed<TabBarItem[]>(() =>
+    this.editor.tabs().map((tab) => {
+      const pane = this.pane(tab.paneId);
+      return {
+        id: tab.paneId,
+        label: pane ? paneLabel(pane) : tab.paneId,
+        preview: !tab.pinned,
+        title: `${tab.paneId}${tab.pinned ? "" : " (preview)"}`,
+      };
+    }),
   );
-  protected readonly openIds = computed(() => new Set(this.opened().map((p) => p.pane_id)));
-  private readonly cards = viewChildren(TerminalView);
+  /** The pane shown in the editor group; only this one keeps a stream open. */
+  protected readonly activePane = computed(() => {
+    const id = this.editor.activeId();
+    return id ? this.pane(id) : undefined;
+  });
+  protected readonly activeControl = computed(() => {
+    const id = this.editor.activeId();
+    return !!id && this.editor.mode(id) === "control";
+  });
 
   constructor() {
     const title = inject(Title);
@@ -95,39 +110,31 @@ export class App {
     event.preventDefault();
   }
 
-  protected open(pane: Pane): void {
-    const card = this.card(pane.pane_id);
-    if (card) {
-      card.expand();
-      card.scrollIntoView();
-      return;
-    }
-    this.opened.update((list) => [...list, pane]);
+  /** Single click previews, a double click pins; an open pane is only activated. */
+  protected open(pane: Pane, pin = false): void {
+    this.known.set(pane.pane_id, pane);
+    this.editor.open(pane.pane_id, pin);
   }
 
-  protected closed(paneId: string): void {
-    this.opened.update((list) => list.filter((p) => p.pane_id !== paneId));
+  protected tabPane(id: string): Pane | undefined {
+    return this.pane(id);
   }
 
-  private card(paneId: string): TerminalView | undefined {
-    return this.cards().find((card) => card.pane().pane_id === paneId);
+  protected setControl(paneId: string, on: boolean): void {
+    this.editor.setMode(paneId, on ? "control" : "observe");
+  }
+
+  protected tabMode(id: string): string {
+    return this.editor.mode(id) === "control" ? "Input" : "Read-only";
+  }
+
+  private pane(id: string): Pane | undefined {
+    return this.store.panes().get(id) ?? this.known.get(id);
   }
 
   private onMenu(action: MenuAction): void {
-    switch (action) {
-      case "expand_all":
-        this.cards().forEach((card) => card.expand());
-        break;
-      case "collapse_all":
-        this.cards().forEach((card) => card.collapse());
-        break;
-      case "close_all":
-        [...this.cards()].forEach((card) => card.close());
-        break;
-      case "refresh":
-        void this.store.refresh();
-        break;
-    }
+    if (action === "close_all") this.editor.closeAll();
+    else void this.store.refresh();
   }
 
   /** HxTheme reads the system setting once; keep light/dark in step when it changes. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpaceNode } from "../core/herdr";
-import { spaceNodes } from "./sidebar";
+import { isDoubleClick, spaceNodes } from "./sidebar";
 
 const space: SpaceNode = {
   workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
@@ -25,5 +25,17 @@ describe("spaceNodes", () => {
 
   it("is empty without spaces", () => {
     expect(spaceNodes([])).toEqual([]);
+  });
+});
+
+describe("isDoubleClick", () => {
+  it("is true for the same row within the interval", () => {
+    expect(isDoubleClick({ key: "p1", at: 1000 }, "p1", 1300)).toBe(true);
+  });
+
+  it("is false for another row, a late click or no earlier click", () => {
+    expect(isDoubleClick({ key: "p1", at: 1000 }, "p2", 1100)).toBe(false);
+    expect(isDoubleClick({ key: "p1", at: 1000 }, "p1", 1500)).toBe(false);
+    expect(isDoubleClick(null, "p1", 1000)).toBe(false);
   });
 });

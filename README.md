@@ -1,6 +1,6 @@
 # poimen
 
-A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding agent sessions with collapsible panes, menus and a status sidebar.
+A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding agent sessions with editor tabs, menus and a status sidebar.
 
 *Poimen* (ποιμήν) is Greek for shepherd. herdr keeps the herd; poimen is the window you watch it through.
 
@@ -11,9 +11,9 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
 ```
 ┌──────────────── poimen (Tauri) ────────────────┐
 │ sidebar: workspaces / panes / agent status     │ ◄── events.subscribe (herdr.sock)
-│ cards: one xterm.js per open pane, collapsible │ ──► workspace/tab/pane.list
+│ tabs: one xterm.js for the active tab          │ ──► workspace/tab/pane.list
 └───────────────┬────────────────────────────────┘
-                │ spawns per expanded card
+                │ spawns per visible tab
                 ▼
   herdr terminal session observe|control <pane>   (NDJSON frames on stdout,
                                                    commands on stdin)
@@ -22,8 +22,9 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
           herdr server  (persistence, agent detection, worktrees, remote)
 ```
 
-- **herdr stays the backend.** Closing poimen, or collapsing a card, only closes the view; the pane and its agent keep running. The herdr TUI keeps working next to poimen.
-- **Read-only by default.** A card opens as an observer (any number allowed). Switch it to *Input* to become the terminal's controller (one per terminal). If another controller holds it, the card offers *Take over*.
+- **herdr stays the backend.** Closing poimen, or closing a tab, only closes the view; the pane and its agent keep running. The herdr TUI keeps working next to poimen.
+- **Read-only by default.** A pane opens as an observer (any number allowed). The switch in the tab bar (the tab shows `RO` or `IN`) makes you the terminal's controller (one per terminal). If another controller holds it, the view offers *Take over*.
+- **Editor tabs.** Opening a pane adds a tab to one tab bar above the terminal: a click opens a preview tab (italic, replaced by the next preview), a double click pins it, a second click on an open pane activates its tab. Tabs close with the x or a middle click and reorder by drag. Only the active tab keeps a stream open; hidden tabs close theirs, the pane keeps running.
 - **Angular frontend.** The UI is Angular 22 with helix-ui (light and dark follow the system); `src/app/core` is the bridge to the Tauri commands and events, `src-tauri` stays a thin shell ([ADR 0001](docs/adr/0001-frontend-stack.md)).
 - **Spaces tree.** The sidebar is a helix `hx-tree` of workspaces and their panes (the herdr tab is secondary text). A badge tells agents (by kind, e.g. `cl` for claude) from plain terminals (`>_`); each row shows the status dot, git branch (`wt` for a linked worktree), directory (`foreground_cwd`) and the status message, state label or integration tokens when present. The filter field matches name, agent, branch, tab, directory and text; arrow keys, Home/End and type-ahead navigate, Enter opens. Branch and worktree come from a read-only `git rev-parse` in the pane directory (herdr's pane list has none).
 - **Layout.** An activity bar (Spaces) sits left of a sidebar you resize by dragging its edge (arrow keys work too) and toggle with `Cmd+B` (`Ctrl+B` elsewhere). Width and collapsed state persist in poimen's own UI state (webview local storage, not the user settings file); the layout works from 720 px window width.

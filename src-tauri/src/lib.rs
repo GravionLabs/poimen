@@ -106,22 +106,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &MenuItem::with_id(
                 app,
-                "expand_all",
-                "Expand All",
-                true,
-                Some("CmdOrCtrl+Shift+E"),
-            )?,
-            &MenuItem::with_id(
-                app,
-                "collapse_all",
-                "Collapse All",
-                true,
-                Some("CmdOrCtrl+Shift+C"),
-            )?,
-            &MenuItem::with_id(
-                app,
                 "close_all",
-                "Close All Views",
+                "Close All Tabs",
                 true,
                 Some("CmdOrCtrl+Shift+W"),
             )?,
