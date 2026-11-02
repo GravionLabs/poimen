@@ -130,6 +130,47 @@ pub fn resolve_dir(input: &str, home: Option<&Path>) -> Result<String, String> {
     })
 }
 
+/// Names of the subdirectories of `dir` (symlinks to directories included); empty when `dir` is
+/// unreadable. Unsorted.
+fn subdir_names(dir: impl AsRef<Path>) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect()
+}
+
+/// A directory of the explorer tree.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub path: String,
+}
+
+/// The subdirectories of `path` (a leading `~` expands), sorted by name; hidden ones (leading dot)
+/// only with `hidden`. A relative, missing or unreadable `path` has none: no error.
+pub fn child_dirs(path: &str, home: Option<&Path>, hidden: bool) -> Vec<DirEntry> {
+    let dir = expand_home(path.trim(), home);
+    if !dir.is_absolute() {
+        return Vec::new();
+    }
+    let mut names: Vec<String> = subdir_names(&dir)
+        .into_iter()
+        .filter(|n| hidden || !n.starts_with('.'))
+        .collect();
+    names.sort_by_key(|n| n.to_lowercase());
+    names
+        .into_iter()
+        .map(|name| DirEntry {
+            path: dir.join(&name).to_string_lossy().into_owned(),
+            name,
+        })
+        .collect()
+}
+
 /// Directories matching a typed path: the subdirectories of the typed directory whose name starts
 /// with the typed rest (`/a/b` lists `/a` entries starting with `b`; `/a/` lists all of `/a`).
 /// Hidden ones only show when the typed rest starts with a dot. Sorted, at most `limit`.
@@ -148,13 +189,8 @@ pub fn list_dirs(input: &str, home: Option<&Path>, limit: usize) -> Vec<String> 
         return Vec::new();
     };
     let (parent, prefix) = (&expanded[..slash], &expanded[slash + 1..]);
-    let Ok(entries) = std::fs::read_dir(if parent.is_empty() { "/" } else { parent }) else {
-        return Vec::new();
-    };
-    let mut dirs: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| e.file_name().into_string().ok())
+    let mut dirs: Vec<String> = subdir_names(if parent.is_empty() { "/" } else { parent })
+        .into_iter()
         .filter(|n| n.starts_with(prefix) && (prefix.starts_with('.') || !n.starts_with('.')))
         .map(|n| format!("{parent}/{n}"))
         .collect();
@@ -255,6 +291,44 @@ mod tests {
                 .unwrap_err()
                 .contains("not a directory")
         );
+    }
+
+    #[test]
+    fn child_dirs_lists_sorted_directories_only_and_hides_dotted_ones() {
+        let dir = std::env::temp_dir().join(format!("poimen-explorer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for d in ["beta", "Alpha", ".hidden"] {
+            std::fs::create_dir_all(dir.join(d)).unwrap();
+        }
+        std::fs::write(dir.join("file.txt"), "x").unwrap();
+        let base = dir.to_string_lossy().into_owned();
+        let names = |hidden| -> Vec<String> {
+            child_dirs(&base, None, hidden)
+                .into_iter()
+                .map(|e| e.name)
+                .collect()
+        };
+        assert_eq!(names(false), ["Alpha", "beta"]);
+        assert_eq!(names(true), [".hidden", "Alpha", "beta"]);
+        assert_eq!(
+            child_dirs(&base, None, false)[0].path,
+            format!("{base}/Alpha")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn child_dirs_expands_home_and_tolerates_bad_paths() {
+        let dir = std::env::temp_dir().join(format!("poimen-explorer-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("proj")).unwrap();
+        let listed = child_dirs("~", Some(&dir), false);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "proj");
+        assert!(child_dirs("/nonexistent/poimen", None, false).is_empty());
+        assert!(child_dirs("relative", None, false).is_empty());
+        assert!(child_dirs("", None, false).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

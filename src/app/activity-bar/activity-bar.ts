@@ -10,6 +10,7 @@ export interface ActivityView {
 /** The views the activity bar offers; plugins and notifications follow later. */
 export const ACTIVITY_VIEWS: readonly ActivityView[] = [
   { id: "spaces", label: "Spaces", icon: "▤" },
+  { id: "explorer", label: "Explorer", icon: "🗀" },
 ];
 
 /** Narrow icon rail at the far left; clicking a view selects it. */

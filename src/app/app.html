@@ -1,15 +1,23 @@
 <app-toolbar [theme]="theme$()" (themeChange)="setTheme($event)" />
 <div class="work">
-  <app-activity-bar [expanded]="!ui.sidebarCollapsed()" (selected)="ui.toggleSidebar()" />
+  <app-activity-bar
+    [active]="ui.activeView()"
+    [expanded]="!ui.sidebarCollapsed()"
+    (selected)="selectView($event)"
+  />
   @if (!ui.sidebarCollapsed()) {
     <div class="side" [style.width.px]="ui.sidebarWidth()">
-      <app-sidebar
-        [openIds]="editor.openIds()"
-        [activeId]="editor.activeId()"
-        (selected)="open($event)"
-        (pinned)="open($event, true)"
-        (menuAction)="onSidebarMenu($event)"
-      />
+      @if (ui.activeView() === "explorer") {
+        <app-explorer />
+      } @else {
+        <app-sidebar
+          [openIds]="editor.openIds()"
+          [activeId]="editor.activeId()"
+          (selected)="open($event)"
+          (pinned)="open($event, true)"
+          (menuAction)="onSidebarMenu($event)"
+        />
+      }
     </div>
     <div
       class="resizer"

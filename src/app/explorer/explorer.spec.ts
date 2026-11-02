@@ -1,0 +1,132 @@
+// @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { signal } from "@angular/core";
+import { TestBed, getTestBed } from "@angular/core/testing";
+import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
+import { TauriBridge } from "../core/tauri";
+import { UI_STATE_KEY, UI_STORAGE } from "../core/ui-state";
+import { Explorer, explorerNodes, type DirEntry } from "./explorer";
+
+const dir = (path: string): DirEntry => ({ path, name: path.split("/").pop()! });
+
+describe("explorerNodes", () => {
+  it("labels roots by path and keeps unloaded folders expandable", () => {
+    const [root] = explorerNodes(["~"], new Map(), new Set());
+    expect(root).toMatchObject({ key: "~", label: "~", leaf: false, expanded: false });
+    expect(root.children).toEqual([]);
+  });
+
+  it("nests loaded children by name and marks the expanded ones", () => {
+    const children = new Map([["/r", [dir("/r/a"), dir("/r/b")]]]);
+    const [root] = explorerNodes(["/r"], children, new Set(["/r"]));
+    expect(root.expanded).toBe(true);
+    expect(root.children!.map((c) => [c.key, c.label])).toEqual([
+      ["/r/a", "a"],
+      ["/r/b", "b"],
+    ]);
+  });
+
+  it("makes a loaded empty folder a leaf", () => {
+    const [root] = explorerNodes(["/r"], new Map([["/r", []]]), new Set());
+    expect(root.leaf).toBe(true);
+  });
+});
+
+const tree: Record<string, DirEntry[]> = {
+  "/r": [dir("/r/a"), dir("/r/locked")],
+  "/r/a": [dir("/r/a/deep")],
+  "/r/locked": [],
+};
+
+async function setup(stored?: object) {
+  TestBed.resetTestingModule();
+  const calls: { path: string; hidden: boolean }[] = [];
+  const data = new Map<string, string>();
+  if (stored) data.set(UI_STATE_KEY, JSON.stringify(stored));
+  TestBed.configureTestingModule({
+    providers: [
+      {
+        provide: TauriBridge,
+        useValue: {
+          invoke: vi.fn(async (_: string, args: { path: string; hidden: boolean }) => {
+            calls.push(args);
+            if (args.path === "/r/locked") throw new Error("permission denied");
+            return tree[args.path] ?? [];
+          }),
+        },
+      },
+      {
+        provide: SettingsStore,
+        useValue: { settings: signal({ ...DEFAULT_SETTINGS, explorerRoots: ["/r"] }) },
+      },
+      {
+        provide: UI_STORAGE,
+        useValue: {
+          getItem: (k: string) => data.get(k) ?? null,
+          setItem: (k: string, v: string) => void data.set(k, v),
+        },
+      },
+    ],
+  });
+  TestBed.overrideComponent(Explorer, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/explorer/explorer.html", "utf8"),
+    },
+  });
+  const fixture = TestBed.createComponent(Explorer);
+  const root = fixture.nativeElement as HTMLElement;
+  const settle = async () => {
+    for (let i = 0; i < 4; i++) {
+      fixture.detectChanges();
+      await fixture.whenStable();
+    }
+  };
+  await settle();
+  const labels = () =>
+    [...root.querySelectorAll('[role="treeitem"]')].map((e) =>
+      e.querySelector(".hx-tree-node-label")?.textContent?.trim(),
+    );
+  const toggle = async (label: string) => {
+    const item = [...root.querySelectorAll('[role="treeitem"]')].find(
+      (e) => e.querySelector(".hx-tree-node-label")?.textContent?.trim() === label,
+    );
+    item!.querySelector<HTMLElement>(".hx-tree-node-toggle")!.click();
+    await settle();
+  };
+  return { calls, data, labels, toggle };
+}
+
+describe("Explorer with the real hx-tree", () => {
+  beforeAll(() => {
+    getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
+  });
+
+  it("shows the configured root and lists nothing below it until it expands", async () => {
+    const { labels, calls } = await setup();
+    expect(labels()).toEqual(["/r"]);
+    expect(calls).toEqual([{ path: "/r", hidden: false }]);
+  });
+
+  it("expands a folder to its subfolders and remembers it", async () => {
+    const { labels, toggle, data } = await setup();
+    await toggle("/r");
+    expect(labels()).toEqual(["/r", "a", "locked"]);
+    expect(JSON.parse(data.get(UI_STATE_KEY)!).expandedDirs).toEqual(["/r"]);
+  });
+
+  it("shows an unreadable folder without children and without an error", async () => {
+    const { labels, toggle } = await setup();
+    await toggle("/r");
+    await toggle("locked");
+    expect(labels()).toEqual(["/r", "a", "locked"]);
+  });
+
+  it("restores the expanded folders after a restart", async () => {
+    const { labels } = await setup({ expandedDirs: ["/r", "/r/a"] });
+    expect(labels()).toEqual(["/r", "a", "deep", "locked"]);
+  });
+});
