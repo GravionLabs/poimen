@@ -23,9 +23,20 @@
   flex: 1;
 }
 
-.view-body {
+/* The padding lives here, not on .view-body: FitAddon measures the computed width of the element
+   xterm opens into, which under border-box includes the padding, so padding on that element made
+   the terminal wider than its content box and clipped the last cell. */
+.view-pad {
   flex: 1;
   min-height: 0;
+  display: flex;
   padding: 4px 0 0 6px;
   background: var(--term-bg);
+}
+
+.view-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
 }
