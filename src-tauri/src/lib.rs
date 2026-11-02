@@ -256,6 +256,13 @@ fn set_theme(theme: String) -> Result<(), String> {
     settings::save_theme(&home, &theme)
 }
 
+/// Writes only the `colorSchema` setting (the settings view): a name or a `{light, dark}` pair.
+#[tauri::command]
+fn set_color_schema(schema: serde_json::Value) -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::save_color_schema(&home, &schema)
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(
@@ -537,6 +544,7 @@ pub fn run() {
             get_settings,
             get_color_schemes,
             set_theme,
+            set_color_schema,
             repo_info,
             open_terminal,
             terminal_input,

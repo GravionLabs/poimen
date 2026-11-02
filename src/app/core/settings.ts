@@ -175,6 +175,18 @@ export class SettingsStore {
     }
   }
 
+  /** Writes the `colorSchema` entry of config.json and applies it at once; the watcher confirms. */
+  async setColorSchema(colorSchema: ColorSchemeSetting): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, colorSchema });
+    try {
+      await this.bridge.invoke("set_color_schema", { schema: colorSchema });
+    } catch (e) {
+      this._settings.set(previous);
+      console.warn(`poimen settings: cannot save colorSchema: ${e}`);
+    }
+  }
+
   private apply(raw: unknown): void {
     const next = parseSettings(raw);
     for (const w of next.warnings) console.warn(`poimen settings: ${w}`);

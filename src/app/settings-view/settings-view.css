@@ -1,0 +1,101 @@
+:host {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+}
+
+.page {
+  max-width: 720px;
+  padding: 16px 24px 32px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 0 16px;
+}
+
+h2 {
+  font-size: 14px;
+  margin: 20px 0 8px;
+}
+
+h3 {
+  font-size: 12px;
+  margin: 16px 0 6px;
+  color: var(--h-text-muted-color);
+  text-transform: uppercase;
+}
+
+.hint {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+}
+
+.radios {
+  display: inline-flex;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.choice {
+  padding: 5px 12px;
+  border: 0;
+  background: none;
+  color: var(--h-text-muted-color);
+  cursor: pointer;
+  font: inherit;
+}
+
+.choice.on {
+  background: var(--h-surface-200, var(--h-content-border-color));
+  color: var(--h-text-color);
+}
+
+.list {
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.option:hover,
+.option:focus-visible {
+  background: var(--h-surface-100, var(--h-content-border-color));
+  outline: none;
+}
+
+.option.on {
+  border-left-color: var(--status-working);
+  font-weight: 600;
+}
+
+.swatches {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+
+.sw {
+  width: 10px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid var(--h-content-border-color);
+}
+
+.sw.big {
+  width: 18px;
+}

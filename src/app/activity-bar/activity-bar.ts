@@ -29,4 +29,6 @@ export class ActivityBar {
   /** True while the sidebar is shown, so the active view looks selected only then. */
   readonly expanded = input(true);
   readonly selected = output<string>();
+  /** The gear at the bottom was clicked: open the settings tab. */
+  readonly settingsOpened = output<void>();
 }
