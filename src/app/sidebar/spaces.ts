@@ -15,13 +15,23 @@ export function paneDetail(row: PaneRow): string | undefined {
   return step || row.pane.terminal_title_stripped?.trim() || undefined;
 }
 
+/** Comparison key: parts that differ only by case or whitespace count as the same text. */
+const same = (text: string | undefined) => (text ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
 /**
  * Second line of a pane row: only what the bold name does not already say. The name of an agent
  * row is its title, so the title (and an agent kind equal to the name) is left out.
  */
 export function subline(row: PaneRow): string {
   const detail = paneDetail(row);
-  return [row.agent, detail].filter((part) => part && part !== row.name).join(" · ");
+  const seen = new Set([same(row.name)]);
+  return [row.agent, detail]
+    .filter((part): part is string => {
+      if (!part || seen.has(same(part))) return false;
+      seen.add(same(part));
+      return true;
+    })
+    .join(" · ");
 }
 
 /** How the sidebar marks a pane: the active tab (strong) or merely an open tab (weak). */

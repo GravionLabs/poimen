@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpaceNode } from "../core/herdr";
-import { blocksCollapse, isDoubleClick, spaceNodes } from "./sidebar";
+import { isDoubleClick, spaceNodes } from "./sidebar";
 
 const space: SpaceNode = {
   workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
@@ -37,18 +37,5 @@ describe("isDoubleClick", () => {
     expect(isDoubleClick({ key: "p1", at: 1000 }, "p2", 1100)).toBe(false);
     expect(isDoubleClick({ key: "p1", at: 1000 }, "p1", 1500)).toBe(false);
     expect(isDoubleClick(null, "p1", 1000)).toBe(false);
-  });
-});
-
-describe("blocksCollapse", () => {
-  const item = (expanded?: string) =>
-    ({ getAttribute: () => expanded ?? null }) as unknown as Element;
-
-  it("blocks ArrowLeft on an expanded item only", () => {
-    expect(blocksCollapse("ArrowLeft", item("true"))).toBe(true);
-    expect(blocksCollapse("ArrowLeft", item())).toBe(false);
-    expect(blocksCollapse("ArrowLeft", item("false"))).toBe(false);
-    expect(blocksCollapse("ArrowLeft", null)).toBe(false);
-    expect(blocksCollapse("ArrowRight", item("true"))).toBe(false);
   });
 });

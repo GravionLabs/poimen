@@ -1,8 +1,6 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  DestroyRef,
-  ElementRef,
   Injector,
   afterNextRender,
   computed,
@@ -70,11 +68,6 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
   });
 }
 
-/** Whether a key press would collapse an expanded tree item (ArrowLeft on an open parent). */
-export function blocksCollapse(key: string, item: Element | null): boolean {
-  return key === "ArrowLeft" && item?.getAttribute("aria-expanded") === "true";
-}
-
 export const DOUBLE_CLICK_MS = 400;
 
 /** Whether a click on `key` at `now` completes a double click that started with `last`. */
@@ -109,17 +102,10 @@ export class Sidebar {
   protected readonly query = signal("");
   protected readonly selection = signal<string | null>(null);
 
-  constructor() {
-    // Workspaces stay expanded: swallow the tree's collapse key before the tree sees it.
-    const host: HTMLElement = inject(ElementRef).nativeElement;
-    const onKey = (event: KeyboardEvent) => {
-      const item = (event.target as HTMLElement).closest("[role=treeitem]");
-      if (!blocksCollapse(event.key, item)) return;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    host.addEventListener("keydown", onKey, true);
-    inject(DestroyRef).onDestroy(() => host.removeEventListener("keydown", onKey, true));
+  /** The chevron at the right edge of a workspace row: expands or collapses it (not a selection). */
+  protected toggle(tree: HxTree, key: string, event: Event): void {
+    event.stopPropagation();
+    tree.toggle(key);
   }
 
   protected marks(row: PaneRow) {

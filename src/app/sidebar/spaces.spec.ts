@@ -76,6 +76,27 @@ describe("subline never repeats the name", () => {
     expect(subline(r)).toBe("claude · review");
   });
 
+  it("ignores case and whitespace differences against the name", () => {
+    const r = row({
+      name: "Projektstand",
+      agent: "Claude",
+      pane: { terminal_title_stripped: "  projektstand " },
+    });
+    expect(subline(r)).toBe("Claude");
+    expect(subline(row({ name: "claude  code", agent: "Claude Code" }))).toBe("");
+  });
+
+  it("shows the kind once when the title repeats it", () => {
+    const r = row({ name: "Fix", agent: "claude", pane: { terminal_title_stripped: "claude" } });
+    expect(subline(r)).toBe("claude");
+    const upper = row({
+      name: "Fix",
+      agent: "claude",
+      pane: { terminal_title_stripped: "Claude" },
+    });
+    expect(subline(upper)).toBe("claude");
+  });
+
   it("is empty when the name is the kind and nothing else is new", () => {
     expect(subline(row({ name: "claude", agent: "claude" }))).toBe("");
   });

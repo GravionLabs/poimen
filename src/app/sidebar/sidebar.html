@@ -14,6 +14,7 @@
   (input)="setQuery($event)"
 />
 <hx-tree
+  #tree
   class="spaces"
   ariaLabel="herdr spaces"
   selectionMode="single"
@@ -22,7 +23,7 @@
   [selection]="selection()"
   (selectionChange)="onSelect($event)"
 >
-  <ng-template hxTreeNode let-node>
+  <ng-template hxTreeNode let-node let-expanded="expanded">
     @let d = data(node);
     @if (d.kind === "workspace") {
       <span class="space">
@@ -34,6 +35,12 @@
         @if (d.meta) {
           <span class="space-meta">{{ d.meta }}</span>
         }
+        <span
+          class="chevron"
+          [class.open]="expanded"
+          aria-hidden="true"
+          (click)="toggle(tree, node.key, $event)"
+        ></span>
       </span>
     } @else {
       @let m = marks(d.row);

@@ -37,7 +37,7 @@
   --h-tree-node-padding: 2px 0.375rem;
 }
 
-/* No expand/collapse icon (workspaces are always expanded); its 1.75rem box made rows taller. */
+/* Helix's toggle at the left is hidden: it takes indent and its 1.75rem box made rows taller. */
 .spaces ::ng-deep .hx-tree-node-toggle {
   display: none;
 }
@@ -45,11 +45,12 @@
 /* The pane of the active tab: bar at the left edge and a stronger background. */
 .spaces ::ng-deep .hx-tree-node-content:has(.row.active) {
   background: color-mix(in srgb, var(--h-highlight-background) 22%, transparent);
-  box-shadow: inset 3px 0 0 var(--h-highlight-background);
+  box-shadow: inset 3px 0 0 var(--h-primary-color);
 }
 
 .space {
   display: flex;
+  flex: 1;
   min-width: 0;
   gap: 6px;
   align-items: center;
@@ -74,9 +75,15 @@
   line-height: 16px;
 }
 
+/*
+ * Contrast: --h-highlight-background is a pale (light) or translucent (dark) tint, a background token,
+ * so it is never text. An open pane is bold in --h-text-color, which stays readable on the content
+ * background and on helix's selected node (--h-tree-node-selected-background = highlight-background);
+ * the muted line 2 uses --h-text-muted-color (AA on both). The active bar uses --h-primary-color.
+ */
 .row.open .name {
   font-weight: 700;
-  color: var(--h-highlight-background);
+  color: var(--h-text-color);
 }
 
 .icon {
@@ -162,4 +169,21 @@
 
 .text {
   font-style: italic;
+}
+
+/* Expand/collapse state at the right edge of a workspace row; a click toggles (see Sidebar.toggle). */
+.chevron {
+  flex: none;
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentcolor;
+  border-bottom: 1.5px solid currentcolor;
+  transform: rotate(-45deg);
+  cursor: pointer;
+  transition: transform 120ms;
+}
+
+.chevron.open {
+  transform: rotate(45deg) translate(-1px, -1px);
 }
