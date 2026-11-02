@@ -5,6 +5,7 @@ import type { PluginAction, Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import { Keymap } from "./keymap";
 import { PluginActions } from "./plugin-actions";
+import { PluginPanes } from "./plugin-panes";
 import { SettingsStore } from "./settings";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -41,8 +42,24 @@ describe("CommandPalette", () => {
       action("link-trim", "open", "Open link without trailing punctuation"),
       action("review-popup", "open", "Open the review popup"),
     ]);
+    tauri.answer("plugin_pane_defs", () => [
+      {
+        plugin_id: "deliver-board",
+        plugin_name: "deliver-board",
+        entrypoint: "board",
+        title: "Deliver board",
+      },
+    ]);
     const injector = Injector.create({
-      providers: [TauriBridge, HerdrStore, SettingsStore, Keymap, PluginActions, CommandPalette],
+      providers: [
+        TauriBridge,
+        HerdrStore,
+        SettingsStore,
+        Keymap,
+        PluginActions,
+        PluginPanes,
+        CommandPalette,
+      ],
     });
     await injector.get(HerdrStore).refresh();
     palette = injector.get(CommandPalette);
@@ -56,6 +73,15 @@ describe("CommandPalette", () => {
       "Open link without trailing punctuation",
       "Open the review popup",
     ]);
+  });
+
+  it("lists the panes plugins declare as tabs to open", async () => {
+    await palette.open();
+    const rows = palette.items().filter((i) => i.kind === "pane");
+    expect(rows.map((i) => i.title)).toEqual(["Open Deliver board as tab"]);
+    expect(rows[0]).toMatchObject({ hint: "deliver-board", def: { entrypoint: "board" } });
+    palette.setQuery("deliver board");
+    expect(palette.items()[0].kind).toBe("pane");
   });
 
   it("shows the shortcut of a command as its hint", async () => {

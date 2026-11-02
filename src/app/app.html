@@ -88,6 +88,7 @@
 <app-command-palette
   [activePaneId]="activePaneId()"
   (commandChosen)="run($event)"
+  (paneChosen)="openPluginPane($event)"
   (failed)="showError($event)"
 />
 
@@ -119,7 +120,7 @@
           [activeId]="g.activeId"
           [groupId]="'' + g.id"
           [menu]="menuFor(g)"
-          (selected)="editor.activate($event)"
+          (selected)="onTabSelected($event)"
           (closed)="editor.close($event)"
           (pinned)="editor.pin($event)"
           (moved)="editor.move($event.from, $event.to, g.id)"

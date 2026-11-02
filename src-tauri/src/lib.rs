@@ -125,6 +125,50 @@ async fn plugin_invoke(
     Ok(())
 }
 
+/// Lists the panes plugins declare (`panes[]` of `plugin.list`).
+#[tauri::command]
+async fn plugin_pane_defs(client: State<'_, Client>) -> Result<Vec<herdr::PluginPaneDef>, String> {
+    let result = herdr_call(client.inner(), "plugin.list", json!({})).await?;
+    Ok(herdr::parse_plugin_pane_defs(&result))
+}
+
+/// Opens a plugin pane as a tab (`plugin.pane.open`); returns the pane herdr created.
+#[tauri::command]
+async fn plugin_pane_open(
+    client: State<'_, Client>,
+    plugin_id: String,
+    entrypoint: String,
+    workspace_id: Option<String>,
+) -> Result<herdr::PluginPane, String> {
+    let params = herdr::plugin_pane_open_params(&plugin_id, &entrypoint, workspace_id.as_deref());
+    let result = herdr_call(client.inner(), "plugin.pane.open", params).await?;
+    herdr::parse_plugin_pane(&result).ok_or_else(|| "herdr answered without a plugin pane".into())
+}
+
+/// Focuses a plugin pane in herdr (`plugin.pane.focus`).
+#[tauri::command]
+async fn plugin_pane_focus(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
+    herdr_call(
+        client.inner(),
+        "plugin.pane.focus",
+        json!({ "pane_id": pane_id }),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Closes a plugin pane in herdr (`plugin.pane.close`); only on an explicit user action.
+#[tauri::command]
+async fn plugin_pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
+    herdr_call(
+        client.inner(),
+        "plugin.pane.close",
+        json!({ "pane_id": pane_id }),
+    )
+    .await?;
+    Ok(())
+}
+
 /// Opens a new terminal in a workspace as a new tab (`tab.create`); returns its pane id.
 #[tauri::command]
 async fn terminal_create(
@@ -602,6 +646,10 @@ pub fn run() {
             terminal_create,
             plugin_actions,
             plugin_invoke,
+            plugin_pane_defs,
+            plugin_pane_open,
+            plugin_pane_focus,
+            plugin_pane_close,
             create_space,
             list_dirs,
             list_child_dirs,

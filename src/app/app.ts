@@ -34,6 +34,7 @@ import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { CommandPalette } from "./core/command-palette";
 import { PluginActions, pluginMenuId } from "./core/plugin-actions";
+import { PluginPanes, type PluginPaneDef } from "./core/plugin-panes";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
@@ -83,6 +84,7 @@ export class App {
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
   protected readonly plugins = inject(PluginActions);
+  private readonly pluginPanes = inject(PluginPanes);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -101,6 +103,7 @@ export class App {
   protected readonly groupItems = computed(() => {
     const snap = this.store.snapshot();
     this.store.panes();
+    const names = this.pluginPanes.names();
     return new Map(
       this.editor.groups().map((group) => [
         group.id,
@@ -115,7 +118,11 @@ export class App {
           const workspace = pane
             ? snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label
             : undefined;
-          const header = tabHeader(workspace, pane ? rowName(pane, tabLabel) : tab.paneId);
+          const pluginName = names.get(tab.paneId);
+          const header = tabHeader(
+            workspace,
+            pluginName ?? (pane ? rowName(pane, tabLabel) : tab.paneId),
+          );
           return {
             id: tab.paneId,
             label: header.label,
@@ -305,6 +312,7 @@ export class App {
         disabled: single,
       },
       { action: "close", label: "Close" },
+      { action: "plugin-pane-close", label: "Close plugin pane" },
       { action: "pane-split-right", label: "New pane to the right" },
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
@@ -317,11 +325,34 @@ export class App {
   protected onTabMenu(id: string, action: string): void {
     if (action.startsWith("plugin:")) {
       if (tabKind(id) === "pane") void this.runPlugin(this.plugins.find(action), id);
+    } else if (action === "plugin-pane-close") {
+      void this.pluginPanes.close(id).then((error) => error && this.showError(error));
     } else if (action === "split-right") this.editor.split(id, "row");
     else if (action === "split-down") this.editor.split(id, "column");
     else if (action === "close") this.editor.close(id);
     else if (action.startsWith("pane-") && tabKind(id) === "pane")
       this.paneAction(id, action.slice("pane-".length));
+  }
+
+  /** A tab is picked: show it, and bring a plugin pane to the front in herdr too. */
+  protected onTabSelected(id: string): void {
+    this.editor.activate(id);
+    void this.pluginPanes.focus(id);
+  }
+
+  /** A plugin pane chosen in the palette opens as a herdr tab and as an editor tab. */
+  protected async openPluginPane(def: PluginPaneDef): Promise<void> {
+    const active = this.activePaneId();
+    const result = await this.pluginPanes.open(
+      def,
+      active ? this.pane(active)?.workspace_id : undefined,
+    );
+    if ("error" in result) {
+      this.showError(result.error);
+      return;
+    }
+    const pane = this.pane(result.paneId);
+    if (pane) this.open(pane, true);
   }
 
   /** Runs a plugin action with `paneId` as context; a refusal shows as a notice. */
