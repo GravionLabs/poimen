@@ -5,8 +5,12 @@ export function stateLabel(status: AgentStatus): string | undefined {
   return status === "unknown" ? undefined : status;
 }
 
-/** Title or step of a pane: the `deliver_step` token, else the stripped terminal title. */
+/**
+ * Title or step of an agent pane: the `deliver_step` token, else the stripped terminal title.
+ * A plain terminal has none: its title is `user@host:~/path`, which herdr does not show.
+ */
 export function paneDetail(row: PaneRow): string | undefined {
+  if (!row.agent) return undefined;
   const step = row.pane.tokens?.["deliver_step"]?.trim();
   return step || row.pane.terminal_title_stripped?.trim() || undefined;
 }

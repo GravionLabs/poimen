@@ -5,6 +5,7 @@ import {
   decodeBase64,
   nextWaiting,
   paneLabel,
+  rowName,
   waitingCount,
   type Pane,
   type Snapshot,
@@ -53,6 +54,31 @@ describe("paneLabel", () => {
     expect(paneLabel(pane({ terminal_title_stripped: "", agent: "claude" }))).toBe("claude");
     expect(paneLabel(pane({ cwd: "/Users/x/Source/poimen/" }))).toBe("poimen");
     expect(paneLabel(pane({}))).toBe("w1:p1");
+  });
+});
+
+describe("rowName", () => {
+  const title = "jkaufmann@M01:~/Source/gravionlabs/agentlens";
+  it("shows the pane label of a labelled terminal", () => {
+    expect(rowName(pane({ label: "terminal", terminal_title_stripped: title }), "x")).toBe(
+      "terminal",
+    );
+  });
+  it("falls back to the tab label, then the directory name", () => {
+    expect(rowName(pane({ terminal_title_stripped: title }), "terminal")).toBe("terminal");
+    expect(
+      rowName(pane({ terminal_title_stripped: title, cwd: "/Users/x/gravionlabs/agentlens" })),
+    ).toBe("agentlens");
+  });
+  it("never shows user@host or a full path", () => {
+    const name = rowName(pane({ terminal_title_stripped: title, cwd: "/a/b/ci" }));
+    expect(name).not.toContain("@");
+    expect(name).not.toContain("/");
+  });
+  it("keeps the session title of an agent pane", () => {
+    expect(
+      rowName(pane({ agent: "claude", terminal_title_stripped: "Projektstand", label: "x" }), "t"),
+    ).toBe("Projektstand");
   });
 });
 
