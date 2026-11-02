@@ -109,7 +109,12 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 {
   "theme": "system",
   "terminal": { "fontFamily": "JetBrains Mono", "fontSize": 13, "ghostty": false, "autoControl": true },
-  "shortcuts": { "toggleSidebar": "Ctrl+Alt+B", "refresh": "" }
+  "shortcuts": { "toggleSidebar": "Ctrl+Alt+B", "refresh": "" },
+  "sidebar": {
+    "rows": {
+      "agent": [["state_icon", { "token": "name", "bold": true }, "state_text"], ["agent", "$deliver_step", "branch", "dir"]]
+    }
+  }
 }
 ```
 
@@ -117,6 +122,7 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 - `terminal.fontFamily` / `terminal.fontSize` (6 to 72, default 13).
 - `terminal.autoControl`: `true` (default) opens panes for input when no other client controls them; `false` opens every tab read-only.
 - `shortcuts`: accelerator per action (keys in the table above), such as `Cmd+Shift+K`, `CmdOrCtrl+Alt+Left` or `F5`. It needs Cmd, Ctrl or Alt (or is an F key); an empty string unbinds the action. Unknown actions, invalid accelerators and ones already used by another action log a warning and keep the default.
+- `sidebar.rows.workspace` / `sidebar.rows.agent` / `sidebar.rows.terminal`: what a row of the Spaces tree shows, a list of lines, each a list of tokens (a name, or `{ "token": "<name>", "bold": true, "dim": true }`). Tokens: `state_icon` (status dot), `name`, `state_text`, `agent`, `title` (the `deliver_step` token, else the terminal title), `branch`, `dir` (short path), `tab`, and `$<name>` (the herdr token `<name>` of the pane). On a workspace row `branch` and `dir` are the values all its panes share; on a pane row they show only when they differ from the workspace. Empty values and values equal to an earlier one on the row are skipped. The filter matches the shown values. The default is `workspace`: `[["state_icon","name","state_text","branch","dir"]]`, `agent` and `terminal`: `[["state_icon","name","state_text"],["agent","title","branch","dir"]]`. An unknown token, a wrong type or an empty list logs a warning and keeps the default of that row type.
 - `terminal.ghostty`: `true` takes font family, size and background/foreground from `~/.config/ghostty/config`; explicit entries above win.
 
 ## Releases

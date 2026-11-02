@@ -111,6 +111,11 @@ describe("buildSpaces and filterSpaces", () => {
     expect(filterSpaces(spaces, "claude nomatch")).toEqual([]);
   });
 
+  it("matches only the given values when a values function is passed", () => {
+    expect(filterSpaces(spaces, "claude", () => ["zzz"])).toEqual([]);
+    expect(filterSpaces(spaces, "zzz", () => ["zzz"])[0].rows).toHaveLength(2);
+  });
+
   it("matches the workspace label for all its panes", () => {
     expect(filterSpaces(spaces, "first")[0].rows).toHaveLength(2);
   });

@@ -1,6 +1,13 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { TauriBridge } from "./tauri";
+import {
+  DEFAULT_SIDEBAR_ROWS,
+  isRowToken,
+  type RowLines,
+  type RowType,
+  type SidebarRows,
+} from "../sidebar/spaces";
 
 export type ThemeSetting = "light" | "dark" | "system";
 
@@ -16,6 +23,8 @@ export interface Settings {
   autoControl: boolean;
   /** Accelerator per action: the defaults over the valid `shortcuts` of config.json. */
   shortcuts: Shortcuts;
+  /** Lines and tokens per row type: the defaults over the valid `sidebar.rows` of config.json. */
+  sidebarRows: SidebarRows;
   warnings: string[];
 }
 
@@ -31,8 +40,35 @@ export const DEFAULT_SETTINGS: Settings = {
   colors: null,
   autoControl: true,
   shortcuts: DEFAULT_SHORTCUTS,
+  sidebarRows: DEFAULT_SIDEBAR_ROWS,
   warnings: [],
 };
+
+/** A valid list of lines of tokens, or `null`. */
+function parseRowLines(raw: unknown): RowLines | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const lines: RowLines = [];
+  for (const l of raw) {
+    if (!Array.isArray(l) || l.length === 0) return null;
+    const line: RowLines[number] = [];
+    for (const t of l) {
+      if (typeof t === "string" && isRowToken(t)) line.push({ token: t });
+      else if (typeof t === "object" && t !== null) {
+        const o = t as Record<string, unknown>;
+        if (typeof o["token"] !== "string" || !isRowToken(o["token"])) return null;
+        line.push({ token: o["token"], bold: o["bold"] === true, dim: o["dim"] === true });
+      } else return null;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+function parseSidebarRows(raw: unknown): SidebarRows {
+  const r = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  const pick = (type: RowType) => parseRowLines(r[type]) ?? DEFAULT_SIDEBAR_ROWS[type];
+  return { workspace: pick("workspace"), agent: pick("agent"), terminal: pick("terminal") };
+}
 
 /** Accepts a payload from the backend; anything malformed falls back to the defaults. */
 export function parseSettings(raw: unknown): Settings {
@@ -53,6 +89,7 @@ export function parseSettings(raw: unknown): Settings {
         : null,
     autoControl: r["autoControl"] !== false,
     shortcuts: parseShortcuts(r["shortcuts"]),
+    sidebarRows: parseSidebarRows(r["sidebarRows"]),
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
       : [],

@@ -216,11 +216,20 @@ export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoI
 }
 
 /** Keeps rows matching `query` (name, agent, branch, tab, directory, text; every word must match). */
-export function filterSpaces(spaces: SpaceNode[], query: string): SpaceNode[] {
+export function filterSpaces(
+  spaces: SpaceNode[],
+  query: string,
+  /** Texts a row is matched on instead of the defaults (the values of the shown tokens). */
+  values?: (row: PaneRow) => string[],
+): SpaceNode[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return spaces;
   const matches = (row: PaneRow, space: string) => {
-    const hay = [row.name, row.agent, row.branch, row.tab, row.dir, row.text, space]
+    const hay = (
+      values
+        ? [...values(row), space]
+        : [row.name, row.agent, row.branch, row.tab, row.dir, row.text, space]
+    )
       .filter(Boolean)
       .join("\n")
       .toLowerCase();

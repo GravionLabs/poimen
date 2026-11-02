@@ -27,14 +27,37 @@
     @let d = data(node);
     @if (d.kind === "workspace") {
       <span class="space" (contextmenu)="openMenu($event, 'workspace', d.workspace.workspace_id)">
-        <span class="dot status-{{ d.status }}"></span>
-        <span class="space-name">{{ d.workspace.label }}</span>
-        @if (d.state) {
-          <span class="state state-{{ d.status }}">{{ d.state }}</span>
-        }
-        @if (d.meta) {
-          <span class="space-meta">{{ d.meta }}</span>
-        }
+        <span class="main space-main">
+          @for (line of d.lines; track $index) {
+            <span class="line">
+              @for (seg of line; track $index) {
+                @switch (seg.kind) {
+                  @case ("dot") {
+                    <span class="dot status-{{ seg.status }}"></span>
+                  }
+                  @case ("name") {
+                    <span class="space-name" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                      seg.text
+                    }}</span>
+                  }
+                  @case ("state") {
+                    <span
+                      class="state state-{{ seg.status }}"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      >{{ seg.text }}</span
+                    >
+                  }
+                  @default {
+                    <span class="space-meta" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                      (seg.sep ? "· " : "") + seg.text
+                    }}</span>
+                  }
+                }
+              }
+            </span>
+          }
+        </span>
         <span
           class="chevron"
           [class.open]="expanded"
@@ -58,15 +81,34 @@
           >{{ glyph(d.row) }}</span
         >
         <span class="main">
-          <span class="line">
-            <span class="dot status-{{ d.row.pane.agent_status }}"></span>
-            <span class="name">{{ d.row.name }}</span>
-            @if (d.state) {
-              <span class="state state-{{ d.row.pane.agent_status }}">{{ d.state }}</span>
-            }
-          </span>
-          @if (d.sub) {
-            <span class="text">{{ d.sub }}</span>
+          @for (line of d.lines; track $index) {
+            <span class="line">
+              @for (seg of line; track $index) {
+                @switch (seg.kind) {
+                  @case ("dot") {
+                    <span class="dot status-{{ seg.status }}"></span>
+                  }
+                  @case ("name") {
+                    <span class="name" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                      seg.text
+                    }}</span>
+                  }
+                  @case ("state") {
+                    <span
+                      class="state state-{{ seg.status }}"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      >{{ seg.text }}</span
+                    >
+                  }
+                  @default {
+                    <span class="text" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                      (seg.sep ? "· " : "") + seg.text
+                    }}</span>
+                  }
+                }
+              }
+            </span>
           }
         </span>
       </span>
