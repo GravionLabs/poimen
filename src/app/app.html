@@ -65,6 +65,7 @@
 />
 
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
+<app-space-dialog />
 
 <ng-template #nodeTpl let-node>
   @if (node.kind === "split") {

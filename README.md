@@ -37,6 +37,7 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
 
 Panes are managed in herdr, so the result shows up through herdr's events like any other change.
 
+- **New space**: the "+" button in the Spaces header opens a dialog with a directory field (completes directories as you type), a Browse button (native folder picker) and a label (default: the directory name). It creates a herdr workspace (`workspace.create` with `cwd` and `label`) and focuses it. A space that already has a pane inside the directory, else one labelled with the directory name, is focused instead and nothing is created. A label that another space uses falls back to the path relative to the home directory. A missing directory or a failing herdr call shows the error in the dialog.
 - **New terminal**: File > New Terminal (`CmdOrCtrl+T`), or right click a workspace in the sidebar. A dialog asks for the directory (the workspace's pane directories are suggested; empty uses herdr's default). It creates a tab in the workspace (`tab.create`) and opens it.
 - **Split**: right click a pane in the sidebar (Split right / Split down), or its tab (New pane to the right / below). The new shell starts in the pane's directory (`pane.split`).
 - **Close pane**: right click a pane in the sidebar or its tab (Close pane / Close herdr pane). It always asks first and warns when an agent is working or waiting (`pane.close`). Closing a tab with the tab's own Close entry still only closes the view.

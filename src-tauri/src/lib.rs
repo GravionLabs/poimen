@@ -3,6 +3,7 @@ mod herdr;
 #[cfg(test)]
 mod live;
 mod settings;
+mod spaces;
 mod stream;
 mod watch;
 
@@ -112,6 +113,66 @@ async fn terminal_create(
     let params = herdr::tab_create_params(&workspace_id, cwd.as_deref());
     let result = herdr_call(client.inner(), "tab.create", params).await?;
     Ok(herdr::created_pane_id(&result))
+}
+
+/// Creates a space (`workspace.create`) for a directory and focuses it; when a space for the
+/// directory exists (a pane inside it, else one labelled with its name) that one is focused.
+#[tauri::command]
+async fn create_space(
+    client: State<'_, Client>,
+    cwd: String,
+    label: Option<String>,
+) -> Result<spaces::SpaceOutcome, String> {
+    let home = home_dir();
+    let dir = spaces::resolve_dir(&cwd, home.as_deref())?;
+    let client = client.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let call =
+            |method: &str, params: Value| client.request(method, params).map_err(|e| e.to_string());
+        let list = |method: &str, key: &str| {
+            Ok::<Vec<Value>, String>(
+                call(method, json!({}))?[key]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
+            )
+        };
+        let workspaces = list("workspace.list", "workspaces")?;
+        let panes = list("pane.list", "panes")?;
+        if let Some(workspace_id) = spaces::find_space(&dir, &workspaces, &panes) {
+            call("workspace.focus", spaces::focus_params(&workspace_id))?;
+            return Ok(spaces::SpaceOutcome {
+                workspace_id,
+                created: false,
+            });
+        }
+        let label = spaces::space_label(
+            &dir,
+            label.as_deref().unwrap_or_default(),
+            home.as_deref(),
+            &workspaces,
+        );
+        let result = call("workspace.create", spaces::create_params(&dir, &label))?;
+        let workspace_id = spaces::created_workspace_id(&result)
+            .ok_or("herdr did not report the new workspace")?;
+        call("workspace.focus", spaces::focus_params(&workspace_id))?;
+        Ok(spaces::SpaceOutcome {
+            workspace_id,
+            created: true,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Directories matching a typed path, for the completion of path fields.
+#[tauri::command]
+async fn list_dirs(input: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        spaces::list_dirs(&input, home_dir().as_deref(), 50)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Version and protocol of the running herdr; `None` when unreachable or too old.
@@ -368,6 +429,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(client.clone())
         .manage(Sessions::default())
         .manage(HerdrBin(bin))
@@ -411,6 +473,8 @@ pub fn run() {
             agent_rename,
             pane_rename,
             terminal_create,
+            create_space,
+            list_dirs,
             app_version,
             get_settings,
             set_theme,
