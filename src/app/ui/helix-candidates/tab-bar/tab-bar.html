@@ -1,4 +1,12 @@
-<div class="strip" role="tablist" aria-orientation="horizontal">
+<div
+  class="strip"
+  role="tablist"
+  aria-orientation="horizontal"
+  [class.drop-end]="foreignAt() === tabs().length"
+  (dragover)="stripOver($event)"
+  (dragleave)="foreignAt.set(null)"
+  (drop)="stripDrop($event)"
+>
   @for (tab of tabs(); track tab.id; let i = $index) {
     <div
       class="tab"
@@ -6,13 +14,16 @@
       draggable="true"
       [class.active]="tab.id === activeId()"
       [class.preview]="tab.preview"
-      [class.drop-before]="dropAt() === i && dragging() !== null && dragging()! > i"
+      [class.drop-before]="
+        (dropAt() === i && dragging() !== null && dragging()! > i) || foreignAt() === i
+      "
       [class.drop-after]="dropAt() === i && dragging() !== null && dragging()! < i"
       [attr.aria-selected]="tab.id === activeId()"
       [attr.tabindex]="tab.id === activeId() ? 0 : -1"
       [title]="tab.title ?? tab.label"
       (click)="selected.emit(tab.id)"
       (dblclick)="pinned.emit(tab.id)"
+      (contextmenu)="openMenu($event, tab.id)"
       (auxclick)="middleClick($event, tab.id)"
       (keydown)="key($event, i)"
       (dragstart)="dragStart($event, i)"
@@ -41,3 +52,30 @@
   }
 </div>
 <div class="actions"><ng-content /></div>
+@if (menuAt(); as at) {
+  <button
+    type="button"
+    class="menu-backdrop"
+    tabindex="-1"
+    aria-label="Close menu"
+    (click)="closeMenu()"
+    (contextmenu)="$event.preventDefault(); closeMenu()"
+  ></button>
+  <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
+    @for (item of menu(); track item.action) {
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        [disabled]="item.disabled"
+        (click)="choose(item)"
+        (keydown.escape)="closeMenu()"
+      >
+        <span>{{ item.label }}</span>
+        @if (item.shortcut) {
+          <span class="shortcut">{{ item.shortcut }}</span>
+        }
+      </button>
+    }
+  </div>
+}

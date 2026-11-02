@@ -35,6 +35,9 @@ describe("TabBar close button name", () => {
       tabContent = () => undefined;
       dragging = () => null;
       dropAt = () => null;
+      foreignAt = () => null;
+      menuAt = () => null;
+      menu = () => [];
     }
     TestBed.resetTestingModule();
     const fixture = TestBed.createComponent(Host);
