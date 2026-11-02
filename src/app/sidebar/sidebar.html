@@ -4,34 +4,60 @@
     herdr not reachable: {{ reason }}
   </hx-message>
 }
-<nav aria-label="herdr panes">
-  @for (node of store.tree(); track node.workspace.workspace_id) {
-    <details class="workspace" open>
-      <summary>
-        <span class="dot status-{{ node.workspace.agent_status }}"></span>
-        <span>{{ node.workspace.label }}</span>
-      </summary>
-      @for (tabNode of node.tabs; track tabNode.tab.tab_id) {
-        @for (pane of tabNode.panes; track pane.pane_id) {
-          <button
-            type="button"
-            class="pane-row"
-            [class.open]="openIds().has(pane.pane_id)"
-            [title]="rowTitle(pane)"
-            (click)="selected.emit(pane)"
-          >
-            <span class="dot status-{{ pane.agent_status }}"></span>
-            <span class="label">{{ paneLabel(pane) }}</span>
-            <span class="tab">
-              {{
-                tabNode.panes.length > 1
-                  ? tabNode.tab.label + " · " + pane.pane_id
-                  : tabNode.tab.label
-              }}
+<input
+  hx-input
+  class="filter"
+  type="search"
+  placeholder="Filter by name, agent, branch"
+  aria-label="Filter panes"
+  [value]="query()"
+  (input)="setQuery($event)"
+/>
+<hx-tree
+  class="spaces"
+  ariaLabel="herdr spaces"
+  selectionMode="single"
+  emptyMessage="No matching panes"
+  [value]="nodes()"
+  [selection]="selection()"
+  (selectionChange)="onSelect($event)"
+>
+  <ng-template hxTreeNode let-node>
+    @let d = data(node);
+    @if (d.kind === "workspace") {
+      <span class="space">
+        <span class="dot status-{{ d.workspace.agent_status }}"></span>
+        <span class="space-name">{{ d.workspace.label }}</span>
+      </span>
+    } @else {
+      <span class="row" [class.open]="openIds().has(d.row.pane.pane_id)" [title]="rowTitle(d.row)">
+        <span
+          class="icon"
+          [class.agent]="d.row.agent"
+          [attr.aria-label]="d.row.agent ? 'Agent ' + d.row.agent : 'Terminal'"
+          >{{ glyph(d.row) }}</span
+        >
+        <span class="main">
+          <span class="line">
+            <span class="dot status-{{ d.row.pane.agent_status }}"></span>
+            <span class="name">{{ d.row.name }}</span>
+            <span class="tab">{{ d.row.tab }}</span>
+          </span>
+          @if (d.row.branch || d.row.dir) {
+            <span class="meta">
+              @if (d.row.branch) {
+                <span class="branch">{{ d.row.worktree ? "⎇ wt " : "⎇ " }}{{ d.row.branch }}</span>
+              }
+              @if (d.row.dir) {
+                <span class="dir">{{ shortPath(d.row.dir) }}</span>
+              }
             </span>
-          </button>
-        }
-      }
-    </details>
-  }
-</nav>
+          }
+          @if (d.row.text) {
+            <span class="text">{{ d.row.text }}</span>
+          }
+        </span>
+      </span>
+    }
+  </ng-template>
+</hx-tree>

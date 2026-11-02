@@ -1,3 +1,4 @@
+mod git;
 mod herdr;
 #[cfg(test)]
 mod live;
@@ -29,6 +30,16 @@ async fn snapshot(client: State<'_, Client>) -> Result<Value, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Branch and worktree flag per directory (read-only `git rev-parse`).
+#[tauri::command]
+async fn repo_info(
+    dirs: Vec<String>,
+) -> Result<std::collections::HashMap<String, git::RepoInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || git::infos(dirs))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -147,6 +158,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
+            repo_info,
             open_terminal,
             terminal_input,
             terminal_resize,

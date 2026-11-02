@@ -1,10 +1,13 @@
 import { DestroyRef, Injectable, computed, inject, signal } from "@angular/core";
 import {
   applyStatus,
+  buildSpaces,
   buildTree,
+  paneDir,
   waitingCount,
   type HerdrEvent,
   type Pane,
+  type RepoInfo,
   type Snapshot,
 } from "./herdr";
 import { TauriBridge, type Unlisten } from "./tauri";
@@ -25,11 +28,15 @@ export class HerdrStore {
 
   private readonly _snapshot = signal<Snapshot>(EMPTY);
   private readonly _connectionError = signal<string | null>(null);
+  private readonly _repos = signal<ReadonlyMap<string, RepoInfo>>(new Map());
 
   readonly snapshot = this._snapshot.asReadonly();
   /** Why herdr is not reachable; `null` while connected. */
   readonly connectionError = this._connectionError.asReadonly();
+  /** Branch and worktree flag per pane directory; poimen asks git, herdr does not know them. */
+  readonly repos = this._repos.asReadonly();
   readonly tree = computed(() => buildTree(this._snapshot()));
+  readonly spaces = computed(() => buildSpaces(this._snapshot(), this._repos()));
   readonly waiting = computed(() => waitingCount(this._snapshot().panes));
   readonly panes = computed(() => new Map(this._snapshot().panes.map((p) => [p.pane_id, p])));
 
@@ -65,7 +72,9 @@ export class HerdrStore {
     }
     this.refreshing = true;
     try {
-      this._snapshot.set(await this.bridge.invoke<Snapshot>("snapshot"));
+      const snapshot = await this.bridge.invoke<Snapshot>("snapshot");
+      this._snapshot.set(snapshot);
+      await this.readRepos(snapshot);
     } catch (err) {
       this._connectionError.set(String(err));
     } finally {
@@ -74,6 +83,19 @@ export class HerdrStore {
         this.refreshAgain = false;
         void this.refresh();
       }
+    }
+  }
+
+  /** Looks up branch and worktree of the pane directories. A failure only leaves them blank. */
+  private async readRepos(snapshot: Snapshot): Promise<void> {
+    const dirs = [...new Set(snapshot.panes.map(paneDir).filter((d): d is string => !!d))];
+    try {
+      const found = await this.bridge.invoke<Record<string, RepoInfo> | undefined>("repo_info", {
+        dirs,
+      });
+      this._repos.set(new Map(Object.entries(found ?? {})));
+    } catch {
+      // keep the previous values
     }
   }
 
