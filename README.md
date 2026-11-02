@@ -40,6 +40,8 @@ Panes are managed in herdr, so the result shows up through herdr's events like a
 - **New terminal**: File > New Terminal (`CmdOrCtrl+T`), or right click a workspace in the sidebar. A dialog asks for the directory (the workspace's pane directories are suggested; empty uses herdr's default). It creates a tab in the workspace (`tab.create`) and opens it.
 - **Split**: right click a pane in the sidebar (Split right / Split down), or its tab (New pane to the right / below). The new shell starts in the pane's directory (`pane.split`).
 - **Close pane**: right click a pane in the sidebar or its tab (Close pane / Close herdr pane). It always asks first and warns when an agent is working or waiting (`pane.close`). Closing a tab with the tab's own Close entry still only closes the view.
+- **Start agent**: right click a pane in the sidebar or its tab (Start agent...). A dialog asks for the agent kind, an optional name (defaults to the kind) and optional arguments (split on spaces); the pane has to be at its shell prompt (`agent.start`).
+- **Rename**: right click a pane (Rename... / Rename pane...). An agent pane renames the agent (`agent.rename`), a plain terminal its label (`pane.rename`); an empty name clears it.
 
 ## Requirements
 

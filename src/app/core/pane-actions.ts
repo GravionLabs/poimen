@@ -1,5 +1,6 @@
 import { Injectable, inject, signal } from "@angular/core";
 import {
+  agentKind,
   closeWarning,
   paneDir,
   rowName,
@@ -13,7 +14,9 @@ import { TauriBridge } from "./tauri";
 /** A dialog the user has to answer before a pane is created or closed. */
 export type PaneDialogState =
   | { kind: "new"; workspaceId: string; dirs: string[]; cwd: string }
-  | { kind: "close"; paneId: string; name: string; warning: string };
+  | { kind: "close"; paneId: string; name: string; warning: string }
+  | { kind: "agent"; paneId: string; name: string }
+  | { kind: "rename"; paneId: string; agent: boolean; current: string };
 
 /**
  * Creates, splits and closes herdr panes. herdr owns the result: each call only asks herdr, then
@@ -50,6 +53,31 @@ export class PaneActions {
       paneId,
       name: pane ? rowName(pane, tab?.label) : paneId,
       warning: closeWarning(pane),
+    });
+  }
+
+  /** Asks which agent to start (and what to call it) in the shell of `paneId`. */
+  askStartAgent(paneId: string): void {
+    const pane = this.store.pane(paneId);
+    const tab = this.store.snapshot().tabs.find((t) => t.tab_id === pane?.tab_id);
+    this._error.set(null);
+    this._dialog.set({
+      kind: "agent",
+      paneId,
+      name: pane ? rowName(pane, tab?.label) : paneId,
+    });
+  }
+
+  /** Asks for a new name: the agent's name for an agent pane, else the pane label. */
+  askRename(paneId: string): void {
+    const pane = this.store.pane(paneId);
+    const tab = this.store.snapshot().tabs.find((t) => t.tab_id === pane?.tab_id);
+    this._error.set(null);
+    this._dialog.set({
+      kind: "rename",
+      paneId,
+      agent: !!pane && !!agentKind(pane),
+      current: pane ? rowName(pane, tab?.label) : "",
     });
   }
 
@@ -100,6 +128,45 @@ export class PaneActions {
     }
     await this.store.refresh();
     return dialog.paneId;
+  }
+
+  /** Starts `kind` in the pane of the open agent dialog; `args` are split on whitespace. */
+  async confirmStartAgent(kind: string, name: string, args: string): Promise<boolean> {
+    const dialog = this._dialog();
+    if (dialog?.kind !== "agent" || !kind.trim()) return false;
+    this._dialog.set(null);
+    return this.run(() =>
+      this.bridge.invoke("agent_start", {
+        paneId: dialog.paneId,
+        kind: kind.trim(),
+        name: name.trim() || null,
+        args,
+      }),
+    );
+  }
+
+  /** Renames the pane of the open rename dialog; an empty name clears it. */
+  async confirmRename(name: string): Promise<boolean> {
+    const dialog = this._dialog();
+    if (dialog?.kind !== "rename") return false;
+    this._dialog.set(null);
+    return this.run(() =>
+      dialog.agent
+        ? this.bridge.invoke("agent_rename", { target: dialog.paneId, name: name.trim() || null })
+        : this.bridge.invoke("pane_rename", { paneId: dialog.paneId, label: name.trim() || null }),
+    );
+  }
+
+  private async run(call: () => Promise<unknown>): Promise<boolean> {
+    this._error.set(null);
+    try {
+      await call();
+    } catch (err) {
+      this._error.set(String(err));
+      return false;
+    }
+    await this.store.refresh();
+    return true;
   }
 
   private async create(call: () => Promise<string | null>): Promise<Pane | undefined> {

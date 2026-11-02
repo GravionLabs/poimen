@@ -37,6 +37,8 @@ describe("sidebarMenuItems", () => {
     expect(sidebarMenuItems("pane").map((i) => i.action)).toEqual([
       "split-right",
       "split-down",
+      "start-agent",
+      "rename",
       "close",
     ]);
   });

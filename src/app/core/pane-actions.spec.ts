@@ -90,6 +90,62 @@ describe("PaneActions", () => {
     expect(actions.error()).toBeNull();
   });
 
+  it("starts the chosen agent in the pane with name and args", async () => {
+    actions.askStartAgent("w1:p1");
+    expect(actions.dialog()).toMatchObject({ kind: "agent", paneId: "w1:p1" });
+    expect(await actions.confirmStartAgent(" codex ", " helper ", "--fast")).toBe(true);
+    expect(tauri.calls("agent_start")).toEqual([
+      { paneId: "w1:p1", kind: "codex", name: "helper", args: "--fast" },
+    ]);
+    expect(actions.dialog()).toBeNull();
+  });
+
+  it("sends no name when the field is empty and starts nothing without a kind", async () => {
+    actions.askStartAgent("w1:p1");
+    expect(await actions.confirmStartAgent("claude", " ", "")).toBe(true);
+    expect(tauri.calls("agent_start")).toEqual([
+      { paneId: "w1:p1", kind: "claude", name: null, args: "" },
+    ]);
+    actions.askStartAgent("w1:p1");
+    expect(await actions.confirmStartAgent(" ", "", "")).toBe(false);
+    expect(tauri.calls("agent_start")).toHaveLength(1);
+  });
+
+  it("reports a failed agent start", async () => {
+    tauri.answer("agent_start", () => {
+      throw "herdr agent_start_failed: not at a prompt";
+    });
+    actions.askStartAgent("w1:p1");
+    expect(await actions.confirmStartAgent("claude", "", "")).toBe(false);
+    expect(actions.error()).toContain("not at a prompt");
+  });
+
+  it("renames an agent pane through agent.rename", async () => {
+    actions.askRename("w1:p2");
+    expect(actions.dialog()).toMatchObject({ kind: "rename", agent: true });
+    expect(await actions.confirmRename(" review ")).toBe(true);
+    expect(tauri.calls("agent_rename")).toEqual([{ target: "w1:p2", name: "review" }]);
+    expect(tauri.calls("pane_rename")).toEqual([]);
+  });
+
+  it("renames a plain terminal through pane.rename and clears with an empty name", async () => {
+    actions.askRename("w1:p1");
+    expect(actions.dialog()).toMatchObject({ kind: "rename", agent: false });
+    await actions.confirmRename("build");
+    actions.askRename("w1:p1");
+    await actions.confirmRename("  ");
+    expect(tauri.calls("pane_rename")).toEqual([
+      { paneId: "w1:p1", label: "build" },
+      { paneId: "w1:p1", label: null },
+    ]);
+  });
+
+  it("does nothing on confirm without the matching dialog", async () => {
+    expect(await actions.confirmRename("x")).toBe(false);
+    expect(await actions.confirmStartAgent("claude", "", "")).toBe(false);
+    expect(tauri.invoke).not.toHaveBeenCalledWith("agent_rename", expect.anything());
+  });
+
   it("does not close before the user confirmed", () => {
     actions.askClose("w1:p2");
     expect(tauri.calls("pane_close")).toEqual([]);

@@ -287,3 +287,31 @@ export function closeWarning(pane: Pane | undefined): string {
   }
   return `The ${agent} agent in the pane ends.`;
 }
+
+/** Agent kinds `agent.start` supports (`herdr agent start --help`). */
+export const AGENT_KINDS = [
+  "claude",
+  "codex",
+  "gemini",
+  "opencode",
+  "copilot",
+  "cursor",
+  "pi",
+  "devin",
+  "agy",
+  "cline",
+  "omp",
+  "mastracode",
+  "kimi",
+  "kiro",
+  "droid",
+  "amp",
+  "grok",
+  "hermes",
+  "kilo",
+  "qodercli",
+  "qwen",
+  "letta",
+  "maki",
+  "muse",
+] as const;

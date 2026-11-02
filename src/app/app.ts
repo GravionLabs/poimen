@@ -223,6 +223,10 @@ export class App {
     if (action === "split-right" || action === "split-down") {
       const direction = action === "split-right" ? "right" : "down";
       void this.paneActions.split(paneId, direction).then((pane) => pane && this.open(pane, true));
+    } else if (action === "start-agent") {
+      this.paneActions.askStartAgent(paneId);
+    } else if (action === "rename") {
+      this.paneActions.askRename(paneId);
     } else if (action === "close") {
       this.paneActions.askClose(paneId);
     }
@@ -252,6 +256,8 @@ export class App {
       { action: "close", label: "Close" },
       { action: "pane-split-right", label: "New pane to the right" },
       { action: "pane-split-down", label: "New pane below" },
+      { action: "pane-start-agent", label: "Start agent..." },
+      { action: "pane-rename", label: "Rename pane..." },
       { action: "pane-close", label: "Close herdr pane..." },
     ];
   }

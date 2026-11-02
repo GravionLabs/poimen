@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, output, signal } from "@angular/core";
-import type { Pane } from "../core/herdr";
+import { AGENT_KINDS, type Pane } from "../core/herdr";
 import { PaneActions } from "../core/pane-actions";
 
 /** The question for a new terminal (directory) or a pane close (confirmation), and action errors. */
@@ -15,6 +15,7 @@ export class PaneDialog {
   readonly created = output<Pane>();
   /** A pane was closed; the host drops its tab. */
   readonly closed = output<string>();
+  protected readonly kinds = AGENT_KINDS;
   private readonly typed = signal<string | null>(null);
 
   protected cwd(fallback: string): string {
@@ -35,6 +36,16 @@ export class PaneDialog {
   protected async close(): Promise<void> {
     const id = await this.actions.confirmClose();
     if (id) this.closed.emit(id);
+  }
+
+  protected async startAgent(form: HTMLFormElement): Promise<void> {
+    const data = new FormData(form);
+    const field = (key: string) => String(data.get(key) ?? "");
+    await this.actions.confirmStartAgent(field("kind"), field("name"), field("args"));
+  }
+
+  protected async rename(form: HTMLFormElement): Promise<void> {
+    await this.actions.confirmRename(String(new FormData(form).get("name") ?? ""));
   }
 
   protected cancel(): void {

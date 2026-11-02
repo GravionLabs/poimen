@@ -46,6 +46,15 @@ label {
   font: inherit;
 }
 
+label + label {
+  margin-top: 8px;
+}
+
+.hint {
+  margin: 8px 0 0;
+  opacity: 0.7;
+}
+
 .buttons {
   display: flex;
   justify-content: flex-end;

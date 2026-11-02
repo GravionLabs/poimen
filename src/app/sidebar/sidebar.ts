@@ -72,7 +72,7 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
 export interface SidebarMenuAction {
   kind: "workspace" | "pane";
   id: string;
-  action: "new-terminal" | "split-right" | "split-down" | "close";
+  action: "new-terminal" | "split-right" | "split-down" | "start-agent" | "rename" | "close";
 }
 
 /** Entries of the context menu of a workspace row or a pane row. */
@@ -84,6 +84,8 @@ export function sidebarMenuItems(
     : [
         { action: "split-right", label: "Split right" },
         { action: "split-down", label: "Split down" },
+        { action: "start-agent", label: "Start agent..." },
+        { action: "rename", label: "Rename..." },
         { action: "close", label: "Close pane..." },
       ];
 }
