@@ -13,35 +13,52 @@ import { HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/hel
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import {
   filterSpaces,
-  shortPath,
+  type AgentStatus,
   type Pane,
   type PaneRow,
   type SpaceNode,
   type Workspace,
 } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
+import { aggregateStatus, paneLine2, spaceContext, spaceMeta, stateLabel } from "./spaces";
 
 /** What a tree node carries back to the template. */
 export type SpaceData =
-  { kind: "workspace"; workspace: Workspace } | { kind: "pane"; row: PaneRow };
+  | { kind: "workspace"; workspace: Workspace; status: AgentStatus; state?: string; meta: string }
+  | { kind: "pane"; row: PaneRow; state?: string; sub: string };
 
 /** Tree keys: the pane id for a pane, a prefixed workspace id for a workspace. */
 const WORKSPACE_PREFIX = "workspace:";
 
 /** Tree nodes of the (filtered) spaces; a workspace starts expanded (helix only applies it once). */
 export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
-  return spaces.map((space) => ({
-    key: WORKSPACE_PREFIX + space.workspace.workspace_id,
-    label: space.workspace.label,
-    expanded: true,
-    data: { kind: "workspace", workspace: space.workspace },
-    children: space.rows.map((row) => ({
-      key: row.pane.pane_id,
-      label: row.name,
-      leaf: true,
-      data: { kind: "pane", row },
-    })),
-  }));
+  return spaces.map((space) => {
+    const ctx = spaceContext(space);
+    const status = aggregateStatus(space);
+    return {
+      key: WORKSPACE_PREFIX + space.workspace.workspace_id,
+      label: space.workspace.label,
+      expanded: true,
+      data: {
+        kind: "workspace",
+        workspace: space.workspace,
+        status,
+        state: stateLabel(status),
+        meta: spaceMeta(ctx),
+      },
+      children: space.rows.map((row) => ({
+        key: row.pane.pane_id,
+        label: row.name,
+        leaf: true,
+        data: {
+          kind: "pane",
+          row,
+          state: stateLabel(row.pane.agent_status),
+          sub: paneLine2(row, ctx),
+        },
+      })),
+    };
+  });
 }
 
 export const DOUBLE_CLICK_MS = 400;
@@ -75,7 +92,6 @@ export class Sidebar {
   protected readonly store = inject(HerdrStore);
   protected readonly query = signal("");
   protected readonly selection = signal<string | null>(null);
-  protected readonly shortPath = shortPath;
 
   protected readonly nodes = computed(() =>
     spaceNodes(filterSpaces(this.store.spaces(), this.query())),

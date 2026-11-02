@@ -26,8 +26,14 @@
     @let d = data(node);
     @if (d.kind === "workspace") {
       <span class="space">
-        <span class="dot status-{{ d.workspace.agent_status }}"></span>
+        <span class="dot status-{{ d.status }}"></span>
         <span class="space-name">{{ d.workspace.label }}</span>
+        @if (d.state) {
+          <span class="state state-{{ d.status }}">{{ d.state }}</span>
+        }
+        @if (d.meta) {
+          <span class="space-meta">{{ d.meta }}</span>
+        }
       </span>
     } @else {
       <span class="row" [class.open]="openIds().has(d.row.pane.pane_id)" [title]="rowTitle(d.row)">
@@ -41,20 +47,12 @@
           <span class="line">
             <span class="dot status-{{ d.row.pane.agent_status }}"></span>
             <span class="name">{{ d.row.name }}</span>
-            <span class="tab">{{ d.row.tab }}</span>
+            @if (d.state) {
+              <span class="state state-{{ d.row.pane.agent_status }}">{{ d.state }}</span>
+            }
           </span>
-          @if (d.row.branch || d.row.dir) {
-            <span class="meta">
-              @if (d.row.branch) {
-                <span class="branch">{{ d.row.worktree ? "⎇ wt " : "⎇ " }}{{ d.row.branch }}</span>
-              }
-              @if (d.row.dir) {
-                <span class="dir">{{ shortPath(d.row.dir) }}</span>
-              }
-            </span>
-          }
-          @if (d.row.text) {
-            <span class="text">{{ d.row.text }}</span>
+          @if (d.sub) {
+            <span class="text">{{ d.sub }}</span>
           }
         </span>
       </span>
