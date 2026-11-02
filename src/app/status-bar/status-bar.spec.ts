@@ -70,6 +70,7 @@ describe("mode button", () => {
       size = () => undefined;
       appVersion = () => null;
       info = () => null;
+      notice = () => "layout.json: invalid JSON";
       jump = { emit: () => {} };
       control = { emit: (v: boolean) => emitted.push(v) };
       label = connectionLabel;
@@ -86,8 +87,13 @@ describe("mode button", () => {
     const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
       "button.mode-button",
     )!;
-    return { button, emitted };
+    return { button, emitted, root: fixture.nativeElement as HTMLElement };
   };
+
+  it("shows the notice (a layout problem of a new space)", () => {
+    const { root } = render("control", null);
+    expect(root.querySelector(".notice")?.textContent).toContain("layout.json: invalid JSON");
+  });
 
   it("shows Input with a pencil and asks for read-only on click", () => {
     const { button, emitted } = render("control", null);

@@ -56,6 +56,8 @@ export class StatusBar {
   readonly size = input<{ cols: number; rows: number }>();
   readonly appVersion = input<string | null>(null);
   readonly info = input<HerdrInfo | null>(null);
+  /** A notice such as a pane layout problem of a new space; empty hides it. */
+  readonly notice = input<string | null>(null);
   readonly jump = output<void>();
   /** The user flips the mode button: `true` asks for input. */
   readonly control = output<boolean>();

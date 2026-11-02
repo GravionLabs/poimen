@@ -154,6 +154,8 @@ pub struct Settings {
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
     pub explorer_show_hidden: bool,
+    /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
+    pub spaces_layout: Option<crate::layout::Layout>,
     pub warnings: Vec<String>,
 }
 
@@ -310,6 +312,7 @@ impl Default for Settings {
             sidebar_rows: SidebarRows::default(),
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
+            spaces_layout: None,
             warnings: Vec::new(),
         }
     }
@@ -395,6 +398,22 @@ fn resolve_explorer(value: &Value, s: &mut Settings) {
     }
 }
 
+/// `spaces.layout` (the layout-bootstrap schema); an invalid one warns and keeps the default.
+fn resolve_spaces(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("spaces must be an object".into());
+        return;
+    };
+    if let Some(layout) = obj.get("layout") {
+        match crate::layout::parse_layout_value(layout) {
+            Ok(l) => s.spaces_layout = Some(l),
+            Err(e) => s
+                .warnings
+                .push(format!("spaces.layout: {e}; using the default layout")),
+        }
+    }
+}
+
 /// Resolves the settings from the file contents. `read_ghostty` is only called when the
 /// `terminal.ghostty` flag is set.
 pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>) -> Settings {
@@ -429,6 +448,10 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("explorer") {
         resolve_explorer(value, &mut s);
+    }
+
+    if let Some(value) = root.get("spaces") {
+        resolve_spaces(value, &mut s);
     }
 
     let mut use_ghostty = false;
@@ -679,6 +702,26 @@ mod tests {
         assert_eq!(s.explorer_roots, ["/srv", "~/code"]);
         assert!(s.explorer_show_hidden);
         assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn spaces_layout_parses_and_invalid_ones_warn_and_fall_back() {
+        let ok = resolve(
+            Some(r#"{"spaces":{"layout":{"panes":[{"name":"main","command":"vim"}]}}}"#),
+            || None,
+        );
+        assert!(ok.warnings.is_empty(), "{:?}", ok.warnings);
+        assert_eq!(ok.spaces_layout.unwrap().panes[0].name, "main");
+        for json in [
+            r#"{"spaces":{"layout":{"panes":[]}}}"#,
+            r#"{"spaces":{"layout":"x"}}"#,
+            r#"{"spaces":3}"#,
+        ] {
+            let s = resolve(Some(json), || None);
+            assert_eq!(s.warnings.len(), 1, "{json}");
+            assert_eq!(s.spaces_layout, None, "{json}");
+        }
+        assert_eq!(resolve(None, || None).spaces_layout, None);
     }
 
     #[test]
