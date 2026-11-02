@@ -20,7 +20,8 @@ const fake = vi.hoisted(() => ({
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
-    options: Record<string, unknown> = {};
+    options: Record<string, unknown> = { theme: { foreground: "#e4e4e0" } };
+    buffer = { active: { viewportY: 0 } };
     get cols() {
       return fake.cols;
     }
@@ -47,10 +48,20 @@ vi.mock("@xterm/addon-fit", () => ({
 }));
 vi.mock("@xterm/addon-web-links", () => ({
   WebLinksAddon: class {
-    constructor(public handler: (event: MouseEvent, uri: string) => void) {}
+    constructor(
+      public handler: (event: MouseEvent, uri: string) => void,
+      public options: {
+        hover: (event: MouseEvent, text: string, range: unknown) => void;
+        leave: () => void;
+      },
+    ) {}
   },
 }));
-vi.mock("@xterm/addon-webgl", () => ({ WebglAddon: class {} }));
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: class {
+    onContextLoss = vi.fn();
+  },
+}));
 
 import { TerminalView, isControllerHeld } from "./terminal-view";
 
@@ -449,15 +460,78 @@ describe("TerminalView links", () => {
     expect(openUrl.mock.calls).toEqual([["https://github.com/GravionLabs/poimen/pull/69"]]);
   });
 
-  it("lets a Cmd mousedown reach xterm in input mode, but captures a plain one", async () => {
+  /** Makes xterm report a hovered link, as it does on a real mouse move. */
+  function hoverLink() {
+    const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {
+      options: { hover: (e: MouseEvent, t: string, r: unknown) => void };
+    };
+    addon.options.hover(new MouseEvent("mousemove"), "https://x.y", {
+      start: { x: 1, y: 1 },
+      end: { x: 2, y: 1 },
+    });
+  }
+
+  it("lets a Ctrl mousedown over a link reach xterm in input mode off macOS, but captures a plain one", async () => {
     const { session, body } = await setup("control");
     await new Promise((resolve) => setTimeout(resolve));
+    hoverLink();
     const reached = vi.fn();
     body.addEventListener("mousedown", reached);
-    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
     expect(reached).toHaveBeenCalledTimes(1);
     body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     expect(reached).toHaveBeenCalledTimes(1);
     expect(session.mouse).toHaveBeenCalledTimes(1); // only the plain press
+  });
+
+  it("keeps Ctrl for the pane application outside a link", async () => {
+    const { session, body } = await setup("control");
+    await new Promise((resolve) => setTimeout(resolve));
+    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
+    expect(session.mouse).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses Cmd instead of Ctrl on macOS", async () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    try {
+      const { session, body } = await setup("control");
+      await new Promise((resolve) => setTimeout(resolve));
+      hoverLink();
+      const reached = vi.fn();
+      body.addEventListener("mousedown", reached);
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
+      expect(reached).toHaveBeenCalledTimes(1);
+      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
+      expect(reached).toHaveBeenCalledTimes(1);
+      expect(session.mouse).toHaveBeenCalledTimes(1); // the Ctrl press is the pane's
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("underlines a hovered link with the WebGL renderer and removes it on leave", async () => {
+    const { body } = await setup("control");
+    const screen = document.createElement("div");
+    screen.className = "xterm-screen";
+    screen.getBoundingClientRect = () => ({ width: 800, height: 480 }) as DOMRect;
+    body.appendChild(screen);
+    const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {
+      options: { hover: (e: MouseEvent, t: string, r: unknown) => void; leave: () => void };
+    };
+    // 80x24 cells of 10x20 px; the link covers cells 7..12 of the second row.
+    addon.options.hover(new MouseEvent("mousemove"), "https://x.y", {
+      start: { x: 7, y: 2 },
+      end: { x: 12, y: 2 },
+    });
+    const lines = screen.querySelectorAll<HTMLElement>(".link-underline");
+    expect(lines).toHaveLength(1);
+    expect(lines[0].style.left).toBe("60px");
+    expect(lines[0].style.top).toBe("39px");
+    expect(lines[0].style.width).toBe("60px");
+    expect(lines[0].style.background).toContain("228, 228, 224");
+    expect(screen.style.cursor).toBe("pointer");
+    addon.options.leave();
+    expect(screen.style.cursor).toBe("");
+    expect(screen.querySelectorAll(".link-underline")).toHaveLength(0);
   });
 });

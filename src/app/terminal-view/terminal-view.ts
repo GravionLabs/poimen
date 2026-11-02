@@ -21,7 +21,7 @@ import { TauriBridge } from "../core/tauri";
 import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
-import { linkHandler } from "./links";
+import { LinkUnderline, holdsLinkModifier, linkHandler, underlineRects } from "./links";
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -88,6 +88,9 @@ export class TerminalView implements OnDestroy {
   private destroyed = false;
   private framed = false;
   private detachMouse?: () => void;
+  private readonly underline = new LinkUnderline();
+  /** Whether the pointer is over a link (xterm reports it for every renderer). */
+  private linkHovered = false;
   private endDrag?: () => void;
   /** Counts connects; a result of an older one is dropped. */
   private generation = 0;
@@ -151,10 +154,47 @@ export class TerminalView implements OnDestroy {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon(linkHandler((url) => this.tauri.openUrl(url))));
+    // xterm underlines a hovered link itself in the DOM renderer only; with WebGL the view draws it.
+    let webgl = false;
+    const underline = this.underline;
+    const screen = () => this.body().nativeElement.querySelector<HTMLElement>(".xterm-screen");
+    term.loadAddon(
+      new WebLinksAddon(
+        linkHandler((url) => this.tauri.openUrl(url)),
+        {
+          hover: (_event, _text, range) => {
+            this.linkHovered = true;
+            const host = screen();
+            if (host) host.style.cursor = "pointer"; // xterm sets a class for this; the style does not depend on it
+            if (!webgl || !host) return;
+            const box = host.getBoundingClientRect();
+            const cell = { width: box.width / term.cols, height: box.height / term.rows };
+            const color = term.options.theme?.foreground ?? "currentColor";
+            underline.show(
+              host,
+              underlineRects(range, term.cols, cell, term.buffer.active.viewportY),
+              color,
+            );
+          },
+          leave: () => {
+            this.linkHovered = false;
+            const host = screen();
+            if (host) host.style.cursor = "";
+            underline.hide();
+          },
+        },
+      ),
+    );
     term.open(this.body().nativeElement);
     try {
-      term.loadAddon(new WebglAddon());
+      const gl = new WebglAddon();
+      gl.onContextLoss(() => {
+        // xterm falls back to its DOM renderer, which underlines on its own.
+        webgl = false;
+        underline.hide();
+      });
+      term.loadAddon(gl);
+      webgl = true;
     } catch {
       // DOM renderer fallback
     }
@@ -181,10 +221,17 @@ export class TerminalView implements OnDestroy {
    * `terminal.mouse` cells; herdr encodes them for the pane application's mouse mode and drops
    * them when the application did not ask for the mouse. herdr does not expose that mode to
    * clients, so it cannot be checked here; a held Shift (as in other terminals) bypasses the
-   * forwarding and leaves xterm's text selection and the native context menu; Cmd (Meta) does the
-   * same so a link can be clicked (the web-links addon sees the click only then). Read-only tabs send
+   * forwarding and leaves xterm's text selection and the native context menu; so does Cmd on macOS
+   * or Ctrl elsewhere while the pointer is over a link, which is how a link is opened in input mode
+   * (the web-links addon sees the click only then; Ctrl+click is the context menu on macOS, hence
+   * Cmd there). Ctrl elsewhere stays the pane application's modifier outside a link. Read-only tabs send
    * nothing. Returns the function that removes every listener.
    */
+  /** A press with the link modifier over a link opens it instead of going to the pane application. */
+  private opensLink(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
+    return this.linkHovered && holdsLinkModifier(event);
+  }
+
   private attachMouse(host: HTMLElement): () => void {
     let pressed: MouseCommand["button"] | null = null;
     let last = "";
@@ -214,7 +261,7 @@ export class TerminalView implements OnDestroy {
     };
     const onMove = (event: MouseEvent) => {
       if (pressed) send(event, "drag", event.button);
-      else if (!event.shiftKey && !event.metaKey) send(event, "move", 0);
+      else if (!event.shiftKey && !this.opensLink(event)) send(event, "move", 0);
     };
     const onHostMove = (event: MouseEvent) => {
       if (!pressed) onMove(event);
@@ -230,7 +277,7 @@ export class TerminalView implements OnDestroy {
       release();
     }
     const onDown = (event: MouseEvent) => {
-      if (this.attempt !== "control" || event.shiftKey || event.metaKey) return; // Shift: xterm selects text, Cmd: links
+      if (this.attempt !== "control" || event.shiftKey || this.opensLink(event)) return; // Shift: xterm selects text, Cmd (macOS) or Ctrl over a link: open it
       event.stopPropagation(); // no text selection while the pane application owns the mouse
       event.preventDefault();
       this.term?.focus();
@@ -351,6 +398,7 @@ export class TerminalView implements OnDestroy {
     this.closeStream();
     this.detachMouse?.();
     this.detachMouse = undefined;
+    this.underline.hide();
     this.endDrag = undefined;
     clearTimeout(this.resizeTimer);
     this.resizeObserver?.disconnect();
