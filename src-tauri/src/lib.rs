@@ -64,6 +64,44 @@ async fn pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), St
     Ok(())
 }
 
+/// Starts a supported agent in an existing pane at a shell prompt (`agent.start`); can take a while.
+#[tauri::command]
+async fn agent_start(
+    client: State<'_, Client>,
+    pane_id: String,
+    kind: String,
+    name: Option<String>,
+    args: String,
+) -> Result<(), String> {
+    let params = herdr::agent_start_params(&pane_id, &kind, name.as_deref(), &args);
+    herdr_call(client.inner(), "agent.start", params).await?;
+    Ok(())
+}
+
+/// Renames an agent (`agent.rename`); an empty name clears it.
+#[tauri::command]
+async fn agent_rename(
+    client: State<'_, Client>,
+    target: String,
+    name: Option<String>,
+) -> Result<(), String> {
+    let params = herdr::agent_rename_params(&target, name.as_deref());
+    herdr_call(client.inner(), "agent.rename", params).await?;
+    Ok(())
+}
+
+/// Renames a pane (`pane.rename`); an empty label clears it.
+#[tauri::command]
+async fn pane_rename(
+    client: State<'_, Client>,
+    pane_id: String,
+    label: Option<String>,
+) -> Result<(), String> {
+    let params = herdr::pane_rename_params(&pane_id, label.as_deref());
+    herdr_call(client.inner(), "pane.rename", params).await?;
+    Ok(())
+}
+
 /// Opens a new terminal in a workspace as a new tab (`tab.create`); returns its pane id.
 #[tauri::command]
 async fn terminal_create(
@@ -369,6 +407,9 @@ pub fn run() {
             herdr_info,
             pane_split,
             pane_close,
+            agent_start,
+            agent_rename,
+            pane_rename,
             terminal_create,
             app_version,
             get_settings,

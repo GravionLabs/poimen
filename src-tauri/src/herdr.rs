@@ -163,6 +163,29 @@ pub fn close_params(pane_id: &str) -> Value {
     json!({ "pane_id": pane_id })
 }
 
+/// Params of `agent.start`: starts `kind` in an existing pane that sits at a shell prompt. The name
+/// is required by herdr, so an empty one falls back to the kind; `args` are split on whitespace.
+pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &str) -> Value {
+    let kind = kind.trim();
+    let name = non_empty(name).unwrap_or(kind);
+    let args: Vec<&str> = args.split_whitespace().collect();
+    let mut params = json!({ "pane_id": pane_id, "kind": kind, "name": name });
+    if !args.is_empty() {
+        params["args"] = json!(args);
+    }
+    params
+}
+
+/// Params of `agent.rename`; a blank name clears the agent name (`null`).
+pub fn agent_rename_params(target: &str, name: Option<&str>) -> Value {
+    json!({ "target": target, "name": non_empty(name) })
+}
+
+/// Params of `pane.rename`; a blank label clears the pane label (`null`).
+pub fn pane_rename_params(pane_id: &str, label: Option<&str>) -> Value {
+    json!({ "pane_id": pane_id, "label": non_empty(label) })
+}
+
 /// Params of `tab.create`: a new tab (with one terminal pane) in a workspace, optionally in `cwd`.
 pub fn tab_create_params(workspace_id: &str, cwd: Option<&str>) -> Value {
     let mut params = json!({ "workspace_id": workspace_id });
@@ -368,6 +391,46 @@ mod tests {
         assert_eq!(
             tab_create_params("w1", Some(" /work ")),
             json!({ "workspace_id": "w1", "cwd": "/work" })
+        );
+    }
+
+    #[test]
+    fn agent_start_params_carry_pane_kind_name_and_args() {
+        assert_eq!(
+            agent_start_params("w1:p1", "claude", Some(" helper "), " --model  opus "),
+            json!({ "pane_id": "w1:p1", "kind": "claude", "name": "helper", "args": ["--model", "opus"] })
+        );
+    }
+
+    #[test]
+    fn agent_start_params_default_the_name_to_the_kind_and_skip_empty_args() {
+        assert_eq!(
+            agent_start_params("w1:p1", "codex", Some(" "), "  "),
+            json!({ "pane_id": "w1:p1", "kind": "codex", "name": "codex" })
+        );
+        assert_eq!(
+            agent_start_params("w1:p1", "codex", None, ""),
+            json!({ "pane_id": "w1:p1", "kind": "codex", "name": "codex" })
+        );
+    }
+
+    #[test]
+    fn rename_params_clear_with_null_when_blank() {
+        assert_eq!(
+            agent_rename_params("w1:p2", Some(" review ")),
+            json!({ "target": "w1:p2", "name": "review" })
+        );
+        assert_eq!(
+            agent_rename_params("w1:p2", Some("")),
+            json!({ "target": "w1:p2", "name": null })
+        );
+        assert_eq!(
+            pane_rename_params("w1:p1", Some("build")),
+            json!({ "pane_id": "w1:p1", "label": "build" })
+        );
+        assert_eq!(
+            pane_rename_params("w1:p1", None),
+            json!({ "pane_id": "w1:p1", "label": null })
         );
     }
 
