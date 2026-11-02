@@ -531,6 +531,18 @@ describe("TerminalView links", () => {
     expect(openUrl.mock.calls).toEqual([["https://github.com/GravionLabs/poimen/pull/69"]]);
   });
 
+  it("opens OSC 8 hyperlinks through the opener, http(s) only", async () => {
+    const { openUrl } = await setup("control");
+    const options = (
+      fake.term as unknown as {
+        options: { linkHandler: { activate: (e: MouseEvent, uri: string) => void } };
+      }
+    ).options;
+    options.linkHandler.activate(new MouseEvent("click"), "https://example.com/doc");
+    options.linkHandler.activate(new MouseEvent("click"), "file:///etc/passwd");
+    expect(openUrl.mock.calls).toEqual([["https://example.com/doc"]]);
+  });
+
   /** Makes xterm report a hovered link, as it does on a real mouse move. */
   function hoverLink() {
     const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {

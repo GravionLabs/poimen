@@ -23,7 +23,7 @@ import { SettingsStore } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
-import { holdsLinkModifier, linkHandler } from "./links";
+import { detectedLinkHandler, holdsLinkModifier, linkHandler } from "./links";
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -165,7 +165,18 @@ export class TerminalView implements OnDestroy {
   }
 
   private createTerminal(): void {
+    const open = (url: string) => this.tauri.openUrl(url);
+    const openLink = linkHandler(open);
+    const hoverCallbacks = {
+      hover: () => (this.linkHovered = true),
+      leave: () => (this.linkHovered = false),
+    };
     const term = new Terminal({
+      // OSC 8 hyperlinks: xterm's default would confirm() and window.open(); use the opener instead.
+      linkHandler: {
+        activate: openLink,
+        ...hoverCallbacks,
+      },
       scrollback: 0, // herdr owns scrollback; wheel events are forwarded instead
       cursorBlink: true,
       allowProposedApi: true,
@@ -176,13 +187,8 @@ export class TerminalView implements OnDestroy {
     // xterm marks a hovered link itself (underline, pointer); the view only needs to know about it.
     this.linkHovered = false;
     term.loadAddon(
-      new WebLinksAddon(
-        linkHandler((url) => this.tauri.openUrl(url)),
-        {
-          hover: () => (this.linkHovered = true),
-          leave: () => (this.linkHovered = false),
-        },
-      ),
+      // Detected URLs are trimmed before opening (the addon's range, and so the underline, stays).
+      new WebLinksAddon(detectedLinkHandler(open), hoverCallbacks),
     );
     term.open(this.body().nativeElement);
     try {
