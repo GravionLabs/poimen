@@ -95,6 +95,16 @@ pub fn scroll_command(up: bool, lines: u16) -> String {
     command_line(json!({ "type": "terminal.scroll", "direction": direction, "lines": lines }))
 }
 
+/// Rejects what herdr's `terminal.mouse` does not define, before it reaches the CLI's stdin.
+pub fn validate_mouse(action: &str, button: &str) -> Result<(), String> {
+    if !matches!(action, "down" | "up" | "drag" | "move")
+        || !matches!(button, "left" | "right" | "middle")
+    {
+        return Err("unknown mouse action or button".into());
+    }
+    Ok(())
+}
+
 /// One mouse event at a zero-based cell of the controller's viewport. herdr encodes it for the
 /// application's mouse mode and drops it when the application has not enabled mouse reporting.
 pub fn mouse_command(action: &str, button: &str, column: u16, row: u16, modifiers: u8) -> String {
@@ -349,6 +359,10 @@ mod tests {
                 "column": 12, "row": 5, "modifiers": 0
             })
         );
+        assert!(validate_mouse("down", "left").is_ok());
+        assert!(validate_mouse("move", "middle").is_ok());
+        assert!(validate_mouse("click", "left").is_err());
+        assert!(validate_mouse("down", "side").is_err());
         assert_eq!(
             parse(release_command()),
             json!({ "type": "terminal.release" })

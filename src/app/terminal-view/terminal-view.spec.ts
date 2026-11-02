@@ -363,18 +363,45 @@ describe("TerminalView mouse input", () => {
 
   it("forwards a drag to a new cell once, with the pressed button and modifiers", async () => {
     const { session, body } = await controlling();
-    body.dispatchEvent(mouse("mousedown", 5, 5, { button: 2, shiftKey: true }));
-    window.dispatchEvent(mouse("mousemove", 35, 5, { button: 2, shiftKey: true }));
-    window.dispatchEvent(mouse("mousemove", 36, 6, { button: 2, shiftKey: true })); // same cell
-    window.dispatchEvent(mouse("mouseup", 35, 5, { button: 2, shiftKey: true }));
+    body.dispatchEvent(mouse("mousedown", 5, 5, { button: 2, ctrlKey: true }));
+    window.dispatchEvent(mouse("mousemove", 35, 5, { button: 2, ctrlKey: true }));
+    window.dispatchEvent(mouse("mousemove", 36, 6, { button: 2, ctrlKey: true })); // same cell
+    window.dispatchEvent(mouse("mouseup", 35, 5, { button: 2, ctrlKey: true }));
     expect(session.mouse.mock.calls.map(([e]) => e.action)).toEqual(["down", "drag", "up"]);
     expect(session.mouse.mock.calls[1][0]).toEqual({
       action: "drag",
       button: "right",
       column: 3,
       row: 0,
-      modifiers: 1,
+      modifiers: 2,
     });
+  });
+
+  it("leaves selection and the context menu to the browser while Shift is held", async () => {
+    const { session, body } = await controlling();
+    const down = mouse("mousedown", 5, 5, { shiftKey: true });
+    body.dispatchEvent(down);
+    window.dispatchEvent(mouse("mousemove", 50, 50, { shiftKey: true }));
+    window.dispatchEvent(mouse("mouseup", 50, 50, { shiftKey: true }));
+    const menu = mouse("contextmenu", 5, 5, { shiftKey: true });
+    body.dispatchEvent(menu);
+    expect(session.mouse).not.toHaveBeenCalled();
+    expect(down.defaultPrevented).toBe(false);
+    expect(menu.defaultPrevented).toBe(false);
+    const plain = mouse("contextmenu", 5, 5);
+    body.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+  });
+
+  it("releases a held button when the tab is destroyed mid-drag and drops the listeners", async () => {
+    const { session, body, fixture } = await controlling();
+    body.dispatchEvent(mouse("mousedown", 125, 45));
+    fixture.destroy();
+    expect(session.mouse.mock.calls.map(([e]) => e.action)).toEqual(["down", "up"]);
+    expect(session.mouse.mock.calls[1][0]).toMatchObject({ column: 12, row: 2 });
+    body.dispatchEvent(mouse("mousedown", 5, 5));
+    window.dispatchEvent(mouse("mouseup", 5, 5));
+    expect(session.mouse).toHaveBeenCalledTimes(2);
   });
 
   it("sends nothing from a read-only tab and leaves selection alone", async () => {

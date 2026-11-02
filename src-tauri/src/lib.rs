@@ -128,11 +128,7 @@ fn terminal_mouse(
     row: u16,
     modifiers: u8,
 ) -> Result<(), String> {
-    if !matches!(action.as_str(), "down" | "up" | "drag" | "move")
-        || !matches!(button.as_str(), "left" | "right" | "middle")
-    {
-        return Err("unknown mouse action or button".into());
-    }
+    stream::validate_mouse(&action, &button)?;
     sessions.send(
         id,
         &stream::mouse_command(&action, &button, column, row, modifiers),
