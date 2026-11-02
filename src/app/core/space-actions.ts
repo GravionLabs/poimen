@@ -7,6 +7,8 @@ export interface SpaceOutcome {
   workspace_id: string;
   /** False when an existing space for the directory was focused instead. */
   created: boolean;
+  /** Why the pane layout of a new space was not (fully) applied. */
+  warnings?: string[];
 }
 
 /** Last path segment: the default label of a space for `path`. */
@@ -27,7 +29,10 @@ export class SpaceActions {
   private readonly _error = signal<string | null>(null);
   private readonly _busy = signal(false);
   private readonly _dirs = signal<string[]>([]);
+  private readonly _warning = signal<string | null>(null);
   readonly open = this._open.asReadonly();
+  /** Layout problem of the last created space (status bar); `null` when there was none. */
+  readonly warning = this._warning.asReadonly();
   /** Why the last attempt failed; shown in the dialog. */
   readonly error = this._error.asReadonly();
   readonly busy = this._busy.asReadonly();
@@ -74,6 +79,9 @@ export class SpaceActions {
         label: label.trim() || null,
       });
       this._open.set(false);
+      const warnings = outcome.warnings ?? [];
+      this._warning.set(warnings.length > 0 ? warnings.join("; ") : null);
+      for (const w of warnings) console.warn(`poimen space layout: ${w}`);
       await this.store.refresh();
       return outcome;
     } catch (err) {

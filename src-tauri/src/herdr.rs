@@ -9,6 +9,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use serde::Serialize;
 use serde_json::{Value, json};
 
 #[derive(Debug)]
@@ -129,7 +130,7 @@ pub fn parse_ping(result: &Value) -> Option<ServerInfo> {
 }
 
 /// Where `pane.split` puts the new pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SplitDirection {
     Right,
@@ -156,6 +157,25 @@ pub fn split_params(target: &str, direction: SplitDirection, cwd: Option<&str>) 
         params["cwd"] = json!(cwd);
     }
     params
+}
+
+/// Params of `pane.split` with the share (`ratio`, 0 to 1) the split pane keeps.
+pub fn split_params_ratio(
+    target: &str,
+    direction: SplitDirection,
+    cwd: Option<&str>,
+    ratio: Option<f64>,
+) -> Value {
+    let mut params = split_params(target, direction, cwd);
+    if let Some(ratio) = ratio {
+        params["ratio"] = json!(ratio);
+    }
+    params
+}
+
+/// Params of `pane.send_input`: types `text` into a pane and presses Enter.
+pub fn send_input_params(pane_id: &str, text: &str) -> Value {
+    json!({ "pane_id": pane_id, "text": text, "keys": ["enter"] })
 }
 
 /// Params of `pane.close`.
@@ -431,6 +451,22 @@ mod tests {
         assert_eq!(
             pane_rename_params("w1:p1", None),
             json!({ "pane_id": "w1:p1", "label": null })
+        );
+    }
+
+    #[test]
+    fn split_ratio_and_send_input_params() {
+        assert_eq!(
+            split_params_ratio("w1:p1", SplitDirection::Right, Some("/a"), Some(0.6)),
+            json!({ "target_pane_id": "w1:p1", "direction": "right", "cwd": "/a", "ratio": 0.6 })
+        );
+        assert_eq!(
+            split_params_ratio("w1:p1", SplitDirection::Down, None, None),
+            split_params("w1:p1", SplitDirection::Down, None)
+        );
+        assert_eq!(
+            send_input_params("w1:p1", "claude"),
+            json!({ "pane_id": "w1:p1", "text": "claude", "keys": ["enter"] })
         );
     }
 

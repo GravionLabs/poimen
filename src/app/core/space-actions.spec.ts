@@ -50,6 +50,20 @@ describe("SpaceActions", () => {
     expect(actions.open()).toBe(false);
   });
 
+  it("keeps a layout warning of the created space for the status bar", async () => {
+    tauri.answer("create_space", () => ({
+      workspace_id: "w2",
+      created: true,
+      warnings: ["/work/app/.agents/herdr-layout.json: invalid JSON"],
+    }));
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await actions.create("/work/app", "");
+    expect(actions.warning()).toBe("/work/app/.agents/herdr-layout.json: invalid JSON");
+    tauri.answer("create_space", () => ({ workspace_id: "w3", created: true }));
+    await actions.create("/work/lib", "");
+    expect(actions.warning()).toBeNull();
+  });
+
   it("sends no label when it is blank", async () => {
     await actions.create("/work/app", "  ");
     expect(tauri.calls("create_space")).toEqual([{ cwd: "/work/app", label: null }]);

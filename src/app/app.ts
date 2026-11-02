@@ -27,6 +27,7 @@ import type { LayoutNode } from "./core/editor-layout";
 import { Toolbar } from "./toolbar/toolbar";
 import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
+import { SpaceActions } from "./core/space-actions";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
 import { StatusBar } from "./status-bar/status-bar";
@@ -67,6 +68,7 @@ export class App {
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
   private readonly paneActions = inject(PaneActions);
+  protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */

@@ -1,5 +1,6 @@
 mod git;
 mod herdr;
+mod layout;
 #[cfg(test)]
 mod live;
 mod settings;
@@ -144,6 +145,7 @@ async fn create_space(
             return Ok(spaces::SpaceOutcome {
                 workspace_id,
                 created: false,
+                warnings: Vec::new(),
             });
         }
         let label = spaces::space_label(
@@ -156,13 +158,43 @@ async fn create_space(
         let workspace_id = spaces::created_workspace_id(&result)
             .ok_or("herdr did not report the new workspace")?;
         call("workspace.focus", spaces::focus_params(&workspace_id))?;
+        let warnings = build_layout(&call, &dir, home.as_deref(), &result);
         Ok(spaces::SpaceOutcome {
             workspace_id,
             created: true,
+            warnings,
         })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Builds the pane layout in a just-created space: the project file (git toplevel of `dir`), else
+/// `spaces.layout` of the config, else the default. Problems come back as warnings; the space then
+/// keeps the panes created so far (at least its single root pane).
+fn build_layout(
+    call: &impl Fn(&str, Value) -> Result<Value, String>,
+    dir: &str,
+    home: Option<&std::path::Path>,
+    created: &Value,
+) -> Vec<String> {
+    let root = git::toplevel(dir).unwrap_or_else(|| dir.to_owned());
+    let path = std::path::Path::new(&root).join(layout::REPO_LAYOUT_FILE);
+    let text = std::fs::read_to_string(&path).ok();
+    let config = home.map(settings::load).and_then(|s| s.spaces_layout);
+    let path = path.to_string_lossy().into_owned();
+    let layout = match layout::resolve(text.as_deref().map(|t| (path.as_str(), t)), config.as_ref())
+    {
+        Ok(l) => l,
+        Err(warning) => return vec![warning],
+    };
+    let Some(root_pane) = herdr::created_pane_id(created) else {
+        return vec!["herdr did not report the root pane; no layout applied".into()];
+    };
+    match layout::apply(call, &layout, dir, &root_pane) {
+        Ok(()) => Vec::new(),
+        Err(e) => vec![format!("layout not fully applied: {e}")],
+    }
 }
 
 /// Directories matching a typed path, for the completion of path fields.

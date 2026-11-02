@@ -12,6 +12,9 @@ pub struct SpaceOutcome {
     pub workspace_id: String,
     /// False when an existing space for the directory was focused instead.
     pub created: bool,
+    /// Why the layout of a new space was not applied (or only partly); empty otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 fn inside(path: &str, dir: &str) -> bool {
