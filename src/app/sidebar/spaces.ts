@@ -6,7 +6,7 @@ export function stateLabel(status: AgentStatus): string | undefined {
 }
 
 /**
- * Title or step of an agent pane: the `deliver_step` token, else the stripped terminal title.
+ * Step or title of an agent pane: the `deliver_step` token, else the stripped terminal title.
  * A plain terminal has none: its title is `user@host:~/path`, which herdr does not show.
  */
 export function paneDetail(row: PaneRow): string | undefined {
@@ -15,9 +15,37 @@ export function paneDetail(row: PaneRow): string | undefined {
   return step || row.pane.terminal_title_stripped?.trim() || undefined;
 }
 
-/** Second line of a pane row: agent kind, then the title or step. */
+/** Comparison key: parts that differ only by case or whitespace count as the same text. */
+const same = (text: string | undefined) => (text ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * Second line of a pane row: only what the bold name does not already say. The name of an agent
+ * row is its title, so the title (and an agent kind equal to the name) is left out.
+ */
 export function subline(row: PaneRow): string {
-  return [row.agent, paneDetail(row)].filter(Boolean).join(" · ");
+  const detail = paneDetail(row);
+  const seen = new Set([same(row.name)]);
+  return [row.agent, detail]
+    .filter((part): part is string => {
+      if (!part || seen.has(same(part))) return false;
+      seen.add(same(part));
+      return true;
+    })
+    .join(" · ");
+}
+
+/** How the sidebar marks a pane: the active tab (strong) or merely an open tab (weak). */
+export interface PaneMarks {
+  open: boolean;
+  active: boolean;
+}
+
+export function paneMarks(
+  paneId: string,
+  openIds: ReadonlySet<string>,
+  activeId: string | null,
+): PaneMarks {
+  return { open: openIds.has(paneId), active: activeId !== null && activeId === paneId };
 }
 
 /** Directory and branch every pane of a space shares (what the workspace row shows). */

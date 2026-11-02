@@ -4,6 +4,7 @@ import {
   aggregateStatus,
   paneDetail,
   paneLine2,
+  paneMarks,
   paneMeta,
   spaceContext,
   spaceMeta,
@@ -39,6 +40,7 @@ describe("stateLabel", () => {
 describe("paneDetail and subline", () => {
   it("prefers the deliver_step token over the terminal title", () => {
     const r = row({
+      name: "Fix login",
       agent: "claude",
       pane: { tokens: { deliver_step: "review" }, terminal_title_stripped: "title" },
     });
@@ -47,11 +49,69 @@ describe("paneDetail and subline", () => {
   });
 
   it("falls back to the title and handles plain terminals", () => {
-    expect(subline(row({ agent: "codex", pane: { terminal_title_stripped: "fix bug" } }))).toBe(
-      "codex · fix bug",
-    );
+    expect(
+      subline(row({ name: "other", agent: "codex", pane: { terminal_title_stripped: "fix bug" } })),
+    ).toBe("codex · fix bug");
     expect(subline(row())).toBe("");
     expect(subline(row({ pane: { terminal_title_stripped: "jkaufmann@M01:~/a/b" } }))).toBe("");
+  });
+});
+
+describe("subline never repeats the name", () => {
+  it("drops the title when it is the bold name", () => {
+    const r = row({
+      name: "Projektstand",
+      agent: "claude",
+      pane: { terminal_title_stripped: "Projektstand" },
+    });
+    expect(subline(r)).toBe("claude");
+  });
+
+  it("keeps a step next to the kind while the title is the name", () => {
+    const r = row({
+      name: "Projektstand",
+      agent: "claude",
+      pane: { tokens: { deliver_step: "review" }, terminal_title_stripped: "Projektstand" },
+    });
+    expect(subline(r)).toBe("claude · review");
+  });
+
+  it("ignores case and whitespace differences against the name", () => {
+    const r = row({
+      name: "Projektstand",
+      agent: "Claude",
+      pane: { terminal_title_stripped: "  projektstand " },
+    });
+    expect(subline(r)).toBe("Claude");
+    expect(subline(row({ name: "claude  code", agent: "Claude Code" }))).toBe("");
+  });
+
+  it("shows the kind once when the title repeats it", () => {
+    const r = row({ name: "Fix", agent: "claude", pane: { terminal_title_stripped: "claude" } });
+    expect(subline(r)).toBe("claude");
+    const upper = row({
+      name: "Fix",
+      agent: "claude",
+      pane: { terminal_title_stripped: "Claude" },
+    });
+    expect(subline(upper)).toBe("claude");
+  });
+
+  it("is empty when the name is the kind and nothing else is new", () => {
+    expect(subline(row({ name: "claude", agent: "claude" }))).toBe("");
+  });
+});
+
+describe("paneMarks", () => {
+  const open = new Set(["a", "b"]);
+  it("marks the active pane and the open ones apart", () => {
+    expect(paneMarks("a", open, "a")).toEqual({ open: true, active: true });
+    expect(paneMarks("b", open, "a")).toEqual({ open: true, active: false });
+    expect(paneMarks("c", open, "a")).toEqual({ open: false, active: false });
+  });
+
+  it("has no active pane without an active tab", () => {
+    expect(paneMarks("a", open, null)).toEqual({ open: true, active: false });
   });
 });
 
@@ -79,8 +139,9 @@ describe("spaceContext, spaceMeta and paneMeta", () => {
 
 describe("paneLine2", () => {
   it("is one line: agent, title, then only a differing branch or path", () => {
-    const a = row({ agent: "claude", dir: "/a/b/c", branch: "main" });
+    const a = row({ name: "Fix", agent: "claude", dir: "/a/b/c", branch: "main" });
     const c = row({
+      name: "Other",
       agent: "codex",
       dir: "/a/b/c",
       branch: "feat",

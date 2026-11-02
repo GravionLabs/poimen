@@ -20,7 +20,14 @@ import {
   type Workspace,
 } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
-import { aggregateStatus, paneLine2, spaceContext, spaceMeta, stateLabel } from "./spaces";
+import {
+  aggregateStatus,
+  paneLine2,
+  paneMarks,
+  spaceContext,
+  spaceMeta,
+  stateLabel,
+} from "./spaces";
 
 /** What a tree node carries back to the template. */
 export type SpaceData =
@@ -83,6 +90,8 @@ export function isDoubleClick(
 export class Sidebar {
   /** Ids of the panes that have an open view. */
   readonly openIds = input<ReadonlySet<string>>(new Set());
+  /** Id of the pane whose tab is active in the editor. */
+  readonly activeId = input<string | null>(null);
   readonly selected = output<Pane>();
   /** A second click on the same row within {@link DOUBLE_CLICK_MS}: pin the tab. */
   readonly pinned = output<Pane>();
@@ -92,6 +101,16 @@ export class Sidebar {
   protected readonly store = inject(HerdrStore);
   protected readonly query = signal("");
   protected readonly selection = signal<string | null>(null);
+
+  /** The chevron at the right edge of a workspace row: expands or collapses it (not a selection). */
+  protected toggle(tree: HxTree, key: string, event: Event): void {
+    event.stopPropagation();
+    tree.toggle(key);
+  }
+
+  protected marks(row: PaneRow) {
+    return paneMarks(row.pane.pane_id, this.openIds(), this.activeId());
+  }
 
   protected readonly nodes = computed(() =>
     spaceNodes(filterSpaces(this.store.spaces(), this.query())),
