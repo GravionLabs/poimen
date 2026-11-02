@@ -6,6 +6,7 @@ import {
   effect,
   inject,
   input,
+  output,
   signal,
   untracked,
   viewChild,
@@ -40,6 +41,8 @@ export class TerminalView implements OnDestroy {
   readonly pane = input.required<Pane>();
   readonly mode = input<Mode>("observe");
   /** Why the stream closed; `null` while it runs. */
+  /** The terminal size in cells, emitted on every change. */
+  readonly sized = output<{ cols: number; rows: number }>();
   readonly banner = signal<string | null>(null);
 
   private readonly streams = inject(TerminalStreamService);
@@ -118,6 +121,7 @@ export class TerminalView implements OnDestroy {
     if (!this.term) this.createTerminal();
     this.fit!.fit();
     this.size = { cols: this.term!.cols, rows: this.term!.rows };
+    this.sized.emit(this.size);
     await this.openStream(takeover);
     this.term?.focus();
   }
@@ -185,6 +189,7 @@ export class TerminalView implements OnDestroy {
       const { cols, rows } = this.term;
       if (cols === this.size.cols && rows === this.size.rows) return;
       this.size = { cols, rows };
+      this.sized.emit(this.size);
       if (!this.session?.open) return;
       if (this.mode() === "control") {
         this.session.resize(cols, rows);

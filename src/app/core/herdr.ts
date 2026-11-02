@@ -103,6 +103,15 @@ export function waitingCount(panes: Pane[]): number {
   return panes.filter((pane) => pane.agent_status === "blocked").length;
 }
 
+/** The blocked pane after `activeId` in list order, wrapping around; undefined when none waits. */
+export function nextWaiting(panes: Pane[], activeId: string | null): Pane | undefined {
+  const waiting = panes.filter((pane) => pane.agent_status === "blocked");
+  if (!waiting.length) return undefined;
+  const index = panes.findIndex((pane) => pane.pane_id === activeId);
+  const after = panes.slice(index + 1).find((pane) => pane.agent_status === "blocked");
+  return after ?? waiting[0];
+}
+
 /** Applies a pane.agent_status_changed event without a full refresh. */
 export function applyStatus(snapshot: Snapshot, paneId: string, status: AgentStatus): Snapshot {
   return {

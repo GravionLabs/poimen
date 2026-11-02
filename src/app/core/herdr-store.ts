@@ -4,6 +4,7 @@ import {
   buildSpaces,
   buildTree,
   paneDir,
+  nextWaiting,
   waitingCount,
   type HerdrEvent,
   type Pane,
@@ -14,6 +15,10 @@ import { TauriBridge, type Unlisten } from "./tauri";
 
 /** Delay that collapses a burst of herdr events into one re-read. */
 export const REFRESH_DEBOUNCE_MS = 80;
+
+/** `reconnecting`: the event watcher lost herdr and retries; `unreachable`: a snapshot read failed. */
+export type ConnectionState =
+  { state: "connected" } | { state: "reconnecting" | "unreachable"; reason: string };
 
 const EMPTY: Snapshot = { workspaces: [], tabs: [], panes: [] };
 
@@ -28,12 +33,18 @@ export class HerdrStore {
 
   private readonly _snapshot = signal<Snapshot>(EMPTY);
   private readonly _connectionError = signal<string | null>(null);
+  private readonly _watchLost = signal(false);
   private readonly _repos = signal<ReadonlyMap<string, RepoInfo>>(new Map());
 
   readonly snapshot = this._snapshot.asReadonly();
   /** Why herdr is not reachable; `null` while connected. */
   readonly connectionError = this._connectionError.asReadonly();
   /** Branch and worktree flag per pane directory; poimen asks git, herdr does not know them. */
+  readonly connection = computed<ConnectionState>(() => {
+    const reason = this._connectionError();
+    if (reason === null) return { state: "connected" };
+    return { state: this._watchLost() ? "reconnecting" : "unreachable", reason };
+  });
   readonly repos = this._repos.asReadonly();
   readonly tree = computed(() => buildTree(this._snapshot()));
   readonly spaces = computed(() => buildSpaces(this._snapshot(), this._repos()));
@@ -60,6 +71,11 @@ export class HerdrStore {
     await this.refresh();
   }
 
+  /** The next blocked pane after `activeId`, wrapping around. */
+  nextWaiting(activeId: string | null): Pane | undefined {
+    return nextWaiting(this._snapshot().panes, activeId);
+  }
+
   pane(paneId: string): Pane | undefined {
     return this.panes().get(paneId);
   }
@@ -74,8 +90,10 @@ export class HerdrStore {
     try {
       const snapshot = await this.bridge.invoke<Snapshot>("snapshot");
       this._snapshot.set(snapshot);
+      if (!this._watchLost()) this._connectionError.set(null);
       await this.readRepos(snapshot);
     } catch (err) {
+      this._watchLost.set(false);
       this._connectionError.set(String(err));
     } finally {
       this.refreshing = false;
@@ -102,9 +120,11 @@ export class HerdrStore {
   private handle(event: HerdrEvent): void {
     switch (event.kind) {
       case "poimen.connected":
+        this._watchLost.set(false);
         this._connectionError.set(null);
         break;
       case "poimen.disconnected":
+        this._watchLost.set(true);
         this._connectionError.set(event.data?.reason ?? "");
         return;
       case "pane.agent_status_changed":
