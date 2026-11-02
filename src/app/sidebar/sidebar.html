@@ -1,4 +1,15 @@
-<div class="brand">Spaces</div>
+<div class="head">
+  <div class="brand">Spaces</div>
+  <button
+    type="button"
+    class="add"
+    aria-label="New space"
+    title="New space from a directory"
+    (click)="spaceActions.ask()"
+  >
+    +
+  </button>
+</div>
 @if (store.connectionError(); as reason) {
   <hx-message class="connection" severity="warn" size="small">
     herdr not reachable: {{ reason }}

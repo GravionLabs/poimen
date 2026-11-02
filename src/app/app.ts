@@ -26,6 +26,7 @@ import type { LayoutNode } from "./core/editor-layout";
 import { Toolbar } from "./toolbar/toolbar";
 import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
+import { SpaceDialog } from "./space-dialog/space-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
@@ -51,6 +52,7 @@ const ZOOM_STEP = 1;
     Toolbar,
     NgTemplateOutlet,
     PaneDialog,
+    SpaceDialog,
   ],
   templateUrl: "./app.html",
   styleUrl: "./app.css",

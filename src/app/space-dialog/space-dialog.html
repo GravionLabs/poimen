@@ -1,0 +1,61 @@
+@if (actions.open()) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Cancel"
+    (click)="cancel()"
+  ></button>
+  <form
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="New space"
+    (submit)="$event.preventDefault(); submit()"
+    (keydown.escape)="cancel()"
+  >
+    <h2>New space</h2>
+    <label>
+      Directory
+      <span class="path-row">
+        <input
+          class="field path"
+          name="path"
+          type="text"
+          list="space-dialog-dirs"
+          placeholder="/path/to/directory"
+          autocomplete="off"
+          [value]="path()"
+          (input)="typePath($event)"
+        />
+        <button type="button" class="browse" (click)="browse()">Browse...</button>
+      </span>
+    </label>
+    <datalist id="space-dialog-dirs">
+      @for (dir of actions.dirs(); track dir) {
+        <option [value]="dir"></option>
+      }
+    </datalist>
+    <label>
+      Label
+      <input
+        class="field"
+        name="label"
+        type="text"
+        placeholder="Name of the directory"
+        [value]="label()"
+        (input)="typeLabel($event)"
+      />
+    </label>
+    <p class="hint">An existing space for the directory is focused instead.</p>
+    @if (actions.error(); as message) {
+      <p class="error" role="alert">{{ message }}</p>
+    }
+    <div class="buttons">
+      <button type="button" class="cancel" (click)="cancel()">Cancel</button>
+      <button type="submit" class="confirm" [disabled]="actions.busy() || !path().trim()">
+        Create
+      </button>
+    </div>
+  </form>
+}

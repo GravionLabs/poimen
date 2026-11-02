@@ -31,6 +31,7 @@ import {
   type SidebarRows,
 } from "./spaces";
 import { SettingsStore } from "../core/settings";
+import { SpaceActions } from "../core/space-actions";
 
 /** What a tree node carries back to the template. */
 export type SpaceData =
@@ -162,6 +163,7 @@ export class Sidebar {
 
   private readonly injector = inject(Injector);
   protected readonly store = inject(HerdrStore);
+  protected readonly spaceActions = inject(SpaceActions);
   protected readonly query = signal("");
   protected readonly selection = signal<string | null>(null);
 
