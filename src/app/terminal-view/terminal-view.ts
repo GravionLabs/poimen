@@ -93,6 +93,7 @@ export class TerminalView implements OnDestroy {
   private destroyed = false;
   private framed = false;
   private detachMouse?: () => void;
+  private detachClipboard?: () => void;
   /** Whether the pointer is over a link (xterm reports it for every renderer). */
   private linkHovered = false;
   private endDrag?: () => void;
@@ -191,7 +192,10 @@ export class TerminalView implements OnDestroy {
     }
     // App shortcuts belong to the app: keep xterm from forwarding them to the pane. Only Cmd
     // shortcuts match here; other keys go to the program in the pane.
-    term.attachCustomKeyEventHandler((event) => this.keymap.match(event, true) === null);
+    term.attachCustomKeyEventHandler((event) => {
+      if (this.keymap.match(event, true) !== null) return false;
+      return !this.clipboardKey(event);
+    });
     term.onData((data) => {
       if (this.mode() === "control") this.session?.input(data);
     });
@@ -205,8 +209,56 @@ export class TerminalView implements OnDestroy {
     this.term = term;
     this.fit = fit;
     this.detachMouse = this.attachMouse(this.body().nativeElement);
+    this.detachClipboard = this.attachClipboard(this.body().nativeElement);
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(this.body().nativeElement);
+  }
+
+  /**
+   * Clipboard keys that are not the native Edit menu's. On macOS Cmd+C and Cmd+V are the menu's
+   * (they arrive as `copy` and `paste` events, see {@link attachClipboard}). Elsewhere Ctrl+C and
+   * Ctrl+V belong to the pane application, so the terminal convention Ctrl+Shift+C copies the
+   * selection and Ctrl+Shift+V pastes (the browser's own paste event follows). Returns whether the
+   * key was taken, so xterm does not send it to the pane.
+   */
+  private clipboardKey(event: KeyboardEvent): boolean {
+    if (this.keymap.mac || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) {
+      return false;
+    }
+    const key = event.key.toLowerCase();
+    if (key === "c") {
+      const text = this.term?.getSelection();
+      if (text) void navigator.clipboard?.writeText(text).catch(() => undefined);
+      return true;
+    }
+    return key === "v"; // the paste event does the work
+  }
+
+  /**
+   * Copy and paste through the DOM events of the Edit menu / browser. Copy puts the terminal
+   * selection (Shift+drag in input mode, plain drag when read-only) on the clipboard in either
+   * mode. Paste goes through xterm's `paste`, which wraps the text in bracketed paste markers when
+   * the pane application asked for them; a read-only tab pastes nothing.
+   */
+  private attachClipboard(host: HTMLElement): () => void {
+    const onCopy = (event: ClipboardEvent) => {
+      const text = this.term?.getSelection();
+      if (!text || !event.clipboardData) return;
+      event.clipboardData.setData("text/plain", text);
+      event.preventDefault();
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation(); // xterm's own paste listener would send it a second time
+      const text = event.clipboardData?.getData("text/plain");
+      if (text && this.mode() === "control" && this.session?.open) this.term?.paste(text);
+    };
+    host.addEventListener("copy", onCopy, true);
+    host.addEventListener("paste", onPaste, true);
+    return () => {
+      host.removeEventListener("copy", onCopy, true);
+      host.removeEventListener("paste", onPaste, true);
+    };
   }
 
   /** A press with the link modifier over a link opens it instead of going to the pane application. */
@@ -392,6 +444,8 @@ export class TerminalView implements OnDestroy {
     this.closeStream();
     this.detachMouse?.();
     this.detachMouse = undefined;
+    this.detachClipboard?.();
+    this.detachClipboard = undefined;
     this.linkHovered = false;
     this.endDrag = undefined;
     clearTimeout(this.resizeTimer);
