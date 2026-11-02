@@ -40,7 +40,7 @@ const tree: Record<string, DirEntry[]> = {
   "/r/locked": [],
 };
 
-async function setup(stored?: object) {
+async function setup(stored?: object, roots: string[] = ["/r"]) {
   TestBed.resetTestingModule();
   const calls: { path: string; hidden: boolean }[] = [];
   const data = new Map<string, string>();
@@ -59,7 +59,7 @@ async function setup(stored?: object) {
       },
       {
         provide: SettingsStore,
-        useValue: { settings: signal({ ...DEFAULT_SETTINGS, explorerRoots: ["/r"] }) },
+        useValue: { settings: signal({ ...DEFAULT_SETTINGS, explorerRoots: roots }) },
       },
       {
         provide: UI_STORAGE,
@@ -128,5 +128,12 @@ describe("Explorer with the real hx-tree", () => {
   it("restores the expanded folders after a restart", async () => {
     const { labels } = await setup({ expandedDirs: ["/r", "/r/a"] });
     expect(labels()).toEqual(["/r", "a", "deep", "locked"]);
+  });
+
+  it("restores expanded folders under a ~ root, whose children have absolute paths", async () => {
+    tree["~"] = [dir("/home/x/code")];
+    tree["/home/x/code"] = [dir("/home/x/code/app")];
+    const { labels } = await setup({ expandedDirs: ["~", "/home/x/code"] }, ["~"]);
+    expect(labels()).toEqual(["~", "code", "app"]);
   });
 });

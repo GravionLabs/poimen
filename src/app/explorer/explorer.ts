@@ -64,7 +64,7 @@ export class Explorer {
   );
 
   constructor() {
-    // Roots or the hidden switch changed: start over and reload the roots and the remembered folders.
+    // Roots or the hidden switch changed: start over and reload the roots; remembered folders reload as their parents load.
     effect(() => {
       const roots = this.roots();
       const hidden = this.hidden();
@@ -72,11 +72,6 @@ export class Explorer {
         this.children.set(new Map());
         this.requested.clear();
         for (const root of roots) void this.load(root, hidden);
-        for (const dir of this.ui.expandedDirs()) {
-          if (roots.some((r) => dir.startsWith(r === "/" ? "/" : r + "/"))) {
-            void this.load(dir, hidden);
-          }
-        }
       });
     });
   }
@@ -102,5 +97,9 @@ export class Explorer {
     }
     if (hidden !== this.hidden()) return;
     this.children.update((m) => new Map(m).set(path, dirs));
+    // Remembered folders are keyed by absolute path, so follow the loaded tree instead of
+    // matching a root prefix (a `~` root never prefixes them).
+    const expanded = this.ui.expandedDirs();
+    for (const d of dirs) if (expanded.has(d.path)) void this.load(d.path, hidden);
   }
 }

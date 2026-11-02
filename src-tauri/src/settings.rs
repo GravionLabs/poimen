@@ -355,8 +355,6 @@ pub fn parse_ghostty(text: &str) -> Ghostty {
     out
 }
 
-/// Resolves the settings from the file contents. `read_ghostty` is only called when the
-/// `terminal.ghostty` flag is set.
 /// `explorer.roots` (non-empty list of absolute or `~` paths) and `explorer.showHidden`; invalid
 /// entries warn and keep the default.
 fn resolve_explorer(value: &Value, s: &mut Settings) {
@@ -397,6 +395,8 @@ fn resolve_explorer(value: &Value, s: &mut Settings) {
     }
 }
 
+/// Resolves the settings from the file contents. `read_ghostty` is only called when the
+/// `terminal.ghostty` flag is set.
 pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>) -> Settings {
     let mut s = Settings::default();
     let Some(json) = json else { return s };
