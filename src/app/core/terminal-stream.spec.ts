@@ -142,6 +142,19 @@ describe("TerminalStreamService", () => {
     expect(tauri.calls("terminal_scroll")).toEqual([]);
   });
 
+  it("delivers a record that arrives before open resolves", async () => {
+    tauri.answer("open_terminal", () => {
+      tauri.emit("terminal", { id: 7, record: { type: "closed", reason: "pane gone" } });
+      return 7;
+    });
+    const got: StreamRecord[] = [];
+
+    const session = await service.open(OBSERVE, (r) => got.push(r));
+
+    expect(got).toEqual([{ type: "closed", reason: "pane gone" }]);
+    expect(session.open).toBe(false);
+  });
+
   it("rejects with the backend error and routes nothing", async () => {
     tauri.answer("open_terminal", () => {
       throw new Error("terminal has a controller");

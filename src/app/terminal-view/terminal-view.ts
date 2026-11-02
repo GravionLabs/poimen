@@ -27,6 +27,18 @@ export interface ModeState {
   blocked: string | null;
 }
 
+/**
+ * Whether a close reason says another client holds the controller. herdr's wording for a held
+ * terminal is "... already has an attached client; retry with --takeover" (found in the herdr
+ * binary; the control path itself is not exercised). Anything else (pane gone, crash, spawn
+ * failure) is a plain error, not a held controller.
+ */
+export function isControllerHeld(reason: string): boolean {
+  return /already has an attached client|retry with --takeover|controlled by another client|controller taken over/i.test(
+    reason,
+  );
+}
+
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -70,6 +82,8 @@ export class TerminalView implements OnDestroy {
   private size = { cols: 0, rows: 0 };
   private destroyed = false;
   private framed = false;
+  /** The mode of the stream being opened or running (what the CLI child was spawned with). */
+  private attempt: Mode = "observe";
 
   constructor() {
     afterNextRender(() => void this.start(false));
@@ -166,17 +180,21 @@ export class TerminalView implements OnDestroy {
     this.modeChange.emit({ mode, blocked });
   }
 
-  private async openStream(takeover: boolean): Promise<void> {
+  /** Opens with `mode` (default: the wanted one). Input is reported only after the first frame. */
+  private async openStream(takeover: boolean, mode: Mode = this.wanted()): Promise<void> {
     this.banner.set(null);
-    const mode = this.wanted();
-    this.setState(mode, null);
+    this.setState("observe", null);
     await this.connect(mode, takeover);
   }
 
   private async connect(mode: Mode, takeover: boolean): Promise<void> {
     this.framed = false;
+    this.attempt = mode;
+    let session: TerminalSession | undefined;
+    // Records that arrive before open() returned are held until the session is assigned.
+    const early: StreamRecord[] = [];
     try {
-      const session = await this.streams.open(
+      session = await this.streams.open(
         {
           mode,
           target: this.pane().pane_id,
@@ -184,7 +202,10 @@ export class TerminalView implements OnDestroy {
           rows: this.size.rows,
           takeover,
         },
-        (record) => this.onRecord(session, record),
+        (record) => {
+          if (session && session === this.session) this.onRecord(session, record);
+          else early.push(record);
+        },
       );
       // The tab was hidden or closed while the stream opened.
       if (this.destroyed) {
@@ -192,9 +213,24 @@ export class TerminalView implements OnDestroy {
         return;
       }
       this.session = session;
+      for (const record of early.splice(0)) this.onRecord(session, record);
     } catch (err) {
-      this.banner.set(String(err));
+      this.failed(mode, String(err), false);
     }
+  }
+
+  /** A stream ended or could not open: fall back to observing when control was attempted. */
+  private failed(mode: Mode, reason: string, lost: boolean): void {
+    if (mode !== "control" || this.destroyed) {
+      this.banner.set(reason);
+      return;
+    }
+    // Held or lost to another client: stay usable as an observer; going back to input is an
+    // explicit user action. Any other failure is shown as an error.
+    const held = lost || isControllerHeld(reason);
+    this.setState("observe", held ? reason : null);
+    void this.connect("observe", false);
+    if (lost || !held) this.banner.set(reason);
   }
 
   private closeStream(): void {
@@ -202,9 +238,9 @@ export class TerminalView implements OnDestroy {
     this.session = undefined;
   }
 
-  private async restartStream(takeover: boolean): Promise<void> {
+  private async restartStream(takeover: boolean, mode?: Mode): Promise<void> {
     this.closeStream();
-    if (this.term) await this.openStream(takeover);
+    if (this.term) await this.openStream(takeover, mode);
     else await this.start(takeover);
   }
 
@@ -221,22 +257,14 @@ export class TerminalView implements OnDestroy {
   private onRecord(session: TerminalSession, record: StreamRecord): void {
     if (session !== this.session) return;
     if (record.type === "frame") {
+      if (!this.framed && this.attempt === "control") this.setState("control", null);
       this.framed = true;
       this.term?.write(decodeBase64(record.bytes));
       return;
     }
     this.session = undefined;
     if (record.reason === "detached") return;
-    if (this.mode() === "control") {
-      // Control failed (another client holds the controller) or was lost to another client:
-      // stay usable as an observer; going back to input is an explicit user action.
-      const lost = this.framed;
-      this.setState("observe", record.reason);
-      if (lost) this.banner.set(record.reason);
-      void this.connect("observe", false);
-      return;
-    }
-    this.banner.set(record.reason);
+    this.failed(this.attempt, record.reason, this.framed);
   }
 
   private scheduleResize(): void {
@@ -253,11 +281,11 @@ export class TerminalView implements OnDestroy {
     this.size = { cols, rows };
     this.sized.emit(this.size);
     if (!this.session?.open) return;
-    if (this.mode() === "control") {
+    if (this.attempt === "control") {
       this.session.resize(cols, rows);
     } else {
-      // Observers have a fixed viewport; reopen with the new size.
-      void this.restartStream(false);
+      // Observers have a fixed viewport; reopen as an observer, never retrying control.
+      void this.restartStream(false, "observe");
     }
   }
 }
