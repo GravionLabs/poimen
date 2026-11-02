@@ -16,6 +16,7 @@ const fake = vi.hoisted(() => ({
   observers: [] as (() => void)[],
   addons: [] as unknown[],
   openUrl: undefined as unknown,
+  term: undefined as { selection: string; pasted: string[] } | undefined,
   keyHandler: undefined as ((event: KeyboardEvent) => boolean) | undefined,
 }));
 
@@ -24,6 +25,7 @@ vi.mock("@xterm/xterm", () => ({
     options: Record<string, unknown>;
     constructor(options: Record<string, unknown> = {}) {
       this.options = { theme: { foreground: "#e4e4e0" }, ...options };
+      fake.term = this;
     }
     buffer = { active: { viewportY: 0 } };
     get cols() {
@@ -42,6 +44,14 @@ vi.mock("@xterm/xterm", () => ({
       fake.keyHandler = handler;
     }
     focus() {}
+    selection = "";
+    pasted: string[] = [];
+    getSelection() {
+      return this.selection;
+    }
+    paste(text: string) {
+      this.pasted.push(text);
+    }
     write() {}
     dispose() {}
   },
@@ -623,5 +633,113 @@ describe("TerminalView app shortcuts (#23, #26)", () => {
     await setup("control");
     expect(fake.keyHandler?.(key("\\"))).toBe(true);
     expect(fake.keyHandler?.(key("c", { ctrlKey: true }))).toBe(true);
+  });
+});
+
+describe("TerminalView copy and paste (#35)", () => {
+  const frame: StreamRecord = {
+    type: "frame",
+    seq: 1,
+    full: true,
+    width: 80,
+    height: 24,
+    bytes: "",
+  };
+  const clipboardEvent = (type: string, text?: string) => {
+    const data = new Map<string, string>(text === undefined ? [] : [["text/plain", text]]);
+    const event = new Event(type, { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        getData: (k: string) => data.get(k) ?? "",
+        setData: (k: string, v: string) => data.set(k, v),
+      },
+    });
+    return { event, data };
+  };
+
+  it("copies the selection on copy in input mode", async () => {
+    const { body, send } = await setup("control");
+    await send(0, frame);
+    fake.term!.selection = "hello";
+    const { event, data } = clipboardEvent("copy");
+    body.dispatchEvent(event);
+    expect(data.get("text/plain")).toBe("hello");
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("copies the selection in a read-only tab too", async () => {
+    const { body } = await setup("observe");
+    fake.term!.selection = "read only text";
+    const { event, data } = clipboardEvent("copy");
+    body.dispatchEvent(event);
+    expect(data.get("text/plain")).toBe("read only text");
+  });
+
+  it("leaves copy alone without a selection", async () => {
+    const { body } = await setup("control");
+    fake.term!.selection = "";
+    const { event, data } = clipboardEvent("copy");
+    body.dispatchEvent(event);
+    expect(data.has("text/plain")).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("pastes the clipboard text once through xterm in input mode", async () => {
+    const { body, send } = await setup("control");
+    await send(0, frame);
+    const { event } = clipboardEvent("paste", "line1\nline2");
+    body.dispatchEvent(event);
+    expect(fake.term!.pasted).toEqual(["line1\nline2"]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("pastes nothing in a read-only tab", async () => {
+    const { body } = await setup("observe");
+    body.dispatchEvent(clipboardEvent("paste", "text").event);
+    expect(fake.term!.pasted).toEqual([]);
+  });
+
+  it("pastes nothing from an empty clipboard", async () => {
+    const { body, send } = await setup("control");
+    await send(0, frame);
+    body.dispatchEvent(clipboardEvent("paste", "").event);
+    expect(fake.term!.pasted).toEqual([]);
+  });
+
+  it("stops listening when the view is destroyed", async () => {
+    const { body, fixture, send } = await setup("control");
+    await send(0, frame);
+    fixture.destroy();
+    body.dispatchEvent(clipboardEvent("paste", "late").event);
+    expect(fake.term!.pasted).toEqual([]);
+  });
+
+  it("takes Ctrl+Shift+C and Ctrl+Shift+V off macOS and leaves Ctrl+C and Ctrl+V to the pane", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { platform: "Linux x86_64", clipboard: { writeText } });
+    try {
+      await setup("control");
+      fake.term!.selection = "sel";
+      const key = (k: string, init: KeyboardEventInit) =>
+        new KeyboardEvent("keydown", { key: k, ...init });
+      expect(fake.keyHandler?.(key("C", { ctrlKey: true, shiftKey: true }))).toBe(false);
+      expect(writeText).toHaveBeenCalledWith("sel");
+      expect(fake.keyHandler?.(key("V", { ctrlKey: true, shiftKey: true }))).toBe(false);
+      expect(fake.keyHandler?.(key("c", { ctrlKey: true }))).toBe(true);
+      expect(fake.keyHandler?.(key("v", { ctrlKey: true }))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not take Ctrl+Shift+C on macOS (Cmd+C is the menu's)", async () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    try {
+      await setup("control");
+      const event = new KeyboardEvent("keydown", { key: "C", ctrlKey: true, shiftKey: true });
+      expect(fake.keyHandler?.(event)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
