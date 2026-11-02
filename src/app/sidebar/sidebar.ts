@@ -21,24 +21,42 @@ import {
 } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import {
+  DEFAULT_SIDEBAR_ROWS,
   aggregateStatus,
-  paneLine2,
   paneMarks,
+  renderRow,
   spaceContext,
-  spaceMeta,
-  stateLabel,
+  type Line,
+  type RowType,
+  type SidebarRows,
 } from "./spaces";
+import { SettingsStore } from "../core/settings";
 
 /** What a tree node carries back to the template. */
 export type SpaceData =
-  | { kind: "workspace"; workspace: Workspace; status: AgentStatus; state?: string; meta: string }
-  | { kind: "pane"; row: PaneRow; state?: string; sub: string };
+  | { kind: "workspace"; workspace: Workspace; status: AgentStatus; lines: Line[] }
+  | { kind: "pane"; row: PaneRow; lines: Line[] };
+
+const rowType = (row: PaneRow): RowType => (row.agent ? "agent" : "terminal");
+
+/** Texts of the shown tokens of a space and one of its panes: what the filter matches. */
+export function filterValues(space: SpaceNode, row: PaneRow, rows: SidebarRows): string[] {
+  const ctx = spaceContext(space);
+  const texts = (lines: Line[]) => lines.flatMap((l) => l.map((s) => s.text));
+  return [
+    ...texts(renderRow(rowType(row), rows[rowType(row)], row, ctx)),
+    ...texts(renderRow("workspace", rows.workspace, space, ctx)),
+  ];
+}
 
 /** Tree keys: the pane id for a pane, a prefixed workspace id for a workspace. */
 const WORKSPACE_PREFIX = "workspace:";
 
 /** Tree nodes of the (filtered) spaces; a workspace starts expanded (helix only applies it once). */
-export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
+export function spaceNodes(
+  spaces: SpaceNode[],
+  rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
+): HxTreeNode<SpaceData>[] {
   return spaces.map((space) => {
     const ctx = spaceContext(space);
     const status = aggregateStatus(space);
@@ -50,8 +68,7 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
         kind: "workspace",
         workspace: space.workspace,
         status,
-        state: stateLabel(status),
-        meta: spaceMeta(ctx),
+        lines: renderRow("workspace", rows.workspace, space, ctx),
       },
       children: space.rows.map((row) => ({
         key: row.pane.pane_id,
@@ -60,8 +77,7 @@ export function spaceNodes(spaces: SpaceNode[]): HxTreeNode<SpaceData>[] {
         data: {
           kind: "pane",
           row,
-          state: stateLabel(row.pane.agent_status),
-          sub: paneLine2(row, ctx),
+          lines: renderRow(rowType(row), rows[rowType(row)], row, ctx),
         },
       })),
     };
@@ -159,9 +175,18 @@ export class Sidebar {
     return paneMarks(row.pane.pane_id, this.openIds(), this.activeId());
   }
 
-  protected readonly nodes = computed(() =>
-    spaceNodes(filterSpaces(this.store.spaces(), this.query())),
-  );
+  private readonly settings = inject(SettingsStore);
+  private readonly rows = computed(() => this.settings.settings().sidebarRows);
+
+  protected readonly nodes = computed(() => {
+    const rows = this.rows();
+    const spaces = this.store.spaces();
+    const bySpace = new Map(spaces.flatMap((s) => s.rows.map((r) => [r, s] as const)));
+    return spaceNodes(
+      filterSpaces(spaces, this.query(), (row) => filterValues(bySpace.get(row)!, row, rows)),
+      rows,
+    );
+  });
 
   protected data(node: HxTreeNode): SpaceData {
     return node.data as SpaceData;

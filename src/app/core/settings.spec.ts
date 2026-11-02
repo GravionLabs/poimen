@@ -32,6 +32,7 @@ describe("parseSettings", () => {
       colors: { background: "#000000", foreground: null },
       autoControl: false,
       shortcuts: DEFAULT_SETTINGS.shortcuts,
+      sidebarRows: DEFAULT_SETTINGS.sidebarRows,
       warnings: ["w"],
     });
   });
@@ -43,6 +44,21 @@ describe("parseSettings", () => {
     expect(parsed.shortcuts.toggleSidebar).toBe("Ctrl+Alt+B");
     expect(parsed.shortcuts.closeTab).toBe("CmdOrCtrl+W");
     expect(parseSettings({ shortcuts: "no" }).shortcuts).toEqual(DEFAULT_SETTINGS.shortcuts);
+  });
+
+  it("takes valid sidebarRows per row type and defaults the rest", () => {
+    const parsed = parseSettings({
+      sidebarRows: {
+        workspace: [[{ token: "name", bold: true }, "$step"]],
+        agent: [["nope"]],
+        terminal: [],
+      },
+    });
+    expect(parsed.sidebarRows.workspace).toEqual([
+      [{ token: "name", bold: true, dim: false }, { token: "$step" }],
+    ]);
+    expect(parsed.sidebarRows.agent).toEqual(DEFAULT_SETTINGS.sidebarRows.agent);
+    expect(parsed.sidebarRows.terminal).toEqual(DEFAULT_SETTINGS.sidebarRows.terminal);
   });
 
   it("falls back to the defaults on malformed input", () => {

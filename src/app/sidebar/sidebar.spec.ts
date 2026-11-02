@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SpaceNode } from "../core/herdr";
-import { isDoubleClick, sidebarMenuItems, spaceNodes } from "./sidebar";
+import { filterValues, isDoubleClick, sidebarMenuItems, spaceNodes } from "./sidebar";
+import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
 
 const space: SpaceNode = {
   workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
@@ -25,6 +26,26 @@ describe("spaceNodes", () => {
 
   it("is empty without spaces", () => {
     expect(spaceNodes([])).toEqual([]);
+  });
+});
+
+describe("spaceNodes rows", () => {
+  it("renders the configured lines per row type and falls back to the defaults", () => {
+    const [def] = spaceNodes([space]);
+    expect(def.children![0].data).toMatchObject({ kind: "pane" });
+    const rows = {
+      ...DEFAULT_SIDEBAR_ROWS,
+      agent: [[{ token: "tab", bold: true }]],
+    };
+    const [node] = spaceNodes([space], rows);
+    const pane = node.children![0].data as { lines: { text: string; bold: boolean }[][] };
+    expect(pane.lines.map((l) => l.map((s) => [s.text, s.bold]))).toEqual([[["agent", true]]]);
+  });
+
+  it("filters on the values of the shown tokens", () => {
+    const rows: SidebarRows = { ...DEFAULT_SIDEBAR_ROWS, agent: [[{ token: "tab" }]] };
+    expect(filterValues(space, space.rows[0], rows)).toContain("agent");
+    expect(filterValues(space, space.rows[0], rows)).not.toContain("claude");
   });
 });
 

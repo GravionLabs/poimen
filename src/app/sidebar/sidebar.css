@@ -250,3 +250,21 @@
 .menu-item:focus-visible {
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
+
+/* Emphasis from `sidebar.rows`; a value after another one on the line sits close to its "·". */
+.bold {
+  font-weight: 700;
+}
+
+.dim {
+  opacity: 0.6;
+}
+
+.text + .text,
+.space-meta + .space-meta {
+  margin-left: -3px;
+}
+
+.space-main {
+  flex: 1;
+}

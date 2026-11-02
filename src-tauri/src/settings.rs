@@ -22,6 +22,116 @@ pub struct Colors {
     pub foreground: Option<String>,
 }
 
+/// A token on a sidebar row line (`sidebar.rows`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RowToken {
+    pub token: String,
+    pub bold: bool,
+    pub dim: bool,
+}
+
+/// Lines of tokens per row type; `None` keeps the frontend default of that row type.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct SidebarRows {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<Vec<Vec<RowToken>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<Vec<Vec<RowToken>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<Vec<Vec<RowToken>>>,
+}
+
+/// Built-in row tokens; `$<name>` shows the herdr token `<name>`.
+pub const ROW_TOKENS: &[&str] = &[
+    "state_icon",
+    "name",
+    "state_text",
+    "agent",
+    "title",
+    "branch",
+    "dir",
+    "tab",
+];
+
+fn parse_row_token(value: &Value) -> Result<RowToken, String> {
+    let (name, bold, dim) = match value {
+        Value::String(s) => (s.as_str(), false, false),
+        Value::Object(o) => {
+            let Some(Value::String(name)) = o.get("token") else {
+                return Err("an object token needs a string \"token\"".into());
+            };
+            let flag = |key: &str| match o.get(key) {
+                None => Ok(false),
+                Some(Value::Bool(b)) => Ok(*b),
+                Some(other) => Err(format!("{key} {other} must be true or false")),
+            };
+            (name.as_str(), flag("bold")?, flag("dim")?)
+        }
+        other => return Err(format!("token {other} must be a string or an object")),
+    };
+    let known = ROW_TOKENS.contains(&name)
+        || name
+            .strip_prefix('$')
+            .is_some_and(|n| !n.is_empty() && !n.contains(char::is_whitespace));
+    if !known {
+        return Err(format!("unknown token \"{name}\""));
+    }
+    Ok(RowToken {
+        token: name.to_owned(),
+        bold,
+        dim,
+    })
+}
+
+fn parse_row_lines(value: &Value) -> Result<Vec<Vec<RowToken>>, String> {
+    let Some(lines) = value.as_array().filter(|l| !l.is_empty()) else {
+        return Err("must be a non-empty list of lines".into());
+    };
+    lines
+        .iter()
+        .map(|line| {
+            let Some(tokens) = line.as_array().filter(|t| !t.is_empty()) else {
+                return Err("each line must be a non-empty list of tokens".into());
+            };
+            tokens.iter().map(parse_row_token).collect()
+        })
+        .collect()
+}
+
+/// The valid row types of `sidebar.rows`; an invalid one warns and stays `None` (the default).
+fn resolve_sidebar_rows(sidebar: &Value, warnings: &mut Vec<String>) -> SidebarRows {
+    let mut out = SidebarRows::default();
+    let Some(sidebar) = sidebar.as_object() else {
+        warnings.push("sidebar must be an object".into());
+        return out;
+    };
+    let Some(rows) = sidebar.get("rows") else {
+        return out;
+    };
+    let Some(rows) = rows.as_object() else {
+        warnings.push("sidebar.rows must be an object".into());
+        return out;
+    };
+    for (kind, value) in rows {
+        let slot = match kind.as_str() {
+            "workspace" => &mut out.workspace,
+            "agent" => &mut out.agent,
+            "terminal" => &mut out.terminal,
+            _ => {
+                warnings.push(format!(
+                    "sidebar.rows.{kind} is not a known row type; ignored"
+                ));
+                continue;
+            }
+        };
+        match parse_row_lines(value) {
+            Ok(lines) => *slot = Some(lines),
+            Err(e) => warnings.push(format!("sidebar.rows.{kind}: {e}; using the default")),
+        }
+    }
+    out
+}
+
 /// The resolved settings sent to the frontend (event `settings`, command `get_settings`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +148,8 @@ pub struct Settings {
     /// Accelerator per action id (see `ACTIONS`), defaults merged with the valid `shortcuts`
     /// overrides; an empty string means unbound.
     pub shortcuts: BTreeMap<String, String>,
+    /// Lines and tokens of the sidebar rows from `sidebar.rows`; types left `None` use the default.
+    pub sidebar_rows: SidebarRows,
     pub warnings: Vec<String>,
 }
 
@@ -191,6 +303,7 @@ impl Default for Settings {
             colors: None,
             auto_control: true,
             shortcuts: default_shortcuts(),
+            sidebar_rows: SidebarRows::default(),
             warnings: Vec::new(),
         }
     }
@@ -262,6 +375,10 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("shortcuts") {
         s.shortcuts = resolve_shortcuts(value, &mut s.warnings);
+    }
+
+    if let Some(value) = root.get("sidebar") {
+        s.sidebar_rows = resolve_sidebar_rows(value, &mut s.warnings);
     }
 
     let mut use_ghostty = false;
@@ -497,6 +614,60 @@ mod tests {
 
     fn none() -> Option<String> {
         None
+    }
+
+    fn rows(json: &str) -> Settings {
+        resolve(Some(json), none)
+    }
+
+    #[test]
+    fn sidebar_rows_accept_names_objects_and_herdr_tokens() {
+        let s = rows(
+            r#"{"sidebar":{"rows":{"agent":[["state_icon",{"token":"name","bold":true}],["$deliver_step","dir"]]}}}"#,
+        );
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let tok = |t: &str, bold| RowToken {
+            token: t.into(),
+            bold,
+            dim: false,
+        };
+        assert_eq!(
+            s.sidebar_rows.agent,
+            Some(vec![
+                vec![tok("state_icon", false), tok("name", true)],
+                vec![tok("$deliver_step", false), tok("dir", false)],
+            ])
+        );
+        assert_eq!(s.sidebar_rows.workspace, None);
+    }
+
+    #[test]
+    fn sidebar_rows_unknown_token_warns_and_keeps_the_default() {
+        let s =
+            rows(r#"{"sidebar":{"rows":{"workspace":[["name","nope"]],"terminal":[["name"]]}}}"#);
+        assert_eq!(s.sidebar_rows.workspace, None);
+        assert!(s.sidebar_rows.terminal.is_some());
+        assert_eq!(s.warnings.len(), 1);
+        assert!(s.warnings[0].contains("sidebar.rows.workspace") && s.warnings[0].contains("nope"));
+    }
+
+    #[test]
+    fn sidebar_rows_wrong_types_warn() {
+        for json in [
+            r#"{"sidebar":{"rows":{"agent":"name"}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[]}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[[]]}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[["name",5]]}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[[{"token":"name","bold":"yes"}]]}}}"#,
+            r#"{"sidebar":{"rows":{"agent":[["$"]]}}}"#,
+            r#"{"sidebar":{"rows":{"pane":[["name"]]}}}"#,
+            r#"{"sidebar":{"rows":[]}}"#,
+            r#"{"sidebar":3}"#,
+        ] {
+            let s = rows(json);
+            assert_eq!(s.sidebar_rows, SidebarRows::default(), "{json}");
+            assert_eq!(s.warnings.len(), 1, "{json}");
+        }
     }
 
     #[test]

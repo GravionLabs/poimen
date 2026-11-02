@@ -104,3 +104,130 @@ export function aggregateStatus(space: SpaceNode): AgentStatus {
     (best, s) => ((STATUS_RANK[s] ?? 0) > (STATUS_RANK[best] ?? 0) ? s : best),
   );
 }
+
+/** Row types whose layout the user configures (`sidebar.rows`). */
+export type RowType = "workspace" | "agent" | "terminal";
+
+/** A token on a row line, with optional emphasis. */
+export interface TokenSpec {
+  token: string;
+  bold?: boolean;
+  dim?: boolean;
+}
+
+/** Lines of a row, each a list of tokens. */
+export type RowLines = TokenSpec[][];
+
+export type SidebarRows = Record<RowType, RowLines>;
+
+const line = (...tokens: string[]): TokenSpec[] => tokens.map((token) => ({ token }));
+
+/** The layout poimen shipped before it became configurable. */
+export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
+  workspace: [line("state_icon", "name", "state_text", "branch", "dir")],
+  agent: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
+  terminal: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
+};
+
+/** Built-in token names (besides `$<name>`). */
+export const ROW_TOKENS = [
+  "state_icon",
+  "name",
+  "state_text",
+  "agent",
+  "title",
+  "branch",
+  "dir",
+  "tab",
+] as const;
+
+/** Whether `name` is a built-in token or `$<name>` with a herdr token name. */
+export function isRowToken(name: string): boolean {
+  return (ROW_TOKENS as readonly string[]).includes(name) || /^\$\S+$/.test(name);
+}
+
+/** One rendered piece of a row line; `kind` selects the element and its status classes. */
+export interface Segment {
+  kind: "dot" | "name" | "state" | "text";
+  text: string;
+  status: AgentStatus;
+  bold: boolean;
+  dim: boolean;
+  /** Preceded by another text value on the line: shown after a " · ". */
+  sep: boolean;
+}
+
+export type Line = Segment[];
+
+/**
+ * Renders the configured lines of a row. Empty values are skipped, and so is a value equal to an
+ * earlier one on the row (the name counts as shown). On a pane row `branch` and `dir` show only
+ * when they differ from the workspace; on the workspace row they are the shared values.
+ */
+export function renderRow(
+  rowType: RowType,
+  lines: RowLines,
+  subject: SpaceNode | PaneRow,
+  ctx: SpaceContext,
+): Line[] {
+  const pane = rowType === "workspace" ? undefined : (subject as PaneRow);
+  const space = rowType === "workspace" ? (subject as SpaceNode) : undefined;
+  const status: AgentStatus = pane
+    ? pane.pane.agent_status
+    : space
+      ? aggregateStatus(space)
+      : "unknown";
+  const name = pane ? pane.name : (space?.workspace.label ?? "");
+  const branchText = (branch: string, worktree: boolean) => (worktree ? "wt " : "") + branch;
+  const value = (token: string): string | undefined => {
+    switch (token) {
+      case "name":
+        return name;
+      case "state_text":
+        return stateLabel(status);
+      case "agent":
+        return pane?.agent;
+      case "title":
+        return pane ? paneDetail(pane) : undefined;
+      case "tab":
+        return pane?.tab;
+      case "branch":
+        if (!pane) return ctx.branch ? branchText(ctx.branch, ctx.worktree) : undefined;
+        return pane.branch && pane.branch !== ctx.branch
+          ? branchText(pane.branch, pane.worktree)
+          : undefined;
+      case "dir":
+        if (!pane) return ctx.dir ? shortPath(ctx.dir) : undefined;
+        return pane.dir && pane.dir !== ctx.dir ? shortPath(pane.dir) : undefined;
+      default:
+        return token.startsWith("$") ? pane?.pane.tokens?.[token.slice(1)]?.trim() : undefined;
+    }
+  };
+  const seen = new Set([same(name)]);
+  return lines
+    .map((spec) => {
+      const out: Line = [];
+      for (const { token, bold, dim } of spec) {
+        const base = { status, bold: bold === true, dim: dim === true };
+        if (token === "state_icon") {
+          out.push({ ...base, kind: "dot", text: "", sep: false });
+          continue;
+        }
+        const text = value(token)?.trim();
+        if (!text) continue;
+        if (token === "name") {
+          out.push({ ...base, kind: "name", text, sep: false });
+          continue;
+        }
+        if (token === "state_text") {
+          out.push({ ...base, kind: "state", text, sep: false });
+          continue;
+        }
+        if (seen.has(same(text))) continue;
+        seen.add(same(text));
+        out.push({ ...base, kind: "text", text, sep: out.at(-1)?.kind === "text" });
+      }
+      return out;
+    })
+    .filter((l) => l.some((s) => s.kind !== "dot"));
+}

@@ -6,6 +6,8 @@ import {
   paneLine2,
   paneMarks,
   paneMeta,
+  renderRow,
+  DEFAULT_SIDEBAR_ROWS,
   spaceContext,
   spaceMeta,
   stateLabel,
@@ -171,5 +173,81 @@ describe("aggregateStatus", () => {
     expect(aggregateStatus(withStatuses("working"))).toBe("working");
     expect(aggregateStatus(withStatuses("working", "idle"))).toBe("working");
     expect(aggregateStatus(withStatuses("unknown"))).toBe("unknown");
+  });
+});
+
+describe("renderRow", () => {
+  const texts = (lines: ReturnType<typeof renderRow>) =>
+    lines.map((l) => l.filter((s) => s.kind !== "dot").map((s) => s.text));
+  const a = row({ dir: "/a/b/c", branch: "main" });
+  const ctx = spaceContext(space([a, a]));
+
+  it("renders the default layouts like the former subline, paneMeta and spaceMeta", () => {
+    const c = row({
+      name: "Other",
+      agent: "codex",
+      dir: "/a/b/c",
+      branch: "feat",
+      pane: { terminal_title_stripped: "fix", agent_status: "working" },
+    });
+    expect(texts(renderRow("agent", DEFAULT_SIDEBAR_ROWS.agent, c, ctx))).toEqual([
+      ["Other", "working"],
+      ["codex", "fix", "feat"],
+    ]);
+    expect(
+      texts(renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, space([a, a]), ctx)),
+    ).toEqual([["One", "idle", "main", "…/b/c"]]);
+  });
+
+  it("skips empty values, repeats of the name or an earlier value, and empty lines", () => {
+    const r = row({ name: "claude", agent: "Claude", pane: { terminal_title_stripped: "t" } });
+    const lines = [[{ token: "agent" }, { token: "title" }, { token: "tab" }], [{ token: "dir" }]];
+    expect(texts(renderRow("agent", lines, r, ctx))).toEqual([["t"]]);
+    const dup = row({ name: "x", agent: "t", tab: "T", pane: { terminal_title_stripped: "t" } });
+    expect(texts(renderRow("agent", lines, dup, ctx))).toEqual([["t"]]);
+  });
+
+  it("shows branch and dir on a pane only when they differ from the workspace", () => {
+    const c = row({ dir: "/a/b/d", branch: "feat", worktree: true });
+    const mixed = spaceContext(space([a, c]));
+    const lines = [[{ token: "branch" }, { token: "dir" }]];
+    expect(texts(renderRow("terminal", lines, c, mixed))).toEqual([["wt feat", "…/b/d"]]);
+    expect(texts(renderRow("terminal", lines, a, ctx))).toEqual([]);
+  });
+
+  it("renders herdr tokens, tab, emphasis, the status classes data and separators", () => {
+    const r = row({ tab: "build", pane: { tokens: { deliver_step: " review ", x: "" } } });
+    const [line] = renderRow(
+      "terminal",
+      [
+        [
+          { token: "state_icon" },
+          { token: "$deliver_step", bold: true },
+          { token: "$x" },
+          { token: "tab", dim: true },
+        ],
+      ],
+      r,
+      ctx,
+    );
+    expect(line.map((s) => [s.kind, s.text, s.bold, s.dim, s.sep, s.status])).toEqual([
+      ["dot", "", false, false, false, "idle"],
+      ["text", "review", true, false, false, "idle"],
+      ["text", "build", false, true, true, "idle"],
+    ]);
+  });
+
+  it("gives a workspace the aggregate status and no pane-only values", () => {
+    const sp = space([row({ pane: { agent_status: "blocked" } })]);
+    const [line] = renderRow(
+      "workspace",
+      [[{ token: "state_icon" }, { token: "state_text" }, { token: "agent" }, { token: "$k" }]],
+      sp,
+      spaceContext(sp),
+    );
+    expect(line.map((s) => [s.kind, s.text, s.status])).toEqual([
+      ["dot", "", "blocked"],
+      ["state", "blocked", "blocked"],
+    ]);
   });
 });
