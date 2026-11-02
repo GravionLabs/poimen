@@ -34,6 +34,7 @@ import {
 import { SettingsStore } from "../core/settings";
 import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
+import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 
 /** What a tree node carries back to the template. */
 export type SpaceData =
@@ -215,10 +216,11 @@ export function isDoubleClick(
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
 @Component({
   selector: "app-sidebar",
-  imports: [HxMessage, HxTree, HxTreeNodeTemplate, HxInput, NgTemplateOutlet],
+  imports: [HxMessage, HxTree, HxTreeNodeTemplate, HxInput, NgTemplateOutlet, SplitPane],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { "[class.split]": "layout() === 'split'" },
 })
 export class Sidebar {
   /** Ids of the panes that have an open view. */
@@ -274,7 +276,7 @@ export class Sidebar {
   private readonly settings = inject(SettingsStore);
   private readonly rows = computed(() => this.settings.settings().sidebarRows);
 
-  private readonly ui = inject(UiState);
+  protected readonly ui = inject(UiState);
   protected readonly layout = computed(() => this.settings.settings().sidebarLayout);
   protected readonly writeError = this.settings.writeError;
   /** The layout a click on the toggle switches to. */
