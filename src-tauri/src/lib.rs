@@ -105,6 +105,26 @@ async fn pane_rename(
     Ok(())
 }
 
+/// Lists the actions of all herdr plugins (`plugin.action.list`).
+#[tauri::command]
+async fn plugin_actions(client: State<'_, Client>) -> Result<Vec<herdr::PluginAction>, String> {
+    let result = herdr_call(client.inner(), "plugin.action.list", json!({})).await?;
+    Ok(herdr::parse_plugin_actions(&result))
+}
+
+/// Runs a plugin action (`plugin.action.invoke`) with the focused pane and workspace as context.
+#[tauri::command]
+async fn plugin_invoke(
+    client: State<'_, Client>,
+    plugin_id: String,
+    action_id: String,
+    context: herdr::PluginContext,
+) -> Result<(), String> {
+    let params = herdr::plugin_invoke_params(&plugin_id, &action_id, &context);
+    herdr_call(client.inner(), "plugin.action.invoke", params).await?;
+    Ok(())
+}
+
 /// Opens a new terminal in a workspace as a new tab (`tab.create`); returns its pane id.
 #[tauri::command]
 async fn terminal_create(
@@ -500,6 +520,8 @@ fn build_menu(
         "Go",
         true,
         &[
+            &item("commandPalette", "Command Palette...")?,
+            &sep()?,
             &item("nextWaiting", "Next Waiting Agent")?,
             &sep()?,
             &item("nextTab", "Next Tab")?,
@@ -578,6 +600,8 @@ pub fn run() {
             agent_rename,
             pane_rename,
             terminal_create,
+            plugin_actions,
+            plugin_invoke,
             create_space,
             list_dirs,
             list_child_dirs,

@@ -86,7 +86,7 @@ rm -rf src-tauri/icons/android src-tauri/icons/ios
 
 ## Keyboard
 
-The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoom, refresh), Go (next waiting agent, tab switching) and Window. Defaults follow VS Code; `CmdOrCtrl` is Cmd on macOS and Ctrl elsewhere. Every shortcut can be changed in the settings file (see below).
+The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoom, refresh), Go (command palette, next waiting agent, tab switching) and Window. Defaults follow VS Code; `CmdOrCtrl` is Cmd on macOS and Ctrl elsewhere. Every shortcut can be changed in the settings file (see below).
 
 | Action | Setting key | Default |
 |---|---|---|
@@ -97,6 +97,7 @@ The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoo
 | Toggle sidebar | `toggleSidebar` | CmdOrCtrl+B |
 | Split right / down | `splitRight` / `splitDown` | CmdOrCtrl+\\ / CmdOrCtrl+Shift+\\ |
 | Zoom in / out / actual size (terminal font) | `zoomIn` / `zoomOut` / `zoomReset` | CmdOrCtrl+= / CmdOrCtrl+- / CmdOrCtrl+0 |
+| Command palette (poimen commands and herdr plugin actions) | `commandPalette` | CmdOrCtrl+Shift+P |
 | Next waiting agent | `nextWaiting` | CmdOrCtrl+Shift+A |
 | Next / previous tab | `nextTab` / `previousTab` | CmdOrCtrl+Alt+Right / CmdOrCtrl+Alt+Left |
 
