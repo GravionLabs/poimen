@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { holdsLinkModifier, isOpenableUrl, linkHandler } from "./links";
+import {
+  detectedLinkHandler,
+  holdsLinkModifier,
+  isOpenableUrl,
+  linkHandler,
+  trimTrailingPunctuation,
+} from "./links";
 
 describe("isOpenableUrl", () => {
   it.each(["https://github.com/GravionLabs/poimen/pull/69", "http://localhost:4200/x?a=1#b"])(
@@ -50,5 +56,45 @@ describe("holdsLinkModifier", () => {
   it("is Ctrl elsewhere", () => {
     expect(holdsLinkModifier({ metaKey: false, ctrlKey: true }, false)).toBe(true);
     expect(holdsLinkModifier({ metaKey: true, ctrlKey: false }, false)).toBe(false);
+  });
+});
+
+describe("trimTrailingPunctuation", () => {
+  it.each([
+    ["https://x.y/a).", "https://x.y/a"],
+    ["https://x.y/a,", "https://x.y/a"],
+    ["https://x.y/a.", "https://x.y/a"],
+    ["https://x.y/a)", "https://x.y/a"],
+    ["https://x.y/a],", "https://x.y/a"],
+    ["https://example.com/a;:'\"", "https://example.com/a"],
+    ["https://x.y/a", "https://x.y/a"],
+    ["", ""],
+  ])("trims %s", (input, expected) => expect(trimTrailingPunctuation(input)).toBe(expected));
+
+  it("keeps a closing parenthesis with its opening partner", () => {
+    expect(trimTrailingPunctuation("https://en.wikipedia.org/wiki/Foo_(bar)")).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    );
+  });
+
+  it("trims the URL part of a parenthesized link as the addon matches it", () => {
+    expect(trimTrailingPunctuation("https://x.y/a)")).toBe("https://x.y/a");
+  });
+
+  it("removes only the extra closing parenthesis", () => {
+    expect(trimTrailingPunctuation("https://en.wikipedia.org/wiki/Foo_(bar))")).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    );
+    expect(trimTrailingPunctuation("https://en.wikipedia.org/wiki/Foo_(bar).")).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    );
+  });
+});
+
+describe("detectedLinkHandler", () => {
+  it("opens the trimmed URL", () => {
+    const open = vi.fn(async () => undefined);
+    detectedLinkHandler(open)(new Event("click") as MouseEvent, "https://x.y/a).");
+    expect(open).toHaveBeenCalledWith("https://x.y/a");
   });
 });
