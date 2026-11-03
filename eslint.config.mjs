@@ -6,6 +6,7 @@ export default tseslint.config(
   {
     ignores: [
       "dist/**",
+      "site/**",
       ".angular/**",
       "node_modules/**",
       "out-tsc/**",

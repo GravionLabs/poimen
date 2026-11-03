@@ -1,0 +1,19 @@
+{
+  "name": "poimen-site",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The public site of poimen (GitHub Pages), built with VitePress. Self-contained: not part of the app's pnpm setup.",
+  "type": "module",
+  "scripts": {
+    "sync": "node scripts/sync-docs.mjs",
+    "dev": "npm run sync && vitepress dev",
+    "build": "npm run sync && vitepress build",
+    "preview": "vitepress preview",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4",
+    "vitest": "5.1.0",
+    "vue": "3.5.44"
+  }
+}
