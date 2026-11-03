@@ -47,28 +47,30 @@
       (keydown)="resizeKey($event)"
     ></div>
   }
-  <main class="views">
-    @if (notice(); as text) {
-      <div class="notice" role="status">
-        <span>{{ text }}</span>
-        <button type="button" aria-label="Dismiss" (click)="dismissNotice()">x</button>
-      </div>
-    }
-    @if (editor.openIds().size) {
-      <ng-container
-        [ngTemplateOutlet]="nodeTpl"
-        [ngTemplateOutletContext]="{ $implicit: rootNode() }"
-      />
-    } @else {
-      <div class="empty">
-        <p>Pick a pane on the left.</p>
-        <p class="hint">
-          A click previews a pane in a tab, a double click pins it. A pane opens for input unless
-          another client controls it; the switch in the status bar makes it read-only. Closing a tab
-          only closes the view; the herdr pane keeps running.
-        </p>
-      </div>
-    }
+  <main class="views" [class.flush]="ui.sidebarCollapsed()">
+    <div class="editor-area">
+      @if (notice(); as text) {
+        <div class="notice" role="status">
+          <span>{{ text }}</span>
+          <button type="button" aria-label="Dismiss" (click)="dismissNotice()">x</button>
+        </div>
+      }
+      @if (editor.openIds().size) {
+        <ng-container
+          [ngTemplateOutlet]="nodeTpl"
+          [ngTemplateOutletContext]="{ $implicit: rootNode() }"
+        />
+      } @else {
+        <div class="empty">
+          <p>Pick a pane on the left.</p>
+          <p class="hint">
+            A click previews a pane in a tab, a double click pins it. A pane opens for input unless
+            another client controls it; the switch in the status bar makes it read-only. Closing a
+            tab only closes the view; the herdr pane keeps running.
+          </p>
+        </div>
+      }
+    </div>
     @if (ui.panelOpen()) {
       <app-bottom-panel [style.height.px]="ui.panelHeight()" />
     }

@@ -5,7 +5,7 @@
   flex-direction: column;
   min-height: 0;
   /* Its own surface below a visible splitter (like VS Code): the gap above holds the sash. */
-  margin: 9px 4px 4px;
+  margin-top: 9px;
   background: var(--h-content-background);
   border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
@@ -15,7 +15,7 @@
 /* The splitter fills the gap above the panel; its line is always visible, thicker while used. */
 .resizer {
   position: absolute;
-  inset: -10px -4px auto;
+  inset: -10px 0 auto;
   height: 9px;
   z-index: 1;
   cursor: row-resize;
