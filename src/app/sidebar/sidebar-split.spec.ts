@@ -84,7 +84,11 @@ async function setup(layout: SidebarLayout) {
     providers: [
       {
         provide: HerdrStore,
-        useValue: { spaces: signal([one, two]), connectionError: signal(null) },
+        useValue: {
+          spaces: signal([one, two]),
+          connectionError: signal(null),
+          startFailure: signal(null),
+        },
       },
       { provide: SettingsStore, useValue: { settings, writeError, setSidebarLayout } },
       { provide: UI_STORAGE, useValue: null },

@@ -47,6 +47,12 @@
     +
   </button>
 </div>
+@if (store.startFailure(); as reason) {
+  <hx-message class="connection" severity="warn" size="small">
+    herdr was not started: {{ reason }}
+    <button type="button" class="retry" (click)="store.ensureBackend()">Retry</button>
+  </hx-message>
+}
 @if (store.connectionError(); as reason) {
   <hx-message class="connection" severity="warn" size="small">
     herdr not reachable: {{ reason }}

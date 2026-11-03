@@ -152,5 +152,17 @@
     </div>
   </section>
 
+  <section aria-labelledby="herdr-h">
+    <h2 id="herdr-h">herdr</h2>
+    <label class="check">
+      <input
+        type="checkbox"
+        [checked]="settings().herdrAutoStart"
+        (change)="setAutoStart($event)"
+      />
+      Start the herdr server when it is not running
+    </label>
+  </section>
+
   <app-space-layout-editor />
 </div>

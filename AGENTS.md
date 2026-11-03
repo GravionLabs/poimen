@@ -5,6 +5,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 ## Architecture
 
 - `src-tauri/src/herdr.rs`: socket API client (NDJSON over the Unix socket); `SUPPORTED_PROTOCOL` (the protocol poimen is written for) lives here. Requests use short-lived connections; subscriptions keep theirs.
+- `src-tauri/src/backend.rs`: `Backend` trait with `ensure_running` and the herdr implementation: ping the socket, else start a detached `herdr server` (own process group, stdio null, never waited on, never stopped by poimen) and wait for the socket and the supported protocol; behind the `herdr.autoStart` setting and the `ensure_backend` command. `gui_path.rs` is the login-shell `PATH` of a GUI app (shared with `plugin_view.rs`). Tests use a fake `Runner`; never start or stop a server in a test.
 - `src-tauri/src/watch.rs`: one long-lived `events.subscribe`. `pane.agent_status_changed` needs a `pane_id`, and herdr rejects the whole subscription when a referenced pane is gone, so the watcher resubscribes on pane-set changes.
 - `src-tauri/src/settings.rs`: user settings (`~/.config/poimen/config.json`, optional Ghostty config); `get_settings` command plus a polling watcher emitting `settings`. Preferences only, never UI state; frontend side is `core/settings.ts`.
 - `src-tauri/src/schemes.rs`: user color schemes (WezTerm TOML in `~/.config/poimen/themes/`); `get_color_schemes` command plus a polling watcher emitting `color-schemes`; frontend side is `core/user-schemes.ts`.

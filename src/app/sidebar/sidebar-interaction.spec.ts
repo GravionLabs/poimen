@@ -31,7 +31,14 @@ async function setup() {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
-      { provide: HerdrStore, useValue: { spaces: signal(spaces), connectionError: signal(null) } },
+      {
+        provide: HerdrStore,
+        useValue: {
+          spaces: signal(spaces),
+          connectionError: signal(null),
+          startFailure: signal(null),
+        },
+      },
     ],
   });
   // JIT cannot fetch templateUrl/styleUrl: inline the real template.
