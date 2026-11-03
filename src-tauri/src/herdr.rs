@@ -341,6 +341,33 @@ pub fn parse_plugin_pane_defs(result: &Value) -> Vec<PluginPaneDef> {
     defs
 }
 
+/// The Claude Code session of a pane (`agent` and `agent_session.value` of `pane.list`) and the
+/// directory the session was started in; the transcript files are found from these.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSession {
+    pub session: String,
+    pub cwd: String,
+}
+
+/// Reads the Claude session of `pane_id` out of a `pane.list` result; `None` for another pane, a
+/// non-Claude agent, or a pane without a session id.
+pub fn parse_claude_session(result: &Value, pane_id: &str) -> Option<AgentSession> {
+    let pane = result
+        .get("panes")?
+        .as_array()?
+        .iter()
+        .find(|p| p.get("pane_id").and_then(Value::as_str) == Some(pane_id))?;
+    if pane.get("agent")?.as_str()? != "claude" {
+        return None;
+    }
+    let session = pane.get("agent_session")?.get("value")?.as_str()?;
+    let cwd = pane.get("cwd")?.as_str()?;
+    (!session.is_empty() && !cwd.is_empty()).then(|| AgentSession {
+        session: session.to_owned(),
+        cwd: cwd.to_owned(),
+    })
+}
+
 /// A plugin pane herdr reports (`plugin_pane_opened`, `plugin_pane_focused`, `plugin_pane_closed`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PluginPane {
@@ -451,6 +478,30 @@ impl Subscription {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn claude_session_is_read_from_the_pane_list() {
+        let result = json!({"panes": [
+            {"pane_id": "w1:p1", "agent": "claude", "cwd": "/home/u/proj",
+             "agent_session": {"agent": "claude", "kind": "id", "value": "abc-123"}},
+            {"pane_id": "w1:p2", "agent": "codex", "cwd": "/x",
+             "agent_session": {"value": "zzz"}},
+            {"pane_id": "w1:p3", "cwd": "/x"},
+            {"pane_id": "w1:p4", "agent": "claude", "cwd": "/x"}
+        ]});
+        assert_eq!(
+            parse_claude_session(&result, "w1:p1"),
+            Some(AgentSession {
+                session: "abc-123".into(),
+                cwd: "/home/u/proj".into()
+            })
+        );
+        assert_eq!(parse_claude_session(&result, "w1:p2"), None);
+        assert_eq!(parse_claude_session(&result, "w1:p3"), None);
+        assert_eq!(parse_claude_session(&result, "w1:p4"), None);
+        assert_eq!(parse_claude_session(&result, "w9:p9"), None);
+        assert_eq!(parse_claude_session(&json!({}), "w1:p1"), None);
+    }
 
     #[test]
     fn plugin_actions_are_parsed_and_incomplete_ones_skipped() {

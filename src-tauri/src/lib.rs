@@ -8,10 +8,12 @@ mod schemes;
 mod settings;
 mod spaces;
 mod stream;
+mod transcripts;
 mod watch;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde_json::{Value, json};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -21,6 +23,10 @@ use herdr::Client;
 use stream::{Mode, OpenRequest, Sessions};
 
 struct HerdrBin(PathBuf);
+
+/// The running subagent transcript watch (at most one: the one of the pane the panel follows).
+#[derive(Default)]
+struct SubagentWatch(Mutex<Option<transcripts::WatchHandle>>);
 
 /// Workspaces, tabs and panes in one call; the frontend rebuilds its tree from it.
 #[tauri::command]
@@ -426,6 +432,42 @@ async fn repo_info(
         .map_err(|e| e.to_string())
 }
 
+/// Starts following the subagent transcripts of the Claude Code agent in `pane_id` (replacing the
+/// previous watch); updates arrive as `subagents` events. `false` when the pane has no Claude
+/// session or its transcript is not found; nothing is watched then. Read-only.
+#[tauri::command]
+async fn subagents_watch(
+    app: AppHandle,
+    client: State<'_, Client>,
+    watch: State<'_, SubagentWatch>,
+    pane_id: String,
+) -> Result<bool, String> {
+    let panes = herdr_call(client.inner(), "pane.list", json!({})).await?;
+    let found = herdr::parse_claude_session(&panes, &pane_id).and_then(|s| {
+        let root = transcripts::projects_root(&home_dir()?);
+        let dir = transcripts::locate_project_dir(&root, &s.cwd, &s.session)?;
+        Some((dir, s.session))
+    });
+    let mut slot = watch.0.lock().map_err(|e| e.to_string())?;
+    *slot = None;
+    let Some((dir, session)) = found else {
+        return Ok(false);
+    };
+    let id = session.clone();
+    *slot = Some(transcripts::watch(&dir, &session, move |update| {
+        let _ = app.emit("subagents", json!({ "session": id, "update": update }));
+    })?);
+    Ok(true)
+}
+
+/// Stops following subagent transcripts.
+#[tauri::command]
+fn subagents_unwatch(watch: State<'_, SubagentWatch>) {
+    if let Ok(mut slot) = watch.0.lock() {
+        *slot = None;
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri injects app/state; the rest is the IPC payload.
 fn open_terminal(
@@ -643,6 +685,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(client.clone())
         .manage(Sessions::default())
+        .manage(SubagentWatch::default())
         .manage(HerdrBin(bin))
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -714,6 +757,8 @@ pub fn run() {
             remove_spaces_layout,
             default_spaces_layout,
             repo_info,
+            subagents_watch,
+            subagents_unwatch,
             open_terminal,
             terminal_input,
             terminal_resize,

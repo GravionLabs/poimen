@@ -1,0 +1,801 @@
+//! Live subagent transcripts of Claude Code agents.
+//!
+//! Subagents do not write to the terminal, so what they do is read from Claude Code's session
+//! transcripts (read-only; the JSONL format is internal to Claude Code and may change, so every
+//! parser here skips what it does not know instead of failing):
+//!
+//! - `~/.claude/projects/<cwd, non-alphanumerics as "-">/<session>.jsonl`: the main transcript;
+//! - `<session>/subagents/agent-<id>.jsonl`: one subagent (prompt, messages, tool calls, results);
+//! - `<session>/subagents/agent-<id>.meta.json`: `agentType`, `description`, `toolUseId`,
+//!   `spawnDepth`, `worktreeBranch` and, in recent versions, `finished`.
+//!
+//! A subagent is done when its meta says `finished`, or when the main transcript holds a
+//! `tool_result` for its `toolUseId` that is not the "launched in the background" acknowledgement.
+//! The watcher is event driven (`notify`); files are tailed from the last read offset.
+
+use std::collections::{BTreeMap, HashSet};
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Sender};
+use std::time::Duration;
+
+use notify::{RecursiveMode, Watcher};
+use serde::Serialize;
+use serde_json::Value;
+
+/// Longest text kept per block; a transcript can hold whole files and diffs.
+const TEXT_LIMIT: usize = 8000;
+const INPUT_LIMIT: usize = 2000;
+
+/// `~/.claude/projects`.
+pub fn projects_root(home: &Path) -> PathBuf {
+    home.join(".claude").join("projects")
+}
+
+/// The directory name Claude Code uses for a working directory: every character that is not an
+/// ASCII letter or digit becomes `-` (so `/a/.b_c` is `-a--b-c`).
+pub fn project_dir_name(cwd: &str) -> String {
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+/// The project directory holding the transcript of `session`: the one named after `cwd`, else any
+/// project directory that has the session file (a session can outlive a renamed path spelling).
+pub fn locate_project_dir(root: &Path, cwd: &str, session: &str) -> Option<PathBuf> {
+    let file = format!("{session}.jsonl");
+    let direct = root.join(project_dir_name(cwd));
+    if direct.join(&file).is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.join(&file).is_file())
+}
+
+/// One piece of a message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Block {
+    Text {
+        text: String,
+    },
+    Thinking {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: String,
+    },
+    ToolResult {
+        tool_use_id: String,
+        text: String,
+        is_error: bool,
+    },
+}
+
+/// A user or assistant message of a transcript.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Entry {
+    pub uuid: String,
+    /// `user` or `assistant`.
+    pub role: String,
+    pub timestamp: Option<String>,
+    pub blocks: Vec<Block>,
+}
+
+/// One transcript line: its timestamp (any entry type has one) and the message, if it is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Line {
+    pub timestamp: Option<String>,
+    pub entry: Option<Entry>,
+}
+
+fn truncate(text: &str, limit: usize) -> String {
+    match text.char_indices().nth(limit) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_owned(),
+    }
+}
+
+fn result_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+fn parse_block(block: &Value) -> Option<Block> {
+    let text = |key: &str| block.get(key).and_then(Value::as_str);
+    match text("type")? {
+        "text" => Some(Block::Text {
+            text: truncate(text("text")?, TEXT_LIMIT),
+        }),
+        "thinking" => Some(Block::Thinking {
+            text: truncate(text("thinking")?, TEXT_LIMIT),
+        }),
+        "tool_use" => Some(Block::ToolUse {
+            id: text("id")?.to_owned(),
+            name: text("name")?.to_owned(),
+            input: truncate(&block.get("input")?.to_string(), INPUT_LIMIT),
+        }),
+        "tool_result" => Some(Block::ToolResult {
+            tool_use_id: text("tool_use_id")?.to_owned(),
+            text: truncate(&result_text(block.get("content")?), TEXT_LIMIT),
+            is_error: block
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        _ => None,
+    }
+}
+
+/// Parses one JSONL line. `None` for text that is not a JSON object; a known object of an
+/// unknown type (attachments, queue operations, ...) has a timestamp but no entry.
+pub fn parse_line(line: &str) -> Option<Line> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    let object = value.as_object()?;
+    let timestamp = object
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let entry = (|| {
+        let role = object.get("type")?.as_str()?;
+        if !matches!(role, "user" | "assistant")
+            || object.get("isMeta").and_then(Value::as_bool) == Some(true)
+        {
+            return None;
+        }
+        let content = object.get("message")?.get("content")?;
+        let blocks: Vec<Block> = match content {
+            Value::String(text) => vec![Block::Text {
+                text: truncate(text, TEXT_LIMIT),
+            }],
+            Value::Array(parts) => parts.iter().filter_map(parse_block).collect(),
+            _ => Vec::new(),
+        };
+        (!blocks.is_empty()).then(|| Entry {
+            uuid: object
+                .get("uuid")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            role: role.to_owned(),
+            timestamp: timestamp.clone(),
+            blocks,
+        })
+    })();
+    Some(Line { timestamp, entry })
+}
+
+/// Tool use ids a main-transcript line answers with a final result. The acknowledgement of a
+/// background launch (`toolUseResult.isAsync` / `status: async_launched`) does not count.
+pub fn completed_tool_uses(line: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return Vec::new();
+    };
+    let result = value.get("toolUseResult");
+    let background = result
+        .and_then(|r| r.get("isAsync"))
+        .and_then(Value::as_bool)
+        == Some(true)
+        || result.and_then(|r| r.get("status")).and_then(Value::as_str) == Some("async_launched");
+    if background || value.get("type").and_then(Value::as_str) != Some("user") {
+        return Vec::new();
+    }
+    value
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
+        .filter_map(|b| b.get("tool_use_id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `agent-<id>.meta.json`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Meta {
+    pub agent_type: String,
+    pub description: String,
+    pub tool_use_id: String,
+    pub spawn_depth: u32,
+    pub worktree_branch: Option<String>,
+    pub finished: bool,
+}
+
+pub fn parse_meta(text: &str) -> Meta {
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return Meta::default();
+    };
+    let string = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    Meta {
+        agent_type: string("agentType"),
+        description: string("description"),
+        tool_use_id: string("toolUseId"),
+        spawn_depth: value
+            .get("spawnDepth")
+            .and_then(Value::as_u64)
+            .and_then(|d| u32::try_from(d).ok())
+            .unwrap_or(0),
+        worktree_branch: Some(string("worktreeBranch")).filter(|b| !b.is_empty()),
+        finished: value.get("finished").and_then(Value::as_bool) == Some(true),
+    }
+}
+
+/// A subagent as the panel lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SubagentInfo {
+    pub agent_id: String,
+    pub agent_type: String,
+    pub description: String,
+    pub tool_use_id: String,
+    pub spawn_depth: u32,
+    pub worktree_branch: Option<String>,
+    /// `running` or `done`.
+    pub status: &'static str,
+    /// Timestamp of the first and of the latest transcript line.
+    pub started: Option<String>,
+    pub last: Option<String>,
+}
+
+/// Reads the lines a file gained since the last call. A half-written last line waits for its
+/// newline; a file that shrank (rewritten) is read from the start again.
+#[derive(Debug)]
+pub struct Tailer {
+    path: PathBuf,
+    offset: u64,
+    partial: Vec<u8>,
+}
+
+impl Tailer {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            offset: 0,
+            partial: Vec::new(),
+        }
+    }
+
+    pub fn read_new(&mut self) -> Vec<String> {
+        let Ok(mut file) = File::open(&self.path) else {
+            return Vec::new();
+        };
+        let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+        if len < self.offset {
+            self.offset = 0;
+            self.partial.clear();
+        }
+        if len == self.offset || file.seek(SeekFrom::Start(self.offset)).is_err() {
+            return Vec::new();
+        }
+        let mut bytes = Vec::new();
+        if file.read_to_end(&mut bytes).is_err() {
+            return Vec::new();
+        }
+        self.offset += bytes.len() as u64;
+        self.partial.extend(bytes);
+        let mut lines = Vec::new();
+        while let Some(end) = self.partial.iter().position(|b| *b == b'\n') {
+            let rest = self.partial.split_off(end + 1);
+            let line = std::mem::replace(&mut self.partial, rest);
+            let text = String::from_utf8_lossy(&line[..end]).trim().to_owned();
+            if !text.is_empty() {
+                lines.push(text);
+            }
+        }
+        lines
+    }
+}
+
+/// What a refresh found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Update {
+    /// The subagents of the session changed (a new one, a status, a timestamp).
+    List { agents: Vec<SubagentInfo> },
+    /// New messages of one subagent, in order.
+    Entries {
+        agent_id: String,
+        entries: Vec<Entry>,
+    },
+}
+
+struct Tracked {
+    tailer: Tailer,
+    started: Option<String>,
+    last: Option<String>,
+}
+
+/// Follows the transcripts of one session.
+pub struct Tracker {
+    sub_dir: PathBuf,
+    parent: Tailer,
+    done: HashSet<String>,
+    agents: BTreeMap<String, Tracked>,
+    listed: Vec<SubagentInfo>,
+}
+
+impl Tracker {
+    /// `project_dir` holds `<session>.jsonl` and the `<session>/` directory.
+    pub fn new(project_dir: &Path, session: &str) -> Self {
+        Self {
+            sub_dir: project_dir.join(session).join("subagents"),
+            parent: Tailer::new(project_dir.join(format!("{session}.jsonl"))),
+            done: HashSet::new(),
+            agents: BTreeMap::new(),
+            listed: Vec::new(),
+        }
+    }
+
+    /// Reads what the files gained; the updates are empty when nothing changed.
+    pub fn refresh(&mut self) -> Vec<Update> {
+        for line in self.parent.read_new() {
+            if line.contains("tool_result") {
+                self.done.extend(completed_tool_uses(&line));
+            }
+        }
+        if let Ok(dir) = std::fs::read_dir(&self.sub_dir) {
+            for path in dir.flatten().map(|e| e.path()) {
+                let id = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.strip_prefix("agent-"))
+                    .and_then(|n| n.strip_suffix(".jsonl"));
+                if let Some(id) = id {
+                    self.agents.entry(id.to_owned()).or_insert_with(|| Tracked {
+                        tailer: Tailer::new(path.clone()),
+                        started: None,
+                        last: None,
+                    });
+                }
+            }
+        }
+        let mut updates = Vec::new();
+        for (id, agent) in &mut self.agents {
+            let mut entries = Vec::new();
+            for line in agent.tailer.read_new() {
+                let Some(parsed) = parse_line(&line) else {
+                    continue;
+                };
+                if let Some(ts) = parsed.timestamp {
+                    agent.started.get_or_insert_with(|| ts.clone());
+                    agent.last = Some(ts);
+                }
+                entries.extend(parsed.entry);
+            }
+            if !entries.is_empty() {
+                updates.push(Update::Entries {
+                    agent_id: id.clone(),
+                    entries,
+                });
+            }
+        }
+        let mut agents: Vec<SubagentInfo> = self
+            .agents
+            .iter()
+            .map(|(id, agent)| {
+                let meta =
+                    std::fs::read_to_string(self.sub_dir.join(format!("agent-{id}.meta.json")))
+                        .map(|t| parse_meta(&t))
+                        .unwrap_or_default();
+                let finished = meta.finished || self.done.contains(&meta.tool_use_id);
+                SubagentInfo {
+                    agent_id: id.clone(),
+                    status: if finished { "done" } else { "running" },
+                    agent_type: meta.agent_type,
+                    description: meta.description,
+                    tool_use_id: meta.tool_use_id,
+                    spawn_depth: meta.spawn_depth,
+                    worktree_branch: meta.worktree_branch,
+                    started: agent.started.clone(),
+                    last: agent.last.clone(),
+                }
+            })
+            .collect();
+        agents.sort_by(|a, b| (&a.started, &a.agent_id).cmp(&(&b.started, &b.agent_id)));
+        if agents != self.listed {
+            self.listed = agents.clone();
+            updates.insert(0, Update::List { agents });
+        }
+        updates
+    }
+}
+
+enum Message {
+    Changed,
+    Stop,
+}
+
+/// A running watch; dropping it stops the thread and the file watcher.
+pub struct WatchHandle {
+    stop: Sender<Message>,
+    _watcher: notify::RecommendedWatcher,
+}
+
+impl Drop for WatchHandle {
+    fn drop(&mut self) {
+        let _ = self.stop.send(Message::Stop);
+    }
+}
+
+/// Watches the project directory of `session` and calls `emit` with every update, first with the
+/// existing transcripts. Events, not polling: the thread sleeps until the file system reports a
+/// change below the session.
+pub fn watch(
+    project_dir: &Path,
+    session: &str,
+    emit: impl Fn(Update) + Send + 'static,
+) -> Result<WatchHandle, String> {
+    // Events carry resolved paths (`/private/var` for `/var` on macOS).
+    let project_dir = &project_dir.canonicalize().map_err(|e| e.to_string())?;
+    let (tx, rx) = mpsc::channel();
+    let notifier = tx.clone();
+    let session_dir = project_dir.join(session);
+    let session_file = project_dir.join(format!("{session}.jsonl"));
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        if let Ok(event) = event
+            && event
+                .paths
+                .iter()
+                .any(|p| p == &session_file || p.starts_with(&session_dir))
+        {
+            let _ = notifier.send(Message::Changed);
+        }
+    })
+    .map_err(|e| e.to_string())?;
+    watcher
+        .watch(project_dir, RecursiveMode::Recursive)
+        .map_err(|e| e.to_string())?;
+    let mut tracker = Tracker::new(project_dir, session);
+    std::thread::spawn(move || {
+        for update in tracker.refresh() {
+            emit(update);
+        }
+        while let Ok(Message::Changed) = rx.recv() {
+            // A burst of writes becomes one refresh.
+            std::thread::sleep(Duration::from_millis(40));
+            let mut stopped = false;
+            while let Ok(message) = rx.try_recv() {
+                stopped |= matches!(message, Message::Stop);
+            }
+            for update in tracker.refresh() {
+                emit(update);
+            }
+            if stopped {
+                break;
+            }
+        }
+    });
+    Ok(WatchHandle {
+        stop: tx,
+        _watcher: watcher,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        static N: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "poimen-transcripts-{}-{}-{name}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn append(path: &Path, text: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        file.write_all(text.as_bytes()).unwrap();
+    }
+
+    const PROMPT: &str = r#"{"type":"user","uuid":"u1","timestamp":"2026-11-02T04:07:52.158Z","isSidechain":true,"message":{"role":"user","content":"Review the diff."}}"#;
+    const CALL: &str = r#"{"type":"assistant","uuid":"a1","timestamp":"2026-11-02T04:07:54.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm","signature":"x"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"git diff"}}]}}"#;
+    const RESULT: &str = r#"{"type":"user","uuid":"u2","timestamp":"2026-11-02T04:07:56.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"1 file changed","is_error":false}]},"toolUseResult":{"stdout":"1 file changed"}}"#;
+    const REPORT: &str = r#"{"type":"assistant","uuid":"a2","timestamp":"2026-11-02T04:08:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"All good."}]}}"#;
+
+    #[test]
+    fn project_dir_name_replaces_every_non_alphanumeric_character() {
+        assert_eq!(
+            project_dir_name("/Users/jk/Source/poimen"),
+            "-Users-jk-Source-poimen"
+        );
+        assert_eq!(project_dir_name("/a/.wt_x"), "-a--wt-x");
+        assert_eq!(project_dir_name("/tmp/ä"), "-tmp--");
+    }
+
+    #[test]
+    fn project_dir_is_found_by_cwd_then_by_scanning_for_the_session() {
+        let root = temp_dir("locate");
+        append(&root.join("-work-proj").join("s1.jsonl"), "{}\n");
+        append(&root.join("-other").join("s2.jsonl"), "{}\n");
+        assert_eq!(
+            locate_project_dir(&root, "/work/proj", "s1"),
+            Some(root.join("-work-proj"))
+        );
+        assert_eq!(
+            locate_project_dir(&root, "/moved/away", "s2"),
+            Some(root.join("-other"))
+        );
+        assert_eq!(locate_project_dir(&root, "/work/proj", "nope"), None);
+        assert_eq!(locate_project_dir(&root.join("missing"), "/x", "s1"), None);
+    }
+
+    #[test]
+    fn messages_are_parsed_into_blocks() {
+        let prompt = parse_line(PROMPT).unwrap().entry.unwrap();
+        assert_eq!(prompt.role, "user");
+        assert_eq!(
+            prompt.blocks,
+            vec![Block::Text {
+                text: "Review the diff.".into()
+            }]
+        );
+        let call = parse_line(CALL).unwrap();
+        assert_eq!(call.timestamp.as_deref(), Some("2026-11-02T04:07:54.000Z"));
+        assert_eq!(
+            call.entry.unwrap().blocks,
+            vec![
+                Block::Thinking { text: "hm".into() },
+                Block::ToolUse {
+                    id: "toolu_1".into(),
+                    name: "Bash".into(),
+                    input: r#"{"command":"git diff"}"#.into()
+                }
+            ]
+        );
+        let result = parse_line(RESULT).unwrap().entry.unwrap();
+        assert_eq!(
+            result.blocks,
+            vec![Block::ToolResult {
+                tool_use_id: "toolu_1".into(),
+                text: "1 file changed".into(),
+                is_error: false
+            }]
+        );
+    }
+
+    #[test]
+    fn tool_results_with_text_parts_are_joined() {
+        let line = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"text","text":"a"},{"type":"image"},{"type":"text","text":"b"}],"is_error":true}]}}"#;
+        assert_eq!(
+            parse_line(line).unwrap().entry.unwrap().blocks,
+            vec![Block::ToolResult {
+                tool_use_id: "t".into(),
+                text: "a\nb".into(),
+                is_error: true
+            }]
+        );
+    }
+
+    #[test]
+    fn unknown_entry_types_blocks_and_fields_are_tolerated() {
+        let attachment =
+            r#"{"type":"attachment","timestamp":"t1","attachment":{"type":"env"},"newField":1}"#;
+        let line = parse_line(attachment).unwrap();
+        assert_eq!(line.timestamp.as_deref(), Some("t1"));
+        assert_eq!(line.entry, None);
+        let meta = r#"{"type":"user","isMeta":true,"message":{"content":"<system-reminder>"}}"#;
+        assert_eq!(parse_line(meta).unwrap().entry, None);
+        let odd = r#"{"type":"assistant","future":{"x":[]},"message":{"content":[{"type":"hologram","data":1},{"type":"text","text":"ok","extra":true}]}}"#;
+        assert_eq!(
+            parse_line(odd).unwrap().entry.unwrap().blocks,
+            vec![Block::Text { text: "ok".into() }]
+        );
+        let no_message = r#"{"type":"assistant"}"#;
+        assert_eq!(parse_line(no_message).unwrap().entry, None);
+    }
+
+    #[test]
+    fn broken_lines_are_not_lines() {
+        assert_eq!(parse_line("not json"), None);
+        assert_eq!(parse_line("[1,2]"), None);
+        assert_eq!(parse_line(""), None);
+    }
+
+    #[test]
+    fn long_text_is_truncated_on_a_character_boundary() {
+        let long = "ä".repeat(TEXT_LIMIT + 10);
+        let line = format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"{long}"}}]}}}}"#
+        );
+        let Block::Text { text } = &parse_line(&line).unwrap().entry.unwrap().blocks[0] else {
+            panic!("text block");
+        };
+        assert_eq!(text.chars().count(), TEXT_LIMIT + 1);
+        assert!(text.ends_with('…'));
+    }
+
+    #[test]
+    fn meta_is_read_with_defaults_for_missing_fields() {
+        let meta = parse_meta(
+            r#"{"agentType":"general-purpose","description":"Review PBI #21","toolUseId":"toolu_9","spawnDepth":2,"worktreeBranch":"fix-1","finished":true,"model":"x"}"#,
+        );
+        assert_eq!(
+            meta,
+            Meta {
+                agent_type: "general-purpose".into(),
+                description: "Review PBI #21".into(),
+                tool_use_id: "toolu_9".into(),
+                spawn_depth: 2,
+                worktree_branch: Some("fix-1".into()),
+                finished: true
+            }
+        );
+        assert_eq!(parse_meta("{}"), Meta::default());
+        assert_eq!(parse_meta("garbage"), Meta::default());
+    }
+
+    #[test]
+    fn a_final_tool_result_completes_the_tool_use() {
+        let done = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"report"}]},"toolUseResult":{"status":"completed"}}"#;
+        assert_eq!(completed_tool_uses(done), vec!["toolu_9".to_owned()]);
+    }
+
+    #[test]
+    fn a_background_launch_acknowledgement_does_not_complete_the_tool_use() {
+        let launched = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"a1"}}"#;
+        assert!(completed_tool_uses(launched).is_empty());
+        assert!(completed_tool_uses("nope").is_empty());
+        assert!(completed_tool_uses(CALL).is_empty());
+    }
+
+    #[test]
+    fn tailer_returns_only_new_complete_lines() {
+        let dir = temp_dir("tail");
+        let path = dir.join("a.jsonl");
+        let mut tailer = Tailer::new(path.clone());
+        assert!(tailer.read_new().is_empty());
+        append(&path, "one\ntwo\nthr");
+        assert_eq!(tailer.read_new(), vec!["one", "two"]);
+        assert!(tailer.read_new().is_empty());
+        append(&path, "ee\n\nfour\n");
+        assert_eq!(tailer.read_new(), vec!["three", "four"]);
+    }
+
+    #[test]
+    fn tailer_starts_over_when_the_file_shrinks() {
+        let dir = temp_dir("shrink");
+        let path = dir.join("a.jsonl");
+        let mut tailer = Tailer::new(path.clone());
+        append(&path, "long first line\n");
+        assert_eq!(tailer.read_new().len(), 1);
+        std::fs::write(&path, "new\n").unwrap();
+        assert_eq!(tailer.read_new(), vec!["new"]);
+    }
+
+    fn session_fixture(name: &str) -> (PathBuf, PathBuf) {
+        let project = temp_dir(name);
+        let sub = project.join("S").join("subagents");
+        append(
+            &sub.join("agent-abc.meta.json"),
+            r#"{"agentType":"general-purpose","description":"Review","toolUseId":"toolu_9","spawnDepth":1}"#,
+        );
+        append(&sub.join("agent-abc.jsonl"), &format!("{PROMPT}\n{CALL}\n"));
+        (project, sub)
+    }
+
+    #[test]
+    fn tracker_lists_a_running_subagent_with_its_entries() {
+        let (project, _) = session_fixture("running");
+        let mut tracker = Tracker::new(&project, "S");
+        let updates = tracker.refresh();
+        let Update::List { agents } = &updates[0] else {
+            panic!("list first");
+        };
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].agent_id, "abc");
+        assert_eq!(agents[0].status, "running");
+        assert_eq!(agents[0].description, "Review");
+        assert_eq!(
+            agents[0].started.as_deref(),
+            Some("2026-11-02T04:07:52.158Z")
+        );
+        assert_eq!(agents[0].last.as_deref(), Some("2026-11-02T04:07:54.000Z"));
+        let Update::Entries { agent_id, entries } = &updates[1] else {
+            panic!("entries");
+        };
+        assert_eq!((agent_id.as_str(), entries.len()), ("abc", 2));
+        assert!(tracker.refresh().is_empty());
+    }
+
+    #[test]
+    fn tracker_streams_later_lines_and_marks_done_by_the_parent_result() {
+        let (project, sub) = session_fixture("done");
+        let mut tracker = Tracker::new(&project, "S");
+        tracker.refresh();
+        append(
+            &sub.join("agent-abc.jsonl"),
+            &format!("{RESULT}\n{REPORT}\n"),
+        );
+        let updates = tracker.refresh();
+        assert!(matches!(&updates[1], Update::Entries { entries, .. } if entries.len() == 2));
+        assert!(matches!(&updates[0], Update::List { agents } if agents[0].status == "running"));
+
+        let launched = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"launched"}]},"toolUseResult":{"isAsync":true}}"#;
+        append(&project.join("S.jsonl"), &format!("{launched}\n"));
+        assert!(tracker.refresh().is_empty(), "a launch is not a result");
+
+        let final_result = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"report"}]}}"#;
+        append(&project.join("S.jsonl"), &format!("{final_result}\n"));
+        let updates = tracker.refresh();
+        assert!(matches!(&updates[..], [Update::List { agents }] if agents[0].status == "done"));
+    }
+
+    #[test]
+    fn tracker_marks_done_by_the_finished_flag_of_the_meta() {
+        let (project, sub) = session_fixture("finished");
+        let mut tracker = Tracker::new(&project, "S");
+        tracker.refresh();
+        std::fs::write(
+            sub.join("agent-abc.meta.json"),
+            r#"{"agentType":"general-purpose","description":"Review","toolUseId":"toolu_9","finished":true}"#,
+        )
+        .unwrap();
+        let updates = tracker.refresh();
+        assert!(matches!(&updates[..], [Update::List { agents }] if agents[0].status == "done"));
+    }
+
+    #[test]
+    fn tracker_without_transcripts_is_empty() {
+        let project = temp_dir("empty");
+        let mut tracker = Tracker::new(&project, "S");
+        assert!(tracker.refresh().is_empty());
+    }
+
+    #[test]
+    fn tracker_ignores_other_files_of_the_directory() {
+        let (project, sub) = session_fixture("other");
+        append(&sub.join("agent-x.forked-skill.json"), "{}");
+        append(&sub.join("notes.txt"), "hi");
+        let mut tracker = Tracker::new(&project, "S");
+        let Update::List { agents } = &tracker.refresh()[0] else {
+            panic!("list");
+        };
+        assert_eq!(agents.len(), 1);
+    }
+
+    #[test]
+    fn watch_reports_the_files_that_appear_afterwards() {
+        let project = temp_dir("watch");
+        let (tx, rx) = mpsc::channel();
+        let handle = watch(&project, "S", move |u| {
+            let _ = tx.send(u);
+        })
+        .unwrap();
+        let sub = project.join("S").join("subagents");
+        append(&sub.join("agent-abc.jsonl"), &format!("{PROMPT}\n"));
+        let update = rx.recv_timeout(Duration::from_secs(10)).expect("an update");
+        assert!(matches!(update, Update::List { .. }));
+        drop(handle);
+    }
+}
