@@ -10,7 +10,9 @@ use std::io;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -40,6 +42,10 @@ pub enum StartError {
     Spawn(String),
     /// The server did not answer within the timeout.
     Timeout(Duration),
+    /// The socket is bound but does not answer, and `autoStart` is off (nothing was waited for).
+    NotAnswering,
+    /// The started server exited before it answered.
+    Exited,
     /// The started server speaks an older protocol than poimen supports.
     ProtocolTooOld { version: String, protocol: u32 },
 }
@@ -57,6 +63,10 @@ impl fmt::Display for StartError {
                 "`herdr server` did not answer within {} s",
                 limit.as_secs()
             ),
+            StartError::NotAnswering => {
+                write!(f, "the herdr socket exists but the server is not answering")
+            }
+            StartError::Exited => write!(f, "`herdr server` exited right after it was started"),
             StartError::ProtocolTooOld { version, protocol } => write!(
                 f,
                 "herdr {version} speaks protocol {protocol}, poimen needs {SUPPORTED_PROTOCOL}; update herdr"
@@ -80,6 +90,11 @@ pub trait Runner {
     /// Starts `<program> server` detached and returns without waiting for it.
     fn spawn(&self, program: &Path) -> io::Result<()>;
     fn sleep(&self, duration: Duration);
+    /// Monotonic time since an arbitrary start; the deadline of `ensure_running` is measured with
+    /// it, so slow probes count.
+    fn now(&self) -> Duration;
+    /// Whether the server started by `spawn` has exited again.
+    fn exited(&self) -> bool;
 }
 
 pub struct HerdrBackend<R: Runner> {
@@ -110,12 +125,19 @@ impl<R: Runner> Backend for HerdrBackend<R> {
     /// the same instant can still pass its own re-probe before the first one spawns; the
     /// `StartLock` only serializes this process.
     fn ensure_running(&self) -> Result<Outcome, StartError> {
-        let attempts = START_TIMEOUT.as_millis() / POLL_INTERVAL.as_millis();
+        let start = self.runner.now();
         let mut spawned = false;
-        for attempt in 0..=attempts {
-            if attempt > 0 {
+        let mut first = true;
+        // The deadline is checked before every probe (a probe can take up to PROBE_TIMEOUT), so the
+        // call ends within START_TIMEOUT plus at most one probe.
+        while first || self.runner.now().saturating_sub(start) < START_TIMEOUT {
+            if !first {
                 self.runner.sleep(POLL_INTERVAL);
+                if self.runner.now().saturating_sub(start) >= START_TIMEOUT {
+                    break;
+                }
             }
+            first = false;
             match self.runner.probe() {
                 Probe::Up(info) if spawned => {
                     return match info.as_ref().and_then(too_old) {
@@ -124,9 +146,13 @@ impl<R: Runner> Backend for HerdrBackend<R> {
                     };
                 }
                 Probe::Up(_) => return Ok(Outcome::AlreadyRunning),
-                Probe::Unresponsive if !self.auto_start => return Ok(Outcome::Disabled),
+                Probe::Unresponsive if !self.auto_start => return Err(StartError::NotAnswering),
                 Probe::Unresponsive => {}
-                Probe::Down if spawned => {}
+                Probe::Down if spawned => {
+                    if self.runner.exited() {
+                        return Err(StartError::Exited);
+                    }
+                }
                 Probe::Down if !self.auto_start => return Ok(Outcome::Disabled),
                 Probe::Down => {
                     let program = self.runner.resolve().ok_or(StartError::NotFound)?;
@@ -147,11 +173,17 @@ impl<R: Runner> Backend for HerdrBackend<R> {
 /// The real runner: the herdr socket of the environment and the `herdr` binary of the login PATH.
 pub struct SystemRunner {
     client: Client,
+    origin: Instant,
+    exited: Arc<AtomicBool>,
 }
 
 impl SystemRunner {
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            origin: Instant::now(),
+            exited: Arc::new(AtomicBool::new(false)),
+        }
     }
 }
 
@@ -168,6 +200,8 @@ impl Runner for SystemRunner {
         // Own process group, no terminal, no pipes: the server outlives poimen. It inherits
         // HERDR_SESSION / HERDR_SOCKET_PATH, so it listens where poimen looks. A small thread
         // reaps the child if it ever exits, so it does not stay a zombie while poimen runs.
+        self.exited.store(false, Ordering::SeqCst);
+        let exited = Arc::clone(&self.exited);
         let mut child = Command::new(program)
             .arg("server")
             .env("PATH", gui_path::child_path())
@@ -178,12 +212,21 @@ impl Runner for SystemRunner {
             .spawn()?;
         std::thread::spawn(move || {
             let _ = child.wait();
+            exited.store(true, Ordering::SeqCst);
         });
         Ok(())
     }
 
     fn sleep(&self, duration: Duration) {
         std::thread::sleep(duration);
+    }
+
+    fn now(&self) -> Duration {
+        self.origin.elapsed()
+    }
+
+    fn exited(&self) -> bool {
+        self.exited.load(Ordering::SeqCst)
     }
 }
 
@@ -229,6 +272,10 @@ mod tests {
         spawn_error: bool,
         spawned: RefCell<Vec<PathBuf>>,
         slept: Cell<u32>,
+        /// Fake clock; every probe and sleep advances it.
+        clock: Cell<Duration>,
+        probe_cost: Duration,
+        exited: bool,
         /// Probe answers served after the `Down` ones and before `up`.
         script: RefCell<std::collections::VecDeque<Probe>>,
     }
@@ -242,6 +289,9 @@ mod tests {
                 spawn_error: false,
                 spawned: RefCell::new(Vec::new()),
                 slept: Cell::new(0),
+                clock: Cell::new(Duration::ZERO),
+                probe_cost: Duration::ZERO,
+                exited: false,
                 script: RefCell::new(Default::default()),
             }
         }
@@ -249,6 +299,7 @@ mod tests {
 
     impl Runner for &Fake {
         fn probe(&self) -> Probe {
+            self.clock.set(self.clock.get() + self.probe_cost);
             if self.down_probes.get() > 0 {
                 self.down_probes.set(self.down_probes.get() - 1);
                 return Probe::Down;
@@ -276,8 +327,15 @@ mod tests {
             self.spawned.borrow_mut().push(program.to_path_buf());
             Ok(())
         }
-        fn sleep(&self, _: Duration) {
+        fn sleep(&self, _d: Duration) {
             self.slept.set(self.slept.get() + 1);
+            self.clock.set(self.clock.get() + _d);
+        }
+        fn now(&self) -> Duration {
+            self.clock.get()
+        }
+        fn exited(&self) -> bool {
+            self.exited
         }
     }
 
@@ -336,9 +394,44 @@ mod tests {
     }
 
     #[test]
-    fn a_silent_socket_with_auto_start_off_is_disabled() {
+    fn slow_probes_count_against_the_deadline() {
+        let mut fake = Fake::new(0, Probe::Unresponsive);
+        fake.probe_cost = Duration::from_millis(1500);
+        assert_eq!(run(&fake, true), Err(StartError::Timeout(START_TIMEOUT)));
+        // 1.6 s per round: the 10 s deadline passes after 7 rounds, not after 100 attempts.
+        assert_eq!(fake.slept.get(), 6);
+        assert!(fake.clock.get() < START_TIMEOUT + Duration::from_millis(1500) + POLL_INTERVAL);
+        assert!(fake.spawned.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_slow_server_that_is_ready_at_eight_seconds_is_accepted() {
+        let mut fake = Fake::new(0, up(Some(22)));
+        fake.probe_cost = Duration::from_millis(1500);
+        // Five silent probes, the sixth answers at about 9.6 s of fake time.
+        fake.script
+            .borrow_mut()
+            .extend([const { Probe::Unresponsive }; 5]);
+        assert_eq!(run(&fake, true), Ok(Outcome::AlreadyRunning));
+        assert!(fake.clock.get() >= Duration::from_secs(8));
+        assert!(fake.spawned.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_started_server_that_exits_fails_fast() {
+        let mut fake = Fake::new(u32::MAX, Probe::Down);
+        fake.exited = true;
+        assert_eq!(run(&fake, true), Err(StartError::Exited));
+        assert_eq!(fake.spawned.borrow().len(), 1);
+        assert!(fake.clock.get() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_silent_socket_with_auto_start_off_says_the_server_is_not_answering() {
         let fake = Fake::new(0, Probe::Unresponsive);
-        assert_eq!(run(&fake, false), Ok(Outcome::Disabled));
+        let err = run(&fake, false).unwrap_err();
+        assert_eq!(err, StartError::NotAnswering);
+        assert!(!err.to_string().contains("auto start"));
         assert!(fake.spawned.borrow().is_empty());
     }
 
