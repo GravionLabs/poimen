@@ -9,6 +9,7 @@ import {
   viewChild,
 } from "@angular/core";
 import { FlowView } from "./flow-view";
+import { EditorTabs } from "../core/editor-tabs";
 import { PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT, UiState } from "../core/ui-state";
 import {
   Subagents,
@@ -36,6 +37,7 @@ export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
 export class BottomPanel {
   protected readonly ui = inject(UiState);
   protected readonly subagents = inject(Subagents);
+  protected readonly editor = inject(EditorTabs);
   protected readonly minHeight = PANEL_MIN_HEIGHT;
   protected readonly maxHeight = PANEL_MAX_HEIGHT;
   protected readonly tabs = Object.entries(PANEL_TAB_LABELS);

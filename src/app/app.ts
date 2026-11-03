@@ -24,7 +24,7 @@ import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
-import { EditorTabs, tabKind, type EditorGroup } from "./core/editor-tabs";
+import { EditorTabs, flowPane, tabKind, tabPaneId, type EditorGroup } from "./core/editor-tabs";
 import { SettingsView } from "./settings-view/settings-view";
 import { DeliverBoardView } from "./deliver-board/deliver-board-view";
 import { BOARD_ENTRYPOINT, BOARD_PLUGIN } from "./core/deliver-board";
@@ -32,6 +32,7 @@ import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
+import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
 import { PaneActions } from "./core/pane-actions";
@@ -69,6 +70,7 @@ const ZOOM_STEP = 1;
     StatusBar,
     Toolbar,
     BottomPanel,
+    FlowTab,
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
@@ -122,18 +124,28 @@ export class App {
           if (tabKind(tab.paneId) === "board") {
             return { id: tab.paneId, label: "Deliver board", title: "Deliver board" };
           }
-          const pane = this.pane(tab.paneId);
+          const flowOf = flowPane(tab.paneId);
+          const paneId = flowOf ?? tab.paneId;
+          const pane = this.pane(paneId);
           const tabLabel = pane
             ? snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label
             : undefined;
           const workspace = pane
             ? snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label
             : undefined;
-          const pluginName = names.get(tab.paneId);
+          const pluginName = names.get(paneId);
           const header = tabHeader(
             workspace,
-            pluginName ?? (pane ? rowName(pane, tabLabel) : tab.paneId),
+            pluginName ?? (pane ? rowName(pane, tabLabel) : paneId),
           );
+          if (flowOf !== null) {
+            return {
+              id: tab.paneId,
+              label: `Flow: ${header.label}`,
+              group: header.group,
+              title: `Agent flow of ${header.title}`,
+            };
+          }
           return {
             id: tab.paneId,
             label: header.label,
@@ -186,10 +198,14 @@ export class App {
     void this.store.start().then(() => this.dropMissing());
   }
 
-  /** The pane and Claude session the open output panel follows; `null` when hidden or not Claude. */
+  /**
+   * The pane and Claude session the open output panel follows (the active tab's pane, or the pane
+   * of the active flow tab); `null` when hidden or not Claude.
+   */
   private readonly subagentTarget = computed(
     () => {
-      const id = this.activePaneId();
+      const active = this.editor.activeId();
+      const id = active === null ? null : tabPaneId(active);
       const pane = id && this.ui.panelOpen() ? this.pane(id) : undefined;
       const session = pane?.agent === "claude" ? pane.agent_session?.value : undefined;
       return pane && session ? { paneId: pane.pane_id, session } : null;
@@ -348,6 +364,11 @@ export class App {
       },
       { action: "close", label: "Close" },
       {
+        action: "open-flow",
+        label: "Open agent flow",
+        appliesTo: (id) => tabKind(id) === "pane" && this.pane(id)?.agent === "claude",
+      },
+      {
         action: "plugin-pane-close",
         label: "Close plugin pane",
         appliesTo: (id) => this.pluginPanes.isPluginPane(id),
@@ -369,6 +390,7 @@ export class App {
     } else if (action === "split-right") this.editor.split(id, "row");
     else if (action === "split-down") this.editor.split(id, "column");
     else if (action === "close") this.editor.close(id);
+    else if (action === "open-flow") this.editor.openFlow(id);
     else if (action.startsWith("pane-") && tabKind(id) === "pane")
       this.paneAction(id, action.slice("pane-".length));
   }
@@ -476,6 +498,21 @@ export class App {
 
   protected isSettings(id: string | null): boolean {
     return id !== null && tabKind(id) === "settings";
+  }
+
+  /** The pane of the group's active tab when that is a flow tab. */
+  protected flowOf(group: EditorGroup): string | null {
+    return group.activeId === null ? null : flowPane(group.activeId);
+  }
+
+  protected isFlow(id: string): boolean {
+    return tabKind(id) === "flow";
+  }
+
+  /** A subagent node of a flow tab was clicked: show its transcript in the Output tab. */
+  protected openAgentOutput(agentId: string): void {
+    this.subagents.pick(agentId);
+    this.ui.selectPanelTab("output");
   }
 
   protected isBoard(id: string | null): boolean {
