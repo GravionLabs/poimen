@@ -120,6 +120,12 @@ describe("DeliverBoard", () => {
     expect(await board.startDeliver("/r", row)).toBe("Start deliver #43: no such plugin");
   });
 
+  it("refuses to start deliver for a non-GitHub issue URL", async () => {
+    const bad = { ...row, url: "https://evil.example/o/r/issues/43" };
+    expect(await board.startDeliver("/r", bad)).toBe("Start deliver #43: not a GitHub issue URL");
+    expect(tauri.calls("plugin_invoke")).toHaveLength(0);
+  });
+
   it("opens GitHub links in the browser and ignores others", async () => {
     await board.openUrl(row.url);
     await board.openUrl("javascript:alert(1)");

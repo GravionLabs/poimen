@@ -116,6 +116,7 @@ Data contract: the deliver-board plugin declares an action `data` (`command = ["
 - The `data` action is hidden from `plugin.action.list` results in poimen (Plugins menu, context menus and palette), since it is not meant to be run by hand.
 - `plugin.action.invoke` is not the transport: in the schema `PluginCommandLogInfo.stdout` is an optional string without a documented limit and `status` can be `running`, so complete stdout is not guaranteed. Running the command directly gives the full output and the exit code.
 - Without a `data` action (the installed plugin is older), the tab shows "not available" with a button for the terminal board. An unknown `version` shows "update poimen or the plugin"; an `error` object of the plugin is shown as is.
+- Not verified against a real plugin: deliver-board 0.4.0 has no `data` action yet, so only fixture and unit tests cover the data path. Manual check once the plugin ships it: open the board tab against a running herdr and compare the rows with the plugin's terminal board.
 
 ## Settings
 

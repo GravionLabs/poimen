@@ -107,6 +107,7 @@ export class DeliverBoard {
    * as the clicked link and the repository as the working directory. Resolves to an error text.
    */
   async startDeliver(root: string, row: BoardRow): Promise<string | null> {
+    if (!isGithubUrl(row.url)) return `Start deliver #${row.number}: not a GitHub issue URL`;
     try {
       await this.bridge.invoke("plugin_invoke", {
         pluginId: "deliver-starter",

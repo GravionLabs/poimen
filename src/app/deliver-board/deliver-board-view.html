@@ -93,7 +93,13 @@
                         }
                       </td>
                       <td>
-                        <button type="button" (click)="start(repo, row)">Start deliver</button>
+                        <button
+                          type="button"
+                          [disabled]="!isGithubUrl(row.url)"
+                          (click)="start(repo, row)"
+                        >
+                          Start deliver
+                        </button>
                       </td>
                     </tr>
                   }
