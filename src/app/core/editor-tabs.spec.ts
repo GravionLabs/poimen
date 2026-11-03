@@ -2,8 +2,27 @@
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { EditorTabs, moveItem, parseEditor } from "./editor-tabs";
+import {
+  EditorTabs,
+  flowPane,
+  flowTab,
+  moveItem,
+  parseEditor,
+  tabKind,
+  tabPaneId,
+} from "./editor-tabs";
 import { UI_STATE_KEY, UI_STORAGE } from "./ui-state";
+
+describe("flow tab ids", () => {
+  it("map a pane to its flow tab and back", () => {
+    expect(flowPane(flowTab("w1:p2"))).toBe("w1:p2");
+    expect(flowPane("w1:p2")).toBeNull();
+    expect(tabKind(flowTab("w1:p2"))).toBe("flow");
+    expect(tabPaneId(flowTab("w1:p2"))).toBe("w1:p2");
+    expect(tabPaneId("w1:p2")).toBe("w1:p2");
+    expect(tabPaneId("poimen:settings")).toBeNull();
+  });
+});
 
 describe("moveItem", () => {
   it("moves an item to a new index", () => {
@@ -31,6 +50,25 @@ describe("EditorTabs", () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: null }] });
     tabs = TestBed.inject(EditorTabs);
+  });
+
+  it("opens one pinned flow tab per pane and activates it when it is open", () => {
+    tabs.open("a", true);
+    tabs.openFlow("a");
+    tabs.open("b", true);
+    tabs.openFlow("b");
+    tabs.openFlow("a");
+    expect(ids()).toEqual(["a", flowTab("a"), "b", flowTab("b")]);
+    expect(tabs.activeId()).toBe(flowTab("a"));
+    expect(tabs.tabs().every((t) => t.pinned)).toBe(true);
+  });
+
+  it("closes a flow tab with its pane when the pane is gone", () => {
+    tabs.open("a", true);
+    tabs.openFlow("a");
+    tabs.openFlow("b");
+    expect(tabs.prune(new Set(["a"]))).toEqual([flowTab("b")]);
+    expect(ids()).toEqual(["a", flowTab("a")]);
   });
 
   it("cycles the active tab of the focused group and wraps around", () => {

@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal } from "@angular/core";
+import { DestroyRef, Injectable, computed, inject, signal } from "@angular/core";
 import { TauriBridge } from "./tauri";
 
 // Wire shapes of `src-tauri/src/transcripts.rs` (the `subagents` event and its commands).
@@ -254,14 +254,20 @@ export function reportIndex(items: readonly TranscriptItem[]): number {
   return -1;
 }
 
+/** Each `Subagents` instance watches under its own key, so the watches of followers are separate. */
+let followers = 0;
+
 /**
  * The subagents of the Claude Code agent in one pane and their transcripts. The backend watches
- * the transcript files and pushes `subagents` events; nothing here reads or polls files.
+ * the transcript files and pushes `subagents` events; nothing here reads or polls files. The root
+ * instance follows the pane of the output panel; a flow tab provides its own instance for its pane.
+ * Every instance has its own backend watch (by key) and stops it when it is destroyed.
  */
 @Injectable({ providedIn: "root" })
 export class Subagents {
   private readonly bridge = inject(TauriBridge);
-  private listening: Promise<unknown> | null = null;
+  private readonly key = `follower-${++followers}`;
+  private listening: Promise<() => void> | null = null;
   private session: string | null = null;
   private generation = 0;
 
@@ -275,6 +281,9 @@ export class Subagents {
   readonly main = this._main.asReadonly();
   /** Messages of every subagent seen so far, by agent id. */
   readonly entries = this._entries.asReadonly();
+  private readonly _paneId = signal<string | null>(null);
+  /** The pane followed; `null` when nothing is followed. */
+  readonly paneId = this._paneId.asReadonly();
   /** `false` for a pane without a Claude Code session (other agents, plain terminals). */
   readonly supported = this._supported.asReadonly();
   /** The shown subagent: the picked one while it exists, else the default. */
@@ -289,6 +298,15 @@ export class Subagents {
     transcriptItems(this._entries().get(this.selectedId() ?? "") ?? []),
   );
 
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      ++this.generation;
+      void this.listening?.then((stop) => stop());
+      void this.bridge.invoke("subagents_unwatch", { key: this.key }).catch(() => undefined);
+    });
+  }
+
+  /** Shows the subagent `id`; kept across panes, since agent ids are unique (else the default). */
   pick(id: string): void {
     this._picked.set(id);
   }
@@ -303,18 +321,23 @@ export class Subagents {
     this._agents.set([]);
     this._entries.set(new Map());
     this._main.set({ calls: [], tools: 0 });
-    this._picked.set(null);
     this._supported.set(false);
-    this.listening ??= this.bridge.listen<unknown>("subagents", (raw) => this.apply(raw));
+    this._paneId.set(session === null ? null : paneId);
+    this.listening ??= this.bridge.listen<unknown>("subagents", (raw) => {
+      if (isObject(raw) && raw["key"] === this.key) this.apply(raw);
+    });
     await this.listening;
     if (generation !== this.generation) return;
     if (paneId === null || session === null) {
-      await this.bridge.invoke("subagents_unwatch").catch(() => undefined);
+      await this.bridge.invoke("subagents_unwatch", { key: this.key }).catch(() => undefined);
       return;
     }
     this.session = session;
     try {
-      const watching = await this.bridge.invoke<boolean>("subagents_watch", { paneId });
+      const watching = await this.bridge.invoke<boolean>("subagents_watch", {
+        key: this.key,
+        paneId,
+      });
       if (generation === this.generation) this._supported.set(watching === true);
     } catch {
       if (generation === this.generation) this._supported.set(false);

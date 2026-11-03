@@ -16,12 +16,36 @@ export const SETTINGS_TAB = "poimen:settings";
 /** The id of the native deliver board tab (ADR 0004); like settings it is no herdr pane. */
 export const BOARD_TAB = "poimen:deliver-board";
 
-/** What a tab shows: a herdr pane (live terminal), the settings view or the deliver board. */
-export type TabKind = "pane" | "settings" | "board";
+/** Prefix of a flow tab id; the rest is the id of the pane whose agent run the tab shows. */
+const FLOW_TAB_PREFIX = "poimen:flow:";
+
+/** The id of the flow tab of `paneId` (at most one per pane). */
+export function flowTab(paneId: string): string {
+  return FLOW_TAB_PREFIX + paneId;
+}
+
+/** The pane a flow tab belongs to; `null` for any other tab. */
+export function flowPane(id: string): string | null {
+  return id.startsWith(FLOW_TAB_PREFIX) ? id.slice(FLOW_TAB_PREFIX.length) : null;
+}
+
+/**
+ * What a tab shows: a herdr pane (live terminal), the settings view, the deliver board or the flow
+ * of a pane's agent run.
+ */
+export type TabKind = "pane" | "settings" | "board" | "flow";
 
 export function tabKind(id: string): TabKind {
   if (id === SETTINGS_TAB) return "settings";
-  return id === BOARD_TAB ? "board" : "pane";
+  if (id === BOARD_TAB) return "board";
+  return flowPane(id) !== null ? "flow" : "pane";
+}
+
+/** The herdr pane a tab is about: the pane itself or the pane of a flow tab; else `null`. */
+export function tabPaneId(id: string): string | null {
+  const kind = tabKind(id);
+  if (kind === "pane") return id;
+  return kind === "flow" ? flowPane(id) : null;
 }
 
 /** An open editor tab. A preview tab (not pinned) is replaced by the next preview, as in VS Code. */
@@ -160,11 +184,14 @@ export class EditorTabs {
   }
 
   /**
-   * Closes the tabs whose pane is not in `existing` (after a restart herdr may have lost them) and
-   * returns their ids.
+   * Closes the tabs whose pane is not in `existing` (after a restart herdr may have lost them),
+   * flow tabs included, and returns their ids.
    */
   prune(existing: ReadonlySet<string>): string[] {
-    const gone = [...this.openIds()].filter((id) => tabKind(id) === "pane" && !existing.has(id));
+    const gone = [...this.openIds()].filter((id) => {
+      const paneId = tabPaneId(id);
+      return paneId !== null && !existing.has(paneId);
+    });
     gone.forEach((id) => this.close(id));
     return gone;
   }
@@ -200,28 +227,27 @@ export class EditorTabs {
 
   /** Opens the settings tab (at most one) as a pinned tab, or activates it when open. */
   openSettings(): void {
-    if (this.groupOf(SETTINGS_TAB)) {
-      this.activate(SETTINGS_TAB);
-      return;
-    }
-    const group = this.focused();
-    this.patch(group.id, {
-      tabs: [...group.tabs, { paneId: SETTINGS_TAB, pinned: true }],
-      activeId: SETTINGS_TAB,
-    });
+    this.openPinned(SETTINGS_TAB);
   }
 
   /** Opens the deliver board tab (at most one) as a pinned tab, or activates it when open. */
   openBoard(): void {
-    if (this.groupOf(BOARD_TAB)) {
-      this.activate(BOARD_TAB);
+    this.openPinned(BOARD_TAB);
+  }
+
+  /** Opens the flow tab of `paneId` (at most one per pane) as a pinned tab, or activates it. */
+  openFlow(paneId: string): void {
+    this.openPinned(flowTab(paneId));
+  }
+
+  /** Appends a pinned tab to the focused group, or activates it when it is open anywhere. */
+  private openPinned(id: string): void {
+    if (this.groupOf(id)) {
+      this.activate(id);
       return;
     }
     const group = this.focused();
-    this.patch(group.id, {
-      tabs: [...group.tabs, { paneId: BOARD_TAB, pinned: true }],
-      activeId: BOARD_TAB,
-    });
+    this.patch(group.id, { tabs: [...group.tabs, { paneId: id, pinned: true }], activeId: id });
   }
 
   pin(paneId: string): void {

@@ -135,6 +135,8 @@
           <ng-template #tabContent let-tab>
             @if (isBoard(tab.id)) {
               <span class="mode ro" title="Native view">BD</span>
+            } @else if (isFlow(tab.id)) {
+              <span class="mode ro" title="Agent flow">FL</span>
             } @else if (isSettings(tab.id)) {
               <svg class="gear" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" />
@@ -161,6 +163,11 @@
         }
         @if (isBoard(g.activeId)) {
           <app-deliver-board-view (terminalRequested)="openTerminalBoard()" />
+        }
+        @for (flowPaneId of [flowOf(g)]; track flowPaneId) {
+          @if (flowPaneId) {
+            <app-flow-tab [paneId]="flowPaneId" (openAgent)="openAgentOutput($event)" />
+          }
         }
         @for (p of [groupPane(g)]; track p?.pane_id) {
           @if (p) {
