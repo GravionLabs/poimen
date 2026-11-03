@@ -4,23 +4,41 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-top: 1px solid var(--h-border-color);
+  /* Its own surface below a visible splitter (like VS Code): the gap above holds the sash. */
+  margin: 9px 4px 4px;
+  background: var(--h-content-background);
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
   font-size: 12px;
 }
 
+/* The splitter fills the gap above the panel; its line is always visible, thicker while used. */
 .resizer {
   position: absolute;
-  inset: -3px 0 auto;
-  height: 5px;
+  inset: -10px -4px auto;
+  height: 9px;
   z-index: 1;
   cursor: row-resize;
   touch-action: none;
 }
 
-.resizer:hover,
-.resizer:focus-visible,
-.resizer.dragging {
-  background: color-mix(in srgb, var(--status-working) 50%, transparent);
+.resizer::after {
+  content: "";
+  position: absolute;
+  inset: 4px 0 auto;
+  height: 1px;
+  background: var(--h-border-color);
+}
+
+.resizer:hover::after,
+.resizer:focus-visible::after,
+.resizer.dragging::after {
+  inset: 3px 0 auto;
+  height: 3px;
+  background: var(--status-working);
+}
+
+.resizer:focus-visible {
   outline: none;
 }
 
@@ -30,7 +48,7 @@
   align-items: center;
   gap: 8px;
   padding: 0 8px;
-  height: 28px;
+  height: 32px;
 }
 
 .tabs {
@@ -50,9 +68,8 @@
 }
 
 .tab.on {
-  color: inherit;
-  box-shadow: inset 0 -2px 0 var(--h-primary-color);
-  border-radius: 0;
+  color: var(--h-text-color);
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
 .tab:hover,
