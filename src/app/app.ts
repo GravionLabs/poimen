@@ -23,6 +23,7 @@ import {
 } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
+import { Attention } from "./core/attention";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { UserSchemes } from "./core/user-schemes";
@@ -123,12 +124,15 @@ export class App {
   private drag: { startX: number; startWidth: number } | null = null;
 
   protected readonly editor = inject(EditorTabs);
+  private readonly attention = inject(Attention);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Pane>();
   protected readonly groupItems = computed(() => {
     const snap = this.store.snapshot();
     this.store.panes();
     const names = this.pluginPanes.names();
+    const ringing = this.attention.attention();
+    const unread = this.attention.unread();
     return new Map(
       this.editor.groups().map((group) => [
         group.id,
@@ -166,6 +170,8 @@ export class App {
             label: header.label,
             group: header.group,
             preview: !tab.pinned,
+            attention: ringing.has(tab.paneId),
+            unread: unread.has(tab.paneId),
             title: `${header.title}${tab.pinned ? "" : " (preview)"}`,
           };
         }),
@@ -181,6 +187,13 @@ export class App {
 
   constructor() {
     const title = inject(Title);
+    // Marks follow herdr's statuses; the active tab of each group counts as viewed.
+    effect(() => {
+      const panes = this.store.panes();
+      const viewed = new Set(this.editor.groups().flatMap((g) => (g.activeId ? [g.activeId] : [])));
+      const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
+      untracked(() => this.attention.observe(statuses, viewed));
+    });
     effect(() => {
       const waiting = this.store.waiting();
       title.setTitle(waiting > 0 ? `poimen (${waiting} waiting)` : "poimen");

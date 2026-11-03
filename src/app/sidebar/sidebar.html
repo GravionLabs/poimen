@@ -104,6 +104,9 @@
           </span>
         }
       </span>
+      @if (unreadOf(d.workspace.workspace_id); as n) {
+        <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
+      }
       @if (layout() === "tree") {
         <span
           class="chevron"
@@ -119,6 +122,7 @@
       class="row"
       [class.open]="m.open"
       [class.active]="m.active"
+      [class.attention]="rings(d.row.pane.pane_id)"
       [title]="rowTitle(d.row)"
       (contextmenu)="openMenu($event, 'pane', d.row.pane.pane_id)"
     >
@@ -159,6 +163,9 @@
           </span>
         }
       </span>
+      @if (isUnread(d.row.pane.pane_id)) {
+        <span class="badge dot-badge" role="img" aria-label="Unread"></span>
+      }
     </span>
   }
 </ng-template>
