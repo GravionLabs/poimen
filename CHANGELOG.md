@@ -5,6 +5,61 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.5.0] — 2026-11-03
+
+### Bug Fixes
+- **plugins**: Persist and prune the plugin pane mapping, scope the close entry (#41)
+- **deliver**: Bound the login shell PATH read, guard non-GitHub start, document deviations (#43)
+- **agents**: Validate session ids, linear tailer, race-free subagent watch (#102)
+- **flow**: Mark failed nested agent calls and document Flow tab limits (#104)
+- **agents**: Close the flow tab with its pane (#196)
+- **agents**: Draw the connections of the flow view (#199) (#200)
+- **app**: Never start a second herdr for a bound but silent socket (#211)
+- **app**: Bound herdr auto start by a clock deadline (#211)
+- **app**: Clear a failed herdr start once herdr connects and resolve one herdr binary (#213) (#214)
+
+
+### Documentation
+- **adr**: Own terminal backend without herdr (#149) (#158)
+- **adr**: Native views for herdr plugins (#42) (#165)
+- **adr**: Leaving herdr for native plugin views (#187) (#194)
+- **adr**: Leaving herdr for native plugin views (#187)
+- **adr**: Label the leaving-herdr triggers as a reading of ADR 0003 (#187)
+
+
+### Features
+- **plugins**: Command palette over plugin actions (#39) (#160)
+- **plugins**: Plugin actions in menus and the pane context menu (#40) (#162)
+- **plugins**: Plugin panes open as tabs (#41) (#164)
+- **plugins**: Plugin panes open as tabs (#41)
+- **deliver**: Native deliver board panel (#43) (#167)
+- **deliver**: Native deliver board panel (#43)
+- **agents**: Output panel with live subagent transcripts (#102) (#168)
+- **agents**: Watch and parse Claude Code subagent transcripts (#102)
+- **agents**: Output panel state, toggleOutput shortcut and menu item (#102)
+- **agents**: Output panel with live subagent transcripts (#102)
+- **agents**: Flow graph of runs, skill calls and subagents (#104) (#178)
+- **agents**: Flow graph of runs, skill calls and subagents (#104)
+- **agents**: Set the bottom panel apart from the editor panes (#195) (#197)
+- **agents**: Set the bottom panel apart from the editor panes (#195)
+- **agents**: Visible splitter between editor and panel (#195)
+- **agents**: Open the flow of a pane as an editor tab (#196) (#198)
+- **agents**: Open the flow of a pane as an editor tab (#196)
+- **agents**: Status bar button to show the closed output panel (#201) (#202)
+- **sidebar**: Frame the sidebar like the bottom panel (#203) (#204)
+- **editor**: Frame the editor area like the sidebar and panel (#205) (#206)
+- **sidebar**: Frame the activity bar like the other surfaces (#207) (#208)
+- **agents**: Icon toolbar and minimap swap in the flow view (#209) (#210)
+- **app**: Start the herdr server automatically when it is not running (#211) (#212)
+- **app**: Start the herdr server when it is not running
+- **app**: Show herdr start failures with Retry and the autoStart setting
+
+
+### Refactoring
+- **agents**: Key subagent watches by follower (#196)
+- **app**: Share the GUI PATH resolution in gui_path
+
+
 ## [0.4.0] — 2026-11-02
 
 ### Bug Fixes
@@ -22,6 +77,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - **adr**: ADR 0002 color schemes (#124)
+- Update CHANGELOG.md for v0.4.0 [skip ci]
 
 
 ### Features
