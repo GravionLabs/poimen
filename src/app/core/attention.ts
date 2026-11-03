@@ -19,7 +19,6 @@ export class Attention {
 
   /** Folds a snapshot of pane statuses in; `viewed` are the panes whose tab is on screen. */
   observe(statuses: ReadonlyMap<string, AgentStatus>, viewed: ReadonlySet<string>): void {
-    const first = this.previous === null;
     const attention = new Set(this.attention());
     const unread = new Set(this.unread());
     for (const [id, status] of statuses) {
@@ -29,7 +28,7 @@ export class Attention {
         unread.delete(id);
       } else if (status !== before) {
         if (status === "blocked") attention.add(id);
-        else if (status === "done" && !first) unread.add(id);
+        else if (status === "done" && before !== undefined) unread.add(id);
       }
       if (status !== "blocked") attention.delete(id);
     }

@@ -21,6 +21,13 @@ describe("Attention", () => {
     expect(a.attention().size).toBe(0);
   });
 
+  it("does not mark panes that were already done when the real snapshot arrives", () => {
+    const a = new Attention();
+    a.observe(st({}), none);
+    a.observe(st({ p1: "done" }), none);
+    expect(a.unread().size).toBe(0);
+  });
+
   it("clears both marks when the tab is viewed", () => {
     const a = new Attention();
     a.observe(st({ p1: "working", p2: "working" }), none);
