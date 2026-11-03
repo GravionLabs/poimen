@@ -187,6 +187,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("closeAll", "CmdOrCtrl+Shift+W"),
     ("refresh", "CmdOrCtrl+R"),
     ("toggleSidebar", "CmdOrCtrl+B"),
+    ("toggleOutput", "CmdOrCtrl+J"),
     ("splitRight", "CmdOrCtrl+\\"),
     ("splitDown", "CmdOrCtrl+Shift+\\"),
     ("zoomIn", "CmdOrCtrl+="),

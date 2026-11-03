@@ -637,6 +637,7 @@ fn build_menu(
         true,
         &[
             &item("toggleSidebar", "Toggle Sidebar")?,
+            &item("toggleOutput", "Toggle Output Panel")?,
             &sep()?,
             &item("splitRight", "Split Right")?,
             &item("splitDown", "Split Down")?,

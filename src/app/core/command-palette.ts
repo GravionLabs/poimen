@@ -24,6 +24,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "zoomOut", title: "Zoom Out" },
   { id: "zoomReset", title: "Reset Zoom" },
   { id: "nextWaiting", title: "Next Waiting Agent" },
+  { id: "toggleOutput", title: "Toggle Output Panel" },
   { id: "nextTab", title: "Next Tab" },
   { id: "previousTab", title: "Previous Tab" },
   { id: "openSettings", title: "Open Settings" },
