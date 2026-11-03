@@ -123,6 +123,8 @@ export class TerminalView implements OnDestroy {
   private size = { cols: 0, rows: 0 };
   private destroyed = false;
   private framed = false;
+  /** Grid of the last `terminal.frame`; herdr's pane may differ from xterm's during a resize. */
+  private frameGrid: { cols: number; rows: number } | undefined;
   private detachMouse?: () => void;
   private detachClipboard?: () => void;
   /** Whether the pointer is over a link (xterm reports it for every renderer). */
@@ -336,6 +338,7 @@ export class TerminalView implements OnDestroy {
         term.rows,
         event.clientX,
         event.clientY,
+        this.frameGrid,
       );
       const key = `${action}:${at.column}:${at.row}`;
       if ((action === "move" || action === "drag") && key === last) return;
@@ -425,6 +428,7 @@ export class TerminalView implements OnDestroy {
 
   private async connect(mode: Mode, takeover: boolean): Promise<void> {
     this.framed = false;
+    this.frameGrid = undefined;
     this.attempt = mode;
     const generation = ++this.generation;
     let session: TerminalSession | undefined;
@@ -503,6 +507,7 @@ export class TerminalView implements OnDestroy {
     if (record.type === "frame") {
       if (!this.framed && this.attempt === "control") this.setState("control", null);
       this.framed = true;
+      this.frameGrid = { cols: record.width, rows: record.height };
       this.term?.write(decodeBase64(record.bytes));
       return;
     }
