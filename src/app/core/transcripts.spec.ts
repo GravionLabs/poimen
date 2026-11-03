@@ -154,14 +154,19 @@ describe("transcriptItems", () => {
 });
 
 describe("Subagents", () => {
-  const create = () => Injector.create({ providers: [TauriBridge, Subagents] }).get(Subagents);
-  const send = (session: string, update: unknown) => tauri.emit("subagents", { session, update });
+  const injector = () =>
+    Injector.create({ providers: [TauriBridge, Subagents] }) as Injector & { destroy(): void };
+  const create = () => injector().get(Subagents);
+  /** The key of the latest watch: events carry the key of the follower they belong to. */
+  const lastKey = () => (tauri.calls("subagents_watch").at(-1) as { key: string }).key;
+  const send = (session: string, update: unknown, key = lastKey()) =>
+    tauri.emit("subagents", { key, session, update });
 
   it("watches the pane and collects list and entries of its session", async () => {
     tauri.answer("subagents_watch", () => true);
     const s = create();
     await s.follow("w1:p1", "S");
-    expect(tauri.calls("subagents_watch")).toEqual([{ paneId: "w1:p1" }]);
+    expect(tauri.calls("subagents_watch")).toEqual([{ key: expect.any(String), paneId: "w1:p1" }]);
     expect(s.supported()).toBe(true);
     send("S", { kind: "list", agents: [info()] });
     send("S", {
@@ -231,6 +236,28 @@ describe("Subagents", () => {
     expect(s.selectedId()).toBe("a");
     send("S", { kind: "list", agents: [info({ agent_id: "b" })] });
     expect(s.selectedId()).toBe("b");
+  });
+
+  it("watches under its own key and ignores the events of another follower", async () => {
+    tauri.answer("subagents_watch", () => true);
+    const panel = create();
+    await panel.follow("w1:p1", "S");
+    const panelKey = lastKey();
+    const flow = create();
+    await flow.follow("w1:p1", "S");
+    expect(lastKey()).not.toBe(panelKey);
+    send("S", { kind: "list", agents: [info({ agent_id: "a" })] }, panelKey);
+    expect(panel.agents().map((a) => a.agent_id)).toEqual(["a"]);
+    expect(flow.agents()).toEqual([]);
+  });
+
+  it("stops its own watch when it is destroyed", async () => {
+    tauri.answer("subagents_watch", () => true);
+    const owner = injector();
+    await owner.get(Subagents).follow("w1:p1", "S");
+    const key = lastKey();
+    owner.destroy();
+    expect(tauri.calls("subagents_unwatch")).toEqual([{ key }]);
   });
 
   it("is unsupported when the backend finds no transcript", async () => {

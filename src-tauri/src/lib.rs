@@ -11,7 +11,7 @@ mod stream;
 mod transcripts;
 mod watch;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -24,54 +24,55 @@ use stream::{Mode, OpenRequest, Sessions};
 
 struct HerdrBin(PathBuf);
 
-/// The running subagent transcript watch (at most one: the one of the pane the panel follows).
+/// The running subagent transcript watches by key: one per frontend follower (the output panel,
+/// each visible flow tab), each with at most one watch.
+#[derive(Default)]
+struct SubagentWatch(Mutex<Watches<transcripts::WatchHandle>>);
+
+/// Values by key, each with the generation of the latest command for that key.
 ///
-/// Every command takes a generation when it starts; a watch that finishes after a newer command
-/// (another watch or an unwatch) began is stale and dropped instead of stored.
-struct SubagentWatch(Mutex<Slot<transcripts::WatchHandle>>);
-
-impl Default for SubagentWatch {
-    fn default() -> Self {
-        Self(Mutex::new(Slot::default()))
-    }
+/// Every command takes a generation when it starts; a result that finishes after a newer command
+/// for the same key (another watch or an unwatch) began is stale and dropped instead of stored.
+/// Generations are unique across keys, so a key removed and begun again never matches an older
+/// in-flight command.
+struct Watches<T> {
+    next: u64,
+    slots: HashMap<String, (u64, Option<T>)>,
 }
 
-/// A value together with the generation of the latest command that touched it.
-struct Slot<T> {
-    generation: u64,
-    value: Option<T>,
-}
-
-impl<T> Default for Slot<T> {
+impl<T> Default for Watches<T> {
     fn default() -> Self {
         Self {
-            generation: 0,
-            value: None,
+            next: 0,
+            slots: HashMap::new(),
         }
     }
 }
 
-impl<T> Slot<T> {
-    /// A new command starts: older in-flight commands become stale.
-    fn begin(&mut self) -> u64 {
-        self.generation += 1;
-        self.generation
+impl<T> Watches<T> {
+    /// A new command for `key` starts: older in-flight commands for it become stale.
+    fn begin(&mut self, key: &str) -> u64 {
+        self.next += 1;
+        self.slots.entry(key.to_owned()).or_insert((0, None)).0 = self.next;
+        self.next
     }
 
-    /// Stores `value` unless a newer command began since `generation`; the previous value is
-    /// dropped (stopped) when stored. `false` for a stale result, which is dropped.
-    fn store(&mut self, generation: u64, value: Option<T>) -> bool {
-        if generation != self.generation {
-            return false;
+    /// Stores `value` for `key` unless a newer command began since `generation` or the key was
+    /// removed; the previous value is dropped (stopped) when stored. `false` for a stale result,
+    /// which is dropped.
+    fn store(&mut self, key: &str, generation: u64, value: Option<T>) -> bool {
+        match self.slots.get_mut(key) {
+            Some(slot) if slot.0 == generation => {
+                slot.1 = value;
+                true
+            }
+            _ => false,
         }
-        self.value = value;
-        true
     }
 
-    /// Clears the value and makes every in-flight command stale.
-    fn cancel(&mut self) {
-        self.generation += 1;
-        self.value = None;
+    /// Drops the value of `key` and makes every in-flight command for it stale.
+    fn remove(&mut self, key: &str) {
+        self.slots.remove(key);
     }
 }
 
@@ -471,9 +472,7 @@ fn default_spaces_layout() -> layout::Layout {
 
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
-async fn repo_info(
-    dirs: Vec<String>,
-) -> Result<std::collections::HashMap<String, git::RepoInfo>, String> {
+async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || git::infos(dirs))
         .await
         .map_err(|e| e.to_string())
@@ -487,9 +486,10 @@ async fn subagents_watch(
     app: AppHandle,
     client: State<'_, Client>,
     watch: State<'_, SubagentWatch>,
+    key: String,
     pane_id: String,
 ) -> Result<bool, String> {
-    let generation = watch.0.lock().map_err(|e| e.to_string())?.begin();
+    let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
     let panes = herdr_call(client.inner(), "pane.list", json!({})).await?;
     let found = herdr::parse_claude_session(&panes, &pane_id).and_then(|s| {
         let root = transcripts::projects_root(&home_dir()?);
@@ -497,24 +497,25 @@ async fn subagents_watch(
         Some((dir, s.session))
     });
     let Some((dir, session)) = found else {
-        let mut slot = watch.0.lock().map_err(|e| e.to_string())?;
-        slot.store(generation, None);
+        let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+        watches.store(&key, generation, None);
         return Ok(false);
     };
-    let id = session.clone();
+    let (id, follower) = (session.clone(), key.clone());
     let handle = transcripts::watch(&dir, &session, move |update| {
-        let _ = app.emit("subagents", json!({ "session": id, "update": update }));
+        let event = json!({ "key": follower, "session": id, "update": update });
+        let _ = app.emit("subagents", event);
     })?;
-    let mut slot = watch.0.lock().map_err(|e| e.to_string())?;
-    // A stale handle is dropped here, which stops its watcher.
-    Ok(slot.store(generation, Some(handle)))
+    let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+    // A stale handle is dropped here, which stops its watcher; so is one whose key was unwatched.
+    Ok(watches.store(&key, generation, Some(handle)))
 }
 
-/// Stops following subagent transcripts.
+/// Stops the subagent watch of `key` and forgets the key.
 #[tauri::command]
-fn subagents_unwatch(watch: State<'_, SubagentWatch>) {
-    if let Ok(mut slot) = watch.0.lock() {
-        slot.cancel();
+fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
+    if let Ok(mut watches) = watch.0.lock() {
+        watches.remove(&key);
     }
 }
 
@@ -828,35 +829,56 @@ pub fn run() {
 }
 
 #[cfg(test)]
-mod subagent_slot_tests {
-    use super::Slot;
+mod subagent_watches_tests {
+    use super::Watches;
 
     #[test]
     fn a_newer_command_makes_an_older_result_stale() {
-        let mut slot = Slot::<&str>::default();
-        let older = slot.begin();
-        let newer = slot.begin();
-        assert!(slot.store(newer, Some("new")));
-        assert!(!slot.store(older, Some("old")));
-        assert_eq!(slot.value, Some("new"));
+        let mut watches = Watches::<&str>::default();
+        let older = watches.begin("panel");
+        let newer = watches.begin("panel");
+        assert!(watches.store("panel", newer, Some("new")));
+        assert!(!watches.store("panel", older, Some("old")));
+        assert_eq!(watches.slots["panel"].1, Some("new"));
     }
 
     #[test]
-    fn a_cancel_before_a_watch_finishes_is_not_undone() {
-        let mut slot = Slot::<&str>::default();
-        let generation = slot.begin();
-        slot.cancel();
-        assert!(!slot.store(generation, Some("late")));
-        assert_eq!(slot.value, None);
+    fn a_remove_before_a_watch_finishes_is_not_undone() {
+        let mut watches = Watches::<&str>::default();
+        let generation = watches.begin("panel");
+        watches.remove("panel");
+        assert!(!watches.store("panel", generation, Some("late")));
+        assert!(!watches.slots.contains_key("panel"));
+    }
+
+    #[test]
+    fn a_key_begun_again_after_a_remove_does_not_take_an_older_result() {
+        let mut watches = Watches::<&str>::default();
+        let older = watches.begin("flow");
+        watches.remove("flow");
+        let newer = watches.begin("flow");
+        assert!(!watches.store("flow", older, Some("old")));
+        assert!(watches.store("flow", newer, Some("new")));
+    }
+
+    #[test]
+    fn keys_do_not_make_each_other_stale() {
+        let mut watches = Watches::<&str>::default();
+        let panel = watches.begin("panel");
+        let flow = watches.begin("flow");
+        assert!(watches.store("panel", panel, Some("p")));
+        assert!(watches.store("flow", flow, Some("f")));
+        watches.remove("flow");
+        assert_eq!(watches.slots["panel"].1, Some("p"));
     }
 
     #[test]
     fn a_current_result_replaces_the_value_and_none_clears_it() {
-        let mut slot = Slot::<&str>::default();
-        let g = slot.begin();
-        assert!(slot.store(g, Some("a")));
-        let g = slot.begin();
-        assert!(slot.store(g, None));
-        assert_eq!(slot.value, None);
+        let mut watches = Watches::<&str>::default();
+        let g = watches.begin("panel");
+        assert!(watches.store("panel", g, Some("a")));
+        let g = watches.begin("panel");
+        assert!(watches.store("panel", g, None));
+        assert_eq!(watches.slots["panel"].1, None);
     }
 }
