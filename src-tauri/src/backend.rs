@@ -193,7 +193,9 @@ impl Runner for SystemRunner {
     }
 
     fn resolve(&self) -> Option<PathBuf> {
-        gui_path::resolve_program("herdr", &gui_path::child_path())
+        // One resolution for the start and for the terminals (`stream::resolve_bin`).
+        let bin = crate::stream::resolve_bin_from_env();
+        (bin.is_absolute() && bin.is_file()).then_some(bin)
     }
 
     fn spawn(&self, program: &Path) -> io::Result<()> {

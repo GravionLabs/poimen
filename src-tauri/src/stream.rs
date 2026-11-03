@@ -122,38 +122,31 @@ pub fn release_command() -> String {
     command_line(json!({ "type": "terminal.release" }))
 }
 
-/// Finds the herdr binary. GUI apps on macOS do not inherit the shell PATH,
-/// so well-known install locations are checked after PATH.
+/// Finds the herdr binary: `HERDR_BIN_PATH`, else `herdr` on `path` (the GUI app's login-shell
+/// `PATH`, `gui_path::child_path`, which includes Homebrew, `~/.local/bin` and `~/.cargo/bin`).
+/// The auto start (`backend.rs`) uses the same function, so both pick one binary.
 pub fn resolve_bin(
-    env: impl Fn(&str) -> Option<String>,
+    override_path: Option<String>,
+    path: &str,
     exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
-    if let Some(path) = env("HERDR_BIN_PATH").filter(|p| !p.is_empty()) {
-        return PathBuf::from(path);
+    if let Some(p) = override_path.filter(|p| !p.is_empty()) {
+        return PathBuf::from(p);
     }
-    let home = env("HOME").unwrap_or_default();
-    let path_dirs = env("PATH").unwrap_or_default();
-    let candidates = path_dirs
-        .split(':')
+    path.split(':')
         .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .chain(
-            ["/opt/homebrew/bin", "/usr/local/bin"]
-                .into_iter()
-                .map(PathBuf::from),
-        )
-        .chain(
-            [".local/bin", ".cargo/bin"]
-                .into_iter()
-                .map(|d| Path::new(&home).join(d)),
-        )
-        .map(|dir| dir.join("herdr"));
-    for candidate in candidates {
-        if exists(&candidate) {
-            return candidate;
-        }
-    }
-    PathBuf::from("herdr")
+        .map(|d| Path::new(d).join("herdr"))
+        .find(|c| exists(c))
+        .unwrap_or_else(|| PathBuf::from("herdr"))
+}
+
+/// `resolve_bin` against the real environment.
+pub fn resolve_bin_from_env() -> PathBuf {
+    resolve_bin(
+        std::env::var("HERDR_BIN_PATH").ok(),
+        &crate::gui_path::child_path(),
+        |p| p.is_file(),
+    )
 }
 
 struct Session {
@@ -370,30 +363,31 @@ mod tests {
     }
 
     #[test]
-    fn resolve_bin_prefers_override_then_path_then_homebrew() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| {
-            move |key: &str| {
-                pairs
-                    .iter()
-                    .find(|(k, _)| *k == key)
-                    .map(|(_, v)| (*v).to_owned())
-            }
-        };
+    fn resolve_bin_prefers_override_then_path() {
         let nothing = |_: &Path| false;
         assert_eq!(
-            resolve_bin(env(&[("HERDR_BIN_PATH", "/x/herdr")]), nothing),
+            resolve_bin(Some("/x/herdr".into()), "/a", nothing),
             PathBuf::from("/x/herdr")
         );
         assert_eq!(
-            resolve_bin(env(&[("PATH", "/a:/b")]), |p: &Path| p
-                == Path::new("/b/herdr")),
+            resolve_bin(None, "/a::/b", |p: &Path| p == Path::new("/b/herdr")),
             PathBuf::from("/b/herdr")
         );
         assert_eq!(
-            resolve_bin(env(&[("PATH", "/usr/bin")]), |p: &Path| p
-                == Path::new("/opt/homebrew/bin/herdr")),
-            PathBuf::from("/opt/homebrew/bin/herdr")
+            resolve_bin(Some(String::new()), "/a", |p: &Path| p
+                == Path::new("/a/herdr")),
+            PathBuf::from("/a/herdr")
         );
-        assert_eq!(resolve_bin(env(&[]), nothing), PathBuf::from("herdr"));
+        assert_eq!(resolve_bin(None, "/a", nothing), PathBuf::from("herdr"));
+    }
+
+    #[test]
+    fn resolve_bin_finds_cargo_bin_in_the_gui_path() {
+        let path = crate::gui_path::augmented_path(Some("/usr/bin"), "/h", "");
+        assert_eq!(
+            resolve_bin(None, &path, |p: &Path| p
+                == Path::new("/h/.cargo/bin/herdr")),
+            PathBuf::from("/h/.cargo/bin/herdr")
+        );
     }
 }

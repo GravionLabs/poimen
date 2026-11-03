@@ -17,6 +17,7 @@ fn usual_dirs(home: &str) -> Vec<String> {
         "/opt/homebrew/bin".to_owned(),
         "/usr/local/bin".to_owned(),
         format!("{home}/.local/bin"),
+        format!("{home}/.cargo/bin"),
         format!("{home}/.volta/bin"),
         format!("{home}/.local/share/mise/shims"),
         format!("{home}/.asdf/shims"),
