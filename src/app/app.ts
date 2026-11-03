@@ -12,7 +12,15 @@ import {
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
-import { rowName, tabHeader, type Mode, type Pane, type PluginAction } from "./core/herdr";
+import {
+  flowSession,
+  rowName,
+  supportsFlow,
+  tabHeader,
+  type Mode,
+  type Pane,
+  type PluginAction,
+} from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { HerdrStore } from "./core/herdr-store";
@@ -189,7 +197,7 @@ export class App {
       this.theme.setDark(setting === "system" ? systemDark : setting === "dark");
     });
     destroyRef.onDestroy(this.followSystemTheme());
-    // The output panel follows the active tab's Claude Code agent; nothing is watched while it is hidden.
+    // The output panel follows the active tab's agent (Claude Code, Copilot CLI); nothing is watched while it is hidden.
     effect(() => {
       const target = this.subagentTarget();
       untracked(() => void this.subagents.follow(target?.paneId ?? null, target?.session ?? null));
@@ -206,15 +214,15 @@ export class App {
   }
 
   /**
-   * The pane and Claude session the open output panel follows (the active tab's pane, or the pane
-   * of the active flow tab); `null` when hidden or not Claude.
+   * The pane and agent session the open output panel follows (the active tab's pane, or the pane
+   * of the active flow tab); `null` when hidden or its agent has no transcripts to follow.
    */
   private readonly subagentTarget = computed(
     () => {
       const active = this.editor.activeId();
       const id = active === null ? null : tabPaneId(active);
       const pane = id && this.ui.panelOpen() ? this.pane(id) : undefined;
-      const session = pane?.agent === "claude" ? pane.agent_session?.value : undefined;
+      const session = flowSession(pane);
       return pane && session ? { paneId: pane.pane_id, session } : null;
     },
     { equal: (a, b) => a?.paneId === b?.paneId && a?.session === b?.session },
@@ -377,7 +385,7 @@ export class App {
       {
         action: "open-flow",
         label: "Open agent flow",
-        appliesTo: (id) => tabKind(id) === "pane" && this.pane(id)?.agent === "claude",
+        appliesTo: (id) => tabKind(id) === "pane" && supportsFlow(this.pane(id)),
       },
       {
         action: "plugin-pane-close",

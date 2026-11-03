@@ -6,10 +6,13 @@ import {
   applyStatus,
   buildTree,
   decodeBase64,
+  flowAgentName,
+  flowSession,
   nextWaiting,
   pluginContext,
   paneLabel,
   rowName,
+  supportsFlow,
   tabHeader,
   waitingCount,
   closeWarning,
@@ -252,5 +255,29 @@ describe("pluginContext", () => {
   it("is empty for no pane or an unknown one", () => {
     expect(pluginContext(snap, null).focused_pane_id).toBeNull();
     expect(pluginContext(snap, "gone").workspace_id).toBeNull();
+  });
+});
+
+describe("flow agents", () => {
+  const session = { value: "0b7e-c0" };
+
+  it("follows Claude Code and Copilot CLI panes", () => {
+    for (const agent of ["claude", "copilot", " copilot "]) {
+      expect(supportsFlow(pane({ agent })), agent).toBe(true);
+      expect(flowSession(pane({ agent, agent_session: session })), agent).toBe("0b7e-c0");
+    }
+    expect(flowAgentName(pane({ agent: "claude" }))).toBe("Claude Code");
+    expect(flowAgentName(pane({ agent: "copilot" }))).toBe("GitHub Copilot CLI");
+  });
+
+  it("does not follow other agents, plain terminals or panes without a session", () => {
+    for (const agent of ["codex", "gemini", "toString", "", undefined]) {
+      expect(supportsFlow(pane({ agent })), agent).toBe(false);
+      expect(flowSession(pane({ agent, agent_session: session })), agent).toBeNull();
+      expect(flowAgentName(pane({ agent })), agent).toBeUndefined();
+    }
+    expect(supportsFlow(undefined)).toBe(false);
+    expect(flowSession(pane({ agent: "copilot" }))).toBeNull();
+    expect(flowSession(pane({ agent: "copilot", agent_session: { value: "" } }))).toBeNull();
   });
 });

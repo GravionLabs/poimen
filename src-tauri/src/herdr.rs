@@ -358,16 +358,27 @@ pub fn parse_plugin_pane_defs(result: &Value) -> Vec<PluginPaneDef> {
     defs
 }
 
-/// The Claude Code session of a pane (`agent` and `agent_session.value` of `pane.list`) and the
+/// An agent whose session transcript poimen can read (`agent` of `pane.list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptAgent {
+    /// Claude Code: `~/.claude/projects/<cwd>/<session>.jsonl`.
+    Claude,
+    /// GitHub Copilot CLI: `~/.copilot/session-state/<session>/events.jsonl`.
+    Copilot,
+}
+
+/// The agent session of a pane (`agent` and `agent_session.value` of `pane.list`) and the
 /// directory the session was started in; the transcript files are found from these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSession {
+    pub agent: TranscriptAgent,
     pub session: String,
+    /// Empty when herdr reports none; only Claude Code needs it.
     pub cwd: String,
 }
 
-/// A session id is used as a file name below `~/.claude/projects`; only `[A-Za-z0-9_-]+` is
-/// accepted, so a value reported by a pane cannot escape that directory.
+/// A session id is used as a file or directory name below the agent's transcript root; only
+/// `[A-Za-z0-9_-]+` is accepted, so a value reported by a pane cannot escape that directory.
 pub fn is_safe_session_id(session: &str) -> bool {
     !session.is_empty()
         && session
@@ -375,20 +386,25 @@ pub fn is_safe_session_id(session: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// Reads the Claude session of `pane_id` out of a `pane.list` result; `None` for another pane, a
-/// non-Claude agent, or a pane without a session id.
-pub fn parse_claude_session(result: &Value, pane_id: &str) -> Option<AgentSession> {
+/// Reads the agent session of `pane_id` out of a `pane.list` result; `None` for another pane, an
+/// agent without a readable transcript (`codex`, ...), or a pane without a session id. Claude
+/// Code also needs the pane's `cwd` (its transcripts are grouped by directory).
+pub fn parse_agent_session(result: &Value, pane_id: &str) -> Option<AgentSession> {
     let pane = result
         .get("panes")?
         .as_array()?
         .iter()
         .find(|p| p.get("pane_id").and_then(Value::as_str) == Some(pane_id))?;
-    if pane.get("agent")?.as_str()? != "claude" {
-        return None;
-    }
+    let agent = match pane.get("agent")?.as_str()? {
+        "claude" => TranscriptAgent::Claude,
+        "copilot" => TranscriptAgent::Copilot,
+        _ => return None,
+    };
     let session = pane.get("agent_session")?.get("value")?.as_str()?;
-    let cwd = pane.get("cwd")?.as_str()?;
-    (is_safe_session_id(session) && !cwd.is_empty()).then(|| AgentSession {
+    let cwd = pane.get("cwd").and_then(Value::as_str).unwrap_or_default();
+    let needs_cwd = agent == TranscriptAgent::Claude;
+    (is_safe_session_id(session) && !(needs_cwd && cwd.is_empty())).then(|| AgentSession {
+        agent,
         session: session.to_owned(),
         cwd: cwd.to_owned(),
     })
@@ -604,43 +620,61 @@ impl Subscription {
 mod tests {
 
     #[test]
-    fn claude_session_is_read_from_the_pane_list() {
+    fn agent_session_is_read_from_the_pane_list() {
         let result = json!({"panes": [
             {"pane_id": "w1:p1", "agent": "claude", "cwd": "/home/u/proj",
              "agent_session": {"agent": "claude", "kind": "id", "value": "abc-123"}},
             {"pane_id": "w1:p2", "agent": "codex", "cwd": "/x",
              "agent_session": {"value": "zzz"}},
             {"pane_id": "w1:p3", "cwd": "/x"},
-            {"pane_id": "w1:p4", "agent": "claude", "cwd": "/x"}
+            {"pane_id": "w1:p4", "agent": "claude", "cwd": "/x"},
+            {"pane_id": "w1:p5", "agent": "copilot", "cwd": "/home/u/proj",
+             "agent_session": {"source": "herdr:copilot", "kind": "id", "value": "0b7e-c0"}},
+            {"pane_id": "w1:p6", "agent": "copilot",
+             "agent_session": {"source": "herdr:copilot", "kind": "id", "value": "0b7e-c1"}},
+            {"pane_id": "w1:p7", "agent": "claude",
+             "agent_session": {"value": "abc-124"}}
         ]});
         assert_eq!(
-            parse_claude_session(&result, "w1:p1"),
+            parse_agent_session(&result, "w1:p1"),
             Some(AgentSession {
+                agent: TranscriptAgent::Claude,
                 session: "abc-123".into(),
                 cwd: "/home/u/proj".into()
             })
         );
-        assert_eq!(parse_claude_session(&result, "w1:p2"), None);
-        assert_eq!(parse_claude_session(&result, "w1:p3"), None);
-        assert_eq!(parse_claude_session(&result, "w1:p4"), None);
-        assert_eq!(parse_claude_session(&result, "w9:p9"), None);
-        assert_eq!(parse_claude_session(&json!({}), "w1:p1"), None);
+        assert_eq!(
+            parse_agent_session(&result, "w1:p5"),
+            Some(AgentSession {
+                agent: TranscriptAgent::Copilot,
+                session: "0b7e-c0".into(),
+                cwd: "/home/u/proj".into()
+            })
+        );
+        // Copilot sessions are found by id alone; Claude needs the directory.
+        assert_eq!(
+            parse_agent_session(&result, "w1:p6").map(|s| (s.agent, s.cwd)),
+            Some((TranscriptAgent::Copilot, String::new()))
+        );
+        assert_eq!(parse_agent_session(&result, "w1:p7"), None);
+        assert_eq!(parse_agent_session(&result, "w1:p2"), None);
+        assert_eq!(parse_agent_session(&result, "w1:p3"), None);
+        assert_eq!(parse_agent_session(&result, "w1:p4"), None);
+        assert_eq!(parse_agent_session(&result, "w9:p9"), None);
+        assert_eq!(parse_agent_session(&json!({}), "w1:p1"), None);
     }
 
     #[test]
-    fn claude_session_ids_must_be_plain_file_names() {
+    fn agent_session_ids_must_be_plain_file_names() {
         let with = |v: &str| {
             json!({"panes": [{"pane_id": "p", "agent": "claude", "cwd": "/x",
                 "agent_session": {"value": v}}]})
         };
         for bad in ["../x", "/abs", "", "a/b", "..", "a.b"] {
-            assert_eq!(parse_claude_session(&with(bad), "p"), None, "{bad}");
+            assert_eq!(parse_agent_session(&with(bad), "p"), None, "{bad}");
         }
         let uuid = "0b7e1c52-3f4a-4d2e-9a61-5c8d7e2f1a90";
-        assert_eq!(
-            parse_claude_session(&with(uuid), "p").unwrap().session,
-            uuid
-        );
+        assert_eq!(parse_agent_session(&with(uuid), "p").unwrap().session, uuid);
     }
 
     #[test]

@@ -132,6 +132,7 @@ export function buildFlowGraph(
   agents: readonly SubagentInfo[],
   entries: ReadonlyMap<string, readonly TranscriptEntry[]>,
   main: MainSnapshot,
+  agentName = "Claude Code",
 ): FlowGraph {
   const byTool = new Map(agents.filter((a) => a.tool_use_id).map((a) => [a.tool_use_id, a]));
   const nodeId = (a: SubagentInfo) => a.tool_use_id || `agent:${a.agent_id}`;
@@ -244,7 +245,7 @@ export function buildFlowGraph(
     id: MAIN_NODE_ID,
     kind: "main",
     title: "Main agent",
-    type: "Claude Code",
+    type: agentName,
     status: "done",
     startedMs: null,
     endedMs: null,

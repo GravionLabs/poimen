@@ -22,7 +22,7 @@ export interface Pane {
   tab_id: string;
   workspace_id: string;
   agent?: string;
-  /** The agent's own session (Claude Code: the transcript's session id in `value`). */
+  /** The agent's own session (Claude Code, Copilot CLI: the transcript's session id in `value`). */
   agent_session?: { value?: string };
   agent_status: AgentStatus;
   cwd?: string;
@@ -157,6 +157,30 @@ export function paneDir(pane: Pane): string | undefined {
 /** Agent kind of a pane (`claude`, `codex`, ...); `undefined` for a plain terminal. */
 export function agentKind(pane: Pane): string | undefined {
   return pane.agent?.trim() || undefined;
+}
+
+/** Agents whose session transcripts poimen reads (Output panel, Flow tab), with their names. */
+const TRANSCRIPT_AGENTS: Readonly<Record<string, string>> = {
+  claude: "Claude Code",
+  copilot: "GitHub Copilot CLI",
+};
+
+/** Display name of the agent of `pane` if its transcripts can be followed (`Claude Code`, ...). */
+export function flowAgentName(pane: Pane | undefined): string | undefined {
+  const kind = pane && agentKind(pane);
+  return kind !== undefined && Object.hasOwn(TRANSCRIPT_AGENTS, kind)
+    ? TRANSCRIPT_AGENTS[kind]
+    : undefined;
+}
+
+/** Whether the Output panel and the Flow tab can follow the agent of `pane`. */
+export function supportsFlow(pane: Pane | undefined): boolean {
+  return flowAgentName(pane) !== undefined;
+}
+
+/** The session id the transcripts of `pane` are found by; `null` when it has none to follow. */
+export function flowSession(pane: Pane | undefined): string | null {
+  return (supportsFlow(pane) && pane?.agent_session?.value) || null;
 }
 
 /**

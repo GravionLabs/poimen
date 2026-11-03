@@ -25,6 +25,14 @@
   --ff-node-border-radius: 6px;
   --ff-connection-color: var(--h-text-muted-color);
   --ff-connection-width: 1.5px;
+  --ff-connector-size: 4px;
+  --ff-connector-border-width: 0px;
+  --ff-connector-background-color: var(--h-text-muted-color);
+  --ff-connector-border-color: var(--h-text-muted-color);
+  --ff-connector-connected-color: var(--h-text-muted-color);
+  --ff-connector-accent-color: var(--h-text-muted-color);
+  --ff-connector-disabled-color: var(--h-text-muted-color);
+  --ff-connector-disabled-border-color: var(--h-text-muted-color);
   --ff-background-dot-color: color-mix(in srgb, currentColor 18%, transparent);
   --ff-minimap-background-color: color-mix(in srgb, currentColor 6%, transparent);
   --ff-minimap-border-color: var(--h-border-color);
@@ -175,20 +183,22 @@
   min-width: 0;
 }
 
+/* The anchors of the edges: as small as still placeable and muted like the edges, in every state
+   of the theme (connected, disabled, hover). */
 .dot {
   position: absolute;
   top: 50%;
-  width: 8px;
-  height: 8px;
-  margin-top: -4px;
+  width: 4px;
+  height: 4px;
+  margin-top: -2px;
   border-radius: 50%;
   background: var(--h-text-muted-color);
 }
 
 .dot.in {
-  left: -4px;
+  left: -2px;
 }
 
 .dot.out {
-  right: -4px;
+  right: -2px;
 }
