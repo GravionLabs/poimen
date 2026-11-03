@@ -583,6 +583,17 @@ describe("TerminalView mouse input", () => {
     ]);
   });
 
+  it("clamps the mouse cell to the grid of the last frame", async () => {
+    const { session, body, send } = await controlling();
+    await send(0, { ...frame, seq: 2, width: 60, height: 10 });
+    body.dispatchEvent(mouse("mousedown", 795, 475)); // xterm cell 79,23
+    window.dispatchEvent(mouse("mouseup", 125, 45));
+    expect(session.mouse.mock.calls.map(([e]) => [e.column, e.row])).toEqual([
+      [59, 9],
+      [12, 2],
+    ]);
+  });
+
   it("forwards a drag to a new cell once, with the pressed button and modifiers", async () => {
     const { session, body } = await controlling();
     body.dispatchEvent(mouse("mousedown", 5, 5, { button: 2, ctrlKey: true }));
