@@ -215,6 +215,12 @@ export class App {
     const destroyRef = inject(DestroyRef);
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
+    // A click on a system notification opens the tab of the pane it was about.
+    const clicks = this.notifier.listen((paneId) => {
+      const pane = this.pane(paneId);
+      if (pane) this.open(pane);
+    });
+    destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
     effect(() => {
       const { theme: setting, colorSchema } = this.prefs.settings();
       const systemDark = this.systemDark();
@@ -483,10 +489,6 @@ export class App {
   @HostListener("window:focus")
   protected loadPlugins(): void {
     void this.plugins.load();
-    // Clicking a system notification focuses the window: open the tab it was about.
-    const clicked = this.notifier.takeClicked(Date.now());
-    const pane = clicked ? this.pane(clicked) : undefined;
-    if (pane) this.open(pane);
   }
 
   /** An action of the Plugins menu runs with the active pane as context. */

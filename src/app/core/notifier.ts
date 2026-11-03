@@ -1,9 +1,6 @@
 import { Injectable, inject } from "@angular/core";
 import type { StatusChange } from "./attention";
-import { TauriBridge } from "./tauri";
-
-/** How long after a notification a window focus counts as a click on it. */
-export const CLICK_WINDOW_MS = 30_000;
+import { TauriBridge, type Unlisten } from "./tauri";
 
 export interface NotifyContext {
   /** Panes whose tab is on screen. */
@@ -18,14 +15,20 @@ export interface NotifyContext {
 }
 
 /**
- * System notifications for agents that turn blocked or done. The notification plugin reports no
- * click on desktop, so a click is recognized as the window gaining focus shortly after a
- * notification was shown while it was in the background: that opens the notified pane's tab.
+ * System notifications for agents that turn blocked or done. Each carries its pane id as `extra`;
+ * the plugin reports a click on it (`onAction`, `tap`) with that extra, so the click opens the
+ * pane's tab, whichever of several notifications was clicked.
  */
 @Injectable({ providedIn: "root" })
 export class Notifier {
   private readonly bridge = inject(TauriBridge);
-  private pending: { paneId: string; at: number } | null = null;
+
+  /** Calls `open` with the pane of every clicked notification; call before notifying. */
+  listen(open: (paneId: string) => void): Promise<Unlisten> {
+    return this.bridge.onNotificationClick((extra) => {
+      if (typeof extra["paneId"] === "string") open(extra["paneId"]);
+    });
+  }
 
   /** Shows a notification per change that settings allow and the user cannot already see. */
   notify(changes: readonly StatusChange[], ctx: NotifyContext): void {
@@ -34,15 +37,7 @@ export class Notifier {
       if (ctx.focused && ctx.viewed.has(paneId)) continue;
       const label = ctx.label(paneId);
       const body = status === "blocked" ? `${label} is waiting for you` : `${label} is done`;
-      if (!ctx.focused) this.pending = { paneId, at: ctx.now };
-      void this.bridge.notify("poimen", body).catch(() => undefined);
+      void this.bridge.notify("poimen", body, { paneId }).catch(() => undefined);
     }
-  }
-
-  /** The window gained focus: the pane to open when a recent notification was clicked, once. */
-  takeClicked(now: number): string | null {
-    const pending = this.pending;
-    this.pending = null;
-    return pending && now - pending.at <= CLICK_WINDOW_MS ? pending.paneId : null;
   }
 }

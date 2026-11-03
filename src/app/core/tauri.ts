@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   isPermissionGranted,
+  onAction,
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
@@ -25,10 +26,21 @@ export class TauriBridge {
   }
 
   /** Shows a system notification, asking for permission once; `false` when it is not allowed. */
-  async notify(title: string, body: string): Promise<boolean> {
+  async notify(title: string, body: string, extra?: Record<string, unknown>): Promise<boolean> {
     const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
-    if (granted) sendNotification({ title, body });
+    if (granted) sendNotification({ title, body, extra });
     return granted;
+  }
+
+  /**
+   * Calls `handler` with the `extra` of a notification the user clicked. The plugin shows and
+   * reports clicks only while a listener exists, so register it before the first notification.
+   */
+  async onNotificationClick(handler: (extra: Record<string, unknown>) => void): Promise<Unlisten> {
+    const listener = await onAction((event) => {
+      if (event.actionId === "tap") handler(event.notification?.extra ?? {});
+    });
+    return () => void listener.unregister();
   }
 
   /** The native folder picker; the chosen directory, or `null` when cancelled. */

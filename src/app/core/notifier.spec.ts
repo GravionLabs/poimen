@@ -5,10 +5,17 @@ import { TauriBridge } from "./tauri";
 
 function setup() {
   const sent: string[] = [];
+  const extras: unknown[] = [];
+  let clickHandler: (extra: Record<string, unknown>) => void = () => undefined;
   const bridge = {
-    notify: (_title: string, body: string) => {
+    notify: (_title: string, body: string, extra?: Record<string, unknown>) => {
       sent.push(body);
+      extras.push(extra);
       return Promise.resolve(true);
+    },
+    onNotificationClick: (handler: (extra: Record<string, unknown>) => void) => {
+      clickHandler = handler;
+      return Promise.resolve(() => undefined);
     },
   };
   const injector = Injector.create({
@@ -23,7 +30,13 @@ function setup() {
     now: 1000,
     ...o,
   });
-  return { notifier: injector.get(Notifier), sent, ctx };
+  return {
+    notifier: injector.get(Notifier),
+    sent,
+    extras,
+    click: (extra: Record<string, unknown>) => clickHandler(extra),
+    ctx,
+  };
 }
 
 describe("Notifier", () => {
@@ -64,23 +77,33 @@ describe("Notifier", () => {
     expect(sent).toEqual(["tab p1 is waiting for you"]);
   });
 
-  it("returns the notified pane once when the window is focused soon after", () => {
-    const { notifier, ctx } = setup();
-    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx({ now: 1000 }));
-    expect(notifier.takeClicked(5000)).toBe("p1");
-    expect(notifier.takeClicked(6000)).toBeNull();
+  it("sends the pane id with each notification", () => {
+    const { notifier, extras, ctx } = setup();
+    notifier.notify(
+      [
+        { paneId: "p1", status: "blocked" },
+        { paneId: "p2", status: "done" },
+      ],
+      ctx(),
+    );
+    expect(extras).toEqual([{ paneId: "p1" }, { paneId: "p2" }]);
   });
 
-  it("ignores a focus long after the notification and when nothing was shown", () => {
-    const { notifier, ctx } = setup();
-    expect(notifier.takeClicked(1)).toBeNull();
-    notifier.notify([{ paneId: "p1", status: "done" }], ctx({ now: 1000 }));
-    expect(notifier.takeClicked(1000 + 31_000)).toBeNull();
+  it("opens the pane of the clicked notification, not the last one", async () => {
+    const { notifier, click } = setup();
+    const opened: string[] = [];
+    await notifier.listen((id) => opened.push(id));
+    click({ paneId: "p1" });
+    click({ paneId: "p2" });
+    expect(opened).toEqual(["p1", "p2"]);
   });
 
-  it("does not arm a jump when the window was already focused", () => {
-    const { notifier, ctx } = setup();
-    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx({ focused: true }));
-    expect(notifier.takeClicked(1001)).toBeNull();
+  it("ignores a click without a pane id", async () => {
+    const { notifier, click } = setup();
+    const opened: string[] = [];
+    await notifier.listen((id) => opened.push(id));
+    click({});
+    click({ paneId: 7 });
+    expect(opened).toEqual([]);
   });
 });
