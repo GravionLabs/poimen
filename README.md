@@ -86,7 +86,7 @@ rm -rf src-tauri/icons/android src-tauri/icons/ios
 
 ## Keyboard
 
-The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoom, refresh), Go (command palette, next waiting agent, tab switching) and Window. Defaults follow VS Code; `CmdOrCtrl` is Cmd on macOS and Ctrl elsewhere. Every shortcut can be changed in the settings file (see below).
+The menu bar has File (new terminal, close tab), Edit, View (sidebar, output panel, split, zoom, refresh), Go (command palette, next waiting agent, tab switching) and Window. Defaults follow VS Code; `CmdOrCtrl` is Cmd on macOS and Ctrl elsewhere. Every shortcut can be changed in the settings file (see below).
 
 | Action | Setting key | Default |
 |---|---|---|
@@ -95,6 +95,7 @@ The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoo
 | Close all tabs | `closeAll` | CmdOrCtrl+Shift+W |
 | Refresh | `refresh` | CmdOrCtrl+R |
 | Toggle sidebar | `toggleSidebar` | CmdOrCtrl+B |
+| Toggle output panel (subagent transcripts) | `toggleOutput` | CmdOrCtrl+J |
 | Split right / down | `splitRight` / `splitDown` | CmdOrCtrl+\\ / CmdOrCtrl+Shift+\\ |
 | Zoom in / out / actual size (terminal font) | `zoomIn` / `zoomOut` / `zoomReset` | CmdOrCtrl+= / CmdOrCtrl+- / CmdOrCtrl+0 |
 | Command palette (poimen commands and herdr plugin actions) | `commandPalette` | CmdOrCtrl+Shift+P |
@@ -104,6 +105,10 @@ The menu bar has File (new terminal, close tab), Edit, View (sidebar, split, zoo
 The **Plugins** button in the top bar lists the herdr plugin actions (`plugin.action.list`, re-read each time the menu opens, on window focus and at start); a pick runs the action with the active pane as context. The context menu of a pane (sidebar row or tab) lists the same actions and runs them with that pane as context. Errors show as a notice. Panes that plugins declare (`panes[]` of `plugin.list`, for example the deliver-board and review-popup panes) appear in the command palette as "Open <title> as tab": poimen starts them with `plugin.pane.open` (placement `tab`, focused) and shows them as an editor tab named after the plugin. Selecting such a tab calls `plugin.pane.focus`; the tab menu entry "Close plugin pane" calls `plugin.pane.close` (closing the tab alone leaves the pane running). The pane id to plugin name mapping is UI state: it is stored with the window layout, survives a restart and is pruned against the live panes (herdr may reuse ids), so focus and close keep working for the plugin panes poimen opened. herdr protocol 22 reports no plugin panes opened by other clients (no list call or event, no marker in the snapshot), so those show as ordinary panes in the sidebar and tabs without the plugin name and are not covered. The deliver-board and review-popup panes are covered by fixture tests with their manifest shapes only (a live test would create panes in the user's session, which tests must not do); opening them against a running herdr is a manual check.
 
 While a terminal has focus, only shortcuts that use Cmd are captured; every other key (Ctrl combinations on Linux and Windows included) goes to the program in the pane. Use the menu, or bind a `Cmd+` (Super) shortcut, to reach an action from a focused terminal there.
+
+### Output panel (subagent transcripts)
+
+A panel below the editor area (View > Toggle Output Panel, the Output button in the top bar, `CmdOrCtrl+J`) shows what the subagents of a Claude Code agent are doing. They do not write to the terminal, so poimen reads Claude Code's session transcripts, read-only: the session id and directory come from herdr (`agent_session.value` and `cwd` of `pane.list`), the files from `~/.claude/projects/<directory with every non-alphanumeric character as "-">/<session>.jsonl` and `<session>/subagents/agent-<id>.jsonl` plus its `.meta.json` (type, description, tool use id). The panel follows the active tab's agent; its dropdown lists the subagents (description, type, running or done, duration) and the selected one streams its prompt, messages, collapsible tool calls with results and the final report. It scrolls along until you scroll up ("Resume auto-scroll" jumps back). A subagent is done when its meta says `finished` or the main transcript holds a final `tool_result` for its tool use id (the acknowledgement of a background launch does not count). The backend watches the files with `notify` and pushes `subagents` events (no polling); only an open panel watches. Other agents and plain terminals show an empty state. The transcript format is internal to Claude Code: unknown entry types and fields are skipped. Visibility, height and tab are UI state (`core/ui-state.ts`); the panel is built to hold more tabs (a Flow tab is planned). Not covered: Copilot and Codex transcripts, remote machines.
 
 ### Native deliver board
 

@@ -26,6 +26,11 @@ export class Toolbar {
   /** The user clicked the theme button: carries the next theme. */
   readonly themeChange = output<ThemeSetting>();
 
+  /** Whether the output panel is shown. */
+  readonly outputOpen = input(false);
+  /** The user clicked the Output button. */
+  readonly outputToggle = output<void>();
+
   /** The herdr plugin actions the Plugins menu lists. */
   readonly plugins = input<readonly PluginAction[]>([]);
   /** Why the plugin actions could not be listed, if so. */

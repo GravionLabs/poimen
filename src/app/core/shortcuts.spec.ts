@@ -93,3 +93,11 @@ describe("formatShortcut", () => {
     expect(formatShortcut("", false)).toBe("");
   });
 });
+
+describe("toggleOutput", () => {
+  it("is bound to CmdOrCtrl+J", () => {
+    expect(matchShortcut(key("j", { ctrlKey: true }), DEFAULT_SHORTCUTS, other)).toBe(
+      "toggleOutput",
+    );
+  });
+});

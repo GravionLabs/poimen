@@ -11,6 +11,15 @@
   <span class="spacer"></span>
   <button
     type="button"
+    class="item"
+    title="Toggle the output panel (subagent transcripts)"
+    [attr.aria-pressed]="outputOpen()"
+    (click)="outputToggle.emit()"
+  >
+    Output
+  </button>
+  <button
+    type="button"
     class="item theme-button"
     [title]="fixedBy() ? fixed(fixedBy()!) : label(theme())"
     [attr.aria-label]="fixedBy() ? fixed(fixedBy()!) : label(theme())"

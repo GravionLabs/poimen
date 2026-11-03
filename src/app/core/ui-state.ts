@@ -8,6 +8,12 @@ export const DEFAULT_VIEW = "spaces";
 export const UI_STATE_KEY = "poimen.ui-state";
 /** Smallest share of a section of the split sidebar layout, so its title stays visible. */
 export const SPLIT_MIN_SHARE = 0.15;
+export const PANEL_MIN_HEIGHT = 80;
+export const PANEL_MAX_HEIGHT = 900;
+export const PANEL_DEFAULT_HEIGHT = 260;
+/** Tabs of the bottom panel; the Output tab shows subagent transcripts, others (Flow) follow. */
+export const PANEL_TABS = ["output"] as const;
+export const DEFAULT_PANEL_TAB = "output";
 export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
@@ -43,6 +49,15 @@ export interface LayoutState {
   splitSizes?: [number, number];
   /** Plugin name per plugin pane id poimen opened (UI bookkeeping; pruned against live panes). */
   pluginPanes?: Record<string, string>;
+  /** The bottom panel below the editor area: shown, its height and its selected tab. */
+  panelOpen: boolean;
+  panelHeight: number;
+  panelTab: string;
+}
+
+export function clampPanelHeight(height: number): number {
+  if (!Number.isFinite(height)) return PANEL_DEFAULT_HEIGHT;
+  return Math.min(PANEL_MAX_HEIGHT, Math.max(PANEL_MIN_HEIGHT, Math.round(height)));
 }
 
 /** Two shares that sum to 1, each at least {@link SPLIT_MIN_SHARE}; anything else is `null`. */
@@ -69,6 +84,9 @@ export function parseLayout(raw: string | null): LayoutState {
     sidebarCollapsed: false,
     activeView: DEFAULT_VIEW,
     expandedDirs: [],
+    panelOpen: false,
+    panelHeight: PANEL_DEFAULT_HEIGHT,
+    panelTab: DEFAULT_PANEL_TAB,
   };
   if (!raw) return state;
   try {
@@ -83,6 +101,9 @@ export function parseLayout(raw: string | null): LayoutState {
       splitWorkspace,
       splitSizes,
       pluginPanes,
+      panelOpen,
+      panelHeight,
+      panelTab,
     } = data as Record<string, unknown>;
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
@@ -101,6 +122,11 @@ export function parseLayout(raw: string | null): LayoutState {
           (e): e is [string, string] => typeof e[1] === "string" && e[1] !== "",
         ),
       );
+    }
+    if (typeof panelOpen === "boolean") state.panelOpen = panelOpen;
+    if (typeof panelHeight === "number") state.panelHeight = clampPanelHeight(panelHeight);
+    if (typeof panelTab === "string" && (PANEL_TABS as readonly string[]).includes(panelTab)) {
+      state.panelTab = panelTab;
     }
     if (editor !== undefined) state.editor = editor;
   } catch {
@@ -127,6 +153,10 @@ export class UiState {
   );
   /** Plugin name per plugin pane id poimen opened; `PluginPanes` prunes it against live panes. */
   readonly pluginPanes = signal<Readonly<Record<string, string>>>(this.initial.pluginPanes ?? {});
+  /** The bottom panel (Output) below the editor area. */
+  readonly panelOpen = signal(this.initial.panelOpen);
+  readonly panelHeight = signal(this.initial.panelHeight);
+  readonly panelTab = signal(this.initial.panelTab);
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -136,6 +166,24 @@ export class UiState {
 
   setSidebarWidth(width: number): void {
     this.sidebarWidth.set(clampSidebarWidth(width));
+    this.save();
+  }
+
+  togglePanel(): void {
+    this.panelOpen.update((open) => !open);
+    this.save();
+  }
+
+  setPanelHeight(height: number): void {
+    this.panelHeight.set(clampPanelHeight(height));
+    this.save();
+  }
+
+  /** Selects a tab of the bottom panel and shows the panel; an unknown tab is ignored. */
+  selectPanelTab(tab: string): void {
+    if (!(PANEL_TABS as readonly string[]).includes(tab)) return;
+    this.panelTab.set(tab);
+    this.panelOpen.set(true);
     this.save();
   }
 
@@ -219,6 +267,9 @@ export class UiState {
       // Like splitWorkspace: stored only once it differs from the default.
       splitSizes:
         this.splitSizes()[0] === SPLIT_DEFAULT_SIZES[0] ? undefined : [...this.splitSizes()],
+      panelOpen: this.panelOpen(),
+      panelHeight: this.panelHeight(),
+      panelTab: this.panelTab(),
       pluginPanes: Object.keys(this.pluginPanes()).length ? { ...this.pluginPanes() } : undefined,
     };
     try {

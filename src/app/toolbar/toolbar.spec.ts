@@ -37,6 +37,8 @@ describe("theme button", () => {
       fixed = fixedLabel;
       themeChange = { emit: (t: ThemeSetting) => emitted.push(t) };
       pluginsOpen = signal(false);
+      outputOpen = () => false;
+      outputToggle = { emit: () => undefined };
       plugins = () => [];
       pluginsError = () => null;
       togglePlugins = () => undefined;
@@ -101,6 +103,8 @@ describe("Plugins menu", () => {
       label = themeLabel;
       next = nextTheme;
       pluginsOpen = signal(false);
+      outputOpen = () => false;
+      outputToggle = { emit: () => undefined };
       plugins = () => plugins;
       pluginsError = () => error;
       togglePlugins() {
@@ -150,5 +154,38 @@ describe("Plugins menu", () => {
     button.click();
     fixture.detectChanges();
     expect(root.querySelector("[role=menu]")?.textContent).toContain("No plugin actions");
+  });
+});
+
+describe("output button", () => {
+  it("shows the pressed state and emits a toggle on click", () => {
+    let toggled = 0;
+    @Component({
+      selector: "app-host",
+      template: readFileSync("src/app/toolbar/toolbar.html", "utf8"),
+    })
+    class Host {
+      theme = () => "system";
+      fixedBy = () => null;
+      fixed = fixedLabel;
+      themeChange = { emit: () => undefined };
+      pluginsOpen = signal(false);
+      outputOpen = () => true;
+      outputToggle = { emit: () => toggled++ };
+      plugins = () => [];
+      pluginsError = () => null;
+      togglePlugins = () => undefined;
+      label = themeLabel;
+      next = nextTheme;
+    }
+    TestBed.resetTestingModule();
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+    const button = [...(fixture.nativeElement as HTMLElement).querySelectorAll("button")].find(
+      (b) => b.textContent?.trim() === "Output",
+    )!;
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    button.click();
+    expect(toggled).toBe(1);
   });
 });
