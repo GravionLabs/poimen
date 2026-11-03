@@ -440,6 +440,7 @@ type Stream = std::os::unix::net::UnixStream;
 type Stream = std::fs::File;
 
 /// The named pipe herdr on Windows serves for the socket path `socket`.
+#[cfg(any(windows, test))]
 pub fn pipe_name(socket: &Path) -> String {
     format!(r"\\.\pipe\{}", socket.display())
 }
