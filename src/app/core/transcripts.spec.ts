@@ -37,8 +37,12 @@ const info = (over: Partial<SubagentInfo> = {}): SubagentInfo => ({
   ...over,
 });
 
-const entry = (role: "user" | "assistant", blocks: TranscriptEntry["blocks"]): TranscriptEntry => ({
-  uuid: "u",
+const entry = (
+  role: "user" | "assistant",
+  blocks: TranscriptEntry["blocks"],
+  uuid = "u",
+): TranscriptEntry => ({
+  uuid,
   role,
   timestamp: "2026-11-02T04:00:01.000Z",
   blocks,
@@ -168,9 +172,21 @@ describe("Subagents", () => {
     send("S", {
       kind: "entries",
       agent_id: "a1",
-      entries: [entry("assistant", [{ type: "text", text: "ok" }])],
+      entries: [entry("assistant", [{ type: "text", text: "ok" }], "u2")],
     });
     expect(s.selectedId()).toBe("a1");
+    expect(s.items().map((i) => i.kind)).toEqual(["prompt", "message"]);
+  });
+
+  it("does not show entries twice when the file is read again after a truncation", async () => {
+    tauri.answer("subagents_watch", () => true);
+    const s = create();
+    await s.follow("w1:p1", "S");
+    const first = entry("user", [{ type: "text", text: "go" }], "u1");
+    const second = entry("assistant", [{ type: "text", text: "ok" }], "u2");
+    send("S", { kind: "list", agents: [info()] });
+    send("S", { kind: "entries", agent_id: "a1", entries: [first, second] });
+    send("S", { kind: "entries", agent_id: "a1", entries: [first, second] });
     expect(s.items().map((i) => i.kind)).toEqual(["prompt", "message"]);
   });
 

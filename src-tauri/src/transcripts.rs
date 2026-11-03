@@ -24,6 +24,8 @@ use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::herdr::is_safe_session_id;
+
 /// Longest text kept per block; a transcript can hold whole files and diffs.
 const TEXT_LIMIT: usize = 8000;
 const INPUT_LIMIT: usize = 2000;
@@ -44,6 +46,9 @@ pub fn project_dir_name(cwd: &str) -> String {
 /// The project directory holding the transcript of `session`: the one named after `cwd`, else any
 /// project directory that has the session file (a session can outlive a renamed path spelling).
 pub fn locate_project_dir(root: &Path, cwd: &str, session: &str) -> Option<PathBuf> {
+    if !is_safe_session_id(session) {
+        return None;
+    }
     let file = format!("{session}.jsonl");
     let direct = root.join(project_dir_name(cwd));
     if direct.join(&file).is_file() {
@@ -293,16 +298,17 @@ impl Tailer {
         }
         self.offset += bytes.len() as u64;
         self.partial.extend(bytes);
-        let mut lines = Vec::new();
-        while let Some(end) = self.partial.iter().position(|b| *b == b'\n') {
-            let rest = self.partial.split_off(end + 1);
-            let line = std::mem::replace(&mut self.partial, rest);
-            let text = String::from_utf8_lossy(&line[..end]).trim().to_owned();
-            if !text.is_empty() {
-                lines.push(text);
-            }
-        }
-        lines
+        // One pass; only the bytes after the last newline stay for the next read.
+        let Some(last) = self.partial.iter().rposition(|b| *b == b'\n') else {
+            return Vec::new();
+        };
+        let tail = self.partial.split_off(last + 1);
+        let complete = std::mem::replace(&mut self.partial, tail);
+        complete[..last]
+            .split(|b| *b == b'\n')
+            .map(|line| String::from_utf8_lossy(line).trim().to_owned())
+            .filter(|text| !text.is_empty())
+            .collect()
     }
 }
 
@@ -335,15 +341,19 @@ pub struct Tracker {
 }
 
 impl Tracker {
-    /// `project_dir` holds `<session>.jsonl` and the `<session>/` directory.
-    pub fn new(project_dir: &Path, session: &str) -> Self {
-        Self {
+    /// `project_dir` holds `<session>.jsonl` and the `<session>/` directory; `None` for a session
+    /// id that is not a plain file name.
+    pub fn new(project_dir: &Path, session: &str) -> Option<Self> {
+        if !is_safe_session_id(session) {
+            return None;
+        }
+        Some(Self {
             sub_dir: project_dir.join(session).join("subagents"),
             parent: Tailer::new(project_dir.join(format!("{session}.jsonl"))),
             done: HashSet::new(),
             agents: BTreeMap::new(),
             listed: Vec::new(),
-        }
+        })
     }
 
     /// Reads what the files gained; the updates are empty when nothing changed.
@@ -445,6 +455,9 @@ pub fn watch(
     session: &str,
     emit: impl Fn(Update) + Send + 'static,
 ) -> Result<WatchHandle, String> {
+    if !is_safe_session_id(session) {
+        return Err(format!("not a valid session id: {session:?}"));
+    }
     // Events carry resolved paths (`/private/var` for `/var` on macOS).
     let project_dir = &project_dir.canonicalize().map_err(|e| e.to_string())?;
     let (tx, rx) = mpsc::channel();
@@ -465,7 +478,7 @@ pub fn watch(
     watcher
         .watch(project_dir, RecursiveMode::Recursive)
         .map_err(|e| e.to_string())?;
-    let mut tracker = Tracker::new(project_dir, session);
+    let mut tracker = Tracker::new(project_dir, session).ok_or("not a valid session id")?;
     std::thread::spawn(move || {
         for update in tracker.refresh() {
             emit(update);
@@ -683,6 +696,37 @@ mod tests {
     }
 
     #[test]
+    fn tailer_reads_a_large_file_in_linear_time() {
+        let dir = temp_dir("large");
+        let path = dir.join("a.jsonl");
+        let mut text = String::new();
+        for i in 0..50_000 {
+            text.push_str(&format!("{{\"n\":{i}}}\n"));
+        }
+        text.push_str("partial");
+        append(&path, &text);
+        let started = std::time::Instant::now();
+        let lines = Tailer::new(path.clone()).read_new();
+        assert_eq!(lines.len(), 50_000);
+        assert_eq!(lines[49_999], "{\"n\":49999}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn unsafe_session_ids_find_no_transcripts() {
+        let root = temp_dir("unsafe");
+        std::fs::write(root.join("x.jsonl"), "").unwrap();
+        let project = root.join("p");
+        std::fs::create_dir_all(&project).unwrap();
+        for bad in ["../x", "/abs", "", "a/b", "..", "a.b"] {
+            assert_eq!(locate_project_dir(&root, "/p", bad), None, "{bad}");
+            assert!(Tracker::new(&project, bad).is_none(), "{bad}");
+            assert!(watch(&project, bad, |_| {}).is_err(), "{bad}");
+        }
+        assert!(Tracker::new(&project, "0b7e-A_1").is_some());
+    }
+
+    #[test]
     fn tailer_starts_over_when_the_file_shrinks() {
         let dir = temp_dir("shrink");
         let path = dir.join("a.jsonl");
@@ -707,7 +751,7 @@ mod tests {
     #[test]
     fn tracker_lists_a_running_subagent_with_its_entries() {
         let (project, _) = session_fixture("running");
-        let mut tracker = Tracker::new(&project, "S");
+        let mut tracker = Tracker::new(&project, "S").unwrap();
         let updates = tracker.refresh();
         let Update::List { agents } = &updates[0] else {
             panic!("list first");
@@ -731,7 +775,7 @@ mod tests {
     #[test]
     fn tracker_streams_later_lines_and_marks_done_by_the_parent_result() {
         let (project, sub) = session_fixture("done");
-        let mut tracker = Tracker::new(&project, "S");
+        let mut tracker = Tracker::new(&project, "S").unwrap();
         tracker.refresh();
         append(
             &sub.join("agent-abc.jsonl"),
@@ -754,7 +798,7 @@ mod tests {
     #[test]
     fn tracker_marks_done_by_the_finished_flag_of_the_meta() {
         let (project, sub) = session_fixture("finished");
-        let mut tracker = Tracker::new(&project, "S");
+        let mut tracker = Tracker::new(&project, "S").unwrap();
         tracker.refresh();
         std::fs::write(
             sub.join("agent-abc.meta.json"),
@@ -768,7 +812,7 @@ mod tests {
     #[test]
     fn tracker_without_transcripts_is_empty() {
         let project = temp_dir("empty");
-        let mut tracker = Tracker::new(&project, "S");
+        let mut tracker = Tracker::new(&project, "S").unwrap();
         assert!(tracker.refresh().is_empty());
     }
 
@@ -777,7 +821,7 @@ mod tests {
         let (project, sub) = session_fixture("other");
         append(&sub.join("agent-x.forked-skill.json"), "{}");
         append(&sub.join("notes.txt"), "hi");
-        let mut tracker = Tracker::new(&project, "S");
+        let mut tracker = Tracker::new(&project, "S").unwrap();
         let Update::List { agents } = &tracker.refresh()[0] else {
             panic!("list");
         };

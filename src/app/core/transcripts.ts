@@ -281,9 +281,13 @@ export class Subagents {
     if (update.kind === "list") {
       this._agents.set(update.agents);
     } else {
-      this._entries.update((map) =>
-        new Map(map).set(update.agent_id, [...(map.get(update.agent_id) ?? []), ...update.entries]),
-      );
+      this._entries.update((map) => {
+        const known = map.get(update.agent_id) ?? [];
+        // A truncated file is read again from the start: skip what is already shown.
+        const seen = new Set(known.map((e) => e.uuid).filter(Boolean));
+        const fresh = update.entries.filter((e) => !e.uuid || !seen.has(e.uuid));
+        return new Map(map).set(update.agent_id, [...known, ...fresh]);
+      });
     }
   }
 }

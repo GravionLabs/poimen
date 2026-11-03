@@ -25,8 +25,55 @@ use stream::{Mode, OpenRequest, Sessions};
 struct HerdrBin(PathBuf);
 
 /// The running subagent transcript watch (at most one: the one of the pane the panel follows).
-#[derive(Default)]
-struct SubagentWatch(Mutex<Option<transcripts::WatchHandle>>);
+///
+/// Every command takes a generation when it starts; a watch that finishes after a newer command
+/// (another watch or an unwatch) began is stale and dropped instead of stored.
+struct SubagentWatch(Mutex<Slot<transcripts::WatchHandle>>);
+
+impl Default for SubagentWatch {
+    fn default() -> Self {
+        Self(Mutex::new(Slot::default()))
+    }
+}
+
+/// A value together with the generation of the latest command that touched it.
+struct Slot<T> {
+    generation: u64,
+    value: Option<T>,
+}
+
+impl<T> Default for Slot<T> {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            value: None,
+        }
+    }
+}
+
+impl<T> Slot<T> {
+    /// A new command starts: older in-flight commands become stale.
+    fn begin(&mut self) -> u64 {
+        self.generation += 1;
+        self.generation
+    }
+
+    /// Stores `value` unless a newer command began since `generation`; the previous value is
+    /// dropped (stopped) when stored. `false` for a stale result, which is dropped.
+    fn store(&mut self, generation: u64, value: Option<T>) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        self.value = value;
+        true
+    }
+
+    /// Clears the value and makes every in-flight command stale.
+    fn cancel(&mut self) {
+        self.generation += 1;
+        self.value = None;
+    }
+}
 
 /// Workspaces, tabs and panes in one call; the frontend rebuilds its tree from it.
 #[tauri::command]
@@ -442,29 +489,32 @@ async fn subagents_watch(
     watch: State<'_, SubagentWatch>,
     pane_id: String,
 ) -> Result<bool, String> {
+    let generation = watch.0.lock().map_err(|e| e.to_string())?.begin();
     let panes = herdr_call(client.inner(), "pane.list", json!({})).await?;
     let found = herdr::parse_claude_session(&panes, &pane_id).and_then(|s| {
         let root = transcripts::projects_root(&home_dir()?);
         let dir = transcripts::locate_project_dir(&root, &s.cwd, &s.session)?;
         Some((dir, s.session))
     });
-    let mut slot = watch.0.lock().map_err(|e| e.to_string())?;
-    *slot = None;
     let Some((dir, session)) = found else {
+        let mut slot = watch.0.lock().map_err(|e| e.to_string())?;
+        slot.store(generation, None);
         return Ok(false);
     };
     let id = session.clone();
-    *slot = Some(transcripts::watch(&dir, &session, move |update| {
+    let handle = transcripts::watch(&dir, &session, move |update| {
         let _ = app.emit("subagents", json!({ "session": id, "update": update }));
-    })?);
-    Ok(true)
+    })?;
+    let mut slot = watch.0.lock().map_err(|e| e.to_string())?;
+    // A stale handle is dropped here, which stops its watcher.
+    Ok(slot.store(generation, Some(handle)))
 }
 
 /// Stops following subagent transcripts.
 #[tauri::command]
 fn subagents_unwatch(watch: State<'_, SubagentWatch>) {
     if let Ok(mut slot) = watch.0.lock() {
-        *slot = None;
+        slot.cancel();
     }
 }
 
@@ -775,4 +825,38 @@ pub fn run() {
                 app.state::<Sessions>().close_all();
             }
         });
+}
+
+#[cfg(test)]
+mod subagent_slot_tests {
+    use super::Slot;
+
+    #[test]
+    fn a_newer_command_makes_an_older_result_stale() {
+        let mut slot = Slot::<&str>::default();
+        let older = slot.begin();
+        let newer = slot.begin();
+        assert!(slot.store(newer, Some("new")));
+        assert!(!slot.store(older, Some("old")));
+        assert_eq!(slot.value, Some("new"));
+    }
+
+    #[test]
+    fn a_cancel_before_a_watch_finishes_is_not_undone() {
+        let mut slot = Slot::<&str>::default();
+        let generation = slot.begin();
+        slot.cancel();
+        assert!(!slot.store(generation, Some("late")));
+        assert_eq!(slot.value, None);
+    }
+
+    #[test]
+    fn a_current_result_replaces_the_value_and_none_clears_it() {
+        let mut slot = Slot::<&str>::default();
+        let g = slot.begin();
+        assert!(slot.store(g, Some("a")));
+        let g = slot.begin();
+        assert!(slot.store(g, None));
+        assert_eq!(slot.value, None);
+    }
 }

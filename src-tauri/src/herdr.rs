@@ -349,6 +349,15 @@ pub struct AgentSession {
     pub cwd: String,
 }
 
+/// A session id is used as a file name below `~/.claude/projects`; only `[A-Za-z0-9_-]+` is
+/// accepted, so a value reported by a pane cannot escape that directory.
+pub fn is_safe_session_id(session: &str) -> bool {
+    !session.is_empty()
+        && session
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 /// Reads the Claude session of `pane_id` out of a `pane.list` result; `None` for another pane, a
 /// non-Claude agent, or a pane without a session id.
 pub fn parse_claude_session(result: &Value, pane_id: &str) -> Option<AgentSession> {
@@ -362,7 +371,7 @@ pub fn parse_claude_session(result: &Value, pane_id: &str) -> Option<AgentSessio
     }
     let session = pane.get("agent_session")?.get("value")?.as_str()?;
     let cwd = pane.get("cwd")?.as_str()?;
-    (!session.is_empty() && !cwd.is_empty()).then(|| AgentSession {
+    (is_safe_session_id(session) && !cwd.is_empty()).then(|| AgentSession {
         session: session.to_owned(),
         cwd: cwd.to_owned(),
     })
@@ -501,6 +510,22 @@ mod tests {
         assert_eq!(parse_claude_session(&result, "w1:p4"), None);
         assert_eq!(parse_claude_session(&result, "w9:p9"), None);
         assert_eq!(parse_claude_session(&json!({}), "w1:p1"), None);
+    }
+
+    #[test]
+    fn claude_session_ids_must_be_plain_file_names() {
+        let with = |v: &str| {
+            json!({"panes": [{"pane_id": "p", "agent": "claude", "cwd": "/x",
+                "agent_session": {"value": v}}]})
+        };
+        for bad in ["../x", "/abs", "", "a/b", "..", "a.b"] {
+            assert_eq!(parse_claude_session(&with(bad), "p"), None, "{bad}");
+        }
+        let uuid = "0b7e1c52-3f4a-4d2e-9a61-5c8d7e2f1a90";
+        assert_eq!(
+            parse_claude_session(&with(uuid), "p").unwrap().session,
+            uuid
+        );
     }
 
     #[test]
