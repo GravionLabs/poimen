@@ -86,8 +86,8 @@ async function setup(layout: SidebarLayout) {
         provide: HerdrStore,
         useValue: {
           spaces: signal([one, two]),
-          connectionError: signal(null),
-          startFailure: signal(null),
+          disconnected: signal<string | null>(null),
+          ensureBackend: vi.fn(),
         },
       },
       { provide: SettingsStore, useValue: { settings, writeError, setSidebarLayout } },

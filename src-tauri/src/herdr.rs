@@ -102,8 +102,12 @@ pub fn parse_event(line: &str) -> Result<Event, Error> {
 /// Whether anything answers on the socket.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Probe {
-    /// No connection, or no valid answer: no server is running.
+    /// Nothing listens: the socket file is missing or the connection is refused (`NotFound`,
+    /// `ConnectionRefused`). Only this state allows starting a server.
     Down,
+    /// Something is bound to the socket but did not answer `ping` (server still starting, busy,
+    /// closed the connection, or answered with an error). Never start a second server for it.
+    Unresponsive,
     /// A server answered `ping`; the info is `None` when it reported no version.
     Up(Option<ServerInfo>),
 }
@@ -425,6 +429,25 @@ pub fn plugin_pane_open_params(
     params
 }
 
+/// Read/write timeout of one `Client::probe`.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// `Down` only when nothing listens (socket file missing, connection refused); every other
+/// failure means something may be bound to the socket, so it is `Unresponsive`.
+pub fn classify_probe_error(err: &Error) -> Probe {
+    match err {
+        Error::Io(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            Probe::Down
+        }
+        _ => Probe::Unresponsive,
+    }
+}
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 fn next_id() -> String {
@@ -458,11 +481,29 @@ impl Client {
         parse_ping(&self.request("ping", json!({})).ok()?)
     }
 
-    /// Asks the socket once whether a server answers (`ping`). Never starts anything.
+    /// Asks the socket once whether a server answers (`ping`). Never starts anything. Reads and
+    /// writes time out after `PROBE_TIMEOUT`, so a socket that accepts but never answers cannot
+    /// hold the caller.
     pub fn probe(&self) -> Probe {
-        match self.request("ping", json!({})) {
+        let result = UnixStream::connect(&self.socket).and_then(|mut stream| {
+            stream.set_read_timeout(Some(PROBE_TIMEOUT))?;
+            stream.set_write_timeout(Some(PROBE_TIMEOUT))?;
+            stream.write_all(request_line(&next_id(), "ping", &json!({})).as_bytes())?;
+            Ok(stream)
+        });
+        let stream = match result {
+            Ok(stream) => stream,
+            Err(err) => return classify_probe_error(&Error::Io(err)),
+        };
+        let mut line = String::new();
+        let answer = match BufReader::new(stream).read_line(&mut line) {
+            Ok(0) => Err(Error::Protocol("connection closed before response".into())),
+            Ok(_) => parse_response(&line),
+            Err(err) => Err(Error::Io(err)),
+        };
+        match answer {
             Ok(result) => Probe::Up(parse_ping(&result)),
-            Err(_) => Probe::Down,
+            Err(err) => classify_probe_error(&err),
         }
     }
 
@@ -661,6 +702,90 @@ mod tests {
         );
     }
     use super::*;
+
+    fn io_err(kind: io::ErrorKind) -> Error {
+        Error::Io(io::Error::from(kind))
+    }
+
+    #[test]
+    fn only_a_missing_or_refusing_socket_is_down() {
+        assert_eq!(
+            classify_probe_error(&io_err(io::ErrorKind::NotFound)),
+            Probe::Down
+        );
+        assert_eq!(
+            classify_probe_error(&io_err(io::ErrorKind::ConnectionRefused)),
+            Probe::Down
+        );
+    }
+
+    #[test]
+    fn any_other_failure_is_unresponsive() {
+        for kind in [
+            io::ErrorKind::WouldBlock,
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::PermissionDenied,
+        ] {
+            assert_eq!(classify_probe_error(&io_err(kind)), Probe::Unresponsive);
+        }
+        assert_eq!(
+            classify_probe_error(&Error::Protocol("closed".into())),
+            Probe::Unresponsive
+        );
+        let api = Error::Api {
+            code: "busy".into(),
+            message: "starting".into(),
+        };
+        assert_eq!(classify_probe_error(&api), Probe::Unresponsive);
+    }
+
+    fn probe_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("poimen-probe-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn probing_a_missing_socket_is_down() {
+        let dir = probe_dir("missing");
+        let client = Client {
+            socket: dir.join("none.sock"),
+        };
+        assert_eq!(client.probe(), Probe::Down);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn probing_a_socket_that_never_answers_times_out_as_unresponsive() {
+        let dir = probe_dir("silent");
+        let path = dir.join("s.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let client = Client { socket: path };
+        assert_eq!(client.probe(), Probe::Unresponsive);
+        drop(listener);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn probing_a_socket_that_answers_is_up() {
+        let dir = probe_dir("up");
+        let path = dir.join("s.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let id = serde_json::from_str::<Value>(&line).unwrap()["id"].clone();
+            let reply = json!({"id": id, "result": {"type": "pong", "version": "0.9.5"}});
+            writeln!(reader.get_mut(), "{reply}").unwrap();
+        });
+        let client = Client { socket: path };
+        assert!(matches!(client.probe(), Probe::Up(_)));
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |key| {

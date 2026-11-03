@@ -60,6 +60,20 @@ export class HerdrStore {
     const b = this._backend();
     return b?.state === "failed" ? (b.reason ?? "herdr could not be started") : null;
   });
+  /**
+   * The one message for a disconnected herdr (start failed, reconnecting, unreachable, auto start
+   * off); `null` while connected. A failed start wins over the connection error it causes.
+   */
+  readonly disconnected = computed<string | null>(() => {
+    const failure = this.startFailure();
+    if (failure !== null) return `herdr was not started: ${failure}`;
+    const conn = this.connection();
+    if (conn.state === "connected") return null;
+    const reason = conn.reason ? `: ${conn.reason}` : "";
+    if (conn.state === "reconnecting") return `herdr connection lost, reconnecting${reason}`;
+    const off = this._backend()?.state === "disabled" ? " (auto start is off)" : "";
+    return `herdr not reachable${off}${reason}`;
+  });
   /** The version of this poimen build. */
   readonly appVersion = this._appVersion.asReadonly();
   /** Why herdr is not reachable; `null` while connected. */

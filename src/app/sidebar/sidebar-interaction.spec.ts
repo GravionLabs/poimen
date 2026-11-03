@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Pane, SpaceNode } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
@@ -27,7 +27,8 @@ const spaces: SpaceNode[] = [
   },
 ];
 
-async function setup() {
+async function setup(message: string | null = null) {
+  const ensureBackend = vi.fn();
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -35,8 +36,8 @@ async function setup() {
         provide: HerdrStore,
         useValue: {
           spaces: signal(spaces),
-          connectionError: signal(null),
-          startFailure: signal(null),
+          disconnected: signal<string | null>(message),
+          ensureBackend,
         },
       },
     ],
@@ -82,12 +83,27 @@ async function setup() {
     target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
     await settle();
   };
-  return { click, selected, pinned, root, settle, workspace, key };
+  return { ensureBackend, click, selected, pinned, root, settle, workspace, key };
 }
 
 describe("Sidebar with the real hx-tree", () => {
   beforeAll(() => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
+  });
+
+  it("shows one disconnected message with a Retry button that asks the backend again", async () => {
+    const { root, ensureBackend } = await setup("herdr not reachable: refused");
+    const messages = root.querySelectorAll(".connection");
+    expect(messages).toHaveLength(1);
+    expect(messages[0].textContent).toContain("herdr not reachable: refused");
+    root.querySelector<HTMLButtonElement>(".retry")!.click();
+    expect(ensureBackend).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no message or Retry while connected", async () => {
+    const { root } = await setup();
+    expect(root.querySelector(".connection")).toBeNull();
+    expect(root.querySelector(".retry")).toBeNull();
   });
 
   it("titles the sidebar Spaces", async () => {

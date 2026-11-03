@@ -46,12 +46,18 @@ Panes are managed in herdr, so the result shows up through herdr's events like a
 
 ## Requirements
 
-- herdr 0.9.5 or newer, installed and on the `PATH` of your login shell (poimen starts the server itself, see "Auto start")
+- herdr 0.9.5 or newer, installed and on the `PATH` of your login shell (poimen starts the server itself, see "Auto start" below)
 - Rust 1.94+, Node.js 24, pnpm
 
 ## Auto start
 
-A running server is never started twice, restarted or stopped by poimen (also one started by the herdr TUI), and closing poimen leaves the server, its panes and agents running. The server poimen starts is a detached `herdr server` (own process group, no terminal, output discarded, never waited on) found on the login shell's `PATH` (the same resolution as the plugin views; a macOS GUI app has only `/usr/bin:/bin:/usr/sbin:/sbin`). Failures show in the sidebar with the reason and a Retry button, with no automatic retry loop: `herdr` not found on `PATH`, no answer within 10 s, or a started server whose protocol is older than the supported 22. The start sits behind a `Backend` trait (`ensure_running`, `src-tauri/src/backend.rs`) so a later `poimen-server` can use the same path. The unit tests use a fake runner; starting the real server was not verified in a live run.
+A server that answers is never restarted or stopped by poimen (also one started by the herdr TUI), and closing poimen leaves the server, its panes and agents running. poimen only starts a server when nothing listens: the socket file is missing or the connection is refused. A socket that is bound but does not answer `ping` within 1.5 s (a server that is still starting or busy, or one just started by the herdr TUI or another poimen) is waited for up to 10 s and never gets a second server; the socket is probed once more right before the spawn. A second poimen that starts at the very same instant can still pass that check before the first one spawns (the in-process lock only serializes one poimen); whether herdr itself refuses a second server on the same socket is not documented in https://herdr.dev/llms.txt and unverified.
+
+What is assumed about the CLI, and not verified in a live run: the command is `herdr server`, found on the login shell's `PATH` (the same resolution as the plugin views; a macOS GUI app has only `/usr/bin:/bin:/usr/sbin:/sbin`), and it stays in the foreground until stopped. poimen spawns it detached (own process group, no terminal, output discarded; a helper thread waits on the child only to reap it) and polls the socket. It inherits `HERDR_SESSION` / `HERDR_SOCKET_PATH`, so it listens where poimen looks. The unit tests use a fake runner.
+
+Manual check on a throwaway session (not your real one): in a terminal run `export HERDR_SESSION=poimen-try`, make sure no server runs for it, start `pnpm tauri dev` from that terminal and confirm that the sidebar connects and `herdr` processes show one `herdr server`. Quit poimen and confirm that server keeps running, then stop it with the herdr command for that session. With `herdr.autoStart` off the sidebar must show "not reachable (auto start is off)" with a Retry button.
+
+Failures show in the sidebar as one message with the reason and a Retry button, which is there in every disconnected state (start failed, auto start off, unreachable, reconnecting); there is no automatic retry loop. Start failures: `herdr` not found on `PATH`, no answer within 10 s, or a started server whose protocol is older than the supported 22. The start sits behind a `Backend` trait (`ensure_running`, `src-tauri/src/backend.rs`) so a later `poimen-server` can use the same path.
 
 ## Development
 

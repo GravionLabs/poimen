@@ -219,4 +219,37 @@ describe("HerdrStore", () => {
     await store.start();
     expect(store.startFailure()).toBe("boom");
   });
+
+  it("has one disconnected message per state and none while connected", async () => {
+    tauri.answer("ensure_backend", () => ({ state: "running", reason: null }));
+    await store.start();
+    expect(store.disconnected()).toBeNull();
+
+    tauri.emit("herdr", { kind: "poimen.disconnected", data: { reason: "socket gone" } });
+    expect(store.disconnected()).toBe("herdr connection lost, reconnecting: socket gone");
+
+    tauri.emit("herdr", { kind: "poimen.connected", data: null });
+    expect(store.disconnected()).toBeNull();
+
+    tauri.answer("snapshot", () => {
+      throw "connection refused";
+    });
+    await store.refresh();
+    expect(store.disconnected()).toBe("herdr not reachable: connection refused");
+  });
+
+  it("names a switched-off auto start and prefers a failed start", async () => {
+    tauri.answer("ensure_backend", () => ({ state: "disabled", reason: null }));
+    tauri.answer("snapshot", () => {
+      throw "connection refused";
+    });
+    await store.start();
+    expect(store.disconnected()).toBe(
+      "herdr not reachable (auto start is off): connection refused",
+    );
+
+    tauri.answer("ensure_backend", () => ({ state: "failed", reason: "no herdr" }));
+    await store.ensureBackend();
+    expect(store.disconnected()).toBe("herdr was not started: no herdr");
+  });
 });

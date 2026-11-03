@@ -104,25 +104,40 @@ fn too_old(info: &ServerInfo) -> Option<StartError> {
 }
 
 impl<R: Runner> Backend for HerdrBackend<R> {
+    /// Only `Probe::Down` (nothing listens) allows a spawn, and only once: a socket that is bound
+    /// but silent (server starting, busy, or started a moment ago by the herdr TUI or another
+    /// poimen) is waited for up to `START_TIMEOUT` without spawning. A second poimen starting at
+    /// the same instant can still pass its own re-probe before the first one spawns; the
+    /// `StartLock` only serializes this process.
     fn ensure_running(&self) -> Result<Outcome, StartError> {
-        if let Probe::Up(_) = self.runner.probe() {
-            return Ok(Outcome::AlreadyRunning);
-        }
-        if !self.auto_start {
-            return Ok(Outcome::Disabled);
-        }
-        let program = self.runner.resolve().ok_or(StartError::NotFound)?;
-        self.runner
-            .spawn(&program)
-            .map_err(|e| StartError::Spawn(e.to_string()))?;
         let attempts = START_TIMEOUT.as_millis() / POLL_INTERVAL.as_millis();
-        for _ in 0..attempts {
-            self.runner.sleep(POLL_INTERVAL);
-            if let Probe::Up(info) = self.runner.probe() {
-                return match info.as_ref().and_then(too_old) {
-                    Some(err) => Err(err),
-                    None => Ok(Outcome::Started),
-                };
+        let mut spawned = false;
+        for attempt in 0..=attempts {
+            if attempt > 0 {
+                self.runner.sleep(POLL_INTERVAL);
+            }
+            match self.runner.probe() {
+                Probe::Up(info) if spawned => {
+                    return match info.as_ref().and_then(too_old) {
+                        Some(err) => Err(err),
+                        None => Ok(Outcome::Started),
+                    };
+                }
+                Probe::Up(_) => return Ok(Outcome::AlreadyRunning),
+                Probe::Unresponsive if !self.auto_start => return Ok(Outcome::Disabled),
+                Probe::Unresponsive => {}
+                Probe::Down if spawned => {}
+                Probe::Down if !self.auto_start => return Ok(Outcome::Disabled),
+                Probe::Down => {
+                    let program = self.runner.resolve().ok_or(StartError::NotFound)?;
+                    // Re-probe right before spawning: the server may have appeared meanwhile.
+                    if self.runner.probe() == Probe::Down {
+                        self.runner
+                            .spawn(&program)
+                            .map_err(|e| StartError::Spawn(e.to_string()))?;
+                        spawned = true;
+                    }
+                }
             }
         }
         Err(StartError::Timeout(START_TIMEOUT))
@@ -150,17 +165,21 @@ impl Runner for SystemRunner {
     }
 
     fn spawn(&self, program: &Path) -> io::Result<()> {
-        // Own process group, no terminal, no pipes: the server outlives poimen and is never waited
-        // on. It inherits HERDR_SESSION / HERDR_SOCKET_PATH, so it listens where poimen looks.
-        Command::new(program)
+        // Own process group, no terminal, no pipes: the server outlives poimen. It inherits
+        // HERDR_SESSION / HERDR_SOCKET_PATH, so it listens where poimen looks. A small thread
+        // reaps the child if it ever exits, so it does not stay a zombie while poimen runs.
+        let mut child = Command::new(program)
             .arg("server")
             .env("PATH", gui_path::child_path())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .process_group(0)
-            .spawn()
-            .map(drop)
+            .spawn()?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
     }
 
     fn sleep(&self, duration: Duration) {
@@ -210,6 +229,8 @@ mod tests {
         spawn_error: bool,
         spawned: RefCell<Vec<PathBuf>>,
         slept: Cell<u32>,
+        /// Probe answers served after the `Down` ones and before `up`.
+        script: RefCell<std::collections::VecDeque<Probe>>,
     }
 
     impl Fake {
@@ -221,6 +242,7 @@ mod tests {
                 spawn_error: false,
                 spawned: RefCell::new(Vec::new()),
                 slept: Cell::new(0),
+                script: RefCell::new(Default::default()),
             }
         }
     }
@@ -231,8 +253,12 @@ mod tests {
                 self.down_probes.set(self.down_probes.get() - 1);
                 return Probe::Down;
             }
+            if let Some(next) = self.script.borrow_mut().pop_front() {
+                return next;
+            }
             match &self.up {
                 Probe::Down => Probe::Down,
+                Probe::Unresponsive => Probe::Unresponsive,
                 Probe::Up(info) => Probe::Up(info.as_ref().map(|i| ServerInfo {
                     version: i.version.clone(),
                     protocol: i.protocol,
@@ -290,8 +316,49 @@ mod tests {
     }
 
     #[test]
+    fn a_bound_but_silent_socket_is_waited_for_without_spawning() {
+        let fake = Fake::new(0, up(Some(22)));
+        fake.script
+            .borrow_mut()
+            .extend([Probe::Unresponsive, Probe::Unresponsive]);
+        assert_eq!(run(&fake, true), Ok(Outcome::AlreadyRunning));
+        assert!(fake.spawned.borrow().is_empty());
+        assert_eq!(fake.slept.get(), 2);
+    }
+
+    #[test]
+    fn a_socket_that_never_answers_times_out_without_spawning() {
+        let fake = Fake::new(0, Probe::Unresponsive);
+        let err = run(&fake, true).unwrap_err();
+        assert_eq!(err, StartError::Timeout(Duration::from_secs(10)));
+        assert!(fake.spawned.borrow().is_empty());
+        assert_eq!(fake.slept.get(), 100);
+    }
+
+    #[test]
+    fn a_silent_socket_with_auto_start_off_is_disabled() {
+        let fake = Fake::new(0, Probe::Unresponsive);
+        assert_eq!(run(&fake, false), Ok(Outcome::Disabled));
+        assert!(fake.spawned.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_refused_connection_spawns_exactly_once() {
+        let fake = Fake::new(5, up(Some(22)));
+        assert_eq!(run(&fake, true), Ok(Outcome::Started));
+        assert_eq!(fake.spawned.borrow().len(), 1);
+    }
+
+    #[test]
+    fn a_server_that_appears_before_the_spawn_is_not_started_again() {
+        let fake = Fake::new(1, up(Some(22)));
+        assert_eq!(run(&fake, true), Ok(Outcome::AlreadyRunning));
+        assert!(fake.spawned.borrow().is_empty());
+    }
+
+    #[test]
     fn a_server_without_a_reported_protocol_is_accepted() {
-        let fake = Fake::new(1, up(None));
+        let fake = Fake::new(2, up(None));
         assert_eq!(run(&fake, true), Ok(Outcome::Started));
     }
 
@@ -339,7 +406,7 @@ mod tests {
 
     #[test]
     fn a_started_server_with_an_old_protocol_is_an_error() {
-        let fake = Fake::new(1, up(Some(21)));
+        let fake = Fake::new(2, up(Some(21)));
         let err = run(&fake, true).unwrap_err();
         assert_eq!(
             err,
