@@ -47,7 +47,7 @@ Panes are managed in herdr, so the result shows up through herdr's events like a
 ## Requirements
 
 - herdr 0.9.5 or newer, installed and on the `PATH` of your login shell (poimen starts the server itself, see "Auto start" below)
-- Rust 1.94+, Node.js 26, pnpm
+- Rust 1.99.1, Node.js 26, pnpm
 
 ## Auto start
 
