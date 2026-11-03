@@ -419,7 +419,7 @@ fn resolve_explorer(value: &Value, s: &mut Settings) {
                 .map(|v| {
                     v.as_str()
                         .map(str::trim)
-                        .filter(|p| p.starts_with('/') || *p == "~" || p.starts_with("~/"))
+                        .filter(|p| is_root_path(p))
                         .map(str::to_owned)
                 })
                 .collect();
@@ -975,18 +975,50 @@ pub fn remove_spaces_layout_text(text: &str) -> Result<String, String> {
     remove_path_text(text, &["spaces", "layout"])
 }
 
-/// Writes a path below `home` as `~` or `~/…`; other paths stay as they are.
+/// A Windows absolute path: drive letter, colon, separator (`C:\x`, `c:/x`).
+fn is_windows_absolute(path: &str) -> bool {
+    let b = path.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/')
+}
+
+/// An explorer root as stored: absolute (`/srv`, `C:\x`, `C:/x`), `~`, or below it (`~/x`, `~\x`).
+fn is_root_path(path: &str) -> bool {
+    path == "~"
+        || path.starts_with("~/")
+        || path.starts_with("~\\")
+        || path.starts_with('/')
+        || is_windows_absolute(path)
+}
+
+/// Writes a path below `home` as `~` or `~/…`; other paths stay as they are. With a Windows home
+/// (`C:\Users\me`) both separators match and the comparison ignores ASCII case.
 pub fn tilde_path(path: &str, home: &Path) -> String {
-    let path = path.trim();
+    let original = path.trim();
     let home = home.to_string_lossy();
+    let windows = is_windows_absolute(&home);
+    let norm = |s: &str| {
+        if windows {
+            s.replace('\\', "/")
+        } else {
+            s.to_owned()
+        }
+    };
+    let (path, home) = (norm(original), norm(&home));
     let home = home.trim_end_matches('/');
     if home.is_empty() {
-        return path.to_owned();
+        return original.to_owned();
     }
-    match path.strip_prefix(home) {
+    let rest = if windows {
+        path.get(..home.len())
+            .filter(|head| head.eq_ignore_ascii_case(home))
+            .map(|_| &path[home.len()..])
+    } else {
+        path.strip_prefix(home)
+    };
+    match rest {
         Some("") | Some("/") => "~".to_owned(),
         Some(rest) if rest.starts_with('/') => format!("~{}", rest.trim_end_matches('/')),
-        _ => path.to_owned(),
+        _ => original.to_owned(),
     }
 }
 
@@ -996,10 +1028,7 @@ pub fn set_explorer_roots_text(text: &str, roots: &[String]) -> Result<String, S
     if roots.is_empty() {
         return Err("explorer.roots needs at least one folder".into());
     }
-    if let Some(bad) = roots
-        .iter()
-        .find(|p| !(p.starts_with('/') || *p == "~" || p.starts_with("~/")))
-    {
+    if let Some(bad) = roots.iter().find(|p| !is_root_path(p)) {
         return Err(format!("{bad:?} is not an absolute path"));
     }
     let value = serde_json::to_string(roots).map_err(|e| e.to_string())?;
@@ -1285,6 +1314,26 @@ mod tests {
         assert_eq!(tilde_path("/Users/meow", home), "/Users/meow");
         assert_eq!(tilde_path("/srv/x", home), "/srv/x");
         assert_eq!(tilde_path("~/x", home), "~/x");
+    }
+
+    #[test]
+    fn tilde_path_shortens_windows_paths_under_home() {
+        let home = Path::new(r"C:\Users\me");
+        assert_eq!(tilde_path(r"C:\Users\me", home), "~");
+        assert_eq!(tilde_path(r"c:\users\ME\", home), "~");
+        assert_eq!(tilde_path(r"C:\Users\me\Source\x", home), "~/Source/x");
+        assert_eq!(tilde_path("C:/Users/me/Source", home), "~/Source");
+        assert_eq!(tilde_path(r"C:\Users\meow", home), r"C:\Users\meow");
+        assert_eq!(tilde_path(r"D:\src", home), r"D:\src");
+    }
+
+    #[test]
+    fn windows_absolute_roots_are_accepted() {
+        let roots = [r"C:\src".to_owned(), "D:/x".into(), r"~\y".into()];
+        let text = set_explorer_roots_text("{}", &roots).unwrap();
+        assert_eq!(rows(&text).explorer_roots, roots);
+        assert!(set_explorer_roots_text("{}", &["C:x".into()]).is_err());
+        assert!(set_explorer_roots_text("{}", &["src".into()]).is_err());
     }
 
     #[test]

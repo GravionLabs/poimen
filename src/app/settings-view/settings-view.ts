@@ -74,13 +74,25 @@ export function moved<T>(list: readonly T[], index: number, delta: number): T[] 
   return next;
 }
 
-/** `path` as the backend stores it: below `home` as `~` or `~/…`, without a trailing slash. */
+const WINDOWS_ABSOLUTE = /^[A-Za-z]:[\\/]/;
+
+/**
+ * `path` as the backend stores it: below `home` as `~` or `~/…`, without a trailing slash. With a
+ * Windows home (`C:\Users\me`) both separators match and the comparison ignores case.
+ */
 function tilded(path: string, home: string | null): string {
-  const p = path.length > 1 ? path.replace(/\/+$/, "") : path;
-  const h = home && home.length > 1 ? home.replace(/\/+$/, "") : home;
+  const windows = !!home && WINDOWS_ABSOLUTE.test(home);
+  const norm = (s: string) => {
+    const n = windows ? s.replaceAll("\\", "/") : s;
+    return n.length > 1 ? n.replace(/\/+$/, "") : n;
+  };
+  const p = norm(path);
+  const h = home ? norm(home) : home;
   if (!h) return p;
-  if (p === h) return "~";
-  return p.startsWith(`${h}/`) ? `~${p.slice(h.length)}` : p;
+  const same = (a: string, b: string) => (windows ? a.toLowerCase() === b.toLowerCase() : a === b);
+  if (same(p, h)) return "~";
+  const head = p.slice(0, h.length + 1);
+  return same(head, `${h}/`) ? `~${p.slice(h.length)}` : p;
 }
 
 /** `roots` with `dir` appended, unless it is already listed (`~/…` and absolute spellings match). */

@@ -105,8 +105,8 @@ pub fn created_workspace_id(result: &Value) -> Option<String> {
 
 fn expand_home(input: &str, home: Option<&Path>) -> PathBuf {
     match (input.strip_prefix('~'), home) {
-        (Some(rest), Some(h)) if rest.is_empty() || rest.starts_with('/') => {
-            h.join(rest.trim_start_matches('/'))
+        (Some(rest), Some(h)) if rest.is_empty() || rest.starts_with(['/', '\\']) => {
+            h.join(rest.trim_start_matches(['/', '\\']))
         }
         _ => PathBuf::from(input),
     }
