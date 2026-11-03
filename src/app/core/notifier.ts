@@ -26,7 +26,11 @@ export class Notifier {
   /** Calls `open` with the pane of every clicked notification; call before notifying. */
   listen(open: (paneId: string) => void): Promise<Unlisten> {
     return this.bridge.onNotificationClick((extra) => {
-      if (typeof extra["paneId"] === "string") open(extra["paneId"]);
+      if (typeof extra["paneId"] !== "string") return;
+      open(extra["paneId"]);
+      void this.bridge
+        .focusWindow()
+        .catch((error: unknown) => console.warn("poimen: could not focus the window", error));
     });
   }
 
@@ -37,7 +41,9 @@ export class Notifier {
       if (ctx.focused && ctx.viewed.has(paneId)) continue;
       const label = ctx.label(paneId);
       const body = status === "blocked" ? `${label} is waiting for you` : `${label} is done`;
-      void this.bridge.notify("poimen", body, { paneId }).catch(() => undefined);
+      void this.bridge
+        .notify("poimen", body, { paneId })
+        .catch((error: unknown) => console.warn("poimen: notification failed", error));
     }
   }
 }

@@ -1,10 +1,12 @@
 import { Injectable } from "@angular/core";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   isPermissionGranted,
   onAction,
+  registerActionTypes,
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
@@ -12,6 +14,15 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 /** Stops a listener started with {@link TauriBridge.listen}. */
 export type Unlisten = () => void;
+
+/**
+ * The action type of every notification. On macOS the notification backend (notify-rust, the
+ * NSUserNotificationCenter) only waits for, and so only reports, a click on a notification that
+ * has a button; the single "Open" action gives it one. Clicking the button or the notification
+ * both reach the click listener.
+ */
+const NOTIFICATION_ACTION_TYPE = "poimen-open";
+const OPEN_ACTION = "open";
 
 /** The only place that talks to the Tauri backend: its commands and its events. */
 @Injectable({ providedIn: "root" })
@@ -28,8 +39,17 @@ export class TauriBridge {
   /** Shows a system notification, asking for permission once; `false` when it is not allowed. */
   async notify(title: string, body: string, extra?: Record<string, unknown>): Promise<boolean> {
     const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
-    if (granted) sendNotification({ title, body, extra });
-    return granted;
+    if (!granted) return false;
+    try {
+      await registerActionTypes([
+        { id: NOTIFICATION_ACTION_TYPE, actions: [{ id: OPEN_ACTION, title: "Open" }] },
+      ]);
+      sendNotification({ title, body, extra, actionTypeId: NOTIFICATION_ACTION_TYPE });
+    } catch (error) {
+      console.warn("poimen: could not show the notification", error);
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -38,9 +58,18 @@ export class TauriBridge {
    */
   async onNotificationClick(handler: (extra: Record<string, unknown>) => void): Promise<Unlisten> {
     const listener = await onAction((event) => {
-      if (event.actionId === "tap") handler(event.notification?.extra ?? {});
+      if (event.actionId === "tap" || event.actionId === OPEN_ACTION)
+        handler(event.notification?.extra ?? {});
     });
     return () => void listener.unregister();
+  }
+
+  /** Brings the main window to the front: shows it if hidden, restores it if minimized, focuses it. */
+  async focusWindow(): Promise<void> {
+    const win = getCurrentWindow();
+    await win.show();
+    await win.unminimize();
+    await win.setFocus();
   }
 
   /** The native folder picker; the chosen directory, or `null` when cancelled. */

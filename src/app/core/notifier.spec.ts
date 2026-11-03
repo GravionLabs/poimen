@@ -6,12 +6,17 @@ import { TauriBridge } from "./tauri";
 function setup() {
   const sent: string[] = [];
   const extras: unknown[] = [];
+  const calls = { focus: 0 };
   let clickHandler: (extra: Record<string, unknown>) => void = () => undefined;
   const bridge = {
     notify: (_title: string, body: string, extra?: Record<string, unknown>) => {
       sent.push(body);
       extras.push(extra);
       return Promise.resolve(true);
+    },
+    focusWindow: () => {
+      calls.focus++;
+      return Promise.resolve();
     },
     onNotificationClick: (handler: (extra: Record<string, unknown>) => void) => {
       clickHandler = handler;
@@ -34,6 +39,7 @@ function setup() {
     notifier: injector.get(Notifier),
     sent,
     extras,
+    calls,
     click: (extra: Record<string, unknown>) => clickHandler(extra),
     ctx,
   };
@@ -98,12 +104,20 @@ describe("Notifier", () => {
     expect(opened).toEqual(["p1", "p2"]);
   });
 
+  it("brings the window to the front on a click", async () => {
+    const { notifier, click, calls } = setup();
+    await notifier.listen(() => undefined);
+    click({ paneId: "p1" });
+    expect(calls.focus).toBe(1);
+  });
+
   it("ignores a click without a pane id", async () => {
-    const { notifier, click } = setup();
+    const { notifier, click, calls } = setup();
     const opened: string[] = [];
     await notifier.listen((id) => opened.push(id));
     click({});
     click({ paneId: 7 });
     expect(opened).toEqual([]);
+    expect(calls.focus).toBe(0);
   });
 });
