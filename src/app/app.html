@@ -86,6 +86,9 @@
   [info]="store.info()"
   [notice]="spaceActions.warning()"
   (jump)="jumpToWaiting()"
+  [panelOpen]="ui.panelOpen()"
+  [panelShortcut]="panelShortcut()"
+  (showPanel)="ui.togglePanel()"
 />
 
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />

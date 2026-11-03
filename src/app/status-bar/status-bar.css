@@ -64,16 +64,19 @@ button.item.any {
   font-weight: 600;
 }
 
-button.item.mode-button {
+button.item.mode-button,
+button.item.panel-button {
   height: 18px;
   padding: 0 5px;
   border-radius: 3px;
 }
 
+button.item.panel-button:hover,
 button.item.mode-button:hover:not(:disabled) {
   background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
+button.item.panel-button:focus-visible,
 button.item.mode-button:focus-visible {
   outline: 1px solid var(--h-primary-color);
   outline-offset: -1px;

@@ -244,6 +244,9 @@ export class App {
     );
   }
 
+  /** Shortcut of the output panel toggle, for the status bar button. */
+  protected readonly panelShortcut = computed(() => this.keymap.label("toggleOutput"));
+
   protected readonly rootNode = computed<LayoutNode>(() => this.editor.layout());
 
   protected readonly theme$ = computed(() => this.prefs.settings().theme);
