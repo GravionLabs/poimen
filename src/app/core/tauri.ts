@@ -72,6 +72,11 @@ export class TauriBridge {
     await win.setFocus();
   }
 
+  /** Sets the dock badge of the app; `undefined` clears it. Rejects where badges are unsupported. */
+  setBadgeCount(count: number | undefined): Promise<void> {
+    return getCurrentWindow().setBadgeCount(count);
+  }
+
   /** The native folder picker; the chosen directory, or `null` when cancelled. */
   async pickDirectory(): Promise<string | null> {
     const dir = await open({ directory: true, multiple: false });
