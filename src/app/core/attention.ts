@@ -4,6 +4,12 @@ import type { AgentStatus, SpaceNode } from "./herdr";
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
   a.size === b.size && [...a].every((id) => b.has(id));
 
+/** A pane whose agent turned blocked or finished since the previous snapshot. */
+export interface StatusChange {
+  paneId: string;
+  status: "blocked" | "done";
+}
+
 /**
  * Unread and attention marks of agent panes. UI bookkeeping only (herdr owns pane state): a pane
  * that turns blocked while not viewed rings until viewed, one that finishes (done) while not
@@ -17,12 +23,18 @@ export class Attention {
   /** Panes that finished while no tab showed them. */
   readonly unread = signal<ReadonlySet<string>>(new Set());
 
-  /** Folds a snapshot of pane statuses in; `viewed` are the panes whose tab is on screen. */
-  observe(statuses: ReadonlyMap<string, AgentStatus>, viewed: ReadonlySet<string>): void {
+  /**
+   * Folds a snapshot of pane statuses in; `viewed` are the panes whose tab is on screen. Returns
+   * the panes that turned blocked or done (panes seen for the first time do not count).
+   */
+  observe(statuses: ReadonlyMap<string, AgentStatus>, viewed: ReadonlySet<string>): StatusChange[] {
+    const changes: StatusChange[] = [];
     const attention = new Set(this.attention());
     const unread = new Set(this.unread());
     for (const [id, status] of statuses) {
       const before = this.previous?.get(id);
+      if (before !== undefined && status !== before && (status === "blocked" || status === "done"))
+        changes.push({ paneId: id, status });
       if (viewed.has(id)) {
         attention.delete(id);
         unread.delete(id);
@@ -41,6 +53,7 @@ export class Attention {
     this.previous = new Map(statuses);
     if (!same(attention, this.attention())) this.attention.set(attention);
     if (!same(unread, this.unread())) this.unread.set(unread);
+    return changes;
   }
 }
 

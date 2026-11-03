@@ -2,6 +2,11 @@ import { Injectable } from "@angular/core";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 /** Stops a listener started with {@link TauriBridge.listen}. */
@@ -17,6 +22,13 @@ export class TauriBridge {
   /** Opens `url` in the default browser through the opener plugin (callers check the scheme). */
   openUrl(url: string): Promise<void> {
     return openUrl(url);
+  }
+
+  /** Shows a system notification, asking for permission once; `false` when it is not allowed. */
+  async notify(title: string, body: string): Promise<boolean> {
+    const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
+    if (granted) sendNotification({ title, body });
+    return granted;
   }
 
   /** The native folder picker; the chosen directory, or `null` when cancelled. */

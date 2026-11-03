@@ -67,3 +67,18 @@ describe("Attention", () => {
     expect(workspaceUnread(space, none)).toBe(0);
   });
 });
+
+describe("Attention changes", () => {
+  it("returns panes that turned blocked or done, not first sightings or repeats", () => {
+    const a = new Attention();
+    expect(a.observe(st({}), none)).toEqual([]);
+    expect(a.observe(st({ p1: "blocked", p2: "working" }), none)).toEqual([]);
+    expect(a.observe(st({ p1: "blocked", p2: "done" }), none)).toEqual([
+      { paneId: "p2", status: "done" },
+    ]);
+    expect(a.observe(st({ p1: "working", p2: "done" }), none)).toEqual([]);
+    expect(a.observe(st({ p1: "blocked", p2: "done" }), new Set(["p1"]))).toEqual([
+      { paneId: "p1", status: "blocked" },
+    ]);
+  });
+});

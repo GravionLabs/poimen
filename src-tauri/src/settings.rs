@@ -174,6 +174,10 @@ pub struct Settings {
     pub explorer_show_hidden: bool,
     /// Start the herdr server when nothing answers on its socket (`herdr.autoStart`).
     pub herdr_auto_start: bool,
+    /// System notification when an agent turns blocked (`notifications.blocked`).
+    pub notify_on_blocked: bool,
+    /// System notification when an agent finishes (`notifications.done`).
+    pub notify_on_done: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
@@ -339,6 +343,8 @@ impl Default for Settings {
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
             herdr_auto_start: true,
+            notify_on_blocked: true,
+            notify_on_done: true,
             spaces_layout: None,
             home: None,
             warnings: Vec::new(),
@@ -459,6 +465,26 @@ fn resolve_herdr(value: &Value, s: &mut Settings) {
     }
 }
 
+/// `notifications.blocked` / `notifications.done`; a wrong type warns and keeps `true`.
+fn resolve_notifications(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("notifications must be an object".into());
+        return;
+    };
+    for (key, slot) in [
+        ("blocked", &mut s.notify_on_blocked),
+        ("done", &mut s.notify_on_done),
+    ] {
+        match obj.get(key) {
+            None => {}
+            Some(Value::Bool(b)) => *slot = *b,
+            Some(_) => s.warnings.push(format!(
+                "notifications.{key} must be true or false; using true"
+            )),
+        }
+    }
+}
+
 /// `spaces.layout` (the layout-bootstrap schema); an invalid one warns and keeps the default.
 fn resolve_spaces(value: &Value, s: &mut Settings) {
     let Some(obj) = value.as_object() else {
@@ -547,6 +573,10 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("herdr") {
         resolve_herdr(value, &mut s);
+    }
+
+    if let Some(value) = root.get("notifications") {
+        resolve_notifications(value, &mut s);
     }
 
     if let Some(value) = root.get("spaces") {
@@ -1174,6 +1204,28 @@ mod tests {
             assert_eq!(s.spaces_layout, None, "{json}");
         }
         assert_eq!(resolve(None, || None).spaces_layout, None);
+    }
+
+    #[test]
+    fn notifications_default_on_and_can_be_turned_off_one_by_one() {
+        let d = rows("{}");
+        assert!(d.notify_on_blocked && d.notify_on_done);
+        let s = rows(r#"{"notifications":{"done":false}}"#);
+        assert!(s.notify_on_blocked);
+        assert!(!s.notify_on_done);
+        assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn notifications_invalid_warns_and_keeps_true() {
+        for json in [
+            r#"{"notifications":{"blocked":"no"}}"#,
+            r#"{"notifications":true}"#,
+        ] {
+            let s = rows(json);
+            assert!(s.notify_on_blocked && s.notify_on_done, "{json}");
+            assert_eq!(s.warnings.len(), 1, "{json}");
+        }
     }
 
     #[test]
