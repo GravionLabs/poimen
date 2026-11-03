@@ -766,7 +766,7 @@ fn build_menu(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let bin = stream::resolve_bin(|key| std::env::var(key).ok(), |path| path.is_file());
+    let bin = stream::resolve_bin_from_env();
     let client = Client::from_env();
 
     tauri::Builder::default()

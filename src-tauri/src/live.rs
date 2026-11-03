@@ -49,7 +49,7 @@ fn subscription_is_accepted() {
 fn observe_stream_delivers_a_full_frame() {
     let client = Client::from_env();
     let target = first_pane(&client);
-    let bin = stream::resolve_bin(|k| std::env::var(k).ok(), |p| p.is_file());
+    let bin = stream::resolve_bin_from_env();
     let sessions = Sessions::default();
     let (tx, rx) = mpsc::channel();
     let id = sessions

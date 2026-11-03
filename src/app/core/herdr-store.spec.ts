@@ -252,4 +252,19 @@ describe("HerdrStore", () => {
     await store.ensureBackend();
     expect(store.disconnected()).toBe("herdr was not started: no herdr");
   });
+
+  it("is null once herdr connects after a failed start", async () => {
+    tauri.answer("ensure_backend", () => ({ state: "failed", reason: "timeout" }));
+    tauri.answer("snapshot", () => {
+      throw "connection refused";
+    });
+    await store.start();
+    expect(store.disconnected()).toBe("herdr was not started: timeout");
+
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1")));
+    tauri.emit("herdr", { kind: "poimen.connected", data: null });
+    await store.refresh();
+    expect(store.connection().state).toBe("connected");
+    expect(store.disconnected()).toBeNull();
+  });
 });
