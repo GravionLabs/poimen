@@ -25,6 +25,10 @@
   --ff-node-border-radius: 6px;
   --ff-connection-color: var(--h-text-muted-color);
   --ff-connection-width: 1.5px;
+  /* The theme rings the end of every connection with an accent-blue drag handle; edges here
+     cannot be reassigned, so the handle stays invisible. */
+  --ff-connection-drag-handle-stroke: transparent;
+  --ff-connection-drag-handle-fill: transparent;
   --ff-connector-size: 4px;
   --ff-connector-border-width: 0px;
   --ff-connector-background-color: var(--h-text-muted-color);
