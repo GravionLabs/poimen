@@ -127,6 +127,24 @@ The view never reimplements an action. Opening a PR is `shell open` in poimen. O
 - **A plugin API in herdr for views.** herdr has no GUI; outside poimen's control. Rejected.
 - **Native view for `deliver-view`.** Nothing to render; see candidates.
 
+## Leaving herdr
+
+[ADR 0003](0003-own-terminal-backend-without-herdr.md) (proposed) may add a poimen backend and later drop herdr. It puts herdr plugins out of scope and leaves them to the herdr backend. This section records how the `data` contract survives that.
+
+| Herdr-bound | Herdr-independent |
+|---|---|
+| Discovery: `plugin.list` and `manifest_path` | The `data` contract: envelope, schemas, `--cwd` input |
+| The action and pane runtime: `plugin.action.invoke`, `plugin.pane.open` (#39 to #41) | The plugin scripts and `lib/` modules, including the `gh` and `git` calls |
+
+Two ways on, if poimen runs native views without herdr:
+
+1. **poimen's own plugin directory.** poimen reads the same `plugin.toml` manifests from a directory of its own and runs the `data` commands as it does today. No plugin changes. Fits when the plugins stay useful as they are and Node is available.
+2. **Port the logic to Rust** where poimen needs it permanently. First candidate: `deliver-board` (`gh api`, `gh pr list`, `git ls-remote`). This is a second implementation, so it is only worth it for a view that poimen treats as a core feature, and it gets the same fixtures as `lib/board.ts`.
+
+Trigger: ADR 0003 is accepted and one of its findings applies. These are the default `backend` moving from `herdr` to `poimen`, the herdr backend being dropped once the own one covers what poimen uses, or the open decision for Epic #3 plugins "per backend" being taken for the poimen backend. Until then nothing changes, and this ADR does not choose between the options. The decision is deferred to ADR 0003.
+
+Rule for plugin authors, so both options stay open: `data` output must not use herdr-specific fields (herdr ids, pane ids, workspace ids). Herdr context may appear only as optional context that a consumer can ignore. The board's `data` action is added by [GravionLabs/herdr-plugins#216](https://github.com/GravionLabs/herdr-plugins/pull/216) (issue #215).
+
 ## Proposed follow-ups in GravionLabs/herdr-plugins
 
 Not created yet; the owner opens them when this ADR is accepted.
