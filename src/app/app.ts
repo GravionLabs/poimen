@@ -26,6 +26,8 @@ import { ColorSchemeService } from "./core/color-scheme-service";
 import { Attention } from "./core/attention";
 import { DockBadge } from "./core/dock-badge";
 import { Notifier } from "./core/notifier";
+import { NotificationCenter } from "./core/notification-center";
+import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { UserSchemes } from "./core/user-schemes";
@@ -80,6 +82,7 @@ const ZOOM_STEP = 1;
     ActivityBar,
     Sidebar,
     Explorer,
+    Notifications,
     TerminalView,
     SettingsView,
     DeliverBoardView,
@@ -128,6 +131,7 @@ export class App {
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
   private readonly notifier = inject(Notifier);
+  private readonly center = inject(NotificationCenter);
   private readonly dockBadge = inject(DockBadge);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Pane>();
@@ -198,6 +202,7 @@ export class App {
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
       untracked(() => {
         const changes = this.attention.observe(statuses, viewed);
+        this.center.record(changes, (id) => this.tabTitle(id), Date.now());
         const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
         this.notifier.notify(changes, {
           viewed,
@@ -219,10 +224,7 @@ export class App {
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     // A click on a system notification opens the tab of the pane it was about.
-    const clicks = this.notifier.listen((paneId) => {
-      const pane = this.pane(paneId);
-      if (pane) this.open(pane);
-    });
+    const clicks = this.notifier.listen((paneId) => this.openPaneById(paneId));
     destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
     effect(() => {
       const { theme: setting, colorSchema } = this.prefs.settings();
@@ -539,6 +541,12 @@ export class App {
   }
 
   /** Single click previews, a double click pins; an open pane is only activated. */
+  /** Opens the tab of a pane by id; a pane herdr no longer has is ignored. */
+  protected openPaneById(paneId: string): void {
+    const pane = this.pane(paneId);
+    if (pane) this.open(pane);
+  }
+
   protected open(pane: Pane, pin = false): void {
     this.known.set(pane.pane_id, pane);
     this.editor.open(pane.pane_id, pin);

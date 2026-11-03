@@ -20,6 +20,8 @@
     <div class="side" [style.width.px]="ui.sidebarWidth()">
       @if (ui.activeView() === "explorer") {
         <app-explorer />
+      } @else if (ui.activeView() === "notifications") {
+        <app-notifications (paneChosen)="openPaneById($event)" />
       } @else {
         <app-sidebar
           [openIds]="editor.openIds()"
