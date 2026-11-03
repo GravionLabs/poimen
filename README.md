@@ -105,6 +105,19 @@ The **Plugins** button in the top bar lists the herdr plugin actions (`plugin.ac
 
 While a terminal has focus, only shortcuts that use Cmd are captured; every other key (Ctrl combinations on Linux and Windows included) goes to the program in the pane. Use the menu, or bind a `Cmd+` (Super) shortcut, to reach an action from a focused terminal there.
 
+### Native deliver board
+
+The "Open Deliver board as tab" palette entry opens a native tab instead of the plugin's terminal pane (ADR 0004, `src-tauri/src/plugin_view.rs`): one table per repository among the pane directories of the herdr session, with the open PBIs, their claim, labels, branch and PR with check state. It refreshes on the Refresh button, on window focus and every 60 s (never faster than 30 s, the plugin caches `gh` for 30 s). Actions: the issue and PR numbers open in the browser (GitHub links only); "Start deliver" runs the deliver-starter action `start-link` through `plugin.action.invoke` with the issue URL as clicked link and the repository as working directory.
+
+Data contract: the deliver-board plugin declares an action `data` (`command = ["node", "bin/data.ts"]`) that prints `{"version":1,"plugin":"deliver-board","generated":...,"data":{"repo":...,"rows":[...]}}` (fixture `src-tauri/fixtures/deliver-board-data-v1.json`). poimen runs that command itself, without a shell and with a 60 s timeout, in the plugin directory with `--cwd <repo>`. Decisions on the gaps of the ADR:
+
+- `plugin.list` reports `manifest_path` as the path of `herdr-plugin.toml`, so the plugin directory is `plugin_root` and, if that is missing, the parent of `manifest_path`.
+- A macOS GUI app has `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The child gets the login shell's `PATH` (`$SHELL -ilc`, read once, 5 s limit), then Homebrew, `~/.local/bin`, Volta, mise, asdf and the newest nvm Node, then the app's own `PATH`; `node` is resolved against that. `HERDR_PLUGIN_STATE_DIR` is `~/.config/poimen/plugin-state/deliver-board` because herdr does not report the plugin's state directory (so the popup's `gh` cache is not shared yet); `HERDR_BIN_PATH` is the herdr binary poimen uses.
+- The `data` action is hidden from `plugin.action.list` results in poimen (Plugins menu, context menus and palette), since it is not meant to be run by hand.
+- `plugin.action.invoke` is not the transport: in the schema `PluginCommandLogInfo.stdout` is an optional string without a documented limit and `status` can be `running`, so complete stdout is not guaranteed. Running the command directly gives the full output and the exit code.
+- Without a `data` action (the installed plugin is older), the tab shows "not available" with a button for the terminal board. An unknown `version` shows "update poimen or the plugin"; an `error` object of the plugin is shown as is.
+- Not verified against a real plugin: deliver-board 0.4.0 has no `data` action yet, so only fixture and unit tests cover the data path. Manual check once the plugin ships it: open the board tab against a running herdr and compare the rows with the plugin's terminal board.
+
 ## Settings
 
 Optional `~/.config/poimen/config.json`, watched and applied without a restart. Invalid entries log a warning and fall back to the default. It holds preferences only; UI state (sidebar width, open tabs) is kept by the app.

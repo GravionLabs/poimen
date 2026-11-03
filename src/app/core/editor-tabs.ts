@@ -13,11 +13,15 @@ import {
 /** The id of the settings tab; it is not a herdr pane, so it never reaches the terminal logic. */
 export const SETTINGS_TAB = "poimen:settings";
 
-/** What a tab shows: a herdr pane (live terminal) or the settings view. */
-export type TabKind = "pane" | "settings";
+/** The id of the native deliver board tab (ADR 0004); like settings it is no herdr pane. */
+export const BOARD_TAB = "poimen:deliver-board";
+
+/** What a tab shows: a herdr pane (live terminal), the settings view or the deliver board. */
+export type TabKind = "pane" | "settings" | "board";
 
 export function tabKind(id: string): TabKind {
-  return id === SETTINGS_TAB ? "settings" : "pane";
+  if (id === SETTINGS_TAB) return "settings";
+  return id === BOARD_TAB ? "board" : "pane";
 }
 
 /** An open editor tab. A preview tab (not pinned) is replaced by the next preview, as in VS Code. */
@@ -204,6 +208,19 @@ export class EditorTabs {
     this.patch(group.id, {
       tabs: [...group.tabs, { paneId: SETTINGS_TAB, pinned: true }],
       activeId: SETTINGS_TAB,
+    });
+  }
+
+  /** Opens the deliver board tab (at most one) as a pinned tab, or activates it when open. */
+  openBoard(): void {
+    if (this.groupOf(BOARD_TAB)) {
+      this.activate(BOARD_TAB);
+      return;
+    }
+    const group = this.focused();
+    this.patch(group.id, {
+      tabs: [...group.tabs, { paneId: BOARD_TAB, pinned: true }],
+      activeId: BOARD_TAB,
     });
   }
 

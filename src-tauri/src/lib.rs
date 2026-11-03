@@ -3,6 +3,7 @@ mod herdr;
 mod layout;
 #[cfg(test)]
 mod live;
+mod plugin_view;
 mod schemes;
 mod settings;
 mod spaces;
@@ -123,6 +124,53 @@ async fn plugin_invoke(
     let params = herdr::plugin_invoke_params(&plugin_id, &action_id, &context);
     herdr_call(client.inner(), "plugin.action.invoke", params).await?;
     Ok(())
+}
+
+/// The deliver board for every repository among the pane directories of the herdr session: runs the
+/// plugin's `data` action per repository (ADR 0004). Repositories come from herdr's own panes, so
+/// only known spaces are ever passed to the plugin. Read-only.
+#[tauri::command]
+async fn deliver_board(
+    client: State<'_, Client>,
+    bin: State<'_, HerdrBin>,
+) -> Result<plugin_view::BoardView, String> {
+    let client = client.inner().clone();
+    let herdr_bin = bin.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = client
+            .request("plugin.list", json!({}))
+            .map_err(|e| e.to_string())?;
+        let panes = client
+            .request("pane.list", json!({}))
+            .map_err(|e| e.to_string())?;
+        let mut dirs: Vec<String> = panes["panes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| {
+                ["foreground_cwd", "cwd"]
+                    .iter()
+                    .find_map(|k| p.get(*k)?.as_str().filter(|s| !s.is_empty()))
+                    .map(str::to_owned)
+            })
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        let roots = git::repo_roots(&dirs);
+        let state = plugin_state_dir("deliver-board");
+        Ok(plugin_view::load_board(&list, &roots, &state, &herdr_bin))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Where poimen keeps the state (the `gh` cache) of a plugin it runs itself: herdr does not report
+/// the plugin's own state directory, so it is `~/.config/poimen/plugin-state/<id>`.
+fn plugin_state_dir(plugin_id: &str) -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home)
+        .join(".config/poimen/plugin-state")
+        .join(plugin_id)
 }
 
 /// Lists the panes plugins declare (`panes[]` of `plugin.list`).
@@ -647,6 +695,7 @@ pub fn run() {
             plugin_actions,
             plugin_invoke,
             plugin_pane_defs,
+            deliver_board,
             plugin_pane_open,
             plugin_pane_focus,
             plugin_pane_close,

@@ -58,6 +58,40 @@ pub fn toplevel(dir: &str) -> Option<String> {
     (!top.is_empty()).then_some(top)
 }
 
+/// Parses `rev-parse --show-toplevel --git-common-dir` (absolute paths): the toplevel and the
+/// common git dir that identifies the repository across its linked worktrees.
+pub fn parse_roots(output: &str) -> Option<(String, String)> {
+    let mut lines = output.lines();
+    let top = lines.next()?.trim();
+    let common = lines.next()?.trim();
+    (!top.is_empty() && !common.is_empty()).then(|| (top.to_owned(), common.to_owned()))
+}
+
+/// The distinct repositories among `dirs` (a linked worktree counts as its main repository), each
+/// by the toplevel of the first directory that belongs to it; directories outside one are skipped.
+pub fn repo_roots(dirs: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut roots = Vec::new();
+    for dir in dirs {
+        let Ok(out) = Command::new("git")
+            .args(["-C", dir, "rev-parse", "--path-format=absolute"])
+            .args(["--show-toplevel", "--git-common-dir"])
+            .output()
+        else {
+            continue;
+        };
+        if !out.status.success() {
+            continue;
+        }
+        if let Some((top, common)) = parse_roots(&String::from_utf8_lossy(&out.stdout))
+            && seen.insert(common)
+        {
+            roots.push(top);
+        }
+    }
+    roots
+}
+
 /// Repository info per directory; directories outside a repository are left out.
 pub fn infos(dirs: Vec<String>) -> HashMap<String, RepoInfo> {
     dirs.into_iter()
@@ -103,6 +137,21 @@ mod tests {
     fn rejects_incomplete_output() {
         assert_eq!(parse_rev_parse(""), None);
         assert_eq!(parse_rev_parse("main\n"), None);
+    }
+
+    #[test]
+    fn roots_need_a_toplevel_and_a_common_dir() {
+        assert_eq!(
+            parse_roots("/r\n/r/.git\n"),
+            Some(("/r".into(), "/r/.git".into()))
+        );
+        assert_eq!(parse_roots("/r\n"), None);
+        assert_eq!(parse_roots(""), None);
+    }
+
+    #[test]
+    fn no_roots_outside_a_repository() {
+        assert!(repo_roots(&["/nonexistent-poimen-dir".to_owned()]).is_empty());
     }
 
     #[test]

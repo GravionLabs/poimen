@@ -135,3 +135,10 @@ Not created yet; the owner opens them when this ADR is accepted.
 2. `review-popup`: `data` action for a branch and for the list of reviews, including the computed `stale`; open-finding action callable with file and line from the context.
 3. Docs: a "native view contract" page in the plugin docs (envelope, error codes, versioning), and a note in each README.
 4. `deliver-view`: nothing. Possible later request: export the sort rule as data so poimen's Agents tree can order the same way.
+
+## Implementation notes (#43)
+
+Deviations from this ADR in the first implementation (Status stays Proposed):
+
+- The state dir is `~/.config/poimen/plugin-state/deliver-board`, not the plugin's shared state dir, because herdr does not report that directory. The popup's 30 s `gh` cache is therefore not shared.
+- The palette always opens the native tab (a button in the unsupported state falls back to the terminal pane) and the frontend calls a board-specific `deliver_board` command instead of the generic `plugin_data(plugin_id, args)`, because the PATH and spawn logic is specific to the board so far. Generalizing it is left for the next native view.

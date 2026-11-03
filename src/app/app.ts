@@ -26,6 +26,8 @@ import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 import { EditorTabs, tabKind, type EditorGroup } from "./core/editor-tabs";
 import { SettingsView } from "./settings-view/settings-view";
+import { DeliverBoardView } from "./deliver-board/deliver-board-view";
+import { BOARD_ENTRYPOINT, BOARD_PLUGIN } from "./core/deliver-board";
 import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
@@ -59,6 +61,7 @@ const ZOOM_STEP = 1;
     Explorer,
     TerminalView,
     SettingsView,
+    DeliverBoardView,
     TabBar,
     SplitPane,
     StatusBar,
@@ -111,6 +114,9 @@ export class App {
         group.tabs.map((tab): TabBarItem => {
           if (tabKind(tab.paneId) === "settings") {
             return { id: tab.paneId, label: "Settings", title: "Settings" };
+          }
+          if (tabKind(tab.paneId) === "board") {
+            return { id: tab.paneId, label: "Deliver board", title: "Deliver board" };
           }
           const pane = this.pane(tab.paneId);
           const tabLabel = pane
@@ -352,6 +358,14 @@ export class App {
 
   /** A plugin pane chosen in the palette opens as a herdr tab and as an editor tab. */
   protected async openPluginPane(def: PluginPaneDef): Promise<void> {
+    if (def.plugin_id === BOARD_PLUGIN && def.entrypoint === BOARD_ENTRYPOINT) {
+      this.editor.openBoard();
+      return;
+    }
+    await this.openHerdrPluginPane(def);
+  }
+
+  private async openHerdrPluginPane(def: PluginPaneDef): Promise<void> {
     const active = this.activePaneId();
     const result = await this.pluginPanes.open(
       def,
@@ -439,6 +453,19 @@ export class App {
 
   protected isSettings(id: string | null): boolean {
     return id !== null && tabKind(id) === "settings";
+  }
+
+  protected isBoard(id: string | null): boolean {
+    return id !== null && tabKind(id) === "board";
+  }
+
+  /** The terminal board of the plugin (herdr pane), for the unsupported state of the native one. */
+  protected openTerminalBoard(): void {
+    const def = this.pluginPanes
+      .defs()
+      .find((d) => d.plugin_id === BOARD_PLUGIN && d.entrypoint === BOARD_ENTRYPOINT);
+    if (def) void this.openHerdrPluginPane(def);
+    else this.showError("The deliver-board plugin has no terminal board pane.");
   }
 
   protected openSettings(): void {

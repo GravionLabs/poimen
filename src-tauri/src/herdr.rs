@@ -221,6 +221,10 @@ pub fn created_pane_id(result: &Value) -> Option<String> {
     Some(pane.get("pane_id")?.as_str()?.to_owned())
 }
 
+/// The id of the headless action that prints a plugin's data for a native view (ADR 0004). It is
+/// not meant to be run by a person, so it is hidden from the Plugins menu and the palette.
+pub const DATA_ACTION_ID: &str = "data";
+
 /// An action a herdr plugin offers (`plugin.action.list`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PluginAction {
@@ -230,7 +234,8 @@ pub struct PluginAction {
     pub description: Option<String>,
 }
 
-/// Reads `{"type":"plugin_action_list","actions":[...]}`; entries without ids or title are skipped.
+/// Reads `{"type":"plugin_action_list","actions":[...]}`; entries without ids or title are skipped,
+/// and so is the `data` action of the native-view contract ([`DATA_ACTION_ID`]).
 pub fn parse_plugin_actions(result: &Value) -> Vec<PluginAction> {
     let Some(actions) = result.get("actions").and_then(Value::as_array) else {
         return Vec::new();
@@ -239,9 +244,13 @@ pub fn parse_plugin_actions(result: &Value) -> Vec<PluginAction> {
         .iter()
         .filter_map(|a| {
             let text = |key: &str| a.get(key)?.as_str().map(str::to_owned);
+            let action_id = text("action_id")?;
+            if action_id == DATA_ACTION_ID {
+                return None;
+            }
             Some(PluginAction {
                 plugin_id: text("plugin_id")?,
-                action_id: text("action_id")?,
+                action_id,
                 title: text("title")?,
                 description: text("description"),
             })
@@ -259,6 +268,8 @@ pub struct PluginContext {
     pub tab_label: Option<String>,
     pub workspace_id: Option<String>,
     pub workspace_label: Option<String>,
+    /// The URL a link handler action starts for (`clicked_url`, `HERDR_PLUGIN_CLICKED_URL`).
+    pub clicked_url: Option<String>,
 }
 
 /// Params of `plugin.action.invoke`; the context lists only the fields that are set.
@@ -273,6 +284,7 @@ pub fn plugin_invoke_params(plugin_id: &str, action_id: &str, context: &PluginCo
         ("tab_label", &context.tab_label),
         ("workspace_id", &context.workspace_id),
         ("workspace_label", &context.workspace_label),
+        ("clicked_url", &context.clicked_url),
     ];
     for (key, value) in fields {
         if let Some(value) = non_empty(value.as_deref()) {
@@ -512,6 +524,32 @@ mod tests {
             "w2"
         );
         assert!(plugin_pane_open_params("a", "b", Some(" "))["workspace_id"].is_null());
+    }
+
+    #[test]
+    fn the_data_action_is_hidden_from_the_runnable_actions() {
+        let result = json!({"type": "plugin_action_list", "actions": [
+            {"plugin_id": "deliver-board", "action_id": "open", "title": "Open the deliver board"},
+            {"plugin_id": "deliver-board", "action_id": "data", "title": "Deliver board data (JSON)"}
+        ]});
+        let actions = parse_plugin_actions(&result);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].action_id, "open");
+    }
+
+    #[test]
+    fn plugin_invoke_params_carry_the_clicked_url() {
+        let ctx = PluginContext {
+            focused_pane_cwd: Some("/r".into()),
+            clicked_url: Some("https://github.com/o/r/issues/7".into()),
+            ..Default::default()
+        };
+        let params = plugin_invoke_params("deliver-starter", "start-link", &ctx);
+        assert_eq!(
+            params["context"]["clicked_url"],
+            "https://github.com/o/r/issues/7"
+        );
+        assert_eq!(params["context"]["focused_pane_cwd"], "/r");
     }
 
     #[test]
