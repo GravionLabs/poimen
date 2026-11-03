@@ -128,7 +128,9 @@
           (menuAction)="onTabMenu($event.id, $event.action)"
         >
           <ng-template #tabContent let-tab>
-            @if (isSettings(tab.id)) {
+            @if (isBoard(tab.id)) {
+              <span class="mode ro" title="Native view">BD</span>
+            } @else if (isSettings(tab.id)) {
               <svg class="gear" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" />
                 <circle cx="8" cy="8" r="4.6" fill="none" stroke="currentColor" />
@@ -151,6 +153,9 @@
         </app-tab-bar>
         @if (isSettings(g.activeId)) {
           <app-settings-view />
+        }
+        @if (isBoard(g.activeId)) {
+          <app-deliver-board-view (terminalRequested)="openTerminalBoard()" />
         }
         @for (p of [groupPane(g)]; track p?.pane_id) {
           @if (p) {

@@ -1,0 +1,122 @@
+<div class="page">
+  <header>
+    <h1>Deliver board</h1>
+    <button type="button" (click)="refresh()" [disabled]="board.loading()">
+      {{ board.loading() ? "Refreshing..." : "Refresh" }}
+    </button>
+  </header>
+  @if (notice(); as text) {
+    <p class="notice" role="status">{{ text }}</p>
+  }
+  @if (board.error(); as err) {
+    <p class="problem" role="alert">Could not read the board: {{ err }}</p>
+  }
+  @let view = board.view();
+  @if (!view) {
+    @if (!board.error()) {
+      <p class="hint">Loading...</p>
+    }
+  } @else if (view.status === "unsupported") {
+    <section class="state" data-testid="unsupported">
+      <p>The native board is not available: {{ view.reason }}.</p>
+      <p class="hint">
+        The plugin needs the <code>data</code> action (GravionLabs/herdr-plugins, deliver-board).
+        Until then the terminal board works as before.
+      </p>
+      <button type="button" (click)="terminalRequested.emit()">Open the terminal board</button>
+    </section>
+  } @else if (view.repos.length === 0) {
+    <p class="hint" data-testid="no-repos">
+      No repository found in the panes of this herdr session.
+    </p>
+  } @else {
+    @for (repo of view.repos; track repo.root) {
+      <section class="repo">
+        <h2>
+          {{ repo.name }} <span class="path">{{ repo.root }}</span>
+        </h2>
+        @switch (repo.outcome.status) {
+          @case ("ok") {
+            @let out = $any(repo.outcome);
+            @if (out.rows.length === 0) {
+              <p class="hint">No open PBIs.</p>
+            } @else {
+              <table>
+                <thead>
+                  <tr>
+                    <th>PBI</th>
+                    <th>Claim</th>
+                    <th>Labels</th>
+                    <th>Branch</th>
+                    <th>PR</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of out.rows; track row.number) {
+                    <tr>
+                      <td>
+                        <button
+                          type="button"
+                          class="link"
+                          [disabled]="!isGithubUrl(row.url)"
+                          (click)="board.openUrl(row.url)"
+                        >
+                          #{{ row.number }}
+                        </button>
+                        {{ row.title }}
+                      </td>
+                      <td [class.unclaimed]="!row.assignee">{{ claim(row) }}</td>
+                      <td>
+                        @for (label of row.labels; track label) {
+                          <span class="badge">{{ label }}</span>
+                        }
+                      </td>
+                      <td class="mono">{{ row.branch ?? "" }}</td>
+                      <td>
+                        @if (row.pr; as pr) {
+                          <button
+                            type="button"
+                            class="link"
+                            [disabled]="!isGithubUrl(pr.url)"
+                            (click)="board.openUrl(pr.url)"
+                          >
+                            PR #{{ pr.number }}
+                          </button>
+                          <span class="badge pr-{{ pr.state.toLowerCase() }}">{{ pr.state }}</span>
+                          <span
+                            class="badge checks-{{ pr.checks.state }}"
+                            [title]="checksText(pr.checks)"
+                          >
+                            {{ pr.checks.state }}
+                          </span>
+                        }
+                      </td>
+                      <td>
+                        <button type="button" (click)="start(repo, row)">Start deliver</button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+          }
+          @case ("plugin_error") {
+            <p class="problem" role="alert">
+              {{ $any(repo.outcome).message }} ({{ $any(repo.outcome).code }})
+            </p>
+          }
+          @case ("outdated") {
+            <p class="problem" role="alert">
+              The plugin prints data version {{ $any(repo.outcome).version }}, which this poimen
+              does not read. Update poimen or the plugin.
+            </p>
+          }
+          @default {
+            <p class="problem" role="alert">{{ $any(repo.outcome).message }}</p>
+          }
+        }
+      </section>
+    }
+  }
+</div>
