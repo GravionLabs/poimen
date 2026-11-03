@@ -55,8 +55,9 @@ describe("modeLabel", () => {
 });
 
 describe("mode button", () => {
-  const render = (mode: "control" | "observe", blocked: string | null) => {
+  const render = (mode: "control" | "observe", blocked: string | null, panelOpen = true) => {
     const emitted: boolean[] = [];
+    let shown = 0;
     @Component({
       selector: "app-host",
       template: readFileSync("src/app/status-bar/status-bar.html", "utf8"),
@@ -72,6 +73,9 @@ describe("mode button", () => {
       info = () => null;
       notice = () => "layout.json: invalid JSON";
       jump = { emit: () => {} };
+      panelOpen = () => panelOpen;
+      panelShortcut = () => "⌘J";
+      showPanel = { emit: () => shown++ };
       control = { emit: (v: boolean) => emitted.push(v) };
       label = connectionLabel;
       modeText = modeLabel;
@@ -87,8 +91,22 @@ describe("mode button", () => {
     const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
       "button.mode-button",
     )!;
-    return { button, emitted, root: fixture.nativeElement as HTMLElement };
+    return { button, emitted, root: fixture.nativeElement as HTMLElement, shown: () => shown };
   };
+
+  it("offers to show the closed output panel, with its shortcut", () => {
+    const { root, shown } = render("control", null, false);
+    const panel = root.querySelector<HTMLButtonElement>("button.panel-button")!;
+    expect(panel.textContent?.trim()).toBe("Output");
+    expect(panel.title).toBe("Show the output panel (⌘J)");
+    panel.click();
+    expect(shown()).toBe(1);
+  });
+
+  it("hides the panel button while the panel is open", () => {
+    const { root } = render("control", null, true);
+    expect(root.querySelector("button.panel-button")).toBeNull();
+  });
 
   it("shows the notice (a layout problem of a new space)", () => {
     const { root } = render("control", null);

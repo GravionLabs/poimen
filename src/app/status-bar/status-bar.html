@@ -12,6 +12,23 @@
   >
     {{ waiting() }} waiting
   </button>
+  @if (!panelOpen()) {
+    <button
+      type="button"
+      class="item panel-button"
+      [title]="
+        panelShortcut()
+          ? 'Show the output panel (' + panelShortcut() + ')'
+          : 'Show the output panel'
+      "
+      (click)="showPanel.emit()"
+    >
+      <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2 3h12v10H2zM2 9.5h12" />
+      </svg>
+      <span>Output</span>
+    </button>
+  }
   @if (notice(); as text) {
     <span class="item version warn notice" [title]="text">{{ text }}</span>
   }
