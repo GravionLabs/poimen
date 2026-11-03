@@ -8,6 +8,7 @@ import {
   signal,
   viewChild,
 } from "@angular/core";
+import { FlowView } from "./flow-view";
 import { PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT, UiState } from "../core/ui-state";
 import {
   Subagents,
@@ -18,12 +19,16 @@ import {
   type TranscriptItem,
 } from "../core/transcripts";
 
-/** The tabs of the panel; Output shows subagent transcripts (a Flow tab is meant to join it). */
-export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = { output: "Output" };
+/** The tabs of the panel: Output shows subagent transcripts, Flow the run as a graph. */
+export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
+  output: "Output",
+  flow: "Flow",
+};
 
 /** Bottom panel below the editor area: a tab strip, the subagent dropdown and the Output tab. */
 @Component({
   selector: "app-bottom-panel",
+  imports: [FlowView],
   templateUrl: "./bottom-panel.html",
   styleUrl: "./bottom-panel.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -65,6 +70,13 @@ export class BottomPanel {
     this.following.set(true);
     const element = this.box()?.nativeElement;
     if (element) element.scrollTop = element.scrollHeight;
+  }
+
+  /** A subagent node of the flow was clicked: show its transcript in the Output tab. */
+  protected openInOutput(agentId: string): void {
+    this.subagents.pick(agentId);
+    this.following.set(true);
+    this.ui.selectPanelTab("output");
   }
 
   protected pick(event: Event): void {

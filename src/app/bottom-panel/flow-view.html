@@ -1,0 +1,84 @@
+<f-flow fDraggable class="flow" aria-label="Agent flow" (fFullRendered)="fit(false)">
+  <f-background>
+    <f-circle-pattern />
+  </f-background>
+  <f-canvas fZoom [fZoomMinimum]="0.25" [fZoomMaximum]="1.8">
+    @for (edge of graph().edges; track edge.id) {
+      <f-connection
+        [fConnectionId]="edge.id"
+        [fSourceId]="'out:' + edge.from"
+        [fTargetId]="'in:' + edge.to"
+        fType="segment"
+        fBehavior="fixed"
+        [fOffset]="24"
+        [fRadius]="8"
+        [fReassignDisabled]="true"
+        [fSelectionDisabled]="true"
+      >
+        <f-connection-marker-arrow />
+      </f-connection>
+    }
+    @for (item of nodes(); track item.node.id) {
+      <div
+        fNode
+        class="node"
+        [class]="'node ' + item.node.kind"
+        [class.running]="item.node.status === 'running'"
+        [class.failed]="item.node.status === 'failed'"
+        [class.link]="item.node.agentId !== null"
+        [fNodeId]="item.node.id"
+        [fNodePosition]="item.position"
+        [fNodeSize]="{ width: width, height: height }"
+        [fNodeDraggingDisabled]="true"
+        [fNodeSelectionDisabled]="true"
+        [fConnectOnNode]="false"
+        [attr.role]="item.node.agentId ? 'button' : null"
+        [attr.tabindex]="item.node.agentId ? 0 : null"
+        [attr.aria-label]="item.node.title + ', ' + item.node.kind + ', ' + item.node.status"
+        (click)="open(item.node)"
+        (keydown)="onKey($event, item.node)"
+      >
+        @if (item.node.kind !== "main") {
+          <span
+            fConnector
+            fConnectorType="target"
+            class="dot in"
+            [fConnectorId]="'in:' + item.node.id"
+            [fConnectorConnectableSide]="left"
+            [fConnectorDisabled]="true"
+          ></span>
+        }
+        <div class="row">
+          <span class="kind">{{ item.node.kind === "agent" ? "subagent" : item.node.kind }}</span>
+          <span class="status" [attr.data-status]="item.node.status">{{ item.node.status }}</span>
+        </div>
+        <div class="title" [title]="item.node.title">{{ item.node.title }}</div>
+        <div class="meta">
+          @if (item.node.type) {
+            <span class="type" [title]="item.node.type">{{ item.node.type }}</span>
+          }
+          @if (duration(item.node); as d) {
+            <span>{{ d }}</span>
+          }
+          @if (item.node.tools) {
+            <span>{{ item.node.tools }} tool calls</span>
+          }
+        </div>
+        <span
+          fConnector
+          fConnectorType="source"
+          class="dot out"
+          [fConnectorId]="'out:' + item.node.id"
+          [fConnectorConnectableSide]="right"
+          [fConnectorDisabled]="true"
+        ></span>
+      </div>
+    }
+  </f-canvas>
+  <f-minimap class="minimap" [fMinSize]="600" />
+</f-flow>
+<div class="tools">
+  <button type="button" aria-label="Zoom in" title="Zoom in" (click)="zoomIn()">+</button>
+  <button type="button" aria-label="Zoom out" title="Zoom out" (click)="zoomOut()">-</button>
+  <button type="button" aria-label="Fit to view" title="Fit to view" (click)="fit()">Fit</button>
+</div>
