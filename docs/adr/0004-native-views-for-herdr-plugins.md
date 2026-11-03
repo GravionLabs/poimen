@@ -114,7 +114,7 @@ The view never reimplements an action. Opening a PR is `shell open` in poimen. O
 - The plugin stays the single owner of its logic and tests. The terminal UI and the native view render the same data, so they cannot disagree about a PR or a stale review.
 - poimen needs no `gh` or `git` code. It does depend on the plugin version: the `version` field and a schema fixture make that visible instead of a silent mismatch.
 - poimen runs plugin code outside herdr. Plugins are already installed and trusted by the user and run as the same user from `plugin.action.invoke`; the command is the one the manifest declares, so no new execution path is invented, but it must be run with a timeout, without a shell and with `--cwd` validated against the known spaces.
-- Without herdr (ADR 0003) the contract still works if plugins stay installable as directories; poimen would then need its own plugin discovery. The state-directory and `HERDR_*` assumptions are limited to the cache.
+- Without herdr (ADR 0003) the contract still works if plugins stay installable as directories; poimen would then need its own plugin discovery (see "Leaving herdr" for the triggers). The state-directory and `HERDR_*` assumptions are limited to the cache.
 - The data command is extra surface in each plugin and must be kept in step with the terminal UI; sharing `lib/` keeps that small.
 - A plugin author who wants a native view must write the data command and the schema; there is no native view for a third-party plugin without a poimen component.
 
@@ -141,7 +141,7 @@ Two ways on, if poimen runs native views without herdr:
 1. **poimen's own plugin directory.** poimen reads the same `plugin.toml` manifests from a directory of its own and runs the `data` commands as it does today. No plugin changes. Fits when the plugins stay useful as they are and Node is available.
 2. **Port the logic to Rust** where poimen needs it permanently. First candidate: `deliver-board` (`gh api`, `gh pr list`, `git ls-remote`). This is a second implementation, so it is only worth it for a view that poimen treats as a core feature, and it gets the same fixtures as `lib/board.ts`.
 
-Trigger: ADR 0003 is accepted and one of its findings applies. These are the default `backend` moving from `herdr` to `poimen`, the herdr backend being dropped once the own one covers what poimen uses, or the open decision for Epic #3 plugins "per backend" being taken for the poimen backend. Until then nothing changes, and this ADR does not choose between the options. The decision is deferred to ADR 0003.
+Triggers (this ADR's reading of ADR 0003, which names none): (a) ADR 0003 is accepted or later, and the default `backend` moves from `herdr` to `poimen` or herdr is dropped once the own backend covers what poimen uses; (b) the open decision for Epic #3 plugins "per backend" is taken for the poimen backend, which decides only Epic #3. Until one applies nothing changes, and this ADR does not choose between the options. The decision is deferred to ADR 0003.
 
 Rule for plugin authors, so both options stay open: `data` output must not use herdr-specific fields (herdr ids, pane ids, workspace ids). Herdr context may appear only as optional context that a consumer can ignore. The board's `data` action is added by [GravionLabs/herdr-plugins#216](https://github.com/GravionLabs/herdr-plugins/pull/216) (issue #215).
 
