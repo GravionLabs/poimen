@@ -24,6 +24,7 @@ import {
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Attention } from "./core/attention";
+import { DockBadge } from "./core/dock-badge";
 import { Notifier } from "./core/notifier";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
@@ -127,6 +128,7 @@ export class App {
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
   private readonly notifier = inject(Notifier);
+  private readonly dockBadge = inject(DockBadge);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Pane>();
   protected readonly groupItems = computed(() => {
@@ -210,6 +212,7 @@ export class App {
     effect(() => {
       const waiting = this.store.waiting();
       title.setTitle(waiting > 0 ? `poimen (${waiting} waiting)` : "poimen");
+      untracked(() => this.dockBadge.set(waiting));
     });
 
     const destroyRef = inject(DestroyRef);
