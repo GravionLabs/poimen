@@ -5,7 +5,17 @@
   min-height: 0;
   overflow: hidden;
   border-radius: 0 0 5px 5px;
+  /* The @foblex/flow theme (angular.json) draws connections and markers from these tokens; the
+     rest keeps the app's look. */
   --ff-flow-background-color: transparent;
+  --ff-flow-text-color: var(--h-text-color);
+  --ff-flow-font-family: var(--font-ui);
+  --ff-flow-font-size: 12px;
+  --ff-node-color: var(--h-text-color);
+  --ff-node-background-color: var(--h-surface-color, Canvas);
+  --ff-node-shadow: none;
+  --ff-node-shadow-selected: none;
+  --ff-marker-color: var(--h-text-muted-color);
   --ff-canvas-background-color: transparent;
   --ff-node-width: auto;
   --ff-node-min-height: 0;
@@ -56,6 +66,7 @@
 
 .node {
   position: relative;
+  text-align: left;
   box-sizing: border-box;
   padding: 6px 10px;
   display: flex;
