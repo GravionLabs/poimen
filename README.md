@@ -4,6 +4,8 @@ A desktop GUI for [herdr](https://herdr.dev): watch and steer your AI coding age
 
 *Poimen* (ποιμήν) is Greek for shepherd. herdr keeps the herd; poimen is the window you watch it through.
 
+Site, downloads and installation guide: <https://gravionlabs.github.io/poimen/>.
+
 > **Status: spike.** This validates the architecture. Expect rough edges.
 
 ## How it works
@@ -185,7 +187,18 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 - The status bar shows `poimen <version>` (the Tauri app version from `tauri.conf.json`) and `herdr <version>` (socket `ping`; `herdr ?` when unreachable or too old; warning colour and tooltip when the protocol differs from the supported 22). The `tauri.conf.json` version, set by `release.yml`, is the source of truth; `herdr <version>` is shown without a protocol check when herdr reports no protocol. Local builds show the last released version.
 - The same run builds the installers after the release is created and attaches them to the GitHub release `v<version>`: Linux x64 (`.deb`, `.rpm`, `.AppImage`), macOS arm64 (`.dmg`; no Intel build) and Windows x64 (`.msi`, `.exe`). Their names and the status bar carry the released version. They are **not code-signed** yet ([#45](https://github.com/GravionLabs/poimen/issues/45)): macOS Gatekeeper and Windows SmartScreen warn on first start. They come from the `GravionLabs/ci/tauri/installers@v1` action (the building block of `tauri-app.yml`; the workflow itself assumes a root Cargo workspace and does its own versioning and release). A manual `workflow_dispatch` run of `release.yml` on a branch builds the same matrix with the version `0.0.<run number>` and creates no tag or release; pull requests never build installers.
 - Tags are `v<major>.<minor>.<patch>`, as in the other GravionLabs repositories; milestones carry the same names.
+- The public site (`site/`, VitePress, published to GitHub Pages by `.github/workflows/pages.yml`) is described in "Site" below.
 - The rulesets `main` and `release` are created by `scripts/setup-rulesets.sh`.
+
+## Site
+
+<https://gravionlabs.github.io/poimen/>: landing page, download links of the latest release (resolved from the GitHub API when the page opens, falling back to the release page), installation guide and the decision records of `docs/adr/`. It lives in `site/` (VitePress, own `package.json` and `package-lock.json`, npm; not part of the app's pnpm setup, and excluded from its lint and format checks).
+
+```sh
+cd site && npm ci && npm run dev    # local preview; `npm run build` (dead links fail it), `npm test`
+```
+
+`.github/workflows/pages.yml` builds it on pull requests that touch `site/` or `docs/` (dry run) and deploys on a push to `main` while the repository variable `DEPLOY_PAGES` is `true` (Settings > Pages > Source: GitHub Actions). The screenshots in `site/public/screenshots/` are placeholders until real captures replace them.
 
 ## License
 
