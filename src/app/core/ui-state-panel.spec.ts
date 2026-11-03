@@ -52,6 +52,12 @@ describe("bottom panel UI state", () => {
     expect(clampPanelHeight(NaN)).toBe(PANEL_DEFAULT_HEIGHT);
   });
 
+  it("remembers the flow tab across a restart", () => {
+    const storage = fakeStorage();
+    stateOn(storage).selectPanelTab("flow");
+    expect(stateOn(storage).panelTab()).toBe("flow");
+  });
+
   it("selecting a tab shows the panel; an unknown tab is ignored", () => {
     const state = stateOn(fakeStorage());
     state.selectPanelTab("nope");
@@ -62,7 +68,7 @@ describe("bottom panel UI state", () => {
 
   it("falls back to defaults for malformed stored values", () => {
     const layout = parseLayout(
-      JSON.stringify({ panelOpen: "yes", panelHeight: "tall", panelTab: "flow" }),
+      JSON.stringify({ panelOpen: "yes", panelHeight: "tall", panelTab: "gantt" }),
     );
     expect(layout.panelOpen).toBe(false);
     expect(layout.panelHeight).toBe(PANEL_DEFAULT_HEIGHT);

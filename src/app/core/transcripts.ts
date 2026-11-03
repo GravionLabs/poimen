@@ -28,8 +28,29 @@ export interface SubagentInfo {
   last: string | null;
 }
 
+/** A `Skill` or `Agent` call of the main transcript (flow graph node). */
+export interface MainCall {
+  tool_use_id: string;
+  name: string;
+  /** The skill name, or the description of the subagent. */
+  target: string;
+  /** The skill arguments, or the subagent type. */
+  detail: string;
+  started: string | null;
+  /** Timestamp of the final result; `null` while there is none. */
+  ended: string | null;
+  is_error: boolean;
+}
+
+export interface MainSnapshot {
+  calls: MainCall[];
+  /** Tool calls that are neither skills nor agents. */
+  tools: number;
+}
+
 export type SubagentUpdate =
   | { kind: "list"; agents: SubagentInfo[] }
+  | ({ kind: "main" } & MainSnapshot)
   | { kind: "entries"; agent_id: string; entries: TranscriptEntry[] };
 
 /** Payload of the `subagents` Tauri event. */
@@ -100,6 +121,26 @@ export function parseSubagentEvent(raw: unknown): SubagentEvent | null {
   if (update["kind"] === "list" && Array.isArray(update["agents"])) {
     const agents = update["agents"].map(parseInfo).filter((a): a is SubagentInfo => a !== null);
     return { session: raw["session"], update: { kind: "list", agents } };
+  }
+  if (update["kind"] === "main" && Array.isArray(update["calls"])) {
+    const time = (v: unknown) => (typeof v === "string" ? v : null);
+    const calls = update["calls"].flatMap((raw): MainCall[] =>
+      isObject(raw) && typeof raw["tool_use_id"] === "string" && raw["tool_use_id"]
+        ? [
+            {
+              tool_use_id: raw["tool_use_id"],
+              name: str(raw["name"]),
+              target: str(raw["target"]),
+              detail: str(raw["detail"]),
+              started: time(raw["started"]),
+              ended: time(raw["ended"]),
+              is_error: raw["is_error"] === true,
+            },
+          ]
+        : [],
+    );
+    const tools = typeof update["tools"] === "number" ? update["tools"] : 0;
+    return { session: raw["session"], update: { kind: "main", calls, tools } };
   }
   if (update["kind"] === "entries" && typeof update["agent_id"] === "string") {
     const list = Array.isArray(update["entries"]) ? update["entries"] : [];
@@ -228,7 +269,12 @@ export class Subagents {
   private readonly _entries = signal<ReadonlyMap<string, readonly TranscriptEntry[]>>(new Map());
   private readonly _picked = signal<string | null>(null);
   private readonly _supported = signal(false);
+  private readonly _main = signal<MainSnapshot>({ calls: [], tools: 0 });
   readonly agents = this._agents.asReadonly();
+  /** Skill and agent calls of the main transcript. */
+  readonly main = this._main.asReadonly();
+  /** Messages of every subagent seen so far, by agent id. */
+  readonly entries = this._entries.asReadonly();
   /** `false` for a pane without a Claude Code session (other agents, plain terminals). */
   readonly supported = this._supported.asReadonly();
   /** The shown subagent: the picked one while it exists, else the default. */
@@ -256,6 +302,7 @@ export class Subagents {
     this.session = null;
     this._agents.set([]);
     this._entries.set(new Map());
+    this._main.set({ calls: [], tools: 0 });
     this._picked.set(null);
     this._supported.set(false);
     this.listening ??= this.bridge.listen<unknown>("subagents", (raw) => this.apply(raw));
@@ -280,6 +327,8 @@ export class Subagents {
     const { update } = event;
     if (update.kind === "list") {
       this._agents.set(update.agents);
+    } else if (update.kind === "main") {
+      this._main.set({ calls: update.calls, tools: update.tools });
     } else {
       this._entries.update((map) => {
         const known = map.get(update.agent_id) ?? [];

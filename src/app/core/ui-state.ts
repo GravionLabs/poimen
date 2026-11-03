@@ -11,8 +11,8 @@ export const SPLIT_MIN_SHARE = 0.15;
 export const PANEL_MIN_HEIGHT = 80;
 export const PANEL_MAX_HEIGHT = 900;
 export const PANEL_DEFAULT_HEIGHT = 260;
-/** Tabs of the bottom panel; the Output tab shows subagent transcripts, others (Flow) follow. */
-export const PANEL_TABS = ["output"] as const;
+/** Tabs of the bottom panel: subagent transcripts (Output) and the run as a graph (Flow). */
+export const PANEL_TABS = ["output", "flow"] as const;
 export const DEFAULT_PANEL_TAB = "output";
 export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 

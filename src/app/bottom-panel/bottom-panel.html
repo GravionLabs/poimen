@@ -43,7 +43,7 @@
     </select>
   }
   <span class="spacer"></span>
-  @if (!following()) {
+  @if (ui.panelTab() === "output" && !following()) {
     <button type="button" class="action" (click)="resume()">Resume auto-scroll</button>
   }
   <button
@@ -106,4 +106,15 @@
       }
     }
   </div>
+}
+@if (ui.panelTab() === "flow") {
+  @if (!subagents.supported()) {
+    <p class="empty body">
+      The flow is available for Claude Code agents. Select a pane that runs one.
+    </p>
+  } @else {
+    @defer {
+      <app-flow-view [now]="now()" (openAgent)="openInOutput($event)" />
+    }
+  }
 }

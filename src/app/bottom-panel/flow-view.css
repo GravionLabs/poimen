@@ -1,0 +1,154 @@
+:host {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-height: 0;
+  --ff-flow-background-color: transparent;
+  --ff-canvas-background-color: transparent;
+  --ff-node-width: auto;
+  --ff-node-min-height: 0;
+  --ff-node-padding: 0;
+  --ff-node-border-color: var(--h-border-color);
+  --ff-node-border-color-selected: var(--h-border-color);
+  --ff-node-border-radius: 6px;
+  --ff-connection-color: var(--h-text-muted-color);
+  --ff-connection-width: 1.5px;
+  --ff-background-dot-color: color-mix(in srgb, currentColor 18%, transparent);
+  --ff-minimap-background-color: color-mix(in srgb, currentColor 6%, transparent);
+  --ff-minimap-border-color: var(--h-border-color);
+  --ff-minimap-node-color: var(--h-text-muted-color);
+  --ff-minimap-view-color: color-mix(in srgb, var(--h-primary-color) 25%, transparent);
+}
+
+.flow {
+  position: absolute;
+  inset: 0;
+}
+
+.minimap {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 140px;
+  height: 80px;
+}
+
+.tools {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 2px;
+}
+
+.tools button {
+  font: inherit;
+  color: inherit;
+  background: var(--h-surface-color, transparent);
+  border: 1px solid var(--h-border-color);
+  border-radius: 3px;
+  min-width: 24px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.node {
+  position: relative;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--h-surface-color, Canvas);
+  border: 1px solid var(--h-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.node.link {
+  cursor: pointer;
+}
+
+.node.link:hover,
+.node.link:focus-visible {
+  border-color: var(--h-primary-color);
+  outline: none;
+}
+
+.node.main {
+  border-left: 3px solid var(--h-primary-color);
+}
+
+.node.skill {
+  border-left: 3px solid var(--status-idle, var(--h-text-muted-color));
+}
+
+.node.agent {
+  border-left: 3px solid var(--status-working);
+}
+
+.node.running {
+  border-color: var(--status-working);
+  box-shadow: 0 0 0 1px var(--status-working);
+}
+
+.node.failed {
+  border-color: var(--status-blocked, #d14);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--h-text-muted-color);
+}
+
+.status[data-status="running"] {
+  color: var(--status-working);
+}
+
+.status[data-status="failed"] {
+  color: var(--status-blocked, #d14);
+}
+
+.title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.dot {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--h-text-muted-color);
+}
+
+.dot.in {
+  left: -4px;
+}
+
+.dot.out {
+  right: -4px;
+}

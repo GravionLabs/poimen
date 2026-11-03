@@ -178,6 +178,34 @@ describe("Subagents", () => {
     expect(s.items().map((i) => i.kind)).toEqual(["prompt", "message"]);
   });
 
+  it("keeps the main calls of its session and drops them with the pane", async () => {
+    tauri.answer("subagents_watch", () => true);
+    const s = create();
+    await s.follow("w1:p1", "S");
+    send("S", {
+      kind: "main",
+      tools: 4,
+      calls: [
+        { tool_use_id: "t1", name: "Skill", target: "grill-me", detail: "", ended: "x" },
+        { name: "Skill" },
+      ],
+    });
+    expect(s.main().tools).toBe(4);
+    expect(s.main().calls).toEqual([
+      {
+        tool_use_id: "t1",
+        name: "Skill",
+        target: "grill-me",
+        detail: "",
+        started: null,
+        ended: "x",
+        is_error: false,
+      },
+    ]);
+    await s.follow("w1:p2", "S2");
+    expect(s.main()).toEqual({ calls: [], tools: 0 });
+  });
+
   it("does not show entries twice when the file is read again after a truncation", async () => {
     tauri.answer("subagents_watch", () => true);
     const s = create();

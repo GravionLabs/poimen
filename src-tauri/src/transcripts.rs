@@ -183,9 +183,9 @@ pub fn parse_line(line: &str) -> Option<Line> {
     Some(Line { timestamp, entry })
 }
 
-/// Tool use ids a main-transcript line answers with a final result. The acknowledgement of a
-/// background launch (`toolUseResult.isAsync` / `status: async_launched`) does not count.
-pub fn completed_tool_uses(line: &str) -> Vec<String> {
+/// Final tool results of a main-transcript line as `(tool_use_id, is_error)`. The acknowledgement
+/// of a background launch (`toolUseResult.isAsync` / `status: async_launched`) does not count.
+pub fn final_results(line: &str) -> Vec<(String, bool)> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Vec::new();
     };
@@ -205,9 +205,81 @@ pub fn completed_tool_uses(line: &str) -> Vec<String> {
         .into_iter()
         .flatten()
         .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
-        .filter_map(|b| b.get("tool_use_id").and_then(Value::as_str))
-        .map(str::to_owned)
+        .filter_map(|b| {
+            Some((
+                b.get("tool_use_id").and_then(Value::as_str)?.to_owned(),
+                b.get("is_error").and_then(Value::as_bool) == Some(true),
+            ))
+        })
         .collect()
+}
+
+/// A `Skill` or `Agent` call of the main transcript, the nodes of the flow graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MainCall {
+    pub tool_use_id: String,
+    /// `Skill` or `Agent`.
+    pub name: String,
+    /// The skill name, or the description of the subagent.
+    pub target: String,
+    /// The skill arguments, or the subagent type.
+    pub detail: String,
+    pub started: Option<String>,
+    /// Timestamp of the final result; `None` while the call has none.
+    pub ended: Option<String>,
+    pub is_error: bool,
+}
+
+/// Skill and agent calls of one main-transcript line, and how many other tool calls it holds.
+pub fn parse_main_calls(line: &str) -> (Vec<MainCall>, Vec<String>) {
+    let mut calls = Vec::new();
+    let mut plain = Vec::new();
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return (calls, plain);
+    };
+    if value.get("type").and_then(Value::as_str) != Some("assistant") {
+        return (calls, plain);
+    }
+    let started = value
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let blocks = value
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array);
+    for block in blocks.into_iter().flatten() {
+        if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+            continue;
+        }
+        let text = |v: &Value, key: &str| {
+            v.get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let id = text(block, "id");
+        let name = text(block, "name");
+        let input = block.get("input").unwrap_or(&Value::Null);
+        let (target, detail) = match name.as_str() {
+            "Skill" => (text(input, "skill"), text(input, "args")),
+            "Agent" => (text(input, "description"), text(input, "subagent_type")),
+            _ => {
+                plain.push(id);
+                continue;
+            }
+        };
+        calls.push(MainCall {
+            tool_use_id: id,
+            name,
+            target: truncate(&target, 200),
+            detail: truncate(&detail, 200),
+            started: started.clone(),
+            ended: None,
+            is_error: false,
+        });
+    }
+    (calls, plain)
 }
 
 /// `agent-<id>.meta.json`.
@@ -323,6 +395,8 @@ pub enum Update {
         agent_id: String,
         entries: Vec<Entry>,
     },
+    /// The main agent's skill and agent calls and its count of other tool calls (flow graph).
+    Main { calls: Vec<MainCall>, tools: u32 },
 }
 
 struct Tracked {
@@ -338,6 +412,9 @@ pub struct Tracker {
     done: HashSet<String>,
     agents: BTreeMap<String, Tracked>,
     listed: Vec<SubagentInfo>,
+    calls: Vec<MainCall>,
+    plain: HashSet<String>,
+    sent_main: (Vec<MainCall>, u32),
 }
 
 impl Tracker {
@@ -353,14 +430,33 @@ impl Tracker {
             done: HashSet::new(),
             agents: BTreeMap::new(),
             listed: Vec::new(),
+            calls: Vec::new(),
+            plain: HashSet::new(),
+            sent_main: (Vec::new(), 0),
         })
     }
 
     /// Reads what the files gained; the updates are empty when nothing changed.
     pub fn refresh(&mut self) -> Vec<Update> {
         for line in self.parent.read_new() {
+            if line.contains("\"tool_use\"") {
+                let (calls, plain) = parse_main_calls(&line);
+                for call in calls {
+                    if !self.calls.iter().any(|c| c.tool_use_id == call.tool_use_id) {
+                        self.calls.push(call);
+                    }
+                }
+                self.plain.extend(plain);
+            }
             if line.contains("tool_result") {
-                self.done.extend(completed_tool_uses(&line));
+                let ended = parse_line(&line).and_then(|l| l.timestamp);
+                for (id, is_error) in final_results(&line) {
+                    if let Some(call) = self.calls.iter_mut().find(|c| c.tool_use_id == id) {
+                        call.ended = ended.clone();
+                        call.is_error = is_error;
+                    }
+                    self.done.insert(id);
+                }
             }
         }
         if let Ok(dir) = std::fs::read_dir(&self.sub_dir) {
@@ -425,6 +521,14 @@ impl Tracker {
         if agents != self.listed {
             self.listed = agents.clone();
             updates.insert(0, Update::List { agents });
+        }
+        let tools = u32::try_from(self.plain.len()).unwrap_or(u32::MAX);
+        if (&self.calls, tools) != (&self.sent_main.0, self.sent_main.1) {
+            self.sent_main = (self.calls.clone(), tools);
+            updates.push(Update::Main {
+                calls: self.calls.clone(),
+                tools,
+            });
         }
         updates
     }
@@ -671,15 +775,15 @@ mod tests {
     #[test]
     fn a_final_tool_result_completes_the_tool_use() {
         let done = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"report"}]},"toolUseResult":{"status":"completed"}}"#;
-        assert_eq!(completed_tool_uses(done), vec!["toolu_9".to_owned()]);
+        assert_eq!(final_results(done), vec![("toolu_9".to_owned(), false)]);
     }
 
     #[test]
     fn a_background_launch_acknowledgement_does_not_complete_the_tool_use() {
         let launched = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"Async agent launched"}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"a1"}}"#;
-        assert!(completed_tool_uses(launched).is_empty());
-        assert!(completed_tool_uses("nope").is_empty());
-        assert!(completed_tool_uses(CALL).is_empty());
+        assert!(final_results(launched).is_empty());
+        assert!(final_results("nope").is_empty());
+        assert!(final_results(CALL).is_empty());
     }
 
     #[test]
@@ -807,6 +911,61 @@ mod tests {
         .unwrap();
         let updates = tracker.refresh();
         assert!(matches!(&updates[..], [Update::List { agents }] if agents[0].status == "done"));
+    }
+
+    const MAIN_CALLS: &str = r#"{"type":"assistant","uuid":"m1","timestamp":"2026-11-02T04:00:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_s","name":"Skill","input":{"skill":"implementation","args":"104"}},{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"ls"}},{"type":"tool_use","id":"toolu_9","name":"Agent","input":{"description":"Review","subagent_type":"general-purpose","prompt":"long"}}]}}"#;
+    const SKILL_RESULT: &str = r#"{"type":"user","uuid":"m2","timestamp":"2026-11-02T04:00:05.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_s","content":"Launching skill","is_error":true}]}}"#;
+
+    #[test]
+    fn main_calls_split_skill_and_agent_from_plain_tools() {
+        let (calls, plain) = parse_main_calls(MAIN_CALLS);
+        assert_eq!(plain, vec!["toolu_b".to_owned()]);
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            (
+                calls[0].name.as_str(),
+                calls[0].target.as_str(),
+                calls[0].detail.as_str()
+            ),
+            ("Skill", "implementation", "104")
+        );
+        assert_eq!(
+            (
+                calls[1].name.as_str(),
+                calls[1].target.as_str(),
+                calls[1].detail.as_str()
+            ),
+            ("Agent", "Review", "general-purpose")
+        );
+        assert_eq!(
+            calls[0].started.as_deref(),
+            Some("2026-11-02T04:00:00.000Z")
+        );
+        assert_eq!(parse_main_calls("not json"), (Vec::new(), Vec::new()));
+        assert_eq!(parse_main_calls(PROMPT), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
+    fn tracker_reports_main_calls_with_results_and_the_plain_tool_count() {
+        let (project, _) = session_fixture("main");
+        let mut tracker = Tracker::new(&project, "S").unwrap();
+        tracker.refresh();
+        append(&project.join("S.jsonl"), &format!("{MAIN_CALLS}\n"));
+        let updates = tracker.refresh();
+        let [Update::Main { calls, tools }] = &updates[..] else {
+            panic!("one main update: {updates:?}");
+        };
+        assert_eq!((calls.len(), *tools), (2, 1));
+        assert_eq!(calls[0].ended, None);
+
+        append(&project.join("S.jsonl"), &format!("{SKILL_RESULT}\n"));
+        let updates = tracker.refresh();
+        let Update::Main { calls, .. } = updates.last().unwrap() else {
+            panic!("main last");
+        };
+        assert_eq!(calls[0].ended.as_deref(), Some("2026-11-02T04:00:05.000Z"));
+        assert!(calls[0].is_error);
+        assert!(tracker.refresh().is_empty());
     }
 
     #[test]
