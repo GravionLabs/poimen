@@ -27,8 +27,8 @@ use serde_json::Value;
 use crate::herdr::is_safe_session_id;
 
 /// Longest text kept per block; a transcript can hold whole files and diffs.
-const TEXT_LIMIT: usize = 8000;
-const INPUT_LIMIT: usize = 2000;
+pub(crate) const TEXT_LIMIT: usize = 8000;
+pub(crate) const INPUT_LIMIT: usize = 2000;
 
 /// `~/.claude/projects`.
 pub fn projects_root(home: &Path) -> PathBuf {
@@ -100,7 +100,7 @@ pub struct Line {
     pub entry: Option<Entry>,
 }
 
-fn truncate(text: &str, limit: usize) -> String {
+pub(crate) fn truncate(text: &str, limit: usize) -> String {
     match text.char_indices().nth(limit) {
         Some((end, _)) => format!("{}…", &text[..end]),
         None => text.to_owned(),
@@ -564,27 +564,41 @@ pub fn watch(
     }
     // Events carry resolved paths (`/private/var` for `/var` on macOS).
     let project_dir = &project_dir.canonicalize().map_err(|e| e.to_string())?;
-    let (tx, rx) = mpsc::channel();
-    let notifier = tx.clone();
     let session_dir = project_dir.join(session);
     let session_file = project_dir.join(format!("{session}.jsonl"));
+    let mut tracker = Tracker::new(project_dir, session).ok_or("not a valid session id")?;
+    watch_dir(
+        project_dir,
+        move |p| p == session_file || p.starts_with(&session_dir),
+        move || tracker.refresh(),
+        emit,
+    )
+}
+
+/// Watches `dir` recursively and calls `refresh` once at the start and again after every change
+/// to a path `relevant` accepts (bursts coalesced); every update goes to `emit`. `dir` must be
+/// canonical, since events carry resolved paths.
+pub(crate) fn watch_dir(
+    dir: &Path,
+    relevant: impl Fn(&Path) -> bool + Send + 'static,
+    mut refresh: impl FnMut() -> Vec<Update> + Send + 'static,
+    emit: impl Fn(Update) + Send + 'static,
+) -> Result<WatchHandle, String> {
+    let (tx, rx) = mpsc::channel();
+    let notifier = tx.clone();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
         if let Ok(event) = event
-            && event
-                .paths
-                .iter()
-                .any(|p| p == &session_file || p.starts_with(&session_dir))
+            && event.paths.iter().any(|p| relevant(p))
         {
             let _ = notifier.send(Message::Changed);
         }
     })
     .map_err(|e| e.to_string())?;
     watcher
-        .watch(project_dir, RecursiveMode::Recursive)
+        .watch(dir, RecursiveMode::Recursive)
         .map_err(|e| e.to_string())?;
-    let mut tracker = Tracker::new(project_dir, session).ok_or("not a valid session id")?;
     std::thread::spawn(move || {
-        for update in tracker.refresh() {
+        for update in refresh() {
             emit(update);
         }
         while let Ok(Message::Changed) = rx.recv() {
@@ -594,7 +608,7 @@ pub fn watch(
             while let Ok(message) = rx.try_recv() {
                 stopped |= matches!(message, Message::Stop);
             }
-            for update in tracker.refresh() {
+            for update in refresh() {
                 emit(update);
             }
             if stopped {

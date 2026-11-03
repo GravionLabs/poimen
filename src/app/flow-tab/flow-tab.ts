@@ -11,6 +11,7 @@ import {
   untracked,
 } from "@angular/core";
 import { FlowView } from "../bottom-panel/flow-view";
+import { flowSession } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { Subagents } from "../core/transcripts";
 
@@ -25,8 +26,8 @@ import { Subagents } from "../core/transcripts";
   template: `
     @if (!subagents.supported()) {
       <p class="empty">
-        The flow is available for Claude Code agents. This pane does not run one, or its transcript
-        is not found yet.
+        The flow is available for Claude Code and GitHub Copilot CLI agents. This pane does not run
+        one, or its transcript is not found yet.
       </p>
     } @else {
       @defer {
@@ -66,7 +67,7 @@ export class FlowTab {
 
   private readonly session = computed(() => {
     const pane = this.store.panes().get(this.paneId());
-    return pane?.agent === "claude" ? (pane.agent_session?.value ?? null) : null;
+    return flowSession(pane);
   });
 
   constructor() {

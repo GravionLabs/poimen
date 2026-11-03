@@ -14,6 +14,8 @@ import {
   FZoomDirective,
   provideFFlow,
 } from "@foblex/flow";
+import { flowAgentName } from "../core/herdr";
+import { HerdrStore } from "../core/herdr-store";
 import { buildFlowGraph, flowDuration, type FlowNode } from "../core/flow-graph";
 import { FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH, layoutFlow } from "../core/flow-layout";
 import { Subagents, formatDuration } from "../core/transcripts";
@@ -35,6 +37,7 @@ const FIT_PADDING = 24;
 })
 export class FlowView {
   private readonly subagents = inject(Subagents);
+  private readonly store = inject(HerdrStore);
   /** Clock for the durations of running nodes. */
   readonly now = input.required<number>();
   /** A subagent node was clicked: show its transcript. */
@@ -48,7 +51,12 @@ export class FlowView {
   private readonly zoom = viewChild(FZoomDirective);
 
   protected readonly graph = computed(() =>
-    buildFlowGraph(this.subagents.agents(), this.subagents.entries(), this.subagents.main()),
+    buildFlowGraph(
+      this.subagents.agents(),
+      this.subagents.entries(),
+      this.subagents.main(),
+      flowAgentName(this.store.panes().get(this.subagents.paneId() ?? "")),
+    ),
   );
   protected readonly positions = computed(() => layoutFlow(this.graph()));
   protected readonly nodes = computed(() => {

@@ -1,4 +1,5 @@
 mod backend;
+mod copilot;
 mod git;
 mod gui_path;
 mod herdr;
@@ -517,9 +518,9 @@ async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, 
         .map_err(|e| e.to_string())
 }
 
-/// Starts following the subagent transcripts of the Claude Code agent in `pane_id` (replacing the
-/// previous watch); updates arrive as `subagents` events. `false` when the pane has no Claude
-/// session or its transcript is not found; nothing is watched then. Read-only.
+/// Starts following the subagent transcripts of the Claude Code or GitHub Copilot CLI agent in
+/// `pane_id` (replacing the previous watch); updates arrive as `subagents` events. `false` when the
+/// pane has no such session or its transcript is not found; nothing is watched then. Read-only.
 #[tauri::command]
 async fn subagents_watch(
     app: AppHandle,
@@ -530,21 +531,34 @@ async fn subagents_watch(
 ) -> Result<bool, String> {
     let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
     let panes = herdr_call(client.inner(), "pane.list", json!({})).await?;
-    let found = herdr::parse_claude_session(&panes, &pane_id).and_then(|s| {
-        let root = transcripts::projects_root(&home_dir()?);
-        let dir = transcripts::locate_project_dir(&root, &s.cwd, &s.session)?;
-        Some((dir, s.session))
+    let found = herdr::parse_agent_session(&panes, &pane_id).and_then(|s| {
+        let home = home_dir()?;
+        let dir = match s.agent {
+            herdr::TranscriptAgent::Claude => transcripts::locate_project_dir(
+                &transcripts::projects_root(&home),
+                &s.cwd,
+                &s.session,
+            )?,
+            herdr::TranscriptAgent::Copilot => {
+                copilot::locate_session_dir(&copilot::sessions_root(&home), &s.session)?
+            }
+        };
+        Some((s.agent, dir, s.session))
     });
-    let Some((dir, session)) = found else {
+    let Some((agent, dir, session)) = found else {
         let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
         watches.store(&key, generation, None);
         return Ok(false);
     };
     let (id, follower) = (session.clone(), key.clone());
-    let handle = transcripts::watch(&dir, &session, move |update| {
+    let emit = move |update| {
         let event = json!({ "key": follower, "session": id, "update": update });
         let _ = app.emit("subagents", event);
-    })?;
+    };
+    let handle = match agent {
+        herdr::TranscriptAgent::Claude => transcripts::watch(&dir, &session, emit)?,
+        herdr::TranscriptAgent::Copilot => copilot::watch(&dir, emit)?,
+    };
     let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
     // A stale handle is dropped here, which stops its watcher; so is one whose key was unwatched.
     Ok(watches.store(&key, generation, Some(handle)))
