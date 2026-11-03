@@ -99,6 +99,15 @@ pub fn parse_event(line: &str) -> Result<Event, Error> {
     })
 }
 
+/// Whether anything answers on the socket.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Probe {
+    /// No connection, or no valid answer: no server is running.
+    Down,
+    /// A server answered `ping`; the info is `None` when it reported no version.
+    Up(Option<ServerInfo>),
+}
+
 #[derive(Debug, Clone)]
 pub struct Client {
     socket: PathBuf,
@@ -447,6 +456,14 @@ impl Client {
     /// The running herdr's version, or `None` when it is unreachable or too old to say.
     pub fn info(&self) -> Option<ServerInfo> {
         parse_ping(&self.request("ping", json!({})).ok()?)
+    }
+
+    /// Asks the socket once whether a server answers (`ping`). Never starts anything.
+    pub fn probe(&self) -> Probe {
+        match self.request("ping", json!({})) {
+            Ok(result) => Probe::Up(parse_ping(&result)),
+            Err(_) => Probe::Down,
+        }
     }
 
     pub fn subscribe(&self, subscriptions: Vec<Value>) -> Result<Subscription, Error> {
