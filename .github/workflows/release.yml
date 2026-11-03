@@ -3,7 +3,16 @@
 # push to main (the merge commit of the release PR release/next -> main):
 #   ci.yml (frontend and Rust checks) -> determine-version (GitVersion.yml) -> gh-release: git-cliff writes CHANGELOG.md
 #   and commits it to main ([skip ci]), tags v<version>, creates the GitHub Release and closes the issues delivered by
-#   the release PR. Bundling and signing the macOS application are not part of this workflow yet.
+#   the release PR. Then the installers (Linux x64, macOS arm64, Windows x64) are built from the tag and attached to
+#   the release. They are not code-signed yet (#45).
+#
+# workflow_dispatch (on a branch): builds the same installer matrix with the throw-away version 0.0.<run number>
+# (MSI needs a numeric one) and creates no tag, release or commit. Pull requests never build installers.
+#
+# The installers use the building block of GravionLabs/ci that tauri-app.yml is made of (tauri/installers@v1), not
+# the reusable workflow itself: tauri-app.yml determines the version, drafts and publishes the release and writes the
+# changelog on its own (this workflow keeps the manifest commit, git-cliff notes and issue closing of gh-release)
+# and assumes a Cargo workspace at the repository root (poimen's crate is src-tauri/).
 #
 # The release job writes the released version into package.json, src-tauri/Cargo.toml (and Cargo.lock) and
 # src-tauri/tauri.conf.json before the changelog commit, so a build of the tag reports the released version.
@@ -16,6 +25,7 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions: {}
 
@@ -34,7 +44,11 @@ jobs:
   release:
     name: Release
     needs: test
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.semver }}
+      release-id: ${{ steps.release-id.outputs.id }}
     permissions:
       contents: write # changelog commit, tag, GitHub Release
       issues: write # close-issues
@@ -80,3 +94,41 @@ jobs:
           update-changelog: "true"
           close-issues: "true"
           token: ${{ secrets.GH_PAT }}
+
+      # The installers are uploaded to this release (tauri-action releaseId).
+      - name: Find the release id
+        id: release-id
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.semver }}
+        run: echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)" >> "$GITHUB_OUTPUT"
+
+  installers:
+    name: Installers ${{ matrix.target }}
+    needs: [test, release]
+    # release is skipped on workflow_dispatch; on a push it must have succeeded.
+    if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload the assets to the release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin } # Apple Silicon; no macOS x64 build
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      # The tag carries the manifests with the released version. A dispatch builds the branch it ran on.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.version && format('v{0}', needs.release.outputs.version) || github.sha }}
+
+      - uses: GravionLabs/ci/tauri/installers@v1
+        with:
+          checkout: "false"
+          version: ${{ needs.release.outputs.version || format('0.0.{0}', github.run_number) }}
+          target: ${{ matrix.target }}
+          # Empty on workflow_dispatch: build only, upload nothing.
+          release-id: ${{ needs.release.outputs.release-id }}
+          cargo-toml: src-tauri/Cargo.toml
