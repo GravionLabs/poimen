@@ -1,0 +1,42 @@
+@if (palette.isOpen()) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Close the command palette"
+    (click)="palette.close()"
+  ></button>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input
+      #field
+      class="query"
+      type="text"
+      role="combobox"
+      aria-expanded="true"
+      aria-controls="palette-list"
+      placeholder="Type a command or plugin action"
+      [value]="palette.query()"
+      (input)="type($event)"
+      (keydown)="key($event)"
+    />
+    @if (palette.loadError(); as error) {
+      <p class="warn">Plugin actions are unavailable: {{ error }}</p>
+    }
+    <ul id="palette-list" role="listbox">
+      @for (item of palette.items(); track item.key; let i = $index) {
+        <li
+          role="option"
+          [class.selected]="i === palette.selected()"
+          [attr.aria-selected]="i === palette.selected()"
+        >
+          <button type="button" tabindex="-1" (click)="run(item)" (mousemove)="palette.hover(i)">
+            <span class="title">{{ item.title }}</span>
+            <span class="hint" [class.plugin]="item.kind === 'plugin'">{{ item.hint }}</span>
+          </button>
+        </li>
+      } @empty {
+        <li class="empty">No matching command</li>
+      }
+    </ul>
+  </div>
+}

@@ -159,6 +159,10 @@ export class SettingsView {
     void this.store.setExplorerShowHidden((event.target as HTMLInputElement).checked);
   }
 
+  protected setAutoStart(event: Event): void {
+    void this.store.setHerdrAutoStart((event.target as HTMLInputElement).checked);
+  }
+
   protected setMode(mode: SchemeMode): void {
     const schema = this.settings().colorSchema;
     if (mode === "pair" && typeof schema !== "object") {

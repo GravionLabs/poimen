@@ -1,0 +1,186 @@
+:host {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Its own surface below a visible splitter (like VS Code): the gap above holds the sash. */
+  margin-top: 9px;
+  background: var(--h-content-background);
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* The splitter fills the gap above the panel; its line is always visible, thicker while used. */
+.resizer {
+  position: absolute;
+  inset: -10px 0 auto;
+  height: 9px;
+  z-index: 1;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.resizer::after {
+  content: "";
+  position: absolute;
+  inset: 4px 0 auto;
+  height: 1px;
+  background: var(--h-border-color);
+}
+
+.resizer:hover::after,
+.resizer:focus-visible::after,
+.resizer.dragging::after {
+  inset: 3px 0 auto;
+  height: 3px;
+  background: var(--status-working);
+}
+
+.resizer:focus-visible {
+  outline: none;
+}
+
+.head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  height: 32px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.tab,
+.action {
+  background: none;
+  border: 0;
+  color: var(--h-text-muted-color);
+  cursor: pointer;
+  font: inherit;
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+
+.tab.on {
+  color: var(--h-text-color);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.tab:hover,
+.action:hover {
+  color: inherit;
+}
+
+.picker {
+  max-width: 55%;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--h-border-color);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 10px 8px;
+  font-family: var(--font-mono, monospace);
+}
+
+.empty {
+  margin: 12px 0;
+  color: var(--h-text-muted-color);
+  font-family: inherit;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+}
+
+.msg {
+  margin: 6px 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--h-border-color);
+}
+
+.msg.prompt {
+  border-left-color: var(--h-primary-color);
+  color: var(--h-text-muted-color);
+}
+
+.msg.report {
+  border-left-color: var(--status-idle, var(--h-primary-color));
+}
+
+.who {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--h-text-muted-color);
+}
+
+.tool,
+.thinking {
+  margin: 2px 0;
+}
+
+.tool summary,
+.thinking summary {
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.thinking summary {
+  color: var(--h-text-muted-color);
+}
+
+.tool-name {
+  font-weight: 600;
+}
+
+.tool-arg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--h-text-muted-color);
+}
+
+.pending {
+  color: var(--status-working);
+}
+
+.tool.error .tool-name {
+  color: var(--status-blocked, #d14);
+}
+
+.io {
+  margin: 2px 0 4px 14px;
+  padding: 4px 6px;
+  max-height: 240px;
+  overflow: auto;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  border-radius: 3px;
+}
+
+.io.result {
+  opacity: 0.9;
+}

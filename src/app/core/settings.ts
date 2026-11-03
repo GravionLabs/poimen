@@ -49,6 +49,8 @@ export interface Settings {
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
   explorerShowHidden: boolean;
+  /** Start the herdr server when it is not running (`herdr.autoStart`). */
+  herdrAutoStart: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
   /** The home directory `~` stands for; `null` until the backend knows it. */
@@ -73,6 +75,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarLayout: "tree",
   explorerRoots: ["~"],
   explorerShowHidden: false,
+  herdrAutoStart: true,
   spacesLayout: null,
   home: null,
   warnings: [],
@@ -154,6 +157,7 @@ export function parseSettings(raw: unknown): Settings {
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
+    herdrAutoStart: r["herdrAutoStart"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
@@ -234,6 +238,13 @@ export class SettingsStore {
       "set_explorer_show_hidden",
       { show: explorerShowHidden },
     );
+  }
+
+  /** Writes `herdr.autoStart` of config.json and applies it at once. */
+  async setHerdrAutoStart(herdrAutoStart: boolean): Promise<void> {
+    await this.write({ herdrAutoStart }, "the herdr auto start option", "set_herdr_auto_start", {
+      on: herdrAutoStart,
+    });
   }
 
   /** Writes `spaces.layout` (validated again by the backend); `false` when the write failed. */

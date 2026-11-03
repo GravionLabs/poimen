@@ -7,6 +7,7 @@ import {
   buildTree,
   decodeBase64,
   nextWaiting,
+  pluginContext,
   paneLabel,
   rowName,
   tabHeader,
@@ -216,5 +217,40 @@ describe("closeWarning", () => {
   it("is plain for a terminal or an unknown pane", () => {
     expect(closeWarning(pane({}))).toBe("The process in the pane ends.");
     expect(closeWarning(undefined)).toBe("The process in the pane ends.");
+  });
+});
+
+describe("pluginContext", () => {
+  const snap: Snapshot = {
+    workspaces: [{ workspace_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+    tabs: [{ tab_id: "t1", workspace_id: "w1", label: "main", number: 1, agent_status: "idle" }],
+    panes: [
+      {
+        pane_id: "p1",
+        tab_id: "t1",
+        workspace_id: "w1",
+        agent: "claude",
+        agent_status: "idle",
+        cwd: "/a",
+        foreground_cwd: "/b",
+      },
+    ],
+  };
+
+  it("describes the pane, its tab and workspace, preferring the foreground directory", () => {
+    expect(pluginContext(snap, "p1")).toEqual({
+      focused_pane_id: "p1",
+      focused_pane_cwd: "/b",
+      focused_pane_agent: "claude",
+      tab_id: "t1",
+      tab_label: "main",
+      workspace_id: "w1",
+      workspace_label: "One",
+    });
+  });
+
+  it("is empty for no pane or an unknown one", () => {
+    expect(pluginContext(snap, null).focused_pane_id).toBeNull();
+    expect(pluginContext(snap, "gone").workspace_id).toBeNull();
   });
 });

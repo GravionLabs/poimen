@@ -1,0 +1,194 @@
+:host {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 5px 5px;
+  /* The @foblex/flow theme (angular.json) draws connections and markers from these tokens; the
+     rest keeps the app's look. */
+  --ff-flow-background-color: transparent;
+  --ff-flow-text-color: var(--h-text-color);
+  --ff-flow-font-family: var(--font-ui);
+  --ff-flow-font-size: 12px;
+  --ff-node-color: var(--h-text-color);
+  --ff-node-background-color: var(--h-surface-color, Canvas);
+  --ff-node-shadow: none;
+  --ff-node-shadow-selected: none;
+  --ff-marker-color: var(--h-text-muted-color);
+  --ff-canvas-background-color: transparent;
+  --ff-node-width: auto;
+  --ff-node-min-height: 0;
+  --ff-node-padding: 0;
+  --ff-node-border-color: var(--h-border-color);
+  --ff-node-border-color-selected: var(--h-border-color);
+  --ff-node-border-radius: 6px;
+  --ff-connection-color: var(--h-text-muted-color);
+  --ff-connection-width: 1.5px;
+  --ff-background-dot-color: color-mix(in srgb, currentColor 18%, transparent);
+  --ff-minimap-background-color: color-mix(in srgb, currentColor 6%, transparent);
+  --ff-minimap-border-color: var(--h-border-color);
+  --ff-minimap-node-color: var(--h-text-muted-color);
+  --ff-minimap-view-color: color-mix(in srgb, var(--h-primary-color) 25%, transparent);
+}
+
+.flow {
+  position: absolute;
+  inset: 0;
+}
+
+.minimap {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  width: 140px;
+  height: 80px;
+}
+
+/* Floating toolbar, as in Ariadne's editor: icon buttons in a pill; more actions (export, ...) go
+   in as further .icon-button, grouped with .divider. */
+.tools {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--h-surface-color, Canvas);
+  border: 1px solid var(--h-border-color);
+  border-radius: 8px;
+}
+
+.tools .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--h-text-muted-color);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.tools .icon-button:hover {
+  color: var(--h-text-color);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.tools .icon-button:focus-visible {
+  outline: 2px solid var(--h-primary-color);
+  outline-offset: -2px;
+}
+
+.tools .divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--h-border-color);
+}
+
+.node {
+  position: relative;
+  text-align: left;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--h-surface-color, Canvas);
+  border: 1px solid var(--h-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.node.link {
+  cursor: pointer;
+}
+
+.node.link:hover,
+.node.link:focus-visible {
+  border-color: var(--h-primary-color);
+  outline: none;
+}
+
+.node.main {
+  border-left: 3px solid var(--h-primary-color);
+}
+
+.node.skill {
+  border-left: 3px solid var(--status-idle, var(--h-text-muted-color));
+}
+
+.node.agent {
+  border-left: 3px solid var(--status-working);
+}
+
+.node.running {
+  border-color: var(--status-working);
+  box-shadow: 0 0 0 1px var(--status-working);
+}
+
+.node.failed {
+  border-color: var(--status-blocked, #d14);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--h-text-muted-color);
+}
+
+.status[data-status="running"] {
+  color: var(--status-working);
+}
+
+.status[data-status="failed"] {
+  color: var(--status-blocked, #d14);
+}
+
+.title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.dot {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--h-text-muted-color);
+}
+
+.dot.in {
+  left: -4px;
+}
+
+.dot.out {
+  right: -4px;
+}

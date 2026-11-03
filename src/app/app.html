@@ -1,4 +1,14 @@
-<app-toolbar [theme]="theme$()" [fixedBy]="fixedBy()" (themeChange)="setTheme($event)" />
+<app-toolbar
+  [plugins]="plugins.actions()"
+  [pluginsError]="plugins.error()"
+  (pluginsOpened)="loadPlugins()"
+  (pluginChosen)="onPluginChosen($event)"
+  [outputOpen]="ui.panelOpen()"
+  (outputToggle)="ui.togglePanel()"
+  [theme]="theme$()"
+  [fixedBy]="fixedBy()"
+  (themeChange)="setTheme($event)"
+/>
 <div class="work">
   <app-activity-bar
     [active]="ui.activeView()"
@@ -16,6 +26,7 @@
           [activeId]="editor.activeId()"
           (selected)="open($event)"
           (pinned)="open($event, true)"
+          [pluginActions]="plugins.actions()"
           (menuAction)="onSidebarMenu($event)"
         />
       }
@@ -36,27 +47,32 @@
       (keydown)="resizeKey($event)"
     ></div>
   }
-  <main class="views">
-    @if (notice(); as text) {
-      <div class="notice" role="status">
-        <span>{{ text }}</span>
-        <button type="button" aria-label="Dismiss" (click)="dismissNotice()">x</button>
-      </div>
-    }
-    @if (editor.openIds().size) {
-      <ng-container
-        [ngTemplateOutlet]="nodeTpl"
-        [ngTemplateOutletContext]="{ $implicit: rootNode() }"
-      />
-    } @else {
-      <div class="empty">
-        <p>Pick a pane on the left.</p>
-        <p class="hint">
-          A click previews a pane in a tab, a double click pins it. A pane opens for input unless
-          another client controls it; the switch in the status bar makes it read-only. Closing a tab
-          only closes the view; the herdr pane keeps running.
-        </p>
-      </div>
+  <main class="views" [class.flush]="ui.sidebarCollapsed()">
+    <div class="editor-area">
+      @if (notice(); as text) {
+        <div class="notice" role="status">
+          <span>{{ text }}</span>
+          <button type="button" aria-label="Dismiss" (click)="dismissNotice()">x</button>
+        </div>
+      }
+      @if (editor.openIds().size) {
+        <ng-container
+          [ngTemplateOutlet]="nodeTpl"
+          [ngTemplateOutletContext]="{ $implicit: rootNode() }"
+        />
+      } @else {
+        <div class="empty">
+          <p>Pick a pane on the left.</p>
+          <p class="hint">
+            A click previews a pane in a tab, a double click pins it. A pane opens for input unless
+            another client controls it; the switch in the status bar makes it read-only. Closing a
+            tab only closes the view; the herdr pane keeps running.
+          </p>
+        </div>
+      }
+    </div>
+    @if (ui.panelOpen()) {
+      <app-bottom-panel [style.height.px]="ui.panelHeight()" />
     }
   </main>
 </div>
@@ -72,10 +88,19 @@
   [info]="store.info()"
   [notice]="spaceActions.warning()"
   (jump)="jumpToWaiting()"
+  [panelOpen]="ui.panelOpen()"
+  [panelShortcut]="panelShortcut()"
+  (showPanel)="ui.togglePanel()"
 />
 
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
 <app-space-dialog />
+<app-command-palette
+  [activePaneId]="activePaneId()"
+  (commandChosen)="run($event)"
+  (paneChosen)="openPluginPane($event)"
+  (failed)="showError($event)"
+/>
 
 <ng-template #nodeTpl let-node>
   @if (node.kind === "split") {
@@ -105,7 +130,7 @@
           [activeId]="g.activeId"
           [groupId]="'' + g.id"
           [menu]="menuFor(g)"
-          (selected)="editor.activate($event)"
+          (selected)="onTabSelected($event)"
           (closed)="editor.close($event)"
           (pinned)="editor.pin($event)"
           (moved)="editor.move($event.from, $event.to, g.id)"
@@ -113,7 +138,11 @@
           (menuAction)="onTabMenu($event.id, $event.action)"
         >
           <ng-template #tabContent let-tab>
-            @if (isSettings(tab.id)) {
+            @if (isBoard(tab.id)) {
+              <span class="mode ro" title="Native view">BD</span>
+            } @else if (isFlow(tab.id)) {
+              <span class="mode ro" title="Agent flow">FL</span>
+            } @else if (isSettings(tab.id)) {
               <svg class="gear" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" />
                 <circle cx="8" cy="8" r="4.6" fill="none" stroke="currentColor" />
@@ -136,6 +165,14 @@
         </app-tab-bar>
         @if (isSettings(g.activeId)) {
           <app-settings-view />
+        }
+        @if (isBoard(g.activeId)) {
+          <app-deliver-board-view (terminalRequested)="openTerminalBoard()" />
+        }
+        @for (flowPaneId of [flowOf(g)]; track flowPaneId) {
+          @if (flowPaneId) {
+            <app-flow-tab [paneId]="flowPaneId" (openAgent)="openAgentOutput($event)" />
+          }
         }
         @for (p of [groupPane(g)]; track p?.pane_id) {
           @if (p) {

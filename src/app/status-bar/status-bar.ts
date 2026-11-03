@@ -58,7 +58,13 @@ export class StatusBar {
   readonly info = input<HerdrInfo | null>(null);
   /** A notice such as a pane layout problem of a new space; empty hides it. */
   readonly notice = input<string | null>(null);
+  /** Whether the bottom panel is shown; while it is closed a button shows it again. */
+  readonly panelOpen = input(true);
+  /** Shortcut label of `toggleOutput` for the button's tooltip; empty when unbound. */
+  readonly panelShortcut = input("");
   readonly jump = output<void>();
+  /** The panel button was clicked. */
+  readonly showPanel = output<void>();
   /** The user flips the mode button: `true` asks for input. */
   readonly control = output<boolean>();
 

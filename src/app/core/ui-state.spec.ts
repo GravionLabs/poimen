@@ -43,6 +43,9 @@ describe("parseLayout", () => {
       sidebarCollapsed: false,
       activeView: "spaces",
       expandedDirs: [],
+      panelOpen: false,
+      panelHeight: 260,
+      panelTab: "output",
     }));
   it("reads stored values", () =>
     expect(parseLayout('{"sidebarWidth":320,"sidebarCollapsed":true}')).toEqual({
@@ -50,6 +53,9 @@ describe("parseLayout", () => {
       sidebarCollapsed: true,
       activeView: "spaces",
       expandedDirs: [],
+      panelOpen: false,
+      panelHeight: 260,
+      panelTab: "output",
     }));
   it("clamps a stored width", () =>
     expect(parseLayout('{"sidebarWidth":5}').sidebarWidth).toBe(SIDEBAR_MIN_WIDTH));
@@ -59,6 +65,9 @@ describe("parseLayout", () => {
       sidebarCollapsed: false,
       activeView: "spaces",
       expandedDirs: [],
+      panelOpen: false,
+      panelHeight: 260,
+      panelTab: "output",
     };
     expect(parseLayout("{nope")).toEqual(defaults);
     expect(parseLayout("42")).toEqual(defaults);
@@ -94,6 +103,9 @@ describe("UiState", () => {
       sidebarCollapsed: true,
       activeView: "spaces",
       expandedDirs: [],
+      panelOpen: false,
+      panelHeight: 260,
+      panelTab: "output",
     });
   });
 
@@ -143,6 +155,9 @@ describe("editor state persistence", () => {
       sidebarCollapsed: false,
       activeView: "spaces",
       expandedDirs: [],
+      panelOpen: false,
+      panelHeight: 260,
+      panelTab: "output",
       editor: { focusedId: 2 },
     });
     expect(stateOn(storage).storedEditor).toEqual({ focusedId: 2 });
@@ -203,5 +218,17 @@ describe("view switching", () => {
     const state = stateOn(fakeStorage('{"activeView":5,"expandedDirs":["/a",3]}'));
     expect(state.activeView()).toBe("spaces");
     expect([...state.expandedDirs()]).toEqual(["/a"]);
+  });
+});
+
+describe("stored plugin panes", () => {
+  it("reads the name per pane id and drops malformed entries", () => {
+    expect(
+      parseLayout('{"pluginPanes":{"w1:p5":"board","w1:p6":3,"w1:p7":""}}').pluginPanes,
+    ).toEqual({
+      "w1:p5": "board",
+    });
+    expect(parseLayout('{"pluginPanes":["x"]}').pluginPanes).toBeUndefined();
+    expect(parseLayout("{}").pluginPanes).toBeUndefined();
   });
 });

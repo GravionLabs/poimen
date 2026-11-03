@@ -47,9 +47,10 @@
     +
   </button>
 </div>
-@if (store.connectionError(); as reason) {
+@if (store.disconnected(); as message) {
   <hx-message class="connection" severity="warn" size="small">
-    herdr not reachable: {{ reason }}
+    {{ message }}
+    <button type="button" class="retry" (click)="store.ensureBackend()">Retry</button>
   </hx-message>
 }
 @if (writeError(); as reason) {

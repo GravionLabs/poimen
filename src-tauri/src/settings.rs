@@ -172,6 +172,8 @@ pub struct Settings {
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
     pub explorer_show_hidden: bool,
+    /// Start the herdr server when nothing answers on its socket (`herdr.autoStart`).
+    pub herdr_auto_start: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
@@ -187,11 +189,13 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("closeAll", "CmdOrCtrl+Shift+W"),
     ("refresh", "CmdOrCtrl+R"),
     ("toggleSidebar", "CmdOrCtrl+B"),
+    ("toggleOutput", "CmdOrCtrl+J"),
     ("splitRight", "CmdOrCtrl+\\"),
     ("splitDown", "CmdOrCtrl+Shift+\\"),
     ("zoomIn", "CmdOrCtrl+="),
     ("zoomOut", "CmdOrCtrl+-"),
     ("zoomReset", "CmdOrCtrl+0"),
+    ("commandPalette", "CmdOrCtrl+Shift+P"),
     ("nextWaiting", "CmdOrCtrl+Shift+A"),
     ("nextTab", "CmdOrCtrl+Alt+Right"),
     ("previousTab", "CmdOrCtrl+Alt+Left"),
@@ -334,6 +338,7 @@ impl Default for Settings {
             sidebar_layout: "tree".into(),
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
+            herdr_auto_start: true,
             spaces_layout: None,
             home: None,
             warnings: Vec::new(),
@@ -439,6 +444,21 @@ fn resolve_explorer(value: &Value, s: &mut Settings) {
     }
 }
 
+/// `herdr.autoStart`; a wrong type warns and keeps `true`.
+fn resolve_herdr(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("herdr must be an object".into());
+        return;
+    };
+    match obj.get("autoStart") {
+        None => {}
+        Some(Value::Bool(b)) => s.herdr_auto_start = *b,
+        Some(_) => s
+            .warnings
+            .push("herdr.autoStart must be true or false; using true".into()),
+    }
+}
+
 /// `spaces.layout` (the layout-bootstrap schema); an invalid one warns and keeps the default.
 fn resolve_spaces(value: &Value, s: &mut Settings) {
     let Some(obj) = value.as_object() else {
@@ -523,6 +543,10 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("explorer") {
         resolve_explorer(value, &mut s);
+    }
+
+    if let Some(value) = root.get("herdr") {
+        resolve_herdr(value, &mut s);
     }
 
     if let Some(value) = root.get("spaces") {
@@ -1015,6 +1039,16 @@ pub fn save_explorer_roots(home: &Path, roots: &[String]) -> Result<(), String> 
     save_with(home, |text| set_explorer_roots_text(text, &roots))
 }
 
+/// Returns `text` with `herdr.autoStart` set, touching nothing else.
+pub fn set_herdr_auto_start_text(text: &str, on: bool) -> Result<String, String> {
+    set_path_text(text, &["herdr", "autoStart"], &on.to_string())
+}
+
+/// Writes `herdr.autoStart` below `home`, like `save_theme`.
+pub fn save_herdr_auto_start(home: &Path, on: bool) -> Result<(), String> {
+    save_with(home, |text| set_herdr_auto_start_text(text, on))
+}
+
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
 pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> {
     save_with(home, |text| set_explorer_show_hidden_text(text, show))
@@ -1111,6 +1145,35 @@ mod tests {
             assert_eq!(s.spaces_layout, None, "{json}");
         }
         assert_eq!(resolve(None, || None).spaces_layout, None);
+    }
+
+    #[test]
+    fn herdr_auto_start_defaults_to_true_and_can_be_turned_off() {
+        assert!(rows("{}").herdr_auto_start);
+        assert!(rows(r#"{"herdr":{}}"#).herdr_auto_start);
+        let off = rows(r#"{"herdr":{"autoStart":false}}"#);
+        assert!(!off.herdr_auto_start);
+        assert!(off.warnings.is_empty());
+    }
+
+    #[test]
+    fn herdr_auto_start_invalid_warns_and_keeps_true() {
+        for json in [r#"{"herdr":{"autoStart":"no"}}"#, r#"{"herdr":true}"#] {
+            let s = rows(json);
+            assert!(s.herdr_auto_start, "{json}");
+            assert_eq!(s.warnings.len(), 1, "{json}");
+        }
+    }
+
+    #[test]
+    fn set_herdr_auto_start_keeps_comments_and_other_keys() {
+        let text = "{\n  // keep\n  \"herdr\": { \"autoStart\": true }\n}";
+        let out = set_herdr_auto_start_text(text, false).unwrap();
+        assert_eq!(out, "{\n  // keep\n  \"herdr\": { \"autoStart\": false}\n}");
+        let created = set_herdr_auto_start_text("{\"theme\":\"dark\"}", false).unwrap();
+        let r = resolve(Some(&created), || None);
+        assert!(!r.herdr_auto_start);
+        assert_eq!(r.theme, "dark");
     }
 
     #[test]

@@ -53,6 +53,7 @@ describe("parseSettings", () => {
       sidebarLayout: "tree",
       explorerRoots: ["~"],
       explorerShowHidden: false,
+      herdrAutoStart: true,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       home: "/Users/x",
       warnings: ["w"],
@@ -159,5 +160,13 @@ describe("theme cycle and persistence", () => {
     await store.start();
     tauri.emit("settings", { ...DEFAULT_SETTINGS, theme: "light" });
     expect(store.settings().theme).toBe("light");
+  });
+});
+
+describe("herdrAutoStart", () => {
+  it("is on unless the backend says false", () => {
+    expect(parseSettings({}).herdrAutoStart).toBe(true);
+    expect(parseSettings({ herdrAutoStart: false }).herdrAutoStart).toBe(false);
+    expect(parseSettings({ herdrAutoStart: "no" }).herdrAutoStart).toBe(true);
   });
 });

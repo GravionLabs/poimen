@@ -62,7 +62,7 @@
     (contextmenu)="$event.preventDefault(); closeMenu()"
   ></button>
   <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
-    @for (item of menu(); track item.action) {
+    @for (item of menuItems(at.id); track item.action) {
       <button
         type="button"
         role="menuitem"

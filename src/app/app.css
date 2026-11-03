@@ -10,12 +10,32 @@
   min-height: 0;
 }
 
+/* The gaps around the framed surfaces; on the left the sidebar resizer fills the gap, unless the
+   sidebar is collapsed. */
 .views {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  padding: 4px 4px 4px 0;
+}
+
+.views.flush {
+  padding-left: 4px;
+}
+
+/* The editor area (all groups and splits) is an inset surface like the sidebar and the panel. */
+.editor-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--h-content-background);
 }
 
 .mode {
@@ -54,17 +74,23 @@
   font-size: 12px;
 }
 
+/* An inset surface like the editor area and the panel: framed on all sides, the gaps show the app
+   ground. */
 .side {
   flex: none;
   display: flex;
   min-width: 0;
   max-width: calc(100vw - 48px - 320px);
+  margin: 4px 0 4px 4px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
+/* The resize handle fills the gap between the sidebar and the editor area. */
 .resizer {
   flex: none;
-  width: 5px;
-  margin: 0 -2px 0 -3px;
+  width: 4px;
   z-index: 1;
   cursor: col-resize;
   touch-action: none;

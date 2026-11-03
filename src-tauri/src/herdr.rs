@@ -99,6 +99,19 @@ pub fn parse_event(line: &str) -> Result<Event, Error> {
     })
 }
 
+/// Whether anything answers on the socket.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Probe {
+    /// Nothing listens: the socket file is missing or the connection is refused (`NotFound`,
+    /// `ConnectionRefused`). Only this state allows starting a server.
+    Down,
+    /// Something is bound to the socket but did not answer `ping` (server still starting, busy,
+    /// closed the connection, or answered with an error). Never start a second server for it.
+    Unresponsive,
+    /// A server answered `ping`; the info is `None` when it reported no version.
+    Up(Option<ServerInfo>),
+}
+
 #[derive(Debug, Clone)]
 pub struct Client {
     socket: PathBuf,
@@ -221,6 +234,220 @@ pub fn created_pane_id(result: &Value) -> Option<String> {
     Some(pane.get("pane_id")?.as_str()?.to_owned())
 }
 
+/// The id of the headless action that prints a plugin's data for a native view (ADR 0004). It is
+/// not meant to be run by a person, so it is hidden from the Plugins menu and the palette.
+pub const DATA_ACTION_ID: &str = "data";
+
+/// An action a herdr plugin offers (`plugin.action.list`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginAction {
+    pub plugin_id: String,
+    pub action_id: String,
+    pub title: String,
+    pub description: Option<String>,
+}
+
+/// Reads `{"type":"plugin_action_list","actions":[...]}`; entries without ids or title are skipped,
+/// and so is the `data` action of the native-view contract ([`DATA_ACTION_ID`]).
+pub fn parse_plugin_actions(result: &Value) -> Vec<PluginAction> {
+    let Some(actions) = result.get("actions").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    actions
+        .iter()
+        .filter_map(|a| {
+            let text = |key: &str| a.get(key)?.as_str().map(str::to_owned);
+            let action_id = text("action_id")?;
+            if action_id == DATA_ACTION_ID {
+                return None;
+            }
+            Some(PluginAction {
+                plugin_id: text("plugin_id")?,
+                action_id,
+                title: text("title")?,
+                description: text("description"),
+            })
+        })
+        .collect()
+}
+
+/// What an invoked plugin action learns about where it was started (`PluginInvocationContext`).
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct PluginContext {
+    pub focused_pane_id: Option<String>,
+    pub focused_pane_cwd: Option<String>,
+    pub focused_pane_agent: Option<String>,
+    pub tab_id: Option<String>,
+    pub tab_label: Option<String>,
+    pub workspace_id: Option<String>,
+    pub workspace_label: Option<String>,
+    /// The URL a link handler action starts for (`clicked_url`, `HERDR_PLUGIN_CLICKED_URL`).
+    pub clicked_url: Option<String>,
+}
+
+/// Params of `plugin.action.invoke`; the context lists only the fields that are set.
+pub fn plugin_invoke_params(plugin_id: &str, action_id: &str, context: &PluginContext) -> Value {
+    let mut ctx = serde_json::Map::new();
+    ctx.insert("invocation_source".into(), json!("poimen"));
+    let fields = [
+        ("focused_pane_id", &context.focused_pane_id),
+        ("focused_pane_cwd", &context.focused_pane_cwd),
+        ("focused_pane_agent", &context.focused_pane_agent),
+        ("tab_id", &context.tab_id),
+        ("tab_label", &context.tab_label),
+        ("workspace_id", &context.workspace_id),
+        ("workspace_label", &context.workspace_label),
+        ("clicked_url", &context.clicked_url),
+    ];
+    for (key, value) in fields {
+        if let Some(value) = non_empty(value.as_deref()) {
+            ctx.insert(key.into(), json!(value));
+        }
+    }
+    json!({ "plugin_id": plugin_id, "action_id": action_id, "context": ctx })
+}
+
+/// A pane a plugin declares (`panes[]` of `plugin.list`), which `plugin.pane.open` can start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginPaneDef {
+    pub plugin_id: String,
+    pub plugin_name: String,
+    pub entrypoint: String,
+    pub title: String,
+}
+
+/// Reads `{"type":"plugin_list","plugins":[...]}` into the panes the enabled plugins declare;
+/// disabled plugins and entries without id or title are skipped. The plugin name falls back to
+/// its id.
+pub fn parse_plugin_pane_defs(result: &Value) -> Vec<PluginPaneDef> {
+    let Some(plugins) = result.get("plugins").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut defs = Vec::new();
+    for plugin in plugins {
+        let Some(plugin_id) = plugin.get("plugin_id").and_then(Value::as_str) else {
+            continue;
+        };
+        if plugin.get("enabled").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        let name = plugin
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(plugin_id);
+        let panes = plugin.get("panes").and_then(Value::as_array);
+        for pane in panes.into_iter().flatten() {
+            let (Some(entrypoint), Some(title)) = (
+                pane.get("id").and_then(Value::as_str),
+                pane.get("title").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            defs.push(PluginPaneDef {
+                plugin_id: plugin_id.to_owned(),
+                plugin_name: name.to_owned(),
+                entrypoint: entrypoint.to_owned(),
+                title: title.to_owned(),
+            });
+        }
+    }
+    defs
+}
+
+/// The Claude Code session of a pane (`agent` and `agent_session.value` of `pane.list`) and the
+/// directory the session was started in; the transcript files are found from these.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSession {
+    pub session: String,
+    pub cwd: String,
+}
+
+/// A session id is used as a file name below `~/.claude/projects`; only `[A-Za-z0-9_-]+` is
+/// accepted, so a value reported by a pane cannot escape that directory.
+pub fn is_safe_session_id(session: &str) -> bool {
+    !session.is_empty()
+        && session
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// Reads the Claude session of `pane_id` out of a `pane.list` result; `None` for another pane, a
+/// non-Claude agent, or a pane without a session id.
+pub fn parse_claude_session(result: &Value, pane_id: &str) -> Option<AgentSession> {
+    let pane = result
+        .get("panes")?
+        .as_array()?
+        .iter()
+        .find(|p| p.get("pane_id").and_then(Value::as_str) == Some(pane_id))?;
+    if pane.get("agent")?.as_str()? != "claude" {
+        return None;
+    }
+    let session = pane.get("agent_session")?.get("value")?.as_str()?;
+    let cwd = pane.get("cwd")?.as_str()?;
+    (is_safe_session_id(session) && !cwd.is_empty()).then(|| AgentSession {
+        session: session.to_owned(),
+        cwd: cwd.to_owned(),
+    })
+}
+
+/// A plugin pane herdr reports (`plugin_pane_opened`, `plugin_pane_focused`, `plugin_pane_closed`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PluginPane {
+    pub plugin_id: String,
+    pub entrypoint: String,
+    pub pane_id: String,
+}
+
+/// Reads `{"type":"plugin_pane_opened","plugin_pane":{plugin_id,entrypoint,pane:{pane_id,..}}}`
+/// (the same shape for focused and closed).
+pub fn parse_plugin_pane(result: &Value) -> Option<PluginPane> {
+    let info = result.get("plugin_pane")?;
+    let text = |v: Option<&Value>| v?.as_str().map(str::to_owned);
+    Some(PluginPane {
+        plugin_id: text(info.get("plugin_id"))?,
+        entrypoint: text(info.get("entrypoint"))?,
+        pane_id: text(info.get("pane")?.get("pane_id"))?,
+    })
+}
+
+/// Params of `plugin.pane.open`: the pane opens as a herdr tab (`placement: tab`) and takes focus,
+/// so poimen can show it as an editor tab.
+pub fn plugin_pane_open_params(
+    plugin_id: &str,
+    entrypoint: &str,
+    workspace_id: Option<&str>,
+) -> Value {
+    let mut params = json!({
+        "plugin_id": plugin_id,
+        "entrypoint": entrypoint,
+        "placement": "tab",
+        "focus": true,
+    });
+    if let Some(id) = non_empty(workspace_id) {
+        params["workspace_id"] = json!(id);
+    }
+    params
+}
+
+/// Read/write timeout of one `Client::probe`.
+const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// `Down` only when nothing listens (socket file missing, connection refused); every other
+/// failure means something may be bound to the socket, so it is `Unresponsive`.
+pub fn classify_probe_error(err: &Error) -> Probe {
+    match err {
+        Error::Io(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            Probe::Down
+        }
+        _ => Probe::Unresponsive,
+    }
+}
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 fn next_id() -> String {
@@ -252,6 +479,32 @@ impl Client {
     /// The running herdr's version, or `None` when it is unreachable or too old to say.
     pub fn info(&self) -> Option<ServerInfo> {
         parse_ping(&self.request("ping", json!({})).ok()?)
+    }
+
+    /// Asks the socket once whether a server answers (`ping`). Never starts anything. Reads and
+    /// writes time out after `PROBE_TIMEOUT`, so a socket that accepts but never answers cannot
+    /// hold the caller.
+    pub fn probe(&self) -> Probe {
+        let result = UnixStream::connect(&self.socket).and_then(|mut stream| {
+            stream.set_read_timeout(Some(PROBE_TIMEOUT))?;
+            stream.set_write_timeout(Some(PROBE_TIMEOUT))?;
+            stream.write_all(request_line(&next_id(), "ping", &json!({})).as_bytes())?;
+            Ok(stream)
+        });
+        let stream = match result {
+            Ok(stream) => stream,
+            Err(err) => return classify_probe_error(&Error::Io(err)),
+        };
+        let mut line = String::new();
+        let answer = match BufReader::new(stream).read_line(&mut line) {
+            Ok(0) => Err(Error::Protocol("connection closed before response".into())),
+            Ok(_) => parse_response(&line),
+            Err(err) => Err(Error::Io(err)),
+        };
+        match answer {
+            Ok(result) => Probe::Up(parse_ping(&result)),
+            Err(err) => classify_probe_error(&err),
+        }
     }
 
     pub fn subscribe(&self, subscriptions: Vec<Value>) -> Result<Subscription, Error> {
@@ -292,7 +545,247 @@ impl Subscription {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn claude_session_is_read_from_the_pane_list() {
+        let result = json!({"panes": [
+            {"pane_id": "w1:p1", "agent": "claude", "cwd": "/home/u/proj",
+             "agent_session": {"agent": "claude", "kind": "id", "value": "abc-123"}},
+            {"pane_id": "w1:p2", "agent": "codex", "cwd": "/x",
+             "agent_session": {"value": "zzz"}},
+            {"pane_id": "w1:p3", "cwd": "/x"},
+            {"pane_id": "w1:p4", "agent": "claude", "cwd": "/x"}
+        ]});
+        assert_eq!(
+            parse_claude_session(&result, "w1:p1"),
+            Some(AgentSession {
+                session: "abc-123".into(),
+                cwd: "/home/u/proj".into()
+            })
+        );
+        assert_eq!(parse_claude_session(&result, "w1:p2"), None);
+        assert_eq!(parse_claude_session(&result, "w1:p3"), None);
+        assert_eq!(parse_claude_session(&result, "w1:p4"), None);
+        assert_eq!(parse_claude_session(&result, "w9:p9"), None);
+        assert_eq!(parse_claude_session(&json!({}), "w1:p1"), None);
+    }
+
+    #[test]
+    fn claude_session_ids_must_be_plain_file_names() {
+        let with = |v: &str| {
+            json!({"panes": [{"pane_id": "p", "agent": "claude", "cwd": "/x",
+                "agent_session": {"value": v}}]})
+        };
+        for bad in ["../x", "/abs", "", "a/b", "..", "a.b"] {
+            assert_eq!(parse_claude_session(&with(bad), "p"), None, "{bad}");
+        }
+        let uuid = "0b7e1c52-3f4a-4d2e-9a61-5c8d7e2f1a90";
+        assert_eq!(
+            parse_claude_session(&with(uuid), "p").unwrap().session,
+            uuid
+        );
+    }
+
+    #[test]
+    fn plugin_actions_are_parsed_and_incomplete_ones_skipped() {
+        let result = json!({"type": "plugin_action_list", "actions": [
+            {"plugin_id": "link-trim", "action_id": "open", "title": "Open link", "command": ["node"]},
+            {"plugin_id": "x", "action_id": "y", "title": "Y", "description": "why"},
+            {"plugin_id": "broken"}
+        ]});
+        let actions = parse_plugin_actions(&result);
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].plugin_id, "link-trim");
+        assert_eq!(actions[0].description, None);
+        assert_eq!(actions[1].description.as_deref(), Some("why"));
+        assert!(parse_plugin_actions(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn plugin_pane_defs_come_from_enabled_plugins_with_a_title() {
+        let result = json!({"type": "plugin_list", "plugins": [
+            {"plugin_id": "deliver-board", "name": "Deliver Board", "enabled": true, "panes": [
+                {"id": "board", "title": "Deliver board", "placement": "popup", "command": ["node"]},
+                {"id": "broken"}
+            ]},
+            {"plugin_id": "review-popup", "panes": [{"id": "review", "title": "Review"}]},
+            {"plugin_id": "off", "enabled": false, "panes": [{"id": "x", "title": "X"}]},
+            {"plugin_id": "agent-notify", "events": []}
+        ]});
+        let defs = parse_plugin_pane_defs(&result);
+        assert_eq!(defs.len(), 2);
+        assert_eq!(defs[0].plugin_name, "Deliver Board");
+        assert_eq!(defs[0].entrypoint, "board");
+        assert_eq!(defs[1].plugin_name, "review-popup");
+        assert!(parse_plugin_pane_defs(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn plugin_pane_results_are_parsed_for_open_focus_and_close() {
+        for kind in [
+            "plugin_pane_opened",
+            "plugin_pane_focused",
+            "plugin_pane_closed",
+        ] {
+            let result = json!({"type": kind, "plugin_pane": {
+                "plugin_id": "deliver-board", "entrypoint": "board",
+                "pane": {"pane_id": "w1:p4", "terminal_id": "t", "workspace_id": "w1", "tab_id": "w1:t2"}
+            }});
+            assert_eq!(
+                parse_plugin_pane(&result),
+                Some(PluginPane {
+                    plugin_id: "deliver-board".into(),
+                    entrypoint: "board".into(),
+                    pane_id: "w1:p4".into(),
+                })
+            );
+        }
+        assert_eq!(parse_plugin_pane(&json!({"type": "ok"})), None);
+        assert_eq!(
+            parse_plugin_pane(&json!({"plugin_pane": {"plugin_id": "x"}})),
+            None
+        );
+    }
+
+    #[test]
+    fn plugin_pane_open_params_ask_for_a_focused_tab() {
+        assert_eq!(
+            plugin_pane_open_params("review-popup", "review", None),
+            json!({"plugin_id": "review-popup", "entrypoint": "review", "placement": "tab", "focus": true})
+        );
+        assert_eq!(
+            plugin_pane_open_params("review-popup", "review", Some("w2"))["workspace_id"],
+            "w2"
+        );
+        assert!(plugin_pane_open_params("a", "b", Some(" "))["workspace_id"].is_null());
+    }
+
+    #[test]
+    fn the_data_action_is_hidden_from_the_runnable_actions() {
+        let result = json!({"type": "plugin_action_list", "actions": [
+            {"plugin_id": "deliver-board", "action_id": "open", "title": "Open the deliver board"},
+            {"plugin_id": "deliver-board", "action_id": "data", "title": "Deliver board data (JSON)"}
+        ]});
+        let actions = parse_plugin_actions(&result);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].action_id, "open");
+    }
+
+    #[test]
+    fn plugin_invoke_params_carry_the_clicked_url() {
+        let ctx = PluginContext {
+            focused_pane_cwd: Some("/r".into()),
+            clicked_url: Some("https://github.com/o/r/issues/7".into()),
+            ..Default::default()
+        };
+        let params = plugin_invoke_params("deliver-starter", "start-link", &ctx);
+        assert_eq!(
+            params["context"]["clicked_url"],
+            "https://github.com/o/r/issues/7"
+        );
+        assert_eq!(params["context"]["focused_pane_cwd"], "/r");
+    }
+
+    #[test]
+    fn plugin_invoke_params_carry_the_set_context_fields() {
+        let ctx = PluginContext {
+            focused_pane_id: Some("p_1".into()),
+            workspace_id: Some("w_1".into()),
+            tab_label: Some("  ".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            plugin_invoke_params("review-popup", "open", &ctx),
+            json!({"plugin_id": "review-popup", "action_id": "open", "context": {
+                "invocation_source": "poimen", "focused_pane_id": "p_1", "workspace_id": "w_1"
+            }})
+        );
+    }
     use super::*;
+
+    fn io_err(kind: io::ErrorKind) -> Error {
+        Error::Io(io::Error::from(kind))
+    }
+
+    #[test]
+    fn only_a_missing_or_refusing_socket_is_down() {
+        assert_eq!(
+            classify_probe_error(&io_err(io::ErrorKind::NotFound)),
+            Probe::Down
+        );
+        assert_eq!(
+            classify_probe_error(&io_err(io::ErrorKind::ConnectionRefused)),
+            Probe::Down
+        );
+    }
+
+    #[test]
+    fn any_other_failure_is_unresponsive() {
+        for kind in [
+            io::ErrorKind::WouldBlock,
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::PermissionDenied,
+        ] {
+            assert_eq!(classify_probe_error(&io_err(kind)), Probe::Unresponsive);
+        }
+        assert_eq!(
+            classify_probe_error(&Error::Protocol("closed".into())),
+            Probe::Unresponsive
+        );
+        let api = Error::Api {
+            code: "busy".into(),
+            message: "starting".into(),
+        };
+        assert_eq!(classify_probe_error(&api), Probe::Unresponsive);
+    }
+
+    fn probe_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("poimen-probe-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn probing_a_missing_socket_is_down() {
+        let dir = probe_dir("missing");
+        let client = Client {
+            socket: dir.join("none.sock"),
+        };
+        assert_eq!(client.probe(), Probe::Down);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn probing_a_socket_that_never_answers_times_out_as_unresponsive() {
+        let dir = probe_dir("silent");
+        let path = dir.join("s.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let client = Client { socket: path };
+        assert_eq!(client.probe(), Probe::Unresponsive);
+        drop(listener);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn probing_a_socket_that_answers_is_up() {
+        let dir = probe_dir("up");
+        let path = dir.join("s.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let id = serde_json::from_str::<Value>(&line).unwrap()["id"].clone();
+            let reply = json!({"id": id, "result": {"type": "pong", "version": "0.9.5"}});
+            writeln!(reader.get_mut(), "{reply}").unwrap();
+        });
+        let client = Client { socket: path };
+        assert!(matches!(client.probe(), Probe::Up(_)));
+        server.join().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |key| {

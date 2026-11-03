@@ -1,16 +1,21 @@
+mod backend;
 mod git;
+mod gui_path;
 mod herdr;
 mod layout;
 #[cfg(test)]
 mod live;
+mod plugin_view;
 mod schemes;
 mod settings;
 mod spaces;
 mod stream;
+mod transcripts;
 mod watch;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde_json::{Value, json};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -20,6 +25,62 @@ use herdr::Client;
 use stream::{Mode, OpenRequest, Sessions};
 
 struct HerdrBin(PathBuf);
+
+/// Serializes `ensure_backend`.
+#[derive(Default)]
+struct StartLock(std::sync::Arc<Mutex<()>>);
+
+/// The running subagent transcript watches by key: one per frontend follower (the output panel,
+/// each visible flow tab), each with at most one watch.
+#[derive(Default)]
+struct SubagentWatch(Mutex<Watches<transcripts::WatchHandle>>);
+
+/// Values by key, each with the generation of the latest command for that key.
+///
+/// Every command takes a generation when it starts; a result that finishes after a newer command
+/// for the same key (another watch or an unwatch) began is stale and dropped instead of stored.
+/// Generations are unique across keys, so a key removed and begun again never matches an older
+/// in-flight command.
+struct Watches<T> {
+    next: u64,
+    slots: HashMap<String, (u64, Option<T>)>,
+}
+
+impl<T> Default for Watches<T> {
+    fn default() -> Self {
+        Self {
+            next: 0,
+            slots: HashMap::new(),
+        }
+    }
+}
+
+impl<T> Watches<T> {
+    /// A new command for `key` starts: older in-flight commands for it become stale.
+    fn begin(&mut self, key: &str) -> u64 {
+        self.next += 1;
+        self.slots.entry(key.to_owned()).or_insert((0, None)).0 = self.next;
+        self.next
+    }
+
+    /// Stores `value` for `key` unless a newer command began since `generation` or the key was
+    /// removed; the previous value is dropped (stopped) when stored. `false` for a stale result,
+    /// which is dropped.
+    fn store(&mut self, key: &str, generation: u64, value: Option<T>) -> bool {
+        match self.slots.get_mut(key) {
+            Some(slot) if slot.0 == generation => {
+                slot.1 = value;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Drops the value of `key` and makes every in-flight command for it stale.
+    fn remove(&mut self, key: &str) {
+        self.slots.remove(key);
+    }
+}
 
 /// Workspaces, tabs and panes in one call; the frontend rebuilds its tree from it.
 #[tauri::command]
@@ -102,6 +163,117 @@ async fn pane_rename(
 ) -> Result<(), String> {
     let params = herdr::pane_rename_params(&pane_id, label.as_deref());
     herdr_call(client.inner(), "pane.rename", params).await?;
+    Ok(())
+}
+
+/// Lists the actions of all herdr plugins (`plugin.action.list`).
+#[tauri::command]
+async fn plugin_actions(client: State<'_, Client>) -> Result<Vec<herdr::PluginAction>, String> {
+    let result = herdr_call(client.inner(), "plugin.action.list", json!({})).await?;
+    Ok(herdr::parse_plugin_actions(&result))
+}
+
+/// Runs a plugin action (`plugin.action.invoke`) with the focused pane and workspace as context.
+#[tauri::command]
+async fn plugin_invoke(
+    client: State<'_, Client>,
+    plugin_id: String,
+    action_id: String,
+    context: herdr::PluginContext,
+) -> Result<(), String> {
+    let params = herdr::plugin_invoke_params(&plugin_id, &action_id, &context);
+    herdr_call(client.inner(), "plugin.action.invoke", params).await?;
+    Ok(())
+}
+
+/// The deliver board for every repository among the pane directories of the herdr session: runs the
+/// plugin's `data` action per repository (ADR 0004). Repositories come from herdr's own panes, so
+/// only known spaces are ever passed to the plugin. Read-only.
+#[tauri::command]
+async fn deliver_board(
+    client: State<'_, Client>,
+    bin: State<'_, HerdrBin>,
+) -> Result<plugin_view::BoardView, String> {
+    let client = client.inner().clone();
+    let herdr_bin = bin.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let list = client
+            .request("plugin.list", json!({}))
+            .map_err(|e| e.to_string())?;
+        let panes = client
+            .request("pane.list", json!({}))
+            .map_err(|e| e.to_string())?;
+        let mut dirs: Vec<String> = panes["panes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| {
+                ["foreground_cwd", "cwd"]
+                    .iter()
+                    .find_map(|k| p.get(*k)?.as_str().filter(|s| !s.is_empty()))
+                    .map(str::to_owned)
+            })
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        let roots = git::repo_roots(&dirs);
+        let state = plugin_state_dir("deliver-board");
+        Ok(plugin_view::load_board(&list, &roots, &state, &herdr_bin))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Where poimen keeps the state (the `gh` cache) of a plugin it runs itself: herdr does not report
+/// the plugin's own state directory, so it is `~/.config/poimen/plugin-state/<id>`.
+fn plugin_state_dir(plugin_id: &str) -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home)
+        .join(".config/poimen/plugin-state")
+        .join(plugin_id)
+}
+
+/// Lists the panes plugins declare (`panes[]` of `plugin.list`).
+#[tauri::command]
+async fn plugin_pane_defs(client: State<'_, Client>) -> Result<Vec<herdr::PluginPaneDef>, String> {
+    let result = herdr_call(client.inner(), "plugin.list", json!({})).await?;
+    Ok(herdr::parse_plugin_pane_defs(&result))
+}
+
+/// Opens a plugin pane as a tab (`plugin.pane.open`); returns the pane herdr created.
+#[tauri::command]
+async fn plugin_pane_open(
+    client: State<'_, Client>,
+    plugin_id: String,
+    entrypoint: String,
+    workspace_id: Option<String>,
+) -> Result<herdr::PluginPane, String> {
+    let params = herdr::plugin_pane_open_params(&plugin_id, &entrypoint, workspace_id.as_deref());
+    let result = herdr_call(client.inner(), "plugin.pane.open", params).await?;
+    herdr::parse_plugin_pane(&result).ok_or_else(|| "herdr answered without a plugin pane".into())
+}
+
+/// Focuses a plugin pane in herdr (`plugin.pane.focus`).
+#[tauri::command]
+async fn plugin_pane_focus(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
+    herdr_call(
+        client.inner(),
+        "plugin.pane.focus",
+        json!({ "pane_id": pane_id }),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Closes a plugin pane in herdr (`plugin.pane.close`); only on an explicit user action.
+#[tauri::command]
+async fn plugin_pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
+    herdr_call(
+        client.inner(),
+        "plugin.pane.close",
+        json!({ "pane_id": pane_id }),
+    )
+    .await?;
     Ok(())
 }
 
@@ -227,6 +399,30 @@ async fn herdr_info(client: State<'_, Client>) -> Result<Option<herdr::ServerInf
         .map_err(|e| e.to_string())
 }
 
+/// Starts the herdr server when nothing answers on its socket (and `herdr.autoStart` allows it),
+/// then waits until it answers. Runs at start and on Retry; one at a time so a retry during a
+/// start never launches a second server.
+#[tauri::command]
+async fn ensure_backend(
+    client: State<'_, Client>,
+    lock: State<'_, StartLock>,
+) -> Result<backend::BackendStatus, String> {
+    let client = client.inner().clone();
+    let lock = lock.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use backend::Backend;
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let auto_start = home_dir()
+            .map(|h| settings::load(&h).herdr_auto_start)
+            .unwrap_or(true);
+        backend::HerdrBackend::new(backend::SystemRunner::new(client), auto_start)
+            .ensure_running()
+            .into()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// The running poimen build's version (Tauri app version).
 #[tauri::command]
 fn app_version(app: AppHandle) -> String {
@@ -284,6 +480,13 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
+/// Writes only `herdr.autoStart`; the settings watcher emits the change.
+#[tauri::command]
+fn set_herdr_auto_start(on: bool) -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::save_herdr_auto_start(&home, on)
+}
+
 /// Writes only `spaces.layout` after validating it; the settings watcher emits the change.
 #[tauri::command]
 fn set_spaces_layout(layout: serde_json::Value) -> Result<(), String> {
@@ -306,12 +509,51 @@ fn default_spaces_layout() -> layout::Layout {
 
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
-async fn repo_info(
-    dirs: Vec<String>,
-) -> Result<std::collections::HashMap<String, git::RepoInfo>, String> {
+async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || git::infos(dirs))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Starts following the subagent transcripts of the Claude Code agent in `pane_id` (replacing the
+/// previous watch); updates arrive as `subagents` events. `false` when the pane has no Claude
+/// session or its transcript is not found; nothing is watched then. Read-only.
+#[tauri::command]
+async fn subagents_watch(
+    app: AppHandle,
+    client: State<'_, Client>,
+    watch: State<'_, SubagentWatch>,
+    key: String,
+    pane_id: String,
+) -> Result<bool, String> {
+    let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
+    let panes = herdr_call(client.inner(), "pane.list", json!({})).await?;
+    let found = herdr::parse_claude_session(&panes, &pane_id).and_then(|s| {
+        let root = transcripts::projects_root(&home_dir()?);
+        let dir = transcripts::locate_project_dir(&root, &s.cwd, &s.session)?;
+        Some((dir, s.session))
+    });
+    let Some((dir, session)) = found else {
+        let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+        watches.store(&key, generation, None);
+        return Ok(false);
+    };
+    let (id, follower) = (session.clone(), key.clone());
+    let handle = transcripts::watch(&dir, &session, move |update| {
+        let event = json!({ "key": follower, "session": id, "update": update });
+        let _ = app.emit("subagents", event);
+    })?;
+    let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+    // A stale handle is dropped here, which stops its watcher; so is one whose key was unwatched.
+    Ok(watches.store(&key, generation, Some(handle)))
+}
+
+/// Stops the subagent watch of `key` and forgets the key.
+#[tauri::command]
+fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
+    if let Ok(mut watches) = watch.0.lock() {
+        watches.remove(&key);
+    }
 }
 
 #[tauri::command]
@@ -483,6 +725,7 @@ fn build_menu(
         true,
         &[
             &item("toggleSidebar", "Toggle Sidebar")?,
+            &item("toggleOutput", "Toggle Output Panel")?,
             &sep()?,
             &item("splitRight", "Split Right")?,
             &item("splitDown", "Split Down")?,
@@ -500,6 +743,8 @@ fn build_menu(
         "Go",
         true,
         &[
+            &item("commandPalette", "Command Palette...")?,
+            &sep()?,
             &item("nextWaiting", "Next Waiting Agent")?,
             &sep()?,
             &item("nextTab", "Next Tab")?,
@@ -521,7 +766,7 @@ fn build_menu(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let bin = stream::resolve_bin(|key| std::env::var(key).ok(), |path| path.is_file());
+    let bin = stream::resolve_bin_from_env();
     let client = Client::from_env();
 
     tauri::Builder::default()
@@ -529,7 +774,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(client.clone())
         .manage(Sessions::default())
+        .manage(SubagentWatch::default())
         .manage(HerdrBin(bin))
+        .manage(StartLock::default())
         .setup(move |app| {
             let handle = app.handle().clone();
             let shortcuts = home_dir()
@@ -572,12 +819,21 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             snapshot,
             herdr_info,
+            ensure_backend,
+            set_herdr_auto_start,
             pane_split,
             pane_close,
             agent_start,
             agent_rename,
             pane_rename,
             terminal_create,
+            plugin_actions,
+            plugin_invoke,
+            plugin_pane_defs,
+            deliver_board,
+            plugin_pane_open,
+            plugin_pane_focus,
+            plugin_pane_close,
             create_space,
             list_dirs,
             list_child_dirs,
@@ -593,6 +849,8 @@ pub fn run() {
             remove_spaces_layout,
             default_spaces_layout,
             repo_info,
+            subagents_watch,
+            subagents_unwatch,
             open_terminal,
             terminal_input,
             terminal_resize,
@@ -608,4 +866,59 @@ pub fn run() {
                 app.state::<Sessions>().close_all();
             }
         });
+}
+
+#[cfg(test)]
+mod subagent_watches_tests {
+    use super::Watches;
+
+    #[test]
+    fn a_newer_command_makes_an_older_result_stale() {
+        let mut watches = Watches::<&str>::default();
+        let older = watches.begin("panel");
+        let newer = watches.begin("panel");
+        assert!(watches.store("panel", newer, Some("new")));
+        assert!(!watches.store("panel", older, Some("old")));
+        assert_eq!(watches.slots["panel"].1, Some("new"));
+    }
+
+    #[test]
+    fn a_remove_before_a_watch_finishes_is_not_undone() {
+        let mut watches = Watches::<&str>::default();
+        let generation = watches.begin("panel");
+        watches.remove("panel");
+        assert!(!watches.store("panel", generation, Some("late")));
+        assert!(!watches.slots.contains_key("panel"));
+    }
+
+    #[test]
+    fn a_key_begun_again_after_a_remove_does_not_take_an_older_result() {
+        let mut watches = Watches::<&str>::default();
+        let older = watches.begin("flow");
+        watches.remove("flow");
+        let newer = watches.begin("flow");
+        assert!(!watches.store("flow", older, Some("old")));
+        assert!(watches.store("flow", newer, Some("new")));
+    }
+
+    #[test]
+    fn keys_do_not_make_each_other_stale() {
+        let mut watches = Watches::<&str>::default();
+        let panel = watches.begin("panel");
+        let flow = watches.begin("flow");
+        assert!(watches.store("panel", panel, Some("p")));
+        assert!(watches.store("flow", flow, Some("f")));
+        watches.remove("flow");
+        assert_eq!(watches.slots["panel"].1, Some("p"));
+    }
+
+    #[test]
+    fn a_current_result_replaces_the_value_and_none_clears_it() {
+        let mut watches = Watches::<&str>::default();
+        let g = watches.begin("panel");
+        assert!(watches.store("panel", g, Some("a")));
+        let g = watches.begin("panel");
+        assert!(watches.store("panel", g, None));
+        assert_eq!(watches.slots["panel"].1, None);
+    }
 }

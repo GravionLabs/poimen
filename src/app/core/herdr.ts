@@ -22,6 +22,8 @@ export interface Pane {
   tab_id: string;
   workspace_id: string;
   agent?: string;
+  /** The agent's own session (Claude Code: the transcript's session id in `value`). */
+  agent_session?: { value?: string };
   agent_status: AgentStatus;
   cwd?: string;
   /** Directory of the foreground process; follows `cd` and is more precise than `cwd`. */
@@ -324,3 +326,38 @@ export const AGENT_KINDS = [
   "maki",
   "muse",
 ] as const;
+
+/** An action a herdr plugin offers (answer of the `plugin_actions` command). */
+export interface PluginAction {
+  plugin_id: string;
+  action_id: string;
+  title: string;
+  description: string | null;
+}
+
+/** Where a plugin action starts: the focused pane and its tab and workspace (herdr's context). */
+export interface PluginContext {
+  focused_pane_id: string | null;
+  focused_pane_cwd: string | null;
+  focused_pane_agent: string | null;
+  tab_id: string | null;
+  tab_label: string | null;
+  workspace_id: string | null;
+  workspace_label: string | null;
+}
+
+/** The context for `paneId` (the focused pane); all `null` when there is no such pane. */
+export function pluginContext(snapshot: Snapshot, paneId: string | null): PluginContext {
+  const pane = paneId ? snapshot.panes.find((p) => p.pane_id === paneId) : undefined;
+  const tab = pane && snapshot.tabs.find((t) => t.tab_id === pane.tab_id);
+  const workspace = pane && snapshot.workspaces.find((w) => w.workspace_id === pane.workspace_id);
+  return {
+    focused_pane_id: pane?.pane_id ?? null,
+    focused_pane_cwd: pane?.foreground_cwd ?? pane?.cwd ?? null,
+    focused_pane_agent: pane?.agent ?? null,
+    tab_id: pane?.tab_id ?? null,
+    tab_label: tab?.label ?? null,
+    workspace_id: pane?.workspace_id ?? null,
+    workspace_label: workspace?.label ?? null,
+  };
+}
