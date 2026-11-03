@@ -54,17 +54,22 @@
   font-size: 12px;
 }
 
+/* An inset surface like the bottom panel: framed on all sides, the gaps show the app ground. */
 .side {
   flex: none;
   display: flex;
   min-width: 0;
   max-width: calc(100vw - 48px - 320px);
+  margin: 4px 0 4px 4px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
+/* The resize handle fills the gap between the sidebar and the editor area. */
 .resizer {
   flex: none;
-  width: 5px;
-  margin: 0 -2px 0 -3px;
+  width: 4px;
   z-index: 1;
   cursor: col-resize;
   touch-action: none;

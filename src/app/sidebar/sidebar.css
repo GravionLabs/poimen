@@ -3,7 +3,6 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--h-content-border-color);
   background: var(--h-content-background);
   overflow-y: auto;
 }
