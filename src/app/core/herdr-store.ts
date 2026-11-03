@@ -21,6 +21,12 @@ export const REFRESH_DEBOUNCE_MS = 80;
 export type ConnectionState =
   { state: "connected" } | { state: "reconnecting" | "unreachable"; reason: string };
 
+/** What `ensure_backend` found: `running` (already), `started`, `disabled` (`herdr.autoStart` off) or `failed`. */
+export interface BackendStatus {
+  state: "running" | "started" | "disabled" | "failed";
+  reason: string | null;
+}
+
 const EMPTY: Snapshot = { workspaces: [], tabs: [], panes: [] };
 
 /**
@@ -40,12 +46,34 @@ export class HerdrStore {
   private readonly _loaded = signal(false);
   private readonly _info = signal<HerdrInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
+  private readonly _backend = signal<BackendStatus | null>(null);
 
   readonly snapshot = this._snapshot.asReadonly();
   /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
   readonly loaded = this._loaded.asReadonly();
   /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
   readonly info = this._info.asReadonly();
+  /** The last result of starting herdr; `null` before the first one. */
+  readonly backend = this._backend.asReadonly();
+  /** Why herdr could not be started; `null` when it ran, started or auto start is off. */
+  readonly startFailure = computed(() => {
+    const b = this._backend();
+    return b?.state === "failed" ? (b.reason ?? "herdr could not be started") : null;
+  });
+  /**
+   * The one message for a disconnected herdr (start failed, reconnecting, unreachable, auto start
+   * off); `null` while connected. A failed start wins over the connection error it causes.
+   */
+  readonly disconnected = computed<string | null>(() => {
+    const failure = this.startFailure();
+    if (failure !== null) return `herdr was not started: ${failure}`;
+    const conn = this.connection();
+    if (conn.state === "connected") return null;
+    const reason = conn.reason ? `: ${conn.reason}` : "";
+    if (conn.state === "reconnecting") return `herdr connection lost, reconnecting${reason}`;
+    const off = this._backend()?.state === "disabled" ? " (auto start is off)" : "";
+    return `herdr not reachable${off}${reason}`;
+  });
   /** The version of this poimen build. */
   readonly appVersion = this._appVersion.asReadonly();
   /** Why herdr is not reachable; `null` while connected. */
@@ -80,7 +108,27 @@ export class HerdrStore {
     this.unlisten = this.bridge.listen<HerdrEvent>("herdr", (event) => this.handle(event));
     await this.unlisten;
     void this.readAppVersion();
+    const started = this.ensureBackend(false);
     await this.refresh();
+    await started;
+  }
+
+  /**
+   * Starts herdr when nothing answers (the backend checks the socket first and honors
+   * `herdr.autoStart`), then re-reads the snapshot (at start only after a start). Runs at start and on Retry; one attempt, no loop.
+   */
+  async ensureBackend(retry = true): Promise<void> {
+    try {
+      const status = await this.bridge.invoke<BackendStatus | undefined>("ensure_backend");
+      this._backend.set(status ?? null);
+    } catch (err) {
+      this._backend.set({ state: "failed", reason: String(err) });
+    }
+    // At start the first snapshot is already being read; only a started server needs another read.
+    if (retry || this._backend()?.state === "started") {
+      this._info.set(null);
+      await this.refresh();
+    }
   }
 
   /** The next blocked pane after `activeId`, wrapping around. */

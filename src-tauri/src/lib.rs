@@ -1,4 +1,6 @@
+mod backend;
 mod git;
+mod gui_path;
 mod herdr;
 mod layout;
 #[cfg(test)]
@@ -23,6 +25,10 @@ use herdr::Client;
 use stream::{Mode, OpenRequest, Sessions};
 
 struct HerdrBin(PathBuf);
+
+/// Serializes `ensure_backend`.
+#[derive(Default)]
+struct StartLock(std::sync::Arc<Mutex<()>>);
 
 /// The running subagent transcript watches by key: one per frontend follower (the output panel,
 /// each visible flow tab), each with at most one watch.
@@ -393,6 +399,30 @@ async fn herdr_info(client: State<'_, Client>) -> Result<Option<herdr::ServerInf
         .map_err(|e| e.to_string())
 }
 
+/// Starts the herdr server when nothing answers on its socket (and `herdr.autoStart` allows it),
+/// then waits until it answers. Runs at start and on Retry; one at a time so a retry during a
+/// start never launches a second server.
+#[tauri::command]
+async fn ensure_backend(
+    client: State<'_, Client>,
+    lock: State<'_, StartLock>,
+) -> Result<backend::BackendStatus, String> {
+    let client = client.inner().clone();
+    let lock = lock.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        use backend::Backend;
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let auto_start = home_dir()
+            .map(|h| settings::load(&h).herdr_auto_start)
+            .unwrap_or(true);
+        backend::HerdrBackend::new(backend::SystemRunner::new(client), auto_start)
+            .ensure_running()
+            .into()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// The running poimen build's version (Tauri app version).
 #[tauri::command]
 fn app_version(app: AppHandle) -> String {
@@ -448,6 +478,13 @@ fn set_explorer_roots(roots: Vec<String>) -> Result<(), String> {
 fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     let home = home_dir().ok_or("HOME is not set")?;
     settings::save_explorer_show_hidden(&home, show)
+}
+
+/// Writes only `herdr.autoStart`; the settings watcher emits the change.
+#[tauri::command]
+fn set_herdr_auto_start(on: bool) -> Result<(), String> {
+    let home = home_dir().ok_or("HOME is not set")?;
+    settings::save_herdr_auto_start(&home, on)
 }
 
 /// Writes only `spaces.layout` after validating it; the settings watcher emits the change.
@@ -739,6 +776,7 @@ pub fn run() {
         .manage(Sessions::default())
         .manage(SubagentWatch::default())
         .manage(HerdrBin(bin))
+        .manage(StartLock::default())
         .setup(move |app| {
             let handle = app.handle().clone();
             let shortcuts = home_dir()
@@ -781,6 +819,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             snapshot,
             herdr_info,
+            ensure_backend,
+            set_herdr_auto_start,
             pane_split,
             pane_close,
             agent_start,

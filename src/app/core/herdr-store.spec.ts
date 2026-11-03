@@ -189,4 +189,67 @@ describe("HerdrStore", () => {
     expect(tauri.calls("snapshot")).toHaveLength(0);
     injector = Injector.create({ providers: [TauriBridge, HerdrStore] }); // afterEach destroys again
   });
+
+  it("asks the backend to start herdr at start and exposes no failure when it runs", async () => {
+    tauri.answer("ensure_backend", () => ({ state: "started", reason: null }));
+    await store.start();
+    expect(tauri.calls("ensure_backend")).toHaveLength(1);
+    expect(store.backend()?.state).toBe("started");
+    expect(store.startFailure()).toBeNull();
+  });
+
+  it("shows why herdr could not be started and retries only on request", async () => {
+    tauri.answer("ensure_backend", () => ({
+      state: "failed",
+      reason: "`herdr` was not found on PATH",
+    }));
+    await store.start();
+    expect(store.startFailure()).toBe("`herdr` was not found on PATH");
+    expect(tauri.calls("ensure_backend")).toHaveLength(1);
+    tauri.answer("ensure_backend", () => ({ state: "running", reason: null }));
+    await store.ensureBackend();
+    expect(tauri.calls("ensure_backend")).toHaveLength(2);
+    expect(store.startFailure()).toBeNull();
+  });
+
+  it("turns a rejected start call into a failure", async () => {
+    tauri.answer("ensure_backend", () => {
+      throw "boom";
+    });
+    await store.start();
+    expect(store.startFailure()).toBe("boom");
+  });
+
+  it("has one disconnected message per state and none while connected", async () => {
+    tauri.answer("ensure_backend", () => ({ state: "running", reason: null }));
+    await store.start();
+    expect(store.disconnected()).toBeNull();
+
+    tauri.emit("herdr", { kind: "poimen.disconnected", data: { reason: "socket gone" } });
+    expect(store.disconnected()).toBe("herdr connection lost, reconnecting: socket gone");
+
+    tauri.emit("herdr", { kind: "poimen.connected", data: null });
+    expect(store.disconnected()).toBeNull();
+
+    tauri.answer("snapshot", () => {
+      throw "connection refused";
+    });
+    await store.refresh();
+    expect(store.disconnected()).toBe("herdr not reachable: connection refused");
+  });
+
+  it("names a switched-off auto start and prefers a failed start", async () => {
+    tauri.answer("ensure_backend", () => ({ state: "disabled", reason: null }));
+    tauri.answer("snapshot", () => {
+      throw "connection refused";
+    });
+    await store.start();
+    expect(store.disconnected()).toBe(
+      "herdr not reachable (auto start is off): connection refused",
+    );
+
+    tauri.answer("ensure_backend", () => ({ state: "failed", reason: "no herdr" }));
+    await store.ensureBackend();
+    expect(store.disconnected()).toBe("herdr was not started: no herdr");
+  });
 });
