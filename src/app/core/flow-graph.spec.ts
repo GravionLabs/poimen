@@ -204,6 +204,15 @@ describe("buildFlowGraph", () => {
     expect(node(g, "tb").status).toBe("running");
   });
 
+  it("marks a nested agent call with an error result as failed", () => {
+    const g = buildFlowGraph(
+      [agent("a", { tool_use_id: "ta" })],
+      new Map([["a", [use("tb", "Agent", { description: "Bad" }, 12), result("tb", 13, true)]]]),
+      { calls: [mainCall("ta", "Agent")], tools: 0 },
+    );
+    expect(node(g, "tb").status).toBe("failed");
+  });
+
   it("is done when nothing runs and counts running time up to now", () => {
     const g = buildFlowGraph([], noEntries, {
       calls: [mainCall("sr", "Skill", { started: at(0) })],

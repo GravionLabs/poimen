@@ -98,7 +98,7 @@ function callsOf(entries: readonly TranscriptEntry[]): { calls: Call[]; tools: n
         // An agent call's first result may be the acknowledgement of a background launch: the
         // status of an agent comes from its meta, not from here.
         end: skill ? (result?.at ?? null) : null,
-        error: skill && result?.error === true,
+        error: result?.error === true,
       });
     }
   }
