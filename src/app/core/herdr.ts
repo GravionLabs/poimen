@@ -22,6 +22,8 @@ export interface Pane {
   tab_id: string;
   workspace_id: string;
   agent?: string;
+  /** The agent's own session (Claude Code: the transcript's session id in `value`). */
+  agent_session?: { value?: string };
   agent_status: AgentStatus;
   cwd?: string;
   /** Directory of the foreground process; follows `cd` and is more precise than `cwd`. */

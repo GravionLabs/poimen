@@ -1,0 +1,102 @@
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  effect,
+  inject,
+  signal,
+  viewChild,
+} from "@angular/core";
+import { PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT, UiState } from "../core/ui-state";
+import {
+  Subagents,
+  atBottom,
+  reportIndex,
+  subagentLabel,
+  toolSummary,
+  type TranscriptItem,
+} from "../core/transcripts";
+
+/** The tabs of the panel; Output shows subagent transcripts (a Flow tab is meant to join it). */
+export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = { output: "Output" };
+
+/** Bottom panel below the editor area: a tab strip, the subagent dropdown and the Output tab. */
+@Component({
+  selector: "app-bottom-panel",
+  templateUrl: "./bottom-panel.html",
+  styleUrl: "./bottom-panel.css",
+  changeDetection: ChangeDetectionStrategy.OnPush,
+})
+export class BottomPanel {
+  protected readonly ui = inject(UiState);
+  protected readonly subagents = inject(Subagents);
+  protected readonly minHeight = PANEL_MIN_HEIGHT;
+  protected readonly maxHeight = PANEL_MAX_HEIGHT;
+  protected readonly tabs = Object.entries(PANEL_TAB_LABELS);
+  protected readonly label = subagentLabel;
+  protected readonly summary = toolSummary;
+  protected readonly reportIndex = () => reportIndex(this.subagents.items());
+
+  /** Clock for the durations of running subagents. */
+  protected readonly now = signal(Date.now());
+  /** New lines scroll into view until the user scrolls up. */
+  protected readonly following = signal(true);
+  private readonly box = viewChild<ElementRef<HTMLElement>>("box");
+  private drag: { startY: number; startHeight: number } | null = null;
+
+  constructor() {
+    const timer = setInterval(() => this.now.set(Date.now()), 1000);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    effect(() => {
+      this.subagents.items();
+      const element = this.box()?.nativeElement;
+      if (element && this.following())
+        queueMicrotask(() => (element.scrollTop = element.scrollHeight));
+    });
+  }
+
+  protected onScroll(): void {
+    const element = this.box()?.nativeElement;
+    if (element) this.following.set(atBottom(element));
+  }
+
+  protected resume(): void {
+    this.following.set(true);
+    const element = this.box()?.nativeElement;
+    if (element) element.scrollTop = element.scrollHeight;
+  }
+
+  protected pick(event: Event): void {
+    this.subagents.pick((event.target as HTMLSelectElement).value);
+    this.following.set(true);
+  }
+
+  protected dragStart(event: PointerEvent): void {
+    const handle = event.target as HTMLElement;
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+    this.drag = { startY: event.clientY, startHeight: this.ui.panelHeight() };
+  }
+
+  protected dragMove(event: PointerEvent): void {
+    if (this.drag) this.ui.setPanelHeight(this.drag.startHeight + this.drag.startY - event.clientY);
+  }
+
+  protected dragEnd(event: PointerEvent): void {
+    this.drag = null;
+    (event.target as HTMLElement).classList.remove("dragging");
+  }
+
+  protected resizeKey(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 40 : 10;
+    if (event.key === "ArrowUp") this.ui.setPanelHeight(this.ui.panelHeight() + step);
+    else if (event.key === "ArrowDown") this.ui.setPanelHeight(this.ui.panelHeight() - step);
+    else return;
+    event.preventDefault();
+  }
+
+  protected isTool(item: TranscriptItem): item is Extract<TranscriptItem, { kind: "tool" }> {
+    return item.kind === "tool";
+  }
+}

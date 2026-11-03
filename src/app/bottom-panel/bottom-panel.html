@@ -1,0 +1,109 @@
+<div
+  class="resizer"
+  role="separator"
+  aria-orientation="horizontal"
+  aria-label="Resize panel"
+  tabindex="0"
+  [attr.aria-valuenow]="ui.panelHeight()"
+  [attr.aria-valuemin]="minHeight"
+  [attr.aria-valuemax]="maxHeight"
+  (pointerdown)="dragStart($event)"
+  (pointermove)="dragMove($event)"
+  (pointerup)="dragEnd($event)"
+  (pointercancel)="dragEnd($event)"
+  (keydown)="resizeKey($event)"
+></div>
+<header class="head">
+  <div class="tabs" role="tablist" aria-label="Panel">
+    @for (tab of tabs; track tab[0]) {
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        [attr.aria-selected]="ui.panelTab() === tab[0]"
+        [class.on]="ui.panelTab() === tab[0]"
+        (click)="ui.selectPanelTab(tab[0])"
+      >
+        {{ tab[1] }}
+      </button>
+    }
+  </div>
+  @if (ui.panelTab() === "output" && subagents.agents().length) {
+    <select
+      class="picker"
+      aria-label="Subagent"
+      [value]="subagents.selectedId() ?? ''"
+      (change)="pick($event)"
+    >
+      @for (agent of subagents.agents(); track agent.agent_id) {
+        <option [value]="agent.agent_id" [selected]="agent.agent_id === subagents.selectedId()">
+          {{ label(agent, now()) }}
+        </option>
+      }
+    </select>
+  }
+  <span class="spacer"></span>
+  @if (!following()) {
+    <button type="button" class="action" (click)="resume()">Resume auto-scroll</button>
+  }
+  <button
+    type="button"
+    class="action"
+    aria-label="Hide panel"
+    title="Hide panel"
+    (click)="ui.togglePanel()"
+  >
+    x
+  </button>
+</header>
+@if (ui.panelTab() === "output") {
+  <div class="body" #box (scroll)="onScroll()">
+    @if (!subagents.supported()) {
+      <p class="empty">
+        Subagent output is available for Claude Code agents. Select a pane that runs one.
+      </p>
+    } @else if (!subagents.agents().length) {
+      <p class="empty">This agent has not started a subagent yet.</p>
+    } @else {
+      @for (item of subagents.items(); track $index) {
+        @if (isTool(item)) {
+          <details class="tool" [class.error]="item.result?.isError">
+            <summary>
+              <span class="tool-name">{{ item.name }}</span>
+              <span class="tool-arg">{{ summary(item.input) }}</span>
+              @if (!item.result) {
+                <span class="pending">running</span>
+              }
+            </summary>
+            <pre class="io">{{ item.input }}</pre>
+            @if (item.result; as result) {
+              <pre class="io result">{{ result.text }}</pre>
+            }
+          </details>
+        } @else if (item.kind === "thinking") {
+          <details class="thinking">
+            <summary>Thinking</summary>
+            <pre class="io">{{ item.text }}</pre>
+          </details>
+        } @else {
+          <div
+            class="msg"
+            [class.prompt]="item.kind === 'prompt'"
+            [class.report]="subagents.selected()?.status === 'done' && $index === reportIndex()"
+          >
+            <span class="who">
+              {{
+                item.kind === "prompt"
+                  ? "Prompt"
+                  : subagents.selected()?.status === "done" && $index === reportIndex()
+                    ? "Report"
+                    : "Agent"
+              }}
+            </span>
+            <pre class="text">{{ item.text }}</pre>
+          </div>
+        }
+      }
+    }
+  </div>
+}

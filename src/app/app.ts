@@ -31,6 +31,8 @@ import { BOARD_ENTRYPOINT, BOARD_PLUGIN } from "./core/deliver-board";
 import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
+import { BottomPanel } from "./bottom-panel/bottom-panel";
+import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
 import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
@@ -66,6 +68,7 @@ const ZOOM_STEP = 1;
     SplitPane,
     StatusBar,
     Toolbar,
+    BottomPanel,
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
@@ -89,6 +92,7 @@ export class App {
   private readonly palette = inject(CommandPalette);
   protected readonly plugins = inject(PluginActions);
   private readonly pluginPanes = inject(PluginPanes);
+  private readonly subagents = inject(Subagents);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -166,6 +170,11 @@ export class App {
       this.theme.setDark(setting === "system" ? systemDark : setting === "dark");
     });
     destroyRef.onDestroy(this.followSystemTheme());
+    // The output panel follows the active tab's Claude Code agent; nothing is watched while it is hidden.
+    effect(() => {
+      const target = this.subagentTarget();
+      untracked(() => void this.subagents.follow(target?.paneId ?? null, target?.session ?? null));
+    });
     void this.plugins.load();
     void this.prefs.start();
     void this.userSchemes.start();
@@ -176,6 +185,17 @@ export class App {
     });
     void this.store.start().then(() => this.dropMissing());
   }
+
+  /** The pane and Claude session the open output panel follows; `null` when hidden or not Claude. */
+  private readonly subagentTarget = computed(
+    () => {
+      const id = this.activePaneId();
+      const pane = id && this.ui.panelOpen() ? this.pane(id) : undefined;
+      const session = pane?.agent === "claude" ? pane.agent_session?.value : undefined;
+      return pane && session ? { paneId: pane.pane_id, session } : null;
+    },
+    { equal: (a, b) => a?.paneId === b?.paneId && a?.session === b?.session },
+  );
 
   /** Set when restored tabs lost their pane, until dismissed. */
   protected readonly notice = signal<string | null>(null);
@@ -247,6 +267,9 @@ export class App {
         break;
       case "toggleSidebar":
         this.ui.toggleSidebar();
+        break;
+      case "toggleOutput":
+        this.ui.togglePanel();
         break;
       case "splitRight":
         if (active) this.editor.split(active, "row");
