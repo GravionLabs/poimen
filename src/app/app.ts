@@ -24,7 +24,14 @@ import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
-import { EditorTabs, flowPane, tabKind, tabPaneId, type EditorGroup } from "./core/editor-tabs";
+import {
+  EditorTabs,
+  flowPane,
+  flowTab,
+  tabKind,
+  tabPaneId,
+  type EditorGroup,
+} from "./core/editor-tabs";
 import { SettingsView } from "./settings-view/settings-view";
 import { DeliverBoardView } from "./deliver-board/deliver-board-view";
 import { BOARD_ENTRYPOINT, BOARD_PLUGIN } from "./core/deliver-board";
@@ -341,9 +348,10 @@ export class App {
     }
   }
 
-  /** A pane closed in herdr: its tab goes with it. */
+  /** A pane closed in herdr: its tab and its flow tab go with it. */
   protected onPaneClosed(paneId: string): void {
     this.editor.close(paneId);
+    this.editor.close(flowTab(paneId));
   }
 
   /** Context menu of a group's tabs; splitting needs a second tab in the group. */
