@@ -21,6 +21,7 @@ import {
   type SpaceNode,
   type Workspace,
 } from "../core/herdr";
+import { Attention, workspaceUnread } from "../core/attention";
 import { HerdrStore } from "../core/herdr-store";
 import { pluginMenuId } from "../core/plugin-actions";
 import {
@@ -278,6 +279,21 @@ export class Sidebar {
   private readonly injector = inject(Injector);
   protected readonly store = inject(HerdrStore);
   protected readonly spaceActions = inject(SpaceActions);
+  private readonly attn = inject(Attention);
+
+  protected rings(paneId: string): boolean {
+    return this.attn.attention().has(paneId);
+  }
+
+  protected isUnread(paneId: string): boolean {
+    return this.attn.unread().has(paneId);
+  }
+
+  /** Unread panes of a workspace (its row shows the sum). */
+  protected unreadOf(workspaceId: string): number {
+    const space = this.store.spaces().find((s) => s.workspace.workspace_id === workspaceId);
+    return space ? workspaceUnread(space, this.attn.unread()) : 0;
+  }
   protected readonly query = signal("");
   protected readonly selection = signal<string | null>(null);
 

@@ -148,3 +148,18 @@
 .shortcut {
   color: var(--h-text-muted-color);
 }
+
+/* Blocked and not viewed yet: a ring around the tab. */
+.tab.attention {
+  box-shadow:
+    inset 0 0 0 2px var(--status-blocked),
+    0 0 6px var(--status-blocked);
+}
+
+.unread {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-done);
+}
