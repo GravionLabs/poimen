@@ -3,6 +3,8 @@
   display: block;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 5px 5px;
   --ff-flow-background-color: transparent;
   --ff-canvas-background-color: transparent;
   --ff-node-width: auto;
