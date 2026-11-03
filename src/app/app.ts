@@ -24,6 +24,7 @@ import {
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Attention } from "./core/attention";
+import { Notifier } from "./core/notifier";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { UserSchemes } from "./core/user-schemes";
@@ -125,6 +126,7 @@ export class App {
 
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
+  private readonly notifier = inject(Notifier);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Pane>();
   protected readonly groupItems = computed(() => {
@@ -192,7 +194,18 @@ export class App {
       const panes = this.store.panes();
       const viewed = new Set(this.editor.groups().flatMap((g) => (g.activeId ? [g.activeId] : [])));
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
-      untracked(() => this.attention.observe(statuses, viewed));
+      untracked(() => {
+        const changes = this.attention.observe(statuses, viewed);
+        const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
+        this.notifier.notify(changes, {
+          viewed,
+          focused: document.hasFocus(),
+          onBlocked: notifyOnBlocked,
+          onDone: notifyOnDone,
+          label: (id) => this.tabTitle(id),
+          now: Date.now(),
+        });
+      });
     });
     effect(() => {
       const waiting = this.store.waiting();
@@ -202,6 +215,12 @@ export class App {
     const destroyRef = inject(DestroyRef);
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
+    // A click on a system notification opens the tab of the pane it was about.
+    const clicks = this.notifier.listen((paneId) => {
+      const pane = this.pane(paneId);
+      if (pane) this.open(pane);
+    });
+    destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
     effect(() => {
       const { theme: setting, colorSchema } = this.prefs.settings();
       const systemDark = this.systemDark();
@@ -583,6 +602,16 @@ export class App {
   protected jumpToWaiting(): void {
     const next = this.store.nextWaiting(this.editor.activeId());
     if (next) this.open(next);
+  }
+
+  /** Workspace and name of a pane, as its tab shows them. */
+  private tabTitle(id: string): string {
+    const snap = this.store.snapshot();
+    const pane = this.pane(id);
+    if (!pane) return id;
+    const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
+    const workspace = snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label;
+    return tabHeader(workspace, rowName(pane, tabLabel)).title;
   }
 
   private pane(id: string): Pane | undefined {
