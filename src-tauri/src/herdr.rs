@@ -1,12 +1,12 @@
-//! Minimal client for the herdr socket API (newline-delimited JSON over a Unix socket).
+//! Minimal client for the herdr socket API (newline-delimited JSON over a Unix socket; on Windows
+//! herdr serves the same protocol on the named pipe `\\.\pipe\<socket path>`).
 //!
 //! Requests open a short-lived connection; subscriptions keep theirs open.
 //! See <https://herdr.dev> (docs/socket-api) for the protocol.
 
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
@@ -42,7 +42,11 @@ pub fn socket_path_from(env: impl Fn(&str) -> Option<String>) -> PathBuf {
     if let Some(path) = env("HERDR_SOCKET_PATH").filter(|p| !p.is_empty()) {
         return PathBuf::from(path);
     }
-    let base = PathBuf::from(env("HOME").unwrap_or_default()).join(".config/herdr");
+    let base = if cfg!(windows) {
+        PathBuf::from(env("APPDATA").unwrap_or_default()).join("herdr")
+    } else {
+        PathBuf::from(env("HOME").unwrap_or_default()).join(".config/herdr")
+    };
     match env("HERDR_SESSION").filter(|s| !s.is_empty() && s != "default") {
         Some(session) => base.join("sessions").join(session).join("herdr.sock"),
         None => base.join("herdr.sock"),
@@ -429,6 +433,74 @@ pub fn plugin_pane_open_params(
     params
 }
 
+/// The connection to the API socket: a Unix socket, on Windows the named pipe herdr listens on.
+#[cfg(unix)]
+type Stream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type Stream = std::fs::File;
+
+/// The named pipe herdr on Windows serves for the socket path `socket`.
+pub fn pipe_name(socket: &Path) -> String {
+    format!(r"\\.\pipe\{}", socket.display())
+}
+
+#[cfg(unix)]
+fn open_stream(socket: &Path) -> io::Result<Stream> {
+    Stream::connect(socket)
+}
+
+/// Opens the pipe, retrying briefly while every pipe instance is busy (`ERROR_PIPE_BUSY`).
+#[cfg(windows)]
+fn open_stream(socket: &Path) -> io::Result<Stream> {
+    const ERROR_PIPE_BUSY: i32 = 231;
+    let pipe = pipe_name(socket);
+    let mut attempts = 0;
+    loop {
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&pipe)
+        {
+            Err(err) if err.raw_os_error() == Some(ERROR_PIPE_BUSY) && attempts < 20 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            result => return result,
+        }
+    }
+}
+
+/// Sends one `ping` on `stream` and reads the answer.
+fn ping_on(mut stream: Stream) -> Result<Value, Error> {
+    stream.write_all(request_line(&next_id(), "ping", &json!({})).as_bytes())?;
+    let mut line = String::new();
+    match BufReader::new(stream).read_line(&mut line)? {
+        0 => Err(Error::Protocol("connection closed before response".into())),
+        _ => parse_response(&line),
+    }
+}
+
+#[cfg(unix)]
+fn ping_within(socket: &Path, timeout: std::time::Duration) -> Result<Value, Error> {
+    let stream = open_stream(socket)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    ping_on(stream)
+}
+
+/// A pipe handle has no read timeout, so the ping runs on a helper thread and the caller stops
+/// waiting after `timeout` (the thread ends once the server answers or closes the pipe).
+#[cfg(windows)]
+fn ping_within(socket: &Path, timeout: std::time::Duration) -> Result<Value, Error> {
+    let stream = open_stream(socket)?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(ping_on(stream));
+    });
+    rx.recv_timeout(timeout)
+        .unwrap_or_else(|_| Err(Error::Io(io::ErrorKind::TimedOut.into())))
+}
+
 /// Read/write timeout of one `Client::probe`.
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
@@ -461,8 +533,8 @@ impl Client {
         }
     }
 
-    fn connect(&self, method: &str, params: &Value) -> Result<BufReader<UnixStream>, Error> {
-        let mut stream = UnixStream::connect(&self.socket)?;
+    fn connect(&self, method: &str, params: &Value) -> Result<BufReader<Stream>, Error> {
+        let mut stream = open_stream(&self.socket)?;
         stream.write_all(request_line(&next_id(), method, params).as_bytes())?;
         Ok(BufReader::new(stream))
     }
@@ -485,23 +557,7 @@ impl Client {
     /// writes time out after `PROBE_TIMEOUT`, so a socket that accepts but never answers cannot
     /// hold the caller.
     pub fn probe(&self) -> Probe {
-        let result = UnixStream::connect(&self.socket).and_then(|mut stream| {
-            stream.set_read_timeout(Some(PROBE_TIMEOUT))?;
-            stream.set_write_timeout(Some(PROBE_TIMEOUT))?;
-            stream.write_all(request_line(&next_id(), "ping", &json!({})).as_bytes())?;
-            Ok(stream)
-        });
-        let stream = match result {
-            Ok(stream) => stream,
-            Err(err) => return classify_probe_error(&Error::Io(err)),
-        };
-        let mut line = String::new();
-        let answer = match BufReader::new(stream).read_line(&mut line) {
-            Ok(0) => Err(Error::Protocol("connection closed before response".into())),
-            Ok(_) => parse_response(&line),
-            Err(err) => Err(Error::Io(err)),
-        };
-        match answer {
+        match ping_within(&self.socket, PROBE_TIMEOUT) {
             Ok(result) => Probe::Up(parse_ping(&result)),
             Err(err) => classify_probe_error(&err),
         }
@@ -524,7 +580,7 @@ impl Client {
 }
 
 pub struct Subscription {
-    reader: BufReader<UnixStream>,
+    reader: BufReader<Stream>,
 }
 
 impl Subscription {
@@ -756,6 +812,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn probing_a_socket_that_never_answers_times_out_as_unresponsive() {
         let dir = probe_dir("silent");
@@ -767,6 +824,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn probing_a_socket_that_answers_is_up() {
         let dir = probe_dir("up");
@@ -796,12 +854,33 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn socket_path_defaults_to_appdata_on_windows() {
+        let path = socket_path_from(env(&[("APPDATA", r"C:\Users\u\AppData\Roaming")]));
+        assert_eq!(
+            path,
+            PathBuf::from(r"C:\Users\u\AppData\Roaming\herdr\herdr.sock")
+        );
+    }
+
+    #[test]
+    fn pipe_name_prefixes_the_socket_path() {
+        let name = pipe_name(Path::new(r"C:\Users\u\AppData\Roaming\herdr\herdr.sock"));
+        assert_eq!(
+            name,
+            r"\\.\pipe\C:\Users\u\AppData\Roaming\herdr\herdr.sock"
+        );
+    }
+
+    #[cfg(unix)]
     #[test]
     fn socket_path_defaults_to_config_dir() {
         let path = socket_path_from(env(&[("HOME", "/home/u")]));
         assert_eq!(path, PathBuf::from("/home/u/.config/herdr/herdr.sock"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn socket_path_uses_named_session() {
         let path = socket_path_from(env(&[("HOME", "/home/u"), ("HERDR_SESSION", "work")]));
