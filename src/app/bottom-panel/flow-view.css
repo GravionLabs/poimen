@@ -39,29 +39,56 @@
 
 .minimap {
   position: absolute;
-  right: 8px;
+  left: 8px;
   bottom: 8px;
   width: 140px;
   height: 80px;
 }
 
+/* Floating toolbar, as in Ariadne's editor: icon buttons in a pill; more actions (export, ...) go
+   in as further .icon-button, grouped with .divider. */
 .tools {
   position: absolute;
-  left: 8px;
+  right: 8px;
   bottom: 8px;
   display: flex;
+  align-items: center;
   gap: 2px;
+  padding: 3px;
+  background: var(--h-surface-color, Canvas);
+  border: 1px solid var(--h-border-color);
+  border-radius: 8px;
 }
 
-.tools button {
-  font: inherit;
-  color: inherit;
-  background: var(--h-surface-color, transparent);
-  border: 1px solid var(--h-border-color);
-  border-radius: 3px;
-  min-width: 24px;
-  padding: 2px 6px;
+.tools .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--h-text-muted-color);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
   cursor: pointer;
+}
+
+.tools .icon-button:hover {
+  color: var(--h-text-color);
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.tools .icon-button:focus-visible {
+  outline: 2px solid var(--h-primary-color);
+  outline-offset: -2px;
+}
+
+.tools .divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--h-border-color);
 }
 
 .node {

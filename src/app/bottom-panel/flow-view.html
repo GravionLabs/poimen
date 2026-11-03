@@ -77,8 +77,27 @@
   </f-canvas>
   <f-minimap class="minimap" [fMinSize]="600" />
 </f-flow>
-<div class="tools">
-  <button type="button" aria-label="Zoom in" title="Zoom in" (click)="zoomIn()">+</button>
-  <button type="button" aria-label="Zoom out" title="Zoom out" (click)="zoomOut()">-</button>
-  <button type="button" aria-label="Fit to view" title="Fit to view" (click)="fit()">Fit</button>
+<div class="tools" role="toolbar" aria-label="Flow view">
+  <button type="button" class="icon-button" aria-label="Zoom in" title="Zoom in" (click)="zoomIn()">
+    <app-icon name="zoomIn" />
+  </button>
+  <button
+    type="button"
+    class="icon-button"
+    aria-label="Zoom out"
+    title="Zoom out"
+    (click)="zoomOut()"
+  >
+    <app-icon name="zoomOut" />
+  </button>
+  <span class="divider" aria-hidden="true"></span>
+  <button
+    type="button"
+    class="icon-button"
+    aria-label="Fit to view"
+    title="Fit to view"
+    (click)="fit()"
+  >
+    <app-icon name="fitScreen" />
+  </button>
 </div>

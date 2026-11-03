@@ -17,6 +17,7 @@ import {
 import { buildFlowGraph, flowDuration, type FlowNode } from "../core/flow-graph";
 import { FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH, layoutFlow } from "../core/flow-layout";
 import { Subagents, formatDuration } from "../core/transcripts";
+import { Icon } from "../ui/icon/icon";
 
 const FIT_PADDING = 24;
 
@@ -26,7 +27,7 @@ const FIT_PADDING = 24;
  */
 @Component({
   selector: "app-flow-view",
-  imports: [FFlowModule],
+  imports: [FFlowModule, Icon],
   providers: [provideFFlow()],
   templateUrl: "./flow-view.html",
   styleUrl: "./flow-view.css",
