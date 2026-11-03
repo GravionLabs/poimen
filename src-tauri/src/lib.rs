@@ -227,8 +227,8 @@ async fn deliver_board(
 /// Where poimen keeps the state (the `gh` cache) of a plugin it runs itself: herdr does not report
 /// the plugin's own state directory, so it is `~/.config/poimen/plugin-state/<id>`.
 fn plugin_state_dir(plugin_id: &str) -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home)
+    home_dir()
+        .unwrap_or_default()
         .join(".config/poimen/plugin-state")
         .join(plugin_id)
 }
@@ -429,8 +429,10 @@ fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// The user's home directory: `HOME` on Unix, the profile (`%USERPROFILE%`) on Windows, where a
+/// GUI app has no `HOME`.
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::home_dir().filter(|h| !h.as_os_str().is_empty())
 }
 
 /// The resolved user settings (`~/.config/poimen/config.json`); changes arrive as `settings` events.

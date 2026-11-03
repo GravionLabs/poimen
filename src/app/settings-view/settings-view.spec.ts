@@ -90,6 +90,14 @@ describe("explorer root helpers", () => {
     expect(withRoot(["/Users/x/Source"], "/Users/x/Source/", home)).toEqual(["/Users/x/Source"]);
     expect(withRoot(["~"], "/Users/xy", home)).toEqual(["~", "/Users/xy"]);
   });
+
+  it("matches Windows spellings of a root below the home directory", () => {
+    const home = "C:\\Users\\x";
+    expect(withRoot(["~/Source"], "C:\\Users\\x\\Source", home)).toEqual(["~/Source"]);
+    expect(withRoot(["~"], "c:\\users\\X\\", home)).toEqual(["~"]);
+    expect(withRoot(["~"], "C:\\Users\\xy", home)).toEqual(["~", "C:\\Users\\xy"]);
+    expect(withRoot(["~"], "D:\\src", home)).toEqual(["~", "D:\\src"]);
+  });
 });
 
 const setDark = vi.fn();
