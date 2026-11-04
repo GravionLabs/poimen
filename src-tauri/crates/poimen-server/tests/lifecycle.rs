@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use poimen_client::protocol::{ErrorCode, Event, TerminalCreate, TerminalStatus};
+use poimen_client::protocol::{AgentStatus, ErrorCode, Event, TerminalCreate, TerminalStatus};
 use poimen_client::{Client, ClientError};
 use poimen_server::{Config, Server, StartError};
 
@@ -356,4 +356,78 @@ fn a_bad_line_gets_an_error_and_the_connection_survives() {
         second.contains(r#""id":"9""#) && second.contains("protocol"),
         "{second}"
     );
+}
+
+fn report(id: &str, seq: u64, status: AgentStatus, session: Option<&str>) -> serde_json::Value {
+    serde_json::json!({"terminal_id": id, "seq": seq, "status": status, "agent": "claude", "session_id": session})
+}
+
+#[test]
+fn agent_reports_update_the_terminal_emit_an_event_and_stale_ones_are_dropped() {
+    let env = Env::new("agent");
+    let client = start(&env.config());
+    let space = client.create_space("api", &env.work()).unwrap();
+    let term = client.create_terminal(&sh(&space.id)).unwrap();
+    let rx = events(&client);
+    let send = |seq, status, session| {
+        client
+            .request(
+                "terminal.report_agent",
+                report(&term.id, seq, status, session),
+            )
+            .unwrap()
+    };
+    let agent = || client.list_terminals(None).unwrap()[0].agent.clone();
+
+    assert_eq!(send(10, AgentStatus::Working, Some("s1"))["accepted"], true);
+    let event = wait_for_event(&rx, |e| matches!(e, Event::AgentStatusChanged { .. }));
+    assert_eq!(
+        event,
+        Event::AgentStatusChanged {
+            terminal_id: term.id.clone(),
+            status: AgentStatus::Working,
+            agent: Some("claude".into()),
+            session_id: Some("s1".into())
+        }
+    );
+    assert_eq!(agent().unwrap().status, AgentStatus::Working);
+
+    // Stale: lower and equal seq are dropped and change nothing.
+    for seq in [9, 10] {
+        assert_eq!(
+            send(seq, AgentStatus::Blocked, Some("s1"))["accepted"],
+            false
+        );
+    }
+    assert_eq!(agent().unwrap().status, AgentStatus::Working);
+
+    send(11, AgentStatus::Gone, None);
+    let gone = wait_for_event(&rx, |e| matches!(e, Event::AgentStatusChanged { .. }));
+    assert!(matches!(
+        gone,
+        Event::AgentStatusChanged {
+            status: AgentStatus::Gone,
+            ..
+        }
+    ));
+    assert!(agent().is_none());
+}
+
+#[test]
+fn reporting_an_unknown_terminal_is_not_found() {
+    let env = Env::new("agent-missing");
+    let client = start(&env.config());
+    let err = client
+        .request(
+            "terminal.report_agent",
+            report("t99", 1, AgentStatus::Idle, None),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        ClientError::Server {
+            code: ErrorCode::NotFound,
+            ..
+        }
+    ));
 }

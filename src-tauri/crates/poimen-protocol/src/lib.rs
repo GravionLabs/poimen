@@ -238,9 +238,13 @@ pub struct Terminal {
     /// Set once `status` is `exited`; `None` when the process was killed by a signal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<u32>,
+    /// The agent in the terminal, as its hooks last reported it; absent when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentInfo>,
 }
 
-/// What an agent in a terminal is doing (reported by hooks, later PBIs).
+/// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the
+/// agent ended, the terminal then has no [`AgentInfo`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {
@@ -248,6 +252,32 @@ pub enum AgentStatus {
     Working,
     Blocked,
     Done,
+    Gone,
+}
+
+/// The agent of a terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentInfo {
+    pub status: AgentStatus,
+    /// Which agent, e.g. `claude`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+/// Params of `terminal.report_agent`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalReportAgent {
+    pub terminal_id: String,
+    /// Increases with every report of a reporter (e.g. nanoseconds since the epoch); a report
+    /// whose `seq` is not above the last accepted one is dropped.
+    pub seq: u64,
+    pub status: AgentStatus,
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 // --- request params and results ----------------------------------------------------------------
@@ -442,6 +472,8 @@ pub enum Event {
         status: AgentStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
     },
 }
 
@@ -512,9 +544,23 @@ mod tests {
             Event::AgentStatusChanged {
                 terminal_id: "t1".into(),
                 status: AgentStatus::Blocked,
-                agent: None
+                agent: None,
+                session_id: None
             }
         );
+    }
+
+    #[test]
+    fn report_agent_params_and_the_terminal_agent_wire_shape() {
+        let p: TerminalReportAgent =
+            serde_json::from_value(json!({"terminal_id":"t1","seq":5,"status":"gone"})).unwrap();
+        assert_eq!(p.status, AgentStatus::Gone);
+        assert_eq!((p.agent, p.session_id), (None, None));
+        let t: Terminal = serde_json::from_value(json!({"id":"t1","space_id":"s1","name":"n",
+            "cwd":"/","cols":80,"rows":24,"status":"running",
+            "agent":{"status":"working","agent":"claude","session_id":"abc"}}))
+        .unwrap();
+        assert_eq!(t.agent.unwrap().session_id.as_deref(), Some("abc"));
     }
 
     #[test]

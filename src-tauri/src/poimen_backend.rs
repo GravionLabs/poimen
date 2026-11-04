@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use poimen_client::protocol::{
-    AttachMode, DetachReason, ErrorCode, Event, PROTOCOL_VERSION, Space, Terminal, TerminalCreate,
+    AgentStatus, AttachMode, DetachReason, ErrorCode, Event, PROTOCOL_VERSION, Space, Terminal,
+    TerminalCreate,
 };
 use poimen_client::{AttachmentWriter, Client, ClientError};
 use serde_json::{Value, json};
@@ -83,18 +84,24 @@ fn text(err: ClientError) -> String {
 }
 
 /// The tree the frontend builds from: a space is a workspace, a terminal is a tab with one pane
-/// (the server has no tabs). Numbers follow the server's order. Agent status is `unknown` until
-/// hooks report it (a later release).
+/// (the server has no tabs). Numbers follow the server's order. Agent status is what the agent's
+/// hooks reported (`unknown` without an agent); a workspace shows its most urgent terminal.
 pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
     let mut workspaces = Vec::new();
     let mut tabs = Vec::new();
     let mut panes = Vec::new();
     for (i, space) in spaces.iter().enumerate() {
+        let space_status = terminals
+            .iter()
+            .filter(|t| t.space_id == space.id)
+            .map(wire_status)
+            .max_by_key(|s| urgency(s))
+            .unwrap_or("unknown");
         workspaces.push(json!({
             "workspace_id": space.id,
             "label": space.name,
             "number": i + 1,
-            "agent_status": "unknown",
+            "agent_status": space_status,
         }));
         for (n, terminal) in terminals
             .iter()
@@ -106,7 +113,7 @@ pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
                 "workspace_id": space.id,
                 "label": terminal.name,
                 "number": n + 1,
-                "agent_status": "unknown",
+                "agent_status": wire_status(terminal),
             }));
             panes.push(json!({
                 "pane_id": terminal.id,
@@ -114,7 +121,7 @@ pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
                 "workspace_id": space.id,
                 "cwd": terminal.cwd,
                 "label": terminal.name,
-                "agent_status": "unknown",
+                "agent_status": wire_status(terminal),
                 "focused": false,
             }));
         }
@@ -123,6 +130,35 @@ pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
         workspaces: Value::Array(workspaces),
         tabs: Value::Array(tabs),
         panes: Value::Array(panes),
+    }
+}
+
+/// The `agent_status` of the frontend for a terminal.
+fn wire_status(terminal: &Terminal) -> &'static str {
+    terminal
+        .agent
+        .as_ref()
+        .map_or("unknown", |a| status_name(a.status))
+}
+
+fn status_name(status: AgentStatus) -> &'static str {
+    match status {
+        AgentStatus::Idle => "idle",
+        AgentStatus::Working => "working",
+        AgentStatus::Blocked => "blocked",
+        AgentStatus::Done => "done",
+        AgentStatus::Gone => "unknown",
+    }
+}
+
+/// Orders statuses for the workspace row: blocked first, then working, done, idle.
+fn urgency(status: &str) -> u8 {
+    match status {
+        "blocked" => 4,
+        "working" => 3,
+        "done" => 2,
+        "idle" => 1,
+        _ => 0,
     }
 }
 
@@ -442,6 +478,18 @@ impl Backend for PoimenBackend {
 
 /// `{"event": kind, "data": ...}` of the wire form as a backend event.
 fn backend_event(event: &Event) -> BackendEvent {
+    // The frontend applies status changes from herdr's event, keyed by pane.
+    if let Event::AgentStatusChanged {
+        terminal_id,
+        status,
+        ..
+    } = event
+    {
+        return BackendEvent {
+            kind: "pane.agent_status_changed".into(),
+            data: json!({"pane_id": terminal_id, "agent_status": status_name(*status)}),
+        };
+    }
     let mut value = serde_json::to_value(event).unwrap_or(Value::Null);
     BackendEvent {
         kind: value["event"].as_str().unwrap_or("unknown").to_owned(),
@@ -457,7 +505,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::mpsc;
 
-    use poimen_client::protocol::TerminalStatus;
+    use poimen_client::protocol::{AgentInfo, TerminalStatus};
 
     fn space(id: &str, name: &str) -> Space {
         Space {
@@ -477,6 +525,7 @@ mod tests {
             rows: 24,
             status: TerminalStatus::Running,
             exit_code: None,
+            agent: None,
         }
     }
 
@@ -646,6 +695,55 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn hook_reported_status_reaches_panes_tabs_and_the_workspace() {
+        let mut working = terminal("t1", "s1", "a");
+        working.agent = Some(AgentInfo {
+            status: AgentStatus::Working,
+            agent: Some("claude".into()),
+            session_id: None,
+        });
+        let mut blocked = terminal("t2", "s1", "b");
+        blocked.agent = Some(AgentInfo {
+            status: AgentStatus::Blocked,
+            agent: None,
+            session_id: None,
+        });
+        let snapshot = map_snapshot(
+            &[space("s1", "api"), space("s2", "web")],
+            &[working, blocked, terminal("t3", "s2", "c")],
+        );
+        let status = |v: &Value| {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x["agent_status"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(status(&snapshot.panes), ["working", "blocked", "unknown"]);
+        assert_eq!(status(&snapshot.tabs), ["working", "blocked", "unknown"]);
+        assert_eq!(status(&snapshot.workspaces), ["blocked", "unknown"]);
+    }
+
+    #[test]
+    fn an_agent_status_event_becomes_the_pane_event_the_frontend_applies() {
+        let changed = |status| {
+            backend_event(&Event::AgentStatusChanged {
+                terminal_id: "t1".into(),
+                status,
+                agent: Some("claude".into()),
+                session_id: None,
+            })
+        };
+        let event = changed(AgentStatus::Blocked);
+        assert_eq!(event.kind, "pane.agent_status_changed");
+        assert_eq!(
+            event.data,
+            json!({"pane_id": "t1", "agent_status": "blocked"})
+        );
+        assert_eq!(changed(AgentStatus::Gone).data["agent_status"], "unknown");
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! The server keeps a flat model: spaces (name, cwd) with terminals. Spaces persist across
 //! restarts, terminals do not. Layout (groups, splits, tabs) is the client's business.
 
+pub mod claude;
 mod emulator;
 mod pty;
 mod store;
@@ -20,10 +21,10 @@ use std::thread;
 use std::time::Duration;
 
 use poimen_protocol::{
-    self as proto, AttachMode, DetachReason, ErrorCode, Event, PROTOCOL_VERSION, PingResult,
-    Request, Response, Space, SpaceClose, SpaceCreate, SpaceRename, Terminal, TerminalAttach,
-    TerminalClose, TerminalCreate, TerminalInput, TerminalList, TerminalRename, TerminalResize,
-    TerminalStatus,
+    self as proto, AgentInfo, AgentStatus, AttachMode, DetachReason, ErrorCode, Event,
+    PROTOCOL_VERSION, PingResult, Request, Response, Space, SpaceClose, SpaceCreate, SpaceRename,
+    Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalInput, TerminalList,
+    TerminalRename, TerminalReportAgent, TerminalResize, TerminalStatus,
 };
 use serde_json::{Value, json};
 
@@ -98,6 +99,8 @@ struct TerminalEntry {
     pty: Option<pty::Pty>,
     /// The screen state and the attached clients; outlives the process.
     stream: Arc<TermStream>,
+    /// `seq` of the last accepted agent report; older or equal reports are dropped.
+    agent_seq: Option<u64>,
 }
 
 #[derive(Default)]
@@ -151,6 +154,7 @@ impl Shared {
         entry.info.status = TerminalStatus::Exited;
         entry.info.exit_code = exit_code;
         entry.pty = None;
+        entry.info.agent = None;
         entry.stream.exited(exit_code);
         self.publish(Event::TerminalExited {
             terminal_id: terminal_id.to_string(),
@@ -492,6 +496,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.create" => terminal_create(shared, parsed(request)?),
         "terminal.rename" => terminal_rename(shared, parsed(request)?),
         "terminal.close" => terminal_close(shared, parsed(request)?),
+        "terminal.report_agent" => terminal_report_agent(shared, parsed(request)?),
         "terminal.input" => terminal_input(shared, parsed(request)?, ctx),
         "terminal.resize" => terminal_resize(shared, parsed(request)?, ctx),
         other => Err((ErrorCode::UnknownMethod, format!("unknown method {other}"))),
@@ -645,11 +650,13 @@ fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
         rows,
         status: TerminalStatus::Running,
         exit_code: None,
+        agent: None,
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
         pty: Some(spawned),
         stream,
+        agent_seq: None,
     });
     shared.publish(Event::TerminalCreated {
         terminal: info.clone(),
@@ -678,6 +685,35 @@ fn terminal_rename(shared: &Shared, p: TerminalRename) -> ApiResult {
         terminal: terminal.clone(),
     });
     Ok(json!({ "terminal": terminal }))
+}
+
+/// Applies an agent report unless it is stale (`seq` not above the last accepted one). The event
+/// is published only when the agent state actually changed.
+fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
+    let mut inner = lock(&shared.inner);
+    let entry = terminal_mut(&mut inner, &p.terminal_id)?;
+    if entry.agent_seq.is_some_and(|last| p.seq <= last) {
+        return Ok(json!({ "accepted": false }));
+    }
+    entry.agent_seq = Some(p.seq);
+    if entry.info.status == TerminalStatus::Exited {
+        return Ok(json!({ "accepted": true }));
+    }
+    let next = (p.status != AgentStatus::Gone).then(|| AgentInfo {
+        status: p.status,
+        agent: p.agent.clone(),
+        session_id: p.session_id.clone(),
+    });
+    if entry.info.agent != next {
+        entry.info.agent = next;
+        shared.publish(Event::AgentStatusChanged {
+            terminal_id: p.terminal_id,
+            status: p.status,
+            agent: p.agent,
+            session_id: p.session_id,
+        });
+    }
+    Ok(json!({ "accepted": true }))
 }
 
 fn terminal_close(shared: &Shared, p: TerminalClose) -> ApiResult {
