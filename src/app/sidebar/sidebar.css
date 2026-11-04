@@ -251,6 +251,38 @@
   transform: rotate(45deg) translate(-1px, -1px);
 }
 
+/* Close icon left of the chevron (or at the row end without one); calm until hover, focus or active. */
+.close {
+  all: unset;
+  flex: none;
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.close + .chevron {
+  margin-left: 0;
+}
+
+.space:hover .close,
+.space.chosen .close,
+.close:focus-visible,
+.spaces ::ng-deep [role="treeitem"]:focus-visible .close {
+  opacity: 1;
+}
+
+.close:hover,
+.close:focus-visible {
+  background: color-mix(in srgb, currentcolor 18%, transparent);
+}
+
+.close:focus-visible {
+  outline: 1px solid currentcolor;
+}
+
 .menu-backdrop {
   all: unset;
   position: fixed;

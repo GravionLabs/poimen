@@ -153,6 +153,45 @@ describe("Sidebar with the real hx-tree", () => {
     expect(workspace().getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("shows a labeled close icon directly left of the chevron", async () => {
+    const { workspace } = await setup();
+    const close = workspace().querySelector<HTMLButtonElement>(".close")!;
+    expect(close.getAttribute("aria-label")).toBe("Close space One");
+    expect(close.title).toBe("Close space One");
+    expect(close.nextElementSibling?.classList.contains("chevron")).toBe(true);
+  });
+
+  it("closes through the menu action without selecting or toggling the row", async () => {
+    const { fixture, workspace, settle, selected } = await setup();
+    const actions: unknown[] = [];
+    fixture.componentInstance.menuAction.subscribe((a) => actions.push(a));
+    workspace().querySelector<HTMLButtonElement>(".close")!.click();
+    await settle();
+    expect(actions).toEqual([{ kind: "workspace", id: "w1", action: "close-space" }]);
+    expect(selected).toEqual([]);
+    expect(workspace().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("keeps the close icon calm until hover, focus or the active space", () => {
+    const css = readFileSync("src/app/sidebar/sidebar.css", "utf8");
+    expect(css).toMatch(/\.close\s*\{[^}]*opacity:\s*0/);
+    expect(css).toMatch(/\.space:hover \.close[^{]*\{\s*opacity:\s*1/);
+    expect(css).toContain(".space.chosen .close");
+    expect(css).toContain(".close:focus-visible");
+    // the treeitem is rendered by hx-tree, so only ::ng-deep reaches it from this component
+    expect(css).toMatch(
+      /\.spaces ::ng-deep \[role="treeitem"\]:focus-visible \.close[^{]*\{\s*opacity:\s*1/,
+    );
+    expect(css).not.toContain(':host [role="treeitem"]');
+  });
+
+  it("makes the close icon a real button for Tab, Enter and Space", async () => {
+    const { workspace } = await setup();
+    const close = workspace().querySelector<HTMLButtonElement>(".close")!;
+    expect(close.tagName).toBe("BUTTON");
+    expect(close.tabIndex).toBe(0);
+  });
+
   it("hides helix's left toggle and gives panes no chevron", async () => {
     const { root } = await setup();
     expect(root.querySelectorAll(".chevron")).toHaveLength(1);

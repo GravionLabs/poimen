@@ -107,6 +107,27 @@
       @if (unreadOf(d.workspace.workspace_id); as n) {
         <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
       }
+      <button
+        type="button"
+        class="close"
+        [attr.aria-label]="'Close space ' + d.workspace.label"
+        [title]="'Close space ' + d.workspace.label"
+        (click)="closeSpace(d.workspace.workspace_id, $event)"
+        (keydown)="$event.stopPropagation()"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M4 4l8 8M12 4l-8 8" />
+        </svg>
+      </button>
       @if (layout() === "tree") {
         <span
           class="chevron"
