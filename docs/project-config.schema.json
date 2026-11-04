@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "poimen project config (.poimen/config.json)",
+  "type": "object",
+  "properties": {
+    "layout": { "$ref": "#/$defs/layout" },
+    "setup": { "$ref": "#/$defs/command" },
+    "teardown": { "$ref": "#/$defs/command" },
+    "commands": {
+      "type": "array",
+      "description": "Entries need a unique name; an invalid entry is skipped with a warning.",
+      "items": {
+        "type": "object",
+        "required": ["name", "command", "target"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "command": { "$ref": "#/$defs/command" },
+          "target": { "enum": ["terminal", "agent"] }
+        }
+      }
+    },
+    "presets": {
+      "type": "array",
+      "description": "Entries need a unique name and the panes of a layout.",
+      "items": {
+        "type": "object",
+        "required": ["name", "panes"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "panes": { "$ref": "#/$defs/panes" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "command": {
+      "description": "A string typed into the user's shell, or an object picked by platform (default as fallback).",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "properties": {
+            "default": { "type": "string", "minLength": 1 },
+            "windows": { "type": "string", "minLength": 1 },
+            "macos": { "type": "string", "minLength": 1 },
+            "linux": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "layout": {
+      "type": "object",
+      "required": ["panes"],
+      "properties": { "panes": { "$ref": "#/$defs/panes" } }
+    },
+    "panes": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The first pane is the root pane and has no split; every later pane needs a split.",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "command": { "type": "string" },
+          "split": {
+            "type": "object",
+            "required": ["direction"],
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "An earlier pane; default the previous one."
+              },
+              "direction": { "enum": ["right", "down"] },
+              "ratio": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "exclusiveMaximum": 1,
+                "default": 0.5
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
