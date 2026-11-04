@@ -388,6 +388,12 @@ export class Sidebar {
     tree.toggle(key);
   }
 
+  /** The close icon of a workspace row: the close flow of the context menu, no selection or toggle. */
+  protected closeSpace(workspaceId: string, event: Event): void {
+    event.stopPropagation();
+    this.menuAction.emit({ kind: "workspace", id: workspaceId, action: "close-space" });
+  }
+
   protected marks(row: PaneRow) {
     return paneMarks(row.pane.pane_id, this.openIds(), this.activeId());
   }

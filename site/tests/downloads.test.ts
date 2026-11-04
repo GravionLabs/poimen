@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { detectPlatform, LATEST_URL, PLATFORMS, resolveDownloads, type ReleaseAsset } from "../downloads";
-import { adrHeading, adrIndex, adrSidebarItems, adrStatus } from "../scripts/adr-index.mjs";
 
 const base = "https://github.com/GravionLabs/poimen/releases/download/v1.2.3/";
 const names = [
@@ -48,34 +47,5 @@ describe("detectPlatform", () => {
     ["", undefined],
   ])("%s", (ua, id) => {
     expect(detectPlatform(ua)).toBe(id);
-  });
-});
-
-describe("decision record index", () => {
-  const text = "# 0002: Color schemes\n\n- Status: Accepted (decided on 2026-11-01)\n";
-  it("reads number, title and status", () => {
-    expect(adrHeading("0002-color-schemes.md", text)).toEqual({ number: "0002", title: "Color schemes" });
-    expect(adrStatus(text)).toBe("Accepted");
-  });
-  it("reads the `# ADR 0003:` heading form", () => {
-    expect(adrHeading("0003-own-backend.md", "# ADR 0003: Own terminal backend\n")).toEqual({
-      number: "0003",
-      title: "Own terminal backend",
-    });
-  });
-  it("lists the overview and every record in the sidebar", () => {
-    const items = adrSidebarItems([
-      { file: "0004-a.md", text: "# ADR 0004: Native views" },
-      { file: "0005-b-c.md", text: "no heading" },
-    ]);
-    expect(items).toEqual([
-      { text: "Overview", link: "/adr/" },
-      { text: "0004 Native views", link: "/adr/0004-a" },
-      { text: "0005 b c", link: "/adr/0005-b-c" },
-    ]);
-  });
-  it("falls back to the file name and a dash without heading and status", () => {
-    expect(adrHeading("0009-some-thing.md", "no heading")).toEqual({ number: "0009", title: "some thing" });
-    expect(adrIndex([{ file: "0009-some-thing.md", text: "x" }])).toContain("| [0009](./0009-some-thing) | some thing | - |");
   });
 });

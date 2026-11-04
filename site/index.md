@@ -27,7 +27,7 @@ features:
   - title: Subagents and Flow
     details: Read-only view of the subagents of Claude Code and GitHub Copilot CLI, and the run drawn as a graph.
   - title: Deliver board
-    details: A native tab for the herdr deliver-board plugin, one table per repository with PBIs, branches and pull requests.
+    details: One table per repository with PBIs, branches and pull requests, fed by the herdr deliver-board plugin. Built-in GitHub views will replace it.
   - title: Color schemes
     details: Bundled and imported WezTerm color schemes, light and dark, with a chrome derived from the scheme.
 ---
@@ -68,7 +68,7 @@ The Output panel (`Cmd/Ctrl+J`) reads the session transcripts of Claude Code and
 
 ### Deliver board
 
-With the herdr `deliver-board` plugin installed, a native tab shows one table per repository: the open PBIs, their claim, labels, branch and pull request with check state, and a button to start the deliver run.
+With the herdr `deliver-board` plugin installed, a native tab shows one table per repository: the open PBIs, their claim, labels, branch and pull request with check state, and a button to start the deliver run. The board will be replaced by built-in GitHub issue and pull request views that need no plugin.
 
 <Screenshot src="deliver.svg" alt="Placeholder for a screenshot of the Deliver board tab" caption="The native Deliver board (screenshot pending, see #264)." />
 
@@ -82,5 +82,4 @@ Light, dark or follow the system. Choose a bundled scheme, use the one of your h
 
 - [Features](/guide/features) in detail
 - [Installation](/guide/installation) per platform
-- [Decisions](/adr/): the architecture decision records
 - [Source and issues on GitHub](https://github.com/GravionLabs/poimen)

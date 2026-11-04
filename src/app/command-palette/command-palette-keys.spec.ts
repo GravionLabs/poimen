@@ -61,6 +61,7 @@ function makeHost() {
   class Host {
     palette = palette;
     parts = titleParts;
+    position = () => ({ left: 0, top: 0 });
     run = (): void => undefined;
     type = (): void => undefined;
     key(event: KeyboardEvent): void {

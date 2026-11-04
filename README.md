@@ -40,13 +40,13 @@ Site, downloads and installation guide: <https://gravionlabs.github.io/poimen/>.
 Panes are managed in herdr, so the result shows up through herdr's events like any other change.
 
 - **New space**: the "+" button in the Spaces header opens a dialog with a directory field (completes directories as you type), a Browse button (native folder picker) and a label (default: the directory name). It creates a herdr workspace (`workspace.create` with `cwd` and `label`) and focuses it. A space that already has a pane inside the directory, else one labelled with the directory name, is focused instead and nothing is created. A label that another space uses falls back to the path relative to the home directory. A missing directory or a failing herdr call shows the error in the dialog.
-- **Close space**: right click a space in the sidebar and pick "Close space", or run "Close Space" in the command palette (closes the space of the active tab). It calls `workspace.close` and ends every pane in the space, so a space with panes asks for confirmation (pane and agent count) and an empty one closes right away. The tabs of its panes close, and the neighboring space is focused. herdr's error is shown when the close fails and the space stays.
+- **Close space**: right click a space in the sidebar and pick "Close space", click the x icon left of the chevron on its row (shown on hover, keyboard focus and for the active space; Tab reaches it, Enter or Space triggers it, and it neither selects nor collapses the row), or run "Close Space" in the command palette (closes the space of the active tab). It calls `workspace.close` and ends every pane in the space, so a space with panes asks for confirmation (pane and agent count) and an empty one closes right away. The tabs of its panes close, and the neighboring space is focused. herdr's error is shown when the close fails and the space stays.
 - **New terminal**: File > New Terminal (`CmdOrCtrl+T`), or right click a workspace in the sidebar. A dialog asks for the directory (the workspace's pane directories are suggested; empty uses herdr's default). It creates a tab in the workspace (`tab.create`) and opens it.
 - **Split**: right click a pane in the sidebar (Split right / Split down), or its tab (New pane to the right / below). The new shell starts in the pane's directory (`pane.split`).
 - **Close pane**: right click a pane in the sidebar or its tab (Close pane / Close herdr pane). It always asks first and warns when an agent is working or waiting (`pane.close`). Closing a tab with the tab's own Close entry still only closes the view.
 - **Start agent**: right click a pane in the sidebar or its tab (Start agent...). A dialog asks for the agent kind, an optional name (defaults to the kind) and optional arguments (split on spaces); the pane has to be at its shell prompt (`agent.start`).
 - **Rename**: right click a pane (Rename... / Rename pane...). An agent pane renames the agent (`agent.rename`), a plain terminal its label (`pane.rename`); an empty name clears it.
-- **Send a prompt**: an agent tab has a one-line input above the terminal. It uses `agent.prompt` and waits up to 10 s for the agent to start working (or block), so it needs no controller and works in a read-only tab. It reports a stalled agent (`agent_prompt_stalled`), a timeout and an agent that waits at an approval (`agent_blocked`, nothing is sent); the text is kept after a timeout or a block.
+- **Send a prompt**: a read-only agent tab has a one-line input above the terminal (it is hidden while the tab controls the terminal, where you type into the terminal directly; the typed text is kept). It uses `agent.prompt` and waits up to 10 s for the agent to start working (or block), so it needs no controller and works in a read-only tab. It reports a stalled agent (`agent_prompt_stalled`), a timeout and an agent that waits at an approval (`agent_blocked`, nothing is sent); the text is kept after a timeout or a block.
 
 ## Requirements
 
@@ -197,13 +197,13 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 
 ## Site
 
-<https://gravionlabs.github.io/poimen/>: landing page, download links of the latest release (resolved from the GitHub API when the page opens, falling back to the release page), installation guide and the decision records of `docs/adr/`. It lives in `site/` (VitePress, own `package.json` and `package-lock.json`, npm; not part of the app's pnpm setup, and excluded from its lint and format checks).
+<https://gravionlabs.github.io/poimen/>: landing page, download links of the latest release (resolved from the GitHub API when the page opens, falling back to the release page), installation guide and feature overview; the decision records of `docs/adr/` stay in the repository and are not published. It lives in `site/` (VitePress, own `package.json` and `package-lock.json`, npm; not part of the app's pnpm setup, and excluded from its lint and format checks).
 
 ```sh
 cd site && npm ci && npm run dev    # local preview; `npm run build` (dead links fail it), `npm test`
 ```
 
-`.github/workflows/pages.yml` builds it on pull requests that touch `site/` or `docs/` (dry run) and deploys on a push to `main` while the repository variable `DEPLOY_PAGES` is `true` (Settings > Pages > Source: GitHub Actions). The screenshots in `site/public/screenshots/` are real captures with demo data, except the Flow tab and the deliver board, which are still labeled placeholders (#264).
+`.github/workflows/pages.yml` builds it on pull requests that touch `site/` (dry run) and deploys on a push to `main` while the repository variable `DEPLOY_PAGES` is `true` (Settings > Pages > Source: GitHub Actions). The screenshots in `site/public/screenshots/` are real captures with demo data, except the Flow tab and the deliver board, which are still labeled placeholders (#264).
 
 ## License
 

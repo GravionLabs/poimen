@@ -9,9 +9,6 @@
 .palette {
   position: fixed;
   z-index: 61;
-  top: 15vh;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;

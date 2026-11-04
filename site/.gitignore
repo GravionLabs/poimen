@@ -1,5 +1,3 @@
 node_modules
 .vitepress/cache
 .vitepress/dist
-# Copied from ../docs/adr by scripts/sync-docs.mjs
-adr

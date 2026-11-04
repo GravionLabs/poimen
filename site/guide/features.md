@@ -6,7 +6,7 @@ Everything here is in the application today; the [README](https://github.com/Gra
 
 - herdr owns the state. poimen never stores pane state; snapshots from herdr are authoritative and events only invalidate them.
 - Non-destructive: closing a tab or the app releases controllers and stops only the CLI child processes, never herdr panes. Taking over a controller is always an explicit action.
-- poimen talks to herdr's socket API (NDJSON over the Unix socket) and attaches terminals with `herdr terminal session observe|control`. A later own backend is proposed in [ADR 0003](/adr/0003-own-terminal-backend-without-herdr).
+- poimen talks to herdr's socket API (NDJSON over the Unix socket) and attaches terminals with `herdr terminal session observe|control`.
 
 ## Spaces sidebar
 
@@ -36,17 +36,14 @@ Everything here is in the application today; the [README](https://github.com/Gra
 
 ## Deliver board
 
-- A native view of the herdr `deliver-board` plugin ([ADR 0004](/adr/0004-native-views-for-herdr-plugins)): one table per repository among your pane directories, with the open PBIs, claim, labels, branch and pull request with check state. It refreshes on demand, on window focus and every 60 s. The issue and PR numbers open in the browser, and "Start deliver" runs the plugin's action.
+- A view fed by the herdr `deliver-board` plugin (it must be installed): one table per repository among your pane directories, with the open PBIs, claim, labels, branch and pull request with check state. It refreshes on demand, on window focus and every 60 s. The issue and PR numbers open in the browser, and "Start deliver" runs the plugin's action.
+- It will be replaced by built-in GitHub views: an issues tree, a pull request view and milestones, read through the `gh` CLI, with no plugin and no Node.js needed.
 
 ## Color schemes
 
-- Light, dark or system. Bundled schemes, the scheme of your herdr config (`"herdr"`), and your own WezTerm color schemes in `~/.config/poimen/themes/`, watched without a restart. The window chrome is derived from the scheme ([ADR 0002](/adr/0002-color-schemes)).
+- Light, dark or system. Bundled schemes, the scheme of your herdr config (`"herdr"`), and your own WezTerm color schemes in `~/.config/poimen/themes/`, watched without a restart. The window chrome is derived from the scheme.
 - Optionally the terminal font and colors of your Ghostty config.
 
 ## Settings
 
 Optional `~/.config/poimen/config.json`, applied without a restart; it holds preferences only. Examples: `theme`, `colorSchema`, `terminal.fontFamily`, `terminal.fontSize`, `terminal.autoControl`, `shortcuts`, `spaces.layout` (the pane layout of a new space), `explorer.roots`, `sidebar.layout`, `sidebar.rows`, `herdr.autoStart`, `notifications`. The full list is in the [README](https://github.com/GravionLabs/poimen#settings).
-
-## Decisions
-
-The architecture decisions are published on this site: [Decisions](/adr/).
