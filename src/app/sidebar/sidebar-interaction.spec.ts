@@ -178,6 +178,11 @@ describe("Sidebar with the real hx-tree", () => {
     expect(css).toMatch(/\.space:hover \.close[^{]*\{\s*opacity:\s*1/);
     expect(css).toContain(".space.chosen .close");
     expect(css).toContain(".close:focus-visible");
+    // the treeitem is rendered by hx-tree, so only ::ng-deep reaches it from this component
+    expect(css).toMatch(
+      /\.spaces ::ng-deep \[role="treeitem"\]:focus-visible \.close[^{]*\{\s*opacity:\s*1/,
+    );
+    expect(css).not.toContain(':host [role="treeitem"]');
   });
 
   it("makes the close icon a real button for Tab, Enter and Space", async () => {

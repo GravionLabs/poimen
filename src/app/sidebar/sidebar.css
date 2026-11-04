@@ -270,7 +270,7 @@
 .space:hover .close,
 .space.chosen .close,
 .close:focus-visible,
-:host [role="treeitem"]:focus-visible .close {
+.spaces ::ng-deep [role="treeitem"]:focus-visible .close {
   opacity: 1;
 }
 
