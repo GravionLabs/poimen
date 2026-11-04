@@ -6,7 +6,14 @@
     aria-label="Close the command palette"
     (click)="palette.close()"
   ></button>
-  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div
+    class="palette"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Command palette"
+    [style.left.px]="position().left"
+    [style.top.px]="position().top"
+  >
     <div class="search">
       <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
         <circle cx="6.5" cy="6.5" r="4.5" />
