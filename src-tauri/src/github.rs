@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -68,7 +68,7 @@ impl Runner for SystemRunner {
         let path = gui_path::child_path();
         let program = gui_path::resolve_program("gh", &path)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "gh not found"))?;
-        let mut child = Command::new(program)
+        let mut child = gui_path::command(program)
             .args(args)
             .env("PATH", &path)
             .env("GH_PROMPT_DISABLED", "1")
@@ -148,7 +148,7 @@ pub fn parse_remote(url: &str) -> Option<Repo> {
 
 /// The GitHub repository behind `origin` of the git directory `dir`.
 pub fn repo_of(dir: &Path) -> Option<Repo> {
-    let out = Command::new("git")
+    let out = gui_path::command("git")
         .args(["remote", "get-url", "origin"])
         .current_dir(dir)
         .env("PATH", gui_path::child_path())

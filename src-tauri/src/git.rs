@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -62,7 +62,7 @@ struct GitRunner;
 
 impl StatusRunner for GitRunner {
     fn status(&self, dir: &str, timeout: Duration) -> Option<String> {
-        let mut child = Command::new("git")
+        let mut child = crate::gui_path::command("git")
             .args(["-C", dir, "status", "--porcelain=v2", "--branch"])
             .args(["--no-renames", "--untracked-files=normal"])
             .env("GIT_OPTIONAL_LOCKS", "0")
@@ -128,7 +128,7 @@ pub fn parse_rev_parse(output: &str) -> Option<RepoInfo> {
 }
 
 pub fn info(dir: &str) -> Option<RepoInfo> {
-    let out = Command::new("git")
+    let out = crate::gui_path::command("git")
         .args(["-C", dir, "rev-parse", "--abbrev-ref", "HEAD"])
         .args([
             "--absolute-git-dir",
@@ -147,7 +147,7 @@ pub fn info(dir: &str) -> Option<RepoInfo> {
 
 /// The top-level directory of the repository containing `dir`; `None` outside a repository.
 pub fn toplevel(dir: &str) -> Option<String> {
-    let out = Command::new("git")
+    let out = crate::gui_path::command("git")
         .args(["-C", dir, "rev-parse", "--show-toplevel"])
         .output()
         .ok()?;
@@ -173,7 +173,7 @@ pub fn repo_roots(dirs: &[String]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut roots = Vec::new();
     for dir in dirs {
-        let Ok(out) = Command::new("git")
+        let Ok(out) = crate::gui_path::command("git")
             .args(["-C", dir, "rev-parse", "--path-format=absolute"])
             .args(["--show-toplevel", "--git-common-dir"])
             .output()

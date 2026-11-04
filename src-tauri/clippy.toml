@@ -1,0 +1,3 @@
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "use gui_path::command, which sets CREATE_NO_WINDOW on Windows" },
+]
