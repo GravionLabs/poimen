@@ -1,4 +1,6 @@
 mod backend;
+#[cfg(test)]
+mod backend_fake;
 mod copilot;
 mod git;
 mod github;
@@ -31,10 +33,10 @@ use serde_json::{Value, json};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
-use herdr::Client;
-use stream::{Mode, OpenRequest, Sessions};
+use backend::{Backend, Mode, SplitDirection, StreamRequest};
 
-struct HerdrBin(PathBuf);
+/// The backend the commands talk to (herdr today).
+type Shared = std::sync::Arc<dyn Backend>;
 
 /// Serializes `ensure_backend`.
 #[derive(Default)]
@@ -92,126 +94,112 @@ impl<T> Watches<T> {
     }
 }
 
+/// Runs `f` against the backend off the main thread; shared by the commands below.
+async fn on_backend<T: Send + 'static>(
+    backend: &Shared,
+    f: impl FnOnce(&dyn Backend) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let backend = backend.clone();
+    tauri::async_runtime::spawn_blocking(move || f(backend.as_ref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Workspaces, tabs and panes in one call; the frontend rebuilds its tree from it.
 #[tauri::command]
-async fn snapshot(client: State<'_, Client>) -> Result<Value, String> {
-    let client = client.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let read = |method: &str| client.request(method, json!({})).map_err(|e| e.to_string());
-        Ok(json!({
-            "workspaces": read("workspace.list")?["workspaces"],
-            "tabs": read("tab.list")?["tabs"],
-            "panes": read("pane.list")?["panes"],
-        }))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+async fn snapshot(backend: State<'_, Shared>) -> Result<backend::Snapshot, String> {
+    on_backend(backend.inner(), |b| b.snapshot()).await
 }
 
-/// Runs one herdr request off the main thread; shared by the pane commands below.
-async fn herdr_call(client: &Client, method: &'static str, params: Value) -> Result<Value, String> {
-    let client = client.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        client.request(method, params).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Splits a pane (`pane.split`); returns the new pane id. The change also arrives as events.
+/// Splits a pane; returns the new pane id. The change also arrives as events.
 #[tauri::command]
 async fn pane_split(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     target: String,
-    direction: herdr::SplitDirection,
+    direction: SplitDirection,
     cwd: Option<String>,
 ) -> Result<Option<String>, String> {
-    let params = herdr::split_params(&target, direction, cwd.as_deref());
-    let result = herdr_call(client.inner(), "pane.split", params).await?;
-    Ok(herdr::created_pane_id(&result))
+    on_backend(backend.inner(), move |b| {
+        b.split(&target, direction, cwd.as_deref(), None)
+    })
+    .await
 }
 
-/// Closes a pane (`pane.close`). The UI confirms first; herdr ends the pane's process.
+/// Closes a pane. The UI confirms first; the backend ends the pane's process.
 #[tauri::command]
-async fn pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
-    herdr_call(client.inner(), "pane.close", herdr::close_params(&pane_id)).await?;
-    Ok(())
+async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| b.close_terminal(&pane_id)).await
 }
 
-/// Closes a space (`workspace.close`) with all its panes; only on an explicit user action (the UI
-/// confirms first when it has panes). Afterwards `focus`, the neighbouring space, is focused on a
-/// best-effort basis; a failing close leaves the space untouched and returns herdr's error.
+/// Closes a space with all its panes; only on an explicit user action (the UI confirms first when
+/// it has panes). Afterwards `focus`, the neighbouring space, is focused on a best-effort basis; a
+/// failing close leaves the space untouched and returns the backend's error.
 #[tauri::command]
 async fn space_close(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     workspace_id: String,
     focus: Option<String>,
 ) -> Result<(), String> {
-    herdr_call(
-        client.inner(),
-        "workspace.close",
-        herdr::workspace_close_params(&workspace_id),
-    )
-    .await?;
-    if let Some(id) = focus.filter(|id| !id.is_empty()) {
-        let _ = herdr_call(client.inner(), "workspace.focus", spaces::focus_params(&id)).await;
-    }
-    Ok(())
+    on_backend(backend.inner(), move |b| {
+        b.close_space(&workspace_id)?;
+        if let Some(id) = focus.filter(|id| !id.is_empty()) {
+            let _ = b.focus_space(&id);
+        }
+        Ok(())
+    })
+    .await
 }
 
-/// Starts a supported agent in an existing pane at a shell prompt (`agent.start`); can take a while.
+/// Starts a supported agent in an existing pane at a shell prompt; can take a while.
 #[tauri::command]
 async fn agent_start(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     pane_id: String,
     kind: String,
     name: Option<String>,
     args: Vec<String>,
 ) -> Result<(), String> {
-    let params = herdr::agent_start_params(&pane_id, &kind, name.as_deref(), &args);
-    herdr_call(client.inner(), "agent.start", params).await?;
-    Ok(())
+    on_backend(backend.inner(), move |b| {
+        b.agent_start(&pane_id, &kind, name.as_deref(), &args)
+    })
+    .await
 }
 
-/// Renames an agent (`agent.rename`); an empty name clears it.
+/// Renames an agent; an empty name clears it.
 #[tauri::command]
 async fn agent_rename(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     target: String,
     name: Option<String>,
 ) -> Result<(), String> {
-    let params = herdr::agent_rename_params(&target, name.as_deref());
-    herdr_call(client.inner(), "agent.rename", params).await?;
-    Ok(())
+    on_backend(backend.inner(), move |b| {
+        b.agent_rename(&target, name.as_deref())
+    })
+    .await
 }
 
-/// Sends a prompt to an agent (`agent.prompt`) without focusing its terminal; no controller needed.
-/// Stalled, timed-out and blocked agents are results, not errors.
+/// Sends a prompt to an agent without focusing its terminal; no controller needed. Stalled,
+/// timed-out and blocked agents are results, not errors.
 #[tauri::command]
 async fn agent_prompt(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     target: String,
     text: String,
 ) -> Result<herdr::PromptOutcome, String> {
-    let client = client.inner().clone();
-    let params = herdr::agent_prompt_params(&target, &text);
-    tauri::async_runtime::spawn_blocking(move || {
-        herdr::prompt_outcome(client.request("agent.prompt", params))
-    })
-    .await
-    .map_err(|e| e.to_string())
+    on_backend(backend.inner(), move |b| Ok(b.agent_prompt(&target, &text))).await
 }
 
-/// Renames a pane (`pane.rename`); an empty label clears it.
+/// Renames a pane; an empty label clears it.
 #[tauri::command]
 async fn pane_rename(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     pane_id: String,
     label: Option<String>,
 ) -> Result<(), String> {
-    let params = herdr::pane_rename_params(&pane_id, label.as_deref());
-    herdr_call(client.inner(), "pane.rename", params).await?;
-    Ok(())
+    on_backend(backend.inner(), move |b| {
+        b.rename_terminal(&pane_id, label.as_deref())
+    })
+    .await
 }
 
 type GithubClient = std::sync::Arc<github::Client<github::SystemRunner>>;
@@ -285,106 +273,107 @@ async fn github_milestones(
         .map_err(|e| e.to_string())
 }
 
-/// Opens a new terminal in a workspace as a new tab (`tab.create`); returns its pane id.
+/// Opens a new terminal in a workspace as a new tab; returns its pane id.
 #[tauri::command]
 async fn terminal_create(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     workspace_id: String,
     cwd: Option<String>,
 ) -> Result<Option<String>, String> {
-    let params = herdr::tab_create_params(&workspace_id, cwd.as_deref());
-    let result = herdr_call(client.inner(), "tab.create", params).await?;
-    Ok(herdr::created_pane_id(&result))
+    on_backend(backend.inner(), move |b| {
+        b.create_terminal(&workspace_id, cwd.as_deref())
+    })
+    .await
 }
 
-/// Creates a space (`workspace.create`) for a directory and focuses it; when a space for the
-/// directory exists (a pane inside it, else one labelled with its name) that one is focused.
+/// Creates a space for a directory and focuses it; when a space for the directory exists (a pane
+/// inside it, else one labelled with its name) that one is focused.
 #[tauri::command]
 async fn create_space(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     cwd: String,
     label: Option<String>,
     decision: Option<trust::Decision>,
 ) -> Result<spaces::SpaceOutcome, String> {
-    let home = home_dir();
-    let dir = spaces::resolve_dir(&cwd, home.as_deref())?;
-    let client = client.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let call =
-            |method: &str, params: Value| client.request(method, params).map_err(|e| e.to_string());
-        let list = |method: &str, key: &str| {
-            Ok::<Vec<Value>, String>(
-                call(method, json!({}))?[key]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default(),
-            )
-        };
-        let workspaces = list("workspace.list", "workspaces")?;
-        let panes = list("pane.list", "panes")?;
-        if let Some(workspace_id) = spaces::find_space(&dir, &workspaces, &panes) {
-            call("workspace.focus", spaces::focus_params(&workspace_id))?;
+    on_backend(backend.inner(), move |b| {
+        create_space_with(b, home_dir().as_deref(), &cwd, label.as_deref(), decision)
+    })
+    .await
+}
+
+/// The body of `create_space`, against any backend.
+fn create_space_with(
+    backend: &dyn Backend,
+    home: Option<&std::path::Path>,
+    cwd: &str,
+    label: Option<&str>,
+    decision: Option<trust::Decision>,
+) -> Result<spaces::SpaceOutcome, String> {
+    let dir = spaces::resolve_dir(cwd, home)?;
+    let snapshot = backend.snapshot()?;
+    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
+    let workspaces = list(&snapshot.workspaces);
+    let panes = list(&snapshot.panes);
+    if let Some(workspace_id) = spaces::find_space(&dir, &workspaces, &panes) {
+        backend.focus_space(&workspace_id)?;
+        return Ok(spaces::SpaceOutcome {
+            workspace_id,
+            created: false,
+            warnings: Vec::new(),
+            setup_started: false,
+            trust: None,
+        });
+    }
+    // The project files are read once; the trust check, the listed commands and the layout all
+    // use this read.
+    let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
+    let sources = trust::Sources::read(&root);
+    let user = home.map(settings::load);
+    let trusted = user
+        .as_ref()
+        .map(|s| s.trusted_projects.clone())
+        .unwrap_or_default();
+    let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
+        trust::Gate::Ask(request) => {
             return Ok(spaces::SpaceOutcome {
-                workspace_id,
+                workspace_id: String::new(),
                 created: false,
                 warnings: Vec::new(),
                 setup_started: false,
-                trust: None,
+                trust: Some(request),
             });
         }
-        // The project files are read once; the trust check, the listed commands and the layout
-        // all use this read.
-        let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
-        let sources = trust::Sources::read(&root);
-        let user = home.as_deref().map(settings::load);
-        let trusted = user
-            .as_ref()
-            .map(|s| s.trusted_projects.clone())
-            .unwrap_or_default();
-        let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
-            trust::Gate::Ask(request) => {
-                return Ok(spaces::SpaceOutcome {
-                    workspace_id: String::new(),
-                    created: false,
-                    warnings: Vec::new(),
-                    setup_started: false,
-                    trust: Some(request),
-                });
+        trust::Gate::Strip => false,
+        trust::Gate::Run { store } => {
+            if let Some(hash) = store {
+                let home = home.ok_or("the home directory is not known")?;
+                settings::trust_project(home, &sources.root, &hash)?;
             }
-            trust::Gate::Strip => false,
-            trust::Gate::Run { store } => {
-                if let Some(hash) = store {
-                    let home = home.as_deref().ok_or("the home directory is not known")?;
-                    settings::trust_project(home, &sources.root, &hash)?;
-                }
-                true
-            }
-        };
-        let label = spaces::space_label(
-            &dir,
-            label.as_deref().unwrap_or_default(),
-            home.as_deref(),
-            &workspaces,
-        );
-        let result = call("workspace.create", spaces::create_params(&dir, &label))?;
-        let workspace_id = spaces::created_workspace_id(&result)
-            .ok_or("herdr did not report the new workspace")?;
-        call("workspace.focus", spaces::focus_params(&workspace_id))?;
-        let user_layout = user.and_then(|s| s.spaces_layout);
-        let mut warnings =
-            build_layout(&call, &dir, &result, &sources, user_layout.as_ref(), allow);
-        let (setup_started, warning) = run_setup(&call, &workspace_id, &dir, &sources, allow);
-        warnings.extend(warning);
-        Ok(spaces::SpaceOutcome {
-            workspace_id,
-            created: true,
-            warnings,
-            setup_started,
-            trust: None,
-        })
+            true
+        }
+    };
+    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &workspaces);
+    let created = backend.create_space(&dir, &label)?;
+    let workspace_id = created.space_id.clone();
+    backend.focus_space(&workspace_id)?;
+    let user_layout = user.and_then(|s| s.spaces_layout);
+    let mut warnings = build_layout(
+        backend,
+        &dir,
+        created.root_terminal.as_deref(),
+        &sources,
+        user_layout.as_ref(),
+        allow,
+    );
+    let (setup_started, warning) = run_setup(backend, &workspace_id, &dir, &sources, allow);
+    warnings.extend(warning);
+    Ok(spaces::SpaceOutcome {
+        workspace_id,
+        created: true,
+        warnings,
+        setup_started,
+        trust: None,
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Builds the pane layout in a just-created space from the already read project `sources`:
@@ -394,9 +383,9 @@ async fn create_space(
 /// Problems come back as warnings; the space then keeps the panes created so far (at least its
 /// single root pane).
 fn build_layout(
-    call: &impl Fn(&str, Value) -> Result<Value, String>,
+    backend: &dyn Backend,
     dir: &str,
-    created: &Value,
+    root_pane: Option<&str>,
     sources: &trust::Sources,
     user_layout: Option<&layout::Layout>,
     allow_project_commands: bool,
@@ -412,10 +401,10 @@ fn build_layout(
     } else {
         layout
     };
-    let Some(root_pane) = herdr::created_pane_id(created) else {
+    let Some(root_pane) = root_pane else {
         return vec!["herdr did not report the root pane; no layout applied".into()];
     };
-    if let Err(e) = layout::apply(call, &layout, dir, &root_pane) {
+    if let Err(e) = layout::apply(backend, &layout, dir, root_pane) {
         warnings.push(format!("layout not fully applied: {e}"));
     }
     warnings
@@ -425,7 +414,7 @@ fn build_layout(
 /// when project commands are allowed (trusted); a failure is a warning, never a reason to close
 /// the space. Returns whether it started and the warning, if any.
 fn run_setup(
-    call: &impl Fn(&str, Value) -> Result<Value, String>,
+    backend: &dyn Backend,
     workspace_id: &str,
     dir: &str,
     sources: &trust::Sources,
@@ -438,7 +427,7 @@ fn run_setup(
     let Some(command) = project::setup_of(project) else {
         return (false, None);
     };
-    match project::start_setup(call, workspace_id, dir, &command) {
+    match project::start_setup(backend, workspace_id, dir, &command) {
         Ok(()) => (true, None),
         Err(e) => (false, Some(format!("setup not started: {e}"))),
     }
@@ -482,37 +471,29 @@ async fn list_child_dirs(path: String, hidden: bool) -> Result<Vec<spaces::DirEn
     .map_err(|e| e.to_string())
 }
 
-/// Version and protocol of the running herdr; `None` when unreachable or too old.
+/// Version and protocol of the running backend; `None` when unreachable or too old.
 #[tauri::command]
-async fn herdr_info(client: State<'_, Client>) -> Result<Option<herdr::ServerInfo>, String> {
-    let client = client.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || client.info())
-        .await
-        .map_err(|e| e.to_string())
+async fn herdr_info(backend: State<'_, Shared>) -> Result<Option<backend::BackendInfo>, String> {
+    on_backend(backend.inner(), |b| Ok(b.info())).await
 }
 
-/// Starts the herdr server when nothing answers on its socket (and `herdr.autoStart` allows it),
+/// Starts the backend server when nothing answers on its socket (and `herdr.autoStart` allows it),
 /// then waits until it answers. Runs at start and on Retry; one at a time so a retry during a
 /// start never launches a second server.
 #[tauri::command]
 async fn ensure_backend(
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     lock: State<'_, StartLock>,
 ) -> Result<backend::BackendStatus, String> {
-    let client = client.inner().clone();
     let lock = lock.0.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        use backend::Backend;
+    on_backend(backend.inner(), move |b| {
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let auto_start = home_dir()
             .map(|h| settings::load(&h).herdr_auto_start)
             .unwrap_or(true);
-        backend::HerdrBackend::new(backend::SystemRunner::new(client), auto_start)
-            .ensure_running()
-            .into()
+        Ok(b.ensure_running(auto_start).into())
     })
     .await
-    .map_err(|e| e.to_string())
 }
 
 /// The running poimen build's version (Tauri app version).
@@ -654,14 +635,17 @@ async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, 
 #[tauri::command]
 async fn subagents_watch(
     app: AppHandle,
-    client: State<'_, Client>,
+    backend: State<'_, Shared>,
     watch: State<'_, SubagentWatch>,
     key: String,
     pane_id: String,
 ) -> Result<bool, String> {
     let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
-    let panes = herdr_call(client.inner(), "pane.list", json!({})).await?;
-    let found = herdr::parse_agent_session(&panes, &pane_id).and_then(|s| {
+    let session = {
+        let pane_id = pane_id.clone();
+        on_backend(backend.inner(), move |b| b.agent_session(&pane_id)).await?
+    };
+    let found = session.and_then(|s| {
         let home = home_dir()?;
         let dir = match s.agent {
             herdr::TranscriptAgent::Claude => transcripts::locate_project_dir(
@@ -702,59 +686,62 @@ fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
     }
 }
 
+/// Opens a terminal stream; records arrive as `terminal` events. The result says whether the
+/// stream is emulated (raw PTY bytes) or rendered (finished frames).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri injects app/state; the rest is the IPC payload.
 fn open_terminal(
     app: AppHandle,
-    sessions: State<'_, Sessions>,
-    bin: State<'_, HerdrBin>,
+    backend: State<'_, Shared>,
     mode: Mode,
     target: String,
     cols: u16,
     rows: u16,
     takeover: bool,
-) -> Result<u32, String> {
-    let req = OpenRequest {
-        bin: &bin.0,
+) -> Result<backend::OpenedStream, String> {
+    let request = StreamRequest {
         mode,
         target: &target,
         cols,
         rows,
         takeover,
     };
-    sessions.open(req, move |id, record| {
-        let _ = app.emit("terminal", json!({ "id": id, "record": record }));
-    })
+    backend.open_stream(
+        request,
+        Box::new(move |id, record| {
+            let _ = app.emit("terminal", json!({ "id": id, "record": record }));
+        }),
+    )
 }
 
 #[tauri::command]
-fn terminal_input(sessions: State<'_, Sessions>, id: u32, text: String) -> Result<(), String> {
-    sessions.send(id, &stream::input_command(&text))
+fn terminal_input(backend: State<'_, Shared>, id: u32, text: String) -> Result<(), String> {
+    backend.stream_input(id, &text)
 }
 
 #[tauri::command]
 fn terminal_resize(
-    sessions: State<'_, Sessions>,
+    backend: State<'_, Shared>,
     id: u32,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    sessions.send(id, &stream::resize_command(cols, rows))
+    backend.stream_resize(id, cols, rows)
 }
 
 #[tauri::command]
 fn terminal_scroll(
-    sessions: State<'_, Sessions>,
+    backend: State<'_, Shared>,
     id: u32,
     up: bool,
     lines: u16,
 ) -> Result<(), String> {
-    sessions.send(id, &stream::scroll_command(up, lines))
+    backend.stream_scroll(id, up, lines)
 }
 
 #[tauri::command]
 fn terminal_mouse(
-    sessions: State<'_, Sessions>,
+    backend: State<'_, Shared>,
     id: u32,
     action: String,
     button: String,
@@ -762,16 +749,12 @@ fn terminal_mouse(
     row: u16,
     modifiers: u8,
 ) -> Result<(), String> {
-    stream::validate_mouse(&action, &button)?;
-    sessions.send(
-        id,
-        &stream::mouse_command(&action, &button, column, row, modifiers),
-    )
+    backend.stream_mouse(id, &action, &button, column, row, modifiers)
 }
 
 #[tauri::command]
-fn close_terminal(sessions: State<'_, Sessions>, id: u32) {
-    sessions.close(id);
+fn close_terminal(backend: State<'_, Shared>, id: u32) {
+    backend.close_stream(id);
 }
 
 /// The accelerator the native menu carries. Only Cmd bindings on macOS: elsewhere (and for Ctrl
@@ -914,8 +897,12 @@ fn build_menu(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let bin = stream::resolve_bin_from_env();
-    let client = Client::from_env();
+    let client = herdr::Client::from_env();
+    let backend: Shared = std::sync::Arc::new(backend::HerdrBackend::new(
+        backend::SystemRunner::new(client.clone()),
+        client,
+        stream::resolve_bin_from_env(),
+    ));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -923,7 +910,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::PendingUpdate::default())
-        .manage(client.clone())
+        .manage(backend.clone())
         .manage::<GithubClient>(std::sync::Arc::new(github::Client::system(
             home_dir()
                 .map(|h| {
@@ -934,9 +921,7 @@ pub fn run() {
                 })
                 .unwrap_or_else(|| std::env::temp_dir().join("poimen-github")),
         )))
-        .manage(Sessions::default())
         .manage(SubagentWatch::default())
-        .manage(HerdrBin(bin))
         .manage(StartLock::default())
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -971,7 +956,7 @@ pub fn run() {
                 });
             }
             std::thread::spawn(move || {
-                watch::run(client, |event| {
+                backend.watch(&|event| {
                     let _ = handle.emit("herdr", event);
                 });
             });
@@ -1030,7 +1015,7 @@ pub fn run() {
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 // Release controllers and stop the CLI children; herdr panes keep running.
-                app.state::<Sessions>().close_all();
+                app.state::<Shared>().close_streams();
             }
         });
 }
@@ -1093,8 +1078,9 @@ mod subagent_watches_tests {
 #[cfg(test)]
 mod build_layout_tests {
     use super::*;
+    use crate::backend_fake::FakeBackend;
+    use backend::{Snapshot, StreamRecord};
     use serde_json::json;
-    use std::cell::RefCell;
 
     const PROJECT_TEXT: &str = r#"{"layout":{"panes":[{"name":"agent","command":"evil"},
         {"name":"sh","command":"worse","split":{"direction":"down"}}]}}"#;
@@ -1107,45 +1093,28 @@ mod build_layout_tests {
         }
     }
 
-    fn run(
-        sources: &trust::Sources,
-        user: Option<&layout::Layout>,
-        allow: bool,
-    ) -> Vec<(String, Value)> {
-        let calls = RefCell::new(Vec::new());
-        let call = |method: &str, params: Value| -> Result<Value, String> {
-            let mut c = calls.borrow_mut();
-            let n = c.len();
-            c.push((method.to_owned(), params));
-            Ok(match method {
-                "pane.split" => json!({ "pane": { "pane_id": format!("w1:p{}", n + 10) } }),
-                _ => json!({}),
-            })
-        };
-        let created = json!({ "root_pane": { "pane_id": "w1:root" } });
-        let warnings = build_layout(&call, "/work/app", &created, sources, user, allow);
+    fn run(sources: &trust::Sources, user: Option<&layout::Layout>, allow: bool) -> Vec<String> {
+        let fake = FakeBackend::default();
+        let warnings = build_layout(&fake, "/work/app", Some("w1:root"), sources, user, allow);
         assert!(warnings.is_empty(), "{warnings:?}");
-        calls.into_inner()
+        fake.calls()
     }
 
-    fn typed(calls: &[(String, Value)]) -> Vec<&Value> {
-        calls
-            .iter()
-            .filter(|(m, _)| m == "pane.send_input")
-            .map(|(_, p)| p)
-            .collect()
+    fn typed(calls: &[String]) -> Vec<&String> {
+        calls.iter().filter(|c| c.starts_with("input ")).collect()
     }
 
     #[test]
     fn untrusted_project_layout_builds_panes_but_types_nothing() {
         let calls = run(&sources(PROJECT_TEXT), None, false);
-        let methods: Vec<_> = calls.iter().map(|(m, _)| m.as_str()).collect();
         assert_eq!(
-            methods,
-            ["pane.rename", "pane.split", "pane.rename"],
-            "{calls:?}"
+            calls,
+            [
+                "rename w1:root agent",
+                "split w1:root down /work/app 0.5",
+                "rename w1:p11 sh"
+            ]
         );
-        assert!(typed(&calls).is_empty());
     }
 
     #[test]
@@ -1154,22 +1123,23 @@ mod build_layout_tests {
         assert_eq!(typed(&calls).len(), 2);
     }
 
-    type SetupRun = ((bool, Option<String>), Vec<(String, Value)>);
+    #[test]
+    fn a_missing_root_pane_is_a_warning_and_nothing_is_called() {
+        let fake = FakeBackend::default();
+        let warnings = build_layout(&fake, "/work/app", None, &sources(PROJECT_TEXT), None, true);
+        assert_eq!(warnings.len(), 1);
+        assert!(fake.calls().is_empty());
+    }
+
+    type SetupRun = ((bool, Option<String>), Vec<String>);
 
     fn setup_calls(sources: &trust::Sources, allow: bool, fail_on: Option<&str>) -> SetupRun {
-        let calls = RefCell::new(Vec::new());
-        let call = |method: &str, params: Value| -> Result<Value, String> {
-            calls.borrow_mut().push((method.to_owned(), params));
-            if fail_on == Some(method) {
-                return Err("boom".into());
-            }
-            Ok(match method {
-                "tab.create" => json!({ "root_pane": { "pane_id": "w1:s1" } }),
-                _ => json!({}),
-            })
-        };
-        let out = run_setup(&call, "w1", "/work/app", sources, allow);
-        (out, calls.into_inner())
+        let fake = FakeBackend::default();
+        if let Some(prefix) = fail_on {
+            fake.fail_on(prefix);
+        }
+        let out = run_setup(&fake, "w1", "/work/app", sources, allow);
+        (out, fake.calls())
     }
 
     #[test]
@@ -1180,18 +1150,9 @@ mod build_layout_tests {
         assert_eq!(
             calls,
             [
-                (
-                    "tab.create".to_owned(),
-                    json!({ "workspace_id": "w1", "cwd": "/work/app" })
-                ),
-                (
-                    "pane.rename".to_owned(),
-                    json!({ "pane_id": "w1:s1", "label": "setup" })
-                ),
-                (
-                    "pane.send_input".to_owned(),
-                    json!({ "pane_id": "w1:s1", "text": "pnpm install", "keys": ["enter"] })
-                ),
+                "create_terminal w1 /work/app",
+                "rename w1:t0 setup",
+                "input w1:t0 pnpm install"
             ]
         );
     }
@@ -1215,11 +1176,8 @@ mod build_layout_tests {
 
     #[test]
     fn a_failing_setup_start_is_a_warning() {
-        let ((started, warning), _) = setup_calls(
-            &sources(r#"{"setup":"make"}"#),
-            true,
-            Some("pane.send_input"),
-        );
+        let ((started, warning), _) =
+            setup_calls(&sources(r#"{"setup":"make"}"#), true, Some("input"));
         assert!(!started);
         assert_eq!(warning.as_deref(), Some("setup not started: boom"));
     }
@@ -1232,5 +1190,91 @@ mod build_layout_tests {
         assert_eq!(typed(&calls).len(), 1);
         let calls = run(&trust::Sources::default(), Some(&user), false);
         assert_eq!(typed(&calls).len(), 1);
+    }
+
+    // The command layer through a fake backend.
+
+    fn tmp_dir() -> String {
+        std::env::temp_dir()
+            .to_string_lossy()
+            .trim_end_matches('/')
+            .to_owned()
+    }
+
+    #[test]
+    fn create_space_creates_focuses_and_lays_out_a_new_space() {
+        let fake = FakeBackend::default();
+        let dir = tmp_dir();
+        let outcome = create_space_with(&fake, None, &dir, Some("demo"), None).unwrap();
+        assert!(outcome.created && outcome.trust.is_none());
+        assert_eq!(outcome.workspace_id, "w9");
+        let calls = fake.calls();
+        assert_eq!(calls[0], "snapshot");
+        assert_eq!(calls[1], format!("create_space {dir} demo"));
+        assert_eq!(calls[2], "focus w9");
+        // The default layout: agent, tests, shell.
+        assert!(calls.contains(&"rename w9:root agent".to_owned()));
+        assert_eq!(calls.iter().filter(|c| c.starts_with("split ")).count(), 2);
+    }
+
+    #[test]
+    fn create_space_focuses_an_existing_space_for_the_directory() {
+        let fake = FakeBackend::default();
+        let dir = tmp_dir();
+        *fake.snapshot.lock().unwrap() = Snapshot {
+            workspaces: json!([{ "workspace_id": "w2", "label": "demo", "number": 1 }]),
+            tabs: json!([]),
+            panes: json!([{ "pane_id": "w2:p1", "workspace_id": "w2", "cwd": dir }]),
+        };
+        let outcome = create_space_with(&fake, None, &dir, None, None).unwrap();
+        assert!(!outcome.created);
+        assert_eq!(outcome.workspace_id, "w2");
+        assert_eq!(fake.calls(), ["snapshot", "focus w2"]);
+    }
+
+    #[test]
+    fn create_space_reports_a_backend_error() {
+        let fake = FakeBackend::default();
+        fake.fail_on("create_space");
+        let err = create_space_with(&fake, None, &tmp_dir(), None, None).unwrap_err();
+        assert_eq!(err, "boom");
+    }
+
+    #[test]
+    fn create_space_rejects_a_missing_directory_before_calling_the_backend() {
+        let fake = FakeBackend::default();
+        assert!(create_space_with(&fake, None, "/no/such/dir/at/all", None, None).is_err());
+        assert!(fake.calls().is_empty());
+    }
+
+    #[test]
+    fn a_fake_stream_delivers_neutral_records_and_says_if_it_is_emulated() {
+        let mut fake = FakeBackend::default();
+        fake.emulated = true;
+        fake.records.lock().unwrap().push(StreamRecord::Output {
+            bytes: "AA==".into(),
+        });
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let backend: &dyn Backend = &fake;
+        let opened = backend
+            .open_stream(
+                StreamRequest {
+                    mode: Mode::Observe,
+                    target: "w1:p1",
+                    cols: 80,
+                    rows: 24,
+                    takeover: false,
+                },
+                Box::new(move |_, record| sink.lock().unwrap().push(record)),
+            )
+            .unwrap();
+        assert!(opened.emulated);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [StreamRecord::Output {
+                bytes: "AA==".into()
+            }]
+        );
     }
 }

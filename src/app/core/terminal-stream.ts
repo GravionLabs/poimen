@@ -1,5 +1,5 @@
 import { DestroyRef, Injectable, inject } from "@angular/core";
-import type { Mode, StreamRecord } from "./herdr";
+import type { Mode, OpenedStream, StreamRecord } from "./herdr";
 import { TauriBridge, type Unlisten } from "./tauri";
 
 export interface OpenTerminal {
@@ -12,7 +12,7 @@ export interface OpenTerminal {
   takeover: boolean;
 }
 
-/** A `terminal.mouse` command; `modifiers` combines Shift = 1, Ctrl = 2, Alt = 4. */
+/** A mouse command for a rendered stream; `modifiers` combines Shift = 1, Ctrl = 2, Alt = 4. */
 export interface MouseCommand {
   action: "down" | "up" | "drag" | "move";
   button: "left" | "middle" | "right";
@@ -28,14 +28,19 @@ interface TerminalEvent {
 }
 
 /**
- * One live `herdr terminal session observe|control` stream. Closing it ends the CLI child process
- * only; the herdr pane keeps running.
+ * One live terminal stream. Closing it ends the stream only (for herdr, the CLI child process); the
+ * terminal keeps running.
  */
 export class TerminalSession {
   private closed = false;
 
   constructor(
     readonly id: number,
+    /**
+     * Raw PTY bytes: xterm.js tracks the terminal modes, so the view sends no mouse and wheel
+     * commands. Otherwise the stream is rendered (finished frames) and the view forwards them.
+     */
+    readonly emulated: boolean,
     private readonly bridge: TauriBridge,
     private readonly release: (id: number) => void,
   ) {}
@@ -125,17 +130,20 @@ export class TerminalStreamService {
   ): Promise<TerminalSession> {
     await this.ready;
     this.opening++;
-    let id: number;
+    let opened: OpenedStream;
     try {
       // The backend emits as soon as the child runs, possibly before this call resolves.
-      id = await this.bridge.invoke<number>("open_terminal", { ...options });
+      opened = await this.bridge.invoke<OpenedStream>("open_terminal", { ...options });
     } catch (err) {
       this.opening--;
       if (this.opening === 0) this.early.clear();
       throw err;
     }
     this.opening--;
-    const session = new TerminalSession(id, this.bridge, (gone) => this.routes.delete(gone));
+    const id = opened.id;
+    const session = new TerminalSession(id, opened.emulated, this.bridge, (gone) =>
+      this.routes.delete(gone),
+    );
     this.routes.set(id, (record) => {
       if (record.type === "closed") session.ended();
       onRecord(record);

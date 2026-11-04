@@ -74,10 +74,29 @@ export interface HerdrEvent {
 /** How a terminal view attaches: as one of many observers or as the single controller. */
 export type Mode = "observe" | "control";
 
-/** One record of a terminal stream (payload of the `terminal` Tauri event, per session id). */
+/**
+ * One record of a terminal stream (payload of the `terminal` Tauri event, per session id), the same
+ * for every backend. `bytes` is base64.
+ */
 export type StreamRecord =
-  | { type: "frame"; seq: number; full: boolean; width: number; height: number; bytes: string }
-  | { type: "closed"; reason: string };
+  | { type: "reset"; cols: number; rows: number; bytes: string }
+  | { type: "output"; bytes: string }
+  | { type: "resized"; cols: number; rows: number }
+  | { type: "controller"; attached: boolean }
+  | {
+      type: "closed";
+      reason: string;
+      exit_code?: number;
+      /** Set when the reason is more than text; `controller_held`: another client is the controller. */
+      code?: "controller_held";
+    };
+
+/** What `open_terminal` answers: the stream id and whether the stream is emulated. */
+export interface OpenedStream {
+  id: number;
+  /** Raw PTY bytes (xterm.js tracks the modes) rather than finished frames. */
+  emulated: boolean;
+}
 
 export interface TabNode {
   tab: Tab;

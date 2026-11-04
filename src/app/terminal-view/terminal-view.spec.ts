@@ -18,6 +18,7 @@ const fake = vi.hoisted(() => ({
   openUrl: undefined as unknown,
   term: undefined as { selection: string; pasted: string[] } | undefined,
   keyHandler: undefined as ((event: KeyboardEvent) => boolean) | undefined,
+  wheelHandler: undefined as ((event: WheelEvent) => boolean) | undefined,
 }));
 
 vi.mock("@xterm/xterm", () => ({
@@ -39,7 +40,9 @@ vi.mock("@xterm/xterm", () => ({
     }
     open() {}
     onData() {}
-    attachCustomWheelEventHandler() {}
+    attachCustomWheelEventHandler(handler: (event: WheelEvent) => boolean) {
+      fake.wheelHandler = handler;
+    }
     attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
       fake.keyHandler = handler;
     }
@@ -80,9 +83,10 @@ vi.mock("@xterm/addon-webgl", () => ({
   },
 }));
 
-import { TerminalView, isControllerHeld } from "./terminal-view";
+import { TerminalView } from "./terminal-view";
 
 const pane: Pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "idle" };
+const attached: StreamRecord = { type: "controller", attached: true };
 
 beforeAll(() => {
   getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting(), {
@@ -99,7 +103,7 @@ beforeAll(() => {
 
 afterEach(() => TestBed.resetTestingModule());
 
-async function setup(wanted: "control" | "observe", target: Pane = pane) {
+async function setup(wanted: "control" | "observe", target: Pane = pane, emulated = false) {
   fake.cols = 80;
   fake.nextCols = 80;
   fake.observers = [];
@@ -108,6 +112,7 @@ async function setup(wanted: "control" | "observe", target: Pane = pane) {
   const settings = signal<Settings>(DEFAULT_SETTINGS);
   const session = {
     open: true,
+    emulated,
     resize: vi.fn(),
     close: vi.fn(),
     input: vi.fn(),
@@ -370,13 +375,15 @@ describe("TerminalView font change", () => {
 });
 
 describe("TerminalView input mode decision", () => {
-  const closed = (reason: string): StreamRecord => ({ type: "closed", reason });
+  const closed = (reason: string, held = false): StreamRecord => ({
+    type: "closed",
+    reason,
+    ...(held ? { code: "controller_held" as const } : {}),
+  });
   const frame: StreamRecord = {
-    type: "frame",
-    seq: 1,
-    full: true,
-    width: 80,
-    height: 24,
+    type: "reset",
+    cols: 80,
+    rows: 24,
     bytes: "",
   };
   const modeOf = (call: unknown) => call as { mode: string; takeover: boolean };
@@ -384,6 +391,7 @@ describe("TerminalView input mode decision", () => {
   it("opens in input mode without a takeover when control succeeds", async () => {
     const { open, modes, fixture, send } = await setup("control");
     await send(0, frame);
+    await send(0, attached);
     expect(open).toHaveBeenCalledTimes(1);
     expect(modeOf(open.mock.calls[0][0])).toMatchObject({ mode: "control", takeover: false });
     expect(modes.at(-1)).toEqual({ mode: "control", blocked: null });
@@ -392,7 +400,7 @@ describe("TerminalView input mode decision", () => {
 
   it("falls back to read-only with the reason when another client holds the controller", async () => {
     const { open, modes, send, fixture } = await setup("control");
-    await send(0, closed("terminal is controlled by another client"));
+    await send(0, closed("terminal is controlled by another client", true));
     expect(open).toHaveBeenCalledTimes(2);
     expect(modeOf(open.mock.calls[1][0])).toMatchObject({ mode: "observe", takeover: false });
     expect(modes.at(-1)).toEqual({
@@ -404,7 +412,7 @@ describe("TerminalView input mode decision", () => {
 
   it("never takes over by itself, only on the explicit action", async () => {
     const { open, send, fixture } = await setup("control");
-    await send(0, closed("held"));
+    await send(0, closed("held", true));
     expect(open.mock.calls.every((c) => !modeOf(c[0]).takeover)).toBe(true);
     fixture.componentInstance.reconnect(true);
     await new Promise((resolve) => setTimeout(resolve));
@@ -422,7 +430,8 @@ describe("TerminalView input mode decision", () => {
   it("goes read-only with the banner when another client takes the controller", async () => {
     const { open, modes, send, fixture } = await setup("control");
     await send(0, frame);
-    await send(0, closed("controller taken over"));
+    await send(0, attached);
+    await send(0, closed("controller taken over", true));
     expect(modes.at(-1)).toEqual({ mode: "observe", blocked: "controller taken over" });
     expect(fixture.componentInstance.banner()).toBe("controller taken over");
     expect(modeOf(open.mock.calls.at(-1)![0]).mode).toBe("observe");
@@ -430,7 +439,7 @@ describe("TerminalView input mode decision", () => {
 
   it("does not retry control when a read-only fallback tab is resized", async () => {
     const { open, send, fixture, settings } = await setup("control");
-    await send(0, closed("terminal 6 already has an attached client; retry with --takeover"));
+    await send(0, closed("terminal 6 already has an attached client; retry with --takeover", true));
     fake.nextCols = 100;
     settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
     fixture.detectChanges();
@@ -444,7 +453,7 @@ describe("TerminalView input mode decision", () => {
   it("keeps the blocked state, banner and take over when a held tab is resized", async () => {
     const held = "terminal 6 already has an attached client; retry with --takeover";
     const { send, fixture, settings, modes } = await setup("control");
-    await send(0, closed(held));
+    await send(0, closed(held, true));
     fake.nextCols = 100;
     settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
     fixture.detectChanges();
@@ -458,6 +467,7 @@ describe("TerminalView input mode decision", () => {
   it("presents a lost stream with a non-takeover reason as an error, not as held", async () => {
     const { modes, send, fixture } = await setup("control");
     await send(0, frame);
+    await send(0, attached);
     await send(0, closed("pane w1:p1 not found"));
     expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
     expect(fixture.componentInstance.banner()).toBe("pane w1:p1 not found");
@@ -471,6 +481,7 @@ describe("TerminalView input mode decision", () => {
       await new Promise<void>((r) => (release = r));
       const s = {
         open: true,
+        emulated: false,
         close: vi.fn(),
         resize: vi.fn(),
         input: vi.fn(),
@@ -496,10 +507,12 @@ describe("TerminalView input mode decision", () => {
     expect(fixture.componentInstance.banner()).toBe("pane w1:p1 not found");
   });
 
-  it("reports read-only until the first frame, then input", async () => {
+  it("reports read-only until the controller record, then input", async () => {
     const { modes, send } = await setup("control");
     expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
     await send(0, frame);
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
+    await send(0, attached);
     expect(modes.at(-1)).toEqual({ mode: "control", blocked: null });
   });
 
@@ -510,13 +523,14 @@ describe("TerminalView input mode decision", () => {
   });
 });
 
-describe("isControllerHeld", () => {
-  it("matches herdr's held message and not other failures", () => {
-    expect(
-      isControllerHeld("terminal 6 already has an attached client; retry with --takeover"),
-    ).toBe(true);
-    expect(isControllerHeld("pane w1:p1 not found")).toBe(false);
-    expect(isControllerHeld("failed to spawn herdr: No such file")).toBe(false);
+describe("a held controller", () => {
+  it("is the structured code of the closed record, not matched from its text", async () => {
+    const { modes, send } = await setup("control");
+    await send(0, {
+      type: "closed",
+      reason: "terminal 6 already has an attached client; retry with --takeover",
+    });
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
   });
 });
 
@@ -554,11 +568,9 @@ describe("TerminalView fit on layout change (#80)", () => {
 
 describe("TerminalView mouse input", () => {
   const frame: StreamRecord = {
-    type: "frame",
-    seq: 1,
-    full: true,
-    width: 80,
-    height: 24,
+    type: "reset",
+    cols: 80,
+    rows: 24,
     bytes: "",
   };
   /** 800x480 px body: 80x24 cells of 10x20 px. */
@@ -569,7 +581,8 @@ describe("TerminalView mouse input", () => {
   async function controlling() {
     const ctx = await setup("control");
     ctx.body.getBoundingClientRect = rect;
-    await ctx.send(0, frame); // the first frame confirms control
+    await ctx.send(0, frame);
+    await ctx.send(0, attached); // the controller record confirms control
     return ctx;
   }
 
@@ -585,7 +598,7 @@ describe("TerminalView mouse input", () => {
 
   it("clamps the mouse cell to the grid of the last frame", async () => {
     const { session, body, send } = await controlling();
-    await send(0, { ...frame, seq: 2, width: 60, height: 10 });
+    await send(0, { type: "resized", cols: 60, rows: 10 });
     body.dispatchEvent(mouse("mousedown", 795, 475)); // xterm cell 79,23
     window.dispatchEvent(mouse("mouseup", 125, 45));
     expect(session.mouse.mock.calls.map(([e]) => [e.column, e.row])).toEqual([
@@ -649,10 +662,39 @@ describe("TerminalView mouse input", () => {
     expect(down.defaultPrevented).toBe(false);
   });
 
+  it("forwards the wheel to a rendered stream", async () => {
+    const { send, session } = await setup("control");
+    await send(0, attached);
+    fake.wheelHandler?.({ deltaY: -60 } as WheelEvent);
+    expect(session.scroll).toHaveBeenCalledWith(true, 2);
+  });
+
+  it("does not forward the wheel to an emulated stream", async () => {
+    const { send, session } = await setup("control", pane, true);
+    await send(0, attached);
+    fake.wheelHandler?.({ deltaY: -60 } as WheelEvent);
+    expect(session.scroll).not.toHaveBeenCalled();
+  });
+
+  it("leaves the mouse to xterm.js in an emulated stream", async () => {
+    const { session, body, send } = await setup("control", pane, true);
+    body.getBoundingClientRect = rect;
+    await send(0, attached);
+    const down = mouse("mousedown", 5, 5);
+    body.dispatchEvent(down);
+    window.dispatchEvent(mouse("mouseup", 5, 5));
+    expect(session.mouse).not.toHaveBeenCalled();
+    expect(down.defaultPrevented).toBe(false);
+  });
+
   it("sends nothing while another client holds the controller", async () => {
     const { session, body, send } = await setup("control");
     body.getBoundingClientRect = rect;
-    await send(0, { type: "closed", reason: "terminal already has an attached client" });
+    await send(0, {
+      type: "closed",
+      reason: "terminal already has an attached client",
+      code: "controller_held",
+    });
     body.dispatchEvent(mouse("mousedown", 5, 5));
     expect(session.mouse).not.toHaveBeenCalled();
   });
@@ -788,11 +830,9 @@ describe("TerminalView app shortcuts (#23, #26)", () => {
 
 describe("TerminalView copy and paste (#35)", () => {
   const frame: StreamRecord = {
-    type: "frame",
-    seq: 1,
-    full: true,
-    width: 80,
-    height: 24,
+    type: "reset",
+    cols: 80,
+    rows: 24,
     bytes: "",
   };
   const clipboardEvent = (type: string, text?: string) => {
@@ -810,6 +850,7 @@ describe("TerminalView copy and paste (#35)", () => {
   it("copies the selection on copy in input mode", async () => {
     const { body, send } = await setup("control");
     await send(0, frame);
+    await send(0, attached);
     fake.term!.selection = "hello";
     const { event, data } = clipboardEvent("copy");
     body.dispatchEvent(event);
@@ -837,6 +878,7 @@ describe("TerminalView copy and paste (#35)", () => {
   it("pastes the clipboard text once through xterm in input mode", async () => {
     const { body, send } = await setup("control");
     await send(0, frame);
+    await send(0, attached);
     const { event } = clipboardEvent("paste", "line1\nline2");
     body.dispatchEvent(event);
     expect(fake.term!.pasted).toEqual(["line1\nline2"]);
@@ -852,6 +894,7 @@ describe("TerminalView copy and paste (#35)", () => {
   it("pastes nothing from an empty clipboard", async () => {
     const { body, send } = await setup("control");
     await send(0, frame);
+    await send(0, attached);
     body.dispatchEvent(clipboardEvent("paste", "").event);
     expect(fake.term!.pasted).toEqual([]);
   });
@@ -859,6 +902,7 @@ describe("TerminalView copy and paste (#35)", () => {
   it("stops listening when the view is destroyed", async () => {
     const { body, fixture, send } = await setup("control");
     await send(0, frame);
+    await send(0, attached);
     fixture.destroy();
     body.dispatchEvent(clipboardEvent("paste", "late").event);
     expect(fake.term!.pasted).toEqual([]);
@@ -911,7 +955,7 @@ describe("TerminalView prompt bar (#293)", () => {
 
   it("is hidden in control mode but stays in the DOM, so its text survives", async () => {
     const { fixture, send } = await setup("control", agentPane);
-    await send(0, { type: "frame", width: 80, height: 24, bytes: "" } as StreamRecord);
+    await send(0, attached);
     fixture.detectChanges();
     expect(bar(fixture)!.hidden).toBe(true);
   });

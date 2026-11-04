@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::backend::SplitDirection;
+
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
@@ -154,14 +156,6 @@ pub fn parse_ping(result: &Value) -> Option<ServerInfo> {
             .and_then(|p| u32::try_from(p).ok()),
         supported: SUPPORTED_PROTOCOL,
     })
-}
-
-/// Where `pane.split` puts the new pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SplitDirection {
-    Right,
-    Down,
 }
 
 impl SplitDirection {
