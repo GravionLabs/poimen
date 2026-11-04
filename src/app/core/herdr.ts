@@ -40,6 +40,11 @@ export interface Pane {
 export interface RepoInfo {
   branch: string | null;
   worktree: boolean;
+  /** Changed plus untracked files; null/absent when unknown. */
+  dirty?: number | null;
+  /** Commits ahead of / behind the upstream; null/absent without upstream. */
+  ahead?: number | null;
+  behind?: number | null;
 }
 
 export interface Snapshot {
@@ -214,6 +219,9 @@ export interface PaneRow {
   agent?: string;
   branch?: string;
   worktree: boolean;
+  dirty?: number;
+  ahead?: number;
+  behind?: number;
   dir?: string;
   text?: string;
 }
@@ -238,6 +246,9 @@ export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoI
           agent: agentKind(pane),
           branch: repo?.branch ?? undefined,
           worktree: repo?.worktree ?? false,
+          dirty: repo?.dirty ?? undefined,
+          ahead: repo?.ahead ?? undefined,
+          behind: repo?.behind ?? undefined,
           dir,
           text: statusText(pane),
         };

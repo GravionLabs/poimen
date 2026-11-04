@@ -17,6 +17,9 @@ import { TauriBridge, type Unlisten } from "./tauri";
 /** Delay that collapses a burst of herdr events into one re-read. */
 export const REFRESH_DEBOUNCE_MS = 80;
 
+/** Interval of the repo refresh (dirty state, ahead/behind) while the window is focused. */
+export const REPOS_REFRESH_MS = 60_000;
+
 /** `reconnecting`: the event watcher lost herdr and retries; `unreachable`: a snapshot read failed. */
 export type ConnectionState =
   { state: "connected" } | { state: "reconnecting" | "unreachable"; reason: string };
@@ -26,6 +29,9 @@ export interface BackendStatus {
   state: "running" | "started" | "disabled" | "failed";
   reason: string | null;
 }
+
+/** Whether the window has focus; false outside a browser. */
+const windowFocused = (): boolean => typeof document !== "undefined" && document.hasFocus();
 
 const EMPTY: Snapshot = { workspaces: [], tabs: [], panes: [] };
 
@@ -94,8 +100,11 @@ export class HerdrStore {
   private refreshing = false;
   private refreshAgain = false;
   private unlisten: Promise<Unlisten> | undefined;
+  private reposKey: string | undefined;
+  private reposStale = false;
 
   constructor() {
+    this.watchRepoTriggers();
     inject(DestroyRef).onDestroy(() => {
       clearTimeout(this.refreshTimer);
       void this.unlisten?.then((stop) => stop());
@@ -189,14 +198,40 @@ export class HerdrStore {
   /** Looks up branch and worktree of the pane directories. A failure only leaves them blank. */
   private async readRepos(snapshot: Snapshot): Promise<void> {
     const dirs = [...new Set(snapshot.panes.map(paneDir).filter((d): d is string => !!d))];
+    const key = dirs.join("\n");
+    // Git runs when the pane set (its directories) changed or a trigger asked for it.
+    if (!this.reposStale && key === this.reposKey) return;
+    this.reposStale = false;
     try {
       const found = await this.bridge.invoke<Record<string, RepoInfo> | undefined>("repo_info", {
         dirs,
       });
       this._repos.set(new Map(Object.entries(found ?? {})));
+      this.reposKey = key;
     } catch {
-      // keep the previous values
+      // keep the previous values and try again at the next refresh
+      this.reposKey = undefined;
     }
+  }
+
+  /** Re-reads branch, dirty state and ahead/behind at the next snapshot read. */
+  refreshRepos(): void {
+    this.reposStale = true;
+    this.scheduleRefresh();
+  }
+
+  /** Window focus and a 60 s timer (focused windows only) refresh the repos, never in the background. */
+  private watchRepoTriggers(): void {
+    if (typeof window === "undefined") return;
+    const onFocus = () => this.refreshRepos();
+    const timer = setInterval(() => {
+      if (windowFocused()) this.refreshRepos();
+    }, REPOS_REFRESH_MS);
+    window.addEventListener("focus", onFocus);
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    });
   }
 
   private handle(event: HerdrEvent): void {
@@ -215,6 +250,11 @@ export class HerdrStore {
           this._snapshot.update((s) =>
             applyStatus(s, event.data!.pane_id!, event.data!.agent_status!),
           );
+          const status = event.data.agent_status;
+          // An agent that finished may have changed the working tree; skip it in the background.
+          if ((status === "done" || status === "idle") && windowFocused()) {
+            this.reposStale = true;
+          }
         }
         break;
     }

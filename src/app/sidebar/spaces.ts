@@ -53,6 +53,19 @@ export interface SpaceContext {
   dir?: string;
   branch?: string;
   worktree: boolean;
+  /** Shared `dirty` and `sync` token texts (empty when clean/even or not shared). */
+  dirty?: string;
+  sync?: string;
+}
+
+/** `●3` for three changed or untracked files; empty when clean or unknown. */
+export function dirtyText(dirty: number | undefined): string {
+  return dirty ? `●${dirty}` : "";
+}
+
+/** `↑2 ↓1`; empty when even, without upstream or unknown. */
+export function syncText(ahead: number | undefined, behind: number | undefined): string {
+  return [ahead ? `↑${ahead}` : "", behind ? `↓${behind}` : ""].filter(Boolean).join(" ");
 }
 
 export function spaceContext(space: SpaceNode): SpaceContext {
@@ -60,8 +73,16 @@ export function spaceContext(space: SpaceNode): SpaceContext {
   if (!first) return { worktree: false };
   const same = <K extends "dir" | "branch">(key: K) =>
     first[key] !== undefined && rest.every((r) => r[key] === first[key]) ? first[key] : undefined;
+  const sharedText = (text: (r: PaneRow) => string) =>
+    rest.every((r) => text(r) === text(first)) ? text(first) : "";
   const branch = same("branch");
-  return { dir: same("dir"), branch, worktree: branch !== undefined && first.worktree };
+  return {
+    dir: same("dir"),
+    branch,
+    worktree: branch !== undefined && first.worktree,
+    dirty: sharedText((r) => dirtyText(r.dirty)),
+    sync: sharedText((r) => syncText(r.ahead, r.behind)),
+  };
 }
 
 /**
@@ -124,7 +145,7 @@ const line = (...tokens: string[]): TokenSpec[] => tokens.map((token) => ({ toke
 
 /** The layout poimen shipped before it became configurable. */
 export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
-  workspace: [line("state_icon", "name", "state_text", "branch", "dir")],
+  workspace: [line("state_icon", "name", "state_text", "branch", "dirty", "sync", "dir")],
   agent: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
   terminal: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
 };
@@ -137,6 +158,8 @@ export const ROW_TOKENS = [
   "agent",
   "title",
   "branch",
+  "dirty",
+  "sync",
   "dir",
   "tab",
 ] as const;
@@ -196,6 +219,14 @@ export function renderRow(
         return pane.branch && pane.branch !== ctx.branch
           ? branchText(pane.branch, pane.worktree)
           : undefined;
+      case "dirty": {
+        const text = pane ? dirtyText(pane.dirty) : (ctx.dirty ?? "");
+        return pane && text === (ctx.dirty ?? "") ? undefined : text;
+      }
+      case "sync": {
+        const text = pane ? syncText(pane.ahead, pane.behind) : (ctx.sync ?? "");
+        return pane && text === (ctx.sync ?? "") ? undefined : text;
+      }
       case "dir":
         if (!pane) return ctx.dir ? shortPath(ctx.dir) : undefined;
         return pane.dir && pane.dir !== ctx.dir ? shortPath(pane.dir) : undefined;
