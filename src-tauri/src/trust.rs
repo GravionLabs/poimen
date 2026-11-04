@@ -97,6 +97,21 @@ impl Sources {
             for cmd in &c.commands {
                 add(&mut out, format!("command \"{}\"", cmd.name), &cmd.command);
             }
+            if let Some(t) = &c.tasks {
+                if let Some(dir) = &t.worktree_dir {
+                    add(&mut out, "task worktreeDir".into(), dir);
+                }
+                for m in t.modes.iter().flatten() {
+                    add(&mut out, format!("task mode \"{}\"", m.name), &m.command);
+                    if let Some(cleanup) = &m.cleanup {
+                        add(
+                            &mut out,
+                            format!("task mode \"{}\" cleanup", m.name),
+                            cleanup,
+                        );
+                    }
+                }
+            }
             for preset in &c.presets {
                 panes(
                     &mut out,

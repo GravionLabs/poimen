@@ -42,6 +42,8 @@ pub struct ProjectConfig {
     pub teardown: Option<String>,
     pub commands: Vec<ProjectCommand>,
     pub presets: Vec<Preset>,
+    /// `tasks`: modes and `worktreeDir` that override the user's (merged by name).
+    pub tasks: Option<crate::settings::TaskOverride>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -160,6 +162,16 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
             }
             Ok(None) => warn(&mut out, key, format!("no command for {platform}; skipped")),
             Err(e) => warn(&mut out, key, e),
+        }
+    }
+
+    if !data["tasks"].is_null() {
+        let mut warnings = Vec::new();
+        let tasks = crate::settings::parse_tasks(&data["tasks"], "ignored", &mut warnings);
+        out.warnings
+            .extend(warnings.into_iter().map(|w| format!("{file}: {w}")));
+        if tasks.modes.is_some() || tasks.worktree_dir.is_some() {
+            out.config.tasks = Some(tasks);
         }
     }
 

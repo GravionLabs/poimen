@@ -36,6 +36,11 @@ dropped with a warning naming the file and the key, and the rest loads. Layout p
   repository is not trusted. If it cannot be started, the space stays and a warning names the
   reason. The agent pane starts in parallel; it does not wait for the setup.
 - `teardown`: a command.
+- `tasks`: task modes of this repository, same schema as `tasks` in the user `config.json`
+  (`modes[]`, `worktreeDir`). They merge by `name` over the user's modes (a project mode replaces
+  the user's mode of the same name, new ones are added) and `worktreeDir` overrides. They count as
+  commands for the trust question; for an untrusted repository only the user's modes are offered,
+  with a note. `get_task_modes(dir)` returns the merged result.
 - `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`).
 - `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`.
 

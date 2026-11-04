@@ -532,42 +532,52 @@ fn resolve_trusted_projects(value: &Value, s: &mut Settings) {
     }
 }
 
-/// `tasks`: `modes[]` and `worktreeDir`. Invalid entries warn and are skipped; without a valid
-/// mode the default `agent` mode stays.
-fn resolve_tasks(value: &Value, s: &mut Settings) {
+/// What a `tasks` object specifies: `None` where it says nothing (or nothing valid).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskOverride {
+    pub modes: Option<Vec<crate::tasks::TaskMode>>,
+    pub worktree_dir: Option<String>,
+}
+
+/// Parses a `tasks` object (`modes[]`, `worktreeDir`) of the user config or of a project file.
+/// Invalid entries warn and are skipped. `fallback` ends the warning for a `modes` list without any
+/// valid mode ("using the default agent mode", "using your modes").
+pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) -> TaskOverride {
     use crate::tasks::{
         COMMAND_PLACEHOLDERS, DEFAULT_BRANCH, PATH_PLACEHOLDERS, TaskMode, unknown_placeholder,
     };
+    let mut result = TaskOverride::default();
     let Some(obj) = value.as_object() else {
-        s.warnings.push("tasks must be an object".into());
-        return;
+        warnings.push("tasks must be an object".into());
+        return result;
     };
     match obj.get("worktreeDir") {
         None => {}
         Some(Value::String(d)) if !d.trim().is_empty() => {
             match unknown_placeholder(d, PATH_PLACEHOLDERS) {
-                Some(p) => s.warnings.push(format!(
+                Some(p) => warnings.push(format!(
                     "tasks.worktreeDir: unknown placeholder {{{p}}}; using the default"
                 )),
-                None => s.tasks.worktree_dir = d.clone(),
+                None => result.worktree_dir = Some(d.clone()),
             }
         }
-        Some(_) => s
-            .warnings
-            .push("tasks.worktreeDir must be a non-empty string; using the default".into()),
+        Some(_) => {
+            warnings.push("tasks.worktreeDir must be a non-empty string; using the default".into())
+        }
     }
     let Some(modes) = obj.get("modes") else {
-        return;
+        return result;
     };
     let Some(modes) = modes.as_array() else {
-        s.warnings.push("tasks.modes must be an array".into());
-        return;
+        warnings.push("tasks.modes must be an array".into());
+        return result;
     };
     let mut out: Vec<TaskMode> = Vec::new();
     for (i, m) in modes.iter().enumerate() {
         let at = format!("tasks.modes[{i}]");
         let Some(m) = m.as_object() else {
-            s.warnings.push(format!("{at} must be an object; ignored"));
+            warnings.push(format!("{at} must be an object; ignored"));
             continue;
         };
         let text = |key: &str, at: &str, warnings: &mut Vec<String>| match m.get(key) {
@@ -578,21 +588,20 @@ fn resolve_tasks(value: &Value, s: &mut Settings) {
                 None
             }
         };
-        let Some(name) = text("name", &at, &mut s.warnings) else {
+        let Some(name) = text("name", &at, warnings) else {
             if !m.contains_key("name") {
-                s.warnings.push(format!("{at}.name is missing; ignored"));
+                warnings.push(format!("{at}.name is missing; ignored"));
             }
             continue;
         };
         let at = format!("tasks.modes[{name}]");
         if out.iter().any(|o| o.name == name) {
-            s.warnings
-                .push(format!("{at}: duplicate name; the first one wins"));
+            warnings.push(format!("{at}: duplicate name; the first one wins"));
             continue;
         }
-        let Some(command) = text("command", &at, &mut s.warnings) else {
+        let Some(command) = text("command", &at, warnings) else {
             if !m.contains_key("command") {
-                s.warnings.push(format!("{at}.command is missing; ignored"));
+                warnings.push(format!("{at}.command is missing; ignored"));
             }
             continue;
         };
@@ -600,13 +609,12 @@ fn resolve_tasks(value: &Value, s: &mut Settings) {
             None => true,
             Some(Value::Bool(b)) => *b,
             Some(_) => {
-                s.warnings
-                    .push(format!("{at}.worktree must be a boolean; using true"));
+                warnings.push(format!("{at}.worktree must be a boolean; using true"));
                 true
             }
         };
-        let branch = text("branch", &at, &mut s.warnings).unwrap_or_else(|| DEFAULT_BRANCH.into());
-        let cleanup = text("cleanup", &at, &mut s.warnings);
+        let branch = text("branch", &at, warnings).unwrap_or_else(|| DEFAULT_BRANCH.into());
+        let cleanup = text("cleanup", &at, warnings);
         let checks = [
             ("command", Some(&command), COMMAND_PLACEHOLDERS),
             ("cleanup", cleanup.as_ref(), COMMAND_PLACEHOLDERS),
@@ -617,8 +625,7 @@ fn resolve_tasks(value: &Value, s: &mut Settings) {
                 .map(|p| (*k, p))
         });
         if let Some((key, p)) = bad {
-            s.warnings
-                .push(format!("{at}.{key}: unknown placeholder {{{p}}}; ignored"));
+            warnings.push(format!("{at}.{key}: unknown placeholder {{{p}}}; ignored"));
             continue;
         }
         out.push(TaskMode {
@@ -630,10 +637,21 @@ fn resolve_tasks(value: &Value, s: &mut Settings) {
         });
     }
     if !out.is_empty() {
-        s.tasks.modes = out;
+        result.modes = Some(out);
     } else if !modes.is_empty() {
-        s.warnings
-            .push("tasks.modes has no valid mode; using the default agent mode".into());
+        warnings.push(format!("tasks.modes has no valid mode; {fallback}"));
+    }
+    result
+}
+
+/// `tasks` of the user config: `modes[]` and `worktreeDir` over the defaults.
+fn resolve_tasks(value: &Value, s: &mut Settings) {
+    let parsed = parse_tasks(value, "using the default agent mode", &mut s.warnings);
+    if let Some(dir) = parsed.worktree_dir {
+        s.tasks.worktree_dir = dir;
+    }
+    if let Some(modes) = parsed.modes {
+        s.tasks.modes = modes;
     }
 }
 
