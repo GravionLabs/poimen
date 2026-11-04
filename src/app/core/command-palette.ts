@@ -41,6 +41,8 @@ interface PaletteItemBase {
   key: string;
   title: string;
   origin: string;
+  /** Groups the items of one plugin (its id) even when names collide; empty for poimen commands. */
+  groupId: string;
   shortcut: string;
 }
 export type PaletteItem =
@@ -91,6 +93,7 @@ export class CommandPalette {
       key: `command:${c.id}`,
       title: c.title,
       origin: "",
+      groupId: "",
       shortcut: c.id === "openSettings" || c.id === "closeSpace" ? "" : this.keymap.label(c.id),
       command: c.id,
     })),
@@ -98,7 +101,8 @@ export class CommandPalette {
       kind: "plugin",
       key: `plugin:${a.plugin_id}:${a.action_id}`,
       title: a.title,
-      origin: a.plugin_id,
+      origin: a.plugin_name || a.plugin_id,
+      groupId: a.plugin_id,
       shortcut: "",
       action: a,
     })),
@@ -106,7 +110,8 @@ export class CommandPalette {
       kind: "pane",
       key: `pane:${d.plugin_id}:${d.entrypoint}`,
       title: `Open ${d.title} as tab`,
-      origin: d.plugin_name,
+      origin: d.plugin_name || d.plugin_id,
+      groupId: d.plugin_id,
       shortcut: "",
       def: d,
     })),
@@ -140,17 +145,20 @@ export class CommandPalette {
       const item = items.find((i) => i.key === key);
       return item ? [item] : [];
     });
-    const groups = new Map<string, PaletteItem[]>();
-    groups.set(RECENT_GROUP, recent);
-    groups.set(POIMEN_GROUP, []);
+    const groups = new Map<string, { label: string; members: PaletteItem[] }>();
+    groups.set(RECENT_GROUP, { label: RECENT_GROUP, members: recent });
+    groups.set(POIMEN_GROUP, { label: POIMEN_GROUP, members: [] });
     for (const item of items) {
       if (recent.includes(item)) continue;
-      const name = item.origin === "" ? POIMEN_GROUP : item.origin;
-      groups.set(name, [...(groups.get(name) ?? []), item]);
+      const id = item.groupId === "" ? POIMEN_GROUP : `plugin:${item.groupId}`;
+      const label = item.origin === "" ? POIMEN_GROUP : item.origin;
+      const group = groups.get(id) ?? { label, members: [] };
+      group.members.push(item);
+      groups.set(id, group);
     }
-    for (const [label, members] of groups) {
+    for (const [id, { label, members }] of groups) {
       if (members.length === 0) continue;
-      rows.push({ type: "heading", key: `heading:${label}`, label });
+      rows.push({ type: "heading", key: `heading:${id}`, label });
       for (const item of members) push(item, []);
     }
     return rows;

@@ -67,7 +67,7 @@
 ul {
   margin: 0;
   padding: 2px 0;
-  /* 10 rows of 24px; headings add to it, so the list scrolls a little earlier with a query-free view */
+  /* 10 rows of 24px; in the grouped view (no query) the group headings take space from those 10 rows */
   max-height: 240px;
   overflow-y: auto;
   list-style: none;

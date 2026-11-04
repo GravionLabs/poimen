@@ -25,6 +25,7 @@ import type { PluginPaneDef } from "../core/plugin-panes";
 })
 export class CommandPalette {
   protected readonly palette = inject(Palette);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The pane that has focus in the editor; the context of a plugin action. */
   readonly activePaneId = input<string | null>(null);
   /** A poimen command was chosen; the host runs it. */
@@ -38,6 +39,13 @@ export class CommandPalette {
   constructor() {
     effect(() => {
       if (this.palette.isOpen()) this.field()?.nativeElement.focus();
+    });
+    effect(() => {
+      this.palette.selected();
+      if (!this.palette.isOpen()) return;
+      queueMicrotask(() =>
+        this.host.nativeElement.querySelector(".selected")?.scrollIntoView({ block: "nearest" }),
+      );
     });
   }
 

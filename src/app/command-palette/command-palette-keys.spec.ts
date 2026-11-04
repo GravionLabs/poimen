@@ -20,6 +20,7 @@ const item = (key: string, title: string, origin = ""): PaletteItem => ({
   key,
   title,
   origin,
+  groupId: origin,
   shortcut: origin ? "" : "Ctrl+X",
   command: "refresh",
 });

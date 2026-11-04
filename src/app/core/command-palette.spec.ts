@@ -102,6 +102,23 @@ describe("CommandPalette", () => {
     expect(plugin).toMatchObject({ origin: "review-popup", shortcut: "" });
   });
 
+  it("shares one heading, labeled with the plugin name, between actions and panes", async () => {
+    tauri.answer("plugin_actions", () => [
+      { ...action("deliver-id", "refresh", "Refresh"), plugin_name: "Deliver Board" },
+    ]);
+    tauri.answer("plugin_pane_defs", () => [
+      {
+        plugin_id: "deliver-id",
+        plugin_name: "Deliver Board",
+        entrypoint: "board",
+        title: "Board",
+      },
+    ]);
+    await palette.open();
+    const headings = palette.rows().flatMap((r) => (r.type === "heading" ? [r.label] : []));
+    expect(headings).toEqual(["Poimen", "Deliver Board"]);
+  });
+
   it("groups an empty query under Poimen and one heading per plugin", async () => {
     await palette.open();
     const headings = palette.rows().flatMap((r) => (r.type === "heading" ? [r.label] : []));
