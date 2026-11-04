@@ -45,6 +45,7 @@ Panes are managed in herdr, so the result shows up through herdr's events like a
 - **Close pane**: right click a pane in the sidebar or its tab (Close pane / Close herdr pane). It always asks first and warns when an agent is working or waiting (`pane.close`). Closing a tab with the tab's own Close entry still only closes the view.
 - **Start agent**: right click a pane in the sidebar or its tab (Start agent...). A dialog asks for the agent kind, an optional name (defaults to the kind) and optional arguments (split on spaces); the pane has to be at its shell prompt (`agent.start`).
 - **Rename**: right click a pane (Rename... / Rename pane...). An agent pane renames the agent (`agent.rename`), a plain terminal its label (`pane.rename`); an empty name clears it.
+- **Send a prompt**: an agent tab has a one-line input above the terminal. It uses `agent.prompt` and waits up to 10 s for the agent to start working (or block), so it needs no controller and works in a read-only tab. It reports a stalled agent (`agent_prompt_stalled`), a timeout and an agent that waits at an approval (`agent_blocked`, nothing is sent); the text is kept after a timeout or a block.
 
 ## Requirements
 

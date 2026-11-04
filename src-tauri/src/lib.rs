@@ -155,6 +155,23 @@ async fn agent_rename(
     Ok(())
 }
 
+/// Sends a prompt to an agent (`agent.prompt`) without focusing its terminal; no controller needed.
+/// Stalled, timed-out and blocked agents are results, not errors.
+#[tauri::command]
+async fn agent_prompt(
+    client: State<'_, Client>,
+    target: String,
+    text: String,
+) -> Result<herdr::PromptOutcome, String> {
+    let client = client.inner().clone();
+    let params = herdr::agent_prompt_params(&target, &text);
+    tauri::async_runtime::spawn_blocking(move || {
+        herdr::prompt_outcome(client.request("agent.prompt", params))
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Renames a pane (`pane.rename`); an empty label clears it.
 #[tauri::command]
 async fn pane_rename(
@@ -842,6 +859,7 @@ pub fn run() {
             pane_close,
             agent_start,
             agent_rename,
+            agent_prompt,
             pane_rename,
             terminal_create,
             plugin_actions,
