@@ -16,6 +16,9 @@ export const SETTINGS_TAB = "poimen:settings";
 /** The id of the native deliver board tab (ADR 0004); like settings it is no herdr pane. */
 export const BOARD_TAB = "poimen:deliver-board";
 
+/** The id of the GitHub pull request tab; like settings it is no herdr pane. */
+export const GITHUB_TAB = "poimen:github";
+
 /** Prefix of a flow tab id; the rest is the id of the pane whose agent run the tab shows. */
 const FLOW_TAB_PREFIX = "poimen:flow:";
 
@@ -33,11 +36,12 @@ export function flowPane(id: string): string | null {
  * What a tab shows: a herdr pane (live terminal), the settings view, the deliver board or the flow
  * of a pane's agent run.
  */
-export type TabKind = "pane" | "settings" | "board" | "flow";
+export type TabKind = "pane" | "settings" | "board" | "github" | "flow";
 
 export function tabKind(id: string): TabKind {
   if (id === SETTINGS_TAB) return "settings";
   if (id === BOARD_TAB) return "board";
+  if (id === GITHUB_TAB) return "github";
   return flowPane(id) !== null ? "flow" : "pane";
 }
 
@@ -233,6 +237,11 @@ export class EditorTabs {
   /** Opens the deliver board tab (at most one) as a pinned tab, or activates it when open. */
   openBoard(): void {
     this.openPinned(BOARD_TAB);
+  }
+
+  /** Opens the GitHub pull request tab (at most one) as a pinned tab, or activates it. */
+  openGithub(): void {
+    this.openPinned(GITHUB_TAB);
   }
 
   /** Opens the flow tab of `paneId` (at most one per pane) as a pinned tab, or activates it. */

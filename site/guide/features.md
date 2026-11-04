@@ -36,6 +36,10 @@ Everything here is in the application today; the [README](https://github.com/Gra
 - The Output panel (`CmdOrCtrl+J`) follows the agent of the active tab and shows its subagents from the session transcripts of Claude Code (`~/.claude/projects`) and GitHub Copilot CLI (`~/.copilot/session-state`), read-only.
 - The Flow tab draws the run as a graph: the main agent, skill calls and subagents, parallel ones side by side, nested by the call that started them, with status and duration. It updates live, has a minimap and fit, and opens the entry on click. A Flow can also be opened as its own editor tab.
 
+## GitHub pull requests
+
+The GitHub item of the activity bar opens a tab with the open pull requests of your repositories: checks, review state, size and age, with filters (review requested, mine, all; by repository; by title or number), multi-select and "Open in browser". It uses the GitHub CLI (`gh auth login`) and refreshes at most every 30 seconds.
+
 ## Deliver board
 
 - A view fed by the herdr `deliver-board` plugin (it must be installed): one table per repository among your pane directories, with the open PBIs, claim, labels, branch and pull request with check state. It refreshes on demand, on window focus and every 60 s. The issue and PR numbers open in the browser, and "Start deliver" runs the plugin's action.

@@ -1,17 +1,16 @@
 //! Shared GitHub client over the `gh` CLI (ADR 0005): repository detection, REST with ETag
-//! revalidation cached on disk, GraphQL cached in memory. No view uses it yet.
+//! revalidation cached on disk, GraphQL cached in memory. The pull request view uses it.
 //!
 //! `gh` is started with an argv (never a shell) and the login-shell `PATH`. Nothing here logs
 //! arguments, headers or the token; files are only written below the cache directory given to
 //! `Client::new`.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,6 +19,9 @@ use crate::gui_path;
 
 /// How long an answer is served without asking GitHub again.
 pub const CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// How long one `gh` call may run before it is killed.
+const GH_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repo {
@@ -66,17 +68,42 @@ impl Runner for SystemRunner {
         let path = gui_path::child_path();
         let program = gui_path::resolve_program("gh", &path)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "gh not found"))?;
-        let out = Command::new(program)
+        let mut child = Command::new(program)
             .args(args)
             .env("PATH", &path)
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
             .stdin(Stdio::null())
-            .output()?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let read = |pipe: Option<Box<dyn io::Read + Send>>| {
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                if let Some(mut pipe) = pipe {
+                    let _ = pipe.read_to_end(&mut buf);
+                }
+                String::from_utf8_lossy(&buf).into_owned()
+            })
+        };
+        let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
+        let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
+        let deadline = Instant::now() + GH_TIMEOUT;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "gh timed out"));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
         Ok(Output {
-            code: out.status.code(),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            code: status.code(),
+            stdout: stdout.join().unwrap_or_default(),
+            stderr: stderr.join().unwrap_or_default(),
         })
     }
 
@@ -214,6 +241,7 @@ pub fn map_error(
     None
 }
 
+#[allow(dead_code)] // REST and its disk cache are for the next GitHub views
 #[derive(Serialize, Deserialize)]
 struct DiskEntry {
     path: String,
@@ -223,6 +251,7 @@ struct DiskEntry {
     fetched_ms: u64,
 }
 
+#[allow(dead_code)] // REST and its disk cache are for the next GitHub views
 fn file_name(path: &str) -> String {
     // FNV-1a; the entry stores the full path, so a collision is detected, not trusted.
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -235,6 +264,7 @@ fn file_name(path: &str) -> String {
 
 pub struct Client<R: Runner> {
     runner: R,
+    #[allow(dead_code)] // REST and its disk cache are for the next GitHub views
     cache_dir: PathBuf,
     graphql_cache: Mutex<HashMap<String, (Duration, Value)>>,
 }
@@ -293,12 +323,14 @@ impl<R: Runner> Client<R> {
         GhError::Other { message }
     }
 
+    #[allow(dead_code)] // REST and its disk cache are for the next GitHub views
     fn read_entry(&self, path: &str) -> Option<DiskEntry> {
         let text = std::fs::read_to_string(self.cache_dir.join(file_name(path))).ok()?;
         let entry: DiskEntry = serde_json::from_str(&text).ok()?;
         (entry.path == path).then_some(entry)
     }
 
+    #[allow(dead_code)] // REST and its disk cache are for the next GitHub views
     fn write_entry(&self, entry: &DiskEntry) {
         // A cache that cannot be written is only slower, never wrong.
         if std::fs::create_dir_all(&self.cache_dir).is_err() {
@@ -318,7 +350,14 @@ impl<R: Runner> Client<R> {
 
     /// `GET path` through `gh api`, revalidated with the cached ETag; the cached body is served
     /// without a request for `CACHE_TTL`.
+    #[allow(dead_code)] // REST and its disk cache are for the next GitHub views
     pub fn rest(&self, path: &str) -> Result<String, GhError> {
+        // A path starting with `-` would be read by `gh` as a flag.
+        if path.starts_with('-') {
+            return Err(GhError::Other {
+                message: "invalid API path".into(),
+            });
+        }
         let now_ms = self.runner.now().as_millis() as u64;
         let cached = self.read_entry(path);
         if let Some(entry) = &cached
@@ -681,6 +720,17 @@ mod tests {
         assert_eq!(names.len(), 1);
         assert!(names[0].file_name().to_string_lossy().ends_with(".json"));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rest_rejects_paths_that_look_like_flags() {
+        let f = fake(vec![]);
+        let client = Client::new(&f, temp_dir("flag"));
+        assert!(matches!(
+            client.rest("--hostname=evil"),
+            Err(GhError::Other { .. })
+        ));
+        assert!(f.calls.borrow().is_empty());
     }
 
     #[test]

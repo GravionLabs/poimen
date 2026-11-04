@@ -9,7 +9,7 @@ import { PluginPanes, type PluginPaneDef } from "./plugin-panes";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
 export interface PoimenCommand {
-  id: ShortcutAction | "openSettings" | "closeSpace";
+  id: ShortcutAction | "openSettings" | "openGithub" | "closeSpace";
   title: string;
 }
 
@@ -31,6 +31,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "previousTab", title: "Previous Tab" },
   { id: "showShortcuts", title: "Keyboard Shortcuts" },
   { id: "openSettings", title: "Open Settings" },
+  { id: "openGithub", title: "Open GitHub" },
 ];
 
 /**
@@ -94,7 +95,10 @@ export class CommandPalette {
       title: c.title,
       origin: "",
       groupId: "",
-      shortcut: c.id === "openSettings" || c.id === "closeSpace" ? "" : this.keymap.label(c.id),
+      shortcut:
+        c.id === "openSettings" || c.id === "openGithub" || c.id === "closeSpace"
+          ? ""
+          : this.keymap.label(c.id),
       command: c.id,
     })),
     ...this.plugins.actions().map((a): PaletteItem => ({

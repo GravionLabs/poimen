@@ -46,6 +46,7 @@ import {
   type EditorGroup,
 } from "./core/editor-tabs";
 import { SettingsView } from "./settings-view/settings-view";
+import { GithubView } from "./github/github-view";
 import { DeliverBoardView } from "./deliver-board/deliver-board-view";
 import { BOARD_ENTRYPOINT, BOARD_PLUGIN } from "./core/deliver-board";
 import { Keymap } from "./core/keymap";
@@ -88,6 +89,7 @@ const ZOOM_STEP = 1;
     TerminalView,
     SettingsView,
     DeliverBoardView,
+    GithubView,
     TabBar,
     SplitPane,
     StatusBar,
@@ -123,9 +125,13 @@ export class App {
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
+    if (ACTIVITY_VIEWS.find((v) => v.id === id)?.tab === "github") {
+      this.editor.openGithub();
+      return;
+    }
     this.ui.selectView(
       id,
-      ACTIVITY_VIEWS.map((v) => v.id),
+      ACTIVITY_VIEWS.filter((v) => !v.tab).map((v) => v.id),
     );
   }
   protected readonly minWidth = SIDEBAR_MIN_WIDTH;
@@ -154,6 +160,14 @@ export class App {
           }
           if (tabKind(tab.paneId) === "board") {
             return { id: tab.paneId, label: "Deliver board", title: "Deliver board" };
+          }
+          if (tabKind(tab.paneId) === "github") {
+            return {
+              id: tab.paneId,
+              label: "Pull requests",
+              group: "GitHub",
+              title: "GitHub pull requests",
+            };
           }
           const flowOf = flowPane(tab.paneId);
           const paneId = flowOf ?? tab.paneId;
@@ -333,6 +347,10 @@ export class App {
   protected run(id: string): void {
     if (id === "openSettings") {
       this.openSettings();
+      return;
+    }
+    if (id === "openGithub") {
+      this.editor.openGithub();
       return;
     }
     if (id === "closeSpace") {
@@ -606,6 +624,10 @@ export class App {
   protected openAgentOutput(agentId: string): void {
     this.subagents.pick(agentId);
     this.ui.selectPanelTab("output");
+  }
+
+  protected isGithub(id: string | null): boolean {
+    return id !== null && tabKind(id) === "github";
   }
 
   protected isBoard(id: string | null): boolean {
