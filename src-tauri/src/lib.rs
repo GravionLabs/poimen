@@ -542,10 +542,27 @@ async fn get_harnesses() -> Vec<harness::HarnessInfo> {
         .unwrap_or_default()
 }
 
-/// The resolved task modes (`tasks` in config.json).
+/// The task modes for the repository of `dir` (the user's `tasks` in config.json with the trusted
+/// project file's `tasks` merged over them); without `dir` only the user's.
 #[tauri::command]
-fn get_task_modes() -> tasks::TaskModes {
-    get_settings().tasks
+async fn get_task_modes(dir: Option<String>) -> tasks::Resolved {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = get_settings();
+        let Some(dir) = dir else {
+            return tasks::Resolved {
+                modes: settings.tasks,
+                note: None,
+            };
+        };
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        let sources = trust::Sources::read(&root);
+        tasks::for_project(&settings.tasks, &sources, &settings.trusted_projects)
+    })
+    .await
+    .unwrap_or_else(|_| tasks::Resolved {
+        modes: tasks::TaskModes::default(),
+        note: None,
+    })
 }
 
 /// The user color schemes (`~/.config/poimen/themes/*.toml`); changes arrive as `color-schemes` events.

@@ -49,6 +49,63 @@ impl Default for TaskModes {
     }
 }
 
+/// `base` with the project's override: a mode of the same `name` is replaced in place, new ones
+/// are appended, `worktreeDir` is replaced.
+pub fn merge(base: &TaskModes, over: &crate::settings::TaskOverride) -> TaskModes {
+    let mut merged = base.clone();
+    for mode in over.modes.iter().flatten() {
+        match merged.modes.iter_mut().find(|m| m.name == mode.name) {
+            Some(existing) => *existing = mode.clone(),
+            None => merged.modes.push(mode.clone()),
+        }
+    }
+    if let Some(dir) = &over.worktree_dir {
+        merged.worktree_dir = dir.clone();
+    }
+    merged
+}
+
+/// The task modes for a repository: the user's, with the project file's `tasks` merged over them
+/// when the project is trusted. An untrusted project contributes nothing and `note` says why.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Resolved {
+    #[serde(flatten)]
+    pub modes: TaskModes,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+pub fn for_project(
+    user: &TaskModes,
+    sources: &crate::trust::Sources,
+    trusted: &std::collections::BTreeMap<String, String>,
+) -> Resolved {
+    let over = sources.project.as_ref().and_then(|(path, text)| {
+        crate::project::parse(path, text, crate::project::platform())
+            .config
+            .tasks
+    });
+    let Some(over) = over else {
+        return Resolved {
+            modes: user.clone(),
+            note: None,
+        };
+    };
+    match crate::trust::gate(sources, trusted, None) {
+        crate::trust::Gate::Run { .. } => Resolved {
+            modes: merge(user, &over),
+            note: None,
+        },
+        _ => Resolved {
+            modes: user.clone(),
+            note: Some(
+                "Task modes of the project file are not used until you trust the project                  (creating a space for it asks)."
+                    .into(),
+            ),
+        },
+    }
+}
+
 /// The names of the `{placeholder}`s in `template`, in order.
 pub fn placeholders(template: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -220,6 +277,104 @@ pub fn expand_mode(mode: &TaskMode, worktree_dir: &str, mut vars: TaskVars) -> E
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::trust::Sources;
+    use std::collections::BTreeMap;
+
+    const PROJECT: &str = r#"{"tasks":{
+        "worktreeDir":"../wt/{repo}-{nr}",
+        "modes":[
+            {"name":"agent","command":"claude --model opus {prompt}"},
+            {"name":"deliver","command":"/deliver {nr}","worktree":false}
+        ]}}"#;
+
+    fn sources(text: &str) -> Sources {
+        Sources {
+            root: "/work/app".into(),
+            project: Some(("/work/app/.poimen/config.json".into(), text.into())),
+            legacy: None,
+        }
+    }
+
+    fn trusted_for(sources: &Sources) -> BTreeMap<String, String> {
+        BTreeMap::from([(sources.root.clone(), sources.hash().unwrap())])
+    }
+
+    #[test]
+    fn project_modes_merge_by_name_over_the_users_and_new_ones_are_appended() {
+        let user = TaskModes::default();
+        let s = sources(PROJECT);
+        let got = for_project(&user, &s, &trusted_for(&s));
+        let names: Vec<_> = got.modes.modes.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["agent", "deliver"]);
+        // The same name replaces the user's mode (project wins), in place.
+        assert_eq!(got.modes.modes[0].command, "claude --model opus {prompt}");
+        assert!(!got.modes.modes[1].worktree);
+        assert_eq!(got.note, None);
+    }
+
+    #[test]
+    fn the_project_overrides_the_worktree_dir_and_leaves_it_alone_otherwise() {
+        let user = TaskModes::default();
+        let s = sources(PROJECT);
+        let got = for_project(&user, &s, &trusted_for(&s));
+        assert_eq!(got.modes.worktree_dir, "../wt/{repo}-{nr}");
+        let only_modes = sources(r#"{"tasks":{"modes":[{"name":"x","command":"echo {nr}"}]}}"#);
+        let got = for_project(&user, &only_modes, &trusted_for(&only_modes));
+        assert_eq!(got.modes.worktree_dir, user.worktree_dir);
+        assert_eq!(got.modes.modes.len(), 2);
+    }
+
+    #[test]
+    fn an_untrusted_project_leaves_only_the_users_modes_with_a_note() {
+        let user = TaskModes::default();
+        let got = for_project(&user, &sources(PROJECT), &BTreeMap::new());
+        assert_eq!(got.modes, user);
+        assert!(got.note.as_deref().unwrap().contains("trust"));
+        // A changed file asks again: the stored hash no longer matches.
+        let s = sources(PROJECT);
+        let mut stale = trusted_for(&s);
+        stale.insert(s.root.clone(), "0".repeat(64));
+        assert_eq!(for_project(&user, &s, &stale).modes, user);
+    }
+
+    #[test]
+    fn no_project_tasks_is_just_the_users_modes_without_a_note() {
+        let user = TaskModes::default();
+        let got = for_project(&user, &sources(r#"{"setup":"make"}"#), &BTreeMap::new());
+        assert_eq!((got.modes, got.note), (user.clone(), None));
+        let got = for_project(&user, &Sources::default(), &BTreeMap::new());
+        assert_eq!((got.modes, got.note), (user, None));
+    }
+
+    #[test]
+    fn the_modes_of_a_project_are_listed_for_the_trust_question() {
+        let listed = sources(PROJECT).commands();
+        let whats: Vec<_> = listed.iter().map(|c| c.what.as_str()).collect();
+        assert_eq!(
+            whats,
+            [
+                "task worktreeDir",
+                "task mode \"agent\"",
+                "task mode \"deliver\""
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_project_modes_warn_with_the_file_and_are_skipped() {
+        let loaded = crate::project::parse(
+            "/p/.poimen/config.json",
+            r#"{"tasks":{"modes":[{"name":"bad","command":"x {nope}"},{"name":"ok","command":"y"}]}}"#,
+            "linux",
+        );
+        assert_eq!(loaded.config.tasks.unwrap().modes.unwrap().len(), 1);
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("/p/.poimen/config.json: tasks.modes[bad].command"))
+        );
+    }
 
     #[test]
     fn type_comes_from_the_conventional_title() {
