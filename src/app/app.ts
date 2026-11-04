@@ -12,7 +12,14 @@ import {
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
-import { flowSession, rowName, supportsFlow, tabHeader, type Mode, type Pane } from "./core/herdr";
+import {
+  flowSession,
+  rowName,
+  supportsFlow,
+  tabHeader,
+  type Mode,
+  type Terminal,
+} from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Attention } from "./core/attention";
@@ -133,7 +140,7 @@ export class App {
   private readonly center = inject(NotificationCenter);
   private readonly dockBadge = inject(DockBadge);
   /** Last known state of each open pane, kept when herdr drops the pane. */
-  private readonly known = new Map<string, Pane>();
+  private readonly known = new Map<string, Terminal>();
   protected readonly groupItems = computed(() => {
     const snap = this.store.snapshot();
     this.store.panes();
@@ -161,7 +168,7 @@ export class App {
             ? snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label
             : undefined;
           const workspace = pane
-            ? snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label
+            ? snap.spaces.find((w) => w.space_id === pane.space_id)?.label
             : undefined;
           const header = tabHeader(workspace, pane ? rowName(pane, tabLabel) : paneId);
           if (flowOf !== null) {
@@ -259,7 +266,7 @@ export class App {
       const id = active === null ? null : tabPaneId(active);
       const pane = id && this.ui.panelOpen() ? this.pane(id) : undefined;
       const session = flowSession(pane);
-      return pane && session ? { paneId: pane.pane_id, session } : null;
+      return pane && session ? { paneId: pane.terminal_id, session } : null;
     },
     { equal: (a, b) => a?.paneId === b?.paneId && a?.session === b?.session },
   );
@@ -325,7 +332,7 @@ export class App {
     }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
-      this.closeSpace(paneId ? this.pane(paneId)?.workspace_id : undefined);
+      this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);
       return;
     }
     const action = id as ShortcutAction;
@@ -377,7 +384,7 @@ export class App {
         this.editor.cycle(-1);
         break;
       case "newTerminal":
-        this.paneActions.askNew(active ? this.pane(active)?.workspace_id : undefined);
+        this.paneActions.askNew(active ? this.pane(active)?.space_id : undefined);
         break;
     }
   }
@@ -458,7 +465,7 @@ export class App {
       this.paneAction(id, action.slice("pane-".length));
   }
 
-  protected groupPane(group: EditorGroup): Pane | undefined {
+  protected groupPane(group: EditorGroup): Terminal | undefined {
     return group.activeId && tabKind(group.activeId) === "pane"
       ? this.pane(group.activeId)
       : undefined;
@@ -504,9 +511,9 @@ export class App {
     if (pane) this.open(pane);
   }
 
-  protected open(pane: Pane, pin = false): void {
-    this.known.set(pane.pane_id, pane);
-    this.editor.open(pane.pane_id, pin);
+  protected open(pane: Terminal, pin = false): void {
+    this.known.set(pane.terminal_id, pane);
+    this.editor.open(pane.terminal_id, pin);
   }
 
   /** The active tab's pane id; `null` for no tab or the settings tab. */
@@ -542,7 +549,7 @@ export class App {
     this.editor.openSettings();
   }
 
-  protected tabPane(id: string): Pane | undefined {
+  protected tabPane(id: string): Terminal | undefined {
     return this.pane(id);
   }
 
@@ -563,17 +570,17 @@ export class App {
     if (next) this.open(next);
   }
 
-  /** Workspace and name of a pane, as its tab shows them. */
+  /** Space and name of a pane, as its tab shows them. */
   private tabTitle(id: string): string {
     const snap = this.store.snapshot();
     const pane = this.pane(id);
     if (!pane) return id;
     const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
-    const workspace = snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label;
+    const workspace = snap.spaces.find((w) => w.space_id === pane.space_id)?.label;
     return tabHeader(workspace, rowName(pane, tabLabel)).title;
   }
 
-  private pane(id: string): Pane | undefined {
+  private pane(id: string): Terminal | undefined {
     return this.store.panes().get(id) ?? this.known.get(id);
   }
 

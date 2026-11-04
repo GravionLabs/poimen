@@ -64,7 +64,7 @@ async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: strin
       {
         provide: HerdrStore,
         useValue: {
-          snapshot: signal({ workspaces: [], tabs: [], panes: spaceCwds.map((cwd) => ({ cwd })) }),
+          snapshot: signal({ spaces: [], tabs: [], terminals: spaceCwds.map((cwd) => ({ cwd })) }),
         },
       },
       {

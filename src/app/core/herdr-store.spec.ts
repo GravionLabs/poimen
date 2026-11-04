@@ -1,6 +1,6 @@
 import { Injector } from "@angular/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Pane, Snapshot } from "./herdr";
+import type { Terminal, Snapshot } from "./herdr";
 import { HerdrStore, REFRESH_DEBOUNCE_MS } from "./herdr-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -12,18 +12,18 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./tauri.mock")).tauri.listen,
 }));
 
-const pane = (pane_id: string, over: Partial<Pane> = {}): Pane => ({
-  pane_id,
+const pane = (terminal_id: string, over: Partial<Terminal> = {}): Terminal => ({
+  terminal_id,
   tab_id: "w1:t1",
-  workspace_id: "w1",
+  space_id: "w1",
   agent_status: "idle",
   ...over,
 });
 
-const snapshot = (...panes: Pane[]): Snapshot => ({
-  workspaces: [{ workspace_id: "w1", label: "One", number: 1, agent_status: "idle" }],
-  tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "main", number: 1, agent_status: "idle" }],
-  panes,
+const snapshot = (...terminals: Terminal[]): Snapshot => ({
+  spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+  tabs: [{ tab_id: "w1:t1", space_id: "w1", label: "main", number: 1, agent_status: "idle" }],
+  terminals,
 });
 
 /** A promise the test settles by hand, to hold a `snapshot` call open. */
@@ -51,7 +51,7 @@ describe("HerdrStore", () => {
   });
 
   it("starts empty", () => {
-    expect(store.snapshot()).toEqual({ workspaces: [], tabs: [], panes: [] });
+    expect(store.snapshot()).toEqual({ spaces: [], tabs: [], terminals: [] });
     expect(store.tree()).toEqual([]);
     expect(store.connectionError()).toBeNull();
   });
@@ -75,7 +75,7 @@ describe("HerdrStore", () => {
     await store.start();
     await store.start();
 
-    expect(store.snapshot().panes.map((p) => p.pane_id)).toEqual(["w1:p1"]);
+    expect(store.snapshot().terminals.map((p) => p.terminal_id)).toEqual(["w1:p1"]);
     expect(store.pane("w1:p1")?.agent_status).toBe("idle");
     expect(store.pane("w1:p9")).toBeUndefined();
     expect(tauri.listen).toHaveBeenCalledTimes(1);
@@ -132,7 +132,7 @@ describe("HerdrStore", () => {
     await vi.runAllTimersAsync();
 
     expect(tauri.calls("snapshot")).toHaveLength(2);
-    expect(store.snapshot().panes).toHaveLength(2);
+    expect(store.snapshot().terminals).toHaveLength(2);
   });
 
   it("applies an agent status change at once and re-reads afterwards", async () => {
@@ -189,7 +189,7 @@ describe("HerdrStore", () => {
 
     expect(store.connectionError()).toBe("connection refused");
     expect(store.connection()).toEqual({ state: "unreachable", reason: "connection refused" });
-    expect(store.snapshot().panes.map((p) => p.pane_id)).toEqual(["w1:p1"]);
+    expect(store.snapshot().terminals.map((p) => p.terminal_id)).toEqual(["w1:p1"]);
   });
 
   it("stops listening and drops a pending re-read when destroyed", async () => {

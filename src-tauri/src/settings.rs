@@ -199,12 +199,12 @@ pub struct Settings {
     pub warnings: Vec<String>,
 }
 
-/// Menu/shortcut actions with their default accelerators (VS Code style). `CmdOrCtrl` is Cmd on
-/// macOS and Ctrl elsewhere.
 /// Default and upper bound of `terminal.scrollback`.
 pub const DEFAULT_SCROLLBACK: u32 = 10_000;
 const MAX_SCROLLBACK: u32 = 1_000_000;
 
+/// Menu/shortcut actions with their default accelerators (VS Code style). `CmdOrCtrl` is Cmd on
+/// macOS and Ctrl elsewhere.
 pub const ACTIONS: &[(&str, &str)] = &[
     ("newTerminal", "CmdOrCtrl+T"),
     ("closeTab", "CmdOrCtrl+W"),

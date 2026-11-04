@@ -8,9 +8,11 @@ import {
   waitingCount,
   type HerdrEvent,
   type HerdrInfo,
-  type Pane,
+  type Terminal,
   type RepoInfo,
   type Snapshot,
+  type WireSnapshot,
+  toSnapshot,
   type BranchPull,
 } from "./herdr";
 import type { BackendKind } from "./settings";
@@ -35,7 +37,7 @@ export interface BackendStatus {
 /** Whether the window has focus; false outside a browser. */
 const windowFocused = (): boolean => typeof document !== "undefined" && document.hasFocus();
 
-const EMPTY: Snapshot = { workspaces: [], tabs: [], panes: [] };
+const EMPTY: Snapshot = { spaces: [], tabs: [], terminals: [] };
 
 /**
  * The herdr state as poimen shows it. herdr owns the state: the snapshot is re-read from herdr,
@@ -101,8 +103,10 @@ export class HerdrStore {
   readonly pulls = this._pulls.asReadonly();
   readonly tree = computed(() => buildTree(this._snapshot()));
   readonly spaces = computed(() => buildSpaces(this._snapshot(), this._repos(), this._pulls()));
-  readonly waiting = computed(() => waitingCount(this._snapshot().panes));
-  readonly panes = computed(() => new Map(this._snapshot().panes.map((p) => [p.pane_id, p])));
+  readonly waiting = computed(() => waitingCount(this._snapshot().terminals));
+  readonly panes = computed(
+    () => new Map(this._snapshot().terminals.map((p) => [p.terminal_id, p])),
+  );
 
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing = false;
@@ -150,11 +154,11 @@ export class HerdrStore {
   }
 
   /** The next blocked pane after `activeId`, wrapping around. */
-  nextWaiting(activeId: string | null): Pane | undefined {
-    return nextWaiting(this._snapshot().panes, activeId);
+  nextWaiting(activeId: string | null): Terminal | undefined {
+    return nextWaiting(this._snapshot().terminals, activeId);
   }
 
-  pane(paneId: string): Pane | undefined {
+  pane(paneId: string): Terminal | undefined {
     return this.panes().get(paneId);
   }
 
@@ -166,7 +170,7 @@ export class HerdrStore {
     }
     this.refreshing = true;
     try {
-      const snapshot = await this.bridge.invoke<Snapshot>("snapshot");
+      const snapshot = toSnapshot(await this.bridge.invoke<WireSnapshot>("snapshot"));
       this._snapshot.set(snapshot);
       this._loaded.set(true);
       if (!this._watchLost()) this._connectionError.set(null);
@@ -216,7 +220,7 @@ export class HerdrStore {
 
   /** Looks up branch and worktree of the pane directories. A failure only leaves them blank. */
   private async readRepos(snapshot: Snapshot): Promise<void> {
-    const dirs = [...new Set(snapshot.panes.map(paneDir).filter((d): d is string => !!d))];
+    const dirs = [...new Set(snapshot.terminals.map(paneDir).filter((d): d is string => !!d))];
     const key = dirs.join("\n");
     // Git runs when the pane set (its directories) changed or a trigger asked for it.
     if (!this.reposStale && key === this.reposKey) return;

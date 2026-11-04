@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentStatus, BranchPull, Pane, PaneRow, SpaceNode } from "../core/herdr";
+import type { AgentStatus, BranchPull, Terminal, PaneRow, SpaceNode } from "../core/herdr";
 import {
   aggregateStatus,
   paneDetail,
@@ -16,21 +16,23 @@ import {
   subline,
 } from "./spaces";
 
-const row = (over: Omit<Partial<PaneRow>, "pane"> & { pane?: Partial<Pane> } = {}): PaneRow => ({
+const row = (
+  over: Omit<Partial<PaneRow>, "pane"> & { pane?: Partial<Terminal> } = {},
+): PaneRow => ({
   tab: "t",
   name: "claude",
   worktree: false,
   ...over,
   pane: {
-    pane_id: "w1:p1",
+    terminal_id: "w1:p1",
     tab_id: "w1:t1",
-    workspace_id: "w1",
+    space_id: "w1",
     agent_status: "idle",
     ...over.pane,
   },
 });
 const space = (rows: PaneRow[]): SpaceNode => ({
-  workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
+  workspace: { space_id: "w1", label: "One", number: 1, agent_status: "idle" },
   rows,
 });
 
@@ -160,7 +162,7 @@ describe("paneLine2", () => {
 
 describe("aggregateStatus", () => {
   const withStatuses = (ws: AgentStatus, ...panes: AgentStatus[]): SpaceNode => ({
-    workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: ws },
+    workspace: { space_id: "w1", label: "One", number: 1, agent_status: ws },
     rows: panes.map((s) => row({ pane: { agent_status: s } })),
   });
 

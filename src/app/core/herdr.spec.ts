@@ -13,44 +13,45 @@ import {
   rowName,
   supportsFlow,
   tabHeader,
+  toSnapshot,
   waitingCount,
   closeWarning,
   workspaceDirs,
-  type Pane,
+  type Terminal,
   type Snapshot,
 } from "./herdr";
 
-const pane = (over: Partial<Pane>): Pane => ({
-  pane_id: "w1:p1",
+const pane = (over: Partial<Terminal>): Terminal => ({
+  terminal_id: "w1:p1",
   tab_id: "w1:t1",
-  workspace_id: "w1",
+  space_id: "w1",
   agent_status: "unknown",
   ...over,
 });
 
 const snapshot: Snapshot = {
-  workspaces: [
-    { workspace_id: "w2", label: "Second", number: 2, agent_status: "idle" },
-    { workspace_id: "w1", label: "First", number: 1, agent_status: "blocked" },
+  spaces: [
+    { space_id: "w2", label: "Second", number: 2, agent_status: "idle" },
+    { space_id: "w1", label: "First", number: 1, agent_status: "blocked" },
   ],
   tabs: [
-    { tab_id: "w1:t2", workspace_id: "w1", label: "b", number: 5, agent_status: "idle" },
-    { tab_id: "w1:t1", workspace_id: "w1", label: "a", number: 1, agent_status: "blocked" },
-    { tab_id: "w2:t1", workspace_id: "w2", label: "c", number: 1, agent_status: "idle" },
+    { tab_id: "w1:t2", space_id: "w1", label: "b", number: 5, agent_status: "idle" },
+    { tab_id: "w1:t1", space_id: "w1", label: "a", number: 1, agent_status: "blocked" },
+    { tab_id: "w2:t1", space_id: "w2", label: "c", number: 1, agent_status: "idle" },
   ],
-  panes: [
-    pane({ pane_id: "w1:p1", tab_id: "w1:t1", agent_status: "blocked" }),
-    pane({ pane_id: "w1:p2", tab_id: "w1:t2" }),
-    pane({ pane_id: "w1:p3", tab_id: "w1:t1" }),
+  terminals: [
+    pane({ terminal_id: "w1:p1", tab_id: "w1:t1", agent_status: "blocked" }),
+    pane({ terminal_id: "w1:p2", tab_id: "w1:t2" }),
+    pane({ terminal_id: "w1:p3", tab_id: "w1:t1" }),
   ],
 };
 
 describe("buildTree", () => {
   it("orders workspaces and tabs by number and groups panes by tab", () => {
     const tree = buildTree(snapshot);
-    expect(tree.map((w) => w.workspace.workspace_id)).toEqual(["w1", "w2"]);
+    expect(tree.map((w) => w.workspace.space_id)).toEqual(["w1", "w2"]);
     expect(tree[0].tabs.map((t) => t.tab.tab_id)).toEqual(["w1:t1", "w1:t2"]);
-    expect(tree[0].tabs[0].panes.map((p) => p.pane_id)).toEqual(["w1:p1", "w1:p3"]);
+    expect(tree[0].tabs[0].panes.map((p) => p.terminal_id)).toEqual(["w1:p1", "w1:p3"]);
     expect(tree[1].tabs[0].panes).toEqual([]);
   });
 });
@@ -93,13 +94,13 @@ describe("rowName", () => {
 
 describe("status", () => {
   it("counts waiting panes", () => {
-    expect(waitingCount(snapshot.panes)).toBe(1);
+    expect(waitingCount(snapshot.terminals)).toBe(1);
   });
 
   it("applies a status change immutably", () => {
     const next = applyStatus(snapshot, "w1:p2", "blocked");
-    expect(waitingCount(next.panes)).toBe(2);
-    expect(waitingCount(snapshot.panes)).toBe(1);
+    expect(waitingCount(next.terminals)).toBe(2);
+    expect(waitingCount(snapshot.terminals)).toBe(1);
   });
 });
 
@@ -112,22 +113,22 @@ describe("decodeBase64", () => {
 
 describe("nextWaiting", () => {
   const panes = [
-    pane({ pane_id: "a", agent_status: "blocked" }),
-    pane({ pane_id: "b", agent_status: "idle" }),
-    pane({ pane_id: "c", agent_status: "blocked" }),
+    pane({ terminal_id: "a", agent_status: "blocked" }),
+    pane({ terminal_id: "b", agent_status: "idle" }),
+    pane({ terminal_id: "c", agent_status: "blocked" }),
   ];
   it("picks the next blocked pane after the active one", () => {
-    expect(nextWaiting(panes, "a")?.pane_id).toBe("c");
+    expect(nextWaiting(panes, "a")?.terminal_id).toBe("c");
   });
   it("wraps around", () => {
-    expect(nextWaiting(panes, "c")?.pane_id).toBe("a");
+    expect(nextWaiting(panes, "c")?.terminal_id).toBe("a");
   });
   it("starts at the first blocked pane without an active one", () => {
-    expect(nextWaiting(panes, null)?.pane_id).toBe("a");
-    expect(nextWaiting(panes, "gone")?.pane_id).toBe("a");
+    expect(nextWaiting(panes, null)?.terminal_id).toBe("a");
+    expect(nextWaiting(panes, "gone")?.terminal_id).toBe("a");
   });
   it("is undefined when nothing waits", () => {
-    expect(nextWaiting([pane({ pane_id: "b" })], "b")).toBeUndefined();
+    expect(nextWaiting([pane({ terminal_id: "b" })], "b")).toBeUndefined();
   });
 });
 
@@ -185,14 +186,14 @@ describe("version labels", () => {
 
 describe("workspaceDirs", () => {
   const snapshot: Snapshot = {
-    workspaces: [],
+    spaces: [],
     tabs: [],
-    panes: [
-      pane({ pane_id: "a", cwd: "/work/a", foreground_cwd: "/work/a/sub" }),
-      pane({ pane_id: "b", cwd: "/work/b" }),
-      pane({ pane_id: "c", cwd: "/work/b" }),
-      pane({ pane_id: "d" }),
-      pane({ pane_id: "e", workspace_id: "w2", cwd: "/other" }),
+    terminals: [
+      pane({ terminal_id: "a", cwd: "/work/a", foreground_cwd: "/work/a/sub" }),
+      pane({ terminal_id: "b", cwd: "/work/b" }),
+      pane({ terminal_id: "c", cwd: "/work/b" }),
+      pane({ terminal_id: "d" }),
+      pane({ terminal_id: "e", space_id: "w2", cwd: "/other" }),
     ],
   };
 
@@ -248,5 +249,34 @@ describe("flow agents", () => {
     expect(supportsFlow(undefined)).toBe(false);
     expect(flowSession(pane({ agent: "copilot" }))).toBeNull();
     expect(flowSession(pane({ agent: "copilot", agent_session: { value: "" } }))).toBeNull();
+  });
+});
+
+describe("toSnapshot", () => {
+  it("maps the wire records onto spaces and terminals and keeps the id values", () => {
+    const snapshot = toSnapshot({
+      workspaces: [{ workspace_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+      tabs: [
+        { tab_id: "w1:t1", workspace_id: "w1", label: "main", number: 1, agent_status: "idle" },
+      ],
+      panes: [
+        { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "done", cwd: "/a" },
+      ],
+    });
+    expect(snapshot).toEqual({
+      spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+      tabs: [{ tab_id: "w1:t1", space_id: "w1", label: "main", number: 1, agent_status: "idle" }],
+      terminals: [
+        { terminal_id: "w1:p1", tab_id: "w1:t1", space_id: "w1", agent_status: "done", cwd: "/a" },
+      ],
+    });
+  });
+
+  it("maps an empty snapshot", () => {
+    expect(toSnapshot({ workspaces: [], tabs: [], panes: [] })).toEqual({
+      spaces: [],
+      tabs: [],
+      terminals: [],
+    });
   });
 });

@@ -4,8 +4,8 @@ import type { Checks } from "../github/pulls";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
-export interface Workspace {
-  workspace_id: string;
+export interface Space {
+  space_id: string;
   label: string;
   number: number;
   agent_status: AgentStatus;
@@ -13,16 +13,16 @@ export interface Workspace {
 
 export interface Tab {
   tab_id: string;
-  workspace_id: string;
+  space_id: string;
   label: string;
   number: number;
   agent_status: AgentStatus;
 }
 
-export interface Pane {
-  pane_id: string;
+export interface Terminal {
+  terminal_id: string;
   tab_id: string;
-  workspace_id: string;
+  space_id: string;
   agent?: string;
   /** The agent's own session (Claude Code, Copilot CLI: the transcript's session id in `value`). */
   agent_session?: { value?: string };
@@ -59,10 +59,40 @@ export interface BranchPull {
   checks: Checks;
 }
 
+/** The backend-neutral state: spaces hold tabs hold terminals (a terminal is identified by `terminal_id`). */
 export interface Snapshot {
-  workspaces: Workspace[];
+  spaces: Space[];
   tabs: Tab[];
-  panes: Pane[];
+  terminals: Terminal[];
+}
+
+/**
+ * The records of the `snapshot` command as the backends deliver them (herdr's workspace.list,
+ * tab.list and pane.list shape). Only `toSnapshot` reads them; everything else works on `Snapshot`.
+ */
+export interface WireSnapshot {
+  workspaces: (Omit<Space, "space_id"> & { workspace_id: string })[];
+  tabs: (Omit<Tab, "space_id"> & { workspace_id: string })[];
+  panes: (Omit<Terminal, "terminal_id" | "space_id"> & {
+    pane_id: string;
+    workspace_id: string;
+  })[];
+}
+
+/** Maps the wire shape of the `snapshot` command to the neutral model (ids keep their values). */
+export function toSnapshot(wire: WireSnapshot): Snapshot {
+  return {
+    spaces: wire.workspaces.map(({ workspace_id, ...rest }) => ({
+      ...rest,
+      space_id: workspace_id,
+    })),
+    tabs: wire.tabs.map(({ workspace_id, ...rest }) => ({ ...rest, space_id: workspace_id })),
+    terminals: wire.panes.map(({ pane_id, workspace_id, ...rest }) => ({
+      ...rest,
+      terminal_id: pane_id,
+      space_id: workspace_id,
+    })),
+  };
 }
 
 /** Payload of the `herdr` Tauri event: a herdr event or a poimen connection event. */
@@ -105,25 +135,25 @@ export interface OpenedStream {
 
 export interface TabNode {
   tab: Tab;
-  panes: Pane[];
+  panes: Terminal[];
 }
 
 export interface WorkspaceNode {
-  workspace: Workspace;
+  workspace: Space;
   tabs: TabNode[];
 }
 
 const byNumber = <T extends { number: number }>(a: T, b: T) => a.number - b.number;
 
 export function buildTree(snapshot: Snapshot): WorkspaceNode[] {
-  return [...snapshot.workspaces].sort(byNumber).map((workspace) => ({
+  return [...snapshot.spaces].sort(byNumber).map((workspace) => ({
     workspace,
     tabs: snapshot.tabs
-      .filter((tab) => tab.workspace_id === workspace.workspace_id)
+      .filter((tab) => tab.space_id === workspace.space_id)
       .sort(byNumber)
       .map((tab) => ({
         tab,
-        panes: snapshot.panes.filter((pane) => pane.tab_id === tab.tab_id),
+        panes: snapshot.terminals.filter((pane) => pane.tab_id === tab.tab_id),
       })),
   }));
 }
@@ -137,12 +167,12 @@ function basename(path: string): string {
   return pathSegments(path).pop() ?? path;
 }
 
-export function paneLabel(pane: Pane): string {
+export function paneLabel(pane: Terminal): string {
   return (
     pane.terminal_title_stripped?.trim() ||
     pane.agent ||
     (pane.cwd ? basename(pane.cwd) : "") ||
-    pane.pane_id
+    pane.terminal_id
   );
 }
 
@@ -152,13 +182,13 @@ export function paneLabel(pane: Pane): string {
  * "terminal"). The shell's terminal title (`user@host:~/path`) is never shown. With no label at
  * all, the directory name stands in.
  */
-export function rowName(pane: Pane, tabLabel?: string): string {
+export function rowName(pane: Terminal, tabLabel?: string): string {
   if (agentKind(pane)) return paneLabel(pane);
   return (
     pane.label?.trim() ||
     tabLabel?.trim() ||
     (paneDir(pane) ? basename(paneDir(pane)!) : "") ||
-    pane.pane_id
+    pane.terminal_id
   );
 }
 
@@ -172,15 +202,15 @@ export function tabHeader(
 }
 
 /** Panes whose agent waits for the user. */
-export function waitingCount(panes: Pane[]): number {
+export function waitingCount(panes: Terminal[]): number {
   return panes.filter((pane) => pane.agent_status === "blocked").length;
 }
 
 /** The blocked pane after `activeId` in list order, wrapping around; undefined when none waits. */
-export function nextWaiting(panes: Pane[], activeId: string | null): Pane | undefined {
+export function nextWaiting(panes: Terminal[], activeId: string | null): Terminal | undefined {
   const waiting = panes.filter((pane) => pane.agent_status === "blocked");
   if (!waiting.length) return undefined;
-  const index = panes.findIndex((pane) => pane.pane_id === activeId);
+  const index = panes.findIndex((pane) => pane.terminal_id === activeId);
   const after = panes.slice(index + 1).find((pane) => pane.agent_status === "blocked");
   return after ?? waiting[0];
 }
@@ -189,19 +219,19 @@ export function nextWaiting(panes: Pane[], activeId: string | null): Pane | unde
 export function applyStatus(snapshot: Snapshot, paneId: string, status: AgentStatus): Snapshot {
   return {
     ...snapshot,
-    panes: snapshot.panes.map((pane) =>
-      pane.pane_id === paneId ? { ...pane, agent_status: status } : pane,
+    terminals: snapshot.terminals.map((pane) =>
+      pane.terminal_id === paneId ? { ...pane, agent_status: status } : pane,
     ),
   };
 }
 
 /** The directory to show for a pane. */
-export function paneDir(pane: Pane): string | undefined {
+export function paneDir(pane: Terminal): string | undefined {
   return pane.foreground_cwd || pane.cwd || undefined;
 }
 
 /** Agent kind of a pane (`claude`, `codex`, ...); `undefined` for a plain terminal. */
-export function agentKind(pane: Pane): string | undefined {
+export function agentKind(pane: Terminal): string | undefined {
   return pane.agent?.trim() || undefined;
 }
 
@@ -212,7 +242,7 @@ const TRANSCRIPT_AGENTS: Readonly<Record<string, string>> = {
 };
 
 /** Display name of the agent of `pane` if its transcripts can be followed (`Claude Code`, ...). */
-export function flowAgentName(pane: Pane | undefined): string | undefined {
+export function flowAgentName(pane: Terminal | undefined): string | undefined {
   const kind = pane && agentKind(pane);
   return kind !== undefined && Object.hasOwn(TRANSCRIPT_AGENTS, kind)
     ? TRANSCRIPT_AGENTS[kind]
@@ -220,12 +250,12 @@ export function flowAgentName(pane: Pane | undefined): string | undefined {
 }
 
 /** Whether the Output panel and the Flow tab can follow the agent of `pane`. */
-export function supportsFlow(pane: Pane | undefined): boolean {
+export function supportsFlow(pane: Terminal | undefined): boolean {
   return flowAgentName(pane) !== undefined;
 }
 
 /** The session id the transcripts of `pane` are found by; `null` when it has none to follow. */
-export function flowSession(pane: Pane | undefined): string | null {
+export function flowSession(pane: Terminal | undefined): string | null {
   return (supportsFlow(pane) && pane?.agent_session?.value) || null;
 }
 
@@ -234,7 +264,7 @@ export function flowSession(pane: Pane | undefined): string | null {
  * plus the `deliver_step` token when an integration set one. herdr reports no free-form status
  * message, so plain terminals and agents with an unknown state have no text.
  */
-export function statusText(pane: Pane): string | undefined {
+export function statusText(pane: Terminal): string | undefined {
   if (!agentKind(pane)) return undefined;
   const state = pane.agent_status === "unknown" ? undefined : pane.agent_status;
   const step = pane.tokens?.["deliver_step"]?.trim() || undefined;
@@ -249,7 +279,7 @@ export function shortPath(path: string): string {
 
 /** What a sidebar row shows for one pane. */
 export interface PaneRow {
-  pane: Pane;
+  pane: Terminal;
   tab: string;
   name: string;
   agent?: string;
@@ -265,7 +295,7 @@ export interface PaneRow {
 }
 
 export interface SpaceNode {
-  workspace: Workspace;
+  workspace: Space;
   rows: PaneRow[];
 }
 
@@ -364,15 +394,15 @@ export type SplitDirection = "right" | "down";
 
 /** The distinct directories of a workspace's panes, in pane order: the choices for a new terminal. */
 export function workspaceDirs(snapshot: Snapshot, workspaceId: string): string[] {
-  const dirs = snapshot.panes
-    .filter((pane) => pane.workspace_id === workspaceId)
+  const dirs = snapshot.terminals
+    .filter((pane) => pane.space_id === workspaceId)
     .map(paneDir)
     .filter((dir): dir is string => !!dir);
   return [...new Set(dirs)];
 }
 
 /** What the close confirmation says: an agent that is still working or waiting gets a warning. */
-export function closeWarning(pane: Pane | undefined): string {
+export function closeWarning(pane: Terminal | undefined): string {
   const agent = pane ? agentKind(pane) : undefined;
   if (!pane || !agent) return "The process in the pane ends.";
   if (pane.agent_status === "working" || pane.agent_status === "blocked") {

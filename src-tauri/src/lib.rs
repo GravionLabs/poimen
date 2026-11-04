@@ -722,7 +722,12 @@ fn channel_messages(record: &backend::StreamRecord, emulated: bool) -> Vec<Invok
     let json = |record: &StreamRecord| {
         InvokeResponseBody::Json(serde_json::to_string(record).unwrap_or_default())
     };
-    let decode = |bytes: &str| poimen_client::protocol::decode_bytes(bytes).unwrap_or_default();
+    let decode = |bytes: &str| {
+        poimen_client::protocol::decode_bytes(bytes).unwrap_or_else(|err| {
+            eprintln!("poimen: dropped terminal output that is not valid base64: {err}");
+            Vec::new()
+        })
+    };
     match record {
         StreamRecord::Output { bytes } if emulated => {
             vec![InvokeResponseBody::Raw(decode(bytes))]

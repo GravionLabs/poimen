@@ -1,4 +1,21 @@
 import { vi } from "vitest";
+import type { Snapshot, WireSnapshot } from "./herdr";
+
+/** The `snapshot` command speaks the wire shape; tests describe the neutral `Snapshot`. */
+export function toWire(snapshot: Snapshot): WireSnapshot {
+  return {
+    workspaces: snapshot.spaces.map(({ space_id, ...rest }) => ({
+      ...rest,
+      workspace_id: space_id,
+    })),
+    tabs: snapshot.tabs.map(({ space_id, ...rest }) => ({ ...rest, workspace_id: space_id })),
+    panes: snapshot.terminals.map(({ terminal_id, space_id, ...rest }) => ({
+      ...rest,
+      pane_id: terminal_id,
+      workspace_id: space_id,
+    })),
+  };
+}
 
 /**
  * A stand-in for `@tauri-apps/api`: records `invoke` calls, answers them from `answers`, and lets a
@@ -10,7 +27,12 @@ function tauriMock() {
 
   const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
     const answer = answers.get(command);
-    return answer ? answer(args) : undefined;
+    if (!answer) return undefined;
+    const result = await answer(args);
+    // Tests describe the neutral model; the command delivers the wire shape.
+    return command === "snapshot" && result && typeof result === "object" && "spaces" in result
+      ? toWire(result as Snapshot)
+      : result;
   });
   const unlisten = vi.fn();
   const listen = vi.fn(async (event: string, handler: (event: { payload: unknown }) => void) => {

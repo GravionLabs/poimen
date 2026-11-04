@@ -4,7 +4,7 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Pane, StreamRecord } from "../core/herdr";
+import type { Terminal, StreamRecord } from "../core/herdr";
 import { SettingsStore, DEFAULT_SETTINGS, type Settings } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { TerminalStreamService } from "../core/terminal-stream";
@@ -101,7 +101,12 @@ vi.mock("@xterm/addon-webgl", () => ({
 
 import { TerminalView } from "./terminal-view";
 
-const pane: Pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "idle" };
+const pane: Terminal = {
+  terminal_id: "w1:p1",
+  tab_id: "w1:t1",
+  space_id: "w1",
+  agent_status: "idle",
+};
 const attached: StreamRecord = { type: "controller", attached: true };
 
 beforeAll(() => {
@@ -119,7 +124,7 @@ beforeAll(() => {
 
 afterEach(() => TestBed.resetTestingModule());
 
-async function setup(wanted: "control" | "observe", target: Pane = pane, emulated = false) {
+async function setup(wanted: "control" | "observe", target: Terminal = pane, emulated = false) {
   fake.cols = 80;
   fake.nextCols = 80;
   fake.observers = [];
@@ -959,7 +964,7 @@ describe("TerminalView copy and paste (#35)", () => {
 describe("TerminalView prompt bar (#293)", () => {
   const bar = (fixture: { nativeElement: HTMLElement }) =>
     fixture.nativeElement.querySelector("app-prompt-bar") as HTMLElement | null;
-  const agentPane: Pane = { ...pane, agent: "claude" };
+  const agentPane: Terminal = { ...pane, agent: "claude" };
 
   it("is not rendered in a terminal tab without an agent", async () => {
     const { fixture } = await setup("observe");
@@ -1096,6 +1101,15 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
     expect(open).toHaveBeenCalledTimes(1);
     expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
     expect(fake.calls).not.toContain("reset");
+  });
+
+  it("keeps the scrollback of an emulated stream after the process exited", async () => {
+    const { send, settings, fixture } = await setup("control", pane, true);
+    await send(0, attached);
+    await send(0, { type: "closed", reason: "the process exited", exit_code: 0, code: "exited" });
+    settings.set({ ...DEFAULT_SETTINGS, scrollback: 500 });
+    fixture.detectChanges();
+    expect(scrollbackOf().scrollback).toBe(500);
   });
 
   it("closes silently when the server detaches the stream", async () => {

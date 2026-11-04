@@ -59,5 +59,5 @@ export class Attention {
 
 /** Unread panes of a workspace: what its row shows as the sum of its panes. */
 export function workspaceUnread(space: SpaceNode, unread: ReadonlySet<string>): number {
-  return space.rows.filter((row) => unread.has(row.pane.pane_id)).length;
+  return space.rows.filter((row) => unread.has(row.pane.terminal_id)).length;
 }

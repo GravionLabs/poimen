@@ -4,7 +4,7 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { Pane, SpaceNode } from "../core/herdr";
+import type { Terminal, SpaceNode } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { DEFAULT_SETTINGS, SettingsStore, type SidebarLayout } from "../core/settings";
 import { UI_STORAGE } from "../core/ui-state";
@@ -14,14 +14,14 @@ import { Sidebar, splitSections } from "./sidebar";
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
 
 const mk = (id: string, label: string, panes: [string, string, boolean][]): SpaceNode => ({
-  workspace: { workspace_id: id, label, number: 1, agent_status: "idle" },
+  workspace: { space_id: id, label, number: 1, agent_status: "idle" },
   rows: panes.map(([pid, name, agent]) => ({
     pane: {
-      pane_id: pid,
+      terminal_id: pid,
       tab_id: `${id}:t`,
-      workspace_id: id,
+      space_id: id,
       agent_status: "idle",
-    } as Pane,
+    } as Terminal,
     tab: "t",
     name,
     agent: agent ? "claude" : undefined,
@@ -108,8 +108,8 @@ async function setup(layout: SidebarLayout) {
   const fixture = TestBed.createComponent(Sidebar);
   const selected: string[] = [];
   const pinned: string[] = [];
-  fixture.componentInstance.selected.subscribe((p) => selected.push(p.pane_id));
-  fixture.componentInstance.pinned.subscribe((p) => pinned.push(p.pane_id));
+  fixture.componentInstance.selected.subscribe((p) => selected.push(p.terminal_id));
+  fixture.componentInstance.pinned.subscribe((p) => pinned.push(p.terminal_id));
   const root = fixture.nativeElement as HTMLElement;
   const settle = async () => {
     for (let i = 0; i < 3; i++) {

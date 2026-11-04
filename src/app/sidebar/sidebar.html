@@ -71,7 +71,7 @@
     <span
       class="space"
       [class.chosen]="d.selected"
-      (contextmenu)="openMenu($event, 'workspace', d.workspace.workspace_id)"
+      (contextmenu)="openMenu($event, 'workspace', d.workspace.space_id)"
     >
       <span class="main space-main">
         @for (line of d.lines; track $index) {
@@ -119,7 +119,7 @@
           </span>
         }
       </span>
-      @if (unreadOf(d.workspace.workspace_id); as n) {
+      @if (unreadOf(d.workspace.space_id); as n) {
         <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
       }
       <button
@@ -127,7 +127,7 @@
         class="close"
         [attr.aria-label]="'Close space ' + d.workspace.label"
         [title]="'Close space ' + d.workspace.label"
-        (click)="closeSpace(d.workspace.workspace_id, $event)"
+        (click)="closeSpace(d.workspace.space_id, $event)"
         (keydown)="$event.stopPropagation()"
       >
         <svg
@@ -158,9 +158,9 @@
       class="row"
       [class.open]="m.open"
       [class.active]="m.active"
-      [class.attention]="rings(d.row.pane.pane_id)"
+      [class.attention]="rings(d.row.pane.terminal_id)"
       [title]="rowTitle(d.row)"
-      (contextmenu)="openMenu($event, 'pane', d.row.pane.pane_id)"
+      (contextmenu)="openMenu($event, 'pane', d.row.pane.terminal_id)"
     >
       <span
         class="icon"
@@ -214,7 +214,7 @@
           </span>
         }
       </span>
-      @if (isUnread(d.row.pane.pane_id)) {
+      @if (isUnread(d.row.pane.terminal_id)) {
         <span class="badge dot-badge" role="img" aria-label="Unread"></span>
       }
     </span>

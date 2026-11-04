@@ -17,9 +17,15 @@ import { HxButton } from "@gravionlabs/helix-ui";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
+import { Terminal as XTerm } from "@xterm/xterm";
 import { TauriBridge } from "../core/tauri";
-import { agentKind, decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
+import {
+  agentKind,
+  decodeBase64,
+  type Mode,
+  type Terminal,
+  type StreamRecord,
+} from "../core/herdr";
 import { SettingsStore } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
@@ -83,7 +89,7 @@ function ansiColors(
   host: { "[class.controlling]": "mode() === 'control'" },
 })
 export class TerminalView implements OnDestroy {
-  readonly pane = input.required<Pane>();
+  readonly pane = input.required<Terminal>();
   /** The mode the tab asks for; `control` is tried without a takeover and may fall back. */
   readonly wanted = input<Mode>("observe");
   /** The mode the stream really has. */
@@ -106,9 +112,11 @@ export class TerminalView implements OnDestroy {
   private readonly tauri = inject(TauriBridge);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
-  private term?: Terminal;
+  private term?: XTerm;
   private fit?: FitAddon;
   private session?: TerminalSession;
+  /** Whether the stream opened last is emulated; stays after the stream closed (scrollback keeps). */
+  private streamEmulated = false;
   private themeObserver?: MutationObserver;
   private resizeObserver?: ResizeObserver;
   private resizeTimer?: ReturnType<typeof setTimeout>;
@@ -204,7 +212,7 @@ export class TerminalView implements OnDestroy {
       hover: () => (this.linkHovered = true),
       leave: () => (this.linkHovered = false),
     };
-    const term = new Terminal({
+    const term = new XTerm({
       // OSC 8 hyperlinks: xterm's default would confirm() and window.open(); use the opener instead.
       linkHandler: {
         activate: openLink,
@@ -452,7 +460,7 @@ export class TerminalView implements OnDestroy {
       session = await this.streams.open(
         {
           mode,
-          target: this.pane().pane_id,
+          target: this.pane().terminal_id,
           cols: this.size.cols,
           rows: this.size.rows,
           takeover,
@@ -468,6 +476,7 @@ export class TerminalView implements OnDestroy {
         return;
       }
       this.session = session;
+      this.streamEmulated = session.emulated;
       this.applyScrollback();
       for (const record of early.splice(0)) this.onRecord(session, record);
     } catch (err) {
@@ -585,8 +594,7 @@ export class TerminalView implements OnDestroy {
   /** Lines of scrollback: xterm.js keeps its own on an emulated stream; herdr owns it otherwise. */
   private applyScrollback(): void {
     if (!this.term) return;
-    const emulated = this.session?.emulated === true;
-    this.term.options.scrollback = emulated ? this.prefs.settings().scrollback : 0;
+    this.term.options.scrollback = this.streamEmulated ? this.prefs.settings().scrollback : 0;
   }
 
   private scheduleResize(): void {

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, output, signal } from "@angular/core";
-import { AGENT_KINDS, type Pane } from "../core/herdr";
+import { AGENT_KINDS, type Terminal } from "../core/herdr";
 import { PaneActions } from "../core/pane-actions";
 
 /** The question for a new terminal (directory) or a pane close (confirmation), and action errors. */
@@ -12,7 +12,7 @@ import { PaneActions } from "../core/pane-actions";
 export class PaneDialog {
   protected readonly actions = inject(PaneActions);
   /** A terminal was created; the host opens it. */
-  readonly created = output<Pane>();
+  readonly created = output<Terminal>();
   /** A pane was closed; the host drops its tab. */
   readonly closed = output<string>();
   protected readonly kinds = AGENT_KINDS;

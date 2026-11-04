@@ -174,13 +174,13 @@
             <app-flow-tab [paneId]="flowPaneId" (openAgent)="openAgentOutput($event)" />
           }
         }
-        @for (p of [groupPane(g)]; track p?.pane_id) {
+        @for (p of [groupPane(g)]; track p?.terminal_id) {
           @if (p) {
             <app-terminal-view
               [pane]="p"
-              [wanted]="wanted(p.pane_id)"
-              (modeChange)="editor.report(p.pane_id, $event.mode, $event.blocked)"
-              (sized)="onSized(p.pane_id, $event)"
+              [wanted]="wanted(p.terminal_id)"
+              (modeChange)="editor.report(p.terminal_id, $event.mode, $event.blocked)"
+              (sized)="onSized(p.terminal_id, $event)"
             />
           }
         }

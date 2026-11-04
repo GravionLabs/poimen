@@ -56,9 +56,7 @@ export interface SpaceClosing {
 
 /** The space to focus after `workspaceId` closed: the next one, else the previous; `null` if none. */
 export function neighbourSpace(snapshot: Snapshot, workspaceId: string): string | null {
-  const ids = [...snapshot.workspaces]
-    .sort((a, b) => a.number - b.number)
-    .map((w) => w.workspace_id);
+  const ids = [...snapshot.spaces].sort((a, b) => a.number - b.number).map((w) => w.space_id);
   const i = ids.indexOf(workspaceId);
   if (i < 0) return null;
   return ids[i + 1] ?? ids[i - 1] ?? null;
@@ -66,7 +64,7 @@ export function neighbourSpace(snapshot: Snapshot, workspaceId: string): string 
 
 /** What closing the space ends, for the confirmation. */
 export function closeSpaceWarning(snapshot: Snapshot, workspaceId: string): string {
-  const panes = snapshot.panes.filter((p) => p.workspace_id === workspaceId);
+  const panes = snapshot.terminals.filter((p) => p.space_id === workspaceId);
   const agents = panes.filter((p) => agentKind(p)).length;
   const noun = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   return agents > 0
@@ -192,10 +190,10 @@ export class SpaceActions {
    */
   async requestClose(workspaceId: string): Promise<string[] | undefined> {
     const snapshot = this.store.snapshot();
-    const space = snapshot.workspaces.find((w) => w.workspace_id === workspaceId);
+    const space = snapshot.spaces.find((w) => w.space_id === workspaceId);
     if (!space) return undefined;
     this._closeError.set(null);
-    const panes = snapshot.panes.filter((p) => p.workspace_id === workspaceId);
+    const panes = snapshot.terminals.filter((p) => p.space_id === workspaceId);
     if (panes.length === 0) return this.close(workspaceId);
     this._closing.set({
       workspaceId,
@@ -224,9 +222,9 @@ export class SpaceActions {
 
   private async close(workspaceId: string): Promise<string[] | undefined> {
     const snapshot = this.store.snapshot();
-    const paneIds = snapshot.panes
-      .filter((p) => p.workspace_id === workspaceId)
-      .map((p) => p.pane_id);
+    const paneIds = snapshot.terminals
+      .filter((p) => p.space_id === workspaceId)
+      .map((p) => p.terminal_id);
     try {
       await this.bridge.invoke("space_close", {
         workspaceId,
