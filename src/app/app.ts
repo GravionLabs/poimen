@@ -54,6 +54,7 @@ import { CommandPalette as PaletteView } from "./command-palette/command-palette
 import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
 import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
+import { TrustDialog } from "./trust-dialog/trust-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
@@ -86,6 +87,7 @@ const ZOOM_STEP = 1;
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
+    TrustDialog,
     PaletteView,
     ShortcutsDialog,
   ],

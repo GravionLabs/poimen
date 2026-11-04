@@ -366,6 +366,50 @@ describe("SettingsView agents section", () => {
   });
 });
 
+describe("SettingsView trusted projects section", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
+
+  const revokeButtons = (host: HTMLElement) => [
+    ...host.querySelectorAll<HTMLButtonElement>('ul[aria-label="Trusted projects"] button'),
+  ];
+
+  it("says so when no project is trusted", () => {
+    const { host } = setup();
+    expect(revokeButtons(host)).toHaveLength(0);
+    expect(host.textContent).toContain("No project is trusted.");
+  });
+
+  it("lists the roots and revokes one", async () => {
+    const { fixture, host, store } = setup();
+    tauri.answer("revoke_project", () => undefined);
+    store["_settings"].set({
+      ...DEFAULT_SETTINGS,
+      trustedProjects: { "/work/b": "h2", "/work/a": "h1" },
+    });
+    fixture.detectChanges();
+    const rows = [...host.querySelectorAll('ul[aria-label="Trusted projects"] .path')];
+    expect(rows.map((r) => r.textContent)).toEqual(["/work/a", "/work/b"]);
+    revokeButtons(host)[0].click();
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.detectChanges();
+    expect(tauri.calls("revoke_project")).toEqual([{ root: "/work/a" }]);
+    expect(store.settings().trustedProjects).toEqual({ "/work/b": "h2" });
+    expect(revokeButtons(host)).toHaveLength(1);
+  });
+
+  it("keeps the root and reports the error when the revoke fails", async () => {
+    const { fixture, store } = setup();
+    tauri.answer("revoke_project", () => {
+      throw "disk full";
+    });
+    store["_settings"].set({ ...DEFAULT_SETTINGS, trustedProjects: { "/work/a": "h1" } });
+    await store.revokeProject("/work/a");
+    fixture.detectChanges();
+    expect(store.settings().trustedProjects).toEqual({ "/work/a": "h1" });
+    expect(store.writeError()).toContain("disk full");
+  });
+});
+
 describe("parseHarnesses", () => {
   it("reads harnesses and skips malformed entries", () => {
     expect(

@@ -47,7 +47,9 @@ describe("SpaceActions", () => {
     actions.ask();
     const outcome = await actions.create(" /work/app ", " App ");
     expect(outcome).toEqual({ workspace_id: "w2", created: true });
-    expect(tauri.calls("create_space")).toEqual([{ cwd: "/work/app", label: "App" }]);
+    expect(tauri.calls("create_space")).toEqual([
+      { cwd: "/work/app", label: "App", decision: null },
+    ]);
     expect(tauri.calls("snapshot")).toHaveLength(1);
     expect(actions.open()).toBe(false);
   });
@@ -66,9 +68,40 @@ describe("SpaceActions", () => {
     expect(actions.warning()).toBeNull();
   });
 
+  it("holds an untrusted project and creates nothing until answered", async () => {
+    const request = { root: "/work/app", files: ["f"], hash: "h1", commands: [] };
+    tauri.answer("create_space", (args) =>
+      args?.["decision"]
+        ? { workspace_id: "w2", created: true }
+        : { workspace_id: "", created: false, trust: request },
+    );
+    expect(await actions.create("/work/app", "App")).toBeUndefined();
+    expect(actions.trust()?.request).toEqual(request);
+    expect(tauri.calls("snapshot")).toHaveLength(0);
+    const outcome = await actions.answerTrust("trust");
+    expect(outcome?.workspace_id).toBe("w2");
+    expect(tauri.calls("create_space")[1]).toEqual({
+      cwd: "/work/app",
+      label: "App",
+      decision: { kind: "trust", hash: "h1" },
+    });
+    expect(actions.trust()).toBeNull();
+  });
+
+  it("cancelling the trust question sends nothing more", async () => {
+    const request = { root: "/work/app", files: ["f"], hash: "h1", commands: [] };
+    tauri.answer("create_space", () => ({ workspace_id: "", created: false, trust: request }));
+    await actions.create("/work/app", "");
+    expect(await actions.answerTrust("cancel")).toBeUndefined();
+    expect(tauri.calls("create_space")).toHaveLength(1);
+    expect(actions.trust()).toBeNull();
+  });
+
   it("sends no label when it is blank", async () => {
     await actions.create("/work/app", "  ");
-    expect(tauri.calls("create_space")).toEqual([{ cwd: "/work/app", label: null }]);
+    expect(tauri.calls("create_space")).toEqual([
+      { cwd: "/work/app", label: null, decision: null },
+    ]);
   });
 
   it("keeps the dialog open and shows the error when herdr or the directory fails", async () => {

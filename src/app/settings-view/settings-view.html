@@ -204,5 +204,27 @@
     <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
   </section>
 
+  <section aria-labelledby="trusted-h">
+    <h2 id="trusted-h">Trusted projects</h2>
+    <p class="hint">
+      Repositories whose project file (<code>.poimen/config.json</code>) may run its commands. The
+      trust ends when the file changes.
+    </p>
+    @if (trustedRoots().length === 0) {
+      <p class="hint">No project is trusted.</p>
+    } @else {
+      <ul class="rows" aria-label="Trusted projects">
+        @for (root of trustedRoots(); track root) {
+          <li class="row-item">
+            <span class="path" [title]="root">{{ root }}</span>
+            <span class="actions">
+              <button type="button" class="btn" (click)="revokeProject(root)">Revoke</button>
+            </span>
+          </li>
+        }
+      </ul>
+    }
+  </section>
+
   <app-space-layout-editor />
 </div>

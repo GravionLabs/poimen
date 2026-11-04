@@ -143,17 +143,28 @@ pub fn parse_layout(text: &str) -> Result<Layout, String> {
 /// else the `spaces.layout` of the poimen config, else the built-in default. An invalid layout in
 /// a project file is an `Err` with a warning naming the file and the problem; the caller then
 /// creates a single pane. The `Ok` warnings are non-fatal.
+#[cfg(test)]
 pub fn resolve(
     project: Option<(&str, &str)>,
     legacy: Option<(&str, &str)>,
     config: Option<&Layout>,
 ) -> Result<(Layout, Vec<String>), String> {
+    resolve_origin(project, legacy, config).map(|(l, w, _)| (l, w))
+}
+
+/// `resolve` that also says whether the layout comes from a project file (`true`; its commands need
+/// trust) or from the user config or the built-in default (`false`).
+pub fn resolve_origin(
+    project: Option<(&str, &str)>,
+    legacy: Option<(&str, &str)>,
+    config: Option<&Layout>,
+) -> Result<(Layout, Vec<String>, bool), String> {
     if let Some((path, text)) = project
         && let Ok(data) = serde_json::from_str::<Value>(text)
         && !data["layout"].is_null()
     {
         return parse_layout_value(&data["layout"])
-            .map(|l| (l, Vec::new()))
+            .map(|l| (l, Vec::new(), true))
             .map_err(|e| format!("{path}: layout: {e}"));
     }
     if let Some((path, text)) = legacy {
@@ -162,9 +173,29 @@ pub fn resolve(
             "{path} is deprecated; move it to \"layout\" in {}",
             crate::project::PROJECT_FILE
         );
-        return Ok((layout, vec![warning]));
+        return Ok((layout, vec![warning], true));
     }
-    Ok((config.cloned().unwrap_or_else(default_layout), Vec::new()))
+    Ok((
+        config.cloned().unwrap_or_else(default_layout),
+        Vec::new(),
+        false,
+    ))
+}
+
+impl Layout {
+    /// The same panes and splits with no command to type.
+    pub fn without_commands(&self) -> Layout {
+        Layout {
+            panes: self
+                .panes
+                .iter()
+                .map(|p| PaneSpec {
+                    command: None,
+                    ..p.clone()
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Builds the layout in the new space: the root pane is named and gets its command, every other
@@ -316,6 +347,30 @@ mod tests {
         );
         assert_eq!(name(resolve(None, None, Some(&config))), "cfg");
         assert_eq!(resolve(None, None, None).unwrap().0, default_layout());
+    }
+
+    #[test]
+    fn origin_is_the_project_for_repo_files_only() {
+        let new = r#"{"layout":{"panes":[{"name":"n"}]}}"#;
+        let old = r#"{"panes":[{"name":"o"}]}"#;
+        let config = default_layout();
+        let origin = |p, l, c| resolve_origin(p, l, c).unwrap().2;
+        assert!(origin(Some((PROJECT, new)), None, Some(&config)));
+        assert!(origin(None, Some((FILE, old)), Some(&config)));
+        // A project file without `layout` leaves the user layout in charge.
+        assert!(!origin(Some((PROJECT, "{}")), None, Some(&config)));
+        assert!(!origin(None, None, None));
+    }
+
+    #[test]
+    fn without_commands_keeps_panes_and_splits() {
+        let l = default_layout().without_commands();
+        assert_eq!(l.panes.len(), 3);
+        assert!(l.panes.iter().all(|p| p.command.is_none()));
+        assert_eq!(l.panes[1].split, default_layout().panes[1].split);
+        let calls = RefCell::new(Vec::new());
+        apply(&fake(&calls), &l, "/work/app", "w1:root").unwrap();
+        assert!(calls.borrow().iter().all(|(m, _)| m != "pane.send_input"));
     }
 
     #[test]

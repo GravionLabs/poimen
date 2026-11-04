@@ -58,10 +58,19 @@ describe("parseSettings", () => {
       notifyOnBlocked: false,
       notifyOnDone: true,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+      trustedProjects: {},
       tasks: DEFAULT_SETTINGS.tasks,
       home: "/Users/x",
       warnings: ["w"],
     });
+  });
+
+  it("parses trusted projects and skips entries that are not strings", () => {
+    expect(parseSettings({ trustedProjects: { "/a": "h1", "/b": 3 } }).trustedProjects).toEqual({
+      "/a": "h1",
+    });
+    expect(parseSettings({ trustedProjects: ["x"] }).trustedProjects).toEqual({});
+    expect(parseSettings({}).trustedProjects).toEqual({});
   });
 
   it("parses tasks and falls back to the default agent mode", () => {

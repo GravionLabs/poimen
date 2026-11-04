@@ -10,6 +10,32 @@ export interface SpaceOutcome {
   created: boolean;
   /** Why the pane layout of a new space was not (fully) applied. */
   warnings?: string[];
+  /** Set instead of creating anything: the project file is not trusted yet. */
+  trust?: TrustRequest;
+}
+
+/** A command of a project file (wire shape of `trust.rs`). */
+export interface ListedCommand {
+  what: string;
+  command: string;
+}
+
+/** The project commands waiting for the user's trust (wire shape of `trust.rs`). */
+export interface TrustRequest {
+  root: string;
+  files: string[];
+  hash: string;
+  commands: ListedCommand[];
+}
+
+/** The answer sent back to `create_space`. */
+export type TrustDecision = { kind: "trust"; hash: string } | { kind: "without" };
+
+/** A space waiting for the trust decision of its repository. */
+export interface TrustPending {
+  cwd: string;
+  label: string;
+  request: TrustRequest;
 }
 
 /** Last path segment: the default label of a space for `path`. */
@@ -64,6 +90,9 @@ export class SpaceActions {
   private readonly _closeError = signal<string | null>(null);
   /** The space waiting for a close confirmation; `null` when none. */
   readonly closing = this._closing.asReadonly();
+  private readonly _trust = signal<TrustPending | null>(null);
+  /** The project file waiting for a trust decision; nothing was created yet. */
+  readonly trust = this._trust.asReadonly();
   /** herdr's error of the last failed close; the space is untouched. */
   readonly closeError = this._closeError.asReadonly();
   readonly open = this._open.asReadonly();
@@ -106,15 +135,26 @@ export class SpaceActions {
   }
 
   /** Creates (or focuses) the space of `cwd`; closes the dialog on success. */
-  async create(cwd: string, label: string): Promise<SpaceOutcome | undefined> {
+  async create(
+    cwd: string,
+    label: string,
+    decision: TrustDecision | null = null,
+  ): Promise<SpaceOutcome | undefined> {
     this._error.set(null);
     this._busy.set(true);
     try {
       const outcome = await this.bridge.invoke<SpaceOutcome>("create_space", {
         cwd: cwd.trim(),
         label: label.trim() || null,
+        decision,
       });
       this._open.set(false);
+      if (outcome.trust) {
+        // Nothing exists yet: ask, then call again with the answer.
+        this._trust.set({ cwd: cwd.trim(), label: label.trim(), request: outcome.trust });
+        return undefined;
+      }
+      this._trust.set(null);
       const warnings = outcome.warnings ?? [];
       this._warning.set(warnings.length > 0 ? warnings.join("; ") : null);
       for (const w of warnings) console.warn(`poimen space layout: ${w}`);
@@ -126,6 +166,21 @@ export class SpaceActions {
     } finally {
       this._busy.set(false);
     }
+  }
+
+  /**
+   * The answer to the trust dialog. "trust" and "without" create the space (the first stores the
+   * hash of the listed file, valid only if the file is unchanged); "cancel" creates nothing.
+   * Resolves to the outcome when a space was created or focused.
+   */
+  async answerTrust(answer: "trust" | "without" | "cancel"): Promise<SpaceOutcome | undefined> {
+    const pending = this._trust();
+    if (!pending) return undefined;
+    this._trust.set(null);
+    if (answer === "cancel") return undefined;
+    const decision: TrustDecision =
+      answer === "trust" ? { kind: "trust", hash: pending.request.hash } : { kind: "without" };
+    return this.create(pending.cwd, pending.label, decision);
   }
 
   /**

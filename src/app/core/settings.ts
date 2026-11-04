@@ -136,6 +136,8 @@ export interface Settings {
   notifyOnDone: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
+  /** `trustedProjects`: repository root to the hash of the project file the user trusted. */
+  trustedProjects: Record<string, string>;
   /** `tasks`: the task modes and the worktree directory template. */
   tasks: TaskModes;
   /** The home directory `~` stands for; `null` until the backend knows it. */
@@ -164,10 +166,19 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnBlocked: true,
   notifyOnDone: true,
   spacesLayout: null,
+  trustedProjects: {},
   tasks: DEFAULT_TASKS,
   home: null,
   warnings: [],
 };
+
+/** The `trustedProjects` map; entries that are not strings are skipped. */
+function parseTrusted(raw: unknown): Record<string, string> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === "string"),
+  );
+}
 
 /** A valid list of lines of tokens, or `null`. */
 function parseRowLines(raw: unknown): RowLines | null {
@@ -249,6 +260,7 @@ export function parseSettings(raw: unknown): Settings {
     notifyOnBlocked: r["notifyOnBlocked"] !== false,
     notifyOnDone: r["notifyOnDone"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
+    trustedProjects: parseTrusted(r["trustedProjects"]),
     tasks: parseTaskModes(r["tasks"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
@@ -363,6 +375,14 @@ export class SettingsStore {
     } catch {
       return null;
     }
+  }
+
+  /** Drops the trust of the project file of `root` (`trustedProjects`) and applies it at once. */
+  async revokeProject(root: string): Promise<void> {
+    const rest = Object.fromEntries(
+      Object.entries(this._settings().trustedProjects).filter(([r]) => r !== root),
+    );
+    await this.write({ trustedProjects: rest }, "the revoked project", "revoke_project", { root });
   }
 
   /** Optimistic write: applies `patch`, calls `command`, goes back and reports a failure. */
