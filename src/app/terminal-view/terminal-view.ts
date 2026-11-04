@@ -35,18 +35,6 @@ export interface ModeState {
   blocked: string | null;
 }
 
-/**
- * Whether a close reason says another client holds the controller. herdr's wording for a held
- * terminal is "... already has an attached client; retry with --takeover" (found in the herdr
- * binary; the control path itself is not exercised). Anything else (pane gone, crash, spawn
- * failure) is a plain error, not a held controller.
- */
-export function isControllerHeld(reason: string): boolean {
-  return /already has an attached client|retry with --takeover|controlled by another client|controller taken over/i.test(
-    reason,
-  );
-}
-
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -248,7 +236,13 @@ export class TerminalView implements OnDestroy {
       if (this.mode() === "control") this.session?.input(data);
     });
     term.attachCustomWheelEventHandler((event) => {
-      if (this.mode() === "control" && this.session?.open && event.deltaY !== 0) {
+      // Emulated streams carry PTY bytes: xterm.js itself scrolls and reports the wheel.
+      if (
+        this.mode() === "control" &&
+        this.session?.open &&
+        !this.session.emulated &&
+        event.deltaY !== 0
+      ) {
         const lines = Math.max(1, Math.min(10, Math.round(Math.abs(event.deltaY) / 30)));
         this.session.scroll(event.deltaY < 0, lines);
       }
@@ -309,6 +303,16 @@ export class TerminalView implements OnDestroy {
     };
   }
 
+  /**
+   * Whether mouse and wheel go to the pane as commands: only in a stream opened for control and
+   * only for a rendered stream (finished frames, whose application modes xterm.js cannot see). An
+   * emulated stream carries the PTY bytes, so xterm.js tracks the modes and reports the mouse
+   * itself.
+   */
+  private forwardsMouse(): boolean {
+    return this.attempt === "control" && this.session?.emulated !== true;
+  }
+
   /** A press with the link modifier over a link opens it instead of going to the pane application. */
   private opensLink(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
     return this.linkHovered && holdsLinkModifier(event);
@@ -334,7 +338,7 @@ export class TerminalView implements OnDestroy {
       const session = this.session;
       const term = this.term;
       // Gate on the mode the stream was opened with, not on the (earlier) requested mode.
-      if (!term || !session?.open || this.attempt !== "control") return;
+      if (!term || !session?.open || !this.forwardsMouse()) return;
       const screen = host.querySelector(".xterm-screen") ?? host;
       at = cellAt(
         screen.getBoundingClientRect(),
@@ -372,7 +376,7 @@ export class TerminalView implements OnDestroy {
       release();
     }
     const onDown = (event: MouseEvent) => {
-      if (this.attempt !== "control" || event.shiftKey || this.opensLink(event)) return; // Shift: xterm selects text, Cmd (macOS) or Ctrl over a link: open it
+      if (!this.forwardsMouse() || event.shiftKey || this.opensLink(event)) return; // Shift: xterm selects text, Cmd (macOS) or Ctrl over a link: open it
       event.stopPropagation(); // no text selection while the pane application owns the mouse
       event.preventDefault();
       this.term?.focus();
@@ -383,14 +387,14 @@ export class TerminalView implements OnDestroy {
       window.addEventListener("mousemove", onMove, true);
     };
     const onContext = (event: MouseEvent) => {
-      if (this.attempt === "control" && !event.shiftKey) event.preventDefault();
+      if (this.forwardsMouse() && !event.shiftKey) event.preventDefault();
     };
     host.addEventListener("mousedown", onDown, true);
     host.addEventListener("mousemove", onHostMove, true);
     host.addEventListener("contextmenu", onContext);
     // A drag still held when the stream ends (tab closed, mode switch) is released first.
     this.endDrag = () => {
-      if (pressed && this.session?.open && this.attempt === "control") {
+      if (pressed && this.session?.open && this.forwardsMouse()) {
         this.session.mouse({ action: "up", button: pressed, ...at, modifiers: 0 });
       }
       release();
@@ -465,14 +469,13 @@ export class TerminalView implements OnDestroy {
   }
 
   /** A stream ended or could not open: fall back to observing when control was attempted. */
-  private failed(mode: Mode, reason: string, lost = false): void {
+  private failed(mode: Mode, reason: string, lost = false, held = false): void {
     if (mode !== "control" || this.destroyed) {
       this.banner.set(reason);
       return;
     }
     // Held by another client: stay usable as an observer; going back to input is an explicit
     // user action. Any other failure is shown as an error.
-    const held = isControllerHeld(reason);
     this.setState("observe", held ? reason : null);
     void this.connect("observe", false);
     if (lost || !held) this.banner.set(reason);
@@ -508,16 +511,29 @@ export class TerminalView implements OnDestroy {
 
   private onRecord(session: TerminalSession, record: StreamRecord): void {
     if (session !== this.session) return;
-    if (record.type === "frame") {
-      if (!this.framed && this.attempt === "control") this.setState("control", null);
-      this.framed = true;
-      this.frameGrid = { cols: record.width, rows: record.height };
-      this.term?.write(decodeBase64(record.bytes));
-      return;
+    switch (record.type) {
+      case "reset":
+        this.framed = true;
+        this.frameGrid = { cols: record.cols, rows: record.rows };
+        this.term?.write(decodeBase64(record.bytes));
+        return;
+      case "output":
+        this.framed = true;
+        this.term?.write(decodeBase64(record.bytes));
+        return;
+      case "resized":
+        this.frameGrid = { cols: record.cols, rows: record.rows };
+        return;
+      case "controller":
+        // Input is reported only once the backend says this client holds the controller.
+        if (record.attached && this.attempt === "control") this.setState("control", null);
+        return;
+      case "closed":
+        this.session = undefined;
+        if (record.reason === "detached") return;
+        this.failed(this.attempt, record.reason, this.framed, record.code === "controller_held");
+        return;
     }
-    this.session = undefined;
-    if (record.reason === "detached") return;
-    this.failed(this.attempt, record.reason, this.framed);
   }
 
   private scheduleResize(): void {

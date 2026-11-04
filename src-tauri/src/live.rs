@@ -83,6 +83,6 @@ fn observe_stream_delivers_a_full_frame() {
             assert_eq!((width, height), (80, 24));
             assert!(!bytes.is_empty());
         }
-        Record::Closed { reason } => panic!("stream closed: {reason}"),
+        Record::Closed { reason, .. } => panic!("stream closed: {reason}"),
     }
 }

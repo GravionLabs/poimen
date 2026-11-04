@@ -1,16 +1,14 @@
 //! The pane layout of a new space, in the schema of the herdr-plugins `layout-bootstrap`
 //! (`.poimen/config.json` `layout`, formerly `.agents/herdr-layout.json`): `panes[]` with `name`, optional `command` and, from the second
-//! pane on, `split.from` / `split.direction` / `split.ratio`. Resolution is pure; `apply` takes the
-//! request function so tests never touch a live herdr.
+//! pane on, `split.from` / `split.direction` / `split.ratio`. Resolution is pure; `apply` goes through
+//! the `Backend` trait, so tests use a fake and never touch a live backend.
 
 use std::collections::HashSet;
 
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::herdr::{
-    SplitDirection, created_pane_id, pane_rename_params, send_input_params, split_params_ratio,
-};
+use crate::backend::{Backend, SplitDirection};
 
 /// The deprecated project layout file, relative to the repository root (read until 1.0).
 pub const REPO_LAYOUT_FILE: &str = ".agents/herdr-layout.json";
@@ -200,9 +198,9 @@ impl Layout {
 
 /// Builds the layout in the new space: the root pane is named and gets its command, every other
 /// pane splits an earlier one (`pane.split` in `cwd`, without focus), is named and gets its
-/// command typed. `request` sends one herdr call.
+/// command typed. `backend` makes the calls.
 pub fn apply(
-    request: &impl Fn(&str, Value) -> Result<Value, String>,
+    backend: &dyn Backend,
     layout: &Layout,
     cwd: &str,
     root_pane: &str,
@@ -217,14 +215,14 @@ pub fn apply(
                     .find(|(n, _)| *n == s.from)
                     .map(|(_, id)| id.as_str())
                     .ok_or(format!("pane {}: unknown split.from {}", spec.name, s.from))?;
-                let params = split_params_ratio(target, s.direction, Some(cwd), Some(s.ratio));
-                let result = request("pane.split", params)?;
-                created_pane_id(&result).ok_or("herdr did not report the new pane")?
+                backend
+                    .split(target, s.direction, Some(cwd), Some(s.ratio))?
+                    .ok_or("herdr did not report the new pane")?
             }
         };
-        request("pane.rename", pane_rename_params(&id, Some(&spec.name)))?;
+        backend.rename_terminal(&id, Some(&spec.name))?;
         if let Some(command) = &spec.command {
-            request("pane.send_input", send_input_params(&id, command))?;
+            backend.send_input(&id, command)?;
         }
         ids.push((&spec.name, id));
     }
@@ -234,8 +232,7 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-    use std::cell::RefCell;
+    use crate::backend_fake::FakeBackend;
 
     const FILE: &str = "/work/app/.agents/herdr-layout.json";
 
@@ -368,9 +365,9 @@ mod tests {
         assert_eq!(l.panes.len(), 3);
         assert!(l.panes.iter().all(|p| p.command.is_none()));
         assert_eq!(l.panes[1].split, default_layout().panes[1].split);
-        let calls = RefCell::new(Vec::new());
-        apply(&fake(&calls), &l, "/work/app", "w1:root").unwrap();
-        assert!(calls.borrow().iter().all(|(m, _)| m != "pane.send_input"));
+        let fake = FakeBackend::default();
+        apply(&fake, &l, "/work/app", "w1:root").unwrap();
+        assert!(fake.calls().iter().all(|c| !c.starts_with("input ")));
     }
 
     #[test]
@@ -404,70 +401,35 @@ mod tests {
         );
     }
 
-    fn fake(
-        calls: &RefCell<Vec<(String, Value)>>,
-    ) -> impl Fn(&str, Value) -> Result<Value, String> + '_ {
-        move |method, params| {
-            let mut calls = calls.borrow_mut();
-            let n = calls.len();
-            calls.push((method.to_owned(), params));
-            Ok(match method {
-                "pane.split" => json!({ "pane": { "pane_id": format!("w1:p{}", n + 10) } }),
-                _ => json!({}),
-            })
-        }
-    }
-
     #[test]
     fn apply_splits_renames_and_types_in_order() {
-        let calls = RefCell::new(Vec::new());
-        apply(&fake(&calls), &default_layout(), "/work/app", "w1:root").unwrap();
-        let calls = calls.into_inner();
-        let methods: Vec<_> = calls.iter().map(|(m, _)| m.as_str()).collect();
+        let fake = FakeBackend::default();
+        apply(&fake, &default_layout(), "/work/app", "w1:root").unwrap();
         assert_eq!(
-            methods,
+            fake.calls(),
             [
-                "pane.rename",
-                "pane.send_input",
-                "pane.split",
-                "pane.rename",
-                "pane.split",
-                "pane.rename"
+                "rename w1:root agent",
+                "input w1:root claude",
+                "split w1:root right /work/app 0.6",
+                "rename w1:p12 tests",
+                // `shell` splits `tests` (the pane created by the first split), downward.
+                "split w1:p12 down /work/app 0.5",
+                "rename w1:p14 shell",
             ]
         );
-        assert_eq!(
-            calls[0].1,
-            json!({ "pane_id": "w1:root", "label": "agent" })
-        );
-        assert_eq!(
-            calls[1].1,
-            json!({ "pane_id": "w1:root", "text": "claude", "keys": ["enter"] })
-        );
-        assert_eq!(
-            calls[2].1,
-            json!({ "target_pane_id": "w1:root", "direction": "right", "cwd": "/work/app", "ratio": 0.6 })
-        );
-        assert_eq!(calls[3].1, json!({ "pane_id": "w1:p12", "label": "tests" }));
-        // `shell` splits `tests` (the pane created by the first split), downward.
-        assert_eq!(
-            calls[4].1,
-            json!({ "target_pane_id": "w1:p12", "direction": "down", "cwd": "/work/app", "ratio": 0.5 })
-        );
-        assert_eq!(calls[5].1, json!({ "pane_id": "w1:p14", "label": "shell" }));
     }
 
     #[test]
     fn apply_stops_on_a_failed_call() {
-        let request = |method: &str, _: Value| -> Result<Value, String> {
-            if method == "pane.split" {
-                Err("boom".into())
-            } else {
-                Ok(json!({}))
-            }
-        };
+        let fake = FakeBackend::default();
+        fake.fail_on("split");
         assert_eq!(
-            apply(&request, &default_layout(), "/work/app", "w1:root"),
+            apply(&fake, &default_layout(), "/work/app", "w1:root"),
             Err("boom".into())
+        );
+        assert_eq!(
+            fake.calls(),
+            ["rename w1:root agent", "input w1:root claude"]
         );
     }
 }

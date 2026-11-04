@@ -20,14 +20,7 @@ const OBSERVE: OpenTerminal = {
   takeover: false,
 };
 
-const frame = (bytes: string): StreamRecord => ({
-  type: "frame",
-  seq: 1,
-  full: true,
-  width: 80,
-  height: 24,
-  bytes,
-});
+const frame = (bytes: string): StreamRecord => ({ type: "output", bytes });
 
 describe("TerminalStreamService", () => {
   let injector: ReturnType<typeof Injector.create>;
@@ -42,7 +35,7 @@ describe("TerminalStreamService", () => {
   beforeEach(() => {
     tauri.reset();
     nextId = 7;
-    tauri.answer("open_terminal", () => nextId++);
+    tauri.answer("open_terminal", () => ({ id: nextId++, emulated: false }));
     create();
   });
 
@@ -153,10 +146,17 @@ describe("TerminalStreamService", () => {
     expect(tauri.calls("terminal_mouse")).toEqual([]);
   });
 
+  it("tells whether the opened stream is emulated", async () => {
+    tauri.answer("open_terminal", () => ({ id: 9, emulated: true }));
+    const session = await service.open(OBSERVE, () => {});
+    expect(session.id).toBe(9);
+    expect(session.emulated).toBe(true);
+  });
+
   it("delivers a record that arrives before open resolves", async () => {
     tauri.answer("open_terminal", () => {
       tauri.emit("terminal", { id: 7, record: { type: "closed", reason: "pane gone" } });
-      return 7;
+      return { id: 7, emulated: false };
     });
     const got: StreamRecord[] = [];
 
@@ -172,7 +172,7 @@ describe("TerminalStreamService", () => {
       throw new Error("terminal has a controller");
     });
     await expect(service.open(OBSERVE, () => {})).rejects.toThrow("controller");
-    tauri.answer("open_terminal", () => 7);
+    tauri.answer("open_terminal", () => ({ id: 7, emulated: false }));
     const got: StreamRecord[] = [];
 
     await service.open(OBSERVE, (r) => got.push(r));
