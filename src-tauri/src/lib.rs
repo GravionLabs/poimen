@@ -3,6 +3,7 @@ mod copilot;
 mod git;
 mod github;
 mod github_issues;
+mod github_milestones;
 mod github_pulls;
 mod gui_path;
 mod herdr;
@@ -308,6 +309,24 @@ async fn github_issues(
         .collect();
     let closed = closed.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || github_issues::load(&client, &dirs, closed))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Open milestones of the GitHub repositories among `dirs` (REST with ETag), ordered by version
+/// with the current one marked. Read-only.
+#[tauri::command]
+async fn github_milestones(
+    client: State<'_, GithubClient>,
+    dirs: Vec<String>,
+) -> Result<Vec<github_milestones::RepoMilestones>, String> {
+    let client = client.inner().clone();
+    let home = home_dir();
+    let dirs: Vec<String> = dirs
+        .iter()
+        .map(|d| github_pulls::expand_home(d, home.as_deref()))
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || github_milestones::load(&client, &dirs))
         .await
         .map_err(|e| e.to_string())
 }
@@ -970,6 +989,7 @@ pub fn run() {
             deliver_board,
             github_pulls,
             github_issues,
+            github_milestones,
             plugin_pane_open,
             plugin_pane_focus,
             plugin_pane_close,

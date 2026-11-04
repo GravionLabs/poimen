@@ -42,6 +42,8 @@ The GitHub item of the activity bar opens a tab with the open pull requests of y
 
 Below the pull requests, the Issues section shows the open issues of each repository as a tree over GitHub's native sub-issues, with level (epic, feature, PBI, bug), `[needs-refinement]` and `[needs-decision]` markers, assignees and linked pull requests with their checks. Filter by state, level, label, assignee or text; collapse nodes per repository.
 
+The Milestones section lists the open milestones of each repository ordered by version, marks the current one (the lowest `x.y.z` with open issues) and shows due date, open and closed counts and a progress bar. Select a milestone to filter the issues tree to it.
+
 ## Deliver board
 
 - A view fed by the herdr `deliver-board` plugin (it must be installed): one table per repository among your pane directories, with the open PBIs, claim, labels, branch and pull request with check state. It refreshes on demand, on window focus and every 60 s. The issue and PR numbers open in the browser, and "Start deliver" runs the plugin's action.

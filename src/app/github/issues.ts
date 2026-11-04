@@ -4,6 +4,7 @@ import { HerdrStore } from "../core/herdr-store";
 import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
+import { GithubMilestones } from "./milestones";
 import { REFRESH_MIN_MS, isGithubUrl, type Checks, type GhError } from "./pulls";
 
 /** A pull request linked to an issue (`LinkedPr` of `github_issues.rs`). */
@@ -100,10 +101,18 @@ export interface IssueFilter {
   label: string | null;
   level: Level | null;
   assignee: string | null;
+  /** Title of the milestone the issues must belong to. */
+  milestone: string | null;
   text: string;
 }
 
-export const NO_ISSUE_FILTER: IssueFilter = { label: null, level: null, assignee: null, text: "" };
+export const NO_ISSUE_FILTER: IssueFilter = {
+  label: null,
+  level: null,
+  assignee: null,
+  milestone: null,
+  text: "",
+};
 
 function matches(node: IssueNode, f: IssueFilter): boolean {
   const i = node.issue;
@@ -112,6 +121,7 @@ function matches(node: IssueNode, f: IssueFilter): boolean {
   if (f.assignee && !i.assignees.some((a) => a.toLowerCase() === f.assignee!.toLowerCase())) {
     return false;
   }
+  if (f.milestone && i.milestone !== f.milestone) return false;
   const text = f.text.trim().toLowerCase().replace(/^#/, "");
   return !text || i.title.toLowerCase().includes(text) || String(i.number).includes(text);
 }
@@ -177,6 +187,7 @@ export class GithubIssues {
   private readonly store = inject(HerdrStore);
   private readonly settings = inject(SettingsStore);
   private readonly ui = inject(UiState);
+  private readonly milestones = inject(GithubMilestones);
 
   private readonly _result = signal<RepoIssues[] | null>(null);
   private readonly _loading = signal(false);
@@ -210,13 +221,16 @@ export class GithubIssues {
   );
 
   readonly trees = computed<RepoTree[]>(() => {
-    const filter: IssueFilter = {
+    const base: IssueFilter = {
       label: this.label(),
       level: this.level(),
       assignee: this.assignee(),
+      milestone: null,
       text: this.text(),
     };
     return this.okRepos().map((r) => {
+      // The selected milestone filters the tree of its own repository.
+      const filter = { ...base, milestone: this.milestones.forRepo(r.repo) };
       const roots = filterTree(buildTree(r.repo, r.issues), filter);
       return {
         root: r.root,

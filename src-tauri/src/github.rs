@@ -241,7 +241,6 @@ pub fn map_error(
     None
 }
 
-#[allow(dead_code)] // REST and its disk cache are for the next GitHub views
 #[derive(Serialize, Deserialize)]
 struct DiskEntry {
     path: String,
@@ -251,7 +250,6 @@ struct DiskEntry {
     fetched_ms: u64,
 }
 
-#[allow(dead_code)] // REST and its disk cache are for the next GitHub views
 fn file_name(path: &str) -> String {
     // FNV-1a; the entry stores the full path, so a collision is detected, not trusted.
     let mut hash: u64 = 0xcbf29ce484222325;
@@ -264,7 +262,6 @@ fn file_name(path: &str) -> String {
 
 pub struct Client<R: Runner> {
     runner: R,
-    #[allow(dead_code)] // REST and its disk cache are for the next GitHub views
     cache_dir: PathBuf,
     graphql_cache: Mutex<HashMap<String, (Duration, Value)>>,
 }
@@ -323,14 +320,12 @@ impl<R: Runner> Client<R> {
         GhError::Other { message }
     }
 
-    #[allow(dead_code)] // REST and its disk cache are for the next GitHub views
     fn read_entry(&self, path: &str) -> Option<DiskEntry> {
         let text = std::fs::read_to_string(self.cache_dir.join(file_name(path))).ok()?;
         let entry: DiskEntry = serde_json::from_str(&text).ok()?;
         (entry.path == path).then_some(entry)
     }
 
-    #[allow(dead_code)] // REST and its disk cache are for the next GitHub views
     fn write_entry(&self, entry: &DiskEntry) {
         // A cache that cannot be written is only slower, never wrong.
         if std::fs::create_dir_all(&self.cache_dir).is_err() {
@@ -350,7 +345,6 @@ impl<R: Runner> Client<R> {
 
     /// `GET path` through `gh api`, revalidated with the cached ETag; the cached body is served
     /// without a request for `CACHE_TTL`.
-    #[allow(dead_code)] // REST and its disk cache are for the next GitHub views
     pub fn rest(&self, path: &str) -> Result<String, GhError> {
         // A path starting with `-` would be read by `gh` as a flag.
         if path.starts_with('-') {
