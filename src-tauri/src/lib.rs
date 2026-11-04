@@ -1,6 +1,7 @@
 mod backend;
 mod copilot;
 mod git;
+mod github;
 mod gui_path;
 mod herdr;
 mod layout;
