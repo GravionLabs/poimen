@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   ElementRef,
   afterNextRender,
   effect,
@@ -18,11 +19,12 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { TauriBridge } from "../core/tauri";
-import { decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
+import { agentKind, decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
+import { PromptBar } from "../prompt-bar/prompt-bar";
 import { detectedLinkHandler, holdsLinkModifier, linkHandler } from "./links";
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
@@ -86,7 +88,7 @@ function ansiColors(
  */
 @Component({
   selector: "app-terminal-view",
-  imports: [HxButton],
+  imports: [HxButton, PromptBar],
   templateUrl: "./terminal-view.html",
   styleUrl: "./terminal-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -106,6 +108,8 @@ export class TerminalView implements OnDestroy {
   readonly sized = output<{ cols: number; rows: number }>();
   /** Why the stream closed; `null` while it runs. */
   readonly banner = signal<string | null>(null);
+  /** Whether the pane hosts an agent, so the prompt bar is shown (also in read-only mode). */
+  protected readonly isAgent = computed(() => !!agentKind(this.pane()));
 
   private readonly streams = inject(TerminalStreamService);
   private readonly prefs = inject(SettingsStore);

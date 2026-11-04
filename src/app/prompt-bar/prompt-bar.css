@@ -1,0 +1,31 @@
+:host {
+  display: block;
+  flex: none;
+}
+
+.prompt {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.result {
+  color: var(--h-text-muted-color, inherit);
+}
+
+.result.failed {
+  color: var(--status-blocked);
+}

@@ -218,6 +218,58 @@ pub fn agent_rename_params(target: &str, name: Option<&str>) -> Value {
     json!({ "target": target, "name": non_empty(name) })
 }
 
+/// How long `agent.prompt` waits for the agent to react (herdr itself gives up after 5 s with
+/// `agent_prompt_stalled`; this caps the whole call).
+pub const PROMPT_WAIT_MS: u64 = 10_000;
+
+/// Params of `agent.prompt` (herdr protocol 22 schema, `AgentPromptParams`): submits `text` to the
+/// agent `target` and waits for it to start working or to block, so a stalled agent is reported.
+pub fn agent_prompt_params(target: &str, text: &str) -> Value {
+    json!({
+        "target": target,
+        "text": text,
+        "wait": { "until": ["working", "blocked"], "timeout_ms": PROMPT_WAIT_MS },
+    })
+}
+
+/// What happened to a prompt sent with `agent.prompt`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PromptOutcome {
+    /// Submitted; the agent then reported `status` (`working` or `blocked`).
+    Started { status: String },
+    /// Submitted, but the agent showed no activity (`agent_prompt_stalled`).
+    Stalled,
+    /// The wait ran out before the agent reacted (`timeout`).
+    Timeout,
+    /// The agent waits at an approval or question dialog; nothing was sent (`agent_blocked`).
+    Blocked,
+    /// Any other failure, with a message for the user.
+    Failed { message: String },
+}
+
+/// Reads the answer of `agent.prompt`: `{"type":"wait_matched","event":{"data":{"status"...}}}` (or
+/// `agent_prompted` without a wait) or an API error with a code herdr documents for the call.
+pub fn prompt_outcome(result: Result<Value, Error>) -> PromptOutcome {
+    match result {
+        Ok(value) => {
+            let status = value
+                .pointer("/event/data/agent_status")
+                .and_then(Value::as_str)
+                .unwrap_or("working");
+            PromptOutcome::Started {
+                status: status.to_owned(),
+            }
+        }
+        Err(Error::Api { code, .. }) if code == "agent_prompt_stalled" => PromptOutcome::Stalled,
+        Err(Error::Api { code, .. }) if code == "timeout" => PromptOutcome::Timeout,
+        Err(Error::Api { code, .. }) if code == "agent_blocked" => PromptOutcome::Blocked,
+        Err(err) => PromptOutcome::Failed {
+            message: err.to_string(),
+        },
+    }
+}
+
 /// Params of `pane.rename`; a blank label clears the pane label (`null`).
 pub fn pane_rename_params(pane_id: &str, label: Option<&str>) -> Value {
     json!({ "pane_id": pane_id, "label": non_empty(label) })
@@ -1019,6 +1071,68 @@ mod tests {
             tab_create_params("w1", Some(" /work ")),
             json!({ "workspace_id": "w1", "cwd": "/work" })
         );
+    }
+
+    #[test]
+    fn agent_prompt_params_wait_for_activity() {
+        assert_eq!(
+            agent_prompt_params("w1:p2", "fix the test"),
+            json!({
+                "target": "w1:p2",
+                "text": "fix the test",
+                "wait": { "until": ["working", "blocked"], "timeout_ms": 10000 },
+            })
+        );
+    }
+
+    fn api(code: &str) -> Error {
+        Error::Api {
+            code: code.into(),
+            message: "m".into(),
+        }
+    }
+
+    #[test]
+    fn prompt_outcome_reads_the_matched_status() {
+        let result = json!({"type":"wait_matched","event":{"event":"pane_agent_status_changed",
+            "data":{"type":"pane_agent_status_changed","pane_id":"w1:p2","agent_status":"blocked"}}});
+        assert_eq!(
+            prompt_outcome(Ok(result)),
+            PromptOutcome::Started {
+                status: "blocked".into()
+            }
+        );
+        assert_eq!(
+            prompt_outcome(Ok(json!({"type":"agent_prompted","agent":{}}))),
+            PromptOutcome::Started {
+                status: "working".into()
+            }
+        );
+    }
+
+    #[test]
+    fn prompt_outcome_maps_documented_error_codes() {
+        assert_eq!(
+            prompt_outcome(Err(api("agent_prompt_stalled"))),
+            PromptOutcome::Stalled
+        );
+        assert_eq!(prompt_outcome(Err(api("timeout"))), PromptOutcome::Timeout);
+        assert_eq!(
+            prompt_outcome(Err(api("agent_blocked"))),
+            PromptOutcome::Blocked
+        );
+        assert_eq!(
+            prompt_outcome(Err(api("agent_not_found"))),
+            PromptOutcome::Failed {
+                message: "herdr agent_not_found: m".into()
+            }
+        );
+    }
+
+    #[test]
+    fn prompt_outcome_serializes_with_a_kind_tag() {
+        let json = serde_json::to_value(PromptOutcome::Stalled).unwrap();
+        assert_eq!(json, json!({"kind":"stalled"}));
     }
 
     #[test]
