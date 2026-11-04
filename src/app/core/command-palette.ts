@@ -28,6 +28,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "toggleOutput", title: "Toggle Output Panel" },
   { id: "nextTab", title: "Next Tab" },
   { id: "previousTab", title: "Previous Tab" },
+  { id: "showShortcuts", title: "Keyboard Shortcuts" },
   { id: "openSettings", title: "Open Settings" },
 ];
 

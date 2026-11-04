@@ -61,6 +61,20 @@
       <span class="item">{{ sizeText(size()) }}</span>
     }
   }
+  <button
+    type="button"
+    class="item help-button"
+    aria-label="Keyboard shortcuts"
+    aria-haspopup="dialog"
+    [title]="
+      shortcutsShortcut()
+        ? 'Keyboard shortcuts (' + shortcutsShortcut() + ')'
+        : 'Keyboard shortcuts'
+    "
+    (click)="showShortcuts.emit()"
+  >
+    ?
+  </button>
   <span class="item version">{{ appLabel(appVersion()) }}</span>
   <span
     class="item version"

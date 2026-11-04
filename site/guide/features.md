@@ -20,7 +20,7 @@ Everything here is in the application today; the [README](https://github.com/Gra
 - One tab per pane; a preview tab becomes a pinned tab on use. One xterm.js shows the active tab with the WebGL renderer.
 - Input by default; read-only when another client controls the pane, with an explicit *Take over*. A mode button toggles input and read-only per tab.
 - Cmd+click (macOS) or Ctrl+click opens links; Shift bypasses mouse forwarding for text selection. Mouse cells follow the frame grid herdr sends.
-- Command palette (`CmdOrCtrl+Shift+P`) with poimen commands and herdr plugin actions; every shortcut can be changed.
+- Command palette (`CmdOrCtrl+Shift+P`) with poimen commands and herdr plugin actions; every shortcut can be changed. The ? button in the status bar (`CmdOrCtrl+/`) lists all shortcuts with your current bindings.
 
 ## Agent status and attention
 
