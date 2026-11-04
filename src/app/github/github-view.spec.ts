@@ -9,6 +9,7 @@ import { EditorTabs, GITHUB_TAB, tabKind } from "../core/editor-tabs";
 import { UI_STORAGE } from "../core/ui-state";
 import { tauri } from "../core/tauri.mock";
 import { GithubView } from "./github-view";
+import { IssuesSection } from "./issues-section";
 import {
   GithubPulls,
   ageText,
@@ -88,6 +89,13 @@ async function render(result: PullsResult = RESULT) {
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/github/github-view.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(IssuesSection, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/issues-section.html", "utf8"),
     },
   });
   const fixture = TestBed.createComponent(GithubView);

@@ -57,6 +57,8 @@ export interface LayoutState {
   panelTab: string;
   /** Keys of the last command palette entries run, newest first. */
   recentCommands?: string[];
+  /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
+  collapsedIssues?: Record<string, number[]>;
 }
 
 export function clampPanelHeight(height: number): number {
@@ -109,7 +111,21 @@ export function parseLayout(raw: string | null): LayoutState {
       panelHeight,
       panelTab,
       recentCommands,
+      collapsedIssues,
     } = data as Record<string, unknown>;
+    if (
+      typeof collapsedIssues === "object" &&
+      collapsedIssues !== null &&
+      !Array.isArray(collapsedIssues)
+    ) {
+      const entries = Object.entries(collapsedIssues)
+        .map(([repo, nrs]): [string, number[]] => [
+          repo,
+          Array.isArray(nrs) ? nrs.filter((n): n is number => Number.isInteger(n)) : [],
+        ])
+        .filter(([, nrs]) => nrs.length > 0);
+      if (entries.length) state.collapsedIssues = Object.fromEntries(entries);
+    }
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
     if (typeof activeView === "string" && activeView) state.activeView = activeView;
@@ -168,6 +184,10 @@ export class UiState {
   readonly panelTab = signal(this.initial.panelTab);
   /** Keys of the last command palette entries run, newest first (at most 5). */
   readonly recentCommands = signal<readonly string[]>(this.initial.recentCommands ?? []);
+  /** Collapsed nodes of the GitHub issue tree per repository (expanded is the default). */
+  readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
+    this.initial.collapsedIssues ?? {},
+  );
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -195,6 +215,16 @@ export class UiState {
     if (!(PANEL_TABS as readonly string[]).includes(tab)) return;
     this.panelTab.set(tab);
     this.panelOpen.set(true);
+    this.save();
+  }
+
+  /** Remembers whether the node `number` of the issue tree of `repo` is collapsed. */
+  setIssueCollapsed(repo: string, number: number, collapsed: boolean): void {
+    const rest = (this.collapsedIssues()[repo] ?? []).filter((n) => n !== number);
+    const list = collapsed ? [...rest, number] : rest;
+    const next = { ...this.collapsedIssues(), [repo]: list };
+    if (!list.length) delete next[repo];
+    this.collapsedIssues.set(next);
     this.save();
   }
 
@@ -291,6 +321,9 @@ export class UiState {
       panelHeight: this.panelHeight(),
       panelTab: this.panelTab(),
       recentCommands: this.recentCommands().length ? [...this.recentCommands()] : undefined,
+      collapsedIssues: Object.keys(this.collapsedIssues()).length
+        ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
+        : undefined,
       pluginPanes: Object.keys(this.pluginPanes()).length ? { ...this.pluginPanes() } : undefined,
     };
     try {

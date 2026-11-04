@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
+import { IssuesSection } from "./issues-section";
 import {
   GithubPulls,
   SCOPES,
@@ -13,6 +14,7 @@ import {
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
   selector: "app-github-view",
+  imports: [IssuesSection],
   templateUrl: "./github-view.html",
   styleUrl: "./github-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
