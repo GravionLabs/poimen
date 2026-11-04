@@ -130,12 +130,44 @@ pub fn resolve_bin(
     path: &str,
     exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
+    let pathext = std::env::var("PATHEXT").ok();
+    resolve_bin_named(
+        override_path,
+        path,
+        &bin_names(cfg!(windows), pathext.as_deref()),
+        exists,
+    )
+}
+
+/// File names to try for `herdr`: on Windows `herdr` plus one per `PATHEXT` extension (default
+/// `.COM;.EXE;.BAT;.CMD`), lowercased (`herdr.exe`); elsewhere just `herdr`.
+pub fn bin_names(windows: bool, pathext: Option<&str>) -> Vec<String> {
+    let mut names = vec!["herdr".to_owned()];
+    if windows {
+        let ext = pathext
+            .filter(|e| !e.is_empty())
+            .unwrap_or(".COM;.EXE;.BAT;.CMD");
+        names.extend(
+            ext.split(';')
+                .filter(|e| e.starts_with('.') && e.len() > 1)
+                .map(|e| format!("herdr{}", e.to_lowercase())),
+        );
+    }
+    names
+}
+
+pub fn resolve_bin_named(
+    override_path: Option<String>,
+    path: &str,
+    names: &[String],
+    exists: impl Fn(&Path) -> bool,
+) -> PathBuf {
     if let Some(p) = override_path.filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
-    path.split(':')
-        .filter(|d| !d.is_empty())
-        .map(|d| Path::new(d).join("herdr"))
+    std::env::split_paths(path)
+        .filter(|d| !d.as_os_str().is_empty())
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
         .find(|c| exists(c))
         .unwrap_or_else(|| PathBuf::from("herdr"))
 }
@@ -379,6 +411,27 @@ mod tests {
             PathBuf::from("/a/herdr")
         );
         assert_eq!(resolve_bin(None, "/a", nothing), PathBuf::from("herdr"));
+    }
+
+    #[test]
+    fn bin_names_add_pathext_extensions_on_windows_only() {
+        assert_eq!(bin_names(false, Some(".EXE")), ["herdr"]);
+        assert_eq!(
+            bin_names(true, Some(".COM;.EXE;;exe")),
+            ["herdr", "herdr.com", "herdr.exe"]
+        );
+        assert!(bin_names(true, None).contains(&"herdr.exe".to_owned()));
+    }
+
+    #[test]
+    fn resolve_bin_finds_herdr_exe_with_the_windows_names() {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        let path = format!("/nope{sep}/win/bin");
+        let names = bin_names(true, None);
+        let found = resolve_bin_named(None, &path, &names, |p: &Path| {
+            p == Path::new("/win/bin").join("herdr.exe")
+        });
+        assert_eq!(found, Path::new("/win/bin").join("herdr.exe"));
     }
 
     #[test]

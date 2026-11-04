@@ -208,9 +208,12 @@ impl Runner for SystemRunner {
         self.exited.store(false, Ordering::SeqCst);
         let exited = Arc::clone(&self.exited);
         let mut command = Command::new(program);
+        command.arg("server");
+        // Windows: the server keeps the inherited PATH; elsewhere it gets the login-shell PATH.
+        if !cfg!(windows) {
+            command.env("PATH", gui_path::child_path());
+        }
         command
-            .arg("server")
-            .env("PATH", gui_path::child_path())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
