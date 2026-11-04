@@ -63,7 +63,7 @@ release_ruleset=$(cat <<EOF
       "require_extra_approval_for_unattributed_changes": true,
       "required_review_thread_resolution": false,
       "required_reviewers": [],
-      "allowed_merge_methods": ["squash"]
+      "allowed_merge_methods": ["squash", "merge"]
     }}
   ]
 }
