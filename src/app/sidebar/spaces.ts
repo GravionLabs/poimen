@@ -1,4 +1,11 @@
-import { shortPath, type AgentStatus, type PaneRow, type SpaceNode } from "../core/herdr";
+import {
+  shortPath,
+  type AgentStatus,
+  type BranchPull,
+  type PaneRow,
+  type SpaceNode,
+} from "../core/herdr";
+import { checksText } from "../github/pulls";
 
 /** State word shown next to the name; `undefined` while herdr reports no known state. */
 export function stateLabel(status: AgentStatus): string | undefined {
@@ -56,6 +63,8 @@ export interface SpaceContext {
   /** Shared `dirty` and `sync` token texts (empty when clean/even or not shared). */
   dirty?: string;
   sync?: string;
+  /** The pull request every pane of the space shares. */
+  pr?: BranchPull;
 }
 
 /** `●3` for three changed or untracked files; empty when clean or unknown. */
@@ -66,6 +75,22 @@ export function dirtyText(dirty: number | undefined): string {
 /** `↑2 ↓1`; empty when even, without upstream or unknown. */
 export function syncText(ahead: number | undefined, behind: number | undefined): string {
   return [ahead ? `↑${ahead}` : "", behind ? `↓${behind}` : ""].filter(Boolean).join(" ");
+}
+
+/** `#123 ✓`, `#123 ✗`, `#123 …` (no symbol without checks); `merged` for a merged pull request. */
+export function prText(pr: BranchPull): string {
+  if (pr.state === "merged") return "merged";
+  const symbol = { passing: "✓", failing: "✗", pending: "…", none: "" }[pr.checks.state];
+  return symbol ? `#${pr.number} ${symbol}` : `#${pr.number}`;
+}
+
+/** Tooltip of the `pr` token: number, title, state and check counts. */
+export function prTooltip(pr: BranchPull): string {
+  const state = pr.state === "merged" ? "merged" : pr.isDraft ? "draft" : "open";
+  const checks = checksText(pr.checks);
+  return [`#${pr.number} ${pr.title} (${state})`, checks && `Checks: ${checks}`]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function spaceContext(space: SpaceNode): SpaceContext {
@@ -82,6 +107,7 @@ export function spaceContext(space: SpaceNode): SpaceContext {
     worktree: branch !== undefined && first.worktree,
     dirty: sharedText((r) => dirtyText(r.dirty)),
     sync: sharedText((r) => syncText(r.ahead, r.behind)),
+    pr: rest.every((r) => r.pr?.url === first.pr?.url) ? first.pr : undefined,
   };
 }
 
@@ -160,6 +186,7 @@ export const ROW_TOKENS = [
   "branch",
   "dirty",
   "sync",
+  "pr",
   "dir",
   "tab",
 ] as const;
@@ -178,6 +205,9 @@ export interface Segment {
   dim: boolean;
   /** Preceded by another text value on the line: shown after a " · ". */
   sep: boolean;
+  /** `pr` token: the pull request to open on a click and the tooltip text. */
+  url?: string;
+  tip?: string;
 }
 
 export type Line = Segment[];
@@ -242,6 +272,23 @@ export function renderRow(
         const base = { status, bold: bold === true, dim: dim === true };
         if (token === "state_icon") {
           out.push({ ...base, kind: "dot", text: "", sep: false });
+          continue;
+        }
+        if (token === "pr") {
+          const pr = pane ? (pane.pr?.url !== ctx.pr?.url ? pane.pr : undefined) : ctx.pr;
+          if (!pr) continue;
+          const text = prText(pr);
+          if (seen.has(same(text))) continue;
+          seen.add(same(text));
+          out.push({
+            ...base,
+            dim: base.dim || pr.isDraft,
+            kind: "text",
+            text,
+            sep: out.at(-1)?.kind === "text",
+            url: pr.url,
+            tip: prTooltip(pr),
+          });
           continue;
         }
         const text = value(token)?.trim();

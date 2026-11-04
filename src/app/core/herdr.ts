@@ -1,5 +1,7 @@
 // Shapes of herdr's workspace.list / tab.list / pane.list results (only the fields poimen uses).
 
+import type { Checks } from "../github/pulls";
+
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
 export interface Workspace {
@@ -45,6 +47,16 @@ export interface RepoInfo {
   /** Commits ahead of / behind the upstream; null/absent without upstream. */
   ahead?: number | null;
   behind?: number | null;
+}
+
+/** The pull request of a branch as `branch_pulls` returns it (`BranchPull` of `github_branches.rs`). */
+export interface BranchPull {
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "merged";
+  isDraft: boolean;
+  checks: Checks;
 }
 
 export interface Snapshot {
@@ -222,6 +234,8 @@ export interface PaneRow {
   dirty?: number;
   ahead?: number;
   behind?: number;
+  /** Pull request of the branch, when it has one. */
+  pr?: BranchPull;
   dir?: string;
   text?: string;
 }
@@ -232,7 +246,11 @@ export interface SpaceNode {
 }
 
 /** Workspaces with their pane rows (tab label as secondary text), enriched with repo info. */
-export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoInfo>): SpaceNode[] {
+export function buildSpaces(
+  snapshot: Snapshot,
+  repos: ReadonlyMap<string, RepoInfo>,
+  pulls: ReadonlyMap<string, BranchPull> = new Map(),
+): SpaceNode[] {
   return buildTree(snapshot).map(({ workspace, tabs }) => ({
     workspace,
     rows: tabs.flatMap(({ tab, panes }) =>
@@ -249,6 +267,7 @@ export function buildSpaces(snapshot: Snapshot, repos: ReadonlyMap<string, RepoI
           dirty: repo?.dirty ?? undefined,
           ahead: repo?.ahead ?? undefined,
           behind: repo?.behind ?? undefined,
+          pr: dir ? pulls.get(dir) : undefined,
           dir,
           text: statusText(pane),
         };

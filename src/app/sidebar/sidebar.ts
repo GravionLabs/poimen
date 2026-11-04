@@ -33,6 +33,8 @@ import {
   type SidebarRows,
 } from "./spaces";
 import { SettingsStore } from "../core/settings";
+import { TauriBridge } from "../core/tauri";
+import { isGithubUrl } from "../github/pulls";
 import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
@@ -339,6 +341,7 @@ export class Sidebar {
   protected readonly store = inject(HerdrStore);
   protected readonly spaceActions = inject(SpaceActions);
   private readonly attn = inject(Attention);
+  private readonly bridge = inject(TauriBridge);
 
   protected rings(paneId: string): boolean {
     return this.attn.attention().has(paneId);
@@ -366,6 +369,12 @@ export class Sidebar {
   protected closeSpace(workspaceId: string, event: Event): void {
     event.stopPropagation();
     this.menuAction.emit({ kind: "workspace", id: workspaceId, action: "close-space" });
+  }
+
+  /** Opens a pull request in the system browser; only github.com links, and the row stays as is. */
+  protected openPull(url: string, event: Event): void {
+    event.stopPropagation();
+    if (isGithubUrl(url)) void this.bridge.openUrl(url);
   }
 
   protected marks(row: PaneRow) {

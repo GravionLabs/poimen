@@ -1,0 +1,49 @@
+{
+  "data": {
+    "repository": {
+      "b0": {
+        "nodes": [
+          {
+            "number": 12,
+            "title": "Add the thing",
+            "url": "https://github.com/o/r/pull/12",
+            "state": "OPEN",
+            "isDraft": true,
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "state": "FAILURE",
+                      "contexts": {
+                        "checkRunCountsByState": [
+                          { "state": "SUCCESS", "count": 3 },
+                          { "state": "FAILURE", "count": 1 },
+                          { "state": "IN_PROGRESS", "count": 2 }
+                        ],
+                        "statusContextCountsByState": []
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "b1": { "nodes": [] },
+      "b2": {
+        "nodes": [
+          {
+            "number": 7,
+            "title": "Old fix",
+            "url": "https://github.com/o/r/pull/7",
+            "state": "MERGED",
+            "isDraft": false,
+            "commits": { "nodes": [{ "commit": { "statusCheckRollup": null } }] }
+          }
+        ]
+      }
+    }
+  }
+}
