@@ -1,4 +1,15 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitepress";
+import { adrSidebarItems } from "../scripts/adr-index.mjs";
+
+// The decision records are the source (`docs/adr/`, synced into `site/adr/` by `sync-docs.mjs`).
+const adrDir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "adr");
+const adrRecords = readdirSync(adrDir)
+  .filter((f) => /^\d{4}-.+\.md$/.test(f))
+  .sort()
+  .map((file) => ({ file, text: readFileSync(join(adrDir, file), "utf8") }));
 
 // `/<repository>/` on GitHub Pages; the workflow sets SITE_BASE.
 const base = process.env["SITE_BASE"] ?? "/";
@@ -35,13 +46,7 @@ export default defineConfig({
       },
       {
         text: "Decisions",
-        items: [
-          { text: "Overview", link: "/adr/" },
-          { text: "0001 Frontend stack", link: "/adr/0001-frontend-stack" },
-          { text: "0002 Color schemes", link: "/adr/0002-color-schemes" },
-          { text: "0003 Own terminal backend", link: "/adr/0003-own-terminal-backend-without-herdr" },
-          { text: "0004 Native views for plugins", link: "/adr/0004-native-views-for-herdr-plugins" },
-        ],
+        items: adrSidebarItems(adrRecords),
       },
     ],
     search: { provider: "local" },

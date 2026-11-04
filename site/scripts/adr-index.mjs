@@ -1,6 +1,6 @@
-/** `# 0002: Color schemes` -> `{ number: "0002", title: "Color schemes" }`; the file name is the fallback. */
+/** `# 0002: Color schemes` or `# ADR 0002: Color schemes` -> `{ number: "0002", title: "Color schemes" }`; the file name is the fallback. */
 export function adrHeading(file, text) {
-  const found = /^#\s+(\d{4}):\s*(.+?)\s*$/m.exec(text);
+  const found = /^#\s+(?:ADR\s+)?(\d{4}):\s*(.+?)\s*$/m.exec(text);
   if (found) return { number: found[1], title: found[2] };
   const number = file.slice(0, 4);
   return { number, title: file.slice(5, -3).replace(/-/g, " ") };
@@ -28,4 +28,15 @@ export function adrIndex(records) {
     ...rows,
     "",
   ].join("\n");
+}
+
+/** Sidebar entries of the decision records: the overview, then one per record in the order of the numbers. */
+export function adrSidebarItems(records) {
+  return [
+    { text: "Overview", link: "/adr/" },
+    ...records.map(({ file, text }) => {
+      const { number, title } = adrHeading(file, text);
+      return { text: `${number} ${title}`, link: `/adr/${file.slice(0, -3)}` };
+    }),
+  ];
 }
