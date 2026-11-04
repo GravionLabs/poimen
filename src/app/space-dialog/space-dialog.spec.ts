@@ -9,7 +9,23 @@ import { TauriBridge } from "../core/tauri";
 import { SpaceDialog } from "./space-dialog";
 
 const bridge = { invoke: vi.fn(), pickDirectory: vi.fn() };
-const store = { refresh: vi.fn(async () => undefined) };
+const snapshot = {
+  workspaces: [
+    { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
+    { workspace_id: "w2", label: "Two", number: 2, agent_status: "idle" },
+  ],
+  tabs: [],
+  panes: [
+    {
+      pane_id: "w1:p1",
+      tab_id: "w1:t1",
+      workspace_id: "w1",
+      agent_status: "working",
+      agent: "claude",
+    },
+  ],
+};
+const store = { refresh: vi.fn(async () => undefined), snapshot: () => snapshot };
 
 async function setup() {
   TestBed.resetTestingModule();
@@ -104,5 +120,40 @@ describe("SpaceDialog", () => {
     await settle();
     expect(root.querySelector("[role=alert]")?.textContent).toContain("is not a directory");
     expect(root.querySelector("form")).not.toBeNull();
+  });
+
+  it("asks before closing a space with panes, then closes it and reports the panes", async () => {
+    const { actions, root, settle } = await setup();
+    bridge.invoke.mockResolvedValue(undefined);
+    const closed = vi.fn();
+    void actions.requestClose("w1");
+    await settle();
+    const dialog = root.querySelector("[role=dialog]")!;
+    expect(dialog.textContent).toContain("Close space One?");
+    expect(dialog.textContent).toContain("1 pane, 1 agent among them");
+    expect(bridge.invoke).not.toHaveBeenCalled();
+    const paneIds = actions.confirmClose().then(closed);
+    await paneIds;
+    await settle();
+    expect(bridge.invoke).toHaveBeenCalledWith("space_close", { workspaceId: "w1", focus: "w2" });
+    expect(closed).toHaveBeenCalledWith(["w1:p1"]);
+    expect(root.querySelector("[role=dialog]")).toBeNull();
+  });
+
+  it("closes an empty space without a dialog", async () => {
+    const { actions, root, settle } = await setup();
+    bridge.invoke.mockResolvedValue(undefined);
+    await actions.requestClose("w2");
+    await settle();
+    expect(root.querySelector("[role=dialog]")).toBeNull();
+    expect(bridge.invoke).toHaveBeenCalledWith("space_close", { workspaceId: "w2", focus: "w1" });
+  });
+
+  it("keeps the space and shows herdr's error when the close fails", async () => {
+    const { actions, root, settle } = await setup();
+    bridge.invoke.mockRejectedValue("herdr: cannot close");
+    await actions.requestClose("w2");
+    await settle();
+    expect(root.querySelector("[role=alert]")?.textContent).toContain("herdr: cannot close");
   });
 });

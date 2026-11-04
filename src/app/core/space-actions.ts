@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from "@angular/core";
+import { agentKind, pathSegments, type Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import { TauriBridge } from "./tauri";
 
@@ -13,7 +14,36 @@ export interface SpaceOutcome {
 
 /** Last path segment: the default label of a space for `path`. */
 export function dirName(path: string): string {
-  return path.trim().replace(/\/+$/, "").split("/").pop() ?? "";
+  return pathSegments(path.trim()).pop() ?? "";
+}
+
+/** A space waiting for the user to confirm its close. */
+export interface SpaceClosing {
+  workspaceId: string;
+  label: string;
+  panes: number;
+  /** What the close ends: open panes and running agents. */
+  warning: string;
+}
+
+/** The space to focus after `workspaceId` closed: the next one, else the previous; `null` if none. */
+export function neighbourSpace(snapshot: Snapshot, workspaceId: string): string | null {
+  const ids = [...snapshot.workspaces]
+    .sort((a, b) => a.number - b.number)
+    .map((w) => w.workspace_id);
+  const i = ids.indexOf(workspaceId);
+  if (i < 0) return null;
+  return ids[i + 1] ?? ids[i - 1] ?? null;
+}
+
+/** What closing the space ends, for the confirmation. */
+export function closeSpaceWarning(snapshot: Snapshot, workspaceId: string): string {
+  const panes = snapshot.panes.filter((p) => p.workspace_id === workspaceId);
+  const agents = panes.filter((p) => agentKind(p)).length;
+  const noun = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  return agents > 0
+    ? `Closing the space ends ${noun(panes.length, "pane")}, ${noun(agents, "agent")} among them.`
+    : `Closing the space ends ${noun(panes.length, "pane")}.`;
 }
 
 /**
@@ -30,6 +60,12 @@ export class SpaceActions {
   private readonly _busy = signal(false);
   private readonly _dirs = signal<string[]>([]);
   private readonly _warning = signal<string | null>(null);
+  private readonly _closing = signal<SpaceClosing | null>(null);
+  private readonly _closeError = signal<string | null>(null);
+  /** The space waiting for a close confirmation; `null` when none. */
+  readonly closing = this._closing.asReadonly();
+  /** herdr's error of the last failed close; the space is untouched. */
+  readonly closeError = this._closeError.asReadonly();
   readonly open = this._open.asReadonly();
   /** Layout problem of the last created space (status bar); `null` when there was none. */
   readonly warning = this._warning.asReadonly();
@@ -90,5 +126,60 @@ export class SpaceActions {
     } finally {
       this._busy.set(false);
     }
+  }
+
+  /**
+   * Closes a space (`workspace.close`). A space with panes asks first (see {@link closing}) and
+   * resolves to `undefined`; an empty one closes right away. Resolves to the ids of the panes that
+   * were closed once herdr closed the space, else `undefined` (a failure sets {@link closeError}).
+   */
+  async requestClose(workspaceId: string): Promise<string[] | undefined> {
+    const snapshot = this.store.snapshot();
+    const space = snapshot.workspaces.find((w) => w.workspace_id === workspaceId);
+    if (!space) return undefined;
+    this._closeError.set(null);
+    const panes = snapshot.panes.filter((p) => p.workspace_id === workspaceId);
+    if (panes.length === 0) return this.close(workspaceId);
+    this._closing.set({
+      workspaceId,
+      label: space.label,
+      panes: panes.length,
+      warning: closeSpaceWarning(snapshot, workspaceId),
+    });
+    return undefined;
+  }
+
+  /** Closes the space of the open confirmation. */
+  async confirmClose(): Promise<string[] | undefined> {
+    const closing = this._closing();
+    if (!closing) return undefined;
+    this._closing.set(null);
+    return this.close(closing.workspaceId);
+  }
+
+  cancelClose(): void {
+    this._closing.set(null);
+  }
+
+  dismissCloseError(): void {
+    this._closeError.set(null);
+  }
+
+  private async close(workspaceId: string): Promise<string[] | undefined> {
+    const snapshot = this.store.snapshot();
+    const paneIds = snapshot.panes
+      .filter((p) => p.workspace_id === workspaceId)
+      .map((p) => p.pane_id);
+    try {
+      await this.bridge.invoke("space_close", {
+        workspaceId,
+        focus: neighbourSpace(snapshot, workspaceId),
+      });
+    } catch (err) {
+      this._closeError.set(String(err));
+      return undefined;
+    }
+    await this.store.refresh();
+    return paneIds;
   }
 }

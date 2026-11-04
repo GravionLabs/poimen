@@ -130,12 +130,33 @@ pub fn resolve_bin(
     path: &str,
     exists: impl Fn(&Path) -> bool,
 ) -> PathBuf {
+    let pathext = std::env::var("PATHEXT").ok();
+    resolve_bin_named(
+        override_path,
+        path,
+        &bin_names(cfg!(windows), pathext.as_deref()),
+        exists,
+    )
+}
+
+/// File names to try for `herdr` (`gui_path::executable_names`): on Windows the `PATHEXT` names
+/// (`herdr.exe`) before the bare `herdr`; elsewhere just `herdr`.
+pub fn bin_names(windows: bool, pathext: Option<&str>) -> Vec<String> {
+    crate::gui_path::executable_names("herdr", windows, pathext)
+}
+
+pub fn resolve_bin_named(
+    override_path: Option<String>,
+    path: &str,
+    names: &[String],
+    exists: impl Fn(&Path) -> bool,
+) -> PathBuf {
     if let Some(p) = override_path.filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
-    path.split(':')
-        .filter(|d| !d.is_empty())
-        .map(|d| Path::new(d).join("herdr"))
+    std::env::split_paths(path)
+        .filter(|d| !d.as_os_str().is_empty())
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
         .find(|c| exists(c))
         .unwrap_or_else(|| PathBuf::from("herdr"))
 }
@@ -362,32 +383,60 @@ mod tests {
         );
     }
 
+    /// A `PATH` of `parts` with the separator of this system.
+    fn join(parts: &[&str]) -> String {
+        std::env::join_paths(parts)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
     #[test]
     fn resolve_bin_prefers_override_then_path() {
         let nothing = |_: &Path| false;
+        let a_then_b = join(&["/a", "", "/b"]);
         assert_eq!(
-            resolve_bin(Some("/x/herdr".into()), "/a", nothing),
+            resolve_bin(Some("/x/herdr".into()), &join(&["/a"]), nothing),
             PathBuf::from("/x/herdr")
         );
+        let found = resolve_bin(None, &a_then_b, |p: &Path| {
+            p == Path::new("/b").join("herdr")
+        });
+        assert_eq!(found, Path::new("/b").join("herdr"));
+        let found = resolve_bin(Some(String::new()), &join(&["/a"]), |p: &Path| {
+            p == Path::new("/a").join("herdr")
+        });
+        assert_eq!(found, Path::new("/a").join("herdr"));
         assert_eq!(
-            resolve_bin(None, "/a::/b", |p: &Path| p == Path::new("/b/herdr")),
-            PathBuf::from("/b/herdr")
+            resolve_bin(None, &join(&["/a"]), nothing),
+            PathBuf::from("herdr")
         );
+    }
+
+    #[test]
+    fn bin_names_put_pathext_extensions_first_on_windows_only() {
+        assert_eq!(bin_names(false, Some(".EXE")), ["herdr"]);
         assert_eq!(
-            resolve_bin(Some(String::new()), "/a", |p: &Path| p
-                == Path::new("/a/herdr")),
-            PathBuf::from("/a/herdr")
+            bin_names(true, Some(".COM;.EXE;;exe")),
+            ["herdr.com", "herdr.exe", "herdr"]
         );
-        assert_eq!(resolve_bin(None, "/a", nothing), PathBuf::from("herdr"));
+        assert_eq!(bin_names(true, None)[..2], ["herdr.com", "herdr.exe"]);
+    }
+
+    #[test]
+    fn resolve_bin_finds_herdr_exe_with_the_windows_names() {
+        let path = join(&["/nope", "/win/bin"]);
+        let names = bin_names(true, None);
+        let found = resolve_bin_named(None, &path, &names, |p: &Path| {
+            p == Path::new("/win/bin").join("herdr.exe")
+        });
+        assert_eq!(found, Path::new("/win/bin").join("herdr.exe"));
     }
 
     #[test]
     fn resolve_bin_finds_cargo_bin_in_the_gui_path() {
-        let path = crate::gui_path::augmented_path(Some("/usr/bin"), "/h", "");
-        assert_eq!(
-            resolve_bin(None, &path, |p: &Path| p
-                == Path::new("/h/.cargo/bin/herdr")),
-            PathBuf::from("/h/.cargo/bin/herdr")
-        );
+        let path = crate::gui_path::augmented_path(Some(&join(&["/usr/bin"])), "/h", "");
+        let cargo = Path::new("/h").join(".cargo/bin").join("herdr");
+        assert_eq!(resolve_bin(None, &path, |p: &Path| p == cargo), cargo);
     }
 }

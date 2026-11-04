@@ -40,28 +40,67 @@ pub fn augmented_path(shell_path: Option<&str>, home: &str, current: &str) -> St
     let mut seen = HashSet::new();
     let mut parts = Vec::new();
     let extra = usual_dirs(home);
-    let sources = shell_path
-        .unwrap_or("")
-        .split(':')
-        .chain(extra.iter().map(String::as_str))
-        .chain(current.split(':'));
+    let sources = std::env::split_paths(shell_path.unwrap_or(""))
+        .chain(extra.iter().map(PathBuf::from))
+        .chain(std::env::split_paths(current));
     for part in sources {
-        if !part.is_empty() && seen.insert(part.to_owned()) {
-            parts.push(part.to_owned());
+        if !part.as_os_str().is_empty() && seen.insert(part.clone()) {
+            parts.push(part);
         }
     }
-    parts.join(":")
+    std::env::join_paths(&parts)
+        .map(|joined| joined.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| current.to_owned())
 }
 
-/// Resolves `program` against `path` (a name without slash) the way a shell would.
+/// File names to try for `program`: on Windows one per `PATHEXT` extension (default
+/// `.COM;.EXE;.BAT;.CMD`, lowercased: `herdr.exe`) first, then the bare name; elsewhere just the
+/// bare name. A name that already ends in a `PATHEXT` extension stays as it is.
+pub fn executable_names(program: &str, windows: bool, pathext: Option<&str>) -> Vec<String> {
+    if !windows {
+        return vec![program.to_owned()];
+    }
+    let exts: Vec<String> = pathext
+        .filter(|e| !e.is_empty())
+        .unwrap_or(".COM;.EXE;.BAT;.CMD")
+        .split(';')
+        .filter(|e| e.starts_with('.') && e.len() > 1)
+        .map(str::to_lowercase)
+        .collect();
+    let lower = program.to_lowercase();
+    if exts.iter().any(|e| lower.ends_with(e.as_str())) {
+        return vec![program.to_owned()];
+    }
+    let mut names: Vec<String> = exts.iter().map(|e| format!("{program}{e}")).collect();
+    names.push(program.to_owned());
+    names
+}
+
+/// Resolves `program` against `path` the way a shell would: a name with a separator (`/`, and `\`
+/// on Windows) is returned as is, a bare name is searched in each directory of `path`.
 pub fn resolve_program(program: &str, path: &str) -> Option<PathBuf> {
-    if program.contains('/') {
+    let pathext = std::env::var("PATHEXT").ok();
+    resolve_program_with(program, path, cfg!(windows), pathext.as_deref(), |p| {
+        p.is_file()
+    })
+}
+
+fn resolve_program_with(
+    program: &str,
+    path: &str,
+    windows: bool,
+    pathext: Option<&str>,
+    exists: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let separators: &[char] = if windows { &['/', '\\'] } else { &['/'] };
+    if program.contains(separators) {
         return Some(PathBuf::from(program));
     }
-    path.split(':')
-        .filter(|d| !d.is_empty())
-        .map(|d| Path::new(d).join(program))
-        .find(|candidate| candidate.is_file())
+    let names = executable_names(program, windows, pathext);
+    std::env::split_paths(path)
+        .filter(|d| !d.as_os_str().is_empty())
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
+        .find(|candidate| exists(candidate))
 }
 
 /// Runs `cmd` (stdout piped) for at most `limit` and extracts the text after `__POIMEN_PATH__`.
@@ -128,16 +167,43 @@ fn login_shell_path() -> Option<String> {
         .clone()
 }
 
+/// The `PATH` for a child. Windows has no login shell and a GUI app inherits the full `PATH`, so
+/// it is returned as is; elsewhere the login shell is probed (`shell_path`, called only then).
+pub fn child_path_for(
+    windows: bool,
+    shell_path: impl FnOnce() -> Option<String>,
+    home: &str,
+    current: &str,
+) -> String {
+    if windows {
+        return current.to_owned();
+    }
+    augmented_path(shell_path().as_deref(), home, current)
+}
+
 pub fn child_path() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let current = std::env::var("PATH").unwrap_or_default();
-    augmented_path(login_shell_path().as_deref(), &home, &current)
+    child_path_for(cfg!(windows), login_shell_path, &home, &current)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A `PATH` of `parts` with the separator of this system.
+    fn join(parts: &[&str]) -> String {
+        std::env::join_paths(parts)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn split(path: &str) -> Vec<PathBuf> {
+        std::env::split_paths(path).collect()
+    }
+
+    #[cfg(unix)]
     #[test]
     fn path_read_returns_even_when_a_child_keeps_the_pipe_open() {
         let mut cmd = Command::new("sh");
@@ -148,6 +214,7 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
+    #[cfg(unix)]
     #[test]
     fn path_read_gives_up_on_a_shell_that_outlives_the_limit() {
         let mut cmd = Command::new("sh");
@@ -159,30 +226,108 @@ mod tests {
 
     #[test]
     fn the_path_puts_the_shell_path_first_and_drops_duplicates() {
-        let path = augmented_path(Some("/a:/b::/a"), "/nonexistent-home", "/usr/bin:/b");
-        let parts: Vec<&str> = path.split(':').collect();
-        assert_eq!(&parts[..2], ["/a", "/b"]);
-        assert!(parts.contains(&"/opt/homebrew/bin"));
-        assert!(parts.contains(&"/usr/bin"));
-        assert_eq!(parts.iter().filter(|p| **p == "/b").count(), 1);
-        assert!(augmented_path(None, "/h", "").contains("/h/.local/bin"));
+        let path = augmented_path(
+            Some(&join(&["/a", "/b", "", "/a"])),
+            "/nonexistent-home",
+            &join(&["/usr/bin", "/b"]),
+        );
+        let parts = split(&path);
+        assert_eq!(parts[..2], [PathBuf::from("/a"), PathBuf::from("/b")]);
+        assert!(parts.contains(&PathBuf::from("/opt/homebrew/bin")));
+        assert!(parts.contains(&PathBuf::from("/usr/bin")));
+        assert_eq!(parts.iter().filter(|p| **p == Path::new("/b")).count(), 1);
+        let home = Path::new("/h");
+        assert!(split(&augmented_path(None, "/h", "")).contains(&home.join(".local/bin")));
     }
 
     #[test]
-    fn programs_resolve_against_the_given_path() {
+    fn windows_keeps_the_inherited_path_and_skips_the_login_shell() {
+        let current = r"C:\Windows\System32;C:\Users\me\.cargo\bin";
+        let path = child_path_for(true, || panic!("login shell probed"), "", current);
+        assert_eq!(path, current);
+    }
+
+    #[test]
+    fn other_systems_probe_the_login_shell() {
+        let path = child_path_for(
+            false,
+            || Some(join(&["/a"])),
+            "/nonexistent-home",
+            &join(&["/b"]),
+        );
+        let parts = split(&path);
+        assert_eq!(parts[0], PathBuf::from("/a"));
+        assert!(parts.contains(&PathBuf::from("/b")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_is_split_at_semicolons_not_drive_colons() {
+        let path = augmented_path(None, r"C:\h", r"C:\a;D:\b");
+        let parts = split(&path);
+        assert!(parts.contains(&PathBuf::from(r"C:\a")));
+        assert!(parts.contains(&PathBuf::from(r"D:\b")));
+    }
+
+    #[test]
+    fn executable_names_try_the_pathext_names_before_the_bare_one_on_windows() {
+        assert_eq!(executable_names("herdr", false, Some(".EXE")), ["herdr"]);
+        assert_eq!(
+            executable_names("herdr", true, Some(".COM;.EXE;;exe")),
+            ["herdr.com", "herdr.exe", "herdr"]
+        );
+        assert_eq!(
+            executable_names("herdr", true, None),
+            ["herdr.com", "herdr.exe", "herdr.bat", "herdr.cmd", "herdr"]
+        );
+        assert_eq!(executable_names("node.EXE", true, None), ["node.EXE"]);
+    }
+
+    #[test]
+    fn programs_resolve_against_the_given_path_with_the_given_names() {
+        let path = join(&["/nonexistent", "/win/bin"]);
+        let found = resolve_program_with("cmd", &path, true, None, |p| {
+            p == Path::new("/win/bin").join("cmd.exe")
+        });
+        assert_eq!(found, Some(Path::new("/win/bin").join("cmd.exe")));
+        assert_eq!(
+            resolve_program_with("cmd", &path, true, None, |_| false),
+            None
+        );
+        let unix = resolve_program_with("node", &path, false, None, |p| {
+            p == Path::new("/win/bin").join("node")
+        });
+        assert_eq!(unix, Some(Path::new("/win/bin").join("node")));
+    }
+
+    #[test]
+    fn a_program_with_a_separator_is_returned_as_is() {
+        assert_eq!(
+            resolve_program_with("/abs/node", "", false, None, |_| false),
+            Some(PathBuf::from("/abs/node"))
+        );
+        assert_eq!(
+            resolve_program_with(r"C:\bin\node", "", true, None, |_| false),
+            Some(PathBuf::from(r"C:\bin\node"))
+        );
+        // A backslash is an ordinary file name character outside Windows.
+        assert_eq!(
+            resolve_program_with(r"a\b", &join(&["/d"]), false, None, |_| false),
+            None
+        );
+    }
+
+    #[test]
+    fn programs_resolve_against_the_real_file_system() {
         let dir = std::env::temp_dir().join(format!("poimen-pv-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("fake-node"), "").unwrap();
-        let path = format!("/nonexistent:{}", dir.display());
+        let path = join(&["/nonexistent", &dir.to_string_lossy()]);
         assert_eq!(
             resolve_program("fake-node", &path),
             Some(dir.join("fake-node"))
         );
         assert_eq!(resolve_program("missing-node", &path), None);
-        assert_eq!(
-            resolve_program("/abs/node", ""),
-            Some(PathBuf::from("/abs/node"))
-        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

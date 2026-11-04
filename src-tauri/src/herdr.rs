@@ -1,12 +1,12 @@
-//! Minimal client for the herdr socket API (newline-delimited JSON over a Unix socket).
+//! Minimal client for the herdr socket API (newline-delimited JSON over a Unix socket; on Windows
+//! herdr serves the same protocol on the named pipe `\\.\pipe\<socket path>`).
 //!
 //! Requests open a short-lived connection; subscriptions keep theirs open.
 //! See <https://herdr.dev> (docs/socket-api) for the protocol.
 
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
@@ -37,12 +37,26 @@ impl From<io::Error> for Error {
     }
 }
 
+/// herdr's directory (socket, `config.toml`): `%APPDATA%\herdr` on Windows, `<home>/.config/herdr`
+/// elsewhere. The one place that knows it; the socket path and the settings both derive from it.
+pub fn herdr_dir(windows: bool, home: &str, appdata: &str) -> PathBuf {
+    if windows {
+        PathBuf::from(appdata).join("herdr")
+    } else {
+        PathBuf::from(home).join(".config").join("herdr")
+    }
+}
+
 /// Resolves the socket path like the herdr CLI does (minus the explicit `--session` flag).
 pub fn socket_path_from(env: impl Fn(&str) -> Option<String>) -> PathBuf {
     if let Some(path) = env("HERDR_SOCKET_PATH").filter(|p| !p.is_empty()) {
         return PathBuf::from(path);
     }
-    let base = PathBuf::from(env("HOME").unwrap_or_default()).join(".config/herdr");
+    let base = herdr_dir(
+        cfg!(windows),
+        &env("HOME").unwrap_or_default(),
+        &env("APPDATA").unwrap_or_default(),
+    );
     match env("HERDR_SESSION").filter(|s| !s.is_empty() && s != "default") {
         Some(session) => base.join("sessions").join(session).join("herdr.sock"),
         None => base.join("herdr.sock"),
@@ -196,6 +210,11 @@ pub fn close_params(pane_id: &str) -> Value {
     json!({ "pane_id": pane_id })
 }
 
+/// Params of `workspace.close`: closes a space and every pane in it.
+pub fn workspace_close_params(workspace_id: &str) -> Value {
+    json!({ "workspace_id": workspace_id })
+}
+
 /// Params of `agent.start`: starts `kind` in an existing pane that sits at a shell prompt. The name
 /// is required by herdr, so an empty one falls back to the kind; `args` are split on whitespace.
 pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &str) -> Value {
@@ -212,6 +231,58 @@ pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &
 /// Params of `agent.rename`; a blank name clears the agent name (`null`).
 pub fn agent_rename_params(target: &str, name: Option<&str>) -> Value {
     json!({ "target": target, "name": non_empty(name) })
+}
+
+/// How long `agent.prompt` waits for the agent to react (herdr itself gives up after 5 s with
+/// `agent_prompt_stalled`; this caps the whole call).
+pub const PROMPT_WAIT_MS: u64 = 10_000;
+
+/// Params of `agent.prompt` (herdr protocol 22 schema, `AgentPromptParams`): submits `text` to the
+/// agent `target` and waits for it to start working or to block, so a stalled agent is reported.
+pub fn agent_prompt_params(target: &str, text: &str) -> Value {
+    json!({
+        "target": target,
+        "text": text,
+        "wait": { "until": ["working", "blocked"], "timeout_ms": PROMPT_WAIT_MS },
+    })
+}
+
+/// What happened to a prompt sent with `agent.prompt`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PromptOutcome {
+    /// Submitted; the agent then reported `status` (`working` or `blocked`).
+    Started { status: String },
+    /// Submitted, but the agent showed no activity (`agent_prompt_stalled`).
+    Stalled,
+    /// The wait ran out before the agent reacted (`timeout`).
+    Timeout,
+    /// The agent waits at an approval or question dialog; nothing was sent (`agent_blocked`).
+    Blocked,
+    /// Any other failure, with a message for the user.
+    Failed { message: String },
+}
+
+/// Reads the answer of `agent.prompt`: `{"type":"wait_matched","event":{"data":{"status"...}}}` (or
+/// `agent_prompted` without a wait) or an API error with a code herdr documents for the call.
+pub fn prompt_outcome(result: Result<Value, Error>) -> PromptOutcome {
+    match result {
+        Ok(value) => {
+            let status = value
+                .pointer("/event/data/agent_status")
+                .and_then(Value::as_str)
+                .unwrap_or("working");
+            PromptOutcome::Started {
+                status: status.to_owned(),
+            }
+        }
+        Err(Error::Api { code, .. }) if code == "agent_prompt_stalled" => PromptOutcome::Stalled,
+        Err(Error::Api { code, .. }) if code == "timeout" => PromptOutcome::Timeout,
+        Err(Error::Api { code, .. }) if code == "agent_blocked" => PromptOutcome::Blocked,
+        Err(err) => PromptOutcome::Failed {
+            message: err.to_string(),
+        },
+    }
 }
 
 /// Params of `pane.rename`; a blank label clears the pane label (`null`).
@@ -242,14 +313,33 @@ pub const DATA_ACTION_ID: &str = "data";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PluginAction {
     pub plugin_id: String,
+    /// Name from `plugin.list`; the id when the plugin is not listed.
+    pub plugin_name: String,
     pub action_id: String,
     pub title: String,
     pub description: Option<String>,
 }
 
+/// Plugin names by id from a `plugin.list` result.
+pub fn parse_plugin_names(result: &Value) -> std::collections::HashMap<String, String> {
+    let plugins = result.get("plugins").and_then(Value::as_array);
+    plugins
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            let id = p.get("plugin_id")?.as_str()?;
+            let name = p.get("name").and_then(Value::as_str).unwrap_or(id);
+            Some((id.to_owned(), name.to_owned()))
+        })
+        .collect()
+}
+
 /// Reads `{"type":"plugin_action_list","actions":[...]}`; entries without ids or title are skipped,
 /// and so is the `data` action of the native-view contract ([`DATA_ACTION_ID`]).
-pub fn parse_plugin_actions(result: &Value) -> Vec<PluginAction> {
+pub fn parse_plugin_actions(
+    result: &Value,
+    names: &std::collections::HashMap<String, String>,
+) -> Vec<PluginAction> {
     let Some(actions) = result.get("actions").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -261,8 +351,13 @@ pub fn parse_plugin_actions(result: &Value) -> Vec<PluginAction> {
             if action_id == DATA_ACTION_ID {
                 return None;
             }
+            let plugin_id = text("plugin_id")?;
             Some(PluginAction {
-                plugin_id: text("plugin_id")?,
+                plugin_name: names
+                    .get(&plugin_id)
+                    .cloned()
+                    .unwrap_or_else(|| plugin_id.clone()),
+                plugin_id,
                 action_id,
                 title: text("title")?,
                 description: text("description"),
@@ -354,16 +449,27 @@ pub fn parse_plugin_pane_defs(result: &Value) -> Vec<PluginPaneDef> {
     defs
 }
 
-/// The Claude Code session of a pane (`agent` and `agent_session.value` of `pane.list`) and the
+/// An agent whose session transcript poimen can read (`agent` of `pane.list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptAgent {
+    /// Claude Code: `~/.claude/projects/<cwd>/<session>.jsonl`.
+    Claude,
+    /// GitHub Copilot CLI: `~/.copilot/session-state/<session>/events.jsonl`.
+    Copilot,
+}
+
+/// The agent session of a pane (`agent` and `agent_session.value` of `pane.list`) and the
 /// directory the session was started in; the transcript files are found from these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentSession {
+    pub agent: TranscriptAgent,
     pub session: String,
+    /// Empty when herdr reports none; only Claude Code needs it.
     pub cwd: String,
 }
 
-/// A session id is used as a file name below `~/.claude/projects`; only `[A-Za-z0-9_-]+` is
-/// accepted, so a value reported by a pane cannot escape that directory.
+/// A session id is used as a file or directory name below the agent's transcript root; only
+/// `[A-Za-z0-9_-]+` is accepted, so a value reported by a pane cannot escape that directory.
 pub fn is_safe_session_id(session: &str) -> bool {
     !session.is_empty()
         && session
@@ -371,20 +477,25 @@ pub fn is_safe_session_id(session: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-/// Reads the Claude session of `pane_id` out of a `pane.list` result; `None` for another pane, a
-/// non-Claude agent, or a pane without a session id.
-pub fn parse_claude_session(result: &Value, pane_id: &str) -> Option<AgentSession> {
+/// Reads the agent session of `pane_id` out of a `pane.list` result; `None` for another pane, an
+/// agent without a readable transcript (`codex`, ...), or a pane without a session id. Claude
+/// Code also needs the pane's `cwd` (its transcripts are grouped by directory).
+pub fn parse_agent_session(result: &Value, pane_id: &str) -> Option<AgentSession> {
     let pane = result
         .get("panes")?
         .as_array()?
         .iter()
         .find(|p| p.get("pane_id").and_then(Value::as_str) == Some(pane_id))?;
-    if pane.get("agent")?.as_str()? != "claude" {
-        return None;
-    }
+    let agent = match pane.get("agent")?.as_str()? {
+        "claude" => TranscriptAgent::Claude,
+        "copilot" => TranscriptAgent::Copilot,
+        _ => return None,
+    };
     let session = pane.get("agent_session")?.get("value")?.as_str()?;
-    let cwd = pane.get("cwd")?.as_str()?;
-    (is_safe_session_id(session) && !cwd.is_empty()).then(|| AgentSession {
+    let cwd = pane.get("cwd").and_then(Value::as_str).unwrap_or_default();
+    let needs_cwd = agent == TranscriptAgent::Claude;
+    (is_safe_session_id(session) && !(needs_cwd && cwd.is_empty())).then(|| AgentSession {
+        agent,
         session: session.to_owned(),
         cwd: cwd.to_owned(),
     })
@@ -429,6 +540,75 @@ pub fn plugin_pane_open_params(
     params
 }
 
+/// The connection to the API socket: a Unix socket, on Windows the named pipe herdr listens on.
+#[cfg(unix)]
+type Stream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type Stream = std::fs::File;
+
+/// The named pipe herdr on Windows serves for the socket path `socket`.
+#[cfg(any(windows, test))]
+pub fn pipe_name(socket: &Path) -> String {
+    format!(r"\\.\pipe\{}", socket.display())
+}
+
+#[cfg(unix)]
+fn open_stream(socket: &Path) -> io::Result<Stream> {
+    Stream::connect(socket)
+}
+
+/// Opens the pipe, retrying briefly while every pipe instance is busy (`ERROR_PIPE_BUSY`).
+#[cfg(windows)]
+fn open_stream(socket: &Path) -> io::Result<Stream> {
+    const ERROR_PIPE_BUSY: i32 = 231;
+    let pipe = pipe_name(socket);
+    let mut attempts = 0;
+    loop {
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&pipe)
+        {
+            Err(err) if err.raw_os_error() == Some(ERROR_PIPE_BUSY) && attempts < 20 => {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            result => return result,
+        }
+    }
+}
+
+/// Sends one `ping` on `stream` and reads the answer.
+fn ping_on(mut stream: Stream) -> Result<Value, Error> {
+    stream.write_all(request_line(&next_id(), "ping", &json!({})).as_bytes())?;
+    let mut line = String::new();
+    match BufReader::new(stream).read_line(&mut line)? {
+        0 => Err(Error::Protocol("connection closed before response".into())),
+        _ => parse_response(&line),
+    }
+}
+
+#[cfg(unix)]
+fn ping_within(socket: &Path, timeout: std::time::Duration) -> Result<Value, Error> {
+    let stream = open_stream(socket)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    ping_on(stream)
+}
+
+/// A pipe handle has no read timeout, so the ping runs on a helper thread and the caller stops
+/// waiting after `timeout` (the thread ends once the server answers or closes the pipe).
+#[cfg(windows)]
+fn ping_within(socket: &Path, timeout: std::time::Duration) -> Result<Value, Error> {
+    let stream = open_stream(socket)?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(ping_on(stream));
+    });
+    rx.recv_timeout(timeout)
+        .unwrap_or_else(|_| Err(Error::Io(io::ErrorKind::TimedOut.into())))
+}
+
 /// Read/write timeout of one `Client::probe`.
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
 
@@ -461,8 +641,8 @@ impl Client {
         }
     }
 
-    fn connect(&self, method: &str, params: &Value) -> Result<BufReader<UnixStream>, Error> {
-        let mut stream = UnixStream::connect(&self.socket)?;
+    fn connect(&self, method: &str, params: &Value) -> Result<BufReader<Stream>, Error> {
+        let mut stream = open_stream(&self.socket)?;
         stream.write_all(request_line(&next_id(), method, params).as_bytes())?;
         Ok(BufReader::new(stream))
     }
@@ -485,23 +665,7 @@ impl Client {
     /// writes time out after `PROBE_TIMEOUT`, so a socket that accepts but never answers cannot
     /// hold the caller.
     pub fn probe(&self) -> Probe {
-        let result = UnixStream::connect(&self.socket).and_then(|mut stream| {
-            stream.set_read_timeout(Some(PROBE_TIMEOUT))?;
-            stream.set_write_timeout(Some(PROBE_TIMEOUT))?;
-            stream.write_all(request_line(&next_id(), "ping", &json!({})).as_bytes())?;
-            Ok(stream)
-        });
-        let stream = match result {
-            Ok(stream) => stream,
-            Err(err) => return classify_probe_error(&Error::Io(err)),
-        };
-        let mut line = String::new();
-        let answer = match BufReader::new(stream).read_line(&mut line) {
-            Ok(0) => Err(Error::Protocol("connection closed before response".into())),
-            Ok(_) => parse_response(&line),
-            Err(err) => Err(Error::Io(err)),
-        };
-        match answer {
+        match ping_within(&self.socket, PROBE_TIMEOUT) {
             Ok(result) => Probe::Up(parse_ping(&result)),
             Err(err) => classify_probe_error(&err),
         }
@@ -524,7 +688,7 @@ impl Client {
 }
 
 pub struct Subscription {
-    reader: BufReader<UnixStream>,
+    reader: BufReader<Stream>,
 }
 
 impl Subscription {
@@ -547,43 +711,61 @@ impl Subscription {
 mod tests {
 
     #[test]
-    fn claude_session_is_read_from_the_pane_list() {
+    fn agent_session_is_read_from_the_pane_list() {
         let result = json!({"panes": [
             {"pane_id": "w1:p1", "agent": "claude", "cwd": "/home/u/proj",
              "agent_session": {"agent": "claude", "kind": "id", "value": "abc-123"}},
             {"pane_id": "w1:p2", "agent": "codex", "cwd": "/x",
              "agent_session": {"value": "zzz"}},
             {"pane_id": "w1:p3", "cwd": "/x"},
-            {"pane_id": "w1:p4", "agent": "claude", "cwd": "/x"}
+            {"pane_id": "w1:p4", "agent": "claude", "cwd": "/x"},
+            {"pane_id": "w1:p5", "agent": "copilot", "cwd": "/home/u/proj",
+             "agent_session": {"source": "herdr:copilot", "kind": "id", "value": "0b7e-c0"}},
+            {"pane_id": "w1:p6", "agent": "copilot",
+             "agent_session": {"source": "herdr:copilot", "kind": "id", "value": "0b7e-c1"}},
+            {"pane_id": "w1:p7", "agent": "claude",
+             "agent_session": {"value": "abc-124"}}
         ]});
         assert_eq!(
-            parse_claude_session(&result, "w1:p1"),
+            parse_agent_session(&result, "w1:p1"),
             Some(AgentSession {
+                agent: TranscriptAgent::Claude,
                 session: "abc-123".into(),
                 cwd: "/home/u/proj".into()
             })
         );
-        assert_eq!(parse_claude_session(&result, "w1:p2"), None);
-        assert_eq!(parse_claude_session(&result, "w1:p3"), None);
-        assert_eq!(parse_claude_session(&result, "w1:p4"), None);
-        assert_eq!(parse_claude_session(&result, "w9:p9"), None);
-        assert_eq!(parse_claude_session(&json!({}), "w1:p1"), None);
+        assert_eq!(
+            parse_agent_session(&result, "w1:p5"),
+            Some(AgentSession {
+                agent: TranscriptAgent::Copilot,
+                session: "0b7e-c0".into(),
+                cwd: "/home/u/proj".into()
+            })
+        );
+        // Copilot sessions are found by id alone; Claude needs the directory.
+        assert_eq!(
+            parse_agent_session(&result, "w1:p6").map(|s| (s.agent, s.cwd)),
+            Some((TranscriptAgent::Copilot, String::new()))
+        );
+        assert_eq!(parse_agent_session(&result, "w1:p7"), None);
+        assert_eq!(parse_agent_session(&result, "w1:p2"), None);
+        assert_eq!(parse_agent_session(&result, "w1:p3"), None);
+        assert_eq!(parse_agent_session(&result, "w1:p4"), None);
+        assert_eq!(parse_agent_session(&result, "w9:p9"), None);
+        assert_eq!(parse_agent_session(&json!({}), "w1:p1"), None);
     }
 
     #[test]
-    fn claude_session_ids_must_be_plain_file_names() {
+    fn agent_session_ids_must_be_plain_file_names() {
         let with = |v: &str| {
             json!({"panes": [{"pane_id": "p", "agent": "claude", "cwd": "/x",
                 "agent_session": {"value": v}}]})
         };
         for bad in ["../x", "/abs", "", "a/b", "..", "a.b"] {
-            assert_eq!(parse_claude_session(&with(bad), "p"), None, "{bad}");
+            assert_eq!(parse_agent_session(&with(bad), "p"), None, "{bad}");
         }
         let uuid = "0b7e1c52-3f4a-4d2e-9a61-5c8d7e2f1a90";
-        assert_eq!(
-            parse_claude_session(&with(uuid), "p").unwrap().session,
-            uuid
-        );
+        assert_eq!(parse_agent_session(&with(uuid), "p").unwrap().session, uuid);
     }
 
     #[test]
@@ -593,12 +775,13 @@ mod tests {
             {"plugin_id": "x", "action_id": "y", "title": "Y", "description": "why"},
             {"plugin_id": "broken"}
         ]});
-        let actions = parse_plugin_actions(&result);
+        let actions = parse_plugin_actions(&result, &Default::default());
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0].plugin_id, "link-trim");
+        assert_eq!(actions[0].plugin_name, "link-trim");
         assert_eq!(actions[0].description, None);
         assert_eq!(actions[1].description.as_deref(), Some("why"));
-        assert!(parse_plugin_actions(&json!({})).is_empty());
+        assert!(parse_plugin_actions(&json!({}), &Default::default()).is_empty());
     }
 
     #[test]
@@ -661,12 +844,31 @@ mod tests {
     }
 
     #[test]
+    fn plugin_actions_carry_the_plugin_name_from_plugin_list() {
+        let list = json!({"type": "plugin_list", "plugins": [
+            {"plugin_id": "deliver-board", "name": "Deliver Board"},
+            {"plugin_id": "bare"}
+        ]});
+        let names = parse_plugin_names(&list);
+        let result = json!({"type": "plugin_action_list", "actions": [
+            {"plugin_id": "deliver-board", "action_id": "open", "title": "Open"},
+            {"plugin_id": "bare", "action_id": "x", "title": "X"},
+            {"plugin_id": "unlisted", "action_id": "y", "title": "Y"}
+        ]});
+        let got: Vec<_> = parse_plugin_actions(&result, &names)
+            .into_iter()
+            .map(|a| a.plugin_name)
+            .collect();
+        assert_eq!(got, ["Deliver Board", "bare", "unlisted"]);
+    }
+
+    #[test]
     fn the_data_action_is_hidden_from_the_runnable_actions() {
         let result = json!({"type": "plugin_action_list", "actions": [
             {"plugin_id": "deliver-board", "action_id": "open", "title": "Open the deliver board"},
             {"plugin_id": "deliver-board", "action_id": "data", "title": "Deliver board data (JSON)"}
         ]});
-        let actions = parse_plugin_actions(&result);
+        let actions = parse_plugin_actions(&result, &Default::default());
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_id, "open");
     }
@@ -756,6 +958,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn probing_a_socket_that_never_answers_times_out_as_unresponsive() {
         let dir = probe_dir("silent");
@@ -767,6 +970,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn probing_a_socket_that_answers_is_up() {
         let dir = probe_dir("up");
@@ -796,12 +1000,45 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn socket_path_defaults_to_appdata_on_windows() {
+        let path = socket_path_from(env(&[("APPDATA", r"C:\Users\u\AppData\Roaming")]));
+        assert_eq!(
+            path,
+            PathBuf::from(r"C:\Users\u\AppData\Roaming\herdr\herdr.sock")
+        );
+    }
+
+    #[test]
+    fn herdr_dir_is_appdata_on_windows_and_dot_config_elsewhere() {
+        assert_eq!(
+            herdr_dir(true, "/ignored", "A"),
+            PathBuf::from("A").join("herdr")
+        );
+        assert_eq!(
+            herdr_dir(false, "/home/u", "ignored"),
+            PathBuf::from("/home/u").join(".config").join("herdr")
+        );
+    }
+
+    #[test]
+    fn pipe_name_prefixes_the_socket_path() {
+        let name = pipe_name(Path::new(r"C:\Users\u\AppData\Roaming\herdr\herdr.sock"));
+        assert_eq!(
+            name,
+            r"\\.\pipe\C:\Users\u\AppData\Roaming\herdr\herdr.sock"
+        );
+    }
+
+    #[cfg(unix)]
     #[test]
     fn socket_path_defaults_to_config_dir() {
         let path = socket_path_from(env(&[("HOME", "/home/u")]));
         assert_eq!(path, PathBuf::from("/home/u/.config/herdr/herdr.sock"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn socket_path_uses_named_session() {
         let path = socket_path_from(env(&[("HOME", "/home/u"), ("HERDR_SESSION", "work")]));
@@ -908,6 +1145,68 @@ mod tests {
     }
 
     #[test]
+    fn agent_prompt_params_wait_for_activity() {
+        assert_eq!(
+            agent_prompt_params("w1:p2", "fix the test"),
+            json!({
+                "target": "w1:p2",
+                "text": "fix the test",
+                "wait": { "until": ["working", "blocked"], "timeout_ms": 10000 },
+            })
+        );
+    }
+
+    fn api(code: &str) -> Error {
+        Error::Api {
+            code: code.into(),
+            message: "m".into(),
+        }
+    }
+
+    #[test]
+    fn prompt_outcome_reads_the_matched_status() {
+        let result = json!({"type":"wait_matched","event":{"event":"pane_agent_status_changed",
+            "data":{"type":"pane_agent_status_changed","pane_id":"w1:p2","agent_status":"blocked"}}});
+        assert_eq!(
+            prompt_outcome(Ok(result)),
+            PromptOutcome::Started {
+                status: "blocked".into()
+            }
+        );
+        assert_eq!(
+            prompt_outcome(Ok(json!({"type":"agent_prompted","agent":{}}))),
+            PromptOutcome::Started {
+                status: "working".into()
+            }
+        );
+    }
+
+    #[test]
+    fn prompt_outcome_maps_documented_error_codes() {
+        assert_eq!(
+            prompt_outcome(Err(api("agent_prompt_stalled"))),
+            PromptOutcome::Stalled
+        );
+        assert_eq!(prompt_outcome(Err(api("timeout"))), PromptOutcome::Timeout);
+        assert_eq!(
+            prompt_outcome(Err(api("agent_blocked"))),
+            PromptOutcome::Blocked
+        );
+        assert_eq!(
+            prompt_outcome(Err(api("agent_not_found"))),
+            PromptOutcome::Failed {
+                message: "herdr agent_not_found: m".into()
+            }
+        );
+    }
+
+    #[test]
+    fn prompt_outcome_serializes_with_a_kind_tag() {
+        let json = serde_json::to_value(PromptOutcome::Stalled).unwrap();
+        assert_eq!(json, json!({"kind":"stalled"}));
+    }
+
+    #[test]
     fn agent_start_params_carry_pane_kind_name_and_args() {
         assert_eq!(
             agent_start_params("w1:p1", "claude", Some(" helper "), " --model  opus "),
@@ -966,6 +1265,14 @@ mod tests {
     #[test]
     fn close_params_name_the_pane() {
         assert_eq!(close_params("w1:p2"), json!({ "pane_id": "w1:p2" }));
+    }
+
+    #[test]
+    fn workspace_close_params_name_the_workspace() {
+        assert_eq!(
+            workspace_close_params("w1"),
+            json!({ "workspace_id": "w1" })
+        );
     }
 
     #[test]

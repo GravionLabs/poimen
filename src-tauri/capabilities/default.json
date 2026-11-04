@@ -6,6 +6,11 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "notification:default",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-badge-count"
   ]
 }

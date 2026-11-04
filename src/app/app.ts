@@ -12,9 +12,22 @@ import {
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
-import { rowName, tabHeader, type Mode, type Pane, type PluginAction } from "./core/herdr";
+import {
+  flowSession,
+  rowName,
+  supportsFlow,
+  tabHeader,
+  type Mode,
+  type Pane,
+  type PluginAction,
+} from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
+import { Attention } from "./core/attention";
+import { DockBadge } from "./core/dock-badge";
+import { Notifier } from "./core/notifier";
+import { NotificationCenter } from "./core/notification-center";
+import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { UserSchemes } from "./core/user-schemes";
@@ -49,6 +62,8 @@ import { CommandPalette } from "./core/command-palette";
 import { PluginActions, pluginMenuId } from "./core/plugin-actions";
 import { PluginPanes, type PluginPaneDef } from "./core/plugin-panes";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
+import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
+import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
 import { StatusBar } from "./status-bar/status-bar";
@@ -69,6 +84,7 @@ const ZOOM_STEP = 1;
     ActivityBar,
     Sidebar,
     Explorer,
+    Notifications,
     TerminalView,
     SettingsView,
     DeliverBoardView,
@@ -82,6 +98,7 @@ const ZOOM_STEP = 1;
     PaneDialog,
     SpaceDialog,
     PaletteView,
+    ShortcutsDialog,
   ],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
@@ -99,6 +116,7 @@ export class App {
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
+  protected readonly shortcutsOverview = inject(ShortcutsOverview);
   protected readonly plugins = inject(PluginActions);
   private readonly pluginPanes = inject(PluginPanes);
   private readonly subagents = inject(Subagents);
@@ -115,12 +133,18 @@ export class App {
   private drag: { startX: number; startWidth: number } | null = null;
 
   protected readonly editor = inject(EditorTabs);
+  private readonly attention = inject(Attention);
+  private readonly notifier = inject(Notifier);
+  private readonly center = inject(NotificationCenter);
+  private readonly dockBadge = inject(DockBadge);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Pane>();
   protected readonly groupItems = computed(() => {
     const snap = this.store.snapshot();
     this.store.panes();
     const names = this.pluginPanes.names();
+    const ringing = this.attention.attention();
+    const unread = this.attention.unread();
     return new Map(
       this.editor.groups().map((group) => [
         group.id,
@@ -158,6 +182,8 @@ export class App {
             label: header.label,
             group: header.group,
             preview: !tab.pinned,
+            attention: ringing.has(tab.paneId),
+            unread: unread.has(tab.paneId),
             title: `${header.title}${tab.pinned ? "" : " (preview)"}`,
           };
         }),
@@ -171,16 +197,45 @@ export class App {
     return id ? this.sizes().get(id) : undefined;
   });
 
+  /** Panes whose tab is on screen: the active tab of each editor group. */
+  private readonly viewedPanes = computed(
+    () => new Set(this.editor.groups().flatMap((g) => (g.activeId ? [g.activeId] : []))),
+  );
+
   constructor() {
     const title = inject(Title);
+    // Marks follow herdr's statuses; the active tab of each group counts as viewed.
+    effect(() => {
+      const panes = this.store.panes();
+      const viewed = this.viewedPanes();
+      const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
+      untracked(() => {
+        const changes = this.attention.observe(statuses, viewed);
+        this.center.record(changes, (id) => this.tabTitle(id), Date.now());
+        const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
+        this.notifier.notify(changes, {
+          // Read live: a delayed done notification checks again when it is due.
+          seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
+          status: (id) => this.store.panes().get(id)?.agent_status,
+          onBlocked: notifyOnBlocked,
+          onDone: notifyOnDone,
+          label: (id) => this.tabTitle(id),
+          now: Date.now(),
+        });
+      });
+    });
     effect(() => {
       const waiting = this.store.waiting();
       title.setTitle(waiting > 0 ? `poimen (${waiting} waiting)` : "poimen");
+      untracked(() => this.dockBadge.set(waiting));
     });
 
     const destroyRef = inject(DestroyRef);
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
+    // A click on a system notification opens the tab of the pane it was about.
+    const clicks = this.notifier.listen((paneId) => this.openPaneById(paneId));
+    destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
     effect(() => {
       const { theme: setting, colorSchema } = this.prefs.settings();
       const systemDark = this.systemDark();
@@ -189,7 +244,7 @@ export class App {
       this.theme.setDark(setting === "system" ? systemDark : setting === "dark");
     });
     destroyRef.onDestroy(this.followSystemTheme());
-    // The output panel follows the active tab's Claude Code agent; nothing is watched while it is hidden.
+    // The output panel follows the active tab's agent (Claude Code, Copilot CLI); nothing is watched while it is hidden.
     effect(() => {
       const target = this.subagentTarget();
       untracked(() => void this.subagents.follow(target?.paneId ?? null, target?.session ?? null));
@@ -206,15 +261,15 @@ export class App {
   }
 
   /**
-   * The pane and Claude session the open output panel follows (the active tab's pane, or the pane
-   * of the active flow tab); `null` when hidden or not Claude.
+   * The pane and agent session the open output panel follows (the active tab's pane, or the pane
+   * of the active flow tab); `null` when hidden or its agent has no transcripts to follow.
    */
   private readonly subagentTarget = computed(
     () => {
       const active = this.editor.activeId();
       const id = active === null ? null : tabPaneId(active);
       const pane = id && this.ui.panelOpen() ? this.pane(id) : undefined;
-      const session = pane?.agent === "claude" ? pane.agent_session?.value : undefined;
+      const session = flowSession(pane);
       return pane && session ? { paneId: pane.pane_id, session } : null;
     },
     { equal: (a, b) => a?.paneId === b?.paneId && a?.session === b?.session },
@@ -246,6 +301,7 @@ export class App {
 
   /** Shortcut of the output panel toggle, for the status bar button. */
   protected readonly panelShortcut = computed(() => this.keymap.label("toggleOutput"));
+  protected readonly shortcutsShortcut = computed(() => this.keymap.label("showShortcuts"));
 
   protected readonly rootNode = computed<LayoutNode>(() => this.editor.layout());
 
@@ -277,6 +333,11 @@ export class App {
   protected run(id: string): void {
     if (id === "openSettings") {
       this.openSettings();
+      return;
+    }
+    if (id === "closeSpace") {
+      const paneId = this.activePaneId();
+      this.closeSpace(paneId ? this.pane(paneId)?.workspace_id : undefined);
       return;
     }
     const action = id as ShortcutAction;
@@ -315,6 +376,9 @@ export class App {
       case "commandPalette":
         this.palette.toggle();
         break;
+      case "showShortcuts":
+        this.shortcutsOverview.open();
+        break;
       case "nextWaiting":
         this.jumpToWaiting();
         break;
@@ -335,7 +399,19 @@ export class App {
     if (event.kind === "pane" && event.action.startsWith("plugin:")) {
       void this.runPlugin(this.plugins.find(event.action), event.id);
     } else if (event.action === "new-terminal") this.paneActions.askNew(event.id);
+    else if (event.action === "close-space") this.closeSpace(event.id);
     else this.paneAction(event.id, event.action);
+  }
+
+  /** Closes a space (asks first when it has panes); `undefined` is a no-op (no active space). */
+  protected closeSpace(workspaceId: string | undefined): void {
+    if (!workspaceId) return;
+    void this.spaceActions.requestClose(workspaceId).then((ids) => ids && this.onSpaceClosed(ids));
+  }
+
+  /** A space closed in herdr: the tabs of its panes go with it. */
+  protected onSpaceClosed(paneIds: string[]): void {
+    for (const id of paneIds) this.onPaneClosed(id);
   }
 
   private paneAction(paneId: string, action: string): void {
@@ -377,7 +453,7 @@ export class App {
       {
         action: "open-flow",
         label: "Open agent flow",
-        appliesTo: (id) => tabKind(id) === "pane" && this.pane(id)?.agent === "claude",
+        appliesTo: (id) => tabKind(id) === "pane" && supportsFlow(this.pane(id)),
       },
       {
         action: "plugin-pane-close",
@@ -496,6 +572,12 @@ export class App {
   }
 
   /** Single click previews, a double click pins; an open pane is only activated. */
+  /** Opens the tab of a pane by id; a pane herdr no longer has is ignored. */
+  protected openPaneById(paneId: string): void {
+    const pane = this.pane(paneId);
+    if (pane) this.open(pane);
+  }
+
   protected open(pane: Pane, pin = false): void {
     this.known.set(pane.pane_id, pane);
     this.editor.open(pane.pane_id, pin);
@@ -562,6 +644,16 @@ export class App {
   protected jumpToWaiting(): void {
     const next = this.store.nextWaiting(this.editor.activeId());
     if (next) this.open(next);
+  }
+
+  /** Workspace and name of a pane, as its tab shows them. */
+  private tabTitle(id: string): string {
+    const snap = this.store.snapshot();
+    const pane = this.pane(id);
+    if (!pane) return id;
+    const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
+    const workspace = snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label;
+    return tabHeader(workspace, rowName(pane, tabLabel)).title;
   }
 
   private pane(id: string): Pane | undefined {

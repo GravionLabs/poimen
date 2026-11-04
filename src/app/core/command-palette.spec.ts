@@ -82,15 +82,93 @@ describe("CommandPalette", () => {
     await palette.open();
     const rows = palette.items().filter((i) => i.kind === "pane");
     expect(rows.map((i) => i.title)).toEqual(["Open Deliver board as tab"]);
-    expect(rows[0]).toMatchObject({ hint: "deliver-board", def: { entrypoint: "board" } });
+    expect(rows[0]).toMatchObject({ origin: "deliver-board", def: { entrypoint: "board" } });
     palette.setQuery("deliver board");
     expect(palette.items()[0].kind).toBe("pane");
   });
 
-  it("shows the shortcut of a command as its hint", async () => {
+  it("offers Close Space for the active space", async () => {
+    await palette.open();
+    palette.setQuery("close space");
+    expect(palette.items()[0]).toMatchObject({ kind: "command", command: "closeSpace" });
+  });
+
+  it("shows the shortcut of a command and the plugin name of a plugin action", async () => {
     await palette.open();
     const toggle = palette.items().find((i) => i.key === "command:toggleSidebar");
-    expect(toggle?.hint).not.toBe("");
+    expect(toggle?.shortcut).not.toBe("");
+    expect(toggle?.origin).toBe("");
+    const plugin = palette.items().find((i) => i.key === "plugin:review-popup:open");
+    expect(plugin).toMatchObject({ origin: "review-popup", shortcut: "" });
+  });
+
+  it("shares one heading, labeled with the plugin name, between actions and panes", async () => {
+    tauri.answer("plugin_actions", () => [
+      { ...action("deliver-id", "refresh", "Refresh"), plugin_name: "Deliver Board" },
+    ]);
+    tauri.answer("plugin_pane_defs", () => [
+      {
+        plugin_id: "deliver-id",
+        plugin_name: "Deliver Board",
+        entrypoint: "board",
+        title: "Board",
+      },
+    ]);
+    await palette.open();
+    const headings = palette.rows().flatMap((r) => (r.type === "heading" ? [r.label] : []));
+    expect(headings).toEqual(["Poimen", "Deliver Board"]);
+  });
+
+  it("groups an empty query under Poimen and one heading per plugin", async () => {
+    await palette.open();
+    const headings = palette.rows().flatMap((r) => (r.type === "heading" ? [r.label] : []));
+    expect(headings).toEqual(["Poimen", "link-trim", "review-popup", "deliver-board"]);
+    expect(palette.rows()[0]).toMatchObject({ type: "heading", label: "Poimen" });
+    expect(palette.items()).toHaveLength(palette.rows().filter((r) => r.type === "item").length);
+  });
+
+  it("shows one ranked list with title match positions for a query", async () => {
+    await palette.open();
+    palette.setQuery("zoom");
+    expect(palette.rows().every((r) => r.type === "item")).toBe(true);
+    const first = palette.rows()[0];
+    expect(first.type === "item" && first.positions).toEqual([0, 1, 2, 3]);
+  });
+
+  it("lists the last run entries under Recent, newest first, without repeating them", async () => {
+    await palette.open();
+    for (const key of ["command:closeTab", "command:refresh", "plugin:review-popup:open"]) {
+      palette.recordRun(palette.items().find((i) => i.key === key)!);
+    }
+    palette.recordRun(palette.items().find((i) => i.key === "command:closeTab")!);
+    await palette.open();
+    const rows = palette.rows();
+    expect(rows[0]).toMatchObject({ type: "heading", label: "Recent" });
+    expect(rows.slice(1, 4).map((r) => r.key)).toEqual([
+      "command:closeTab",
+      "plugin:review-popup:open",
+      "command:refresh",
+    ]);
+    expect(rows.filter((r) => r.key === "command:closeTab")).toHaveLength(1);
+    expect(rows[4]).toMatchObject({ type: "heading", label: "Poimen" });
+  });
+
+  it("keeps only the last five run entries and ignores ones that no longer exist", async () => {
+    await palette.open();
+    const keys = ["newTerminal", "closeTab", "closeAll", "refresh", "toggleSidebar", "splitRight"];
+    for (const k of keys) palette.recordRun(palette.items().find((i) => i.key === `command:${k}`)!);
+    palette.recordRun({ ...palette.items()[0], key: "gone" });
+    await palette.open();
+    const recent = palette
+      .rows()
+      .slice(1, 5)
+      .map((r) => r.key);
+    expect(recent).toEqual([
+      "command:splitRight",
+      "command:toggleSidebar",
+      "command:refresh",
+      "command:closeAll",
+    ]);
   });
 
   it("filters fuzzily across commands and plugin actions", async () => {

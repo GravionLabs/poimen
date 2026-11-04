@@ -105,8 +105,8 @@ pub fn created_workspace_id(result: &Value) -> Option<String> {
 
 fn expand_home(input: &str, home: Option<&Path>) -> PathBuf {
     match (input.strip_prefix('~'), home) {
-        (Some(rest), Some(h)) if rest.is_empty() || rest.starts_with('/') => {
-            h.join(rest.trim_start_matches('/'))
+        (Some(rest), Some(h)) if rest.is_empty() || rest.starts_with(['/', '\\']) => {
+            h.join(rest.trim_start_matches(['/', '\\']))
         }
         _ => PathBuf::from(input),
     }
@@ -126,11 +126,17 @@ pub fn resolve_dir(input: &str, home: Option<&Path>) -> Result<String, String> {
         return Err(format!("{input} is not a directory."));
     }
     let s = path.to_string_lossy().into_owned();
-    Ok(if s.len() > 1 {
-        s.trim_end_matches('/').to_owned()
+    // Keep a root (`/`, `C:\`) as it is; any other path loses its trailing separators.
+    Ok(if path.file_name().is_some() {
+        s.trim_end_matches(is_separator).to_owned()
     } else {
         s
     })
+}
+
+/// A path separator: `/` everywhere, `\` too on Windows (an ordinary character elsewhere).
+fn is_separator(c: char) -> bool {
+    c == '/' || (cfg!(windows) && c == '\\')
 }
 
 /// Names of the subdirectories of `dir` (symlinks to directories included); empty when `dir` is
@@ -179,23 +185,24 @@ pub fn child_dirs(path: &str, home: Option<&Path>, hidden: bool) -> Vec<DirEntry
 /// Hidden ones only show when the typed rest starts with a dot. Sorted, at most `limit`.
 pub fn list_dirs(input: &str, home: Option<&Path>, limit: usize) -> Vec<String> {
     let expanded = expand_home(input, home).to_string_lossy().into_owned();
-    // `~/` keeps its trailing slash through the join only when typed; restore it.
-    let expanded = if input.ends_with('/') && !expanded.ends_with('/') {
+    // `~/` keeps its trailing separator through the join only when typed; restore it.
+    let expanded = if input.ends_with(is_separator) && !expanded.ends_with(is_separator) {
         format!("{expanded}/")
     } else {
         expanded
     };
-    if !expanded.starts_with('/') {
+    if !Path::new(&expanded).is_absolute() {
         return Vec::new();
     }
-    let Some(slash) = expanded.rfind('/') else {
+    let Some(slash) = expanded.rfind(is_separator) else {
         return Vec::new();
     };
-    let (parent, prefix) = (&expanded[..slash], &expanded[slash + 1..]);
-    let mut dirs: Vec<String> = subdir_names(if parent.is_empty() { "/" } else { parent })
+    // `parent` keeps its separator, so a root (`/`, `C:\`) works like any directory.
+    let (parent, prefix) = (&expanded[..=slash], &expanded[slash + 1..]);
+    let mut dirs: Vec<String> = subdir_names(parent)
         .into_iter()
         .filter(|n| n.starts_with(prefix) && (prefix.starts_with('.') || !n.starts_with('.')))
-        .map(|n| format!("{parent}/{n}"))
+        .map(|n| format!("{parent}{n}"))
         .collect();
     dirs.sort();
     dirs.truncate(limit);
@@ -345,7 +352,13 @@ mod tests {
         let names = |input: &str| -> Vec<String> {
             list_dirs(input, None, 10)
                 .iter()
-                .map(|p| p.rsplit('/').next().unwrap().to_owned())
+                .map(|p| {
+                    Path::new(p)
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
                 .collect()
         };
         assert_eq!(names(&format!("{base}/al")), ["alpha", "alps"]);
@@ -353,6 +366,18 @@ mod tests {
         assert_eq!(names(&format!("{base}/.")), [".hidden"]);
         assert_eq!(list_dirs(&format!("{base}/"), None, 2).len(), 2);
         assert!(list_dirs("relative", None, 10).is_empty());
+        // A root lists like any directory, and a trailing separator is not kept by `resolve_dir`.
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            resolve_dir(&format!("{base}{sep}"), None).as_deref(),
+            Ok(base.as_str())
+        );
+        let root_dir = Path::new(&base).ancestors().last().unwrap();
+        assert_eq!(
+            resolve_dir(&root_dir.to_string_lossy(), None),
+            Ok(root_dir.to_string_lossy().into_owned())
+        );
+        assert!(!list_dirs(&root_dir.to_string_lossy(), None, 5).is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

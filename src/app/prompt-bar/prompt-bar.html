@@ -1,0 +1,24 @@
+<form class="prompt" (submit)="$event.preventDefault(); send()">
+  <input
+    type="text"
+    name="prompt"
+    placeholder="Send a prompt to this agent"
+    aria-label="Prompt for this agent"
+    autocomplete="off"
+    [value]="text()"
+    [disabled]="sending()"
+    (input)="type($event)"
+  />
+  <button
+    hx-button
+    size="small"
+    variant="outlined"
+    type="submit"
+    [disabled]="sending() || !text().trim()"
+  >
+    Send
+  </button>
+  @if (result(); as r) {
+    <span class="result" role="status" [class.failed]="!r.ok">{{ r.message }}</span>
+  }
+</form>

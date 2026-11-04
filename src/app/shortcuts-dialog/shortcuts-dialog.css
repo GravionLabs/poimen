@@ -1,0 +1,67 @@
+dialog.shortcuts {
+  width: min(520px, 92vw);
+  max-height: 80vh;
+  padding: 0;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 8px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 30%);
+  font-size: 13px;
+}
+
+dialog.shortcuts::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+
+.body {
+  padding: 16px 20px;
+}
+
+h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+h3 {
+  margin: 14px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.hint {
+  margin: 0;
+  opacity: 0.8;
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 3px 0;
+}
+
+kbd {
+  font-family: inherit;
+  white-space: nowrap;
+  padding: 0 6px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+}
+
+.unbound {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.close {
+  display: block;
+  margin: 16px 0 0 auto;
+}

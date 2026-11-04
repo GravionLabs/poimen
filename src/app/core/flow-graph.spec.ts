@@ -55,6 +55,13 @@ describe("buildFlowGraph", () => {
     expect(g.nodes[0].status).toBe("done");
   });
 
+  it("names the main agent after the followed agent, Claude Code by default", () => {
+    const main = { calls: [], tools: 0 };
+    expect(buildFlowGraph([], noEntries, main).nodes[0].type).toBe("Claude Code");
+    const copilot = buildFlowGraph([], noEntries, main, "GitHub Copilot CLI");
+    expect(copilot.nodes[0].type).toBe("GitHub Copilot CLI");
+  });
+
   it("makes nodes of skill and agent calls only and counts the plain tools", () => {
     const g = buildFlowGraph(
       [agent("a")],

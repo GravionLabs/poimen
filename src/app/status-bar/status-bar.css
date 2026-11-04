@@ -96,3 +96,19 @@ button.item.mode-button:disabled {
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+
+button.item.help-button {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+button.item.help-button:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+button.item.help-button:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}

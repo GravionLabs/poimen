@@ -1,7 +1,8 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HerdrStore } from "./herdr-store";
-import { SpaceActions, dirName } from "./space-actions";
+import { SpaceActions, closeSpaceWarning, dirName, neighbourSpace } from "./space-actions";
+import type { Snapshot } from "./herdr";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -17,6 +18,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: pick }));
 describe("dirName", () => {
   it("is the last path segment", () => {
     expect(dirName("/work/app")).toBe("app");
+    expect(dirName("C:\\work\\app\\")).toBe("app");
     expect(dirName("/work/app/ ")).toBe("app");
     expect(dirName("")).toBe("");
   });
@@ -98,5 +100,105 @@ describe("SpaceActions", () => {
     expect(pick).toHaveBeenCalledWith({ directory: true, multiple: false });
     pick.mockResolvedValueOnce(null);
     expect(await actions.pick()).toBeNull();
+  });
+});
+
+const space = (id: string, number: number) => ({
+  workspace_id: id,
+  label: `Space ${number}`,
+  number,
+  agent_status: "idle" as const,
+});
+const pane = (id: string, workspace: string, agent?: string) => ({
+  pane_id: id,
+  tab_id: `${workspace}:t1`,
+  workspace_id: workspace,
+  agent_status: "idle" as const,
+  agent,
+});
+const snap = (): Snapshot => ({
+  workspaces: [space("w1", 1), space("w2", 2), space("w3", 3)],
+  tabs: [],
+  panes: [pane("w1:p1", "w1"), pane("w2:p1", "w2", "claude"), pane("w2:p2", "w2")],
+});
+
+describe("neighbourSpace", () => {
+  it("is the next space, else the previous, else null", () => {
+    expect(neighbourSpace(snap(), "w1")).toBe("w2");
+    expect(neighbourSpace(snap(), "w3")).toBe("w2");
+    expect(neighbourSpace({ workspaces: [space("w1", 1)], tabs: [], panes: [] }, "w1")).toBeNull();
+    expect(neighbourSpace(snap(), "nope")).toBeNull();
+  });
+});
+
+describe("closeSpaceWarning", () => {
+  it("counts panes and agents", () => {
+    expect(closeSpaceWarning(snap(), "w1")).toBe("Closing the space ends 1 pane.");
+    expect(closeSpaceWarning(snap(), "w2")).toBe(
+      "Closing the space ends 2 panes, 1 agent among them.",
+    );
+  });
+});
+
+describe("SpaceActions close", () => {
+  let actions: SpaceActions;
+
+  beforeEach(async () => {
+    tauri.reset();
+    tauri.answer("snapshot", snap);
+    const injector = Injector.create({ providers: [TauriBridge, HerdrStore, SpaceActions] });
+    await injector.get(HerdrStore).refresh();
+    tauri.answer("space_close", () => undefined);
+    actions = injector.get(SpaceActions);
+  });
+
+  it("asks before closing a space with panes and closes nothing yet", async () => {
+    expect(await actions.requestClose("w2")).toBeUndefined();
+    expect(actions.closing()).toMatchObject({ workspaceId: "w2", label: "Space 2", panes: 2 });
+    expect(tauri.calls("space_close")).toEqual([]);
+    actions.cancelClose();
+    expect(actions.closing()).toBeNull();
+    expect(tauri.calls("space_close")).toEqual([]);
+  });
+
+  it("closes the confirmed space, focuses the neighbour and re-reads the snapshot", async () => {
+    await actions.requestClose("w2");
+    const before = tauri.calls("snapshot").length;
+    expect(await actions.confirmClose()).toEqual(["w2:p1", "w2:p2"]);
+    expect(tauri.calls("space_close")).toEqual([{ workspaceId: "w2", focus: "w3" }]);
+    expect(tauri.calls("snapshot")).toHaveLength(before + 1);
+    expect(actions.closing()).toBeNull();
+  });
+
+  it("closes an empty space without a prompt", async () => {
+    expect(await actions.requestClose("w3")).toEqual([]);
+    expect(actions.closing()).toBeNull();
+    expect(tauri.calls("space_close")).toEqual([{ workspaceId: "w3", focus: "w2" }]);
+  });
+
+  it("closing the last space sends no neighbour", async () => {
+    tauri.answer("snapshot", () => ({ workspaces: [space("w1", 1)], tabs: [], panes: [] }));
+    const injector = Injector.create({ providers: [TauriBridge, HerdrStore, SpaceActions] });
+    await injector.get(HerdrStore).refresh();
+    const last = injector.get(SpaceActions);
+    await last.requestClose("w1");
+    expect(tauri.calls("space_close").at(-1)).toEqual({ workspaceId: "w1", focus: null });
+  });
+
+  it("shows herdr's error and reports no closed panes when the close fails", async () => {
+    tauri.answer("space_close", () => {
+      throw "workspace not found";
+    });
+    await actions.requestClose("w2");
+    expect(await actions.confirmClose()).toBeUndefined();
+    expect(actions.closeError()).toBe("workspace not found");
+    actions.dismissCloseError();
+    expect(actions.closeError()).toBeNull();
+  });
+
+  it("ignores an unknown space and a confirmation nobody asked for", async () => {
+    expect(await actions.requestClose("nope")).toBeUndefined();
+    expect(await actions.confirmClose()).toBeUndefined();
+    expect(tauri.calls("space_close")).toEqual([]);
   });
 });

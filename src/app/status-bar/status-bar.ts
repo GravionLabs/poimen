@@ -62,7 +62,11 @@ export class StatusBar {
   readonly panelOpen = input(true);
   /** Shortcut label of `toggleOutput` for the button's tooltip; empty when unbound. */
   readonly panelShortcut = input("");
+  /** Shortcut label of `showShortcuts` for the ? button's tooltip; empty when unbound. */
+  readonly shortcutsShortcut = input("");
   readonly jump = output<void>();
+  /** The ? button was clicked. */
+  readonly showShortcuts = output<void>();
   /** The panel button was clicked. */
   readonly showPanel = output<void>();
   /** The user flips the mode button: `true` asks for input. */

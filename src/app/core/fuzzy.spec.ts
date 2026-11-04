@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyFilter, fuzzyScore } from "./fuzzy";
+import { fuzzyFilter, fuzzyMatch, fuzzyRank, fuzzyScore } from "./fuzzy";
 
 describe("fuzzyScore", () => {
   it("matches characters in order, ignoring case and spaces", () => {
@@ -22,6 +22,25 @@ describe("fuzzyScore", () => {
       fuzzyScore("term", "Toggle Edit Remote Mode")!,
     );
     expect(fuzzyScore("ns", "New Sidebar")!).toBeGreaterThan(fuzzyScore("ns", "Panes")!);
+  });
+});
+
+describe("fuzzyMatch", () => {
+  it("returns the matched character positions", () => {
+    expect(fuzzyMatch("ntm", "New Terminal")?.positions).toEqual([0, 4, 7]);
+    expect(fuzzyMatch("TERM", "Terminal")?.positions).toEqual([0, 1, 2, 3]);
+  });
+
+  it("has no positions for an empty query and null for no match", () => {
+    expect(fuzzyMatch("", "x")).toEqual({ score: 0, positions: [] });
+    expect(fuzzyMatch("zz", "New Terminal")).toBeNull();
+  });
+});
+
+describe("fuzzyRank", () => {
+  it("ranks like fuzzyFilter and carries the positions", () => {
+    const ranked = fuzzyRank(["Toggle Sidebar", "Open Settings"], "set", (s) => s);
+    expect(ranked[0]).toEqual({ item: "Open Settings", positions: [5, 6, 7] });
   });
 });
 

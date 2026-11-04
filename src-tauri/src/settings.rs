@@ -174,6 +174,10 @@ pub struct Settings {
     pub explorer_show_hidden: bool,
     /// Start the herdr server when nothing answers on its socket (`herdr.autoStart`).
     pub herdr_auto_start: bool,
+    /// System notification when an agent turns blocked (`notifications.blocked`).
+    pub notify_on_blocked: bool,
+    /// System notification when an agent finishes (`notifications.done`).
+    pub notify_on_done: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
@@ -199,6 +203,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("nextWaiting", "CmdOrCtrl+Shift+A"),
     ("nextTab", "CmdOrCtrl+Alt+Right"),
     ("previousTab", "CmdOrCtrl+Alt+Left"),
+    ("showShortcuts", "CmdOrCtrl+/"),
 ];
 
 pub fn default_shortcuts() -> BTreeMap<String, String> {
@@ -339,6 +344,8 @@ impl Default for Settings {
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
             herdr_auto_start: true,
+            notify_on_blocked: true,
+            notify_on_done: true,
             spaces_layout: None,
             home: None,
             warnings: Vec::new(),
@@ -419,7 +426,7 @@ fn resolve_explorer(value: &Value, s: &mut Settings) {
                 .map(|v| {
                     v.as_str()
                         .map(str::trim)
-                        .filter(|p| p.starts_with('/') || *p == "~" || p.starts_with("~/"))
+                        .filter(|p| is_root_path(p))
                         .map(str::to_owned)
                 })
                 .collect();
@@ -456,6 +463,26 @@ fn resolve_herdr(value: &Value, s: &mut Settings) {
         Some(_) => s
             .warnings
             .push("herdr.autoStart must be true or false; using true".into()),
+    }
+}
+
+/// `notifications.blocked` / `notifications.done`; a wrong type warns and keeps `true`.
+fn resolve_notifications(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("notifications must be an object".into());
+        return;
+    };
+    for (key, slot) in [
+        ("blocked", &mut s.notify_on_blocked),
+        ("done", &mut s.notify_on_done),
+    ] {
+        match obj.get(key) {
+            None => {}
+            Some(Value::Bool(b)) => *slot = *b,
+            Some(_) => s.warnings.push(format!(
+                "notifications.{key} must be true or false; using true"
+            )),
+        }
     }
 }
 
@@ -549,6 +576,10 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
         resolve_herdr(value, &mut s);
     }
 
+    if let Some(value) = root.get("notifications") {
+        resolve_notifications(value, &mut s);
+    }
+
     if let Some(value) = root.get("spaces") {
         resolve_spaces(value, &mut s);
     }
@@ -634,16 +665,28 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     s
 }
 
+/// poimen's own files live under `<home>/.config/poimen` on every system, Windows included
+/// (deliberately not `%APPDATA%`: one documented location, like `~/.config/poimen/themes`).
 pub fn config_path(home: &Path) -> PathBuf {
-    home.join(".config/poimen/config.json")
+    home.join(".config").join("poimen").join("config.json")
 }
 
+/// Ghostty's config. Ghostty has no Windows build, so this is intentionally Unix-only.
 pub fn ghostty_path(home: &Path) -> PathBuf {
-    home.join(".config/ghostty/config")
+    home.join(".config").join("ghostty").join("config")
 }
 
+/// herdr's `config.toml` in the herdr directory (`herdr::herdr_dir`, also home of the socket).
 pub fn herdr_config_path(home: &Path) -> PathBuf {
-    home.join(".config/herdr/config.toml")
+    herdr_config_path_in(
+        cfg!(windows),
+        home,
+        &std::env::var("APPDATA").unwrap_or_default(),
+    )
+}
+
+fn herdr_config_path_in(windows: bool, home: &Path, appdata: &str) -> PathBuf {
+    crate::herdr::herdr_dir(windows, &home.to_string_lossy(), appdata).join("config.toml")
 }
 
 /// The `[theme] name` of a herdr `config.toml` (minimal read: no full TOML parser needed).
@@ -676,7 +719,7 @@ pub fn parse_herdr_theme(text: &str) -> Option<String> {
 /// Replaces `colorSchema: "herdr"` by the scheme named in herdr's config. `terminal`, a missing
 /// file or no name warns and falls back to `poimen` (which follows `theme`). Unknown scheme names
 /// are warned about and replaced by the frontend, like any other name.
-fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>) {
+fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>, config: &Path) {
     if s.color_schema != Some(ColorSchema::Name("herdr".into())) {
         return;
     }
@@ -691,16 +734,21 @@ fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>) {
         }
         None => {
             s.color_schema = None;
-            s.warnings.push(
-                "colorSchema \"herdr\": no [theme] name in ~/.config/herdr/config.toml; using poimen"
-                    .into(),
-            );
+            s.warnings.push(format!(
+                "colorSchema \"herdr\": no [theme] name in {}; using poimen",
+                config.display()
+            ));
         }
     }
 }
 
 /// Reads and resolves the settings below `home`; a missing file means defaults.
 pub fn load(home: &Path) -> Settings {
+    load_with(home, &herdr_config_path(home))
+}
+
+/// `load` with the herdr `config.toml` given, so tests never read the real herdr directory.
+fn load_with(home: &Path, herdr_config: &Path) -> Settings {
     let json = match std::fs::read_to_string(config_path(home)) {
         Ok(text) => Some(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -717,8 +765,8 @@ pub fn load(home: &Path) -> Settings {
         std::fs::read_to_string(ghostty_path(home)).ok()
     });
     if s.color_schema == Some(ColorSchema::Name("herdr".into())) {
-        let toml = std::fs::read_to_string(herdr_config_path(home)).ok();
-        apply_herdr(&mut s, toml.as_deref());
+        let toml = std::fs::read_to_string(herdr_config).ok();
+        apply_herdr(&mut s, toml.as_deref(), herdr_config);
     }
     s.home = Some(home.to_string_lossy().into_owned());
     s
@@ -975,18 +1023,50 @@ pub fn remove_spaces_layout_text(text: &str) -> Result<String, String> {
     remove_path_text(text, &["spaces", "layout"])
 }
 
-/// Writes a path below `home` as `~` or `~/…`; other paths stay as they are.
+/// A Windows absolute path: drive letter, colon, separator (`C:\x`, `c:/x`).
+fn is_windows_absolute(path: &str) -> bool {
+    let b = path.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/')
+}
+
+/// An explorer root as stored: absolute (`/srv`, `C:\x`, `C:/x`), `~`, or below it (`~/x`, `~\x`).
+fn is_root_path(path: &str) -> bool {
+    path == "~"
+        || path.starts_with("~/")
+        || path.starts_with("~\\")
+        || path.starts_with('/')
+        || is_windows_absolute(path)
+}
+
+/// Writes a path below `home` as `~` or `~/…`; other paths stay as they are. With a Windows home
+/// (`C:\Users\me`) both separators match and the comparison ignores ASCII case.
 pub fn tilde_path(path: &str, home: &Path) -> String {
-    let path = path.trim();
+    let original = path.trim();
     let home = home.to_string_lossy();
+    let windows = is_windows_absolute(&home);
+    let norm = |s: &str| {
+        if windows {
+            s.replace('\\', "/")
+        } else {
+            s.to_owned()
+        }
+    };
+    let (path, home) = (norm(original), norm(&home));
     let home = home.trim_end_matches('/');
     if home.is_empty() {
-        return path.to_owned();
+        return original.to_owned();
     }
-    match path.strip_prefix(home) {
+    let rest = if windows {
+        path.get(..home.len())
+            .filter(|head| head.eq_ignore_ascii_case(home))
+            .map(|_| &path[home.len()..])
+    } else {
+        path.strip_prefix(home)
+    };
+    match rest {
         Some("") | Some("/") => "~".to_owned(),
         Some(rest) if rest.starts_with('/') => format!("~{}", rest.trim_end_matches('/')),
-        _ => path.to_owned(),
+        _ => original.to_owned(),
     }
 }
 
@@ -996,10 +1076,7 @@ pub fn set_explorer_roots_text(text: &str, roots: &[String]) -> Result<String, S
     if roots.is_empty() {
         return Err("explorer.roots needs at least one folder".into());
     }
-    if let Some(bad) = roots
-        .iter()
-        .find(|p| !(p.starts_with('/') || *p == "~" || p.starts_with("~/")))
-    {
+    if let Some(bad) = roots.iter().find(|p| !is_root_path(p)) {
         return Err(format!("{bad:?} is not an absolute path"));
     }
     let value = serde_json::to_string(roots).map_err(|e| e.to_string())?;
@@ -1047,6 +1124,19 @@ pub fn set_herdr_auto_start_text(text: &str, on: bool) -> Result<String, String>
 /// Writes `herdr.autoStart` below `home`, like `save_theme`.
 pub fn save_herdr_auto_start(home: &Path, on: bool) -> Result<(), String> {
     save_with(home, |text| set_herdr_auto_start_text(text, on))
+}
+
+/// Returns `text` with `notifications.<kind>` set (`blocked` or `done`), touching nothing else.
+pub fn set_notification_text(text: &str, kind: &str, on: bool) -> Result<String, String> {
+    if !matches!(kind, "blocked" | "done") {
+        return Err(format!("unknown notification kind `{kind}`"));
+    }
+    set_path_text(text, &["notifications", kind], &on.to_string())
+}
+
+/// Writes `notifications.<kind>` below `home`, like `save_theme`.
+pub fn save_notification(home: &Path, kind: &str, on: bool) -> Result<(), String> {
+    save_with(home, |text| set_notification_text(text, kind, on))
 }
 
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
@@ -1148,6 +1238,28 @@ mod tests {
     }
 
     #[test]
+    fn notifications_default_on_and_can_be_turned_off_one_by_one() {
+        let d = rows("{}");
+        assert!(d.notify_on_blocked && d.notify_on_done);
+        let s = rows(r#"{"notifications":{"done":false}}"#);
+        assert!(s.notify_on_blocked);
+        assert!(!s.notify_on_done);
+        assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn notifications_invalid_warns_and_keeps_true() {
+        for json in [
+            r#"{"notifications":{"blocked":"no"}}"#,
+            r#"{"notifications":true}"#,
+        ] {
+            let s = rows(json);
+            assert!(s.notify_on_blocked && s.notify_on_done, "{json}");
+            assert_eq!(s.warnings.len(), 1, "{json}");
+        }
+    }
+
+    #[test]
     fn herdr_auto_start_defaults_to_true_and_can_be_turned_off() {
         assert!(rows("{}").herdr_auto_start);
         assert!(rows(r#"{"herdr":{}}"#).herdr_auto_start);
@@ -1163,6 +1275,31 @@ mod tests {
             assert!(s.herdr_auto_start, "{json}");
             assert_eq!(s.warnings.len(), 1, "{json}");
         }
+    }
+
+    #[test]
+    fn set_notification_keeps_comments_and_other_keys() {
+        let text = "{\n  // keep\n  \"theme\": \"dark\"\n}";
+        let out = set_notification_text(text, "done", false).unwrap();
+        assert!(out.contains("// keep"), "{out}");
+        assert!(
+            out.contains("\"notifications\": { \"done\": false }"),
+            "{out}"
+        );
+        let created = set_notification_text("{\"theme\":\"dark\"}", "done", false).unwrap();
+        let r = resolve(Some(&created), || None);
+        assert!(!r.notify_on_done && r.notify_on_blocked);
+        assert_eq!(r.theme, "dark");
+        let both = set_notification_text(&created, "blocked", false).unwrap();
+        let r = resolve(Some(&both), || None);
+        assert!(!r.notify_on_blocked && !r.notify_on_done);
+        let back = set_notification_text(&both, "done", true).unwrap();
+        assert!(resolve(Some(&back), || None).notify_on_done);
+    }
+
+    #[test]
+    fn set_notification_rejects_an_unknown_kind() {
+        assert!(set_notification_text("{}", "sound", true).is_err());
     }
 
     #[test]
@@ -1285,6 +1422,26 @@ mod tests {
         assert_eq!(tilde_path("/Users/meow", home), "/Users/meow");
         assert_eq!(tilde_path("/srv/x", home), "/srv/x");
         assert_eq!(tilde_path("~/x", home), "~/x");
+    }
+
+    #[test]
+    fn tilde_path_shortens_windows_paths_under_home() {
+        let home = Path::new(r"C:\Users\me");
+        assert_eq!(tilde_path(r"C:\Users\me", home), "~");
+        assert_eq!(tilde_path(r"c:\users\ME\", home), "~");
+        assert_eq!(tilde_path(r"C:\Users\me\Source\x", home), "~/Source/x");
+        assert_eq!(tilde_path("C:/Users/me/Source", home), "~/Source");
+        assert_eq!(tilde_path(r"C:\Users\meow", home), r"C:\Users\meow");
+        assert_eq!(tilde_path(r"D:\src", home), r"D:\src");
+    }
+
+    #[test]
+    fn windows_absolute_roots_are_accepted() {
+        let roots = [r"C:\src".to_owned(), "D:/x".into(), r"~\y".into()];
+        let text = set_explorer_roots_text("{}", &roots).unwrap();
+        assert_eq!(rows(&text).explorer_roots, roots);
+        assert!(set_explorer_roots_text("{}", &["C:x".into()]).is_err());
+        assert!(set_explorer_roots_text("{}", &["src".into()]).is_err());
     }
 
     #[test]
@@ -1619,7 +1776,7 @@ mod tests {
     fn herdr_schema_follows_the_herdr_theme_or_falls_back_with_a_warning() {
         let herdr = |toml: Option<&str>| {
             let mut s = resolve(Some(r#"{"colorSchema":"herdr"}"#), none);
-            apply_herdr(&mut s, toml);
+            apply_herdr(&mut s, toml, Path::new("/h/herdr/config.toml"));
             s
         };
         let s = herdr(Some("[theme]\nname = \"dracula\""));
@@ -1631,23 +1788,57 @@ mod tests {
             assert_eq!(s.warnings.len(), 1, "{toml:?}");
         }
         let mut other = resolve(Some(r#"{"colorSchema":"vesper"}"#), none);
-        apply_herdr(&mut other, Some("[theme]\nname = \"dracula\""));
+        apply_herdr(
+            &mut other,
+            Some("[theme]\nname = \"dracula\""),
+            Path::new("x"),
+        );
         assert_eq!(other.color_schema, Some(ColorSchema::Name("vesper".into())));
+    }
+
+    #[test]
+    fn the_herdr_warning_names_the_real_config_path() {
+        let mut s = resolve(Some(r#"{"colorSchema":"herdr"}"#), none);
+        apply_herdr(&mut s, None, Path::new("/h/herdr/config.toml"));
+        assert!(
+            s.warnings[0].contains("/h/herdr/config.toml"),
+            "{:?}",
+            s.warnings
+        );
+    }
+
+    #[test]
+    fn herdr_config_sits_in_the_herdr_directory_of_each_system() {
+        let home = Path::new("/home/u");
+        assert_eq!(
+            herdr_config_path_in(false, home, "ignored"),
+            Path::new("/home/u")
+                .join(".config")
+                .join("herdr")
+                .join("config.toml")
+        );
+        assert_eq!(
+            herdr_config_path_in(true, home, r"C:\Users\u\AppData\Roaming"),
+            Path::new(r"C:\Users\u\AppData\Roaming")
+                .join("herdr")
+                .join("config.toml")
+        );
     }
 
     #[test]
     fn load_follows_the_herdr_config_in_a_temp_home() {
         let home = std::env::temp_dir().join(format!("poimen-herdr-{}", std::process::id()));
+        let herdr = herdr_config_path_in(false, &home, "");
+        assert!(herdr.starts_with(&home));
         std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
-        std::fs::create_dir_all(home.join(".config/herdr")).unwrap();
+        std::fs::create_dir_all(herdr.parent().unwrap()).unwrap();
         std::fs::write(config_path(&home), r#"{"colorSchema":"herdr"}"#).unwrap();
-        assert_eq!(load(&home).color_schema, None);
-        std::fs::write(herdr_config_path(&home), "[theme]\nname = \"vesper\"\n").unwrap();
+        assert_eq!(load_with(&home, &herdr).color_schema, None);
+        std::fs::write(&herdr, "[theme]\nname = \"vesper\"\n").unwrap();
         assert_eq!(
-            load(&home).color_schema,
+            load_with(&home, &herdr).color_schema,
             Some(ColorSchema::Name("vesper".into()))
         );
-        assert!(stamp(&home)[2].is_some());
         std::fs::remove_dir_all(&home).unwrap();
     }
 

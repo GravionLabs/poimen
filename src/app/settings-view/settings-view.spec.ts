@@ -90,6 +90,14 @@ describe("explorer root helpers", () => {
     expect(withRoot(["/Users/x/Source"], "/Users/x/Source/", home)).toEqual(["/Users/x/Source"]);
     expect(withRoot(["~"], "/Users/xy", home)).toEqual(["~", "/Users/xy"]);
   });
+
+  it("matches Windows spellings of a root below the home directory", () => {
+    const home = "C:\\Users\\x";
+    expect(withRoot(["~/Source"], "C:\\Users\\x\\Source", home)).toEqual(["~/Source"]);
+    expect(withRoot(["~"], "c:\\users\\X\\", home)).toEqual(["~"]);
+    expect(withRoot(["~"], "C:\\Users\\xy", home)).toEqual(["~", "C:\\Users\\xy"]);
+    expect(withRoot(["~"], "D:\\src", home)).toEqual(["~", "D:\\src"]);
+  });
 });
 
 const setDark = vi.fn();
@@ -313,5 +321,24 @@ describe("SettingsView explorer section", () => {
     await Promise.resolve();
     fixture.detectChanges();
     expect(host.querySelector(".error")?.textContent).toContain("read-only");
+  });
+
+  it("saves the notification switches", async () => {
+    tauri.reset();
+    const { host } = setup(null, ["~"]);
+    const section = host.querySelector('section[aria-labelledby="notifications-h"]')!;
+    const [blocked, done] = section.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(blocked.checked).toBe(true);
+    expect(done.checked).toBe(true);
+    done.checked = false;
+    done.dispatchEvent(new Event("change"));
+    blocked.checked = false;
+    blocked.dispatchEvent(new Event("change"));
+    await vi.waitFor(() =>
+      expect(tauri.calls("set_notification")).toEqual([
+        { kind: "done", on: false },
+        { kind: "blocked", on: false },
+      ]),
+    );
   });
 });

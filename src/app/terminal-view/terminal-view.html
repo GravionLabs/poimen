@@ -1,3 +1,6 @@
+@if (isAgent()) {
+  <app-prompt-bar [pane]="pane()" />
+}
 @if (blocked(); as why) {
   @if (!banner()) {
     <div class="view-banner" role="status">

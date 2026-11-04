@@ -30,6 +30,7 @@ describe("parseSettings", () => {
           palette: ["#111111", null, 5],
         },
         autoControl: false,
+        notifyOnBlocked: false,
         spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
         home: "/Users/x",
         warnings: ["w"],
@@ -54,6 +55,8 @@ describe("parseSettings", () => {
       explorerRoots: ["~"],
       explorerShowHidden: false,
       herdrAutoStart: true,
+      notifyOnBlocked: false,
+      notifyOnDone: true,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       home: "/Users/x",
       warnings: ["w"],
@@ -168,5 +171,15 @@ describe("herdrAutoStart", () => {
     expect(parseSettings({}).herdrAutoStart).toBe(true);
     expect(parseSettings({ herdrAutoStart: false }).herdrAutoStart).toBe(false);
     expect(parseSettings({ herdrAutoStart: "no" }).herdrAutoStart).toBe(true);
+  });
+});
+
+describe("notifications", () => {
+  it("default on and parse per kind", () => {
+    expect(parseSettings({}).notifyOnBlocked).toBe(true);
+    expect(parseSettings({}).notifyOnDone).toBe(true);
+    const s = parseSettings({ notifyOnBlocked: false, notifyOnDone: "no" });
+    expect(s.notifyOnBlocked).toBe(false);
+    expect(s.notifyOnDone).toBe(true);
   });
 });

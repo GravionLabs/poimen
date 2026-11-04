@@ -1,0 +1,26 @@
+<dialog #dialog class="shortcuts" aria-labelledby="shortcuts-title" (close)="overview.close()">
+  <div class="body">
+    <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+    <p class="hint">
+      The command palette ({{ overview.paletteKeys() }}) lists all commands and plugin actions.
+    </p>
+    @for (section of overview.sections(); track section.title) {
+      <section>
+        <h3>{{ section.title }}</h3>
+        <ul>
+          @for (row of section.rows; track row.action) {
+            <li>
+              <span>{{ row.title }}</span>
+              @if (row.keys; as keys) {
+                <kbd>{{ keys }}</kbd>
+              } @else {
+                <span class="unbound">not bound</span>
+              }
+            </li>
+          }
+        </ul>
+      </section>
+    }
+    <button type="button" class="close" (click)="overview.close()">Close</button>
+  </div>
+</dialog>

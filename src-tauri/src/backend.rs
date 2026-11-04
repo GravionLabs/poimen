@@ -7,7 +7,10 @@
 
 use std::fmt;
 use std::io;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -204,14 +207,23 @@ impl Runner for SystemRunner {
         // reaps the child if it ever exits, so it does not stay a zombie while poimen runs.
         self.exited.store(false, Ordering::SeqCst);
         let exited = Arc::clone(&self.exited);
-        let mut child = Command::new(program)
-            .arg("server")
-            .env("PATH", gui_path::child_path())
+        let mut command = Command::new(program);
+        command.arg("server");
+        // Windows: the server keeps the inherited PATH; elsewhere it gets the login-shell PATH.
+        if !cfg!(windows) {
+            command.env("PATH", gui_path::child_path());
+        }
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()?;
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        command.process_group(0);
+        // Windows: own process group and no console window (CREATE_NEW_PROCESS_GROUP |
+        // CREATE_NO_WINDOW), so closing poimen's console does not end the server.
+        #[cfg(windows)]
+        command.creation_flags(0x0000_0200 | 0x0800_0000);
+        let mut child = command.spawn()?;
         std::thread::spawn(move || {
             let _ = child.wait();
             exited.store(true, Ordering::SeqCst);
@@ -531,8 +543,10 @@ mod tests {
 
     #[test]
     fn the_real_runner_finds_a_program_on_the_login_path_or_not_at_all() {
-        // `sh` exists on every supported system; this only reads the PATH, it starts nothing.
-        let found = gui_path::resolve_program("sh", &gui_path::child_path());
+        // `sh` (`cmd` on Windows, found through PATHEXT) exists on every supported system; this
+        // only reads the PATH, it starts nothing.
+        let program = if cfg!(windows) { "cmd" } else { "sh" };
+        let found = gui_path::resolve_program(program, &gui_path::child_path());
         assert!(found.is_some());
     }
 }

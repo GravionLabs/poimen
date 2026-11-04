@@ -22,7 +22,7 @@ export interface Pane {
   tab_id: string;
   workspace_id: string;
   agent?: string;
-  /** The agent's own session (Claude Code: the transcript's session id in `value`). */
+  /** The agent's own session (Claude Code, Copilot CLI: the transcript's session id in `value`). */
   agent_session?: { value?: string };
   agent_status: AgentStatus;
   cwd?: string;
@@ -87,8 +87,13 @@ export function buildTree(snapshot: Snapshot): WorkspaceNode[] {
   }));
 }
 
+/** The segments of a path, split at `/` and `\` (Windows cwds), without empty ones. */
+export function pathSegments(path: string): string[] {
+  return path.split(/[\\/]+/).filter(Boolean);
+}
+
 function basename(path: string): string {
-  return path.replace(/\/+$/, "").split("/").pop() ?? path;
+  return pathSegments(path).pop() ?? path;
 }
 
 export function paneLabel(pane: Pane): string {
@@ -159,6 +164,30 @@ export function agentKind(pane: Pane): string | undefined {
   return pane.agent?.trim() || undefined;
 }
 
+/** Agents whose session transcripts poimen reads (Output panel, Flow tab), with their names. */
+const TRANSCRIPT_AGENTS: Readonly<Record<string, string>> = {
+  claude: "Claude Code",
+  copilot: "GitHub Copilot CLI",
+};
+
+/** Display name of the agent of `pane` if its transcripts can be followed (`Claude Code`, ...). */
+export function flowAgentName(pane: Pane | undefined): string | undefined {
+  const kind = pane && agentKind(pane);
+  return kind !== undefined && Object.hasOwn(TRANSCRIPT_AGENTS, kind)
+    ? TRANSCRIPT_AGENTS[kind]
+    : undefined;
+}
+
+/** Whether the Output panel and the Flow tab can follow the agent of `pane`. */
+export function supportsFlow(pane: Pane | undefined): boolean {
+  return flowAgentName(pane) !== undefined;
+}
+
+/** The session id the transcripts of `pane` are found by; `null` when it has none to follow. */
+export function flowSession(pane: Pane | undefined): string | null {
+  return (supportsFlow(pane) && pane?.agent_session?.value) || null;
+}
+
 /**
  * Row text of an agent pane: its state label (`agent_status`, as `herdr pane list` reports it)
  * plus the `deliver_step` token when an integration set one. herdr reports no free-form status
@@ -173,7 +202,7 @@ export function statusText(pane: Pane): string | undefined {
 
 /** The last two path segments, so rows stay short. */
 export function shortPath(path: string): string {
-  const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
+  const parts = pathSegments(path);
   return parts.length <= 2 ? path : "…/" + parts.slice(-2).join("/");
 }
 
@@ -330,6 +359,8 @@ export const AGENT_KINDS = [
 /** An action a herdr plugin offers (answer of the `plugin_actions` command). */
 export interface PluginAction {
   plugin_id: string;
+  /** The plugin's name from `plugin.list`; the id when herdr lists none. */
+  plugin_name?: string;
   action_id: string;
   title: string;
   description: string | null;

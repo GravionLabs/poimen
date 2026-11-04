@@ -14,6 +14,12 @@ describe("cellAt", () => {
     expect(cellAt(rect, 80, 24, 5000, 5000)).toEqual({ column: 79, row: 23 });
   });
 
+  it("measures in xterm cells and clamps to a smaller frame grid", () => {
+    const frame = { cols: 60, rows: 10 };
+    expect(cellAt(rect, 80, 24, 225, 95, frame)).toEqual({ column: 12, row: 2 });
+    expect(cellAt(rect, 80, 24, 890, 520, frame)).toEqual({ column: 59, row: 9 });
+  });
+
   it("falls back to the origin for an empty rect", () => {
     expect(cellAt({ left: 0, top: 0, width: 0, height: 0 }, 80, 24, 10, 10)).toEqual({
       column: 0,

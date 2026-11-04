@@ -281,6 +281,22 @@
   cursor: pointer;
 }
 
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--h-content-border-color);
+}
+
+.menu-heading {
+  padding: 4px 10px 2px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  cursor: default;
+  user-select: none;
+}
+
 .menu-item:hover,
 .menu-item:focus-visible {
   background: color-mix(in srgb, currentColor 12%, transparent);
@@ -367,4 +383,35 @@
   background: none;
   border: 0;
   cursor: pointer;
+}
+
+/* Blocked and not viewed yet: a ring around the row. */
+.row.attention {
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1px var(--status-blocked),
+    0 0 6px var(--status-blocked);
+}
+
+/* Unread: finished while not viewed; on a workspace row the count of its unread panes. */
+.badge {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--status-done);
+  color: var(--h-content-background);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.dot-badge {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
 }

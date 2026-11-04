@@ -1,0 +1,98 @@
+:host {
+  width: 100%;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--h-content-background);
+  overflow-y: auto;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 8px;
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.mark {
+  all: unset;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.mark:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.empty {
+  padding: 0 14px;
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+.list {
+  margin: 0;
+  padding: 0 4px;
+  list-style: none;
+}
+
+.entry {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.entry:hover,
+.entry:focus-visible {
+  background: rgb(127 127 127 / 15%);
+}
+
+.entry.unread {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.status-blocked {
+  color: #e5a50a;
+}
+
+.status-done {
+  color: #2ea043;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.meta,
+.time {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.7;
+}

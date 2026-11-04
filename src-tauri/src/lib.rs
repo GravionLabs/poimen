@@ -1,4 +1,5 @@
 mod backend;
+mod copilot;
 mod git;
 mod gui_path;
 mod herdr;
@@ -14,7 +15,7 @@ mod transcripts;
 mod watch;
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
@@ -128,6 +129,27 @@ async fn pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), St
     Ok(())
 }
 
+/// Closes a space (`workspace.close`) with all its panes; only on an explicit user action (the UI
+/// confirms first when it has panes). Afterwards `focus`, the neighbouring space, is focused on a
+/// best-effort basis; a failing close leaves the space untouched and returns herdr's error.
+#[tauri::command]
+async fn space_close(
+    client: State<'_, Client>,
+    workspace_id: String,
+    focus: Option<String>,
+) -> Result<(), String> {
+    herdr_call(
+        client.inner(),
+        "workspace.close",
+        herdr::workspace_close_params(&workspace_id),
+    )
+    .await?;
+    if let Some(id) = focus.filter(|id| !id.is_empty()) {
+        let _ = herdr_call(client.inner(), "workspace.focus", spaces::focus_params(&id)).await;
+    }
+    Ok(())
+}
+
 /// Starts a supported agent in an existing pane at a shell prompt (`agent.start`); can take a while.
 #[tauri::command]
 async fn agent_start(
@@ -154,6 +176,23 @@ async fn agent_rename(
     Ok(())
 }
 
+/// Sends a prompt to an agent (`agent.prompt`) without focusing its terminal; no controller needed.
+/// Stalled, timed-out and blocked agents are results, not errors.
+#[tauri::command]
+async fn agent_prompt(
+    client: State<'_, Client>,
+    target: String,
+    text: String,
+) -> Result<herdr::PromptOutcome, String> {
+    let client = client.inner().clone();
+    let params = herdr::agent_prompt_params(&target, &text);
+    tauri::async_runtime::spawn_blocking(move || {
+        herdr::prompt_outcome(client.request("agent.prompt", params))
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Renames a pane (`pane.rename`); an empty label clears it.
 #[tauri::command]
 async fn pane_rename(
@@ -170,7 +209,12 @@ async fn pane_rename(
 #[tauri::command]
 async fn plugin_actions(client: State<'_, Client>) -> Result<Vec<herdr::PluginAction>, String> {
     let result = herdr_call(client.inner(), "plugin.action.list", json!({})).await?;
-    Ok(herdr::parse_plugin_actions(&result))
+    // Names are optional: without `plugin.list` the groups fall back to the plugin id.
+    let names = match herdr_call(client.inner(), "plugin.list", json!({})).await {
+        Ok(list) => herdr::parse_plugin_names(&list),
+        Err(_) => Default::default(),
+    };
+    Ok(herdr::parse_plugin_actions(&result, &names))
 }
 
 /// Runs a plugin action (`plugin.action.invoke`) with the focused pane and workspace as context.
@@ -227,9 +271,14 @@ async fn deliver_board(
 /// Where poimen keeps the state (the `gh` cache) of a plugin it runs itself: herdr does not report
 /// the plugin's own state directory, so it is `~/.config/poimen/plugin-state/<id>`.
 fn plugin_state_dir(plugin_id: &str) -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home)
-        .join(".config/poimen/plugin-state")
+    plugin_state_dir_in(&home_dir().unwrap_or_default(), plugin_id)
+}
+
+/// Under `<home>/.config/poimen` on every system, Windows included (see `settings::config_path`).
+fn plugin_state_dir_in(home: &Path, plugin_id: &str) -> PathBuf {
+    home.join(".config")
+        .join("poimen")
+        .join("plugin-state")
         .join(plugin_id)
 }
 
@@ -429,8 +478,10 @@ fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// The user's home directory: `HOME` on Unix, the profile (`%USERPROFILE%`) on Windows, where a
+/// GUI app has no `HOME`.
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::home_dir().filter(|h| !h.as_os_str().is_empty())
 }
 
 /// The resolved user settings (`~/.config/poimen/config.json`); changes arrive as `settings` events.
@@ -448,56 +499,63 @@ fn get_color_schemes() -> schemes::Schemes {
 /// Writes only the `theme` setting (the toolbar button); the settings watcher emits the change.
 #[tauri::command]
 fn set_theme(theme: String) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_theme(&home, &theme)
 }
 
 /// Writes only the `colorSchema` setting (the settings view): a name or a `{light, dark}` pair.
 #[tauri::command]
 fn set_color_schema(schema: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_color_schema(&home, &schema)
 }
 
 /// Writes only `sidebar.layout` (`tree` or `split`); the settings watcher emits the change.
 #[tauri::command]
 fn set_sidebar_layout(layout: String) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_sidebar_layout(&home, &layout)
 }
 
 /// Writes only `explorer.roots` (paths under the home directory as `~/…`); the watcher emits it.
 #[tauri::command]
 fn set_explorer_roots(roots: Vec<String>) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_explorer_roots(&home, &roots)
 }
 
 /// Writes only `explorer.showHidden`; the settings watcher emits the change.
 #[tauri::command]
 fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_explorer_show_hidden(&home, show)
+}
+
+/// Writes only `notifications.<kind>` (`blocked` or `done`); the settings watcher emits the change.
+#[tauri::command]
+fn set_notification(kind: String, on: bool) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_notification(&home, &kind, on)
 }
 
 /// Writes only `herdr.autoStart`; the settings watcher emits the change.
 #[tauri::command]
 fn set_herdr_auto_start(on: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_herdr_auto_start(&home, on)
 }
 
 /// Writes only `spaces.layout` after validating it; the settings watcher emits the change.
 #[tauri::command]
 fn set_spaces_layout(layout: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_spaces_layout(&home, &layout)
 }
 
 /// Removes `spaces.layout`, so new spaces use the built-in default again.
 #[tauri::command]
 fn remove_spaces_layout() -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::remove_spaces_layout(&home)
 }
 
@@ -515,9 +573,9 @@ async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, 
         .map_err(|e| e.to_string())
 }
 
-/// Starts following the subagent transcripts of the Claude Code agent in `pane_id` (replacing the
-/// previous watch); updates arrive as `subagents` events. `false` when the pane has no Claude
-/// session or its transcript is not found; nothing is watched then. Read-only.
+/// Starts following the subagent transcripts of the Claude Code or GitHub Copilot CLI agent in
+/// `pane_id` (replacing the previous watch); updates arrive as `subagents` events. `false` when the
+/// pane has no such session or its transcript is not found; nothing is watched then. Read-only.
 #[tauri::command]
 async fn subagents_watch(
     app: AppHandle,
@@ -528,21 +586,34 @@ async fn subagents_watch(
 ) -> Result<bool, String> {
     let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
     let panes = herdr_call(client.inner(), "pane.list", json!({})).await?;
-    let found = herdr::parse_claude_session(&panes, &pane_id).and_then(|s| {
-        let root = transcripts::projects_root(&home_dir()?);
-        let dir = transcripts::locate_project_dir(&root, &s.cwd, &s.session)?;
-        Some((dir, s.session))
+    let found = herdr::parse_agent_session(&panes, &pane_id).and_then(|s| {
+        let home = home_dir()?;
+        let dir = match s.agent {
+            herdr::TranscriptAgent::Claude => transcripts::locate_project_dir(
+                &transcripts::projects_root(&home),
+                &s.cwd,
+                &s.session,
+            )?,
+            herdr::TranscriptAgent::Copilot => {
+                copilot::locate_session_dir(&copilot::sessions_root(&home), &s.session)?
+            }
+        };
+        Some((s.agent, dir, s.session))
     });
-    let Some((dir, session)) = found else {
+    let Some((agent, dir, session)) = found else {
         let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
         watches.store(&key, generation, None);
         return Ok(false);
     };
     let (id, follower) = (session.clone(), key.clone());
-    let handle = transcripts::watch(&dir, &session, move |update| {
+    let emit = move |update| {
         let event = json!({ "key": follower, "session": id, "update": update });
         let _ = app.emit("subagents", event);
-    })?;
+    };
+    let handle = match agent {
+        herdr::TranscriptAgent::Claude => transcripts::watch(&dir, &session, emit)?,
+        herdr::TranscriptAgent::Copilot => copilot::watch(&dir, emit)?,
+    };
     let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
     // A stale handle is dropped here, which stops its watcher; so is one whose key was unwatched.
     Ok(watches.store(&key, generation, Some(handle)))
@@ -749,6 +820,8 @@ fn build_menu(
             &sep()?,
             &item("nextTab", "Next Tab")?,
             &item("previousTab", "Previous Tab")?,
+            &sep()?,
+            &item("showShortcuts", "Keyboard Shortcuts")?,
         ],
     )?)?;
     menu.append(&Submenu::with_items(
@@ -772,6 +845,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(client.clone())
         .manage(Sessions::default())
         .manage(SubagentWatch::default())
@@ -821,10 +895,13 @@ pub fn run() {
             herdr_info,
             ensure_backend,
             set_herdr_auto_start,
+            set_notification,
             pane_split,
             pane_close,
+            space_close,
             agent_start,
             agent_rename,
+            agent_prompt,
             pane_rename,
             terminal_create,
             plugin_actions,
@@ -866,6 +943,25 @@ pub fn run() {
                 app.state::<Sessions>().close_all();
             }
         });
+}
+
+#[cfg(test)]
+mod plugin_state_tests {
+    use super::plugin_state_dir_in;
+    use std::path::Path;
+
+    #[test]
+    fn plugin_state_lives_under_the_poimen_config_of_the_home() {
+        let expected = Path::new("/h")
+            .join(".config")
+            .join("poimen")
+            .join("plugin-state")
+            .join("deliver-board");
+        assert_eq!(
+            plugin_state_dir_in(Path::new("/h"), "deliver-board"),
+            expected
+        );
+    }
 }
 
 #[cfg(test)]

@@ -18,6 +18,10 @@ export interface TabBarItem {
   /** Shown in italics, as VS Code does for a preview tab. */
   preview?: boolean;
   title?: string;
+  /** Rings the tab (it needs the user) until the owner clears it. */
+  attention?: boolean;
+  /** Shows an unread badge. */
+  unread?: boolean;
 }
 
 /** An entry of the tab context menu; `action` is reported back with the tab id. */

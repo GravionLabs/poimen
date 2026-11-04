@@ -14,6 +14,7 @@ export const SHORTCUT_ACTIONS = [
   "nextWaiting",
   "nextTab",
   "previousTab",
+  "showShortcuts",
 ] as const;
 
 export type ShortcutAction = (typeof SHORTCUT_ACTIONS)[number];
@@ -36,6 +37,7 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
   nextWaiting: "CmdOrCtrl+Shift+A",
   nextTab: "CmdOrCtrl+Alt+Right",
   previousTab: "CmdOrCtrl+Alt+Left",
+  showShortcuts: "CmdOrCtrl+/",
 };
 
 /** Accepts the resolved `shortcuts` of the settings payload; anything else keeps the default. */

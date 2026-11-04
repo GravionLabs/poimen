@@ -20,6 +20,8 @@
     <div class="side" [style.width.px]="ui.sidebarWidth()">
       @if (ui.activeView() === "explorer") {
         <app-explorer />
+      } @else if (ui.activeView() === "notifications") {
+        <app-notifications (paneChosen)="openPaneById($event)" />
       } @else {
         <app-sidebar
           [openIds]="editor.openIds()"
@@ -91,10 +93,13 @@
   [panelOpen]="ui.panelOpen()"
   [panelShortcut]="panelShortcut()"
   (showPanel)="ui.togglePanel()"
+  [shortcutsShortcut]="shortcutsShortcut()"
+  (showShortcuts)="shortcutsOverview.open()"
 />
 
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
-<app-space-dialog />
+<app-space-dialog (closed)="onSpaceClosed($event)" />
+<app-shortcuts-dialog />
 <app-command-palette
   [activePaneId]="activePaneId()"
   (commandChosen)="run($event)"

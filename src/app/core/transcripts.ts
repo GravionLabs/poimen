@@ -258,7 +258,7 @@ export function reportIndex(items: readonly TranscriptItem[]): number {
 let followers = 0;
 
 /**
- * The subagents of the Claude Code agent in one pane and their transcripts. The backend watches
+ * The subagents of the Claude Code or Copilot CLI agent in one pane and their transcripts. The backend watches
  * the transcript files and pushes `subagents` events; nothing here reads or polls files. The root
  * instance follows the pane of the output panel; a flow tab provides its own instance for its pane.
  * Every instance has its own backend watch (by key) and stops it when it is destroyed.
@@ -284,7 +284,7 @@ export class Subagents {
   private readonly _paneId = signal<string | null>(null);
   /** The pane followed; `null` when nothing is followed. */
   readonly paneId = this._paneId.asReadonly();
-  /** `false` for a pane without a Claude Code session (other agents, plain terminals). */
+  /** `false` for a pane without a followed session (other agents, plain terminals). */
   readonly supported = this._supported.asReadonly();
   /** The shown subagent: the picked one while it exists, else the default. */
   readonly selectedId = computed(() => {

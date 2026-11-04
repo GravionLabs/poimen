@@ -59,3 +59,32 @@
     </div>
   </form>
 }
+@if (actions.closing(); as c) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Cancel"
+    (click)="actions.cancelClose()"
+  ></button>
+  <div
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Close space"
+    (keydown.escape)="actions.cancelClose()"
+  >
+    <h2>Close space {{ c.label }}?</h2>
+    <p class="hint">{{ c.warning }}</p>
+    <div class="buttons">
+      <button type="button" class="cancel" (click)="actions.cancelClose()">Cancel</button>
+      <button type="button" class="confirm" (click)="confirmClose()">Close space</button>
+    </div>
+  </div>
+}
+@if (actions.closeError(); as message) {
+  <p class="error close-error" role="alert">
+    {{ message }}
+    <button type="button" aria-label="Dismiss" (click)="actions.dismissCloseError()">x</button>
+  </p>
+}

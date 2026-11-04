@@ -51,6 +51,10 @@ export interface Settings {
   explorerShowHidden: boolean;
   /** Start the herdr server when it is not running (`herdr.autoStart`). */
   herdrAutoStart: boolean;
+  /** System notification when an agent turns blocked (`notifications.blocked`). */
+  notifyOnBlocked: boolean;
+  /** System notification when an agent finishes (`notifications.done`). */
+  notifyOnDone: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
   /** The home directory `~` stands for; `null` until the backend knows it. */
@@ -76,6 +80,8 @@ export const DEFAULT_SETTINGS: Settings = {
   explorerRoots: ["~"],
   explorerShowHidden: false,
   herdrAutoStart: true,
+  notifyOnBlocked: true,
+  notifyOnDone: true,
   spacesLayout: null,
   home: null,
   warnings: [],
@@ -158,6 +164,8 @@ export function parseSettings(raw: unknown): Settings {
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     herdrAutoStart: r["herdrAutoStart"] !== false,
+    notifyOnBlocked: r["notifyOnBlocked"] !== false,
+    notifyOnDone: r["notifyOnDone"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
@@ -238,6 +246,12 @@ export class SettingsStore {
       "set_explorer_show_hidden",
       { show: explorerShowHidden },
     );
+  }
+
+  /** Writes `notifications.blocked` or `notifications.done` of config.json and applies it at once. */
+  async setNotification(kind: "blocked" | "done", on: boolean): Promise<void> {
+    const patch = kind === "blocked" ? { notifyOnBlocked: on } : { notifyOnDone: on };
+    await this.write(patch, `the ${kind} notification option`, "set_notification", { kind, on });
   }
 
   /** Writes `herdr.autoStart` of config.json and applies it at once. */
