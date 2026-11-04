@@ -3,6 +3,7 @@
 //! directories, and programs are resolved against that.
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -10,6 +11,25 @@ use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// A `Command` for a child of poimen. The release build on Windows is a GUI app without a console,
+/// so every console program it starts would open its own window unless `CREATE_NO_WINDOW` is set.
+/// All spawn sites go through here (clippy forbids `Command::new` elsewhere); no-op off Windows.
+#[allow(clippy::disallowed_methods)]
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Windows process creation flag: do not open a console window for the child.
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Directories where `node`, `gh` and `herdr` usually live on macOS and Linux.
 fn usual_dirs(home: &str) -> Vec<String> {
@@ -160,7 +180,7 @@ fn login_shell_path() -> Option<String> {
     CACHE
         .get_or_init(|| {
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-            let mut cmd = Command::new(shell);
+            let mut cmd = command(shell);
             cmd.args(["-ilc", "printf '%s' \"__POIMEN_PATH__$PATH\""]);
             path_from_command(cmd, Duration::from_secs(5))
         })
@@ -206,7 +226,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn path_read_returns_even_when_a_child_keeps_the_pipe_open() {
-        let mut cmd = Command::new("sh");
+        let mut cmd = command("sh");
         cmd.args(["-c", "sleep 5 & printf '__POIMEN_PATH__/a:/b'"]);
         let started = Instant::now();
         let got = path_from_command(cmd, Duration::from_secs(2));
@@ -217,7 +237,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn path_read_gives_up_on_a_shell_that_outlives_the_limit() {
-        let mut cmd = Command::new("sh");
+        let mut cmd = command("sh");
         cmd.args(["-c", "sleep 5 & sleep 5"]);
         let started = Instant::now();
         assert_eq!(path_from_command(cmd, Duration::from_millis(200)), None);

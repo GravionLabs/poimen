@@ -12,7 +12,7 @@ use std::os::unix::process::CommandExt;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -207,7 +207,7 @@ impl Runner for SystemRunner {
         // reaps the child if it ever exits, so it does not stay a zombie while poimen runs.
         self.exited.store(false, Ordering::SeqCst);
         let exited = Arc::clone(&self.exited);
-        let mut command = Command::new(program);
+        let mut command = gui_path::command(program);
         command.arg("server");
         // Windows: the server keeps the inherited PATH; elsewhere it gets the login-shell PATH.
         if !cfg!(windows) {
@@ -222,7 +222,7 @@ impl Runner for SystemRunner {
         // Windows: own process group and no console window (CREATE_NEW_PROCESS_GROUP |
         // CREATE_NO_WINDOW), so closing poimen's console does not end the server.
         #[cfg(windows)]
-        command.creation_flags(0x0000_0200 | 0x0800_0000);
+        command.creation_flags(0x0000_0200 | gui_path::CREATE_NO_WINDOW);
         let mut child = command.spawn()?;
         std::thread::spawn(move || {
             let _ = child.wait();
