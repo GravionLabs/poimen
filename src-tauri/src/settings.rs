@@ -183,6 +183,8 @@ pub struct Settings {
     pub notify_on_done: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
+    /// Repository root to the SHA-256 of the project file the user trusted (`trustedProjects`).
+    pub trusted_projects: BTreeMap<String, String>,
     /// The task modes (`tasks`); the default is one `agent` mode.
     pub tasks: crate::tasks::TaskModes,
     /// The agent harnesses (`harnesses`); the defaults are `claude` and `copilot`.
@@ -354,6 +356,7 @@ impl Default for Settings {
             notify_on_blocked: true,
             notify_on_done: true,
             spaces_layout: None,
+            trusted_projects: BTreeMap::new(),
             tasks: crate::tasks::TaskModes::default(),
             harnesses: crate::harness::default_harnesses(),
             home: None,
@@ -507,6 +510,24 @@ fn resolve_spaces(value: &Value, s: &mut Settings) {
             Err(e) => s
                 .warnings
                 .push(format!("spaces.layout: {e}; using the default layout")),
+        }
+    }
+}
+
+/// `trustedProjects`: root to hash; entries that are not strings are skipped with a warning.
+fn resolve_trusted_projects(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("trustedProjects must be an object".into());
+        return;
+    };
+    for (root, hash) in obj {
+        match hash.as_str() {
+            Some(h) if !h.is_empty() => {
+                s.trusted_projects.insert(root.clone(), h.to_owned());
+            }
+            _ => s.warnings.push(format!(
+                "trustedProjects: {root}: the hash must be a string"
+            )),
         }
     }
 }
@@ -694,6 +715,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
         resolve_notifications(value, &mut s);
     }
 
+    if let Some(value) = root.get("trustedProjects") {
+        resolve_trusted_projects(value, &mut s);
+    }
     if let Some(value) = root.get("spaces") {
         resolve_spaces(value, &mut s);
     }
@@ -1141,6 +1165,32 @@ pub fn set_spaces_layout_text(text: &str, layout: &Value) -> Result<String, Stri
 /// Returns `text` without `spaces.layout`, so new spaces use the built-in default again.
 pub fn remove_spaces_layout_text(text: &str) -> Result<String, String> {
     remove_path_text(text, &["spaces", "layout"])
+}
+
+/// Returns `text` with `trustedProjects` replaced by `projects`, touching nothing else (comments
+/// inside the old `trustedProjects` object go with it).
+pub fn set_trusted_projects_text(
+    text: &str,
+    projects: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    let value = serde_json::to_string(projects).map_err(|e| e.to_string())?;
+    set_key_text(text, "trustedProjects", &value)
+}
+
+/// Stores `hash` as the trusted content of the project file of `root`.
+pub fn trust_project(home: &Path, root: &str, hash: &str) -> Result<(), String> {
+    let mut projects = load(home).trusted_projects;
+    projects.insert(root.to_owned(), hash.to_owned());
+    save_with(home, |text| set_trusted_projects_text(text, &projects))
+}
+
+/// Drops the trust of `root`; an unknown root or a missing file changes nothing.
+pub fn revoke_project(home: &Path, root: &str) -> Result<(), String> {
+    let mut projects = load(home).trusted_projects;
+    if projects.remove(root).is_none() {
+        return Ok(());
+    }
+    save_with(home, |text| set_trusted_projects_text(text, &projects))
 }
 
 /// A Windows absolute path: drive letter, colon, separator (`C:\x`, `c:/x`).
@@ -1717,6 +1767,55 @@ mod tests {
         let out = remove_spaces_layout_text(compact).unwrap();
         assert_eq!(out, "{\"spaces\":{\"x\":1}}");
         assert!(serde_json::from_str::<Value>(&out).is_ok());
+    }
+
+    #[test]
+    fn trusted_projects_resolve_and_bad_entries_warn() {
+        let s = resolve(
+            Some(r#"{"trustedProjects":{"/a":"abc","/b":3,"/c":""}}"#),
+            || None,
+        );
+        assert_eq!(s.trusted_projects.len(), 1);
+        assert_eq!(s.trusted_projects["/a"], "abc");
+        assert_eq!(s.warnings.len(), 2);
+        let s = resolve(Some(r#"{"trustedProjects":[1]}"#), || None);
+        assert!(s.trusted_projects.is_empty() && s.warnings.len() == 1);
+        assert!(resolve(None, || None).trusted_projects.is_empty());
+    }
+
+    #[test]
+    fn set_trusted_projects_keeps_comments_and_other_keys() {
+        let text = "{\n  // keep\n  \"theme\": \"dark\"\n}";
+        let map = BTreeMap::from([("C:\\work\\app".to_owned(), "h1".to_owned())]);
+        let out = set_trusted_projects_text(text, &map).unwrap();
+        assert!(out.contains("// keep") && out.contains("\"theme\": \"dark\""));
+        let parsed: Value = serde_json::from_str(&out.replace("  // keep\n", "")).unwrap();
+        assert_eq!(parsed["trustedProjects"]["C:\\work\\app"], "h1");
+        // Replacing an existing entry set keeps the rest too.
+        let again = set_trusted_projects_text(&out, &BTreeMap::new()).unwrap();
+        assert!(again.contains("// keep") && again.contains("\"trustedProjects\": {}"));
+    }
+
+    #[test]
+    fn trust_and_revoke_round_trip_keeping_other_keys() {
+        let home = std::env::temp_dir().join(format!("poimen-trust-set-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        revoke_project(&home, "/a").unwrap();
+        assert!(!config_path(&home).exists());
+        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+        std::fs::write(config_path(&home), "{\n  \"theme\": \"dark\"\n}").unwrap();
+        trust_project(&home, "/a", "h1").unwrap();
+        trust_project(&home, "/b", "h2").unwrap();
+        trust_project(&home, "/a", "h3").unwrap();
+        let s = load(&home);
+        assert_eq!(s.trusted_projects["/a"], "h3");
+        assert_eq!(s.trusted_projects["/b"], "h2");
+        revoke_project(&home, "/a").unwrap();
+        revoke_project(&home, "/unknown").unwrap();
+        let s = load(&home);
+        assert_eq!(s.trusted_projects.keys().collect::<Vec<_>>(), ["/b"]);
+        assert_eq!(s.theme, "dark");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

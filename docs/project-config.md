@@ -46,3 +46,20 @@ For a new space: `layout` of `.poimen/config.json`, else the deprecated
 `.agents/herdr-layout.json` (still read until 1.0; a warning is shown each time a space is
 created), else `spaces.layout` of the user config, else the built-in default. An invalid project
 layout shows a warning naming the file and the space gets a single pane.
+
+## Trust
+
+Commands of a project file (layout pane commands, `setup`, `teardown`, `commands[]`, the panes of
+`presets[]`) run only after you trusted that repository. Before a new space would type or run one,
+poimen shows every command of the file and asks:
+
+- **Trust and run** stores the SHA-256 of the file content under the repository root in
+  `trustedProjects` of the user `config.json`.
+- **Run without project commands** builds, names and splits the layout panes but types nothing; the
+  question comes again next time.
+- **Cancel** creates nothing.
+
+Any change to the file changes its hash and revokes the trust, so the question comes back. With
+both `.poimen/config.json` and the deprecated `.agents/herdr-layout.json` present, the hash covers
+both. The settings view section "Trusted projects" lists the roots with a "Revoke" button. The
+layout of `spaces.layout` in the user config and the built-in default need no trust.

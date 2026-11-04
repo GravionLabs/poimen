@@ -19,6 +19,7 @@ mod spaces;
 mod stream;
 mod tasks;
 mod transcripts;
+mod trust;
 mod watch;
 
 use std::collections::{BTreeMap, HashMap};
@@ -302,6 +303,7 @@ async fn create_space(
     client: State<'_, Client>,
     cwd: String,
     label: Option<String>,
+    decision: Option<trust::Decision>,
 ) -> Result<spaces::SpaceOutcome, String> {
     let home = home_dir();
     let dir = spaces::resolve_dir(&cwd, home.as_deref())?;
@@ -325,8 +327,36 @@ async fn create_space(
                 workspace_id,
                 created: false,
                 warnings: Vec::new(),
+                trust: None,
             });
         }
+        // The project files are read once; the trust check, the listed commands and the layout
+        // all use this read.
+        let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
+        let sources = trust::Sources::read(&root);
+        let user = home.as_deref().map(settings::load);
+        let trusted = user
+            .as_ref()
+            .map(|s| s.trusted_projects.clone())
+            .unwrap_or_default();
+        let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
+            trust::Gate::Ask(request) => {
+                return Ok(spaces::SpaceOutcome {
+                    workspace_id: String::new(),
+                    created: false,
+                    warnings: Vec::new(),
+                    trust: Some(request),
+                });
+            }
+            trust::Gate::Strip => false,
+            trust::Gate::Run { store } => {
+                if let Some(hash) = store {
+                    let home = home.as_deref().ok_or("the home directory is not known")?;
+                    settings::trust_project(home, &sources.root, &hash)?;
+                }
+                true
+            }
+        };
         let label = spaces::space_label(
             &dir,
             label.as_deref().unwrap_or_default(),
@@ -337,43 +367,43 @@ async fn create_space(
         let workspace_id = spaces::created_workspace_id(&result)
             .ok_or("herdr did not report the new workspace")?;
         call("workspace.focus", spaces::focus_params(&workspace_id))?;
-        let warnings = build_layout(&call, &dir, home.as_deref(), &result);
+        let user_layout = user.and_then(|s| s.spaces_layout);
+        let warnings = build_layout(&call, &dir, &result, &sources, user_layout.as_ref(), allow);
         Ok(spaces::SpaceOutcome {
             workspace_id,
             created: true,
             warnings,
+            trust: None,
         })
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Builds the pane layout in a just-created space: `.poimen/config.json` (git toplevel of `dir`), else
-/// the deprecated `.agents/herdr-layout.json`, else `spaces.layout` of the config, else the default. Problems come back as warnings; the space then
-/// keeps the panes created so far (at least its single root pane).
+/// Builds the pane layout in a just-created space from the already read project `sources`:
+/// `.poimen/config.json`, else the deprecated `.agents/herdr-layout.json`, else `spaces.layout` of
+/// the config (`user_layout`), else the default. With `allow_project_commands` false the commands
+/// of a layout that comes from a project file are not typed; the panes are still created and named.
+/// Problems come back as warnings; the space then keeps the panes created so far (at least its
+/// single root pane).
 fn build_layout(
     call: &impl Fn(&str, Value) -> Result<Value, String>,
     dir: &str,
-    home: Option<&std::path::Path>,
     created: &Value,
+    sources: &trust::Sources,
+    user_layout: Option<&layout::Layout>,
+    allow_project_commands: bool,
 ) -> Vec<String> {
-    let root = git::toplevel(dir).unwrap_or_else(|| dir.to_owned());
-    let read = |rel: &str| {
-        let path = std::path::Path::new(&root).join(rel);
-        std::fs::read_to_string(&path)
-            .ok()
-            .map(|text| (path.to_string_lossy().into_owned(), text))
-    };
-    let project = read(project::PROJECT_FILE);
-    let legacy = read(layout::REPO_LAYOUT_FILE);
-    let config = home.map(settings::load).and_then(|s| s.spaces_layout);
-    let (layout, mut warnings) = match layout::resolve(
-        project.as_ref().map(|(p, t)| (p.as_str(), t.as_str())),
-        legacy.as_ref().map(|(p, t)| (p.as_str(), t.as_str())),
-        config.as_ref(),
-    ) {
-        Ok(r) => r,
-        Err(warning) => return vec![warning],
+    let (project, legacy) = sources.refs();
+    let (layout, mut warnings, from_project) =
+        match layout::resolve_origin(project, legacy, user_layout) {
+            Ok(r) => r,
+            Err(warning) => return vec![warning],
+        };
+    let layout = if from_project && !allow_project_commands {
+        layout.without_commands()
+    } else {
+        layout
     };
     let Some(root_pane) = herdr::created_pane_id(created) else {
         return vec!["herdr did not report the root pane; no layout applied".into()];
@@ -382,6 +412,13 @@ fn build_layout(
         warnings.push(format!("layout not fully applied: {e}"));
     }
     warnings
+}
+
+/// Revokes the trust of the project file of `root`; the settings watcher emits the change.
+#[tauri::command]
+fn revoke_project(root: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::revoke_project(&home, &root)
 }
 
 /// The project file `.poimen/config.json` of the repository containing `dir`, with warnings.
@@ -923,6 +960,7 @@ pub fn run() {
             set_explorer_roots,
             set_explorer_show_hidden,
             set_spaces_layout,
+            revoke_project,
             remove_spaces_layout,
             default_spaces_layout,
             project_config,
@@ -998,5 +1036,80 @@ mod subagent_watches_tests {
         let g = watches.begin("panel");
         assert!(watches.store("panel", g, None));
         assert_eq!(watches.slots["panel"].1, None);
+    }
+}
+
+#[cfg(test)]
+mod build_layout_tests {
+    use super::*;
+    use serde_json::json;
+    use std::cell::RefCell;
+
+    const PROJECT_TEXT: &str = r#"{"layout":{"panes":[{"name":"agent","command":"evil"},
+        {"name":"sh","command":"worse","split":{"direction":"down"}}]}}"#;
+
+    fn sources(text: &str) -> trust::Sources {
+        trust::Sources {
+            root: "/work/app".into(),
+            project: Some(("/work/app/.poimen/config.json".into(), text.into())),
+            legacy: None,
+        }
+    }
+
+    fn run(
+        sources: &trust::Sources,
+        user: Option<&layout::Layout>,
+        allow: bool,
+    ) -> Vec<(String, Value)> {
+        let calls = RefCell::new(Vec::new());
+        let call = |method: &str, params: Value| -> Result<Value, String> {
+            let mut c = calls.borrow_mut();
+            let n = c.len();
+            c.push((method.to_owned(), params));
+            Ok(match method {
+                "pane.split" => json!({ "pane": { "pane_id": format!("w1:p{}", n + 10) } }),
+                _ => json!({}),
+            })
+        };
+        let created = json!({ "root_pane": { "pane_id": "w1:root" } });
+        let warnings = build_layout(&call, "/work/app", &created, sources, user, allow);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        calls.into_inner()
+    }
+
+    fn typed(calls: &[(String, Value)]) -> Vec<&Value> {
+        calls
+            .iter()
+            .filter(|(m, _)| m == "pane.send_input")
+            .map(|(_, p)| p)
+            .collect()
+    }
+
+    #[test]
+    fn untrusted_project_layout_builds_panes_but_types_nothing() {
+        let calls = run(&sources(PROJECT_TEXT), None, false);
+        let methods: Vec<_> = calls.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(
+            methods,
+            ["pane.rename", "pane.split", "pane.rename"],
+            "{calls:?}"
+        );
+        assert!(typed(&calls).is_empty());
+    }
+
+    #[test]
+    fn trusted_project_layout_types_its_commands() {
+        let calls = run(&sources(PROJECT_TEXT), None, true);
+        assert_eq!(typed(&calls).len(), 2);
+    }
+
+    #[test]
+    fn the_user_layout_needs_no_trust() {
+        let user = layout::default_layout();
+        // No project layout: the user's `claude` is typed although project commands are blocked.
+        let calls = run(&sources("{\"setup\":\"make\"}"), Some(&user), false);
+        assert_eq!(typed(&calls).len(), 1);
+        let calls = run(&trust::Sources::default(), Some(&user), false);
+        assert_eq!(typed(&calls).len(), 1);
     }
 }

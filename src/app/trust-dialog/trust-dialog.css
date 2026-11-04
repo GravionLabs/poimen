@@ -1,0 +1,134 @@
+.backdrop {
+  all: unset;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 35%);
+}
+
+.dialog {
+  position: fixed;
+  z-index: 61;
+  top: 20vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(480px, 90vw);
+  padding: 16px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 8px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 30%);
+  font-size: 13px;
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+label + label {
+  margin-top: 8px;
+}
+
+.path-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field {
+  padding: 5px 8px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.path {
+  flex: 1;
+  min-width: 0;
+}
+
+.hint {
+  margin: 8px 0 0;
+  opacity: 0.7;
+}
+
+.error {
+  margin: 8px 0 0;
+  color: #c0392b;
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+button {
+  padding: 4px 12px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.close-error {
+  position: fixed;
+  z-index: 62;
+  right: 16px;
+  bottom: 32px;
+  max-width: 420px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid #c0392b;
+  border-radius: 6px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  font-size: 12px;
+}
+
+.trust {
+  width: min(640px, 92vw);
+}
+
+.commands {
+  max-height: 40vh;
+  margin: 10px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.commands li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-top: 1px solid var(--h-content-border-color);
+}
+
+.what {
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

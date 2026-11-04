@@ -37,7 +37,7 @@ export class SpaceDialog {
 
   protected async submit(): Promise<void> {
     const outcome = await this.actions.create(this.path(), this.label());
-    if (outcome) this.reset();
+    if (outcome || this.actions.trust()) this.reset();
   }
 
   protected async confirmClose(): Promise<void> {

@@ -193,6 +193,15 @@ export class SettingsView {
     void this.store.setExplorerRoots(moved(this.settings().explorerRoots, index, delta));
   }
 
+  /** The repositories whose project file is trusted, sorted. */
+  protected readonly trustedRoots = computed(() =>
+    Object.keys(this.settings().trustedProjects).sort((a, b) => a.localeCompare(b)),
+  );
+
+  protected revokeProject(root: string): void {
+    void this.store.revokeProject(root);
+  }
+
   protected setShowHidden(event: Event): void {
     void this.store.setExplorerShowHidden((event.target as HTMLInputElement).checked);
   }
