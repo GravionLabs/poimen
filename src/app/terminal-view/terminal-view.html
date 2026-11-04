@@ -1,5 +1,6 @@
 @if (isAgent()) {
-  <app-prompt-bar [pane]="pane()" />
+  <!-- Hidden, not destroyed, in control mode: the typed text survives; the body observer refits. -->
+  <app-prompt-bar [pane]="pane()" [hidden]="mode() !== 'observe'" />
 }
 @if (blocked(); as why) {
   @if (!banner()) {

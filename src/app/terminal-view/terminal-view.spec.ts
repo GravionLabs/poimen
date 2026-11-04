@@ -99,7 +99,7 @@ beforeAll(() => {
 
 afterEach(() => TestBed.resetTestingModule());
 
-async function setup(wanted: "control" | "observe") {
+async function setup(wanted: "control" | "observe", target: Pane = pane) {
   fake.cols = 80;
   fake.nextCols = 80;
   fake.observers = [];
@@ -140,7 +140,7 @@ async function setup(wanted: "control" | "observe") {
   // The same goes for signal inputs.
   Object.assign(fixture.componentInstance, {
     body: () => ({ nativeElement: body }),
-    pane: signal(pane),
+    pane: signal(target),
     wanted: signal(wanted),
   });
   const modes: { mode: string; blocked: string | null }[] = [];
@@ -891,5 +891,43 @@ describe("TerminalView copy and paste (#35)", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("TerminalView prompt bar (#293)", () => {
+  const bar = (fixture: { nativeElement: HTMLElement }) =>
+    fixture.nativeElement.querySelector("app-prompt-bar") as HTMLElement | null;
+  const agentPane: Pane = { ...pane, agent: "claude" };
+
+  it("is not rendered in a terminal tab without an agent", async () => {
+    const { fixture } = await setup("observe");
+    expect(bar(fixture)).toBeNull();
+  });
+
+  it("is shown in read-only mode", async () => {
+    const { fixture } = await setup("observe", agentPane);
+    expect(bar(fixture)!.hidden).toBe(false);
+  });
+
+  it("is hidden in control mode but stays in the DOM, so its text survives", async () => {
+    const { fixture, send } = await setup("control", agentPane);
+    await send(0, { type: "frame", width: 80, height: 24, bytes: "" } as StreamRecord);
+    fixture.detectChanges();
+    expect(bar(fixture)!.hidden).toBe(true);
+  });
+
+  it("toggles live when the mode changes", async () => {
+    const { fixture } = await setup("observe", agentPane);
+    fixture.componentInstance.mode.set("control");
+    fixture.detectChanges();
+    expect(bar(fixture)!.hidden).toBe(true);
+    fixture.componentInstance.mode.set("observe");
+    fixture.detectChanges();
+    expect(bar(fixture)!.hidden).toBe(false);
+  });
+
+  it("collapses the hidden bar although the component sets display", () => {
+    const css = readFileSync("src/app/terminal-view/terminal-view.css", "utf8");
+    expect(css).toMatch(/app-prompt-bar\[hidden\]\s*\{[^}]*display:\s*none/);
   });
 });
