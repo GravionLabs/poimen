@@ -320,6 +320,89 @@ impl Attachment {
     }
 }
 
+/// The write half of an attachment, for another thread than the one reading records. Requests
+/// are sent on the attached connection (so the server applies the controller rules) and their
+/// responses are not awaited: [`Attachment::next_record`] skips them.
+pub struct AttachmentWriter {
+    #[cfg(unix)]
+    stream: Stream,
+    terminal_id: String,
+}
+
+impl Attachment {
+    /// A writer on the same connection. Closing it ends the attachment and makes a blocked
+    /// [`Attachment::next_record`] fail.
+    #[cfg(unix)]
+    pub fn writer(&self) -> Result<AttachmentWriter, ClientError> {
+        let stream = self
+            .conn
+            .reader
+            .get_ref()
+            .try_clone()
+            .map_err(ClientError::Io)?;
+        Ok(AttachmentWriter {
+            stream,
+            terminal_id: self.info.terminal_id.clone(),
+        })
+    }
+
+    #[cfg(not(unix))]
+    pub fn writer(&self) -> Result<AttachmentWriter, ClientError> {
+        unreachable!("connect_stream fails off Unix")
+    }
+}
+
+impl AttachmentWriter {
+    /// Input for the terminal (accepted from the controller only).
+    pub fn input(&mut self, data: &str) -> Result<(), ClientError> {
+        let params = to_value(&TerminalInput {
+            terminal_id: self.terminal_id.clone(),
+            data: data.into(),
+        });
+        self.send("terminal.input", params)
+    }
+
+    /// Resizes the terminal (accepted from the controller only).
+    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), ClientError> {
+        let params = to_value(&TerminalResize {
+            terminal_id: self.terminal_id.clone(),
+            cols,
+            rows,
+        });
+        self.send("terminal.resize", params)
+    }
+
+    /// Ends the attachment; the terminal keeps running.
+    #[cfg(unix)]
+    pub fn close(&self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+    }
+
+    #[cfg(not(unix))]
+    pub fn close(&self) {}
+
+    #[cfg(unix)]
+    fn send(&mut self, method: &str, params: Value) -> Result<(), ClientError> {
+        let request = Request {
+            id: next_id(),
+            method: method.into(),
+            params,
+        };
+        let mut line =
+            serde_json::to_string(&request).map_err(|e| ClientError::Protocol(e.to_string()))?;
+        line.push('\n');
+        self.stream
+            .write_all(line.as_bytes())
+            .and_then(|()| self.stream.flush())
+            .map_err(ClientError::Io)
+    }
+
+    #[cfg(not(unix))]
+    fn send(&mut self, _: &str, _: Value) -> Result<(), ClientError> {
+        unreachable!("connect_stream fails off Unix")
+    }
+}
+
 fn to_value<T: serde::Serialize>(params: &T) -> Value {
     // The protocol types always serialize.
     serde_json::to_value(params).unwrap_or_else(|_| json!({}))
@@ -534,6 +617,55 @@ mod tests {
             Err(ClientError::Protocol(_))
         ));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn an_attachment_writer_sends_on_the_same_connection_and_close_ends_the_reader() {
+        let path = temp_socket("writer");
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut attach = String::new();
+            reader.read_line(&mut attach).unwrap();
+            let id = serde_json::from_str::<Value>(&attach).unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            writeln!(
+                stream,
+                r#"{{"id":"{id}","result":{{"terminal_id":"t1","seq":0,"cols":80,"rows":24,"mode":"control","snapshot":""}}}}"#
+            )
+            .unwrap();
+            let mut input = String::new();
+            reader.read_line(&mut input).unwrap();
+            // The response to the input must not confuse the reader.
+            writeln!(stream, r#"{{"id":"x","result":{{}}}}"#).unwrap();
+            writeln!(
+                stream,
+                r#"{{"event":"terminal.output","data":{{"terminal_id":"t1","seq":1,"data":"YQ=="}}}}"#
+            )
+            .unwrap();
+            let mut rest = String::new();
+            // Ends when the client closes its writer.
+            reader.read_line(&mut rest).unwrap();
+            input
+        });
+        let mut attachment = Client::new(&path)
+            .attach("t1", AttachMode::Control, false)
+            .unwrap();
+        let mut writer = attachment.writer().unwrap();
+        writer.input("ls\r").unwrap();
+        assert!(matches!(
+            attachment.next_record().unwrap(),
+            Event::TerminalOutput { seq: 1, .. }
+        ));
+        writer.close();
+        assert!(attachment.next_record().is_err());
+        let input = server.join().unwrap();
+        assert!(input.contains(r#""method":"terminal.input""#));
+        assert!(input.contains(r#""terminal_id":"t1""#));
+        assert!(input.contains(r#""data":"ls\r""#));
     }
 
     #[test]

@@ -75,7 +75,7 @@ export interface HerdrEvent {
 export type Mode = "observe" | "control";
 
 /**
- * One record of a terminal stream (payload of the `terminal` Tauri event, per session id), the same
+ * One record of a terminal stream (sent through the channel of `open_terminal`), the same
  * for every backend. `bytes` is base64.
  */
 export type StreamRecord =
@@ -87,9 +87,14 @@ export type StreamRecord =
       type: "closed";
       reason: string;
       exit_code?: number;
-      /** Set when the reason is more than text; `controller_held`: another client is the controller. */
-      code?: "controller_held";
-    };
+      /**
+       * Set when the reason is more than text; `controller_held`: another client is the
+       * controller; `exited`: the process ended (`exit_code` says how) and its last screen stays.
+       */
+      code?: "controller_held" | "exited";
+    }
+  /** Raw PTY bytes of an emulated stream (an `ArrayBuffer` over the channel). */
+  | { type: "bytes"; data: Uint8Array };
 
 /** What `open_terminal` answers: the stream id and whether the stream is emulated. */
 export interface OpenedStream {
@@ -338,9 +343,9 @@ export interface HerdrInfo {
   supported: number;
 }
 
-/** `herdr <version>`, or `herdr ?` when herdr is unreachable or too old to report it. */
-export function herdrVersionLabel(info: HerdrInfo | null | undefined): string {
-  return info?.version ? `herdr ${info.version}` : "herdr ?";
+/** `herdr <version>`, or `herdr ?` when herdr is unreachable or too old to report it; `backend` names another server. */
+export function herdrVersionLabel(info: HerdrInfo | null | undefined, backend = "herdr"): string {
+  return info?.version ? `${backend} ${info.version}` : `${backend} ?`;
 }
 
 /** `poimen <version>`, or `poimen ?` until the build version is known. */
@@ -349,9 +354,9 @@ export function appVersionLabel(version: string | null | undefined): string {
 }
 
 /** The tooltip warning for a herdr protocol other than the supported one; empty when it matches or is unknown. */
-export function protocolWarning(info: HerdrInfo | null | undefined): string {
+export function protocolWarning(info: HerdrInfo | null | undefined, backend = "herdr"): string {
   if (!info || info.protocol == null || info.protocol === info.supported) return "";
-  return `herdr protocol ${info.protocol}, poimen supports ${info.supported}`;
+  return `${backend} protocol ${info.protocol}, poimen supports ${info.supported}`;
 }
 
 /** Where a split puts the new pane (`pane.split` direction). */

@@ -36,6 +36,8 @@ app-prompt-bar[hidden] {
   display: flex;
   padding: 4px 0 0 6px;
   background: var(--term-bg);
+  /* An emulated observer renders at the controller's size; what does not fit is clipped. */
+  overflow: hidden;
 }
 
 .view-body {

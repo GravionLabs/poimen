@@ -128,7 +128,11 @@ export interface Settings {
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
   explorerShowHidden: boolean;
-  /** Start the herdr server when it is not running (`herdr.autoStart`). */
+  /** The terminal backend (`backend`); a change needs a restart. */
+  backend: BackendKind;
+  /** Lines of scrollback xterm.js keeps on an emulated stream (`terminal.scrollback`). */
+  scrollback: number;
+  /** Start the backend's server when it is not running (`herdr.autoStart`). */
   herdrAutoStart: boolean;
   /** System notification when an agent turns blocked (`notifications.blocked`). */
   notifyOnBlocked: boolean;
@@ -150,6 +154,9 @@ export function nextTheme(theme: ThemeSetting): ThemeSetting {
   return theme === "system" ? "light" : theme === "light" ? "dark" : "system";
 }
 
+/** The terminal backend poimen talks to: herdr (default) or poimen-server. */
+export type BackendKind = "herdr" | "poimen";
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   colorSchema: null,
@@ -162,6 +169,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarLayout: "tree",
   explorerRoots: ["~"],
   explorerShowHidden: false,
+  backend: "herdr",
+  scrollback: 10000,
   herdrAutoStart: true,
   notifyOnBlocked: true,
   notifyOnDone: true,
@@ -256,6 +265,13 @@ export function parseSettings(raw: unknown): Settings {
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
+    backend: r["backend"] === "poimen" ? "poimen" : "herdr",
+    scrollback:
+      typeof r["scrollback"] === "number" &&
+      Number.isInteger(r["scrollback"]) &&
+      r["scrollback"] >= 0
+        ? r["scrollback"]
+        : DEFAULT_SETTINGS.scrollback,
     herdrAutoStart: r["herdrAutoStart"] !== false,
     notifyOnBlocked: r["notifyOnBlocked"] !== false,
     notifyOnDone: r["notifyOnDone"] !== false,

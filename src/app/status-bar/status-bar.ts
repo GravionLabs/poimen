@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
 import { errorTitle, type UpdateState } from "../core/updater";
+import type { BackendKind } from "../core/settings";
 import type { ConnectionState } from "../core/herdr-store";
 import {
   appVersionLabel,
@@ -10,14 +11,14 @@ import {
 } from "../core/herdr";
 
 /** The connection as one line of text. */
-export function connectionLabel(c: ConnectionState): string {
+export function connectionLabel(c: ConnectionState, backend = "herdr"): string {
   switch (c.state) {
     case "connected":
-      return "herdr connected";
+      return `${backend} connected`;
     case "reconnecting":
-      return c.reason ? `herdr reconnecting: ${c.reason}` : "herdr reconnecting";
+      return c.reason ? `${backend} reconnecting: ${c.reason}` : `${backend} reconnecting`;
     case "unreachable":
-      return c.reason ? `herdr unreachable: ${c.reason}` : "herdr unreachable";
+      return c.reason ? `${backend} unreachable: ${c.reason}` : `${backend} unreachable`;
   }
 }
 
@@ -57,6 +58,8 @@ export class StatusBar {
   readonly size = input<{ cols: number; rows: number }>();
   readonly appVersion = input<string | null>(null);
   readonly info = input<HerdrInfo | null>(null);
+  /** The backend this run talks to; names the connection and the server version. */
+  readonly backend = input<BackendKind>("herdr");
   /** A notice such as a pane layout problem of a new space; empty hides it. */
   readonly notice = input<string | null>(null);
   /** Whether the bottom panel is shown; while it is closed a button shows it again. */

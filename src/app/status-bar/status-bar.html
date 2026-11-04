@@ -19,8 +19,8 @@
       }
     </section>
   }
-  <span class="item conn {{ connection().state }}" [title]="label(connection())">
-    <span class="dot"></span>{{ label(connection()) }}
+  <span class="item conn {{ connection().state }}" [title]="label(connection(), backend())">
+    <span class="dot"></span>{{ label(connection(), backend()) }}
   </span>
   <button
     type="button"
@@ -84,9 +84,9 @@
   <span class="item version">{{ appLabel(appVersion()) }}</span>
   <span
     class="item version"
-    [class.warn]="warning(info()) !== ''"
-    [title]="warning(info()) || herdrLabel(info())"
-    >{{ herdrLabel(info()) }}</span
+    [class.warn]="warning(info(), backend()) !== ''"
+    [title]="warning(info(), backend()) || herdrLabel(info(), backend())"
+    >{{ herdrLabel(info(), backend()) }}</span
   >
   @switch (update().kind) {
     @case ("checking") {

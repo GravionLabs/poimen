@@ -193,6 +193,10 @@ impl Backend for FakeBackend {
         })
     }
 
+    fn emulated(&self) -> bool {
+        self.emulated
+    }
+
     fn stream_input(&self, id: u32, text: &str) -> Result<(), String> {
         self.record(format!("stream_input {id} {text}")).map(drop)
     }

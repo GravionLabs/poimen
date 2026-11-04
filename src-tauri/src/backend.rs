@@ -58,6 +58,8 @@ pub enum StartError {
     Exited,
     /// The started server speaks an older protocol than poimen supports.
     ProtocolTooOld { version: String, protocol: u32 },
+    /// Another backend's start failed; the text is the whole message.
+    Other(String),
 }
 
 impl fmt::Display for StartError {
@@ -81,6 +83,7 @@ impl fmt::Display for StartError {
                 f,
                 "herdr {version} speaks protocol {protocol}, poimen needs {SUPPORTED_PROTOCOL}; update herdr"
             ),
+            StartError::Other(message) => write!(f, "{message}"),
         }
     }
 }
@@ -138,6 +141,8 @@ pub enum CloseCode {
     /// Another client holds the controller; the stream can be reopened as an observer or with a
     /// takeover.
     ControllerHeld,
+    /// The terminal's process ended (`exit_code` says how); the last screen stays.
+    Exited,
 }
 
 /// One record of a terminal stream, the same for every backend. `bytes` is base64.
@@ -230,6 +235,9 @@ pub trait Backend: Send + Sync {
         request: StreamRequest<'_>,
         on_record: OnRecord,
     ) -> Result<OpenedStream, String>;
+    /// Whether streams carry raw PTY bytes (xterm.js tracks the modes) rather than finished
+    /// frames.
+    fn emulated(&self) -> bool;
     fn stream_input(&self, id: u32, text: &str) -> Result<(), String>;
     fn stream_resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String>;
     /// Only for rendered streams.
@@ -560,6 +568,10 @@ impl<R: Runner + Send + Sync> Backend for HerdrBackend<R> {
             id,
             emulated: false,
         })
+    }
+
+    fn emulated(&self) -> bool {
+        false
     }
 
     fn stream_input(&self, id: u32, text: &str) -> Result<(), String> {

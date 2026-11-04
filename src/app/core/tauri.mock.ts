@@ -22,8 +22,14 @@ function tauriMock() {
     };
   });
 
+  /** Stand-in for Tauri's `Channel`: a test pushes messages through `onmessage`. */
+  class Channel<T = unknown> {
+    onmessage: (message: T) => void = () => {};
+  }
+
   return {
     invoke,
+    Channel,
     listen,
     unlisten,
     /** Sets how `command` answers (a thrown error rejects the call). */

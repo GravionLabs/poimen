@@ -14,6 +14,7 @@ mod herdr;
 mod layout;
 #[cfg(test)]
 mod live;
+mod poimen_backend;
 mod poimen_server;
 mod project;
 mod schemes;
@@ -31,12 +32,13 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
 use backend::{Backend, Mode, SplitDirection, StreamRequest};
 
-/// The backend the commands talk to (herdr today).
+/// The backend the commands talk to (herdr or poimen-server, see the `backend` setting).
 type Shared = std::sync::Arc<dyn Backend>;
 
 /// Serializes `ensure_backend`.
@@ -472,6 +474,14 @@ async fn list_child_dirs(path: String, hidden: bool) -> Result<Vec<spaces::DirEn
     .map_err(|e| e.to_string())
 }
 
+/// The backend this run talks to (`herdr` or `poimen`), fixed at start from the `backend` setting.
+struct BackendKind(&'static str);
+
+#[tauri::command]
+fn backend_kind(kind: State<'_, BackendKind>) -> &'static str {
+    kind.0
+}
+
 /// Version and protocol of the running backend; `None` when unreachable or too old.
 #[tauri::command]
 async fn herdr_info(backend: State<'_, Shared>) -> Result<Option<backend::BackendInfo>, String> {
@@ -498,7 +508,7 @@ async fn ensure_backend(
 }
 
 /// Starts `poimen-server` when none answers (never stops it); the status is `already-running`,
-/// `started` or `disabled`. Not used by the UI until the `backend` setting exists.
+/// `started` or `disabled`. The UI starts the selected backend through `ensure_backend`.
 #[tauri::command]
 async fn ensure_poimen_server(auto_start: bool) -> Result<&'static str, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -704,18 +714,48 @@ fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
     }
 }
 
-/// Opens a terminal stream; records arrive as `terminal` events. The result says whether the
-/// stream is emulated (raw PTY bytes) or rendered (finished frames).
+/// What goes over the channel of a stream for one record. On an emulated stream the PTY bytes
+/// (snapshot and output) are sent raw, which the webview receives as an `ArrayBuffer`; the other
+/// records are JSON. A rendered stream (herdr frames) sends JSON only.
+fn channel_messages(record: &backend::StreamRecord, emulated: bool) -> Vec<InvokeResponseBody> {
+    use backend::StreamRecord;
+    let json = |record: &StreamRecord| {
+        InvokeResponseBody::Json(serde_json::to_string(record).unwrap_or_default())
+    };
+    let decode = |bytes: &str| poimen_client::protocol::decode_bytes(bytes).unwrap_or_default();
+    match record {
+        StreamRecord::Output { bytes } if emulated => {
+            vec![InvokeResponseBody::Raw(decode(bytes))]
+        }
+        // The reset announces the size and clears the screen; the snapshot follows as raw bytes.
+        StreamRecord::Reset { cols, rows, bytes } if emulated => {
+            let mut messages = vec![json(&StreamRecord::Reset {
+                cols: *cols,
+                rows: *rows,
+                bytes: String::new(),
+            })];
+            let snapshot = decode(bytes);
+            if !snapshot.is_empty() {
+                messages.push(InvokeResponseBody::Raw(snapshot));
+            }
+            messages
+        }
+        other => vec![json(other)],
+    }
+}
+
+/// Opens a terminal stream; its records go through `on_record`, a channel of this stream (no
+/// global event, so no record is lost or mixed up before the view has its id). The result says
+/// whether the stream is emulated (raw PTY bytes) or rendered (finished frames).
 #[tauri::command]
-#[allow(clippy::too_many_arguments)] // Tauri injects app/state; the rest is the IPC payload.
 fn open_terminal(
-    app: AppHandle,
     backend: State<'_, Shared>,
     mode: Mode,
     target: String,
     cols: u16,
     rows: u16,
     takeover: bool,
+    on_record: Channel<InvokeResponseBody>,
 ) -> Result<backend::OpenedStream, String> {
     let request = StreamRequest {
         mode,
@@ -724,10 +764,13 @@ fn open_terminal(
         rows,
         takeover,
     };
+    let emulated = backend.emulated();
     backend.open_stream(
         request,
-        Box::new(move |id, record| {
-            let _ = app.emit("terminal", json!({ "id": id, "record": record }));
+        Box::new(move |_, record| {
+            for message in channel_messages(&record, emulated) {
+                let _ = on_record.send(message);
+            }
         }),
     )
 }
@@ -913,14 +956,27 @@ fn build_menu(
     Ok(menu)
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+/// The backend named by the `backend` setting (anything but `poimen` is herdr) and its name.
+fn make_backend(kind: &str) -> (Shared, &'static str) {
+    if kind == "poimen" {
+        let backend = poimen_backend::PoimenBackend::new(poimen_client::Client::default());
+        return (std::sync::Arc::new(backend), "poimen");
+    }
     let client = herdr::Client::from_env();
-    let backend: Shared = std::sync::Arc::new(backend::HerdrBackend::new(
+    let backend = backend::HerdrBackend::new(
         backend::SystemRunner::new(client.clone()),
         client,
         stream::resolve_bin_from_env(),
-    ));
+    );
+    (std::sync::Arc::new(backend), "herdr")
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let kind = home_dir()
+        .map(|h| settings::load(&h).backend)
+        .unwrap_or_default();
+    let (backend, kind) = make_backend(&kind);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -929,6 +985,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::PendingUpdate::default())
         .manage(backend.clone())
+        .manage(BackendKind(kind))
         .manage::<GithubClient>(std::sync::Arc::new(github::Client::system(
             home_dir()
                 .map(|h| {
@@ -984,6 +1041,7 @@ pub fn run() {
             snapshot,
             herdr_info,
             ensure_backend,
+            backend_kind,
             ensure_poimen_server,
             set_herdr_auto_start,
             set_notification,
@@ -1295,5 +1353,85 @@ mod build_layout_tests {
                 bytes: "AA==".into()
             }]
         );
+    }
+
+    fn raw(body: &InvokeResponseBody) -> Option<&[u8]> {
+        match body {
+            InvokeResponseBody::Raw(bytes) => Some(bytes),
+            InvokeResponseBody::Json(_) => None,
+        }
+    }
+
+    fn text(body: &InvokeResponseBody) -> Option<&str> {
+        match body {
+            InvokeResponseBody::Json(text) => Some(text),
+            InvokeResponseBody::Raw(_) => None,
+        }
+    }
+
+    #[test]
+    fn emulated_output_goes_over_the_channel_as_raw_bytes() {
+        let messages = channel_messages(
+            &StreamRecord::Output {
+                bytes: "aGk=".into(),
+            },
+            true,
+        );
+        assert_eq!(messages.len(), 1);
+        assert_eq!(raw(&messages[0]), Some(&b"hi"[..]));
+    }
+
+    #[test]
+    fn an_emulated_snapshot_is_a_json_reset_without_bytes_then_raw_bytes() {
+        let record = StreamRecord::Reset {
+            cols: 90,
+            rows: 30,
+            bytes: "aGk=".into(),
+        };
+        let messages = channel_messages(&record, true);
+        assert_eq!(messages.len(), 2);
+        let head: serde_json::Value = serde_json::from_str(text(&messages[0]).unwrap()).unwrap();
+        assert_eq!(
+            head,
+            json!({"type": "reset", "cols": 90, "rows": 30, "bytes": ""})
+        );
+        assert_eq!(raw(&messages[1]), Some(&b"hi"[..]));
+    }
+
+    #[test]
+    fn an_empty_snapshot_sends_only_the_reset() {
+        let record = StreamRecord::Reset {
+            cols: 80,
+            rows: 24,
+            bytes: String::new(),
+        };
+        assert_eq!(channel_messages(&record, true).len(), 1);
+    }
+
+    #[test]
+    fn other_records_and_rendered_streams_are_json() {
+        let closed = StreamRecord::Closed {
+            reason: "x".into(),
+            exit_code: None,
+            code: Some(backend::CloseCode::Exited),
+        };
+        let messages = channel_messages(&closed, true);
+        let value: serde_json::Value = serde_json::from_str(text(&messages[0]).unwrap()).unwrap();
+        assert_eq!(value["code"], "exited");
+        let frame = StreamRecord::Output {
+            bytes: "aGk=".into(),
+        };
+        let messages = channel_messages(&frame, false);
+        let value: serde_json::Value = serde_json::from_str(text(&messages[0]).unwrap()).unwrap();
+        assert_eq!(value, json!({"type": "output", "bytes": "aGk="}));
+    }
+
+    #[test]
+    fn the_backend_setting_picks_the_backend_and_unknown_means_herdr() {
+        assert_eq!(make_backend("poimen").1, "poimen");
+        assert_eq!(make_backend("herdr").1, "herdr");
+        assert_eq!(make_backend("").1, "herdr");
+        assert!(make_backend("poimen").0.emulated());
+        assert!(!make_backend("herdr").0.emulated());
     }
 }

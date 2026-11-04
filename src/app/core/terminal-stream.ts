@@ -1,10 +1,10 @@
-import { DestroyRef, Injectable, inject } from "@angular/core";
+import { Injectable, inject } from "@angular/core";
 import type { Mode, OpenedStream, StreamRecord } from "./herdr";
-import { TauriBridge, type Unlisten } from "./tauri";
+import { TauriBridge } from "./tauri";
 
 export interface OpenTerminal {
   mode: Mode;
-  /** The herdr pane id. */
+  /** The backend's terminal id (herdr: the pane id). */
   target: string;
   cols: number;
   rows: number;
@@ -19,12 +19,6 @@ export interface MouseCommand {
   column: number;
   row: number;
   modifiers: number;
-}
-
-/** Payload of the `terminal` Tauri event. */
-interface TerminalEvent {
-  id: number;
-  record: StreamRecord;
 }
 
 /**
@@ -42,7 +36,6 @@ export class TerminalSession {
      */
     readonly emulated: boolean,
     private readonly bridge: TauriBridge,
-    private readonly release: (id: number) => void,
   ) {}
 
   /** `false` once the stream ended (closed record or {@link close}). */
@@ -78,80 +71,60 @@ export class TerminalSession {
     void this.bridge.invoke("close_terminal", { id: this.id });
   }
 
-  /** The backend ended the stream: forget the route, but there is nothing left to close. */
+  /** The backend ended the stream: there is nothing left to close. */
   ended(): void {
     this.closed = true;
-    this.release(this.id);
   }
 }
 
+/** What arrives on the channel of a stream: a JSON record, or raw PTY bytes of an emulated stream. */
+type ChannelMessage = StreamRecord | ArrayBuffer | ArrayBufferView;
+
+/** The record for a message of the channel. */
+export function recordOf(message: ChannelMessage): StreamRecord {
+  if (message instanceof ArrayBuffer) return { type: "bytes", data: new Uint8Array(message) };
+  if (ArrayBuffer.isView(message)) {
+    const { buffer, byteOffset, byteLength } = message;
+    return { type: "bytes", data: new Uint8Array(buffer, byteOffset, byteLength) };
+  }
+  return message;
+}
+
 /**
- * Owns the `terminal` event subscription. The backend emits the records of every stream on the one
- * event; this service routes them by session id to the view that opened the stream and drops
- * records of ids it does not know (late frames of a stream that was closed).
+ * Opens terminal streams. Each stream has a channel of its own that the backend pushes its records
+ * through (raw bytes as an `ArrayBuffer` on an emulated stream), so there is no global event to
+ * route and nothing to hold back for a stream whose id is not known yet: the view that opened the
+ * stream gets its records from the first one on.
  */
 @Injectable({ providedIn: "root" })
 export class TerminalStreamService {
   private readonly bridge = inject(TauriBridge);
-  private readonly routes = new Map<number, (record: StreamRecord) => void>();
-  /** Streams being opened: records of ids not routed yet are held for them. */
-  private opening = 0;
-  private readonly early = new Map<number, StreamRecord[]>();
-  private readonly ready: Promise<Unlisten>;
-
-  constructor() {
-    this.ready = this.bridge.listen<TerminalEvent>("terminal", ({ id, record }) =>
-      this.deliver(id, record),
-    );
-    inject(DestroyRef).onDestroy(() => {
-      this.routes.clear();
-      void this.ready.then((stop) => stop());
-    });
-  }
-
-  private deliver(id: number, record: StreamRecord): void {
-    const route = this.routes.get(id);
-    if (route) route(record);
-    else if (this.opening > 0) this.early.set(id, [...(this.early.get(id) ?? []), record]);
-  }
-
-  /** Number of streams that currently receive records. */
-  get size(): number {
-    return this.routes.size;
-  }
 
   /**
-   * Opens a stream; `onRecord` gets its frames and, last, its closed record. Rejects with the
-   * backend's error (for example, another controller holds the terminal).
+   * Opens a stream; `onRecord` gets its records and, last, its closed record (possibly before this
+   * call returns). Rejects with the backend's error (for example, the terminal does not exist).
    */
   async open(
     options: OpenTerminal,
     onRecord: (record: StreamRecord) => void,
   ): Promise<TerminalSession> {
-    await this.ready;
-    this.opening++;
-    let opened: OpenedStream;
-    try {
-      // The backend emits as soon as the child runs, possibly before this call resolves.
-      opened = await this.bridge.invoke<OpenedStream>("open_terminal", { ...options });
-    } catch (err) {
-      this.opening--;
-      if (this.opening === 0) this.early.clear();
-      throw err;
-    }
-    this.opening--;
-    const id = opened.id;
-    const session = new TerminalSession(id, opened.emulated, this.bridge, (gone) =>
-      this.routes.delete(gone),
-    );
-    this.routes.set(id, (record) => {
-      if (record.type === "closed") session.ended();
+    // The session exists only once `open_terminal` answered; a closed record may come before.
+    const state: { session?: TerminalSession; closed: boolean } = { closed: false };
+    const channel = this.bridge.channel<ChannelMessage>((message) => {
+      const record = recordOf(message);
+      if (record.type === "closed") {
+        state.closed = true;
+        state.session?.ended();
+      }
       onRecord(record);
     });
-    const held = this.early.get(id) ?? [];
-    this.early.delete(id);
-    if (this.opening === 0) this.early.clear();
-    for (const record of held) this.routes.get(id)?.(record);
+    const opened = await this.bridge.invoke<OpenedStream>("open_terminal", {
+      ...options,
+      onRecord: channel,
+    });
+    const session = new TerminalSession(opened.id, opened.emulated, this.bridge);
+    state.session = session;
+    if (state.closed) session.ended();
     return session;
   }
 }

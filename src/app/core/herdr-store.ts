@@ -13,6 +13,7 @@ import {
   type Snapshot,
   type BranchPull,
 } from "./herdr";
+import type { BackendKind } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 
 /** Delay that collapses a burst of herdr events into one re-read. */
@@ -55,12 +56,15 @@ export class HerdrStore {
   private readonly _info = signal<HerdrInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
   private readonly _backend = signal<BackendStatus | null>(null);
+  private readonly _backendKind = signal<BackendKind>("herdr");
 
   readonly snapshot = this._snapshot.asReadonly();
   /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
   readonly loaded = this._loaded.asReadonly();
   /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
   readonly info = this._info.asReadonly();
+  /** The backend of this run (`backend` setting at start); herdr until the app has said otherwise. */
+  readonly backendKind = this._backendKind.asReadonly();
   /** The last result of starting herdr; `null` before the first one. */
   readonly backend = this._backend.asReadonly();
   /** Why herdr could not be started; `null` when it ran, started or auto start is off. */
@@ -121,6 +125,7 @@ export class HerdrStore {
     this.unlisten = this.bridge.listen<HerdrEvent>("herdr", (event) => this.handle(event));
     await this.unlisten;
     void this.readAppVersion();
+    await this.readBackendKind();
     const started = this.ensureBackend(false);
     await this.refresh();
     await started;
@@ -185,6 +190,16 @@ export class HerdrStore {
       this._appVersion.set((await this.bridge.invoke<string | undefined>("app_version")) ?? null);
     } catch {
       // stays unknown
+    }
+  }
+
+  /** Which backend this run talks to; a failure keeps herdr. */
+  private async readBackendKind(): Promise<void> {
+    try {
+      const kind = await this.bridge.invoke<string | undefined>("backend_kind");
+      this._backendKind.set(kind === "poimen" ? "poimen" : "herdr");
+    } catch {
+      // stays herdr
     }
   }
 
