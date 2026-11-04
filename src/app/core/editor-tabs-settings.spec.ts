@@ -3,7 +3,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { EditorTabs, GITHUB_TAB, SETTINGS_TAB, parseEditor, tabKind } from "./editor-tabs";
-import { UI_STORAGE, UI_STATE_KEY } from "./ui-state";
+import { UI_STORAGE, UI_STATE_KEY, UiState } from "./ui-state";
 
 beforeAll(() => {
   getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
@@ -33,6 +33,14 @@ describe("settings tab", () => {
     expect(ids()).toEqual(["a", SETTINGS_TAB]);
     expect(tabs.activeId()).toBe(SETTINGS_TAB);
     expect(tabs.tabs()[1].pinned).toBe(true);
+  });
+
+  it("opens the settings tab on a given page (deep link)", () => {
+    tabs.openSettings("notifications");
+    expect(tabs.activeId()).toBe(SETTINGS_TAB);
+    expect(TestBed.inject(UiState).settingsPage()).toBe("notifications");
+    tabs.openSettings();
+    expect(TestBed.inject(UiState).settingsPage()).toBe("notifications");
   });
 
   it("is neither replaced by a preview pane nor replaces one", () => {
