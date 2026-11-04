@@ -1,0 +1,322 @@
+//! The server end to end: a real socket, a real shell in a temp dir, the real client.
+#![cfg(unix)]
+
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use poimen_client::protocol::{ErrorCode, Event, TerminalCreate, TerminalStatus};
+use poimen_client::{Client, ClientError};
+use poimen_server::{Config, Server, StartError};
+
+struct Env {
+    dir: PathBuf,
+}
+
+impl Env {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("poimen-it-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("work")).unwrap();
+        Self { dir }
+    }
+
+    fn config(&self) -> Config {
+        Config {
+            socket: self.dir.join("run").join("server.sock"),
+            state_file: self.dir.join("state").join("server.json"),
+        }
+    }
+
+    fn work(&self) -> String {
+        // /tmp may be a symlink (macOS); the shell reports the resolved path.
+        self.dir
+            .join("work")
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
+    }
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn start(config: &Config) -> Client {
+    let server = Server::bind(config.clone()).unwrap();
+    thread::spawn(move || server.serve());
+    Client::new(&config.socket)
+}
+
+fn events(client: &Client) -> Receiver<Event> {
+    let stream = client.subscribe().unwrap();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        for event in stream.flatten() {
+            if tx.send(event).is_err() {
+                return;
+            }
+        }
+    });
+    rx
+}
+
+fn wait_for_event(rx: &Receiver<Event>, pred: impl Fn(&Event) -> bool) -> Event {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let event = rx.recv_timeout(left).expect("event did not arrive");
+        if pred(&event) {
+            return event;
+        }
+    }
+}
+
+fn wait_for_file(path: &Path) -> String {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Ok(text) = std::fs::read_to_string(path)
+            && text.ends_with('\n')
+        {
+            return text;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{} never appeared",
+            path.display()
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn sh(space_id: &str) -> TerminalCreate {
+    TerminalCreate {
+        space_id: space_id.into(),
+        command: Some(vec!["sh".into()]),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn ping_reports_the_protocol_version() {
+    let env = Env::new("ping");
+    let client = start(&env.config());
+    let ping = client.ping().unwrap();
+    assert_eq!(ping.protocol, 1);
+    assert_eq!(ping.pid, std::process::id());
+}
+
+#[test]
+fn a_second_server_on_the_same_socket_is_refused() {
+    let env = Env::new("single");
+    let config = env.config();
+    start(&config);
+    assert!(matches!(
+        Server::bind(config),
+        Err(StartError::AlreadyRunning(_))
+    ));
+}
+
+#[test]
+fn a_stale_socket_file_is_replaced() {
+    let env = Env::new("stale");
+    let config = env.config();
+    std::fs::create_dir_all(config.socket.parent().unwrap()).unwrap();
+    // A socket file nobody listens on, as left by a killed server.
+    drop(std::os::unix::net::UnixListener::bind(&config.socket).unwrap());
+    start(&config).ping().unwrap();
+}
+
+#[test]
+fn spaces_persist_across_restarts_but_terminals_do_not() {
+    let env = Env::new("persist");
+    let first = env.config();
+    let client = start(&first);
+    let space = client.create_space("api", &env.work()).unwrap();
+    client.create_space("docs", &env.work()).unwrap();
+    client.rename_space(&space.id, "api v2").unwrap();
+    client.create_terminal(&sh(&space.id)).unwrap();
+
+    // A new server (another socket, same state file), as after a restart.
+    let second = Config {
+        socket: env.dir.join("run2").join("server.sock"),
+        ..first
+    };
+    let client = start(&second);
+    let spaces = client.list_spaces().unwrap();
+    let names: Vec<_> = spaces.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["api v2", "docs"]);
+    assert_eq!(spaces[0].cwd, env.work());
+    assert!(client.list_terminals(None).unwrap().is_empty());
+    // New ids do not collide with persisted ones.
+    let third = client.create_space("new", &env.work()).unwrap();
+    assert!(spaces.iter().all(|s| s.id != third.id));
+}
+
+#[test]
+fn a_real_shell_gets_its_environment_input_and_resize() {
+    let env = Env::new("shell");
+    let client = start(&env.config());
+    let rx = events(&client);
+    let space = client.create_space("work", &env.work()).unwrap();
+    let terminal = client.create_terminal(&sh(&space.id)).unwrap();
+    assert_eq!(terminal.name, "sh");
+    assert_eq!(terminal.status, TerminalStatus::Running);
+    assert_eq!(terminal.cwd, env.work());
+    wait_for_event(&rx, |e| matches!(e, Event::TerminalCreated { .. }));
+
+    let out = env.dir.join("work").join("env.txt");
+    client
+        .input(
+            &terminal.id,
+            "echo \"$POIMEN_TERMINAL_ID|$POIMEN_SOCKET|$PWD\" > env.txt\n",
+        )
+        .unwrap();
+    assert_eq!(
+        wait_for_file(&out).trim_end(),
+        format!(
+            "{}|{}|{}",
+            terminal.id,
+            env.config().socket.display(),
+            env.work()
+        )
+    );
+
+    client.resize(&terminal.id, 100, 30).unwrap();
+    client
+        .input(&terminal.id, "stty size > size.txt\n")
+        .unwrap();
+    assert_eq!(
+        wait_for_file(&env.dir.join("work").join("size.txt")).trim(),
+        "30 100"
+    );
+    let listed = client.list_terminals(Some(&space.id)).unwrap();
+    assert_eq!((listed[0].cols, listed[0].rows), (100, 30));
+}
+
+#[test]
+fn exit_close_and_rename_are_reported() {
+    let env = Env::new("exit");
+    let client = start(&env.config());
+    let rx = events(&client);
+    let space = client.create_space("work", &env.work()).unwrap();
+    let terminal = client.create_terminal(&sh(&space.id)).unwrap();
+
+    let renamed = client.rename_terminal(&terminal.id, "build").unwrap();
+    assert_eq!(renamed.name, "build");
+    wait_for_event(&rx, |e| matches!(e, Event::TerminalRenamed { .. }));
+
+    client.input(&terminal.id, "exit 3\n").unwrap();
+    let exited = wait_for_event(&rx, |e| matches!(e, Event::TerminalExited { .. }));
+    assert_eq!(
+        exited,
+        Event::TerminalExited {
+            terminal_id: terminal.id.clone(),
+            exit_code: Some(3)
+        }
+    );
+    let listed = client.list_terminals(None).unwrap();
+    assert_eq!(listed[0].status, TerminalStatus::Exited);
+    assert_eq!(listed[0].exit_code, Some(3));
+    match client.input(&terminal.id, "x") {
+        Err(ClientError::Server { code, .. }) => assert_eq!(code, ErrorCode::Exited),
+        other => panic!("{other:?}"),
+    }
+
+    client.close_terminal(&terminal.id).unwrap();
+    wait_for_event(&rx, |e| matches!(e, Event::TerminalClosed { .. }));
+    assert!(client.list_terminals(None).unwrap().is_empty());
+}
+
+#[test]
+fn closing_a_terminal_kills_its_shell_and_closing_a_space_closes_its_terminals() {
+    let env = Env::new("close");
+    let client = start(&env.config());
+    let rx = events(&client);
+    let space = client.create_space("work", &env.work()).unwrap();
+    let other = client.create_space("other", &env.work()).unwrap();
+    client.create_terminal(&sh(&space.id)).unwrap();
+    client.create_terminal(&sh(&space.id)).unwrap();
+    let kept = client.create_terminal(&sh(&other.id)).unwrap();
+
+    client.close_space(&space.id).unwrap();
+    wait_for_event(&rx, |e| matches!(e, Event::SpaceClosed { .. }));
+    let left = client.list_terminals(None).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].id, kept.id);
+    assert_eq!(client.list_spaces().unwrap().len(), 1);
+}
+
+fn code<T>(r: Result<T, ClientError>) -> ErrorCode {
+    match r {
+        Err(ClientError::Server { code, .. }) => code,
+        Ok(_) => panic!("expected an error"),
+        Err(other) => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn errors_are_typed() {
+    let env = Env::new("errors");
+    let client = start(&env.config());
+    let space = client.create_space("work", &env.work()).unwrap();
+
+    assert_eq!(code(client.close_space("nope")), ErrorCode::NotFound);
+    assert_eq!(code(client.close_terminal("nope")), ErrorCode::NotFound);
+    assert_eq!(
+        code(client.create_terminal(&sh("nope"))),
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        code(client.create_space("  ", "/x")),
+        ErrorCode::InvalidParams
+    );
+    assert_eq!(code(client.resize("t1", 0, 5)), ErrorCode::InvalidParams);
+    assert_eq!(
+        code(client.request("nope.nope", serde_json::Value::Null)),
+        ErrorCode::UnknownMethod
+    );
+    assert_eq!(
+        code(client.request("space.rename", serde_json::json!({"space_id": 5}))),
+        ErrorCode::InvalidParams
+    );
+    let bad = TerminalCreate {
+        command: Some(vec!["/definitely/not/a/program".into()]),
+        ..sh(&space.id)
+    };
+    assert_eq!(code(client.create_terminal(&bad)), ErrorCode::SpawnFailed);
+    let empty = TerminalCreate {
+        command: Some(vec![]),
+        ..sh(&space.id)
+    };
+    assert_eq!(
+        code(client.create_terminal(&empty)),
+        ErrorCode::InvalidParams
+    );
+}
+
+#[test]
+fn a_bad_line_gets_an_error_and_the_connection_survives() {
+    use std::io::{BufRead, BufReader, Write};
+    let env = Env::new("raw");
+    let config = env.config();
+    start(&config);
+    let mut stream = std::os::unix::net::UnixStream::connect(&config.socket).unwrap();
+    stream
+        .write_all(b"garbage\n{\"id\":\"9\",\"method\":\"ping\"}\n")
+        .unwrap();
+    let mut reader = BufReader::new(stream);
+    let mut first = String::new();
+    reader.read_line(&mut first).unwrap();
+    assert!(first.contains("parse_error"), "{first}");
+    let mut second = String::new();
+    reader.read_line(&mut second).unwrap();
+    assert!(
+        second.contains(r#""id":"9""#) && second.contains("protocol"),
+        "{second}"
+    );
+}
