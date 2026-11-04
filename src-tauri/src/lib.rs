@@ -808,6 +808,8 @@ fn build_menu(
             &sep()?,
             &item("nextTab", "Next Tab")?,
             &item("previousTab", "Previous Tab")?,
+            &sep()?,
+            &item("showShortcuts", "Keyboard Shortcuts")?,
         ],
     )?)?;
     menu.append(&Submenu::with_items(

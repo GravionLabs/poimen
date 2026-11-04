@@ -62,6 +62,8 @@ import { CommandPalette } from "./core/command-palette";
 import { PluginActions, pluginMenuId } from "./core/plugin-actions";
 import { PluginPanes, type PluginPaneDef } from "./core/plugin-panes";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
+import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
+import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
 import { StatusBar } from "./status-bar/status-bar";
@@ -96,6 +98,7 @@ const ZOOM_STEP = 1;
     PaneDialog,
     SpaceDialog,
     PaletteView,
+    ShortcutsDialog,
   ],
   templateUrl: "./app.html",
   styleUrl: "./app.css",
@@ -113,6 +116,7 @@ export class App {
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
+  protected readonly shortcutsOverview = inject(ShortcutsOverview);
   protected readonly plugins = inject(PluginActions);
   private readonly pluginPanes = inject(PluginPanes);
   private readonly subagents = inject(Subagents);
@@ -291,6 +295,7 @@ export class App {
 
   /** Shortcut of the output panel toggle, for the status bar button. */
   protected readonly panelShortcut = computed(() => this.keymap.label("toggleOutput"));
+  protected readonly shortcutsShortcut = computed(() => this.keymap.label("showShortcuts"));
 
   protected readonly rootNode = computed<LayoutNode>(() => this.editor.layout());
 
@@ -364,6 +369,9 @@ export class App {
         break;
       case "commandPalette":
         this.palette.toggle();
+        break;
+      case "showShortcuts":
+        this.shortcutsOverview.open();
         break;
       case "nextWaiting":
         this.jumpToWaiting();

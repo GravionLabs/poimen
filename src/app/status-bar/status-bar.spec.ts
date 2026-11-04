@@ -58,6 +58,7 @@ describe("mode button", () => {
   const render = (mode: "control" | "observe", blocked: string | null, panelOpen = true) => {
     const emitted: boolean[] = [];
     let shown = 0;
+    let opened = 0;
     @Component({
       selector: "app-host",
       template: readFileSync("src/app/status-bar/status-bar.html", "utf8"),
@@ -76,6 +77,8 @@ describe("mode button", () => {
       panelOpen = () => panelOpen;
       panelShortcut = () => "⌘J";
       showPanel = { emit: () => shown++ };
+      shortcutsShortcut = () => "⌘/";
+      showShortcuts = { emit: () => opened++ };
       control = { emit: (v: boolean) => emitted.push(v) };
       label = connectionLabel;
       modeText = modeLabel;
@@ -91,7 +94,13 @@ describe("mode button", () => {
     const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
       "button.mode-button",
     )!;
-    return { button, emitted, root: fixture.nativeElement as HTMLElement, shown: () => shown };
+    return {
+      button,
+      emitted,
+      root: fixture.nativeElement as HTMLElement,
+      shown: () => shown,
+      opened: () => opened,
+    };
   };
 
   it("offers to show the closed output panel, with its shortcut", () => {
@@ -101,6 +110,17 @@ describe("mode button", () => {
     expect(panel.title).toBe("Show the output panel (⌘J)");
     panel.click();
     expect(shown()).toBe(1);
+  });
+
+  it("has an accessible ? button that opens the shortcuts overview", () => {
+    const { root, opened } = render("control", null);
+    const help = root.querySelector<HTMLButtonElement>("button.help-button")!;
+    expect(help.textContent?.trim()).toBe("?");
+    expect(help.getAttribute("aria-label")).toBe("Keyboard shortcuts");
+    expect(help.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(help.title).toBe("Keyboard shortcuts (⌘/)");
+    help.click();
+    expect(opened()).toBe(1);
   });
 
   it("hides the panel button while the panel is open", () => {

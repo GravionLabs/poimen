@@ -203,6 +203,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("nextWaiting", "CmdOrCtrl+Shift+A"),
     ("nextTab", "CmdOrCtrl+Alt+Right"),
     ("previousTab", "CmdOrCtrl+Alt+Left"),
+    ("showShortcuts", "CmdOrCtrl+/"),
 ];
 
 pub fn default_shortcuts() -> BTreeMap<String, String> {
