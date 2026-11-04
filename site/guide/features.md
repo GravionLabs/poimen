@@ -12,6 +12,7 @@ Everything here is in the application today; the [README](https://github.com/Gra
 
 - A tree of herdr workspaces with their panes, per row agent, status, branch and worktree (`git` is read-only). A filter field searches by name, agent or branch.
 - Create a space (directory with completion, native folder picker, label), a terminal in a space, split a pane right or down, start an agent in a shell pane, rename and close panes. Closing a pane always asks first and warns while an agent works.
+- Close a space from its context menu, the × icon left of the chevron on its row (shown on hover, keyboard focus and for the active space) or the command palette. A space with panes asks first and says how many panes and agents the close ends.
 - `sidebar.layout` switches between the tree and two lists (Spaces and the panes of the selected one); `sidebar.rows` defines what a row shows.
 - An Explorer view (second item of the activity bar) browses directories.
 
@@ -19,8 +20,9 @@ Everything here is in the application today; the [README](https://github.com/Gra
 
 - One tab per pane; a preview tab becomes a pinned tab on use. One xterm.js shows the active tab with the WebGL renderer.
 - Input by default; read-only when another client controls the pane, with an explicit *Take over*. A mode button toggles input and read-only per tab.
+- A read-only agent tab has a prompt bar above the terminal that sends a prompt without taking over the controller; it is hidden while the tab controls the terminal, and the typed text is kept.
 - Cmd+click (macOS) or Ctrl+click opens links; Shift bypasses mouse forwarding for text selection. Mouse cells follow the frame grid herdr sends.
-- Compact command palette (`CmdOrCtrl+Shift+P`, JetBrains style: highlighted matches, shortcuts, recent entries) with poimen commands and herdr plugin actions; every shortcut can be changed. The ? button in the status bar (`CmdOrCtrl+/`) lists all shortcuts with your current bindings.
+- Compact command palette (`CmdOrCtrl+Shift+P`, JetBrains style: highlighted matches, shortcuts, recent entries) with poimen commands and herdr plugin actions; every shortcut can be changed. It opens centered on the editor area, which also holds non-terminal tabs (on the window without an open tab). The ? button in the status bar (`CmdOrCtrl+/`) lists all shortcuts with your current bindings.
 
 ## Agent status and attention
 
