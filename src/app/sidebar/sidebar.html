@@ -269,13 +269,7 @@
           <div class="menu-heading" aria-hidden="true">{{ group.label }}</div>
         }
         @for (item of group.items; track item.action) {
-          <button
-            type="button"
-            role="menuitem"
-            class="menu-item"
-            (click)="choose(item.action)"
-            (keydown.escape)="closeMenu()"
-          >
+          <button type="button" role="menuitem" class="menu-item" (click)="choose(item.action)">
             {{ item.label }}
           </button>
         }

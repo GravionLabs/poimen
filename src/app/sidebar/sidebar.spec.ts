@@ -81,8 +81,9 @@ describe("isDoubleClick", () => {
 });
 
 describe("sidebarMenuItems with plugin actions", () => {
-  const act = (plugin_id: string, action_id: string, title: string) => ({
+  const act = (plugin_id: string, action_id: string, title: string, plugin_name?: string) => ({
     plugin_id,
+    plugin_name,
     action_id,
     title,
     description: null,
@@ -90,16 +91,25 @@ describe("sidebarMenuItems with plugin actions", () => {
 
   it("puts built-in actions first, then one group per plugin by name and title", () => {
     const groups = sidebarMenuItems("pane", [
-      act("review-popup", "open", "Review"),
-      act("deliver-board", "start", "Start deliver"),
-      act("deliver-board", "open", "Open board"),
+      act("review-popup", "open", "Review", "Review Popup"),
+      act("deliver-board", "start", "Start deliver", "Deliver Board"),
+      act("deliver-board", "open", "Open board", "Deliver Board"),
     ]);
-    expect(groups.map((g) => g.label)).toEqual([null, "deliver-board", "review-popup"]);
+    expect(groups.map((g) => g.label)).toEqual([null, "Deliver Board", "Review Popup"]);
     expect(groups[0].items).toHaveLength(5);
     expect(groups[1].items).toEqual([
       { action: 'plugin:["deliver-board","open"]', label: "Open board" },
       { action: 'plugin:["deliver-board","start"]', label: "Start deliver" },
     ]);
+  });
+
+  it("orders by plugin name, not id, and falls back to the id without a name", () => {
+    const groups = sidebarMenuItems("pane", [
+      act("a-id", "1", "X", "Zeta"),
+      act("z-id", "1", "X", "Alpha"),
+      act("m", "1", "X"),
+    ]);
+    expect(groups.slice(1).map((g) => g.label)).toEqual(["Alpha", "m", "Zeta"]);
   });
 
   it("keeps the order stable regardless of the input order", () => {

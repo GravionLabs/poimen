@@ -166,8 +166,20 @@ describe("Sidebar with the real hx-tree", () => {
     // JIT does not wire signal inputs for setInput here: replace the input signal itself.
     Object.assign(fixture.componentInstance, {
       pluginActions: signal([
-        { plugin_id: "review-popup", action_id: "open", title: "Review", description: null },
-        { plugin_id: "deliver-board", action_id: "open", title: "Open board", description: null },
+        {
+          plugin_id: "review-popup",
+          action_id: "open",
+          title: "Review",
+          plugin_name: "Review Popup",
+          description: null,
+        },
+        {
+          plugin_id: "deliver-board",
+          action_id: "open",
+          title: "Open board",
+          plugin_name: "Deliver Board",
+          description: null,
+        },
       ]),
     });
     const row = [...root.querySelectorAll<HTMLElement>(".row")].find((e) =>
@@ -180,8 +192,8 @@ describe("Sidebar with the real hx-tree", () => {
     const groups = [...root.querySelectorAll('.menu [role="group"]')];
     expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
       "Actions",
-      "deliver-board",
-      "review-popup",
+      "Deliver Board",
+      "Review Popup",
     ]);
     expect(root.querySelectorAll(".menu-heading")).toHaveLength(2);
 
@@ -201,5 +213,23 @@ describe("Sidebar with the real hx-tree", () => {
     expect(document.activeElement?.textContent?.trim()).toBe("Review");
     press("o");
     expect(document.activeElement?.textContent?.trim()).toBe("Open board");
+
+    // Modified keys are no type-ahead and stay unhandled.
+    items[0].focus();
+    const chord = new KeyboardEvent("keydown", {
+      key: "o",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    menu.dispatchEvent(chord);
+    expect(chord.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(items[0]);
+
+    // Escape closes the menu even when the container itself has focus.
+    menu.focus();
+    menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle();
+    expect(root.querySelector(".menu")).toBeNull();
   });
 });

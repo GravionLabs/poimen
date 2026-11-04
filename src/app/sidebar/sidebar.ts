@@ -238,15 +238,18 @@ export function sidebarMenuItems(
           ],
   };
   if (kind === "workspace") return [builtin];
-  const byPlugin = new Map<string, PluginAction[]>();
-  for (const a of plugins) byPlugin.set(a.plugin_id, [...(byPlugin.get(a.plugin_id) ?? []), a]);
+  const byPlugin = new Map<string, { name: string; actions: PluginAction[] }>();
+  for (const a of plugins) {
+    const group = byPlugin.get(a.plugin_id);
+    if (group) group.actions.push(a);
+    else byPlugin.set(a.plugin_id, { name: a.plugin_name || a.plugin_id, actions: [a] });
+  }
   const groups = [...byPlugin.entries()]
-    .sort(([x], [y]) => x.localeCompare(y))
-    .map<SidebarMenuGroup>(([id, actions]) => ({
+    .sort(([xi, x], [yi, y]) => x.name.localeCompare(y.name) || xi.localeCompare(yi))
+    .map<SidebarMenuGroup>(([id, { name, actions }]) => ({
       id: `plugin:${id}`,
-      label: id,
+      label: name,
       items: actions
-        .slice()
         .sort((x, y) => x.title.localeCompare(y.title))
         .map((a) => ({ action: pluginMenuId(a) as SidebarMenuAction["action"], label: a.title })),
     }));
@@ -331,6 +334,11 @@ export class Sidebar {
 
   /** Arrow keys, Home/End and type-ahead move focus over the entries; separators and headings are no buttons. */
   protected onMenuKey(event: KeyboardEvent, menu: HTMLElement): void {
+    if (event.key === "Escape") {
+      this.closeMenu();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
     const current = items.findIndex((e) => e === document.activeElement);
     const to = menuTarget(
