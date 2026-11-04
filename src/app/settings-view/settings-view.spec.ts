@@ -6,7 +6,7 @@ import { HxTheme } from "@gravionlabs/helix-ui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bundled } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
-import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
+import { DEFAULT_SETTINGS, parseHarnesses, SettingsStore } from "../core/settings";
 import { tauri } from "../core/tauri.mock";
 import { TauriBridge } from "../core/tauri";
 import {
@@ -340,5 +340,45 @@ describe("SettingsView explorer section", () => {
         { kind: "blocked", on: false },
       ]),
     );
+  });
+});
+
+describe("SettingsView agents section", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
+
+  it("lists the harnesses with their availability", async () => {
+    const { fixture, host, store } = setup();
+    tauri.answer("get_harnesses", () => [
+      { id: "claude", command: ["claude"], models: ["opus"], defaultModel: null, available: true },
+      { id: "copilot", command: ["copilot"], models: [], defaultModel: null, available: false },
+    ]);
+    // A settings change (config.json edited) reads the harnesses again.
+    store["_settings"].set({ ...DEFAULT_SETTINGS, warnings: ["x"] });
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.detectChanges();
+    const rows = [...host.querySelectorAll(".harnesses li")].map((li) => li.textContent);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain("claude");
+    expect(rows[0]).toContain("available");
+    expect(rows[0]).toContain("Models: opus");
+    expect(rows[1]).toContain("not found");
+  });
+});
+
+describe("parseHarnesses", () => {
+  it("reads harnesses and skips malformed entries", () => {
+    expect(
+      parseHarnesses([
+        { id: "a", command: ["a", "x"], models: ["m", 1], defaultModel: "m", available: true },
+        { command: ["no-id"] },
+        null,
+        { id: "b" },
+      ]),
+    ).toEqual([
+      { id: "a", command: ["a", "x"], models: ["m"], defaultModel: "m", available: true },
+      { id: "b", command: [], models: [], defaultModel: null, available: false },
+    ]);
+    expect(parseHarnesses("nope")).toEqual([]);
   });
 });

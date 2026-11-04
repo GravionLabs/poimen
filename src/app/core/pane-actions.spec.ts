@@ -95,16 +95,24 @@ describe("PaneActions", () => {
     expect(actions.dialog()).toMatchObject({ kind: "agent", paneId: "w1:p1" });
     expect(await actions.confirmStartAgent(" codex ", " helper ", "--fast")).toBe(true);
     expect(tauri.calls("agent_start")).toEqual([
-      { paneId: "w1:p1", kind: "codex", name: "helper", args: "--fast" },
+      { paneId: "w1:p1", kind: "codex", name: "helper", args: ["--fast"] },
     ]);
     expect(actions.dialog()).toBeNull();
+  });
+
+  it("splits the args field into argv elements", async () => {
+    actions.askStartAgent("w1:p1");
+    await actions.confirmStartAgent("claude", "", "  --model   opus ");
+    expect(tauri.calls("agent_start")).toEqual([
+      { paneId: "w1:p1", kind: "claude", name: null, args: ["--model", "opus"] },
+    ]);
   });
 
   it("sends no name when the field is empty and starts nothing without a kind", async () => {
     actions.askStartAgent("w1:p1");
     expect(await actions.confirmStartAgent("claude", " ", "")).toBe(true);
     expect(tauri.calls("agent_start")).toEqual([
-      { paneId: "w1:p1", kind: "claude", name: null, args: "" },
+      { paneId: "w1:p1", kind: "claude", name: null, args: [] },
     ]);
     actions.askStartAgent("w1:p1");
     expect(await actions.confirmStartAgent(" ", "", "")).toBe(false);

@@ -182,6 +182,8 @@ pub struct Settings {
     pub spaces_layout: Option<crate::layout::Layout>,
     /// The task modes (`tasks`); the default is one `agent` mode.
     pub tasks: crate::tasks::TaskModes,
+    /// The agent harnesses (`harnesses`); the defaults are `claude` and `copilot`.
+    pub harnesses: Vec<crate::harness::Harness>,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -350,6 +352,7 @@ impl Default for Settings {
             notify_on_done: true,
             spaces_layout: None,
             tasks: crate::tasks::TaskModes::default(),
+            harnesses: crate::harness::default_harnesses(),
             home: None,
             warnings: Vec::new(),
         }
@@ -693,6 +696,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("tasks") {
         resolve_tasks(value, &mut s);
+    }
+    if let Some(value) = root.get("harnesses") {
+        s.harnesses = crate::harness::resolve(value, &mut s.warnings);
     }
 
     let mut use_ghostty = false;
@@ -1326,6 +1332,17 @@ mod tests {
         assert_eq!(s.explorer_roots, ["/srv", "~/code"]);
         assert!(s.explorer_show_hidden);
         assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn harnesses_default_and_resolve_from_config() {
+        let d = resolve(None, none);
+        assert_eq!(d.harnesses.len(), 2);
+        let s = rows(r#"{"harnesses":{"x":{"command":["x"]},"bad":{"command":[]}}}"#);
+        assert_eq!(s.harnesses.len(), 3);
+        assert_eq!(s.harnesses[2].id, "x");
+        assert_eq!(s.warnings.len(), 1);
+        assert!(s.warnings[0].starts_with("harnesses.bad:"));
     }
 
     #[test]

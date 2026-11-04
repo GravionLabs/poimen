@@ -85,7 +85,7 @@ pub fn resolve_program(program: &str, path: &str) -> Option<PathBuf> {
     })
 }
 
-fn resolve_program_with(
+pub fn resolve_program_with(
     program: &str,
     path: &str,
     windows: bool,

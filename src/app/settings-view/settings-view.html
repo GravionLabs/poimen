@@ -187,5 +187,22 @@
     </label>
   </section>
 
+  <section aria-labelledby="agents-h">
+    <h2 id="agents-h">Agents</h2>
+    <ul class="harnesses">
+      @for (h of harnesses(); track h.id) {
+        <li>
+          <strong>{{ h.id }}</strong>
+          <code>{{ h.command.join(" ") }}</code>
+          <span>{{ h.available ? "available" : "not found" }}</span>
+          @if (h.models.length) {
+            <span>Models: {{ h.models.join(", ") }}</span>
+          }
+        </li>
+      }
+    </ul>
+    <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
+  </section>
+
   <app-space-layout-editor />
 </div>

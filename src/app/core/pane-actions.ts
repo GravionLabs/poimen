@@ -130,7 +130,7 @@ export class PaneActions {
     return dialog.paneId;
   }
 
-  /** Starts `kind` in the pane of the open agent dialog; `args` are split on whitespace. */
+  /** Starts `kind` in the pane of the open agent dialog; the `args` field is split on whitespace into argv elements. */
   async confirmStartAgent(kind: string, name: string, args: string): Promise<boolean> {
     const dialog = this._dialog();
     if (dialog?.kind !== "agent" || !kind.trim()) return false;
@@ -140,7 +140,7 @@ export class PaneActions {
         paneId: dialog.paneId,
         kind: kind.trim(),
         name: name.trim() || null,
-        args,
+        args: args.split(/\s+/).filter(Boolean),
       }),
     );
   }
