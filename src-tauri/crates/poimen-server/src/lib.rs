@@ -147,6 +147,9 @@ fn not_found(what: &str, id: &str) -> (ErrorCode, String) {
 pub struct Server {
     #[cfg(unix)]
     listener: UnixListener,
+    /// Keeps the lock next to the socket for as long as the server lives.
+    #[cfg(unix)]
+    _lock: Option<std::fs::File>,
     shared: Arc<Shared>,
 }
 
@@ -155,15 +158,37 @@ impl Server {
     /// loads the persisted spaces. Fails with [`StartError::AlreadyRunning`] when a server answers.
     #[cfg(unix)]
     pub fn bind(config: Config) -> Result<Self, StartError> {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 
-        if let Some(dir) = config.socket.parent() {
+        let mut lock_file = None;
+        if let Some(dir) = config.socket.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::DirBuilder::new()
                 .recursive(true)
                 .mode(0o700)
                 .create(dir)?;
+            // A directory that already existed may be someone else's or too open: tighten what
+            // is ours, refuse the rest.
+            proto::check_private_dir(dir, true)?;
+            // Held for the life of the server: whoever holds it is the only one to judge the
+            // socket file stale.
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .mode(0o600)
+                .open(dir.join("server.lock"))?;
+            if file.try_lock().is_err() {
+                return Err(StartError::AlreadyRunning(config.socket));
+            }
+            lock_file = Some(file);
         }
-        if config.socket.exists() {
+        if let Ok(meta) = std::fs::symlink_metadata(&config.socket) {
+            if !std::os::unix::fs::FileTypeExt::is_socket(&meta.file_type()) {
+                return Err(StartError::Io(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{} exists and is not a socket", config.socket.display()),
+                )));
+            }
             if UnixStream::connect(&config.socket).is_ok() {
                 return Err(StartError::AlreadyRunning(config.socket));
             }
@@ -192,6 +217,7 @@ impl Server {
         };
         Ok(Self {
             listener,
+            _lock: lock_file,
             shared: Arc::new(shared),
         })
     }
@@ -508,9 +534,13 @@ fn running_pty<'a>(
 }
 
 fn terminal_input(shared: &Shared, p: TerminalInput) -> ApiResult {
-    let mut inner = lock(&shared.inner);
-    let entry = terminal_mut(&mut inner, &p.terminal_id)?;
-    running_pty(entry, &p.terminal_id)?
+    // The write may block on a full PTY; do it outside the global lock.
+    let writer = {
+        let mut inner = lock(&shared.inner);
+        let entry = terminal_mut(&mut inner, &p.terminal_id)?;
+        running_pty(entry, &p.terminal_id)?.writer()
+    };
+    writer
         .write(p.data.as_bytes())
         .map_err(|e| (ErrorCode::Internal, e))?;
     Ok(json!({}))

@@ -122,6 +122,42 @@ fn a_second_server_on_the_same_socket_is_refused() {
 }
 
 #[test]
+fn an_existing_open_socket_directory_is_tightened_to_0700() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = Env::new("loosedir");
+    let config = env.config();
+    let run = config.socket.parent().unwrap();
+    std::fs::create_dir_all(run).unwrap();
+    std::fs::set_permissions(run, std::fs::Permissions::from_mode(0o777)).unwrap();
+    start(&config).ping().unwrap();
+    let mode = std::fs::metadata(run).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700);
+}
+
+#[test]
+fn a_symlinked_socket_directory_is_refused() {
+    let env = Env::new("linkdir");
+    let config = env.config();
+    std::fs::create_dir_all(env.dir.join("elsewhere")).unwrap();
+    std::os::unix::fs::symlink(env.dir.join("elsewhere"), env.dir.join("run")).unwrap();
+    let err = Server::bind(config).err().expect("must be refused");
+    assert!(matches!(err, StartError::Io(e) if e.kind() == std::io::ErrorKind::PermissionDenied));
+}
+
+#[test]
+fn a_regular_file_at_the_socket_path_is_not_removed() {
+    let env = Env::new("notsock");
+    let config = env.config();
+    std::fs::create_dir_all(config.socket.parent().unwrap()).unwrap();
+    std::fs::write(&config.socket, "precious").unwrap();
+    assert!(matches!(
+        Server::bind(config.clone()),
+        Err(StartError::Io(_))
+    ));
+    assert_eq!(std::fs::read_to_string(&config.socket).unwrap(), "precious");
+}
+
+#[test]
 fn a_stale_socket_file_is_replaced() {
     let env = Env::new("stale");
     let config = env.config();

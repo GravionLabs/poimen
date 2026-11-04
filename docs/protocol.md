@@ -69,4 +69,4 @@ The space list (id, name, cwd) is stored in `$POIMEN_STATE_DIR/server.json`, els
 
 ## Lifecycle
 
-The app starts `poimen-server` detached when no server answers and never stops it. Compatibility: a client compares `ping.protocol` with the version it was written for.
+The app starts `poimen-server` detached when no server answers and never stops it. It looks for the binary next to its own executable first, then on the login-shell `PATH`. Releases ship it as a sidecar (`bundle.externalBin` in `tauri.bundle.conf.json`, built by `scripts/prepare-sidecar.sh` in `release.yml`); a plain `pnpm tauri build` does not, so build it with `cargo build --release -p poimen-server` and put it beside the app. The socket directory must be a real directory owned by the user with mode 0700: the server tightens one it owns and refuses anything else, and the client refuses to connect otherwise (so a `POIMEN_SOCKET` override must point into a private directory). A `server.lock` next to the socket keeps two servers from both judging a socket stale. Compatibility: a client compares `ping.protocol` with the version it was written for.

@@ -18,16 +18,27 @@ pub(crate) struct SpawnSpec<'a> {
 
 pub(crate) struct Pty {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    writer: PtyWriter,
     killer: Box<dyn ChildKiller + Send + Sync>,
 }
 
-impl Pty {
-    pub fn write(&mut self, data: &[u8]) -> Result<(), String> {
-        self.writer
-            .write_all(data)
-            .and_then(|()| self.writer.flush())
+/// A shared handle on the input side of a PTY, so a blocking write can happen without holding
+/// the server's global lock.
+#[derive(Clone)]
+pub(crate) struct PtyWriter(std::sync::Arc<std::sync::Mutex<Box<dyn Write + Send>>>);
+
+impl PtyWriter {
+    pub fn write(&self, data: &[u8]) -> Result<(), String> {
+        let mut w = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        w.write_all(data)
+            .and_then(|()| w.flush())
             .map_err(|e| e.to_string())
+    }
+}
+
+impl Pty {
+    pub fn writer(&self) -> PtyWriter {
+        self.writer.clone()
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
@@ -108,7 +119,7 @@ pub(crate) fn spawn(
 
     Ok(Pty {
         master: pair.master,
-        writer,
+        writer: PtyWriter(std::sync::Arc::new(std::sync::Mutex::new(writer))),
         killer,
     })
 }

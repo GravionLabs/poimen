@@ -73,6 +73,15 @@ fn connect_stream(_: &Path) -> io::Result<Stream> {
 
 #[cfg(unix)]
 fn connect_stream(path: &Path) -> io::Result<Stream> {
+    // Never talk to a socket in a directory another user could have replaced it in. A missing
+    // directory falls through to the connect error.
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        match poimen_protocol::check_private_dir(dir, false) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
     UnixStream::connect(path)
 }
 
@@ -345,6 +354,8 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("poimen-client-test-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
         dir.join("s.sock")
     }
 
@@ -435,5 +446,17 @@ mod tests {
             Err(ClientError::Protocol(_))
         ));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn a_socket_in_a_loose_directory_is_refused_before_connecting() {
+        let path = temp_socket("loose");
+        let _server = UnixListener::bind(&path).unwrap();
+        let dir = path.parent().unwrap();
+        std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o777)).unwrap();
+        let err = Client::new(&path).ping().unwrap_err();
+        assert!(
+            matches!(err, ClientError::Connect(ref e) if e.kind() == io::ErrorKind::PermissionDenied)
+        );
     }
 }

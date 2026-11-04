@@ -57,15 +57,40 @@ pub(crate) fn load(path: &Path) -> Vec<Space> {
 /// Writes the spaces atomically (temp file, then rename).
 pub(crate) fn save(path: &Path, spaces: &[Space]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
+        create_private_dir(dir)?;
     }
     let text = serde_json::to_string_pretty(&File {
         spaces: spaces.to_vec(),
     })
     .map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, text)?;
+    write_private(&tmp, text.as_bytes())?;
     fs::rename(&tmp, path)
+}
+
+/// Creates the directory (and parents) with mode 0700; an existing one is left as it is.
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    fs::create_dir_all(dir)
+}
+
+/// Writes the file with mode 0600 (a leftover temp file is replaced).
+fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    let _ = fs::remove_file(path);
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(path)?.write_all(data)
 }
 
 /// The first id counter value that collides with no persisted `s<n>` id.
@@ -93,6 +118,18 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("poimen-store-{}-{name}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir.join("server.json")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_state_file_is_0600_and_a_new_directory_0700() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = temp("modes");
+        let path = base.parent().unwrap().join("fresh").join("server.json");
+        save(&path, &[space("s1")]).unwrap();
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        assert_eq!(mode(path.parent().unwrap()), 0o700);
     }
 
     #[test]

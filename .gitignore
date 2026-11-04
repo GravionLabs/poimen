@@ -28,3 +28,6 @@ dist-ssr
 # Angular
 .angular
 out-tsc
+
+# Tauri sidecar built by scripts/prepare-sidecar.sh
+src-tauri/binaries/

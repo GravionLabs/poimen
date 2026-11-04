@@ -48,6 +48,59 @@ pub fn socket_path_from(
     temp_dir.join(format!("poimen-{user}")).join("server.sock")
 }
 
+/// The effective user id of this process, read as the owner of a file created now (std has no
+/// safe uid getter and this crate forbids `unsafe`).
+#[cfg(unix)]
+pub fn current_uid() -> std::io::Result<u32> {
+    use std::os::unix::fs::MetadataExt;
+    let probe = std::env::temp_dir().join(format!(
+        "poimen-uid-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos())
+    ));
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)?;
+    let uid = file.metadata().map(|m| m.uid());
+    drop(file);
+    let _ = std::fs::remove_file(&probe);
+    uid
+}
+
+/// Checks that `dir` is a real directory (not a symlink) owned by the current user with no
+/// group/other permission bits. With `fix`, a directory we own but with loose bits is chmod 0700;
+/// a symlink, a foreign owner or loose bits without `fix` give `PermissionDenied`. A missing
+/// directory is `NotFound`.
+#[cfg(unix)]
+pub fn check_private_dir(dir: &std::path::Path, fix: bool) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let deny = |why: &str| {
+        Error::new(
+            ErrorKind::PermissionDenied,
+            format!("{} {why}", dir.display()),
+        )
+    };
+    let meta = std::fs::symlink_metadata(dir)?;
+    if !meta.file_type().is_dir() {
+        return Err(deny("is not a real directory"));
+    }
+    if meta.uid() != current_uid()? {
+        return Err(deny("is owned by another user"));
+    }
+    if meta.mode() & 0o077 != 0 {
+        if !fix {
+            return Err(deny("is accessible by group or others"));
+        }
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
 /// A request line. `id` is echoed in the response; any string the client picks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Request {
@@ -419,5 +472,67 @@ mod tests {
             socket_path_from(None, None, Some("jk".into()), tmp),
             PathBuf::from("/tmp/poimen-jk/server.sock")
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod private_dir_tests {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    fn fresh(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("poimen-pd-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn mode(p: &std::path::Path) -> u32 {
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn a_0700_dir_of_ours_passes() {
+        let dir = fresh("ok");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        check_private_dir(&dir, false).unwrap();
+    }
+
+    #[test]
+    fn a_0777_dir_is_fixed_with_fix_and_refused_without() {
+        let dir = fresh("loose");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let err = check_private_dir(&dir, false).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(mode(&dir), 0o777);
+        check_private_dir(&dir, true).unwrap();
+        assert_eq!(mode(&dir), 0o700);
+    }
+
+    #[test]
+    fn a_symlink_to_a_dir_is_refused_even_with_fix() {
+        let target = fresh("target");
+        let link = std::env::temp_dir().join(format!("poimen-pd-{}-link", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        symlink(&target, &link).unwrap();
+        let err = check_private_dir(&link, true).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        std::fs::remove_file(&link).unwrap();
+    }
+
+    #[test]
+    fn a_dir_of_another_user_is_refused() {
+        // `/` is owned by root; skipped when the tests run as root.
+        if current_uid().unwrap() == 0 {
+            return;
+        }
+        let err = check_private_dir(std::path::Path::new("/"), true).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn a_missing_dir_is_not_found() {
+        let err = check_private_dir(&fresh("m").join("nope"), false).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 }
