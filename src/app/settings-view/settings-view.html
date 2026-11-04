@@ -1,191 +1,327 @@
-<div class="page">
-  <h1>Settings</h1>
-  @if (writeError(); as reason) {
-    <p class="error" role="alert">{{ reason }}</p>
-  }
-  <section aria-labelledby="appearance-h">
-    <h2 id="appearance-h">Appearance</h2>
-    <div class="radios" role="radiogroup" aria-label="Appearance">
-      @for (choice of themeChoices; track choice.value) {
-        <button
-          type="button"
-          role="radio"
-          class="choice"
-          [attr.aria-checked]="settings().theme === choice.value"
-          [class.on]="settings().theme === choice.value"
-          (click)="setTheme(choice.value)"
-        >
-          {{ choice.label }}
-        </button>
-      }
-    </div>
-    @if (appearanceFixed()) {
-      <p class="hint">
-        The color scheme fixes light or dark; use a light/dark pair to follow the appearance.
-      </p>
-    }
-  </section>
-
-  <section aria-labelledby="scheme-h">
-    <h2 id="scheme-h">Color scheme</h2>
-    <div class="radios" role="radiogroup" aria-label="Scheme mode">
-      <button
-        type="button"
-        role="radio"
-        class="choice"
-        [attr.aria-checked]="mode() === 'single'"
-        [class.on]="mode() === 'single'"
-        (click)="setMode('single')"
-      >
-        Single scheme
-      </button>
-      <button
-        type="button"
-        role="radio"
-        class="choice"
-        [attr.aria-checked]="mode() === 'pair'"
-        [class.on]="mode() === 'pair'"
-        (click)="setMode('pair')"
-      >
-        Light/dark pair
-      </button>
-    </div>
-    <p class="hint">Hover or focus a scheme to preview it; click or press Enter to save it.</p>
-
-    @for (side of sides; track side) {
-      <h3 [id]="'list-' + side">
-        {{ side === "dark" ? "Dark" : "Light" }}{{ mode() === "pair" ? " scheme" : " schemes" }}
-      </h3>
-      <div
-        class="list"
-        role="listbox"
-        [attr.aria-labelledby]="'list-' + side"
-        (mouseleave)="leave($event)"
-        (focusout)="blur($event)"
-      >
-        @for (scheme of groups()[side]; track scheme.name; let i = $index) {
+<div class="shell">
+  <nav class="nav" aria-label="Settings categories">
+    <input
+      #search
+      type="search"
+      class="search"
+      placeholder="Search settings"
+      aria-label="Search settings"
+      [value]="query()"
+      (input)="setQuery($event)"
+      (keydown)="searchKey($event)"
+    />
+    <ul class="tree" role="tree" aria-label="Settings">
+      @for (group of visibleGroups(); track group.id) {
+        <li role="none">
           <div
-            class="option"
-            role="option"
-            [attr.data-name]="scheme.name"
-            [attr.aria-selected]="selected(side) === scheme.name"
-            [class.on]="selected(side) === scheme.name"
-            [attr.tabindex]="tabStop(side, scheme.name, i) ? 0 : -1"
-            (mouseenter)="preview(scheme.name)"
-            (focus)="preview(scheme.name)"
-            (click)="save(side, scheme.name)"
-            (keydown)="key($event, side, scheme.name, i)"
+            class="node group"
+            role="treeitem"
+            [attr.data-node]="'g:' + group.id"
+            [attr.aria-expanded]="expanded(group.id)"
+            aria-selected="false"
+            [attr.tabindex]="tabStopNode() === 'g:' + group.id ? 0 : -1"
+            (click)="toggleGroup(group.id)"
+            (keydown)="treeKey($event, 'g:' + group.id)"
           >
-            <span class="label">{{ scheme.label }}</span>
-            <span class="swatches" aria-hidden="true">
-              <span class="sw big" [style.background]="scheme.background"></span>
-              <span class="sw big" [style.background]="scheme.foreground"></span>
-              @for (color of scheme.ansi; track $index) {
-                <span class="sw" [style.background]="color"></span>
-              }
-              <span class="sw big" [style.background]="scheme.ansi[5]"></span>
-            </span>
+            <span class="chev" aria-hidden="true">{{ expanded(group.id) ? "▾" : "▸" }}</span>
+            {{ group.title }}
           </div>
-        }
-      </div>
-    }
-  </section>
-
-  <section aria-labelledby="explorer-h">
-    <h2 id="explorer-h">Explorer</h2>
-    <p class="hint">
-      The folders the Explorer view starts from; folders under your home are saved as ~/….
-    </p>
-    <ul class="rows" aria-label="Explorer folders">
-      @for (
-        root of settings().explorerRoots;
-        track root;
-        let i = $index, first = $first, last = $last
-      ) {
-        <li class="row-item">
-          <span class="path" [title]="root">{{ root }}</span>
-          <span class="actions">
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Move ' + root + ' up'"
-              title="Move up"
-              [disabled]="first"
-              (click)="moveRoot(i, -1)"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Move ' + root + ' down'"
-              title="Move down"
-              [disabled]="last"
-              (click)="moveRoot(i, 1)"
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Remove ' + root"
-              title="Remove"
-              [disabled]="first && last"
-              (click)="removeRoot(i)"
-            >
-              ×
-            </button>
-          </span>
+          @if (expanded(group.id)) {
+            <ul role="group" class="pages">
+              @for (page of group.pages; track page.id) {
+                <li role="none">
+                  <div
+                    class="node page-node"
+                    role="treeitem"
+                    [attr.data-node]="'p:' + page.id"
+                    [attr.aria-selected]="current().page.id === page.id"
+                    [class.on]="current().page.id === page.id"
+                    [attr.tabindex]="tabStopNode() === 'p:' + page.id ? 0 : -1"
+                    (click)="selectPage(page.id)"
+                    (keydown)="treeKey($event, 'p:' + page.id)"
+                  >
+                    {{ page.title }}
+                  </div>
+                </li>
+              }
+            </ul>
+          }
         </li>
+      } @empty {
+        <li class="hint empty" role="none">No settings match.</li>
       }
     </ul>
-    <div class="toolbar-row">
-      <button type="button" class="btn" (click)="addRoot()">Add folder…</button>
-      <label class="check">
-        <input
-          type="checkbox"
-          [checked]="settings().explorerShowHidden"
-          (change)="setShowHidden($event)"
-        />
-        Show hidden folders
-      </label>
+  </nav>
+
+  <main class="page-pane">
+    <header class="crumb">
+      <h1>
+        <span class="crumb-group">{{ current().group.title }}</span>
+        <span aria-hidden="true"> › </span>
+        <span class="crumb-page">{{ current().page.title }}</span>
+      </h1>
+    </header>
+    <div class="scroll">
+      <div class="page">
+        @if (writeError(); as reason) {
+          <p class="error" role="alert">{{ reason }}</p>
+        }
+        @switch (current().page.id) {
+          @case ("appearance") {
+            <section aria-label="Appearance">
+              <div class="radios" role="radiogroup" aria-label="Appearance">
+                @for (choice of themeChoices; track choice.value) {
+                  <button
+                    type="button"
+                    role="radio"
+                    class="choice"
+                    [attr.aria-checked]="settings().theme === choice.value"
+                    [class.on]="settings().theme === choice.value"
+                    [class.hit]="hit(choice.label)"
+                    (click)="setTheme(choice.value)"
+                  >
+                    {{ choice.label }}
+                  </button>
+                }
+              </div>
+              @if (appearanceFixed()) {
+                <p class="hint">
+                  The color scheme fixes light or dark; use a light/dark pair to follow the
+                  appearance.
+                </p>
+              }
+            </section>
+          }
+          @case ("color-scheme") {
+            <section aria-label="Color scheme">
+              <div class="radios" role="radiogroup" aria-label="Scheme mode">
+                <button
+                  type="button"
+                  role="radio"
+                  class="choice"
+                  [attr.aria-checked]="mode() === 'single'"
+                  [class.on]="mode() === 'single'"
+                  [class.hit]="hit('Single scheme')"
+                  (click)="setMode('single')"
+                >
+                  Single scheme
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  class="choice"
+                  [attr.aria-checked]="mode() === 'pair'"
+                  [class.on]="mode() === 'pair'"
+                  [class.hit]="hit('Light/dark pair')"
+                  (click)="setMode('pair')"
+                >
+                  Light/dark pair
+                </button>
+              </div>
+              <p class="hint">
+                Hover or focus a scheme to preview it; click or press Enter to save it.
+              </p>
+
+              @for (side of sides; track side) {
+                <h3
+                  [id]="'list-' + side"
+                  [class.hit]="hit(side === 'dark' ? 'Dark schemes' : 'Light schemes')"
+                >
+                  {{ side === "dark" ? "Dark" : "Light"
+                  }}{{ mode() === "pair" ? " scheme" : " schemes" }}
+                </h3>
+                <div
+                  class="list"
+                  role="listbox"
+                  [attr.aria-labelledby]="'list-' + side"
+                  (mouseleave)="leave($event)"
+                  (focusout)="blur($event)"
+                >
+                  @for (scheme of groups()[side]; track scheme.name; let i = $index) {
+                    <div
+                      class="option"
+                      role="option"
+                      [attr.data-name]="scheme.name"
+                      [attr.aria-selected]="selected(side) === scheme.name"
+                      [class.on]="selected(side) === scheme.name"
+                      [attr.tabindex]="tabStop(side, scheme.name, i) ? 0 : -1"
+                      (mouseenter)="preview(scheme.name)"
+                      (focus)="preview(scheme.name)"
+                      (click)="save(side, scheme.name)"
+                      (keydown)="key($event, side, scheme.name, i)"
+                    >
+                      <span class="label">{{ scheme.label }}</span>
+                      <span class="swatches" aria-hidden="true">
+                        <span class="sw big" [style.background]="scheme.background"></span>
+                        <span class="sw big" [style.background]="scheme.foreground"></span>
+                        @for (color of scheme.ansi; track $index) {
+                          <span class="sw" [style.background]="color"></span>
+                        }
+                        <span class="sw big" [style.background]="scheme.ansi[5]"></span>
+                      </span>
+                    </div>
+                  }
+                </div>
+              }
+            </section>
+          }
+          @case ("notifications") {
+            <section aria-label="Notifications">
+              <p class="hint">
+                System notifications while you do not see the agent's tab in the focused window.
+              </p>
+              <label class="check" [class.hit]="hit('When an agent waits for you')">
+                <input
+                  type="checkbox"
+                  [checked]="settings().notifyOnBlocked"
+                  (change)="setNotification('blocked', $event)"
+                />
+                When an agent waits for you
+              </label>
+              <label class="check" [class.hit]="hit('When an agent is done')">
+                <input
+                  type="checkbox"
+                  [checked]="settings().notifyOnDone"
+                  (change)="setNotification('done', $event)"
+                />
+                When an agent is done
+              </label>
+            </section>
+          }
+          @case ("explorer") {
+            <section aria-label="Explorer">
+              <p class="hint">
+                The folders the Explorer view starts from; folders under your home are saved as ~/….
+              </p>
+              <ul class="rows" aria-label="Explorer folders" [class.hit]="hit('Explorer folders')">
+                @for (
+                  root of settings().explorerRoots;
+                  track root;
+                  let i = $index, first = $first, last = $last
+                ) {
+                  <li class="row-item">
+                    <span class="path" [title]="root">{{ root }}</span>
+                    <span class="actions">
+                      <button
+                        type="button"
+                        class="icon-btn"
+                        [attr.aria-label]="'Move ' + root + ' up'"
+                        title="Move up"
+                        [disabled]="first"
+                        (click)="moveRoot(i, -1)"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        class="icon-btn"
+                        [attr.aria-label]="'Move ' + root + ' down'"
+                        title="Move down"
+                        [disabled]="last"
+                        (click)="moveRoot(i, 1)"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        class="icon-btn"
+                        [attr.aria-label]="'Remove ' + root"
+                        title="Remove"
+                        [disabled]="first && last"
+                        (click)="removeRoot(i)"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  </li>
+                }
+              </ul>
+              <div class="toolbar-row">
+                <button
+                  type="button"
+                  class="btn"
+                  [class.hit]="hit('Add folder')"
+                  (click)="addRoot()"
+                >
+                  Add folder…
+                </button>
+                <label class="check" [class.hit]="hit('Show hidden folders')">
+                  <input
+                    type="checkbox"
+                    [checked]="settings().explorerShowHidden"
+                    (change)="setShowHidden($event)"
+                  />
+                  Show hidden folders
+                </label>
+              </div>
+            </section>
+          }
+          @case ("trusted-projects") {
+            <section aria-label="Trusted projects">
+              <p class="hint">
+                Repositories whose project file (<code>.poimen/config.json</code>) may run its
+                commands. The trust ends when the file changes.
+              </p>
+              @if (trustedRoots().length === 0) {
+                <p class="hint">No project is trusted.</p>
+              } @else {
+                <ul class="rows" aria-label="Trusted projects">
+                  @for (root of trustedRoots(); track root) {
+                    <li class="row-item">
+                      <span class="path" [title]="root">{{ root }}</span>
+                      <span class="actions">
+                        <button
+                          type="button"
+                          class="btn"
+                          [class.hit]="hit('Revoke')"
+                          (click)="revokeProject(root)"
+                        >
+                          Revoke
+                        </button>
+                      </span>
+                    </li>
+                  }
+                </ul>
+              }
+            </section>
+          }
+          @case ("herdr") {
+            <section aria-label="herdr">
+              <label
+                class="check"
+                [class.hit]="hit('Start the herdr server when it is not running')"
+              >
+                <input
+                  type="checkbox"
+                  [checked]="settings().herdrAutoStart"
+                  (change)="setAutoStart($event)"
+                />
+                Start the herdr server when it is not running
+              </label>
+            </section>
+          }
+          @case ("agents") {
+            <section aria-label="Agents">
+              <ul class="harnesses" [class.hit]="hit('Harnesses')">
+                @for (h of harnesses(); track h.id) {
+                  <li>
+                    <strong>{{ h.id }}</strong>
+                    <code>{{ h.command.join(" ") }}</code>
+                    <span>{{ h.available ? "available" : "not found" }}</span>
+                    @if (h.models.length) {
+                      <span [class.hit]="hit('Models')">Models: {{ h.models.join(", ") }}</span>
+                    }
+                  </li>
+                }
+              </ul>
+              <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
+            </section>
+          }
+          @case ("space-layout") {
+            <app-space-layout-editor />
+          }
+        }
+      </div>
     </div>
-  </section>
-
-  <section aria-labelledby="notifications-h">
-    <h2 id="notifications-h">Notifications</h2>
-    <p class="hint">
-      System notifications while you do not see the agent's tab in the focused window.
-    </p>
-    <label class="check">
-      <input
-        type="checkbox"
-        [checked]="settings().notifyOnBlocked"
-        (change)="setNotification('blocked', $event)"
-      />
-      When an agent waits for you
-    </label>
-    <label class="check">
-      <input
-        type="checkbox"
-        [checked]="settings().notifyOnDone"
-        (change)="setNotification('done', $event)"
-      />
-      When an agent is done
-    </label>
-  </section>
-
-  <section aria-labelledby="herdr-h">
-    <h2 id="herdr-h">herdr</h2>
-    <label class="check">
-      <input
-        type="checkbox"
-        [checked]="settings().herdrAutoStart"
-        (change)="setAutoStart($event)"
-      />
-      Start the herdr server when it is not running
-    </label>
-  </section>
-
-  <app-space-layout-editor />
+  </main>
 </div>

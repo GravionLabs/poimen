@@ -6,9 +6,10 @@ import { HxTheme } from "@gravionlabs/helix-ui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bundled } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
-import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
+import { DEFAULT_SETTINGS, parseHarnesses, SettingsStore } from "../core/settings";
 import { tauri } from "../core/tauri.mock";
 import { TauriBridge } from "../core/tauri";
+import { UiState, UI_STORAGE, UI_STATE_KEY, type UiStorage } from "../core/ui-state";
 import {
   chosen,
   groupSchemes,
@@ -18,6 +19,7 @@ import {
   SettingsView,
   withRoot,
 } from "./settings-view";
+import { allPages, SETTINGS_GROUPS } from "./settings-categories";
 import { SpaceLayoutEditor } from "./space-layout-editor";
 
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -111,14 +113,22 @@ afterEach(() => {
   document.documentElement.removeAttribute("style");
 });
 
+let storage: UiStorage | null = null;
+
 function setup(
   colorSchema: string | { light: string; dark: string } | null = "dracula",
   explorerRoots: string[] = ["~"],
+  page = "color-scheme",
 ) {
   tauri.reset();
   setDark.mockReset();
   TestBed.resetTestingModule();
-  TestBed.configureTestingModule({ providers: [{ provide: HxTheme, useValue: { setDark } }] });
+  TestBed.configureTestingModule({
+    providers: [
+      { provide: HxTheme, useValue: { setDark } },
+      { provide: UI_STORAGE, useValue: storage },
+    ],
+  });
   TestBed.overrideComponent(SettingsView, {
     set: {
       templateUrl: undefined,
@@ -133,6 +143,7 @@ function setup(
       template: readFileSync("src/app/settings-view/space-layout-editor.html", "utf8"),
     },
   });
+  TestBed.inject(UiState).selectSettingsPage(page);
   const store = TestBed.inject(SettingsStore);
   store["_settings"].set({ ...DEFAULT_SETTINGS, colorSchema, explorerRoots });
   const schemes = TestBed.inject(ColorSchemeService);
@@ -173,7 +184,9 @@ describe("SettingsView", () => {
     );
     fixture.detectChanges();
     expect(revert).toHaveBeenCalledOnce();
-    expect(host.querySelector('[aria-selected="true"]')!.getAttribute("data-name")).toBe("dracula");
+    expect(
+      host.querySelector('[role="option"][aria-selected="true"]')!.getAttribute("data-name"),
+    ).toBe("dracula");
     expect(tauri.calls("set_color_schema")).toEqual([]);
   });
 
@@ -257,7 +270,7 @@ describe("SettingsView", () => {
   });
 
   it("saves the appearance", () => {
-    const { host } = setup();
+    const { host } = setup(undefined, undefined, "appearance");
     [...host.querySelectorAll<HTMLElement>('[role="radio"]')]
       .find((b) => b.textContent?.includes("Light"))!
       .click();
@@ -272,26 +285,26 @@ describe("SettingsView explorer section", () => {
     host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
 
   it("lists the roots and keeps the last one", () => {
-    const { host } = setup(null, ["~"]);
+    const { host } = setup(null, ["~"], "explorer");
     expect(host.querySelector(".path")!.textContent).toBe("~");
     expect(button(host, "Remove ~").disabled).toBe(true);
     expect(button(host, "Move ~ up").disabled).toBe(true);
   });
 
   it("removes and reorders roots", () => {
-    const { host } = setup(null, ["~", "/srv"]);
+    const { host } = setup(null, ["~", "/srv"], "explorer");
     button(host, "Move /srv up").click();
     expect(tauri.calls("set_explorer_roots")).toEqual([{ roots: ["/srv", "~"] }]);
   });
 
   it("removes a root", () => {
-    const { host } = setup(null, ["~", "/srv"]);
+    const { host } = setup(null, ["~", "/srv"], "explorer");
     button(host, "Remove ~").click();
     expect(tauri.calls("set_explorer_roots")).toEqual([{ roots: ["/srv"] }]);
   });
 
   it("adds a folder from the picker and ignores a cancel", async () => {
-    const { host } = setup(null, ["~"]);
+    const { host } = setup(null, ["~"], "explorer");
     const pick = vi.spyOn(TestBed.inject(TauriBridge), "pickDirectory");
     pick.mockResolvedValueOnce(null).mockResolvedValueOnce("/srv/projects");
     const add = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
@@ -308,7 +321,7 @@ describe("SettingsView explorer section", () => {
 
   it("saves the hidden folders option and shows a write error", async () => {
     tauri.reset();
-    const { fixture, host } = setup(null, ["~"]);
+    const { fixture, host } = setup(null, ["~"], "explorer");
     tauri.answer("set_explorer_show_hidden", () => {
       throw new Error("read-only");
     });
@@ -325,8 +338,8 @@ describe("SettingsView explorer section", () => {
 
   it("saves the notification switches", async () => {
     tauri.reset();
-    const { host } = setup(null, ["~"]);
-    const section = host.querySelector('section[aria-labelledby="notifications-h"]')!;
+    const { host } = setup(null, ["~"], "notifications");
+    const section = host.querySelector('section[aria-label="Notifications"]')!;
     const [blocked, done] = section.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
     expect(blocked.checked).toBe(true);
     expect(done.checked).toBe(true);
@@ -340,5 +353,282 @@ describe("SettingsView explorer section", () => {
         { kind: "blocked", on: false },
       ]),
     );
+  });
+});
+
+describe("SettingsView agents section", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
+
+  it("lists the harnesses with their availability", async () => {
+    const { fixture, host, store } = setup(undefined, undefined, "agents");
+    tauri.answer("get_harnesses", () => [
+      { id: "claude", command: ["claude"], models: ["opus"], defaultModel: null, available: true },
+      { id: "copilot", command: ["copilot"], models: [], defaultModel: null, available: false },
+    ]);
+    // A settings change (config.json edited) reads the harnesses again.
+    store["_settings"].set({ ...DEFAULT_SETTINGS, warnings: ["x"] });
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.detectChanges();
+    const rows = [...host.querySelectorAll(".harnesses li")].map((li) => li.textContent);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain("claude");
+    expect(rows[0]).toContain("available");
+    expect(rows[0]).toContain("Models: opus");
+    expect(rows[1]).toContain("not found");
+  });
+});
+
+describe("SettingsView trusted projects section", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
+
+  const revokeButtons = (host: HTMLElement) => [
+    ...host.querySelectorAll<HTMLButtonElement>('ul[aria-label="Trusted projects"] button'),
+  ];
+
+  it("says so when no project is trusted", () => {
+    const { host } = setup(undefined, undefined, "trusted-projects");
+    expect(revokeButtons(host)).toHaveLength(0);
+    expect(host.textContent).toContain("No project is trusted.");
+  });
+
+  it("lists the roots and revokes one", async () => {
+    const { fixture, host, store } = setup(undefined, undefined, "trusted-projects");
+    tauri.answer("revoke_project", () => undefined);
+    store["_settings"].set({
+      ...DEFAULT_SETTINGS,
+      trustedProjects: { "/work/b": "h2", "/work/a": "h1" },
+    });
+    fixture.detectChanges();
+    const rows = [...host.querySelectorAll('ul[aria-label="Trusted projects"] .path')];
+    expect(rows.map((r) => r.textContent)).toEqual(["/work/a", "/work/b"]);
+    revokeButtons(host)[0].click();
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.detectChanges();
+    expect(tauri.calls("revoke_project")).toEqual([{ root: "/work/a" }]);
+    expect(store.settings().trustedProjects).toEqual({ "/work/b": "h2" });
+    expect(revokeButtons(host)).toHaveLength(1);
+  });
+
+  it("keeps the root and reports the error when the revoke fails", async () => {
+    const { fixture, store } = setup(undefined, undefined, "trusted-projects");
+    tauri.answer("revoke_project", () => {
+      throw "disk full";
+    });
+    store["_settings"].set({ ...DEFAULT_SETTINGS, trustedProjects: { "/work/a": "h1" } });
+    await store.revokeProject("/work/a");
+    fixture.detectChanges();
+    expect(store.settings().trustedProjects).toEqual({ "/work/a": "h1" });
+    expect(store.writeError()).toContain("disk full");
+  });
+});
+
+describe("parseHarnesses", () => {
+  it("reads harnesses and skips malformed entries", () => {
+    expect(
+      parseHarnesses([
+        { id: "a", command: ["a", "x"], models: ["m", 1], defaultModel: "m", available: true },
+        { command: ["no-id"] },
+        null,
+        { id: "b" },
+      ]),
+    ).toEqual([
+      { id: "a", command: ["a", "x"], models: ["m"], defaultModel: "m", available: true },
+      { id: "b", command: [], models: [], defaultModel: null, available: false },
+    ]);
+    expect(parseHarnesses("nope")).toEqual([]);
+  });
+});
+
+function memoryStorage(
+  initial: Record<string, string> = {},
+): UiStorage & { data: Map<string, string> } {
+  const data = new Map(Object.entries(initial));
+  return {
+    data,
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+  };
+}
+
+describe("SettingsView categories", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    storage = null;
+  });
+  afterEach(() => {
+    storage = null;
+  });
+
+  const item = (host: HTMLElement, node: string) =>
+    host.querySelector<HTMLElement>(`[role="treeitem"][data-node="${node}"]`)!;
+  const titles = (host: HTMLElement) =>
+    [...host.querySelectorAll('[role="treeitem"]')].map((e) =>
+      e.textContent!.replace(/[▾▸]/, "").trim(),
+    );
+  const press = (el: HTMLElement, key: string, init: KeyboardEventInit = {}) =>
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }),
+    );
+  const search = (host: HTMLElement) =>
+    host.querySelector<HTMLInputElement>('input[type="search"]')!;
+  const type = (fixture: { detectChanges(): void }, host: HTMLElement, text: string) => {
+    search(host).value = text;
+    search(host).dispatchEvent(new Event("input"));
+    fixture.detectChanges();
+  };
+  const crumb = (host: HTMLElement) =>
+    host.querySelector("h1")!.textContent!.replace(/\s+/g, " ").trim();
+
+  it("shows the groups and pages as a tree with a breadcrumb", () => {
+    const { host } = setup(undefined, undefined, "explorer");
+    expect(host.querySelector('[role="tree"]')).not.toBeNull();
+    expect(titles(host)).toEqual([
+      "Appearance & Behavior",
+      "Appearance",
+      "Color scheme",
+      "Notifications",
+      "Workspace",
+      "Explorer",
+      "New space layout",
+      "Trusted projects",
+      "Backend",
+      "herdr",
+      "Agents",
+    ]);
+    expect(crumb(host)).toBe("Workspace › Explorer");
+    expect(item(host, "p:explorer").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("falls back to the first page when the stored one no longer exists", () => {
+    const { host } = setup(undefined, undefined, "gone");
+    expect(crumb(host)).toBe("Appearance & Behavior › Appearance");
+  });
+
+  it("selects a page on click and persists it with the collapsed groups", () => {
+    const mem = memoryStorage();
+    storage = mem;
+    const { fixture, host } = setup(undefined, undefined, "appearance");
+    item(host, "p:herdr").click();
+    item(host, "g:workspace").click();
+    fixture.detectChanges();
+    expect(crumb(host)).toBe("Backend › herdr");
+    expect(host.textContent).toContain("Start the herdr server");
+    expect(item(host, "p:explorer")).toBeNull();
+    const saved = JSON.parse(mem.data.get(UI_STATE_KEY)!);
+    expect(saved.settingsPage).toBe("herdr");
+    expect(saved.settingsCollapsed).toEqual(["workspace"]);
+  });
+
+  it("restores the collapsed groups from the stored state", () => {
+    storage = memoryStorage({
+      [UI_STATE_KEY]: JSON.stringify({ settingsPage: "agents", settingsCollapsed: ["backend"] }),
+    });
+    const { host } = setup(undefined, undefined, "agents");
+    expect(item(host, "g:backend").getAttribute("aria-expanded")).toBe("false");
+    expect(item(host, "p:agents")).toBeNull();
+    expect(crumb(host)).toBe("Backend › Agents");
+  });
+
+  it("filters the tree by page title and by setting label, keeping the group", () => {
+    const { fixture, host } = setup();
+    type(fixture, host, "notif");
+    expect(titles(host)).toEqual(["Appearance & Behavior", "Notifications"]);
+    type(fixture, host, "hidden folders");
+    expect(titles(host)).toEqual(["Workspace", "Explorer"]);
+    type(fixture, host, "zzz");
+    expect(titles(host)).toEqual([]);
+    expect(host.textContent).toContain("No settings match.");
+    type(fixture, host, "");
+    expect(titles(host)).toHaveLength(11);
+  });
+
+  it("expands collapsed groups while searching", () => {
+    storage = memoryStorage({
+      [UI_STATE_KEY]: JSON.stringify({ settingsCollapsed: ["workspace"] }),
+    });
+    const { fixture, host } = setup();
+    expect(item(host, "p:explorer")).toBeNull();
+    type(fixture, host, "explorer");
+    expect(item(host, "p:explorer")).not.toBeNull();
+  });
+
+  it("highlights the setting whose label matches", () => {
+    const { fixture, host } = setup(undefined, undefined, "explorer");
+    expect(host.querySelector(".hit")).toBeNull();
+    type(fixture, host, "hidden");
+    const hits = [...host.querySelectorAll(".hit")].map((e) => e.textContent!.trim());
+    expect(hits).toEqual(["Show hidden folders"]);
+  });
+
+  it("has every label of the category list in its page template", () => {
+    const html = readFileSync("src/app/settings-view/settings-view.html", "utf8");
+    const editor = readFileSync("src/app/settings-view/space-layout-editor.html", "utf8");
+    for (const page of allPages()) {
+      const source = page.id === "space-layout" ? editor : html;
+      for (const label of page.labels) {
+        expect(source.toLowerCase(), `${page.id}: ${label}`).toContain(label.toLowerCase());
+      }
+    }
+    expect(SETTINGS_GROUPS.length).toBeGreaterThan(0);
+  });
+
+  it("moves with the arrow keys, expands and collapses with Left and Right", () => {
+    const { fixture, host } = setup(undefined, undefined, "appearance");
+    document.body.append(host);
+    const node = (n: string) => item(host, n);
+    press(node("p:appearance"), "ArrowDown");
+    expect(document.activeElement).toBe(node("p:color-scheme"));
+    press(node("p:color-scheme"), "ArrowUp");
+    press(node("p:appearance"), "ArrowLeft");
+    expect(document.activeElement).toBe(node("g:appearance-behavior"));
+    press(node("g:appearance-behavior"), "ArrowLeft");
+    fixture.detectChanges();
+    expect(node("g:appearance-behavior").getAttribute("aria-expanded")).toBe("false");
+    expect(node("p:appearance")).toBeNull();
+    press(node("g:appearance-behavior"), "ArrowDown");
+    expect(document.activeElement).toBe(node("g:workspace"));
+    press(node("g:appearance-behavior"), "ArrowRight");
+    fixture.detectChanges();
+    expect(node("g:appearance-behavior").getAttribute("aria-expanded")).toBe("true");
+    press(node("g:appearance-behavior"), "ArrowRight");
+    expect(document.activeElement).toBe(node("p:appearance"));
+    press(node("p:appearance"), "End");
+    expect(document.activeElement).toBe(node("p:agents"));
+    press(node("p:agents"), "Home");
+    expect(document.activeElement).toBe(node("g:appearance-behavior"));
+    host.remove();
+  });
+
+  it("opens a page with Enter or Space and keeps one tab stop", () => {
+    const { fixture, host } = setup(undefined, undefined, "appearance");
+    press(item(host, "p:herdr"), "Enter");
+    fixture.detectChanges();
+    expect(crumb(host)).toBe("Backend › herdr");
+    press(item(host, "p:agents"), " ");
+    fixture.detectChanges();
+    expect(crumb(host)).toBe("Backend › Agents");
+    const stops = [...host.querySelectorAll('[role="treeitem"][tabindex="0"]')];
+    expect(stops).toHaveLength(1);
+    expect(stops[0].getAttribute("data-node")).toBe("p:agents");
+  });
+
+  it("focuses the search field with Cmd/Ctrl+F and clears it with Escape", () => {
+    const { fixture, host } = setup();
+    document.body.append(host);
+    press(item(host, "p:appearance"), "f", { ctrlKey: true });
+    expect(document.activeElement).toBe(search(host));
+    type(fixture, host, "x");
+    press(search(host), "Escape");
+    fixture.detectChanges();
+    expect(search(host).value).toBe("");
+    host.remove();
+  });
+
+  it("follows a deep link made while the view is open", () => {
+    const { fixture, host } = setup();
+    TestBed.inject(UiState).selectSettingsPage("notifications");
+    fixture.detectChanges();
+    expect(crumb(host)).toBe("Appearance & Behavior › Notifications");
   });
 });

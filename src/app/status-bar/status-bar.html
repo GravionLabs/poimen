@@ -1,4 +1,24 @@
 <footer class="bar" role="status">
+  @if (detailsOpen() && (update().kind === "available" || update().kind === "error")) {
+    <section class="update-details" aria-label="Update">
+      @if ($any(update()).step; as step) {
+        <h3 class="failed">{{ errTitle(step) }}</h3>
+        <pre class="message">{{ $any(update()).message }}</pre>
+      }
+      @if ($any(update()).info; as info) {
+        <h3>poimen {{ info.version }}</h3>
+        @if (info.notes) {
+          <pre class="message">{{ info.notes }}</pre>
+        }
+        <button type="button" class="install" (click)="installUpdate.emit()">
+          Install and restart
+        </button>
+      }
+      @if ($any(update()).step === "check") {
+        <button type="button" class="install" (click)="checkUpdate.emit()">Try again</button>
+      }
+    </section>
+  }
   <span class="item conn {{ connection().state }}" [title]="label(connection())">
     <span class="dot"></span>{{ label(connection()) }}
   </span>
@@ -76,6 +96,42 @@
     ?
   </button>
   <span class="item version">{{ appLabel(appVersion()) }}</span>
+  @switch (update().kind) {
+    @case ("checking") {
+      <span class="item update">Checking for updates…</span>
+    }
+    @case ("current") {
+      <button type="button" class="item update-button" (click)="checkUpdate.emit()">
+        Up to date
+      </button>
+    }
+    @case ("available") {
+      <button
+        type="button"
+        class="item update-button available"
+        (click)="detailsOpen.set(!detailsOpen())"
+      >
+        Update available
+      </button>
+    }
+    @case ("installing") {
+      <span class="item update">Installing the update…</span>
+    }
+    @case ("error") {
+      <button
+        type="button"
+        class="item update-button failed"
+        (click)="detailsOpen.set(!detailsOpen())"
+      >
+        {{ errTitle($any(update()).step) }}
+      </button>
+    }
+    @default {
+      <button type="button" class="item update-button" (click)="checkUpdate.emit()">
+        Check for updates
+      </button>
+    }
+  }
   <span
     class="item version"
     [class.warn]="warning(info()) !== ''"

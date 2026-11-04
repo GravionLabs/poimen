@@ -1,9 +1,7 @@
 <dialog #dialog class="shortcuts" aria-labelledby="shortcuts-title" (close)="overview.close()">
   <div class="body">
     <h2 id="shortcuts-title">Keyboard shortcuts</h2>
-    <p class="hint">
-      The command palette ({{ overview.paletteKeys() }}) lists all commands and plugin actions.
-    </p>
+    <p class="hint">The command palette ({{ overview.paletteKeys() }}) lists all commands.</p>
     @for (section of overview.sections(); track section.title) {
       <section>
         <h3>{{ section.title }}</h3>

@@ -34,5 +34,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2RDUxQjM1NkZDQzIyOUMKUldTY0lzeHZOUnZWTmc0bk96MEppaEhuMTNOa3dkS2dGVEVkUDUyM1QxOFlrR01FQnE0R0NiVFYK",
+      "endpoints": [
+        "https://github.com/GravionLabs/poimen/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

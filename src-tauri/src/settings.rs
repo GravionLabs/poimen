@@ -54,6 +54,9 @@ pub const ROW_TOKENS: &[&str] = &[
     "agent",
     "title",
     "branch",
+    "dirty",
+    "sync",
+    "pr",
     "dir",
     "tab",
 ];
@@ -180,6 +183,12 @@ pub struct Settings {
     pub notify_on_done: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
+    /// Repository root to the SHA-256 of the project file the user trusted (`trustedProjects`).
+    pub trusted_projects: BTreeMap<String, String>,
+    /// The task modes (`tasks`); the default is one `agent` mode.
+    pub tasks: crate::tasks::TaskModes,
+    /// The agent harnesses (`harnesses`); the defaults are `claude` and `copilot`.
+    pub harnesses: Vec<crate::harness::Harness>,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -347,6 +356,9 @@ impl Default for Settings {
             notify_on_blocked: true,
             notify_on_done: true,
             spaces_layout: None,
+            trusted_projects: BTreeMap::new(),
+            tasks: crate::tasks::TaskModes::default(),
+            harnesses: crate::harness::default_harnesses(),
             home: None,
             warnings: Vec::new(),
         }
@@ -502,6 +514,129 @@ fn resolve_spaces(value: &Value, s: &mut Settings) {
     }
 }
 
+/// `trustedProjects`: root to hash; entries that are not strings are skipped with a warning.
+fn resolve_trusted_projects(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("trustedProjects must be an object".into());
+        return;
+    };
+    for (root, hash) in obj {
+        match hash.as_str() {
+            Some(h) if !h.is_empty() => {
+                s.trusted_projects.insert(root.clone(), h.to_owned());
+            }
+            _ => s.warnings.push(format!(
+                "trustedProjects: {root}: the hash must be a string"
+            )),
+        }
+    }
+}
+
+/// `tasks`: `modes[]` and `worktreeDir`. Invalid entries warn and are skipped; without a valid
+/// mode the default `agent` mode stays.
+fn resolve_tasks(value: &Value, s: &mut Settings) {
+    use crate::tasks::{
+        COMMAND_PLACEHOLDERS, DEFAULT_BRANCH, PATH_PLACEHOLDERS, TaskMode, unknown_placeholder,
+    };
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("tasks must be an object".into());
+        return;
+    };
+    match obj.get("worktreeDir") {
+        None => {}
+        Some(Value::String(d)) if !d.trim().is_empty() => {
+            match unknown_placeholder(d, PATH_PLACEHOLDERS) {
+                Some(p) => s.warnings.push(format!(
+                    "tasks.worktreeDir: unknown placeholder {{{p}}}; using the default"
+                )),
+                None => s.tasks.worktree_dir = d.clone(),
+            }
+        }
+        Some(_) => s
+            .warnings
+            .push("tasks.worktreeDir must be a non-empty string; using the default".into()),
+    }
+    let Some(modes) = obj.get("modes") else {
+        return;
+    };
+    let Some(modes) = modes.as_array() else {
+        s.warnings.push("tasks.modes must be an array".into());
+        return;
+    };
+    let mut out: Vec<TaskMode> = Vec::new();
+    for (i, m) in modes.iter().enumerate() {
+        let at = format!("tasks.modes[{i}]");
+        let Some(m) = m.as_object() else {
+            s.warnings.push(format!("{at} must be an object; ignored"));
+            continue;
+        };
+        let text = |key: &str, at: &str, warnings: &mut Vec<String>| match m.get(key) {
+            None => None,
+            Some(Value::String(v)) if !v.trim().is_empty() => Some(v.clone()),
+            Some(_) => {
+                warnings.push(format!("{at}.{key} must be a non-empty string; ignored"));
+                None
+            }
+        };
+        let Some(name) = text("name", &at, &mut s.warnings) else {
+            if !m.contains_key("name") {
+                s.warnings.push(format!("{at}.name is missing; ignored"));
+            }
+            continue;
+        };
+        let at = format!("tasks.modes[{name}]");
+        if out.iter().any(|o| o.name == name) {
+            s.warnings
+                .push(format!("{at}: duplicate name; the first one wins"));
+            continue;
+        }
+        let Some(command) = text("command", &at, &mut s.warnings) else {
+            if !m.contains_key("command") {
+                s.warnings.push(format!("{at}.command is missing; ignored"));
+            }
+            continue;
+        };
+        let worktree = match m.get("worktree") {
+            None => true,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => {
+                s.warnings
+                    .push(format!("{at}.worktree must be a boolean; using true"));
+                true
+            }
+        };
+        let branch = text("branch", &at, &mut s.warnings).unwrap_or_else(|| DEFAULT_BRANCH.into());
+        let cleanup = text("cleanup", &at, &mut s.warnings);
+        let checks = [
+            ("command", Some(&command), COMMAND_PLACEHOLDERS),
+            ("cleanup", cleanup.as_ref(), COMMAND_PLACEHOLDERS),
+            ("branch", Some(&branch), PATH_PLACEHOLDERS),
+        ];
+        let bad = checks.iter().find_map(|(k, v, allowed)| {
+            v.and_then(|v| unknown_placeholder(v, allowed))
+                .map(|p| (*k, p))
+        });
+        if let Some((key, p)) = bad {
+            s.warnings
+                .push(format!("{at}.{key}: unknown placeholder {{{p}}}; ignored"));
+            continue;
+        }
+        out.push(TaskMode {
+            name,
+            worktree,
+            command,
+            branch,
+            cleanup,
+        });
+    }
+    if !out.is_empty() {
+        s.tasks.modes = out;
+    } else if !modes.is_empty() {
+        s.warnings
+            .push("tasks.modes has no valid mode; using the default agent mode".into());
+    }
+}
+
 /// Resolves the settings from the file contents. `read_ghostty` is only called when the
 /// `terminal.ghostty` flag is set.
 pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>) -> Settings {
@@ -580,8 +715,17 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
         resolve_notifications(value, &mut s);
     }
 
+    if let Some(value) = root.get("trustedProjects") {
+        resolve_trusted_projects(value, &mut s);
+    }
     if let Some(value) = root.get("spaces") {
         resolve_spaces(value, &mut s);
+    }
+    if let Some(value) = root.get("tasks") {
+        resolve_tasks(value, &mut s);
+    }
+    if let Some(value) = root.get("harnesses") {
+        s.harnesses = crate::harness::resolve(value, &mut s.warnings);
     }
 
     let mut use_ghostty = false;
@@ -1023,6 +1167,32 @@ pub fn remove_spaces_layout_text(text: &str) -> Result<String, String> {
     remove_path_text(text, &["spaces", "layout"])
 }
 
+/// Returns `text` with `trustedProjects` replaced by `projects`, touching nothing else (comments
+/// inside the old `trustedProjects` object go with it).
+pub fn set_trusted_projects_text(
+    text: &str,
+    projects: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    let value = serde_json::to_string(projects).map_err(|e| e.to_string())?;
+    set_key_text(text, "trustedProjects", &value)
+}
+
+/// Stores `hash` as the trusted content of the project file of `root`.
+pub fn trust_project(home: &Path, root: &str, hash: &str) -> Result<(), String> {
+    let mut projects = load(home).trusted_projects;
+    projects.insert(root.to_owned(), hash.to_owned());
+    save_with(home, |text| set_trusted_projects_text(text, &projects))
+}
+
+/// Drops the trust of `root`; an unknown root or a missing file changes nothing.
+pub fn revoke_project(home: &Path, root: &str) -> Result<(), String> {
+    let mut projects = load(home).trusted_projects;
+    if projects.remove(root).is_none() {
+        return Ok(());
+    }
+    save_with(home, |text| set_trusted_projects_text(text, &projects))
+}
+
 /// A Windows absolute path: drive letter, colon, separator (`C:\x`, `c:/x`).
 fn is_windows_absolute(path: &str) -> bool {
     let b = path.as_bytes();
@@ -1215,6 +1385,87 @@ mod tests {
         assert_eq!(s.explorer_roots, ["/srv", "~/code"]);
         assert!(s.explorer_show_hidden);
         assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn harnesses_default_and_resolve_from_config() {
+        let d = resolve(None, none);
+        assert_eq!(d.harnesses.len(), 2);
+        let s = rows(r#"{"harnesses":{"x":{"command":["x"]},"bad":{"command":[]}}}"#);
+        assert_eq!(s.harnesses.len(), 3);
+        assert_eq!(s.harnesses[2].id, "x");
+        assert_eq!(s.warnings.len(), 1);
+        assert!(s.warnings[0].starts_with("harnesses.bad:"));
+    }
+
+    #[test]
+    fn tasks_default_to_one_agent_mode() {
+        let s = resolve(None, || None);
+        assert_eq!(s.tasks.modes.len(), 1);
+        let m = &s.tasks.modes[0];
+        assert_eq!(m.name, "agent");
+        assert!(m.worktree);
+        assert_eq!(m.command, "claude {prompt}");
+        assert_eq!(m.branch, "{type}/{nr}-{slug}");
+        assert_eq!(m.cleanup, None);
+        assert_eq!(s.tasks.worktree_dir, "../{repo}-{nr}");
+        assert_eq!(resolve(Some(r#"{"tasks":{}}"#), || None).tasks, s.tasks);
+    }
+
+    #[test]
+    fn tasks_parse_modes_and_worktree_dir() {
+        let s = resolve(
+            Some(
+                r#"{"tasks":{"worktreeDir":"../wt/{nr}","modes":[
+                {"name":"agent","command":"claude {prompt}"},
+                {"name":"quick","worktree":false,"command":"vim {url}","branch":"x/{nr}","cleanup":"echo {branch}"}]}}"#,
+            ),
+            || None,
+        );
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert_eq!(s.tasks.worktree_dir, "../wt/{nr}");
+        assert_eq!(s.tasks.modes.len(), 2);
+        let q = &s.tasks.modes[1];
+        assert!(!q.worktree);
+        assert_eq!(q.branch, "x/{nr}");
+        assert_eq!(q.cleanup.as_deref(), Some("echo {branch}"));
+        assert_eq!(s.tasks.modes[0].branch, "{type}/{nr}-{slug}");
+    }
+
+    #[test]
+    fn tasks_invalid_entries_warn_and_the_rest_loads() {
+        let s = resolve(
+            Some(
+                r#"{"theme":"dark","tasks":{"modes":[
+                {"name":"a","command":"run"},
+                {"name":"a","command":"again"},
+                {"name":"nocmd"},
+                {"name":"bad","command":"run {nope}"},
+                {"command":"x"},
+                {"name":"b","command":"ok","branch":"{prompt}"},
+                {"name":"c","command":"ok","worktree":"yes"}]}}"#,
+            ),
+            || None,
+        );
+        assert_eq!(s.theme, "dark");
+        let names: Vec<_> = s.tasks.modes.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["a", "c"]);
+        assert_eq!(s.tasks.modes[0].command, "run");
+        assert_eq!(s.warnings.len(), 6, "{:?}", s.warnings);
+        assert!(s.warnings.iter().any(|w| w.contains("duplicate")));
+        assert!(s.warnings.iter().any(|w| w.contains("{nope}")));
+        assert!(s.warnings.iter().any(|w| w.contains("{prompt}")));
+    }
+
+    #[test]
+    fn tasks_without_a_valid_mode_keep_the_default() {
+        let s = resolve(
+            Some(r#"{"tasks":{"worktreeDir":"../{bad}","modes":[{"name":"x"}]}}"#),
+            || None,
+        );
+        assert_eq!(s.tasks, crate::tasks::TaskModes::default());
+        assert_eq!(s.warnings.len(), 3, "{:?}", s.warnings);
+        assert_eq!(resolve(Some(r#"{"tasks":3}"#), || None).warnings.len(), 1);
     }
 
     #[test]
@@ -1516,6 +1767,55 @@ mod tests {
         let out = remove_spaces_layout_text(compact).unwrap();
         assert_eq!(out, "{\"spaces\":{\"x\":1}}");
         assert!(serde_json::from_str::<Value>(&out).is_ok());
+    }
+
+    #[test]
+    fn trusted_projects_resolve_and_bad_entries_warn() {
+        let s = resolve(
+            Some(r#"{"trustedProjects":{"/a":"abc","/b":3,"/c":""}}"#),
+            || None,
+        );
+        assert_eq!(s.trusted_projects.len(), 1);
+        assert_eq!(s.trusted_projects["/a"], "abc");
+        assert_eq!(s.warnings.len(), 2);
+        let s = resolve(Some(r#"{"trustedProjects":[1]}"#), || None);
+        assert!(s.trusted_projects.is_empty() && s.warnings.len() == 1);
+        assert!(resolve(None, || None).trusted_projects.is_empty());
+    }
+
+    #[test]
+    fn set_trusted_projects_keeps_comments_and_other_keys() {
+        let text = "{\n  // keep\n  \"theme\": \"dark\"\n}";
+        let map = BTreeMap::from([("C:\\work\\app".to_owned(), "h1".to_owned())]);
+        let out = set_trusted_projects_text(text, &map).unwrap();
+        assert!(out.contains("// keep") && out.contains("\"theme\": \"dark\""));
+        let parsed: Value = serde_json::from_str(&out.replace("  // keep\n", "")).unwrap();
+        assert_eq!(parsed["trustedProjects"]["C:\\work\\app"], "h1");
+        // Replacing an existing entry set keeps the rest too.
+        let again = set_trusted_projects_text(&out, &BTreeMap::new()).unwrap();
+        assert!(again.contains("// keep") && again.contains("\"trustedProjects\": {}"));
+    }
+
+    #[test]
+    fn trust_and_revoke_round_trip_keeping_other_keys() {
+        let home = std::env::temp_dir().join(format!("poimen-trust-set-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        revoke_project(&home, "/a").unwrap();
+        assert!(!config_path(&home).exists());
+        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+        std::fs::write(config_path(&home), "{\n  \"theme\": \"dark\"\n}").unwrap();
+        trust_project(&home, "/a", "h1").unwrap();
+        trust_project(&home, "/b", "h2").unwrap();
+        trust_project(&home, "/a", "h3").unwrap();
+        let s = load(&home);
+        assert_eq!(s.trusted_projects["/a"], "h3");
+        assert_eq!(s.trusted_projects["/b"], "h2");
+        revoke_project(&home, "/a").unwrap();
+        revoke_project(&home, "/unknown").unwrap();
+        let s = load(&home);
+        assert_eq!(s.trusted_projects.keys().collect::<Vec<_>>(), ["/b"]);
+        assert_eq!(s.theme, "dark");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

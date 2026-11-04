@@ -1,0 +1,18 @@
+{"data":{"repository":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":"c1"},"nodes":[
+{"number":10,"title":"[Epic] GitHub views","url":"https://github.com/o/n/issues/10","state":"OPEN",
+ "labels":{"nodes":[{"name":"epic"}]},"assignees":{"nodes":[]},"milestone":{"title":"1.0.0"},
+ "parent":null,"subIssuesSummary":{"total":2,"completed":1},
+ "closedByPullRequestsReferences":{"nodes":[]}},
+{"number":232,"title":"Issues tree","url":"https://github.com/o/n/issues/232","state":"OPEN",
+ "labels":{"nodes":[{"name":"pbi"},{"name":"needs-refinement"}]},"assignees":{"nodes":[{"login":"jkaufmann"}]},"milestone":null,
+ "parent":{"number":10,"repository":{"nameWithOwner":"o/n"}},"subIssuesSummary":{"total":0,"completed":0},
+ "closedByPullRequestsReferences":{"nodes":[
+  {"number":400,"url":"https://github.com/o/n/pull/400","state":"MERGED","headRefName":"x",
+   "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"checkRunCountsByState":[{"state":"SUCCESS","count":3}],"statusContextCountsByState":[]}}}}]}},
+  {"number":401,"url":"https://github.com/o/n/pull/401","state":"OPEN","headRefName":"feat/232-tree","commits":{"nodes":[]}}]}},
+{"number":233,"title":"Other","url":"https://github.com/o/n/issues/233","state":"OPEN",
+ "labels":{"nodes":[]},"assignees":{"nodes":[]},"milestone":null,
+ "parent":{"number":5,"repository":{"nameWithOwner":"o/other"}},"subIssuesSummary":null,
+ "closedByPullRequestsReferences":{"nodes":[]}},
+{"title":"no number"}
+]}}}}

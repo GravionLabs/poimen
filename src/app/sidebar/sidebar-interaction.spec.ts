@@ -200,58 +200,31 @@ describe("Sidebar with the real hx-tree", () => {
     );
   });
 
-  it("groups the pane context menu by plugin and moves focus over separators and headings", async () => {
-    const { root, settle, fixture } = await setup();
-    // JIT does not wire signal inputs for setInput here: replace the input signal itself.
-    Object.assign(fixture.componentInstance, {
-      pluginActions: signal([
-        {
-          plugin_id: "review-popup",
-          action_id: "open",
-          title: "Review",
-          plugin_name: "Review Popup",
-          description: null,
-        },
-        {
-          plugin_id: "deliver-board",
-          action_id: "open",
-          title: "Open board",
-          plugin_name: "Deliver Board",
-          description: null,
-        },
-      ]),
-    });
+  it("moves focus over the entries of the pane context menu", async () => {
+    const { root, settle } = await setup();
     const row = [...root.querySelectorAll<HTMLElement>(".row")].find((e) =>
       e.textContent?.includes("claude"),
     )!;
     row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     await settle();
 
-    expect(root.querySelectorAll('.menu [role="separator"]')).toHaveLength(2);
     const groups = [...root.querySelectorAll('.menu [role="group"]')];
-    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
-      "Actions",
-      "Deliver Board",
-      "Review Popup",
-    ]);
-    expect(root.querySelectorAll(".menu-heading")).toHaveLength(2);
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual(["Actions"]);
 
     const menu = root.querySelector<HTMLElement>(".menu")!;
     const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-    expect(items).toHaveLength(7);
+    expect(items).toHaveLength(5);
     const press = (name: string) =>
       menu.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
     items[4].focus();
     press("ArrowDown");
-    expect(document.activeElement?.textContent?.trim()).toBe("Open board");
-    press("ArrowDown");
-    expect(document.activeElement?.textContent?.trim()).toBe("Review");
-    press("Home");
     expect(document.activeElement?.textContent?.trim()).toBe("Split right");
     press("End");
-    expect(document.activeElement?.textContent?.trim()).toBe("Review");
-    press("o");
-    expect(document.activeElement?.textContent?.trim()).toBe("Open board");
+    expect(document.activeElement?.textContent?.trim()).toBe("Close pane...");
+    press("Home");
+    expect(document.activeElement?.textContent?.trim()).toBe("Split right");
+    press("r");
+    expect(document.activeElement?.textContent?.trim()).toBe("Rename...");
 
     // Modified keys are no type-ahead and stay unhandled.
     items[0].focus();

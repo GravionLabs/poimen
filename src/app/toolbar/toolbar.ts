@@ -1,5 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
-import type { PluginAction } from "../core/herdr";
+import { ChangeDetectionStrategy, Component, input, output } from "@angular/core";
 import { nextTheme, type ThemeSetting } from "../core/settings";
 
 /** Tooltip and accessible name of the theme button: the current value and what a click selects. */
@@ -30,27 +29,6 @@ export class Toolbar {
   readonly outputOpen = input(false);
   /** The user clicked the Output button. */
   readonly outputToggle = output<void>();
-
-  /** The herdr plugin actions the Plugins menu lists. */
-  readonly plugins = input<readonly PluginAction[]>([]);
-  /** Why the plugin actions could not be listed, if so. */
-  readonly pluginsError = input<string | null>(null);
-  /** The Plugins menu is about to open: the host re-reads the actions. */
-  readonly pluginsOpened = output<void>();
-  /** An action of the Plugins menu was picked. */
-  readonly pluginChosen = output<PluginAction>();
-  protected readonly pluginsOpen = signal(false);
-
-  protected togglePlugins(): void {
-    const open = !this.pluginsOpen();
-    this.pluginsOpen.set(open);
-    if (open) this.pluginsOpened.emit();
-  }
-
-  protected choosePlugin(action: PluginAction): void {
-    this.pluginsOpen.set(false);
-    this.pluginChosen.emit(action);
-  }
 
   protected readonly label = themeLabel;
   protected readonly fixed = fixedLabel;

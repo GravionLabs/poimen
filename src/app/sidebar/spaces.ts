@@ -1,4 +1,11 @@
-import { shortPath, type AgentStatus, type PaneRow, type SpaceNode } from "../core/herdr";
+import {
+  shortPath,
+  type AgentStatus,
+  type BranchPull,
+  type PaneRow,
+  type SpaceNode,
+} from "../core/herdr";
+import { checksText } from "../github/pulls";
 
 /** State word shown next to the name; `undefined` while herdr reports no known state. */
 export function stateLabel(status: AgentStatus): string | undefined {
@@ -53,6 +60,37 @@ export interface SpaceContext {
   dir?: string;
   branch?: string;
   worktree: boolean;
+  /** Shared `dirty` and `sync` token texts (empty when clean/even or not shared). */
+  dirty?: string;
+  sync?: string;
+  /** The pull request every pane of the space shares. */
+  pr?: BranchPull;
+}
+
+/** `●3` for three changed or untracked files; empty when clean or unknown. */
+export function dirtyText(dirty: number | undefined): string {
+  return dirty ? `●${dirty}` : "";
+}
+
+/** `↑2 ↓1`; empty when even, without upstream or unknown. */
+export function syncText(ahead: number | undefined, behind: number | undefined): string {
+  return [ahead ? `↑${ahead}` : "", behind ? `↓${behind}` : ""].filter(Boolean).join(" ");
+}
+
+/** `#123 ✓`, `#123 ✗`, `#123 …` (no symbol without checks); `merged` for a merged pull request. */
+export function prText(pr: BranchPull): string {
+  if (pr.state === "merged") return "merged";
+  const symbol = { passing: "✓", failing: "✗", pending: "…", none: "" }[pr.checks.state];
+  return symbol ? `#${pr.number} ${symbol}` : `#${pr.number}`;
+}
+
+/** Tooltip of the `pr` token: number, title, state and check counts. */
+export function prTooltip(pr: BranchPull): string {
+  const state = pr.state === "merged" ? "merged" : pr.isDraft ? "draft" : "open";
+  const checks = checksText(pr.checks);
+  return [`#${pr.number} ${pr.title} (${state})`, checks && `Checks: ${checks}`]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function spaceContext(space: SpaceNode): SpaceContext {
@@ -60,8 +98,17 @@ export function spaceContext(space: SpaceNode): SpaceContext {
   if (!first) return { worktree: false };
   const same = <K extends "dir" | "branch">(key: K) =>
     first[key] !== undefined && rest.every((r) => r[key] === first[key]) ? first[key] : undefined;
+  const sharedText = (text: (r: PaneRow) => string) =>
+    rest.every((r) => text(r) === text(first)) ? text(first) : "";
   const branch = same("branch");
-  return { dir: same("dir"), branch, worktree: branch !== undefined && first.worktree };
+  return {
+    dir: same("dir"),
+    branch,
+    worktree: branch !== undefined && first.worktree,
+    dirty: sharedText((r) => dirtyText(r.dirty)),
+    sync: sharedText((r) => syncText(r.ahead, r.behind)),
+    pr: rest.every((r) => r.pr?.url === first.pr?.url) ? first.pr : undefined,
+  };
 }
 
 /**
@@ -124,7 +171,7 @@ const line = (...tokens: string[]): TokenSpec[] => tokens.map((token) => ({ toke
 
 /** The layout poimen shipped before it became configurable. */
 export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
-  workspace: [line("state_icon", "name", "state_text", "branch", "dir")],
+  workspace: [line("state_icon", "name", "state_text", "branch", "dirty", "sync", "dir")],
   agent: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
   terminal: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
 };
@@ -137,6 +184,9 @@ export const ROW_TOKENS = [
   "agent",
   "title",
   "branch",
+  "dirty",
+  "sync",
+  "pr",
   "dir",
   "tab",
 ] as const;
@@ -155,6 +205,9 @@ export interface Segment {
   dim: boolean;
   /** Preceded by another text value on the line: shown after a " · ". */
   sep: boolean;
+  /** `pr` token: the pull request to open on a click and the tooltip text. */
+  url?: string;
+  tip?: string;
 }
 
 export type Line = Segment[];
@@ -196,6 +249,14 @@ export function renderRow(
         return pane.branch && pane.branch !== ctx.branch
           ? branchText(pane.branch, pane.worktree)
           : undefined;
+      case "dirty": {
+        const text = pane ? dirtyText(pane.dirty) : (ctx.dirty ?? "");
+        return pane && text === (ctx.dirty ?? "") ? undefined : text;
+      }
+      case "sync": {
+        const text = pane ? syncText(pane.ahead, pane.behind) : (ctx.sync ?? "");
+        return pane && text === (ctx.sync ?? "") ? undefined : text;
+      }
       case "dir":
         if (!pane) return ctx.dir ? shortPath(ctx.dir) : undefined;
         return pane.dir && pane.dir !== ctx.dir ? shortPath(pane.dir) : undefined;
@@ -211,6 +272,23 @@ export function renderRow(
         const base = { status, bold: bold === true, dim: dim === true };
         if (token === "state_icon") {
           out.push({ ...base, kind: "dot", text: "", sep: false });
+          continue;
+        }
+        if (token === "pr") {
+          const pr = pane ? (pane.pr?.url !== ctx.pr?.url ? pane.pr : undefined) : ctx.pr;
+          if (!pr) continue;
+          const text = prText(pr);
+          if (seen.has(same(text))) continue;
+          seen.add(same(text));
+          out.push({
+            ...base,
+            dim: base.dim || pr.isDraft,
+            kind: "text",
+            text,
+            sep: out.at(-1)?.kind === "text",
+            url: pr.url,
+            tip: prTooltip(pr),
+          });
           continue;
         }
         const text = value(token)?.trim();

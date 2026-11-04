@@ -12,15 +12,7 @@ import {
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
-import {
-  flowSession,
-  rowName,
-  supportsFlow,
-  tabHeader,
-  type Mode,
-  type Pane,
-  type PluginAction,
-} from "./core/herdr";
+import { flowSession, rowName, supportsFlow, tabHeader, type Mode, type Pane } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Attention } from "./core/attention";
@@ -32,6 +24,7 @@ import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
+import { Updater } from "./core/updater";
 import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
@@ -46,8 +39,7 @@ import {
   type EditorGroup,
 } from "./core/editor-tabs";
 import { SettingsView } from "./settings-view/settings-view";
-import { DeliverBoardView } from "./deliver-board/deliver-board-view";
-import { BOARD_ENTRYPOINT, BOARD_PLUGIN } from "./core/deliver-board";
+import { GithubView } from "./github/github-view";
 import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
@@ -59,12 +51,11 @@ import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { CommandPalette } from "./core/command-palette";
-import { PluginActions, pluginMenuId } from "./core/plugin-actions";
-import { PluginPanes, type PluginPaneDef } from "./core/plugin-panes";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
 import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
+import { TrustDialog } from "./trust-dialog/trust-dialog";
 import type { SidebarMenuAction } from "./sidebar/sidebar";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
@@ -87,7 +78,7 @@ const ZOOM_STEP = 1;
     Notifications,
     TerminalView,
     SettingsView,
-    DeliverBoardView,
+    GithubView,
     TabBar,
     SplitPane,
     StatusBar,
@@ -97,6 +88,7 @@ const ZOOM_STEP = 1;
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
+    TrustDialog,
     PaletteView,
     ShortcutsDialog,
   ],
@@ -106,6 +98,7 @@ const ZOOM_STEP = 1;
 })
 export class App {
   protected readonly store = inject(HerdrStore);
+  protected readonly updater = inject(Updater);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
@@ -117,15 +110,17 @@ export class App {
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
   protected readonly shortcutsOverview = inject(ShortcutsOverview);
-  protected readonly plugins = inject(PluginActions);
-  private readonly pluginPanes = inject(PluginPanes);
   private readonly subagents = inject(Subagents);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
+    if (ACTIVITY_VIEWS.find((v) => v.id === id)?.tab === "github") {
+      this.editor.openGithub();
+      return;
+    }
     this.ui.selectView(
       id,
-      ACTIVITY_VIEWS.map((v) => v.id),
+      ACTIVITY_VIEWS.filter((v) => !v.tab).map((v) => v.id),
     );
   }
   protected readonly minWidth = SIDEBAR_MIN_WIDTH;
@@ -142,7 +137,6 @@ export class App {
   protected readonly groupItems = computed(() => {
     const snap = this.store.snapshot();
     this.store.panes();
-    const names = this.pluginPanes.names();
     const ringing = this.attention.attention();
     const unread = this.attention.unread();
     return new Map(
@@ -152,8 +146,13 @@ export class App {
           if (tabKind(tab.paneId) === "settings") {
             return { id: tab.paneId, label: "Settings", title: "Settings" };
           }
-          if (tabKind(tab.paneId) === "board") {
-            return { id: tab.paneId, label: "Deliver board", title: "Deliver board" };
+          if (tabKind(tab.paneId) === "github") {
+            return {
+              id: tab.paneId,
+              label: "Pull requests",
+              group: "GitHub",
+              title: "GitHub pull requests",
+            };
           }
           const flowOf = flowPane(tab.paneId);
           const paneId = flowOf ?? tab.paneId;
@@ -164,11 +163,7 @@ export class App {
           const workspace = pane
             ? snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label
             : undefined;
-          const pluginName = names.get(paneId);
-          const header = tabHeader(
-            workspace,
-            pluginName ?? (pane ? rowName(pane, tabLabel) : paneId),
-          );
+          const header = tabHeader(workspace, pane ? rowName(pane, tabLabel) : paneId);
           if (flowOf !== null) {
             return {
               id: tab.paneId,
@@ -249,14 +244,8 @@ export class App {
       const target = this.subagentTarget();
       untracked(() => void this.subagents.follow(target?.paneId ?? null, target?.session ?? null));
     });
-    void this.plugins.load();
     void this.prefs.start();
     void this.userSchemes.start();
-    // herdr may reuse pane ids: forget plugin panes that are gone once a snapshot is read.
-    effect(() => {
-      const panes = this.store.panes();
-      if (this.store.loaded()) untracked(() => this.pluginPanes.prune(panes));
-    });
     void this.store.start().then(() => this.dropMissing());
   }
 
@@ -280,11 +269,6 @@ export class App {
 
   protected dismissNotice(): void {
     this.notice.set(null);
-  }
-
-  /** A plugin action failed in the command palette. */
-  protected showError(message: string): void {
-    this.notice.set(message);
   }
 
   /** After the first snapshot, closes restored tabs whose pane is gone, and says so. */
@@ -333,6 +317,10 @@ export class App {
   protected run(id: string): void {
     if (id === "openSettings") {
       this.openSettings();
+      return;
+    }
+    if (id === "openGithub") {
+      this.editor.openGithub();
       return;
     }
     if (id === "closeSpace") {
@@ -396,9 +384,7 @@ export class App {
 
   /** Context menu of a sidebar row: new terminal in a workspace, split or close a pane. */
   protected onSidebarMenu(event: SidebarMenuAction): void {
-    if (event.kind === "pane" && event.action.startsWith("plugin:")) {
-      void this.runPlugin(this.plugins.find(event.action), event.id);
-    } else if (event.action === "new-terminal") this.paneActions.askNew(event.id);
+    if (event.action === "new-terminal") this.paneActions.askNew(event.id);
     else if (event.action === "close-space") this.closeSpace(event.id);
     else this.paneAction(event.id, event.action);
   }
@@ -455,81 +441,21 @@ export class App {
         label: "Open agent flow",
         appliesTo: (id) => tabKind(id) === "pane" && supportsFlow(this.pane(id)),
       },
-      {
-        action: "plugin-pane-close",
-        label: "Close plugin pane",
-        appliesTo: (id) => this.pluginPanes.isPluginPane(id),
-      },
       { action: "pane-split-right", label: "New pane to the right" },
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
       { action: "pane-rename", label: "Rename pane..." },
       { action: "pane-close", label: "Close herdr pane..." },
-      ...this.plugins.actions().map((a) => ({ action: pluginMenuId(a), label: a.title })),
     ];
   }
 
   protected onTabMenu(id: string, action: string): void {
-    if (action.startsWith("plugin:")) {
-      if (tabKind(id) === "pane") void this.runPlugin(this.plugins.find(action), id);
-    } else if (action === "plugin-pane-close") {
-      void this.pluginPanes.close(id).then((error) => error && this.showError(error));
-    } else if (action === "split-right") this.editor.split(id, "row");
+    if (action === "split-right") this.editor.split(id, "row");
     else if (action === "split-down") this.editor.split(id, "column");
     else if (action === "close") this.editor.close(id);
     else if (action === "open-flow") this.editor.openFlow(id);
     else if (action.startsWith("pane-") && tabKind(id) === "pane")
       this.paneAction(id, action.slice("pane-".length));
-  }
-
-  /** A tab is picked: show it, and bring a plugin pane to the front in herdr too. */
-  protected onTabSelected(id: string): void {
-    this.editor.activate(id);
-    void this.pluginPanes.focus(id);
-  }
-
-  /** A plugin pane chosen in the palette opens as a herdr tab and as an editor tab. */
-  protected async openPluginPane(def: PluginPaneDef): Promise<void> {
-    if (def.plugin_id === BOARD_PLUGIN && def.entrypoint === BOARD_ENTRYPOINT) {
-      this.editor.openBoard();
-      return;
-    }
-    await this.openHerdrPluginPane(def);
-  }
-
-  private async openHerdrPluginPane(def: PluginPaneDef): Promise<void> {
-    const active = this.activePaneId();
-    const result = await this.pluginPanes.open(
-      def,
-      active ? this.pane(active)?.workspace_id : undefined,
-    );
-    if ("error" in result) {
-      this.showError(result.error);
-      return;
-    }
-    const pane = this.pane(result.paneId);
-    if (pane) this.open(pane, true);
-  }
-
-  /** Runs a plugin action with `paneId` as context; a refusal shows as a notice. */
-  protected async runPlugin(
-    action: PluginAction | undefined,
-    paneId: string | null,
-  ): Promise<void> {
-    if (!action) return;
-    const error = await this.plugins.invoke(action, paneId);
-    if (error) this.showError(error);
-  }
-
-  /** The Plugins menu opens: re-read the actions; the context menus use the same list. */
-  @HostListener("window:focus")
-  protected loadPlugins(): void {
-    void this.plugins.load();
-  }
-
-  /** An action of the Plugins menu runs with the active pane as context. */
-  protected onPluginChosen(action: PluginAction): void {
-    void this.runPlugin(action, this.activePaneId());
   }
 
   protected groupPane(group: EditorGroup): Pane | undefined {
@@ -608,17 +534,8 @@ export class App {
     this.ui.selectPanelTab("output");
   }
 
-  protected isBoard(id: string | null): boolean {
-    return id !== null && tabKind(id) === "board";
-  }
-
-  /** The terminal board of the plugin (herdr pane), for the unsupported state of the native one. */
-  protected openTerminalBoard(): void {
-    const def = this.pluginPanes
-      .defs()
-      .find((d) => d.plugin_id === BOARD_PLUGIN && d.entrypoint === BOARD_ENTRYPOINT);
-    if (def) void this.openHerdrPluginPane(def);
-    else this.showError("The deliver-board plugin has no terminal board pane.");
+  protected isGithub(id: string | null): boolean {
+    return id !== null && tabKind(id) === "github";
   }
 
   protected openSettings(): void {

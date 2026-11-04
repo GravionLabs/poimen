@@ -1,0 +1,143 @@
+<div class="page">
+  <header>
+    <h1>Pull requests</h1>
+    <button type="button" (click)="refresh()" [disabled]="pulls.loading()">
+      {{ pulls.loading() ? "Refreshing..." : "Refresh" }}
+    </button>
+  </header>
+  @if (pulls.error(); as err) {
+    <p class="problem" role="alert">Could not read the pull requests: {{ err }}</p>
+  }
+  @let result = pulls.result();
+  @if (!result) {
+    @if (!pulls.error()) {
+      <p class="hint">Loading...</p>
+    }
+  } @else {
+    <div class="toolbar" role="group" aria-label="Filters">
+      @for (s of scopes; track s.id) {
+        <button
+          type="button"
+          [class.active]="pulls.scope() === s.id"
+          [attr.aria-pressed]="pulls.scope() === s.id"
+          (click)="pulls.scope.set(s.id)"
+        >
+          {{ s.label }}
+        </button>
+      }
+      <select
+        aria-label="Repository"
+        [value]="pulls.repoFilter() ?? ''"
+        (change)="setRepo($any($event.target).value)"
+      >
+        <option value="">All repositories</option>
+        @for (name of pulls.repoNames(); track name) {
+          <option [value]="name">{{ name }}</option>
+        }
+      </select>
+      <input
+        type="search"
+        aria-label="Filter by title or number"
+        placeholder="Title or number"
+        [value]="pulls.text()"
+        (input)="pulls.text.set($any($event.target).value)"
+      />
+      <span class="count" data-testid="count">
+        {{ pulls.visible().length }} shown
+        @if (pulls.selected().size) {
+          , {{ pulls.selectedPulls().length }} selected
+        }
+      </span>
+    </div>
+    @if (result.repos.length === 0) {
+      <p class="hint" data-testid="no-repos">
+        No GitHub repository found among the spaces and explorer roots.
+      </p>
+    }
+    @for (repo of result.repos; track repo.root) {
+      @if (repo.status === "error") {
+        <p class="problem" role="alert" data-testid="repo-error">
+          {{ repo.repo }}: {{ errorText(repo.error) }}
+        </p>
+      }
+    }
+    @if (result.repos.length > 0) {
+      @if (pulls.visible().length === 0) {
+        <p class="hint" data-testid="empty">No pull requests match.</p>
+      } @else {
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>Repository</th>
+              <th>#</th>
+              <th>Title</th>
+              <th>Author</th>
+              <th>Checks</th>
+              <th>Review</th>
+              <th class="num">Size</th>
+              <th class="num">Age</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody tabindex="0" (keydown)="onKey($event)" aria-label="Pull requests">
+            @for (row of pulls.visible(); track row.key) {
+              <tr
+                [class.selected]="pulls.selected().has(row.key)"
+                [class.cursor]="pulls.cursor() === row.key"
+                [attr.data-key]="row.key"
+              >
+                <td>
+                  <input
+                    type="checkbox"
+                    [attr.aria-label]="'Select #' + row.number"
+                    [checked]="pulls.selected().has(row.key)"
+                    (click)="onCheck($event, row.key)"
+                  />
+                </td>
+                <td class="mono">{{ row.repo }}</td>
+                <td>#{{ row.number }}</td>
+                <td>
+                  {{ row.title }}
+                  @if (row.isDraft) {
+                    <span class="badge">draft</span>
+                  }
+                </td>
+                <td>{{ row.author ?? "ghost" }}</td>
+                <td>
+                  @if (row.checks.state !== "none") {
+                    <span
+                      class="checks-{{ row.checks.state }}"
+                      [title]="checksText(row.checks)"
+                      data-testid="checks"
+                    >
+                      {{ row.checks.passed }} / {{ row.checks.failed }} / {{ row.checks.pending }}
+                    </span>
+                  }
+                </td>
+                <td>{{ reviewText(row) }}</td>
+                <td class="num">
+                  <span class="add">+{{ row.additions }}</span>
+                  <span class="del">-{{ row.deletions }}</span>
+                </td>
+                <td class="num">{{ age(row) }}</td>
+                <td>
+                  <button
+                    type="button"
+                    [disabled]="!isGithubUrl(row.url)"
+                    (click)="pulls.openUrl(row.url)"
+                  >
+                    Open in browser
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        <p class="hint">Checks: passed / failed / pending.</p>
+      }
+    }
+  }
+  <app-github-milestones />
+  <app-github-issues />
+</div>

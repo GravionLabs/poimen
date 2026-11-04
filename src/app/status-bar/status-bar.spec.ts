@@ -71,6 +71,11 @@ describe("mode button", () => {
       blocked = () => blocked;
       size = () => undefined;
       appVersion = () => null;
+      update = () => ({ kind: "idle" }) as const;
+      detailsOpen = () => false;
+      errTitle = () => "";
+      checkUpdate = { emit: () => {} };
+      installUpdate = { emit: () => {} };
       info = () => null;
       notice = () => "layout.json: invalid JSON";
       jump = { emit: () => {} };

@@ -1,8 +1,4 @@
 <app-toolbar
-  [plugins]="plugins.actions()"
-  [pluginsError]="plugins.error()"
-  (pluginsOpened)="loadPlugins()"
-  (pluginChosen)="onPluginChosen($event)"
   [outputOpen]="ui.panelOpen()"
   (outputToggle)="ui.togglePanel()"
   [theme]="theme$()"
@@ -28,7 +24,6 @@
           [activeId]="editor.activeId()"
           (selected)="open($event)"
           (pinned)="open($event, true)"
-          [pluginActions]="plugins.actions()"
           (menuAction)="onSidebarMenu($event)"
         />
       }
@@ -87,6 +82,9 @@
   (control)="setControl($event)"
   [size]="termSize()"
   [appVersion]="store.appVersion()"
+  [update]="updater.state()"
+  (checkUpdate)="updater.check()"
+  (installUpdate)="updater.install()"
   [info]="store.info()"
   [notice]="spaceActions.warning()"
   (jump)="jumpToWaiting()"
@@ -99,13 +97,9 @@
 
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
 <app-space-dialog (closed)="onSpaceClosed($event)" />
+<app-trust-dialog />
 <app-shortcuts-dialog />
-<app-command-palette
-  [activePaneId]="activePaneId()"
-  (commandChosen)="run($event)"
-  (paneChosen)="openPluginPane($event)"
-  (failed)="showError($event)"
-/>
+<app-command-palette (commandChosen)="run($event)" />
 
 <ng-template #nodeTpl let-node>
   @if (node.kind === "split") {
@@ -135,7 +129,7 @@
           [activeId]="g.activeId"
           [groupId]="'' + g.id"
           [menu]="menuFor(g)"
-          (selected)="onTabSelected($event)"
+          (selected)="editor.activate($event)"
           (closed)="editor.close($event)"
           (pinned)="editor.pin($event)"
           (moved)="editor.move($event.from, $event.to, g.id)"
@@ -143,8 +137,8 @@
           (menuAction)="onTabMenu($event.id, $event.action)"
         >
           <ng-template #tabContent let-tab>
-            @if (isBoard(tab.id)) {
-              <span class="mode ro" title="Native view">BD</span>
+            @if (isGithub(tab.id)) {
+              <span class="mode ro" title="GitHub">GH</span>
             } @else if (isFlow(tab.id)) {
               <span class="mode ro" title="Agent flow">FL</span>
             } @else if (isSettings(tab.id)) {
@@ -171,8 +165,8 @@
         @if (isSettings(g.activeId)) {
           <app-settings-view />
         }
-        @if (isBoard(g.activeId)) {
-          <app-deliver-board-view (terminalRequested)="openTerminalBoard()" />
+        @if (isGithub(g.activeId)) {
+          <app-github-view />
         }
         @for (flowPaneId of [flowOf(g)]; track flowPaneId) {
           @if (flowPaneId) {

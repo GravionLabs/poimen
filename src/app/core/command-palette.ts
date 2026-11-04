@@ -1,15 +1,12 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { fuzzyRank } from "./fuzzy";
-import type { PluginAction } from "./herdr";
 import { Keymap } from "./keymap";
 import type { ShortcutAction } from "./shortcuts";
-import { PluginActions } from "./plugin-actions";
 import { UiState } from "./ui-state";
-import { PluginPanes, type PluginPaneDef } from "./plugin-panes";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
 export interface PoimenCommand {
-  id: ShortcutAction | "openSettings" | "closeSpace";
+  id: ShortcutAction | "openSettings" | "openGithub" | "closeSpace";
   title: string;
 }
 
@@ -31,24 +28,16 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "previousTab", title: "Previous Tab" },
   { id: "showShortcuts", title: "Keyboard Shortcuts" },
   { id: "openSettings", title: "Open Settings" },
+  { id: "openGithub", title: "Open GitHub" },
 ];
 
-/**
- * An entry of the palette: a poimen command or a herdr plugin action. `origin` is the plugin name
- * (empty for poimen commands), `shortcut` the key binding label (empty when there is none).
- */
-interface PaletteItemBase {
+/** An entry of the palette: a poimen command; `shortcut` is the key binding label (empty when none). */
+export interface PaletteItem {
   key: string;
   title: string;
-  origin: string;
-  /** Groups the items of one plugin (its id) even when names collide; empty for poimen commands. */
-  groupId: string;
   shortcut: string;
+  command: PoimenCommand["id"];
 }
-export type PaletteItem =
-  | (PaletteItemBase & { kind: "command"; command: PoimenCommand["id"] })
-  | (PaletteItemBase & { kind: "plugin"; action: PluginAction })
-  | (PaletteItemBase & { kind: "pane"; def: PluginPaneDef });
 
 /** A line of the list: a group heading (not selectable) or a selectable entry. */
 export type PaletteRow =
@@ -68,13 +57,10 @@ export const POIMEN_GROUP = "Poimen";
 export const RECENT_GROUP = "Recent";
 
 /**
- * The command palette: poimen commands plus every herdr plugin action (`plugin.action.list`),
- * fuzzy filtered. herdr owns the actions: they are re-read each time the palette opens.
+ * The command palette: the poimen commands, fuzzy filtered.
  */
 @Injectable({ providedIn: "root" })
 export class CommandPalette {
-  private readonly plugins = inject(PluginActions);
-  private readonly panes = inject(PluginPanes);
   private readonly keymap = inject(Keymap);
   private readonly ui = inject(UiState);
 
@@ -84,46 +70,22 @@ export class CommandPalette {
 
   readonly isOpen = this._open.asReadonly();
   readonly query = this._query.asReadonly();
-  /** Why the plugin actions could not be listed; the poimen commands still work. */
-  readonly loadError = this.plugins.error;
 
   private readonly all = computed<PaletteItem[]>(() => [
     ...POIMEN_COMMANDS.map((c): PaletteItem => ({
-      kind: "command",
       key: `command:${c.id}`,
       title: c.title,
-      origin: "",
-      groupId: "",
-      shortcut: c.id === "openSettings" || c.id === "closeSpace" ? "" : this.keymap.label(c.id),
+      shortcut:
+        c.id === "openSettings" || c.id === "openGithub" || c.id === "closeSpace"
+          ? ""
+          : this.keymap.label(c.id),
       command: c.id,
-    })),
-    ...this.plugins.actions().map((a): PaletteItem => ({
-      kind: "plugin",
-      key: `plugin:${a.plugin_id}:${a.action_id}`,
-      title: a.title,
-      origin: a.plugin_name || a.plugin_id,
-      groupId: a.plugin_id,
-      shortcut: "",
-      action: a,
-    })),
-    ...this.panes.defs().map((d): PaletteItem => ({
-      kind: "pane",
-      key: `pane:${d.plugin_id}:${d.entrypoint}`,
-      title: `Open ${d.title} as tab`,
-      origin: d.plugin_name || d.plugin_id,
-      groupId: d.plugin_id,
-      shortcut: "",
-      def: d,
     })),
   ]);
 
-  private readonly ranked = computed(() =>
-    fuzzyRank(this.all(), this._query(), (i) =>
-      i.kind === "command" ? i.title : `${i.title} ${i.origin}`,
-    ),
-  );
+  private readonly ranked = computed(() => fuzzyRank(this.all(), this._query(), (i) => i.title));
 
-  /** The lines of the list. With an empty query: Recent, Poimen, one group per plugin. */
+  /** The lines of the list. With an empty query: Recent, then Poimen. */
   readonly rows = computed<PaletteRow[]>(() => {
     const ranked = this.ranked();
     const rows: PaletteRow[] = [];
@@ -145,20 +107,13 @@ export class CommandPalette {
       const item = items.find((i) => i.key === key);
       return item ? [item] : [];
     });
-    const groups = new Map<string, { label: string; members: PaletteItem[] }>();
-    groups.set(RECENT_GROUP, { label: RECENT_GROUP, members: recent });
-    groups.set(POIMEN_GROUP, { label: POIMEN_GROUP, members: [] });
-    for (const item of items) {
-      if (recent.includes(item)) continue;
-      const id = item.groupId === "" ? POIMEN_GROUP : `plugin:${item.groupId}`;
-      const label = item.origin === "" ? POIMEN_GROUP : item.origin;
-      const group = groups.get(id) ?? { label, members: [] };
-      group.members.push(item);
-      groups.set(id, group);
-    }
-    for (const [id, { label, members }] of groups) {
+    const groups: [string, PaletteItem[]][] = [
+      [RECENT_GROUP, recent],
+      [POIMEN_GROUP, items.filter((i) => !recent.includes(i))],
+    ];
+    for (const [label, members] of groups) {
       if (members.length === 0) continue;
-      rows.push({ type: "heading", key: `heading:${id}`, label });
+      rows.push({ type: "heading", key: `heading:${label}`, label });
       for (const item of members) push(item, []);
     }
     return rows;
@@ -172,12 +127,11 @@ export class CommandPalette {
     Math.max(0, Math.min(this._selected(), this.items().length - 1)),
   );
 
-  /** Opens the palette and re-reads the plugin actions. */
-  async open(): Promise<void> {
+  /** Opens the palette with an empty query. */
+  open(): void {
     this._query.set("");
     this._selected.set(0);
     this._open.set(true);
-    await Promise.all([this.plugins.load(), this.panes.load()]);
   }
 
   close(): void {
@@ -186,7 +140,7 @@ export class CommandPalette {
 
   toggle(): void {
     if (this._open()) this.close();
-    else void this.open();
+    else this.open();
   }
 
   setQuery(query: string): void {
@@ -213,10 +167,5 @@ export class CommandPalette {
   /** Remembers `item` as the most recently run entry. */
   recordRun(item: PaletteItem): void {
     this.ui.addRecentCommand(item.key);
-  }
-
-  /** Runs a plugin action with `paneId` as context; see {@link PluginActions.invoke}. */
-  invoke(action: PluginAction, paneId: string | null): Promise<string | null> {
-    return this.plugins.invoke(action, paneId);
   }
 }

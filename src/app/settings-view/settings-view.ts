@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  HostListener,
+  inject,
+  signal,
+} from "@angular/core";
 import {
   appearance,
   pickSchemeName,
@@ -6,9 +15,24 @@ import {
   type ColorScheme,
 } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
-import { SettingsStore, type ColorSchemeSetting, type ThemeSetting } from "../core/settings";
+import {
+  parseHarnesses,
+  SettingsStore,
+  type ColorSchemeSetting,
+  type HarnessInfo,
+  type ThemeSetting,
+} from "../core/settings";
 import { TauriBridge } from "../core/tauri";
+import { UiState } from "../core/ui-state";
 import { UserSchemes } from "../core/user-schemes";
+import {
+  allPages,
+  DEFAULT_SETTINGS_PAGE,
+  filterGroups,
+  findPage,
+  matches,
+  SETTINGS_GROUPS,
+} from "./settings-categories";
 import { SpaceLayoutEditor } from "./space-layout-editor";
 
 export type SchemeMode = "single" | "pair";
@@ -118,6 +142,145 @@ export class SettingsView {
   private readonly schemes = inject(ColorSchemeService);
   private readonly user = inject(UserSchemes);
   private readonly bridge = inject(TauriBridge);
+  private readonly ui = inject(UiState);
+
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  /** The search text; filters the category tree and highlights the labels on the page. */
+  protected readonly query = signal("");
+  protected readonly visibleGroups = computed(() => filterGroups(this.query()));
+  /** The selected page; the first one when the stored id no longer exists. */
+  protected readonly current = computed(
+    () =>
+      findPage(this.ui.settingsPage()) ??
+      findPage(DEFAULT_SETTINGS_PAGE) ??
+      findPage(allPages()[0].id)!,
+  );
+  /** The tree node with the tab stop (`g:<group>` or `p:<page>`); the selected page by default. */
+  private readonly focusedNode = signal<string | null>(null);
+  protected readonly tabStopNode = computed(() => {
+    const focused = this.focusedNode();
+    const nodes = this.nodes();
+    return focused !== null && nodes.includes(focused) ? focused : `p:${this.current().page.id}`;
+  });
+
+  /** The visible tree nodes in order; a search expands every group that has a match. */
+  private readonly nodes = computed(() =>
+    this.visibleGroups().flatMap((g) => [
+      `g:${g.id}`,
+      ...(this.expanded(g.id) ? g.pages.map((p) => `p:${p.id}`) : []),
+    ]),
+  );
+
+  protected expanded(groupId: string): boolean {
+    return this.query().trim() !== "" || !this.ui.settingsCollapsed().has(groupId);
+  }
+
+  protected selectPage(id: string): void {
+    this.ui.selectSettingsPage(id);
+  }
+
+  protected toggleGroup(id: string): void {
+    this.ui.setSettingsGroupCollapsed(id, this.expanded(id) && this.query().trim() === "");
+  }
+
+  protected setQuery(event: Event): void {
+    this.query.set((event.target as HTMLInputElement).value);
+  }
+
+  /** Whether `label` matches the search, so the page highlights it. */
+  protected hit(label: string): boolean {
+    return matches(label, this.query());
+  }
+
+  /** Cmd/Ctrl+F in the tab moves to the search field. */
+  @HostListener("keydown", ["$event"])
+  protected onViewKey(event: KeyboardEvent): void {
+    const search = this.host.nativeElement.querySelector<HTMLInputElement>("input.search");
+    if (
+      search &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      event.key.toLowerCase() === "f"
+    ) {
+      event.preventDefault();
+      search.focus();
+      search.select();
+    }
+  }
+
+  /** Escape in the search field clears it. */
+  protected searchKey(event: KeyboardEvent): void {
+    if (event.key === "Escape" && this.query() !== "") {
+      event.stopPropagation();
+      this.query.set("");
+      (event.target as HTMLInputElement).value = "";
+    }
+  }
+
+  /** Arrow keys, Home/End, Left/Right and Enter/Space on the tree. */
+  protected treeKey(event: KeyboardEvent, node: string): void {
+    const nodes = this.nodes();
+    const at = nodes.indexOf(node);
+    const [kind, id] = [node.slice(0, 1), node.slice(2)];
+    const focus = (target: string | undefined) => {
+      if (!target) return;
+      event.preventDefault();
+      this.focusedNode.set(target);
+      (event.currentTarget as HTMLElement)
+        .closest('[role="tree"]')
+        ?.querySelector<HTMLElement>(`[data-node="${target}"]`)
+        ?.focus();
+    };
+    switch (event.key) {
+      case "ArrowDown":
+        return focus(nodes[Math.min(at + 1, nodes.length - 1)]);
+      case "ArrowUp":
+        return focus(nodes[Math.max(at - 1, 0)]);
+      case "Home":
+        return focus(nodes[0]);
+      case "End":
+        return focus(nodes[nodes.length - 1]);
+      case "ArrowRight":
+        if (kind !== "g") return;
+        if (!this.expanded(id)) {
+          event.preventDefault();
+          this.toggleGroup(id);
+        } else {
+          focus(nodes[at + 1]?.startsWith("p:") ? nodes[at + 1] : undefined);
+        }
+        return;
+      case "ArrowLeft":
+        if (kind === "g") {
+          if (this.expanded(id) && this.query().trim() === "") {
+            event.preventDefault();
+            this.toggleGroup(id);
+          }
+        } else {
+          const group = SETTINGS_GROUPS.find((g) => g.pages.some((p) => p.id === id));
+          if (group) focus(`g:${group.id}`);
+        }
+        return;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        if (kind === "p") this.selectPage(id);
+        else this.toggleGroup(id);
+        return;
+    }
+  }
+
+  protected readonly harnesses = signal<HarnessInfo[]>([]);
+
+  constructor() {
+    // The harnesses come from config.json, so they are read again when the settings change.
+    effect(() => {
+      this.settings();
+      void this.bridge
+        .invoke<unknown>("get_harnesses")
+        .then((raw) => this.harnesses.set(parseHarnesses(raw)))
+        .catch(() => this.harnesses.set([]));
+    });
+  }
 
   protected readonly themeChoices = THEME_CHOICES;
   protected readonly settings = this.store.settings;
@@ -165,6 +328,15 @@ export class SettingsView {
 
   protected moveRoot(index: number, delta: number): void {
     void this.store.setExplorerRoots(moved(this.settings().explorerRoots, index, delta));
+  }
+
+  /** The repositories whose project file is trusted, sorted. */
+  protected readonly trustedRoots = computed(() =>
+    Object.keys(this.settings().trustedProjects).sort((a, b) => a.localeCompare(b)),
+  );
+
+  protected revokeProject(root: string): void {
+    void this.store.revokeProject(root);
   }
 
   protected setShowHidden(event: Event): void {

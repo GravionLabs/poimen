@@ -27,6 +27,85 @@ export interface GhosttyColors {
   palette: (string | null)[];
 }
 
+/** A task mode (`tasks.modes[]`, wire shape of `tasks.rs`). */
+export interface TaskMode {
+  name: string;
+  worktree: boolean;
+  command: string;
+  branch: string;
+  cleanup: string | null;
+}
+
+export interface TaskModes {
+  modes: TaskMode[];
+  worktreeDir: string;
+}
+
+export const DEFAULT_TASKS: TaskModes = {
+  modes: [
+    {
+      name: "agent",
+      worktree: true,
+      command: "claude {prompt}",
+      branch: "{type}/{nr}-{slug}",
+      cleanup: null,
+    },
+  ],
+  worktreeDir: "../{repo}-{nr}",
+};
+
+/** An agent harness with its availability (`get_harnesses`, wire shape of `harness.rs`). */
+export interface HarnessInfo {
+  id: string;
+  command: string[];
+  models: string[];
+  defaultModel: string | null;
+  /** The program was found on the `PATH` of a child. */
+  available: boolean;
+}
+
+/** The harnesses of a `get_harnesses` answer; malformed entries are skipped. */
+export function parseHarnesses(raw: unknown): HarnessInfo[] {
+  if (!Array.isArray(raw)) return [];
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  return raw.flatMap((item): HarnessInfo[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const r = item as Record<string, unknown>;
+    if (typeof r["id"] !== "string") return [];
+    return [
+      {
+        id: r["id"],
+        command: strings(r["command"]),
+        models: strings(r["models"]),
+        defaultModel: typeof r["defaultModel"] === "string" ? r["defaultModel"] : null,
+        available: r["available"] === true,
+      },
+    ];
+  });
+}
+
+/** The resolved task modes; the default when the shape is wrong. */
+export function parseTaskModes(raw: unknown): TaskModes {
+  if (typeof raw !== "object" || raw === null) return DEFAULT_TASKS;
+  const r = raw as Record<string, unknown>;
+  if (!Array.isArray(r["modes"]) || typeof r["worktreeDir"] !== "string") return DEFAULT_TASKS;
+  const modes: TaskMode[] = [];
+  for (const m of r["modes"]) {
+    if (typeof m !== "object" || m === null) continue;
+    const o = m as Record<string, unknown>;
+    if (typeof o["name"] !== "string" || typeof o["command"] !== "string") continue;
+    modes.push({
+      name: o["name"],
+      worktree: o["worktree"] !== false,
+      command: o["command"],
+      branch: typeof o["branch"] === "string" ? o["branch"] : DEFAULT_TASKS.modes[0].branch,
+      cleanup: typeof o["cleanup"] === "string" ? o["cleanup"] : null,
+    });
+  }
+  return modes.length > 0 ? { modes, worktreeDir: r["worktreeDir"] } : DEFAULT_TASKS;
+}
+
 /** The resolved user settings from `~/.config/poimen/config.json` (wire shape of `settings.rs`). */
 export interface Settings {
   theme: ThemeSetting;
@@ -57,6 +136,10 @@ export interface Settings {
   notifyOnDone: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
+  /** `trustedProjects`: repository root to the hash of the project file the user trusted. */
+  trustedProjects: Record<string, string>;
+  /** `tasks`: the task modes and the worktree directory template. */
+  tasks: TaskModes;
   /** The home directory `~` stands for; `null` until the backend knows it. */
   home: string | null;
   warnings: string[];
@@ -83,9 +166,19 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnBlocked: true,
   notifyOnDone: true,
   spacesLayout: null,
+  trustedProjects: {},
+  tasks: DEFAULT_TASKS,
   home: null,
   warnings: [],
 };
+
+/** The `trustedProjects` map; entries that are not strings are skipped. */
+function parseTrusted(raw: unknown): Record<string, string> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw).filter((e): e is [string, string] => typeof e[1] === "string"),
+  );
+}
 
 /** A valid list of lines of tokens, or `null`. */
 function parseRowLines(raw: unknown): RowLines | null {
@@ -167,6 +260,8 @@ export function parseSettings(raw: unknown): Settings {
     notifyOnBlocked: r["notifyOnBlocked"] !== false,
     notifyOnDone: r["notifyOnDone"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
+    trustedProjects: parseTrusted(r["trustedProjects"]),
+    tasks: parseTaskModes(r["tasks"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
@@ -280,6 +375,14 @@ export class SettingsStore {
     } catch {
       return null;
     }
+  }
+
+  /** Drops the trust of the project file of `root` (`trustedProjects`) and applies it at once. */
+  async revokeProject(root: string): Promise<void> {
+    const rest = Object.fromEntries(
+      Object.entries(this._settings().trustedProjects).filter(([r]) => r !== root),
+    );
+    await this.write({ trustedProjects: rest }, "the revoked project", "revoke_project", { root });
   }
 
   /** Optimistic write: applies `patch`, calls `command`, goes back and reports a failure. */

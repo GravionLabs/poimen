@@ -88,7 +88,11 @@ describe("SpaceDialog", () => {
     expect(root.querySelector<HTMLInputElement>("input[name=label]")!.value).toBe("app");
     root.querySelector("form")!.dispatchEvent(new Event("submit"));
     await settle();
-    expect(bridge.invoke).toHaveBeenCalledWith("create_space", { cwd: "/work/app", label: "app" });
+    expect(bridge.invoke).toHaveBeenCalledWith("create_space", {
+      cwd: "/work/app",
+      label: "app",
+      decision: null,
+    });
     expect(root.querySelector("form")).toBeNull();
   });
 

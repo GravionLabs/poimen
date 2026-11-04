@@ -15,6 +15,10 @@ pub struct SpaceOutcome {
     /// Why the layout of a new space was not applied (or only partly); empty otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Set instead of creating anything when the project file of the repository is not trusted
+    /// yet: the commands to show. `workspace_id` is empty then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust: Option<crate::trust::TrustRequest>,
 }
 
 fn inside(path: &str, dir: &str) -> bool {

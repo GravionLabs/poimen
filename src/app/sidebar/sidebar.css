@@ -111,6 +111,20 @@
   color: var(--status-done-on-active);
 }
 
+.pr-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.pr-link:hover {
+  text-decoration: underline;
+}
+
 .space {
   display: flex;
   flex: 1;

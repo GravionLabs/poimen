@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -198,7 +198,7 @@ impl Sessions {
         req: OpenRequest<'_>,
         on_record: impl Fn(u32, Record) + Send + 'static,
     ) -> Result<u32, String> {
-        let mut child = Command::new(req.bin)
+        let mut child = crate::gui_path::command(req.bin)
             .args(stream_args(
                 req.mode,
                 req.target,

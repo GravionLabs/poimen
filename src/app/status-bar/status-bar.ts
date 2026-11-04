@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, input, output } from "@angular/core";
+import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
+import { errorTitle, type UpdateState } from "../core/updater";
 import type { ConnectionState } from "../core/herdr-store";
 import {
   appVersionLabel,
@@ -64,6 +65,12 @@ export class StatusBar {
   readonly panelShortcut = input("");
   /** Shortcut label of `showShortcuts` for the ? button's tooltip; empty when unbound. */
   readonly shortcutsShortcut = input("");
+  /** State of the self-update shown next to the version. */
+  readonly update = input<UpdateState>({ kind: "idle" });
+  /** Check for updates was clicked. */
+  readonly checkUpdate = output<void>();
+  /** Install and restart was clicked. */
+  readonly installUpdate = output<void>();
   readonly jump = output<void>();
   /** The ? button was clicked. */
   readonly showShortcuts = output<void>();
@@ -79,4 +86,7 @@ export class StatusBar {
   protected readonly appLabel = appVersionLabel;
   protected readonly herdrLabel = herdrVersionLabel;
   protected readonly warning = protocolWarning;
+  protected readonly errTitle = errorTitle;
+  /** Whether the notes or the error of the update are shown above the bar. */
+  protected readonly detailsOpen = signal(false);
 }

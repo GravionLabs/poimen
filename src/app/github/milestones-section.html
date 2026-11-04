@@ -1,0 +1,57 @@
+<section class="milestones">
+  <header>
+    <h2>Milestones</h2>
+    <button type="button" (click)="milestones.load()" [disabled]="milestones.loading()">
+      {{ milestones.loading() ? "Refreshing..." : "Refresh" }}
+    </button>
+  </header>
+  @if (milestones.error(); as err) {
+    <p class="problem" role="alert">Could not read the milestones: {{ err }}</p>
+  }
+  @for (e of milestones.errors(); track e.repo) {
+    <p class="problem" role="alert" data-testid="milestone-error">
+      {{ e.repo }}: {{ errorText(e.error) }}
+    </p>
+  }
+  @for (r of milestones.repos(); track r.root) {
+    <h3 class="mono">{{ r.repo }}</h3>
+    @if (r.milestones.length === 0) {
+      <p class="hint" data-testid="milestones-empty">No open milestones.</p>
+    }
+    <ul class="list" [attr.aria-label]="r.repo + ' milestones'">
+      @for (m of r.milestones; track m.number) {
+        <li class="item" [class.current]="m.current" [attr.data-title]="m.title">
+          <button
+            type="button"
+            class="pick"
+            [attr.aria-pressed]="milestones.isSelected(r.repo, m.title)"
+            [attr.aria-label]="'Filter issues by milestone ' + m.title"
+            (click)="milestones.toggle(r.repo, m.title)"
+          >
+            <span class="name">{{ m.title }}</span>
+            @if (m.current) {
+              <span class="badge" data-testid="current">current</span>
+            }
+            <span class="hint">{{ dueText(m.dueOn) }}</span>
+            <span class="hint" data-testid="counts">{{ m.open }} open / {{ m.closed }} closed</span>
+            <progress
+              max="100"
+              [value]="percent(m)"
+              [attr.aria-label]="'Progress of ' + m.title"
+            ></progress>
+            <span class="hint">{{ percent(m) }}%</span>
+          </button>
+          <button
+            type="button"
+            class="link"
+            [disabled]="!isGithubUrl(m.url)"
+            [attr.aria-label]="'Open milestone ' + m.title + ' in browser'"
+            (click)="milestones.openUrl(m.url)"
+          >
+            Open
+          </button>
+        </li>
+      }
+    </ul>
+  }
+</section>

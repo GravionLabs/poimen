@@ -1,21 +1,30 @@
 mod backend;
 mod copilot;
 mod git;
+mod github;
+mod github_branches;
+mod github_issues;
+mod github_milestones;
+mod github_pulls;
 mod gui_path;
+mod harness;
 mod herdr;
 mod layout;
 #[cfg(test)]
 mod live;
-mod plugin_view;
+mod project;
 mod schemes;
 mod settings;
 mod spaces;
 mod stream;
+mod tasks;
 mod transcripts;
+mod trust;
+mod updater;
 mod watch;
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
@@ -157,7 +166,7 @@ async fn agent_start(
     pane_id: String,
     kind: String,
     name: Option<String>,
-    args: String,
+    args: Vec<String>,
 ) -> Result<(), String> {
     let params = herdr::agent_start_params(&pane_id, &kind, name.as_deref(), &args);
     herdr_call(client.inner(), "agent.start", params).await?;
@@ -205,125 +214,75 @@ async fn pane_rename(
     Ok(())
 }
 
-/// Lists the actions of all herdr plugins (`plugin.action.list`).
-#[tauri::command]
-async fn plugin_actions(client: State<'_, Client>) -> Result<Vec<herdr::PluginAction>, String> {
-    let result = herdr_call(client.inner(), "plugin.action.list", json!({})).await?;
-    // Names are optional: without `plugin.list` the groups fall back to the plugin id.
-    let names = match herdr_call(client.inner(), "plugin.list", json!({})).await {
-        Ok(list) => herdr::parse_plugin_names(&list),
-        Err(_) => Default::default(),
-    };
-    Ok(herdr::parse_plugin_actions(&result, &names))
-}
+type GithubClient = std::sync::Arc<github::Client<github::SystemRunner>>;
 
-/// Runs a plugin action (`plugin.action.invoke`) with the focused pane and workspace as context.
+/// Open pull requests of the GitHub repositories among `dirs` (space and explorer directories),
+/// one GraphQL query per repository. A failing repository carries its own error. Read-only.
 #[tauri::command]
-async fn plugin_invoke(
-    client: State<'_, Client>,
-    plugin_id: String,
-    action_id: String,
-    context: herdr::PluginContext,
-) -> Result<(), String> {
-    let params = herdr::plugin_invoke_params(&plugin_id, &action_id, &context);
-    herdr_call(client.inner(), "plugin.action.invoke", params).await?;
-    Ok(())
-}
-
-/// The deliver board for every repository among the pane directories of the herdr session: runs the
-/// plugin's `data` action per repository (ADR 0004). Repositories come from herdr's own panes, so
-/// only known spaces are ever passed to the plugin. Read-only.
-#[tauri::command]
-async fn deliver_board(
-    client: State<'_, Client>,
-    bin: State<'_, HerdrBin>,
-) -> Result<plugin_view::BoardView, String> {
+async fn github_pulls(
+    client: State<'_, GithubClient>,
+    dirs: Vec<String>,
+) -> Result<github_pulls::Pulls, String> {
     let client = client.inner().clone();
-    let herdr_bin = bin.0.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let list = client
-            .request("plugin.list", json!({}))
-            .map_err(|e| e.to_string())?;
-        let panes = client
-            .request("pane.list", json!({}))
-            .map_err(|e| e.to_string())?;
-        let mut dirs: Vec<String> = panes["panes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|p| {
-                ["foreground_cwd", "cwd"]
-                    .iter()
-                    .find_map(|k| p.get(*k)?.as_str().filter(|s| !s.is_empty()))
-                    .map(str::to_owned)
-            })
-            .collect();
-        dirs.sort();
-        dirs.dedup();
-        let roots = git::repo_roots(&dirs);
-        let state = plugin_state_dir("deliver-board");
-        Ok(plugin_view::load_board(&list, &roots, &state, &herdr_bin))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let home = home_dir();
+    let dirs: Vec<String> = dirs
+        .iter()
+        .map(|d| github_pulls::expand_home(d, home.as_deref()))
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || github_pulls::load(&client, &dirs))
+        .await
+        .map_err(|e| e.to_string())
 }
 
-/// Where poimen keeps the state (the `gh` cache) of a plugin it runs itself: herdr does not report
-/// the plugin's own state directory, so it is `~/.config/poimen/plugin-state/<id>`.
-fn plugin_state_dir(plugin_id: &str) -> PathBuf {
-    plugin_state_dir_in(&home_dir().unwrap_or_default(), plugin_id)
-}
-
-/// Under `<home>/.config/poimen` on every system, Windows included (see `settings::config_path`).
-fn plugin_state_dir_in(home: &Path, plugin_id: &str) -> PathBuf {
-    home.join(".config")
-        .join("poimen")
-        .join("plugin-state")
-        .join(plugin_id)
-}
-
-/// Lists the panes plugins declare (`panes[]` of `plugin.list`).
+/// The pull request (open or merged) of the branch of each directory, one GraphQL query per
+/// repository; directories without one are left out. Read-only; `gh` errors give an empty answer.
 #[tauri::command]
-async fn plugin_pane_defs(client: State<'_, Client>) -> Result<Vec<herdr::PluginPaneDef>, String> {
-    let result = herdr_call(client.inner(), "plugin.list", json!({})).await?;
-    Ok(herdr::parse_plugin_pane_defs(&result))
+async fn branch_pulls(
+    client: State<'_, GithubClient>,
+    dirs: Vec<String>,
+) -> Result<HashMap<String, github_branches::BranchPull>, String> {
+    let client = client.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || github_branches::load(&client, dirs))
+        .await
+        .map_err(|e| e.to_string())
 }
 
-/// Opens a plugin pane as a tab (`plugin.pane.open`); returns the pane herdr created.
+/// Issues of the GitHub repositories among `dirs` with parent links and linked pull requests (open
+/// ones, or the closed ones with `closed`), up to 300 per repository. Read-only.
 #[tauri::command]
-async fn plugin_pane_open(
-    client: State<'_, Client>,
-    plugin_id: String,
-    entrypoint: String,
-    workspace_id: Option<String>,
-) -> Result<herdr::PluginPane, String> {
-    let params = herdr::plugin_pane_open_params(&plugin_id, &entrypoint, workspace_id.as_deref());
-    let result = herdr_call(client.inner(), "plugin.pane.open", params).await?;
-    herdr::parse_plugin_pane(&result).ok_or_else(|| "herdr answered without a plugin pane".into())
+async fn github_issues(
+    client: State<'_, GithubClient>,
+    dirs: Vec<String>,
+    closed: Option<bool>,
+) -> Result<Vec<github_issues::RepoIssues>, String> {
+    let client = client.inner().clone();
+    let home = home_dir();
+    let dirs: Vec<String> = dirs
+        .iter()
+        .map(|d| github_pulls::expand_home(d, home.as_deref()))
+        .collect();
+    let closed = closed.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || github_issues::load(&client, &dirs, closed))
+        .await
+        .map_err(|e| e.to_string())
 }
 
-/// Focuses a plugin pane in herdr (`plugin.pane.focus`).
+/// Open milestones of the GitHub repositories among `dirs` (REST with ETag), ordered by version
+/// with the current one marked. Read-only.
 #[tauri::command]
-async fn plugin_pane_focus(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
-    herdr_call(
-        client.inner(),
-        "plugin.pane.focus",
-        json!({ "pane_id": pane_id }),
-    )
-    .await?;
-    Ok(())
-}
-
-/// Closes a plugin pane in herdr (`plugin.pane.close`); only on an explicit user action.
-#[tauri::command]
-async fn plugin_pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
-    herdr_call(
-        client.inner(),
-        "plugin.pane.close",
-        json!({ "pane_id": pane_id }),
-    )
-    .await?;
-    Ok(())
+async fn github_milestones(
+    client: State<'_, GithubClient>,
+    dirs: Vec<String>,
+) -> Result<Vec<github_milestones::RepoMilestones>, String> {
+    let client = client.inner().clone();
+    let home = home_dir();
+    let dirs: Vec<String> = dirs
+        .iter()
+        .map(|d| github_pulls::expand_home(d, home.as_deref()))
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || github_milestones::load(&client, &dirs))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Opens a new terminal in a workspace as a new tab (`tab.create`); returns its pane id.
@@ -345,6 +304,7 @@ async fn create_space(
     client: State<'_, Client>,
     cwd: String,
     label: Option<String>,
+    decision: Option<trust::Decision>,
 ) -> Result<spaces::SpaceOutcome, String> {
     let home = home_dir();
     let dir = spaces::resolve_dir(&cwd, home.as_deref())?;
@@ -368,8 +328,36 @@ async fn create_space(
                 workspace_id,
                 created: false,
                 warnings: Vec::new(),
+                trust: None,
             });
         }
+        // The project files are read once; the trust check, the listed commands and the layout
+        // all use this read.
+        let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
+        let sources = trust::Sources::read(&root);
+        let user = home.as_deref().map(settings::load);
+        let trusted = user
+            .as_ref()
+            .map(|s| s.trusted_projects.clone())
+            .unwrap_or_default();
+        let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
+            trust::Gate::Ask(request) => {
+                return Ok(spaces::SpaceOutcome {
+                    workspace_id: String::new(),
+                    created: false,
+                    warnings: Vec::new(),
+                    trust: Some(request),
+                });
+            }
+            trust::Gate::Strip => false,
+            trust::Gate::Run { store } => {
+                if let Some(hash) = store {
+                    let home = home.as_deref().ok_or("the home directory is not known")?;
+                    settings::trust_project(home, &sources.root, &hash)?;
+                }
+                true
+            }
+        };
         let label = spaces::space_label(
             &dir,
             label.as_deref().unwrap_or_default(),
@@ -380,43 +368,69 @@ async fn create_space(
         let workspace_id = spaces::created_workspace_id(&result)
             .ok_or("herdr did not report the new workspace")?;
         call("workspace.focus", spaces::focus_params(&workspace_id))?;
-        let warnings = build_layout(&call, &dir, home.as_deref(), &result);
+        let user_layout = user.and_then(|s| s.spaces_layout);
+        let warnings = build_layout(&call, &dir, &result, &sources, user_layout.as_ref(), allow);
         Ok(spaces::SpaceOutcome {
             workspace_id,
             created: true,
             warnings,
+            trust: None,
         })
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Builds the pane layout in a just-created space: the project file (git toplevel of `dir`), else
-/// `spaces.layout` of the config, else the default. Problems come back as warnings; the space then
-/// keeps the panes created so far (at least its single root pane).
+/// Builds the pane layout in a just-created space from the already read project `sources`:
+/// `.poimen/config.json`, else the deprecated `.agents/herdr-layout.json`, else `spaces.layout` of
+/// the config (`user_layout`), else the default. With `allow_project_commands` false the commands
+/// of a layout that comes from a project file are not typed; the panes are still created and named.
+/// Problems come back as warnings; the space then keeps the panes created so far (at least its
+/// single root pane).
 fn build_layout(
     call: &impl Fn(&str, Value) -> Result<Value, String>,
     dir: &str,
-    home: Option<&std::path::Path>,
     created: &Value,
+    sources: &trust::Sources,
+    user_layout: Option<&layout::Layout>,
+    allow_project_commands: bool,
 ) -> Vec<String> {
-    let root = git::toplevel(dir).unwrap_or_else(|| dir.to_owned());
-    let path = std::path::Path::new(&root).join(layout::REPO_LAYOUT_FILE);
-    let text = std::fs::read_to_string(&path).ok();
-    let config = home.map(settings::load).and_then(|s| s.spaces_layout);
-    let path = path.to_string_lossy().into_owned();
-    let layout = match layout::resolve(text.as_deref().map(|t| (path.as_str(), t)), config.as_ref())
-    {
-        Ok(l) => l,
-        Err(warning) => return vec![warning],
+    let (project, legacy) = sources.refs();
+    let (layout, mut warnings, from_project) =
+        match layout::resolve_origin(project, legacy, user_layout) {
+            Ok(r) => r,
+            Err(warning) => return vec![warning],
+        };
+    let layout = if from_project && !allow_project_commands {
+        layout.without_commands()
+    } else {
+        layout
     };
     let Some(root_pane) = herdr::created_pane_id(created) else {
         return vec!["herdr did not report the root pane; no layout applied".into()];
     };
-    match layout::apply(call, &layout, dir, &root_pane) {
-        Ok(()) => Vec::new(),
-        Err(e) => vec![format!("layout not fully applied: {e}")],
+    if let Err(e) = layout::apply(call, &layout, dir, &root_pane) {
+        warnings.push(format!("layout not fully applied: {e}"));
     }
+    warnings
+}
+
+/// Revokes the trust of the project file of `root`; the settings watcher emits the change.
+#[tauri::command]
+fn revoke_project(root: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::revoke_project(&home, &root)
+}
+
+/// The project file `.poimen/config.json` of the repository containing `dir`, with warnings.
+#[tauri::command]
+async fn project_config(dir: String) -> Result<project::Loaded, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        project::load(&root)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Directories matching a typed path, for the completion of path fields.
@@ -488,6 +502,21 @@ fn home_dir() -> Option<PathBuf> {
 #[tauri::command]
 fn get_settings() -> settings::Settings {
     home_dir().map(|h| settings::load(&h)).unwrap_or_default()
+}
+
+/// The agent harnesses with availability (program found on the `PATH` of a child).
+#[tauri::command]
+async fn get_harnesses() -> Vec<harness::HarnessInfo> {
+    let harnesses = get_settings().harnesses;
+    tauri::async_runtime::spawn_blocking(move || harness::with_availability(harnesses))
+        .await
+        .unwrap_or_default()
+}
+
+/// The resolved task modes (`tasks` in config.json).
+#[tauri::command]
+fn get_task_modes() -> tasks::TaskModes {
+    get_settings().tasks
 }
 
 /// The user color schemes (`~/.config/poimen/themes/*.toml`); changes arrive as `color-schemes` events.
@@ -846,7 +875,19 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::PendingUpdate::default())
         .manage(client.clone())
+        .manage::<GithubClient>(std::sync::Arc::new(github::Client::system(
+            home_dir()
+                .map(|h| {
+                    h.join(".config")
+                        .join("poimen")
+                        .join("cache")
+                        .join("github")
+                })
+                .unwrap_or_else(|| std::env::temp_dir().join("poimen-github")),
+        )))
         .manage(Sessions::default())
         .manage(SubagentWatch::default())
         .manage(HerdrBin(bin))
@@ -904,18 +945,19 @@ pub fn run() {
             agent_prompt,
             pane_rename,
             terminal_create,
-            plugin_actions,
-            plugin_invoke,
-            plugin_pane_defs,
-            deliver_board,
-            plugin_pane_open,
-            plugin_pane_focus,
-            plugin_pane_close,
+            github_pulls,
+            branch_pulls,
+            github_issues,
+            github_milestones,
             create_space,
             list_dirs,
             list_child_dirs,
             app_version,
+            updater::update_check,
+            updater::update_install,
             get_settings,
+            get_harnesses,
+            get_task_modes,
             get_color_schemes,
             set_theme,
             set_color_schema,
@@ -923,8 +965,10 @@ pub fn run() {
             set_explorer_roots,
             set_explorer_show_hidden,
             set_spaces_layout,
+            revoke_project,
             remove_spaces_layout,
             default_spaces_layout,
+            project_config,
             repo_info,
             subagents_watch,
             subagents_unwatch,
@@ -943,25 +987,6 @@ pub fn run() {
                 app.state::<Sessions>().close_all();
             }
         });
-}
-
-#[cfg(test)]
-mod plugin_state_tests {
-    use super::plugin_state_dir_in;
-    use std::path::Path;
-
-    #[test]
-    fn plugin_state_lives_under_the_poimen_config_of_the_home() {
-        let expected = Path::new("/h")
-            .join(".config")
-            .join("poimen")
-            .join("plugin-state")
-            .join("deliver-board");
-        assert_eq!(
-            plugin_state_dir_in(Path::new("/h"), "deliver-board"),
-            expected
-        );
-    }
 }
 
 #[cfg(test)]
@@ -1016,5 +1041,80 @@ mod subagent_watches_tests {
         let g = watches.begin("panel");
         assert!(watches.store("panel", g, None));
         assert_eq!(watches.slots["panel"].1, None);
+    }
+}
+
+#[cfg(test)]
+mod build_layout_tests {
+    use super::*;
+    use serde_json::json;
+    use std::cell::RefCell;
+
+    const PROJECT_TEXT: &str = r#"{"layout":{"panes":[{"name":"agent","command":"evil"},
+        {"name":"sh","command":"worse","split":{"direction":"down"}}]}}"#;
+
+    fn sources(text: &str) -> trust::Sources {
+        trust::Sources {
+            root: "/work/app".into(),
+            project: Some(("/work/app/.poimen/config.json".into(), text.into())),
+            legacy: None,
+        }
+    }
+
+    fn run(
+        sources: &trust::Sources,
+        user: Option<&layout::Layout>,
+        allow: bool,
+    ) -> Vec<(String, Value)> {
+        let calls = RefCell::new(Vec::new());
+        let call = |method: &str, params: Value| -> Result<Value, String> {
+            let mut c = calls.borrow_mut();
+            let n = c.len();
+            c.push((method.to_owned(), params));
+            Ok(match method {
+                "pane.split" => json!({ "pane": { "pane_id": format!("w1:p{}", n + 10) } }),
+                _ => json!({}),
+            })
+        };
+        let created = json!({ "root_pane": { "pane_id": "w1:root" } });
+        let warnings = build_layout(&call, "/work/app", &created, sources, user, allow);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        calls.into_inner()
+    }
+
+    fn typed(calls: &[(String, Value)]) -> Vec<&Value> {
+        calls
+            .iter()
+            .filter(|(m, _)| m == "pane.send_input")
+            .map(|(_, p)| p)
+            .collect()
+    }
+
+    #[test]
+    fn untrusted_project_layout_builds_panes_but_types_nothing() {
+        let calls = run(&sources(PROJECT_TEXT), None, false);
+        let methods: Vec<_> = calls.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(
+            methods,
+            ["pane.rename", "pane.split", "pane.rename"],
+            "{calls:?}"
+        );
+        assert!(typed(&calls).is_empty());
+    }
+
+    #[test]
+    fn trusted_project_layout_types_its_commands() {
+        let calls = run(&sources(PROJECT_TEXT), None, true);
+        assert_eq!(typed(&calls).len(), 2);
+    }
+
+    #[test]
+    fn the_user_layout_needs_no_trust() {
+        let user = layout::default_layout();
+        // No project layout: the user's `claude` is typed although project commands are blocked.
+        let calls = run(&sources("{\"setup\":\"make\"}"), Some(&user), false);
+        assert_eq!(typed(&calls).len(), 1);
+        let calls = run(&trust::Sources::default(), Some(&user), false);
+        assert_eq!(typed(&calls).len(), 1);
     }
 }

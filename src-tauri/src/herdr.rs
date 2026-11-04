@@ -216,11 +216,16 @@ pub fn workspace_close_params(workspace_id: &str) -> Value {
 }
 
 /// Params of `agent.start`: starts `kind` in an existing pane that sits at a shell prompt. The name
-/// is required by herdr, so an empty one falls back to the kind; `args` are split on whitespace.
-pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &str) -> Value {
+/// is required by herdr, so an empty one falls back to the kind; `args` are passed as given (one
+/// argv element each, so a prompt with spaces stays one argument), empty ones dropped.
+pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &[String]) -> Value {
     let kind = kind.trim();
     let name = non_empty(name).unwrap_or(kind);
-    let args: Vec<&str> = args.split_whitespace().collect();
+    let args: Vec<&str> = args
+        .iter()
+        .map(String::as_str)
+        .filter(|a| !a.trim().is_empty())
+        .collect();
     let mut params = json!({ "pane_id": pane_id, "kind": kind, "name": name });
     if !args.is_empty() {
         params["args"] = json!(args);
@@ -305,150 +310,6 @@ pub fn created_pane_id(result: &Value) -> Option<String> {
     Some(pane.get("pane_id")?.as_str()?.to_owned())
 }
 
-/// The id of the headless action that prints a plugin's data for a native view (ADR 0004). It is
-/// not meant to be run by a person, so it is hidden from the Plugins menu and the palette.
-pub const DATA_ACTION_ID: &str = "data";
-
-/// An action a herdr plugin offers (`plugin.action.list`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PluginAction {
-    pub plugin_id: String,
-    /// Name from `plugin.list`; the id when the plugin is not listed.
-    pub plugin_name: String,
-    pub action_id: String,
-    pub title: String,
-    pub description: Option<String>,
-}
-
-/// Plugin names by id from a `plugin.list` result.
-pub fn parse_plugin_names(result: &Value) -> std::collections::HashMap<String, String> {
-    let plugins = result.get("plugins").and_then(Value::as_array);
-    plugins
-        .into_iter()
-        .flatten()
-        .filter_map(|p| {
-            let id = p.get("plugin_id")?.as_str()?;
-            let name = p.get("name").and_then(Value::as_str).unwrap_or(id);
-            Some((id.to_owned(), name.to_owned()))
-        })
-        .collect()
-}
-
-/// Reads `{"type":"plugin_action_list","actions":[...]}`; entries without ids or title are skipped,
-/// and so is the `data` action of the native-view contract ([`DATA_ACTION_ID`]).
-pub fn parse_plugin_actions(
-    result: &Value,
-    names: &std::collections::HashMap<String, String>,
-) -> Vec<PluginAction> {
-    let Some(actions) = result.get("actions").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    actions
-        .iter()
-        .filter_map(|a| {
-            let text = |key: &str| a.get(key)?.as_str().map(str::to_owned);
-            let action_id = text("action_id")?;
-            if action_id == DATA_ACTION_ID {
-                return None;
-            }
-            let plugin_id = text("plugin_id")?;
-            Some(PluginAction {
-                plugin_name: names
-                    .get(&plugin_id)
-                    .cloned()
-                    .unwrap_or_else(|| plugin_id.clone()),
-                plugin_id,
-                action_id,
-                title: text("title")?,
-                description: text("description"),
-            })
-        })
-        .collect()
-}
-
-/// What an invoked plugin action learns about where it was started (`PluginInvocationContext`).
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub struct PluginContext {
-    pub focused_pane_id: Option<String>,
-    pub focused_pane_cwd: Option<String>,
-    pub focused_pane_agent: Option<String>,
-    pub tab_id: Option<String>,
-    pub tab_label: Option<String>,
-    pub workspace_id: Option<String>,
-    pub workspace_label: Option<String>,
-    /// The URL a link handler action starts for (`clicked_url`, `HERDR_PLUGIN_CLICKED_URL`).
-    pub clicked_url: Option<String>,
-}
-
-/// Params of `plugin.action.invoke`; the context lists only the fields that are set.
-pub fn plugin_invoke_params(plugin_id: &str, action_id: &str, context: &PluginContext) -> Value {
-    let mut ctx = serde_json::Map::new();
-    ctx.insert("invocation_source".into(), json!("poimen"));
-    let fields = [
-        ("focused_pane_id", &context.focused_pane_id),
-        ("focused_pane_cwd", &context.focused_pane_cwd),
-        ("focused_pane_agent", &context.focused_pane_agent),
-        ("tab_id", &context.tab_id),
-        ("tab_label", &context.tab_label),
-        ("workspace_id", &context.workspace_id),
-        ("workspace_label", &context.workspace_label),
-        ("clicked_url", &context.clicked_url),
-    ];
-    for (key, value) in fields {
-        if let Some(value) = non_empty(value.as_deref()) {
-            ctx.insert(key.into(), json!(value));
-        }
-    }
-    json!({ "plugin_id": plugin_id, "action_id": action_id, "context": ctx })
-}
-
-/// A pane a plugin declares (`panes[]` of `plugin.list`), which `plugin.pane.open` can start.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PluginPaneDef {
-    pub plugin_id: String,
-    pub plugin_name: String,
-    pub entrypoint: String,
-    pub title: String,
-}
-
-/// Reads `{"type":"plugin_list","plugins":[...]}` into the panes the enabled plugins declare;
-/// disabled plugins and entries without id or title are skipped. The plugin name falls back to
-/// its id.
-pub fn parse_plugin_pane_defs(result: &Value) -> Vec<PluginPaneDef> {
-    let Some(plugins) = result.get("plugins").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    let mut defs = Vec::new();
-    for plugin in plugins {
-        let Some(plugin_id) = plugin.get("plugin_id").and_then(Value::as_str) else {
-            continue;
-        };
-        if plugin.get("enabled").and_then(Value::as_bool) == Some(false) {
-            continue;
-        }
-        let name = plugin
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or(plugin_id);
-        let panes = plugin.get("panes").and_then(Value::as_array);
-        for pane in panes.into_iter().flatten() {
-            let (Some(entrypoint), Some(title)) = (
-                pane.get("id").and_then(Value::as_str),
-                pane.get("title").and_then(Value::as_str),
-            ) else {
-                continue;
-            };
-            defs.push(PluginPaneDef {
-                plugin_id: plugin_id.to_owned(),
-                plugin_name: name.to_owned(),
-                entrypoint: entrypoint.to_owned(),
-                title: title.to_owned(),
-            });
-        }
-    }
-    defs
-}
-
 /// An agent whose session transcript poimen can read (`agent` of `pane.list`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TranscriptAgent {
@@ -499,45 +360,6 @@ pub fn parse_agent_session(result: &Value, pane_id: &str) -> Option<AgentSession
         session: session.to_owned(),
         cwd: cwd.to_owned(),
     })
-}
-
-/// A plugin pane herdr reports (`plugin_pane_opened`, `plugin_pane_focused`, `plugin_pane_closed`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PluginPane {
-    pub plugin_id: String,
-    pub entrypoint: String,
-    pub pane_id: String,
-}
-
-/// Reads `{"type":"plugin_pane_opened","plugin_pane":{plugin_id,entrypoint,pane:{pane_id,..}}}`
-/// (the same shape for focused and closed).
-pub fn parse_plugin_pane(result: &Value) -> Option<PluginPane> {
-    let info = result.get("plugin_pane")?;
-    let text = |v: Option<&Value>| v?.as_str().map(str::to_owned);
-    Some(PluginPane {
-        plugin_id: text(info.get("plugin_id"))?,
-        entrypoint: text(info.get("entrypoint"))?,
-        pane_id: text(info.get("pane")?.get("pane_id"))?,
-    })
-}
-
-/// Params of `plugin.pane.open`: the pane opens as a herdr tab (`placement: tab`) and takes focus,
-/// so poimen can show it as an editor tab.
-pub fn plugin_pane_open_params(
-    plugin_id: &str,
-    entrypoint: &str,
-    workspace_id: Option<&str>,
-) -> Value {
-    let mut params = json!({
-        "plugin_id": plugin_id,
-        "entrypoint": entrypoint,
-        "placement": "tab",
-        "focus": true,
-    });
-    if let Some(id) = non_empty(workspace_id) {
-        params["workspace_id"] = json!(id);
-    }
-    params
 }
 
 /// The connection to the API socket: a Unix socket, on Windows the named pipe herdr listens on.
@@ -768,141 +590,6 @@ mod tests {
         assert_eq!(parse_agent_session(&with(uuid), "p").unwrap().session, uuid);
     }
 
-    #[test]
-    fn plugin_actions_are_parsed_and_incomplete_ones_skipped() {
-        let result = json!({"type": "plugin_action_list", "actions": [
-            {"plugin_id": "link-trim", "action_id": "open", "title": "Open link", "command": ["node"]},
-            {"plugin_id": "x", "action_id": "y", "title": "Y", "description": "why"},
-            {"plugin_id": "broken"}
-        ]});
-        let actions = parse_plugin_actions(&result, &Default::default());
-        assert_eq!(actions.len(), 2);
-        assert_eq!(actions[0].plugin_id, "link-trim");
-        assert_eq!(actions[0].plugin_name, "link-trim");
-        assert_eq!(actions[0].description, None);
-        assert_eq!(actions[1].description.as_deref(), Some("why"));
-        assert!(parse_plugin_actions(&json!({}), &Default::default()).is_empty());
-    }
-
-    #[test]
-    fn plugin_pane_defs_come_from_enabled_plugins_with_a_title() {
-        let result = json!({"type": "plugin_list", "plugins": [
-            {"plugin_id": "deliver-board", "name": "Deliver Board", "enabled": true, "panes": [
-                {"id": "board", "title": "Deliver board", "placement": "popup", "command": ["node"]},
-                {"id": "broken"}
-            ]},
-            {"plugin_id": "review-popup", "panes": [{"id": "review", "title": "Review"}]},
-            {"plugin_id": "off", "enabled": false, "panes": [{"id": "x", "title": "X"}]},
-            {"plugin_id": "agent-notify", "events": []}
-        ]});
-        let defs = parse_plugin_pane_defs(&result);
-        assert_eq!(defs.len(), 2);
-        assert_eq!(defs[0].plugin_name, "Deliver Board");
-        assert_eq!(defs[0].entrypoint, "board");
-        assert_eq!(defs[1].plugin_name, "review-popup");
-        assert!(parse_plugin_pane_defs(&json!({})).is_empty());
-    }
-
-    #[test]
-    fn plugin_pane_results_are_parsed_for_open_focus_and_close() {
-        for kind in [
-            "plugin_pane_opened",
-            "plugin_pane_focused",
-            "plugin_pane_closed",
-        ] {
-            let result = json!({"type": kind, "plugin_pane": {
-                "plugin_id": "deliver-board", "entrypoint": "board",
-                "pane": {"pane_id": "w1:p4", "terminal_id": "t", "workspace_id": "w1", "tab_id": "w1:t2"}
-            }});
-            assert_eq!(
-                parse_plugin_pane(&result),
-                Some(PluginPane {
-                    plugin_id: "deliver-board".into(),
-                    entrypoint: "board".into(),
-                    pane_id: "w1:p4".into(),
-                })
-            );
-        }
-        assert_eq!(parse_plugin_pane(&json!({"type": "ok"})), None);
-        assert_eq!(
-            parse_plugin_pane(&json!({"plugin_pane": {"plugin_id": "x"}})),
-            None
-        );
-    }
-
-    #[test]
-    fn plugin_pane_open_params_ask_for_a_focused_tab() {
-        assert_eq!(
-            plugin_pane_open_params("review-popup", "review", None),
-            json!({"plugin_id": "review-popup", "entrypoint": "review", "placement": "tab", "focus": true})
-        );
-        assert_eq!(
-            plugin_pane_open_params("review-popup", "review", Some("w2"))["workspace_id"],
-            "w2"
-        );
-        assert!(plugin_pane_open_params("a", "b", Some(" "))["workspace_id"].is_null());
-    }
-
-    #[test]
-    fn plugin_actions_carry_the_plugin_name_from_plugin_list() {
-        let list = json!({"type": "plugin_list", "plugins": [
-            {"plugin_id": "deliver-board", "name": "Deliver Board"},
-            {"plugin_id": "bare"}
-        ]});
-        let names = parse_plugin_names(&list);
-        let result = json!({"type": "plugin_action_list", "actions": [
-            {"plugin_id": "deliver-board", "action_id": "open", "title": "Open"},
-            {"plugin_id": "bare", "action_id": "x", "title": "X"},
-            {"plugin_id": "unlisted", "action_id": "y", "title": "Y"}
-        ]});
-        let got: Vec<_> = parse_plugin_actions(&result, &names)
-            .into_iter()
-            .map(|a| a.plugin_name)
-            .collect();
-        assert_eq!(got, ["Deliver Board", "bare", "unlisted"]);
-    }
-
-    #[test]
-    fn the_data_action_is_hidden_from_the_runnable_actions() {
-        let result = json!({"type": "plugin_action_list", "actions": [
-            {"plugin_id": "deliver-board", "action_id": "open", "title": "Open the deliver board"},
-            {"plugin_id": "deliver-board", "action_id": "data", "title": "Deliver board data (JSON)"}
-        ]});
-        let actions = parse_plugin_actions(&result, &Default::default());
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].action_id, "open");
-    }
-
-    #[test]
-    fn plugin_invoke_params_carry_the_clicked_url() {
-        let ctx = PluginContext {
-            focused_pane_cwd: Some("/r".into()),
-            clicked_url: Some("https://github.com/o/r/issues/7".into()),
-            ..Default::default()
-        };
-        let params = plugin_invoke_params("deliver-starter", "start-link", &ctx);
-        assert_eq!(
-            params["context"]["clicked_url"],
-            "https://github.com/o/r/issues/7"
-        );
-        assert_eq!(params["context"]["focused_pane_cwd"], "/r");
-    }
-
-    #[test]
-    fn plugin_invoke_params_carry_the_set_context_fields() {
-        let ctx = PluginContext {
-            focused_pane_id: Some("p_1".into()),
-            workspace_id: Some("w_1".into()),
-            tab_label: Some("  ".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            plugin_invoke_params("review-popup", "open", &ctx),
-            json!({"plugin_id": "review-popup", "action_id": "open", "context": {
-                "invocation_source": "poimen", "focused_pane_id": "p_1", "workspace_id": "w_1"
-            }})
-        );
-    }
     use super::*;
 
     fn io_err(kind: io::ErrorKind) -> Error {
@@ -1209,19 +896,38 @@ mod tests {
     #[test]
     fn agent_start_params_carry_pane_kind_name_and_args() {
         assert_eq!(
-            agent_start_params("w1:p1", "claude", Some(" helper "), " --model  opus "),
+            agent_start_params(
+                "w1:p1",
+                "claude",
+                Some(" helper "),
+                &args(&["--model", "opus"])
+            ),
             json!({ "pane_id": "w1:p1", "kind": "claude", "name": "helper", "args": ["--model", "opus"] })
+        );
+    }
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn agent_start_params_keep_a_prompt_with_spaces_as_one_argument() {
+        let prompt = "fix the bug; \"quoted\" $(x)\nsecond line";
+        assert_eq!(
+            agent_start_params("w1:p1", "claude", None, &args(&["--model", "opus", prompt])),
+            json!({ "pane_id": "w1:p1", "kind": "claude", "name": "claude",
+                    "args": ["--model", "opus", prompt] })
         );
     }
 
     #[test]
     fn agent_start_params_default_the_name_to_the_kind_and_skip_empty_args() {
         assert_eq!(
-            agent_start_params("w1:p1", "codex", Some(" "), "  "),
+            agent_start_params("w1:p1", "codex", Some(" "), &args(&["  "])),
             json!({ "pane_id": "w1:p1", "kind": "codex", "name": "codex" })
         );
         assert_eq!(
-            agent_start_params("w1:p1", "codex", None, ""),
+            agent_start_params("w1:p1", "codex", None, &[]),
             json!({ "pane_id": "w1:p1", "kind": "codex", "name": "codex" })
         );
     }

@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Pane, Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import { HerdrStore, REPOS_REFRESH_MS } from "./herdr-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -30,15 +30,21 @@ describe("HerdrStore repos", () => {
   let injector: ReturnType<typeof Injector.create>;
   let store: HerdrStore;
 
+  let focused = true;
+
   beforeEach(() => {
     vi.useFakeTimers();
     tauri.reset();
+    focused = true;
+    vi.stubGlobal("window", new EventTarget());
+    vi.stubGlobal("document", { hasFocus: () => focused });
     injector = Injector.create({ providers: [TauriBridge, HerdrStore] });
     store = injector.get(HerdrStore);
   });
 
   afterEach(() => {
     injector.destroy();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -52,6 +58,93 @@ describe("HerdrStore repos", () => {
 
     expect(tauri.calls("repo_info")).toEqual([{ dirs: ["/src/a"] }]);
     expect(store.spaces()[0].rows.map((r) => r.branch)).toEqual(["main", "main"]);
+  });
+
+  it("carries dirty state and ahead/behind into the rows, null as unknown", async () => {
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+    tauri.answer("repo_info", () => ({
+      "/src/a": { branch: "main", worktree: false, dirty: 3, ahead: 2, behind: null },
+    }));
+
+    await store.start();
+
+    const r = store.spaces()[0].rows[0];
+    expect([r.dirty, r.ahead, r.behind]).toEqual([3, 2, undefined]);
+  });
+
+  it("does not run git on every snapshot read, but on focus, on done and on the 60 s timer", async () => {
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+    tauri.answer("repo_info", () => ({}));
+    await store.start();
+    expect(tauri.calls("repo_info")).toHaveLength(1);
+
+    await store.refresh();
+    expect(tauri.calls("repo_info")).toHaveLength(1);
+
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(tauri.calls("repo_info")).toHaveLength(2);
+
+    tauri.emit("herdr", {
+      kind: "pane.agent_status_changed",
+      data: { pane_id: "w1:p1", agent_status: "done" },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(tauri.calls("repo_info")).toHaveLength(3);
+
+    await vi.advanceTimersByTimeAsync(REPOS_REFRESH_MS);
+    expect(tauri.calls("repo_info")).toHaveLength(4);
+  });
+
+  it("does not run git on the timer while the window is not focused", async () => {
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+    tauri.answer("repo_info", () => ({}));
+    focused = false;
+    await store.start();
+
+    await vi.advanceTimersByTimeAsync(REPOS_REFRESH_MS * 2);
+
+    expect(tauri.calls("repo_info")).toHaveLength(1);
+  });
+
+  it("asks for the pull requests of the pane directories and puts them on the rows", async () => {
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+    tauri.answer("repo_info", () => ({ "/src/a": { branch: "feat/x", worktree: false } }));
+    const pr = {
+      number: 5,
+      title: "T",
+      url: "https://github.com/o/r/pull/5",
+      state: "open",
+      isDraft: false,
+      checks: { state: "none", passed: 0, failed: 0, pending: 0 },
+    };
+    tauri.answer("branch_pulls", () => ({ "/src/a": pr }));
+
+    await store.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(tauri.calls("branch_pulls")).toEqual([{ dirs: ["/src/a"] }]);
+    expect(store.spaces()[0].rows[0].pr?.number).toBe(5);
+  });
+
+  it("keeps the previous pull requests when the lookup fails", async () => {
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+    tauri.answer("repo_info", () => ({ "/src/a": { branch: "feat/x", worktree: false } }));
+    tauri.answer("branch_pulls", () => ({
+      "/src/a": { number: 5, title: "T", url: "u", state: "open", isDraft: false, checks: {} },
+    }));
+    await store.start();
+    await vi.advanceTimersByTimeAsync(0);
+    tauri.answer("branch_pulls", () => {
+      throw new Error("boom");
+    });
+
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(tauri.calls("branch_pulls")).toHaveLength(2);
+    expect(store.spaces()[0].rows[0].pr?.number).toBe(5);
+    expect(store.connectionError()).toBeNull();
   });
 
   it("keeps the spaces without branches when the lookup fails", async () => {

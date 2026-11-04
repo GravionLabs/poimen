@@ -1,0 +1,95 @@
+.issues {
+  margin-top: 32px;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+h2 {
+  font-size: 16px;
+  margin: 0;
+}
+h3 {
+  font-size: 13px;
+  margin: 16px 0 6px;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.hint {
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+}
+.problem {
+  color: var(--h-danger-color, #d33);
+}
+.mono {
+  font-family: monospace;
+}
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+.row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--h-content-border-color);
+}
+.twisty {
+  display: inline-block;
+  width: 16px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.badge {
+  padding: 0 6px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 8px;
+  font-size: 11px;
+}
+.nr {
+  color: var(--h-text-muted-color);
+}
+.marker {
+  color: var(--h-warning-color, #b8860b);
+}
+.assignee {
+  color: var(--h-text-muted-color);
+}
+.pr {
+  display: inline-flex;
+  gap: 4px;
+}
+.open {
+  margin-left: auto;
+}
+.checks-passing {
+  color: var(--h-success-color, #2a8a3e);
+}
+.checks-pending {
+  color: var(--h-warning-color, #b8860b);
+}
+.checks-failing {
+  color: var(--h-danger-color, #d33);
+}
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--h-accent-color, inherit);
+  cursor: pointer;
+  text-decoration: underline;
+}

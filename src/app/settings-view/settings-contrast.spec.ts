@@ -22,13 +22,17 @@ describe.each(["poimen-light", "poimen-dark", "dracula", "one-light", "tokyo-nig
     const text = t["--h-text-color"];
     const base = t["--h-content-background"];
 
-    it.each([".option.on", ".option:focus-visible", ".choice.on"])(
-      "%s keeps the label at AA",
-      (selector) => {
-        const tint = mixSrgb(text, base, share(selector));
-        expect(contrast(text, tint)).toBeGreaterThanOrEqual(4.5);
-      },
-    );
+    it.each([
+      ".option.on",
+      ".option:focus-visible",
+      ".choice.on",
+      ".node.on",
+      ".node:focus-visible",
+      ".hit",
+    ])("%s keeps the label at AA", (selector) => {
+      const tint = mixSrgb(text, base, share(selector));
+      expect(contrast(text, tint)).toBeGreaterThanOrEqual(4.5);
+    });
 
     it("uses no surface step for hover or selection", () => {
       expect(css).not.toMatch(/--h-surface-/);
