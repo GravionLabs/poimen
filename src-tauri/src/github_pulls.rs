@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use crate::git;
 use crate::github::{Client, GhError, Repo, Runner, repo_of};
 
-const QUERY: &str = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { \
+pub(crate) const QUERY: &str = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { \
 pullRequests(states: OPEN, first: 50, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { \
 number title url author { login } isDraft additions deletions createdAt headRefName baseRefName \
 reviewDecision reviewRequests(first: 20) { nodes { requestedReviewer { __typename \
@@ -94,7 +94,7 @@ fn add_counts(list: &Value, checks: &mut Checks) {
     }
 }
 
-fn parse_checks(node: &Value) -> Checks {
+pub(crate) fn parse_checks(node: &Value) -> Checks {
     let rollup = &node["commits"]["nodes"][0]["commit"]["statusCheckRollup"];
     let mut checks = Checks {
         state: "none".into(),

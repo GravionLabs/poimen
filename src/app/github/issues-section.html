@@ -1,0 +1,126 @@
+<section class="issues">
+  <header>
+    <h2>Issues</h2>
+    <button type="button" (click)="issues.load()" [disabled]="issues.loading()">
+      {{ issues.loading() ? "Refreshing..." : "Refresh" }}
+    </button>
+  </header>
+  @if (issues.error(); as err) {
+    <p class="problem" role="alert">Could not read the issues: {{ err }}</p>
+  }
+  @if (issues.result()) {
+    <div class="toolbar" role="group" aria-label="Issue filters">
+      <select aria-label="State" [value]="issues.state()" (change)="setState(value($event))">
+        <option value="open">Open</option>
+        <option value="closed">Closed</option>
+      </select>
+      <select aria-label="Level" [value]="issues.level() ?? ''" (change)="setLevel(value($event))">
+        <option value="">All levels</option>
+        @for (l of levels; track l) {
+          <option [value]="l">{{ l }}</option>
+        }
+      </select>
+      <select
+        aria-label="Label"
+        [value]="issues.label() ?? ''"
+        (change)="issues.label.set(value($event) || null)"
+      >
+        <option value="">All labels</option>
+        @for (l of issues.labelNames(); track l) {
+          <option [value]="l">{{ l }}</option>
+        }
+      </select>
+      <select
+        aria-label="Assignee"
+        [value]="issues.assignee() ?? ''"
+        (change)="issues.assignee.set(value($event) || null)"
+      >
+        <option value="">Anyone</option>
+        @for (a of issues.assigneeNames(); track a) {
+          <option [value]="a">{{ a }}</option>
+        }
+      </select>
+      <input
+        type="search"
+        aria-label="Filter issues by title or number"
+        placeholder="Title or number"
+        [value]="issues.text()"
+        (input)="issues.text.set(value($event))"
+      />
+    </div>
+    @for (e of issues.errors(); track e.repo) {
+      <p class="problem" role="alert" data-testid="issue-error">
+        {{ e.repo }}: {{ errorText(e.error) }}
+      </p>
+    }
+    @for (tree of issues.trees(); track tree.root) {
+      <h3 class="mono">{{ tree.repo }}</h3>
+      @if (tree.count === 0) {
+        <p class="hint" data-testid="issues-empty">No issues match.</p>
+      }
+      <ul class="tree" [attr.aria-label]="tree.repo + ' issues'">
+        @for (row of issues.rows(tree); track row.key) {
+          @let i = row.node.issue;
+          <li class="row" [style.padding-left.px]="row.depth * 20" [attr.data-number]="i.number">
+            @if (row.node.children.length) {
+              <button
+                type="button"
+                class="twisty"
+                data-testid="twisty"
+                [attr.aria-expanded]="!row.collapsed"
+                [attr.aria-label]="(row.collapsed ? 'Expand #' : 'Collapse #') + i.number"
+                (click)="issues.toggle(tree.repo, i.number)"
+              >
+                {{ row.collapsed ? "▸" : "▾" }}
+              </button>
+            } @else {
+              <span class="twisty"></span>
+            }
+            <span class="badge level-{{ row.node.level }}">{{ row.node.level }}</span>
+            <span class="nr">#{{ i.number }}</span>
+            <span class="title">{{ i.title }}</span>
+            @for (m of markers(i); track m) {
+              <span class="marker" data-testid="marker">[{{ m }}]</span>
+            }
+            @for (a of i.assignees; track a) {
+              <span class="assignee" data-testid="assignee">[&#64;{{ a }}]</span>
+            }
+            @if (i.subTotal) {
+              <span class="hint">{{ i.subCompleted }}/{{ i.subTotal }}</span>
+            }
+            @for (pr of i.prs; track pr.number) {
+              <span class="pr" data-testid="pr">
+                <button
+                  type="button"
+                  class="link"
+                  [disabled]="!isGithubUrl(pr.url)"
+                  [attr.aria-label]="'Open pull request #' + pr.number + ' in browser'"
+                  (click)="issues.openUrl(pr.url)"
+                >
+                  PR #{{ pr.number }}
+                </button>
+                @if (pr.checks.state !== "none") {
+                  <span class="checks-{{ pr.checks.state }}" [title]="checksText(pr.checks)">
+                    {{ pr.checks.passed }} / {{ pr.checks.failed }} / {{ pr.checks.pending }}
+                  </span>
+                }
+              </span>
+            }
+            <button
+              type="button"
+              class="link open"
+              [disabled]="!isGithubUrl(i.url)"
+              [attr.aria-label]="'Open issue #' + i.number + ' in browser'"
+              (click)="issues.openUrl(i.url)"
+            >
+              Open
+            </button>
+          </li>
+        }
+      </ul>
+      @if (tree.truncated) {
+        <p class="hint">Showing the first 300 issues.</p>
+      }
+    }
+  }
+</section>

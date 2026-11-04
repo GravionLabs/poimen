@@ -2,6 +2,7 @@ mod backend;
 mod copilot;
 mod git;
 mod github;
+mod github_issues;
 mod github_pulls;
 mod gui_path;
 mod herdr;
@@ -287,6 +288,26 @@ async fn github_pulls(
         .map(|d| github_pulls::expand_home(d, home.as_deref()))
         .collect();
     tauri::async_runtime::spawn_blocking(move || github_pulls::load(&client, &dirs))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Issues of the GitHub repositories among `dirs` with parent links and linked pull requests (open
+/// ones, or the closed ones with `closed`), up to 300 per repository. Read-only.
+#[tauri::command]
+async fn github_issues(
+    client: State<'_, GithubClient>,
+    dirs: Vec<String>,
+    closed: Option<bool>,
+) -> Result<Vec<github_issues::RepoIssues>, String> {
+    let client = client.inner().clone();
+    let home = home_dir();
+    let dirs: Vec<String> = dirs
+        .iter()
+        .map(|d| github_pulls::expand_home(d, home.as_deref()))
+        .collect();
+    let closed = closed.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || github_issues::load(&client, &dirs, closed))
         .await
         .map_err(|e| e.to_string())
 }
@@ -948,6 +969,7 @@ pub fn run() {
             plugin_pane_defs,
             deliver_board,
             github_pulls,
+            github_issues,
             plugin_pane_open,
             plugin_pane_focus,
             plugin_pane_close,

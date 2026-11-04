@@ -40,6 +40,8 @@ Everything here is in the application today; the [README](https://github.com/Gra
 
 The GitHub item of the activity bar opens a tab with the open pull requests of your repositories: checks, review state, size and age, with filters (review requested, mine, all; by repository; by title or number), multi-select and "Open in browser". It uses the GitHub CLI (`gh auth login`) and refreshes at most every 30 seconds.
 
+Below the pull requests, the Issues section shows the open issues of each repository as a tree over GitHub's native sub-issues, with level (epic, feature, PBI, bug), `[needs-refinement]` and `[needs-decision]` markers, assignees and linked pull requests with their checks. Filter by state, level, label, assignee or text; collapse nodes per repository.
+
 ## Deliver board
 
 - A view fed by the herdr `deliver-board` plugin (it must be installed): one table per repository among your pane directories, with the open PBIs, claim, labels, branch and pull request with check state. It refreshes on demand, on window focus and every 60 s. The issue and PR numbers open in the browser, and "Start deliver" runs the plugin's action.
