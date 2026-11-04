@@ -210,6 +210,11 @@ pub fn close_params(pane_id: &str) -> Value {
     json!({ "pane_id": pane_id })
 }
 
+/// Params of `workspace.close`: closes a space and every pane in it.
+pub fn workspace_close_params(workspace_id: &str) -> Value {
+    json!({ "workspace_id": workspace_id })
+}
+
 /// Params of `agent.start`: starts `kind` in an existing pane that sits at a shell prompt. The name
 /// is required by herdr, so an empty one falls back to the kind; `args` are split on whitespace.
 pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &str) -> Value {
@@ -1216,6 +1221,14 @@ mod tests {
     #[test]
     fn close_params_name_the_pane() {
         assert_eq!(close_params("w1:p2"), json!({ "pane_id": "w1:p2" }));
+    }
+
+    #[test]
+    fn workspace_close_params_name_the_workspace() {
+        assert_eq!(
+            workspace_close_params("w1"),
+            json!({ "workspace_id": "w1" })
+        );
     }
 
     #[test]

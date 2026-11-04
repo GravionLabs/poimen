@@ -96,7 +96,7 @@
 />
 
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
-<app-space-dialog />
+<app-space-dialog (closed)="onSpaceClosed($event)" />
 <app-command-palette
   [activePaneId]="activePaneId()"
   (commandChosen)="run($event)"

@@ -324,6 +324,11 @@ export class App {
       this.openSettings();
       return;
     }
+    if (id === "closeSpace") {
+      const paneId = this.activePaneId();
+      this.closeSpace(paneId ? this.pane(paneId)?.workspace_id : undefined);
+      return;
+    }
     const action = id as ShortcutAction;
     const active = this.editor.activeId();
     switch (action) {
@@ -380,7 +385,19 @@ export class App {
     if (event.kind === "pane" && event.action.startsWith("plugin:")) {
       void this.runPlugin(this.plugins.find(event.action), event.id);
     } else if (event.action === "new-terminal") this.paneActions.askNew(event.id);
+    else if (event.action === "close-space") this.closeSpace(event.id);
     else this.paneAction(event.id, event.action);
+  }
+
+  /** Closes a space (asks first when it has panes); `undefined` is a no-op (no active space). */
+  protected closeSpace(workspaceId: string | undefined): void {
+    if (!workspaceId) return;
+    void this.spaceActions.requestClose(workspaceId).then((ids) => ids && this.onSpaceClosed(ids));
+  }
+
+  /** A space closed in herdr: the tabs of its panes go with it. */
+  protected onSpaceClosed(paneIds: string[]): void {
+    for (const id of paneIds) this.onPaneClosed(id);
   }
 
   private paneAction(paneId: string, action: string): void {

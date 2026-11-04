@@ -51,7 +51,10 @@ describe("spaceNodes rows", () => {
 
 describe("sidebarMenuItems", () => {
   it("offers a new terminal on a workspace", () => {
-    expect(sidebarMenuItems("workspace").map((i) => i.action)).toEqual(["new-terminal"]);
+    expect(sidebarMenuItems("workspace").map((i) => i.action)).toEqual([
+      "new-terminal",
+      "close-space",
+    ]);
   });
 
   it("offers split and close on a pane", () => {
@@ -95,7 +98,7 @@ describe("sidebarMenuItems with plugin actions", () => {
   });
 
   it("leaves the workspace menu and a menu without plugins alone", () => {
-    expect(sidebarMenuItems("workspace", [plugin])).toHaveLength(1);
+    expect(sidebarMenuItems("workspace", [plugin])).toHaveLength(2);
     expect(sidebarMenuItems("pane")).toHaveLength(5);
   });
 });
