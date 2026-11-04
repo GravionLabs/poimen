@@ -5,6 +5,63 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.6.0] — 2026-11-04
+
+### Bug Fixes
+- **app**: Build on Windows and talk to herdr over its named pipe (#218) (#220)
+- **app**: Build on Windows and talk to herdr over its named pipe (#218)
+- **app**: Compile pipe_name only on Windows and in tests (#218)
+- **settings**: Add explorer folders on Windows (#221) (#222)
+- **agents**: Hide the blue drag handle at the end of flow edges (#219) (#225)
+- **app**: Do not mark already-done panes unread when the first real snapshot arrives
+- **app**: Open the clicked notification's tab through the plugin's action events
+- **app**: Report notification clicks on macOS and bring the window to the front
+- **terminal**: Map mouse cells onto the herdr frame grid (#166) (#253)
+- **app**: Find herdr on the Windows PATH (#267) (#269)
+- Release review 0.6.0 findings (Windows paths, notification wording, docs) (#268) (#271)
+- Windows paths in the Rust backend and a shared herdr directory (#268)
+- Windows cwd names in the UI and one notification wording (#268)
+- Site sidebar from the ADR files, ADR heading form, AGENTS.md ADR 0005 (#268)
+- **app**: Keep the herdr config test inside its temp home and reword the ADR 0004 decision
+- **app**: Group the pane menu by plugin name and harden its keyboard handling (#273)
+- **notifications**: Send done once per pane after it stayed done (#286)
+- **app**: Group palette plugin actions and panes by plugin id under the plugin name (#274)
+
+
+### Documentation
+- **site**: Landing page with downloads and installation guide on GitHub Pages (#216) (#261)
+- **site**: Landing page, download links, installation guide and decisions (#216)
+- **site**: Link the site in README and AGENTS (#216)
+- **adr**: GitHub views and agent harnesses native in poimen (#229) (#263)
+- **adr**: GitHub views and agent harnesses native in poimen (#229)
+- **adr**: Accept ADR 0005 (#229)
+- **site**: Real screenshots of sidebar, tabs and color schemes (#216) (#266)
+- **site**: Real screenshots of sidebar, tabs and color schemes (#216)
+- **site**: Fix the color scheme screenshot file names (#216)
+
+
+### Features
+- **agents**: Flow tab and subagent views for GitHub Copilot CLI panes (#219) (#224)
+- **agents**: Flow tab and subagent views for GitHub Copilot CLI panes (#219)
+- **agents**: Small muted edge anchors in the flow view (#219)
+- **notify**: Attention ring and unread badges (#28) (#227)
+- **notify**: Attention ring and unread badges
+- **notify**: System notification that jumps to the tab (#29) (#228)
+- **notify**: System notification that jumps to the tab
+- **notify**: Dock badge with the waiting count (#30) (#240)
+- **notify**: Notification center view with recent agent status changes (#31) (#241)
+- **agents**: Send a prompt without focusing the terminal (#34) (#262)
+- **adr**: GitHub views and agent harnesses native in poimen (#229) (#263)
+- **sidebar**: Close a space (#270) (#275)
+- **status-bar**: Keyboard shortcuts overview (#272) (#276)
+- **sidebar**: Group the context menu by plugin (#273) (#285)
+- **sidebar**: Group the context menu by plugin (#273)
+- **notifications**: Send done notifications once and add switches to the settings view (#286) (#287)
+- **settings**: Notification switches in the settings view (#286)
+- **command-palette**: Compact JetBrains-style popup (#274) (#288)
+- **command-palette**: Compact JetBrains-style popup (#274)
+
+
 ## [0.5.0] — 2026-11-03
 
 ### Bug Fixes
@@ -25,6 +82,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **adr**: Leaving herdr for native plugin views (#187) (#194)
 - **adr**: Leaving herdr for native plugin views (#187)
 - **adr**: Label the leaving-herdr triggers as a reading of ADR 0003 (#187)
+- Update CHANGELOG.md for v0.5.0 [skip ci]
 
 
 ### Features
