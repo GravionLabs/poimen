@@ -9,6 +9,16 @@ rust-version = "1.94"
 publish = false
 edition = "2024"
 
+[workspace]
+members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server"]
+default-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.94"
+license = "MIT"
+repository = "https://github.com/GravionLabs/poimen"
+
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
@@ -29,6 +39,7 @@ tauri-plugin-dialog = "2"
 notify = "8"
 sha2 = "0.10"
 tauri-plugin-notification = "2"
+poimen-client = { path = "crates/poimen-client" }
 
 [lints.rust]
 unsafe_code = "forbid"

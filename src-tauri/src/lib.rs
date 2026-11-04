@@ -14,6 +14,7 @@ mod herdr;
 mod layout;
 #[cfg(test)]
 mod live;
+mod poimen_server;
 mod project;
 mod schemes;
 mod settings;
@@ -496,6 +497,23 @@ async fn ensure_backend(
     .await
 }
 
+/// Starts `poimen-server` when none answers (never stops it); the status is `already-running`,
+/// `started` or `disabled`. Not used by the UI until the `backend` setting exists.
+#[tauri::command]
+async fn ensure_poimen_server(auto_start: bool) -> Result<&'static str, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        poimen_server::ensure_running(&poimen_server::SystemRunner::new(), auto_start)
+            .map(|outcome| match outcome {
+                backend::Outcome::AlreadyRunning => "already-running",
+                backend::Outcome::Started => "started",
+                backend::Outcome::Disabled => "disabled",
+            })
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The running poimen build's version (Tauri app version).
 #[tauri::command]
 fn app_version(app: AppHandle) -> String {
@@ -966,6 +984,7 @@ pub fn run() {
             snapshot,
             herdr_info,
             ensure_backend,
+            ensure_poimen_server,
             set_herdr_auto_start,
             set_notification,
             pane_split,
