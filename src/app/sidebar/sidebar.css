@@ -281,6 +281,22 @@
   cursor: pointer;
 }
 
+.menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--h-content-border-color);
+}
+
+.menu-heading {
+  padding: 4px 10px 2px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  cursor: default;
+  user-select: none;
+}
+
 .menu-item:hover,
 .menu-item:focus-visible {
   background: color-mix(in srgb, currentColor 12%, transparent);

@@ -251,17 +251,35 @@
     (click)="closeMenu()"
     (contextmenu)="$event.preventDefault(); closeMenu()"
   ></button>
-  <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
-    @for (item of menuItems(at.kind); track item.action) {
-      <button
-        type="button"
-        role="menuitem"
-        class="menu-item"
-        (click)="choose(item.action)"
-        (keydown.escape)="closeMenu()"
-      >
-        {{ item.label }}
-      </button>
+  <div
+    #menu
+    class="menu"
+    role="menu"
+    tabindex="-1"
+    [style.left.px]="at.x"
+    [style.top.px]="at.y"
+    (keydown)="onMenuKey($event, menu)"
+  >
+    @for (group of menuItems(at.kind); track group.id; let first = $first) {
+      @if (!first) {
+        <div class="menu-separator" role="separator"></div>
+      }
+      <div role="group" [attr.aria-label]="group.label ?? 'Actions'">
+        @if (group.label) {
+          <div class="menu-heading" aria-hidden="true">{{ group.label }}</div>
+        }
+        @for (item of group.items; track item.action) {
+          <button
+            type="button"
+            role="menuitem"
+            class="menu-item"
+            (click)="choose(item.action)"
+            (keydown.escape)="closeMenu()"
+          >
+            {{ item.label }}
+          </button>
+        }
+      </div>
     }
   </div>
 }
