@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SpaceNode } from "../core/herdr";
-import { filterValues, isDoubleClick, sidebarMenuItems, spaceNodes } from "./sidebar";
+import { filterValues, isDoubleClick, menuTarget, sidebarMenuItems, spaceNodes } from "./sidebar";
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
 
 const space: SpaceNode = {
@@ -51,14 +51,14 @@ describe("spaceNodes rows", () => {
 
 describe("sidebarMenuItems", () => {
   it("offers a new terminal on a workspace", () => {
-    expect(sidebarMenuItems("workspace").map((i) => i.action)).toEqual([
+    expect(sidebarMenuItems("workspace").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "new-terminal",
       "close-space",
     ]);
   });
 
   it("offers split and close on a pane", () => {
-    expect(sidebarMenuItems("pane").map((i) => i.action)).toEqual([
+    expect(sidebarMenuItems("pane").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "split-right",
       "split-down",
       "start-agent",
@@ -81,24 +81,75 @@ describe("isDoubleClick", () => {
 });
 
 describe("sidebarMenuItems with plugin actions", () => {
-  const plugin = {
-    plugin_id: "review-popup",
-    action_id: "open",
-    title: "Review",
+  const act = (plugin_id: string, action_id: string, title: string, plugin_name?: string) => ({
+    plugin_id,
+    plugin_name,
+    action_id,
+    title,
     description: null,
-  };
-
-  it("appends the plugin actions to a pane row menu", () => {
-    const items = sidebarMenuItems("pane", [plugin]);
-    expect(items.at(-1)).toEqual({
-      action: 'plugin:["review-popup","open"]',
-      label: "Review",
-    });
-    expect(items[0]).toEqual({ action: "split-right", label: "Split right" });
   });
 
-  it("leaves the workspace menu and a menu without plugins alone", () => {
-    expect(sidebarMenuItems("workspace", [plugin])).toHaveLength(2);
-    expect(sidebarMenuItems("pane")).toHaveLength(5);
+  it("puts built-in actions first, then one group per plugin by name and title", () => {
+    const groups = sidebarMenuItems("pane", [
+      act("review-popup", "open", "Review", "Review Popup"),
+      act("deliver-board", "start", "Start deliver", "Deliver Board"),
+      act("deliver-board", "open", "Open board", "Deliver Board"),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual([null, "Deliver Board", "Review Popup"]);
+    expect(groups[0].items).toHaveLength(5);
+    expect(groups[1].items).toEqual([
+      { action: 'plugin:["deliver-board","open"]', label: "Open board" },
+      { action: 'plugin:["deliver-board","start"]', label: "Start deliver" },
+    ]);
+  });
+
+  it("orders by plugin name, not id, and falls back to the id without a name", () => {
+    const groups = sidebarMenuItems("pane", [
+      act("a-id", "1", "X", "Zeta"),
+      act("z-id", "1", "X", "Alpha"),
+      act("m", "1", "X"),
+    ]);
+    expect(groups.slice(1).map((g) => g.label)).toEqual(["Alpha", "m", "Zeta"]);
+  });
+
+  it("keeps the order stable regardless of the input order", () => {
+    const a = [act("b", "1", "Y"), act("a", "2", "Z"), act("a", "3", "X")];
+    expect(sidebarMenuItems("pane", a)).toEqual(sidebarMenuItems("pane", [...a].reverse()));
+  });
+
+  it("makes no group for a plugin without actions and none on a workspace row", () => {
+    expect(sidebarMenuItems("pane")).toHaveLength(1);
+    const groups = sidebarMenuItems("workspace", [act("p", "x", "X")]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items).toHaveLength(2);
+  });
+});
+
+describe("menuTarget", () => {
+  const labels = ["Split right", "Split down", "Rename...", "Review"];
+
+  it("moves with the arrows and wraps", () => {
+    expect(menuTarget(labels, -1, "ArrowDown")).toBe(0);
+    expect(menuTarget(labels, 3, "ArrowDown")).toBe(0);
+    expect(menuTarget(labels, 0, "ArrowUp")).toBe(3);
+    expect(menuTarget(labels, -1, "ArrowUp")).toBe(3);
+  });
+
+  it("jumps with Home and End", () => {
+    expect(menuTarget(labels, 2, "Home")).toBe(0);
+    expect(menuTarget(labels, 1, "End")).toBe(3);
+  });
+
+  it("type-ahead finds the next label that starts with the character", () => {
+    expect(menuTarget(labels, 0, "s")).toBe(1);
+    expect(menuTarget(labels, 1, "r")).toBe(2);
+    expect(menuTarget(labels, 2, "R")).toBe(3);
+    expect(menuTarget(labels, 0, "z")).toBeNull();
+  });
+
+  it("ignores other keys and an empty menu", () => {
+    expect(menuTarget(labels, 0, "Tab")).toBeNull();
+    expect(menuTarget(labels, 0, " ")).toBeNull();
+    expect(menuTarget([], -1, "ArrowDown")).toBeNull();
   });
 });

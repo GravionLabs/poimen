@@ -198,27 +198,89 @@ export interface SidebarMenuAction {
     | `plugin:${string}`;
 }
 
-/** Entries of the context menu of a workspace row or a pane row; a pane row adds plugin actions. */
+/** One entry of a context menu. */
+export interface SidebarMenuItem {
+  action: SidebarMenuAction["action"];
+  label: string;
+}
+
+/** A group of context menu entries; `label` is the heading (the plugin name), `null` for the built-in group. */
+export interface SidebarMenuGroup {
+  id: string;
+  label: string | null;
+  items: SidebarMenuItem[];
+}
+
+/**
+ * Groups of the context menu of a workspace row or a pane row: the built-in actions first, then
+ * (pane rows) one group per plugin by plugin name, its actions by title. A plugin without actions
+ * produces no group.
+ */
 export function sidebarMenuItems(
   kind: SidebarMenuAction["kind"],
   plugins: readonly PluginAction[] = [],
-): { action: SidebarMenuAction["action"]; label: string }[] {
-  return kind === "workspace"
-    ? [
-        { action: "new-terminal", label: "New terminal..." },
-        { action: "close-space", label: "Close space" },
-      ]
-    : [
-        { action: "split-right", label: "Split right" },
-        { action: "split-down", label: "Split down" },
-        { action: "start-agent", label: "Start agent..." },
-        { action: "rename", label: "Rename..." },
-        { action: "close", label: "Close pane..." },
-        ...plugins.map((a) => ({
-          action: pluginMenuId(a) as SidebarMenuAction["action"],
-          label: a.title,
-        })),
-      ];
+): SidebarMenuGroup[] {
+  const builtin: SidebarMenuGroup = {
+    id: "builtin",
+    label: null,
+    items:
+      kind === "workspace"
+        ? [
+            { action: "new-terminal", label: "New terminal..." },
+            { action: "close-space", label: "Close space" },
+          ]
+        : [
+            { action: "split-right", label: "Split right" },
+            { action: "split-down", label: "Split down" },
+            { action: "start-agent", label: "Start agent..." },
+            { action: "rename", label: "Rename..." },
+            { action: "close", label: "Close pane..." },
+          ],
+  };
+  if (kind === "workspace") return [builtin];
+  const byPlugin = new Map<string, { name: string; actions: PluginAction[] }>();
+  for (const a of plugins) {
+    const group = byPlugin.get(a.plugin_id);
+    if (group) group.actions.push(a);
+    else byPlugin.set(a.plugin_id, { name: a.plugin_name || a.plugin_id, actions: [a] });
+  }
+  const groups = [...byPlugin.entries()]
+    .sort(([xi, x], [yi, y]) => x.name.localeCompare(y.name) || xi.localeCompare(yi))
+    .map<SidebarMenuGroup>(([id, { name, actions }]) => ({
+      id: `plugin:${id}`,
+      label: name,
+      items: actions
+        .sort((x, y) => x.title.localeCompare(y.title))
+        .map((a) => ({ action: pluginMenuId(a) as SidebarMenuAction["action"], label: a.title })),
+    }));
+  return [builtin, ...groups];
+}
+
+/**
+ * The index of the menu item a key moves to among `labels` (focusable items only, so separators
+ * and headings never count), or `null` when the key does nothing. `current` is -1 when no item has
+ * focus; arrows wrap; a single character jumps to the next label that starts with it.
+ */
+export function menuTarget(labels: readonly string[], current: number, key: string): number | null {
+  const n = labels.length;
+  if (n === 0) return null;
+  switch (key) {
+    case "ArrowDown":
+      return current < 0 ? 0 : (current + 1) % n;
+    case "ArrowUp":
+      return current < 0 ? n - 1 : (current - 1 + n) % n;
+    case "Home":
+      return 0;
+    case "End":
+      return n - 1;
+  }
+  if (key.length !== 1 || key === " ") return null;
+  const c = key.toLowerCase();
+  for (let i = 1; i <= n; i++) {
+    const idx = (Math.max(current, -1) + i) % n;
+    if (labels[idx].toLowerCase().startsWith(c)) return idx;
+  }
+  return null;
 }
 
 export const DOUBLE_CLICK_MS = 400;
@@ -268,6 +330,25 @@ export class Sidebar {
     event.preventDefault();
     event.stopPropagation();
     this.menuAt.set({ kind, id, x: event.clientX, y: event.clientY });
+  }
+
+  /** Arrow keys, Home/End and type-ahead move focus over the entries; separators and headings are no buttons. */
+  protected onMenuKey(event: KeyboardEvent, menu: HTMLElement): void {
+    if (event.key === "Escape") {
+      this.closeMenu();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const current = items.findIndex((e) => e === document.activeElement);
+    const to = menuTarget(
+      items.map((e) => e.textContent?.trim() ?? ""),
+      current,
+      event.key,
+    );
+    if (to === null) return;
+    event.preventDefault();
+    items[to].focus();
   }
 
   protected closeMenu(): void {

@@ -359,6 +359,8 @@ export const AGENT_KINDS = [
 /** An action a herdr plugin offers (answer of the `plugin_actions` command). */
 export interface PluginAction {
   plugin_id: string;
+  /** The plugin's name from `plugin.list`; the id when herdr lists none. */
+  plugin_name?: string;
   action_id: string;
   title: string;
   description: string | null;

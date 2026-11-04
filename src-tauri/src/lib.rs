@@ -209,7 +209,12 @@ async fn pane_rename(
 #[tauri::command]
 async fn plugin_actions(client: State<'_, Client>) -> Result<Vec<herdr::PluginAction>, String> {
     let result = herdr_call(client.inner(), "plugin.action.list", json!({})).await?;
-    Ok(herdr::parse_plugin_actions(&result))
+    // Names are optional: without `plugin.list` the groups fall back to the plugin id.
+    let names = match herdr_call(client.inner(), "plugin.list", json!({})).await {
+        Ok(list) => herdr::parse_plugin_names(&list),
+        Err(_) => Default::default(),
+    };
+    Ok(herdr::parse_plugin_actions(&result, &names))
 }
 
 /// Runs a plugin action (`plugin.action.invoke`) with the focused pane and workspace as context.

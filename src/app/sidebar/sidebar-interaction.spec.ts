@@ -83,7 +83,7 @@ async function setup(message: string | null = null) {
     target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
     await settle();
   };
-  return { ensureBackend, click, selected, pinned, root, settle, workspace, key };
+  return { fixture, ensureBackend, click, selected, pinned, root, settle, workspace, key };
 }
 
 describe("Sidebar with the real hx-tree", () => {
@@ -159,5 +159,77 @@ describe("Sidebar with the real hx-tree", () => {
     expect(readFileSync("src/app/sidebar/sidebar.css", "utf8")).toMatch(
       /hx-tree-node-toggle\s*\{\s*display:\s*none/,
     );
+  });
+
+  it("groups the pane context menu by plugin and moves focus over separators and headings", async () => {
+    const { root, settle, fixture } = await setup();
+    // JIT does not wire signal inputs for setInput here: replace the input signal itself.
+    Object.assign(fixture.componentInstance, {
+      pluginActions: signal([
+        {
+          plugin_id: "review-popup",
+          action_id: "open",
+          title: "Review",
+          plugin_name: "Review Popup",
+          description: null,
+        },
+        {
+          plugin_id: "deliver-board",
+          action_id: "open",
+          title: "Open board",
+          plugin_name: "Deliver Board",
+          description: null,
+        },
+      ]),
+    });
+    const row = [...root.querySelectorAll<HTMLElement>(".row")].find((e) =>
+      e.textContent?.includes("claude"),
+    )!;
+    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(root.querySelectorAll('.menu [role="separator"]')).toHaveLength(2);
+    const groups = [...root.querySelectorAll('.menu [role="group"]')];
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
+      "Actions",
+      "Deliver Board",
+      "Review Popup",
+    ]);
+    expect(root.querySelectorAll(".menu-heading")).toHaveLength(2);
+
+    const menu = root.querySelector<HTMLElement>(".menu")!;
+    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(items).toHaveLength(7);
+    const press = (name: string) =>
+      menu.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+    items[4].focus();
+    press("ArrowDown");
+    expect(document.activeElement?.textContent?.trim()).toBe("Open board");
+    press("ArrowDown");
+    expect(document.activeElement?.textContent?.trim()).toBe("Review");
+    press("Home");
+    expect(document.activeElement?.textContent?.trim()).toBe("Split right");
+    press("End");
+    expect(document.activeElement?.textContent?.trim()).toBe("Review");
+    press("o");
+    expect(document.activeElement?.textContent?.trim()).toBe("Open board");
+
+    // Modified keys are no type-ahead and stay unhandled.
+    items[0].focus();
+    const chord = new KeyboardEvent("keydown", {
+      key: "o",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    menu.dispatchEvent(chord);
+    expect(chord.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(items[0]);
+
+    // Escape closes the menu even when the container itself has focus.
+    menu.focus();
+    menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle();
+    expect(root.querySelector(".menu")).toBeNull();
   });
 });

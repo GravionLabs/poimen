@@ -313,14 +313,33 @@ pub const DATA_ACTION_ID: &str = "data";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PluginAction {
     pub plugin_id: String,
+    /// Name from `plugin.list`; the id when the plugin is not listed.
+    pub plugin_name: String,
     pub action_id: String,
     pub title: String,
     pub description: Option<String>,
 }
 
+/// Plugin names by id from a `plugin.list` result.
+pub fn parse_plugin_names(result: &Value) -> std::collections::HashMap<String, String> {
+    let plugins = result.get("plugins").and_then(Value::as_array);
+    plugins
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            let id = p.get("plugin_id")?.as_str()?;
+            let name = p.get("name").and_then(Value::as_str).unwrap_or(id);
+            Some((id.to_owned(), name.to_owned()))
+        })
+        .collect()
+}
+
 /// Reads `{"type":"plugin_action_list","actions":[...]}`; entries without ids or title are skipped,
 /// and so is the `data` action of the native-view contract ([`DATA_ACTION_ID`]).
-pub fn parse_plugin_actions(result: &Value) -> Vec<PluginAction> {
+pub fn parse_plugin_actions(
+    result: &Value,
+    names: &std::collections::HashMap<String, String>,
+) -> Vec<PluginAction> {
     let Some(actions) = result.get("actions").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -332,8 +351,13 @@ pub fn parse_plugin_actions(result: &Value) -> Vec<PluginAction> {
             if action_id == DATA_ACTION_ID {
                 return None;
             }
+            let plugin_id = text("plugin_id")?;
             Some(PluginAction {
-                plugin_id: text("plugin_id")?,
+                plugin_name: names
+                    .get(&plugin_id)
+                    .cloned()
+                    .unwrap_or_else(|| plugin_id.clone()),
+                plugin_id,
                 action_id,
                 title: text("title")?,
                 description: text("description"),
@@ -751,12 +775,13 @@ mod tests {
             {"plugin_id": "x", "action_id": "y", "title": "Y", "description": "why"},
             {"plugin_id": "broken"}
         ]});
-        let actions = parse_plugin_actions(&result);
+        let actions = parse_plugin_actions(&result, &Default::default());
         assert_eq!(actions.len(), 2);
         assert_eq!(actions[0].plugin_id, "link-trim");
+        assert_eq!(actions[0].plugin_name, "link-trim");
         assert_eq!(actions[0].description, None);
         assert_eq!(actions[1].description.as_deref(), Some("why"));
-        assert!(parse_plugin_actions(&json!({})).is_empty());
+        assert!(parse_plugin_actions(&json!({}), &Default::default()).is_empty());
     }
 
     #[test]
@@ -819,12 +844,31 @@ mod tests {
     }
 
     #[test]
+    fn plugin_actions_carry_the_plugin_name_from_plugin_list() {
+        let list = json!({"type": "plugin_list", "plugins": [
+            {"plugin_id": "deliver-board", "name": "Deliver Board"},
+            {"plugin_id": "bare"}
+        ]});
+        let names = parse_plugin_names(&list);
+        let result = json!({"type": "plugin_action_list", "actions": [
+            {"plugin_id": "deliver-board", "action_id": "open", "title": "Open"},
+            {"plugin_id": "bare", "action_id": "x", "title": "X"},
+            {"plugin_id": "unlisted", "action_id": "y", "title": "Y"}
+        ]});
+        let got: Vec<_> = parse_plugin_actions(&result, &names)
+            .into_iter()
+            .map(|a| a.plugin_name)
+            .collect();
+        assert_eq!(got, ["Deliver Board", "bare", "unlisted"]);
+    }
+
+    #[test]
     fn the_data_action_is_hidden_from_the_runnable_actions() {
         let result = json!({"type": "plugin_action_list", "actions": [
             {"plugin_id": "deliver-board", "action_id": "open", "title": "Open the deliver board"},
             {"plugin_id": "deliver-board", "action_id": "data", "title": "Deliver board data (JSON)"}
         ]});
-        let actions = parse_plugin_actions(&result);
+        let actions = parse_plugin_actions(&result, &Default::default());
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action_id, "open");
     }
