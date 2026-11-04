@@ -132,3 +132,8 @@ jobs:
           # Empty on workflow_dispatch: build only, upload nothing.
           release-id: ${{ needs.release.outputs.release-id }}
           cargo-toml: src-tauri/Cargo.toml
+          # Signed update packages and latest.json (docs/updater.md); createUpdaterArtifacts lives in the
+          # release-only bundle config, so local builds need no key.
+          args: --config src-tauri/tauri.bundle.conf.json
+          signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          signing-private-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
