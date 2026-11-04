@@ -1,5 +1,4 @@
 .update-button.available {
-  color: #3fb950;
   font-weight: 600;
 }
 
@@ -46,7 +45,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   height: 22px;
   padding: 0 10px;
   font-size: 11px;
@@ -154,6 +153,35 @@ button.item.help-button:hover {
 }
 
 button.item.help-button:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}
+
+/* Neighboring items are separated by a thin bar; the spacer and the update popover are no items, so
+   nothing leads a group and an absent item leaves no double separator. */
+.item + .item::before {
+  content: "";
+  flex: none;
+  width: 1px;
+  height: 12px;
+  margin-right: 3px;
+  background: var(--h-border-color);
+}
+
+/* The update control is a link in the accent color (the helix link token). */
+button.item.update-button {
+  color: var(--h-button-link-color, var(--h-primary-color));
+}
+
+button.item.update-button:hover {
+  text-decoration: underline;
+}
+
+button.item.update-button.failed {
+  color: #f85149;
+}
+
+button.item.update-button:focus-visible {
   outline: 1px solid var(--h-primary-color);
   outline-offset: -1px;
 }
