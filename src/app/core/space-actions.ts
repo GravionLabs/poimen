@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from "@angular/core";
+import { pathSegments } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import { TauriBridge } from "./tauri";
 
@@ -13,7 +14,7 @@ export interface SpaceOutcome {
 
 /** Last path segment: the default label of a space for `path`. */
 export function dirName(path: string): string {
-  return path.trim().replace(/\/+$/, "").split("/").pop() ?? "";
+  return pathSegments(path.trim()).pop() ?? "";
 }
 
 /**

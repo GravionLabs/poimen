@@ -543,8 +543,10 @@ mod tests {
 
     #[test]
     fn the_real_runner_finds_a_program_on_the_login_path_or_not_at_all() {
-        // `sh` exists on every supported system; this only reads the PATH, it starts nothing.
-        let found = gui_path::resolve_program("sh", &gui_path::child_path());
+        // `sh` (`cmd` on Windows, found through PATHEXT) exists on every supported system; this
+        // only reads the PATH, it starts nothing.
+        let program = if cfg!(windows) { "cmd" } else { "sh" };
+        let found = gui_path::resolve_program(program, &gui_path::child_path());
         assert!(found.is_some());
     }
 }

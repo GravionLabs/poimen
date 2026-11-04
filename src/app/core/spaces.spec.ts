@@ -58,6 +58,7 @@ describe("pane details", () => {
   it("shortens long paths to their last two segments", () => {
     expect(shortPath("/Users/x/Source/gravionlabs/poimen/")).toBe("…/gravionlabs/poimen");
     expect(shortPath("/tmp/x")).toBe("/tmp/x");
+    expect(shortPath("C:\\Users\\x\\Source\\poimen\\")).toBe("…/Source/poimen");
   });
 });
 

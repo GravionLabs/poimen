@@ -1,5 +1,6 @@
 import { Injectable, inject } from "@angular/core";
 import type { StatusChange } from "./attention";
+import { notificationMessage } from "./notification-center";
 import { TauriBridge, type Unlisten } from "./tauri";
 
 export interface NotifyContext {
@@ -40,7 +41,7 @@ export class Notifier {
       if (!(status === "blocked" ? ctx.onBlocked : ctx.onDone)) continue;
       if (ctx.focused && ctx.viewed.has(paneId)) continue;
       const label = ctx.label(paneId);
-      const body = status === "blocked" ? `${label} is waiting for you` : `${label} is done`;
+      const body = notificationMessage(label, status);
       void this.bridge
         .notify("poimen", body, { paneId })
         .catch((error: unknown) => console.warn("poimen: notification failed", error));

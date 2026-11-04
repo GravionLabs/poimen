@@ -87,8 +87,13 @@ export function buildTree(snapshot: Snapshot): WorkspaceNode[] {
   }));
 }
 
+/** The segments of a path, split at `/` and `\` (Windows cwds), without empty ones. */
+export function pathSegments(path: string): string[] {
+  return path.split(/[\\/]+/).filter(Boolean);
+}
+
 function basename(path: string): string {
-  return path.replace(/\/+$/, "").split("/").pop() ?? path;
+  return pathSegments(path).pop() ?? path;
 }
 
 export function paneLabel(pane: Pane): string {
@@ -197,7 +202,7 @@ export function statusText(pane: Pane): string | undefined {
 
 /** The last two path segments, so rows stay short. */
 export function shortPath(path: string): string {
-  const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
+  const parts = pathSegments(path);
   return parts.length <= 2 ? path : "…/" + parts.slice(-2).join("/");
 }
 

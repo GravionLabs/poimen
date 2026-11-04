@@ -139,21 +139,10 @@ pub fn resolve_bin(
     )
 }
 
-/// File names to try for `herdr`: on Windows `herdr` plus one per `PATHEXT` extension (default
-/// `.COM;.EXE;.BAT;.CMD`), lowercased (`herdr.exe`); elsewhere just `herdr`.
+/// File names to try for `herdr` (`gui_path::executable_names`): on Windows the `PATHEXT` names
+/// (`herdr.exe`) before the bare `herdr`; elsewhere just `herdr`.
 pub fn bin_names(windows: bool, pathext: Option<&str>) -> Vec<String> {
-    let mut names = vec!["herdr".to_owned()];
-    if windows {
-        let ext = pathext
-            .filter(|e| !e.is_empty())
-            .unwrap_or(".COM;.EXE;.BAT;.CMD");
-        names.extend(
-            ext.split(';')
-                .filter(|e| e.starts_with('.') && e.len() > 1)
-                .map(|e| format!("herdr{}", e.to_lowercase())),
-        );
-    }
-    names
+    crate::gui_path::executable_names("herdr", windows, pathext)
 }
 
 pub fn resolve_bin_named(
@@ -394,39 +383,49 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolve_bin_prefers_override_then_path() {
-        let nothing = |_: &Path| false;
-        assert_eq!(
-            resolve_bin(Some("/x/herdr".into()), "/a", nothing),
-            PathBuf::from("/x/herdr")
-        );
-        assert_eq!(
-            resolve_bin(None, "/a::/b", |p: &Path| p == Path::new("/b/herdr")),
-            PathBuf::from("/b/herdr")
-        );
-        assert_eq!(
-            resolve_bin(Some(String::new()), "/a", |p: &Path| p
-                == Path::new("/a/herdr")),
-            PathBuf::from("/a/herdr")
-        );
-        assert_eq!(resolve_bin(None, "/a", nothing), PathBuf::from("herdr"));
+    /// A `PATH` of `parts` with the separator of this system.
+    fn join(parts: &[&str]) -> String {
+        std::env::join_paths(parts)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
     }
 
     #[test]
-    fn bin_names_add_pathext_extensions_on_windows_only() {
+    fn resolve_bin_prefers_override_then_path() {
+        let nothing = |_: &Path| false;
+        let a_then_b = join(&["/a", "", "/b"]);
+        assert_eq!(
+            resolve_bin(Some("/x/herdr".into()), &join(&["/a"]), nothing),
+            PathBuf::from("/x/herdr")
+        );
+        let found = resolve_bin(None, &a_then_b, |p: &Path| {
+            p == Path::new("/b").join("herdr")
+        });
+        assert_eq!(found, Path::new("/b").join("herdr"));
+        let found = resolve_bin(Some(String::new()), &join(&["/a"]), |p: &Path| {
+            p == Path::new("/a").join("herdr")
+        });
+        assert_eq!(found, Path::new("/a").join("herdr"));
+        assert_eq!(
+            resolve_bin(None, &join(&["/a"]), nothing),
+            PathBuf::from("herdr")
+        );
+    }
+
+    #[test]
+    fn bin_names_put_pathext_extensions_first_on_windows_only() {
         assert_eq!(bin_names(false, Some(".EXE")), ["herdr"]);
         assert_eq!(
             bin_names(true, Some(".COM;.EXE;;exe")),
-            ["herdr", "herdr.com", "herdr.exe"]
+            ["herdr.com", "herdr.exe", "herdr"]
         );
-        assert!(bin_names(true, None).contains(&"herdr.exe".to_owned()));
+        assert_eq!(bin_names(true, None)[..2], ["herdr.com", "herdr.exe"]);
     }
 
     #[test]
     fn resolve_bin_finds_herdr_exe_with_the_windows_names() {
-        let sep = if cfg!(windows) { ';' } else { ':' };
-        let path = format!("/nope{sep}/win/bin");
+        let path = join(&["/nope", "/win/bin"]);
         let names = bin_names(true, None);
         let found = resolve_bin_named(None, &path, &names, |p: &Path| {
             p == Path::new("/win/bin").join("herdr.exe")
@@ -436,11 +435,8 @@ mod tests {
 
     #[test]
     fn resolve_bin_finds_cargo_bin_in_the_gui_path() {
-        let path = crate::gui_path::augmented_path(Some("/usr/bin"), "/h", "");
-        assert_eq!(
-            resolve_bin(None, &path, |p: &Path| p
-                == Path::new("/h/.cargo/bin/herdr")),
-            PathBuf::from("/h/.cargo/bin/herdr")
-        );
+        let path = crate::gui_path::augmented_path(Some(&join(&["/usr/bin"])), "/h", "");
+        let cargo = Path::new("/h").join(".cargo/bin").join("herdr");
+        assert_eq!(resolve_bin(None, &path, |p: &Path| p == cargo), cargo);
     }
 }
