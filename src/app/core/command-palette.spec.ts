@@ -87,6 +87,12 @@ describe("CommandPalette", () => {
     expect(palette.items()[0].kind).toBe("pane");
   });
 
+  it("offers Close Space for the active space", async () => {
+    await palette.open();
+    palette.setQuery("close space");
+    expect(palette.items()[0]).toMatchObject({ kind: "command", command: "closeSpace" });
+  });
+
   it("shows the shortcut of a command as its hint", async () => {
     await palette.open();
     const toggle = palette.items().find((i) => i.key === "command:toggleSidebar");

@@ -129,6 +129,27 @@ async fn pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), St
     Ok(())
 }
 
+/// Closes a space (`workspace.close`) with all its panes; only on an explicit user action (the UI
+/// confirms first when it has panes). Afterwards `focus`, the neighbouring space, is focused on a
+/// best-effort basis; a failing close leaves the space untouched and returns herdr's error.
+#[tauri::command]
+async fn space_close(
+    client: State<'_, Client>,
+    workspace_id: String,
+    focus: Option<String>,
+) -> Result<(), String> {
+    herdr_call(
+        client.inner(),
+        "workspace.close",
+        herdr::workspace_close_params(&workspace_id),
+    )
+    .await?;
+    if let Some(id) = focus.filter(|id| !id.is_empty()) {
+        let _ = herdr_call(client.inner(), "workspace.focus", spaces::focus_params(&id)).await;
+    }
+    Ok(())
+}
+
 /// Starts a supported agent in an existing pane at a shell prompt (`agent.start`); can take a while.
 #[tauri::command]
 async fn agent_start(
@@ -862,6 +883,7 @@ pub fn run() {
             set_herdr_auto_start,
             pane_split,
             pane_close,
+            space_close,
             agent_start,
             agent_rename,
             agent_prompt,

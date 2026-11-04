@@ -194,6 +194,7 @@ export interface SidebarMenuAction {
     | "start-agent"
     | "rename"
     | "close"
+    | "close-space"
     | `plugin:${string}`;
 }
 
@@ -203,7 +204,10 @@ export function sidebarMenuItems(
   plugins: readonly PluginAction[] = [],
 ): { action: SidebarMenuAction["action"]; label: string }[] {
   return kind === "workspace"
-    ? [{ action: "new-terminal", label: "New terminal..." }]
+    ? [
+        { action: "new-terminal", label: "New terminal..." },
+        { action: "close-space", label: "Close space" },
+      ]
     : [
         { action: "split-right", label: "Split right" },
         { action: "split-down", label: "Split down" },
