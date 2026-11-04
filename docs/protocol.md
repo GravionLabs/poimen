@@ -25,7 +25,7 @@ Error codes: `parse_error`, `invalid_request`, `unknown_method`, `invalid_params
 
 Space: `{"id": "s1", "name": "api", "cwd": "/home/me/api"}`.
 
-Terminal: `{"id": "t2", "space_id": "s1", "name": "zsh", "cwd": "...", "cols": 80, "rows": 24, "status": "running" | "exited", "exit_code": 0}` (`exit_code` only when exited).
+Terminal: `{"id": "t2", "space_id": "s1", "name": "zsh", "cwd": "...", "cols": 80, "rows": 24, "status": "running" | "exited", "exit_code": 0}` (`exit_code` only when exited) `agent` (`{"status": "idle" | "working" | "blocked" | "done", "agent": "claude", "session_id": "..."}`; `agent` and `session_id` optional) is present while hooks report an agent in the terminal, and cleared when it ends or the process exits.
 
 The server stores no layout: groups, splits and tabs are the client's business. Terminal ids are unique per server run; ids of spaces survive restarts.
 
@@ -46,6 +46,7 @@ The server stores no layout: groups, splits and tabs are the client's business. 
 | `terminal.input`  | `terminal_id`, `data`                                                   | `{}`                  | `data` is written as is; `exited` error when the process has ended. An observer, or a controller that was taken over, gets `not_controller`. |
 | `terminal.resize` | `terminal_id`, `cols`, `rows`                                           | `{}`                  | Both at least 1. Resizes the PTY and the grid, and is the only way to set the size. `not_controller` from an observer, and from a connection that is not attached while a controller exists (without one, any connection may resize). |
 | `terminal.attach` | `terminal_id`, `mode` (`observe` or `control`), `take_over?` (default false) | `AttachResult`   | See Attach. The connection becomes a stream connection. `not_found`, `conflict`. |
+| `terminal.report_agent` | `terminal_id`, `seq`, `status` (`idle`, `working`, `blocked`, `done`, `gone`), `agent?`, `session_id?` | `{accepted}` | See Agent status. `not_found` for an unknown terminal. |
 
 Terminals get `POIMEN_SOCKET` (the server's socket) and `POIMEN_TERMINAL_ID` in their environment, and `TERM=xterm-256color` when the server has none.
 
@@ -66,6 +67,12 @@ From then on the connection carries stream records (the events below) and still 
 - Backpressure: output is coalesced (what arrives within 4 ms, at most 32 KiB per record). Each client has a bounded queue (128 records); the PTY is never blocked by a client. A client whose queue is full is detached with `terminal.detached` reason `overflow` (a client that does not read at all is cut off after a 5 s write timeout) and must attach again for a fresh snapshot.
 - `terminal.detached` (the server ended the attachment: `overflow`, `taken_over`, `closed`) and `terminal.exited` (the process ended, with its exit code; the stream ends after it) are distinct. Attaching to an exited terminal returns the final snapshot, then `terminal.exited`.
 
+## Agent status
+
+Agent status comes from hooks only; the server never reads the screen. A reporter (the Claude Code hook) sends `terminal.report_agent` with a `seq` that increases with every report (the hook uses nanoseconds since the epoch). A report whose `seq` is not above the last accepted one of that terminal is stale: it is dropped and the result is `{"accepted": false}`. `status` `gone` means the agent ended and clears the terminal's `agent`. `agent.status_changed` is published only when the state of the terminal actually changed. Adding the request, the `agent` field of Terminal and `session_id` of the event is backwards compatible, so the protocol version stays 2.
+
+Claude Code: `poimen-server integration install|uninstall|status claude [--settings <path>]` registers `poimen-server hook claude` in `~/.claude/settings.json` (entries marked with `# poimen-agent-hook`, next to existing ones such as herdr's; uninstall removes only these). The hook does nothing when `POIMEN_TERMINAL_ID` is unset, gives up after 1.5 s and always exits 0. Mapping: `SessionStart` and `Stop` idle, `UserPromptSubmit` and `PostToolUse` working, `Notification` of type `permission_prompt` blocked, `SessionEnd` gone; events with an `agent_id` (subagents) are ignored.
+
 ## Events
 
 | Event                  | `data`                                       | When                                                  |
@@ -82,7 +89,7 @@ From then on the connection carries stream records (the events below) and still 
 | `terminal.detached`    | `{terminal_id, reason}`                      | stream record: `overflow`, `taken_over` or `closed`   |
 | `terminal.controller_attached` | `{terminal_id}`                      | subscribers: a controller attached                    |
 | `terminal.controller_detached` | `{terminal_id}`                      | subscribers: the controller detached or was dropped   |
-| `agent.status_changed` | `{terminal_id, status, agent?}`              | an agent in a terminal changed state; `status` is `idle`, `working`, `blocked` or `done`. Defined now; reported by hooks in a later release. |
+| `agent.status_changed` | `{terminal_id, status, agent?, session_id?}` | the agent state of a terminal changed (after `terminal.report_agent`); `status` is `idle`, `working`, `blocked`, `done` or `gone`. |
 
 ## Persistence
 
