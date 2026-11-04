@@ -54,6 +54,37 @@ export const DEFAULT_TASKS: TaskModes = {
   worktreeDir: "../{repo}-{nr}",
 };
 
+/** An agent harness with its availability (`get_harnesses`, wire shape of `harness.rs`). */
+export interface HarnessInfo {
+  id: string;
+  command: string[];
+  models: string[];
+  defaultModel: string | null;
+  /** The program was found on the `PATH` of a child. */
+  available: boolean;
+}
+
+/** The harnesses of a `get_harnesses` answer; malformed entries are skipped. */
+export function parseHarnesses(raw: unknown): HarnessInfo[] {
+  if (!Array.isArray(raw)) return [];
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  return raw.flatMap((item): HarnessInfo[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const r = item as Record<string, unknown>;
+    if (typeof r["id"] !== "string") return [];
+    return [
+      {
+        id: r["id"],
+        command: strings(r["command"]),
+        models: strings(r["models"]),
+        defaultModel: typeof r["defaultModel"] === "string" ? r["defaultModel"] : null,
+        available: r["available"] === true,
+      },
+    ];
+  });
+}
+
 /** The resolved task modes; the default when the shape is wrong. */
 export function parseTaskModes(raw: unknown): TaskModes {
   if (typeof raw !== "object" || raw === null) return DEFAULT_TASKS;

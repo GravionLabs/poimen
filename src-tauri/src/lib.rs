@@ -6,6 +6,7 @@ mod github_issues;
 mod github_milestones;
 mod github_pulls;
 mod gui_path;
+mod harness;
 mod herdr;
 mod layout;
 #[cfg(test)]
@@ -161,7 +162,7 @@ async fn agent_start(
     pane_id: String,
     kind: String,
     name: Option<String>,
-    args: String,
+    args: Vec<String>,
 ) -> Result<(), String> {
     let params = herdr::agent_start_params(&pane_id, &kind, name.as_deref(), &args);
     herdr_call(client.inner(), "agent.start", params).await?;
@@ -429,6 +430,15 @@ fn home_dir() -> Option<PathBuf> {
 #[tauri::command]
 fn get_settings() -> settings::Settings {
     home_dir().map(|h| settings::load(&h)).unwrap_or_default()
+}
+
+/// The agent harnesses with availability (program found on the `PATH` of a child).
+#[tauri::command]
+async fn get_harnesses() -> Vec<harness::HarnessInfo> {
+    let harnesses = get_settings().harnesses;
+    tauri::async_runtime::spawn_blocking(move || harness::with_availability(harnesses))
+        .await
+        .unwrap_or_default()
 }
 
 /// The resolved task modes (`tasks` in config.json).
@@ -869,6 +879,7 @@ pub fn run() {
             list_child_dirs,
             app_version,
             get_settings,
+            get_harnesses,
             get_task_modes,
             get_color_schemes,
             set_theme,

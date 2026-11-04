@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+} from "@angular/core";
 import {
   appearance,
   pickSchemeName,
@@ -6,7 +13,13 @@ import {
   type ColorScheme,
 } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
-import { SettingsStore, type ColorSchemeSetting, type ThemeSetting } from "../core/settings";
+import {
+  parseHarnesses,
+  SettingsStore,
+  type ColorSchemeSetting,
+  type HarnessInfo,
+  type ThemeSetting,
+} from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UserSchemes } from "../core/user-schemes";
 import { SpaceLayoutEditor } from "./space-layout-editor";
@@ -118,6 +131,19 @@ export class SettingsView {
   private readonly schemes = inject(ColorSchemeService);
   private readonly user = inject(UserSchemes);
   private readonly bridge = inject(TauriBridge);
+
+  protected readonly harnesses = signal<HarnessInfo[]>([]);
+
+  constructor() {
+    // The harnesses come from config.json, so they are read again when the settings change.
+    effect(() => {
+      this.settings();
+      void this.bridge
+        .invoke<unknown>("get_harnesses")
+        .then((raw) => this.harnesses.set(parseHarnesses(raw)))
+        .catch(() => this.harnesses.set([]));
+    });
+  }
 
   protected readonly themeChoices = THEME_CHOICES;
   protected readonly settings = this.store.settings;

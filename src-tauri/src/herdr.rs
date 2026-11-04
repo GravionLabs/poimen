@@ -216,11 +216,16 @@ pub fn workspace_close_params(workspace_id: &str) -> Value {
 }
 
 /// Params of `agent.start`: starts `kind` in an existing pane that sits at a shell prompt. The name
-/// is required by herdr, so an empty one falls back to the kind; `args` are split on whitespace.
-pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &str) -> Value {
+/// is required by herdr, so an empty one falls back to the kind; `args` are passed as given (one
+/// argv element each, so a prompt with spaces stays one argument), empty ones dropped.
+pub fn agent_start_params(pane_id: &str, kind: &str, name: Option<&str>, args: &[String]) -> Value {
     let kind = kind.trim();
     let name = non_empty(name).unwrap_or(kind);
-    let args: Vec<&str> = args.split_whitespace().collect();
+    let args: Vec<&str> = args
+        .iter()
+        .map(String::as_str)
+        .filter(|a| !a.trim().is_empty())
+        .collect();
     let mut params = json!({ "pane_id": pane_id, "kind": kind, "name": name });
     if !args.is_empty() {
         params["args"] = json!(args);
@@ -891,19 +896,38 @@ mod tests {
     #[test]
     fn agent_start_params_carry_pane_kind_name_and_args() {
         assert_eq!(
-            agent_start_params("w1:p1", "claude", Some(" helper "), " --model  opus "),
+            agent_start_params(
+                "w1:p1",
+                "claude",
+                Some(" helper "),
+                &args(&["--model", "opus"])
+            ),
             json!({ "pane_id": "w1:p1", "kind": "claude", "name": "helper", "args": ["--model", "opus"] })
+        );
+    }
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn agent_start_params_keep_a_prompt_with_spaces_as_one_argument() {
+        let prompt = "fix the bug; \"quoted\" $(x)\nsecond line";
+        assert_eq!(
+            agent_start_params("w1:p1", "claude", None, &args(&["--model", "opus", prompt])),
+            json!({ "pane_id": "w1:p1", "kind": "claude", "name": "claude",
+                    "args": ["--model", "opus", prompt] })
         );
     }
 
     #[test]
     fn agent_start_params_default_the_name_to_the_kind_and_skip_empty_args() {
         assert_eq!(
-            agent_start_params("w1:p1", "codex", Some(" "), "  "),
+            agent_start_params("w1:p1", "codex", Some(" "), &args(&["  "])),
             json!({ "pane_id": "w1:p1", "kind": "codex", "name": "codex" })
         );
         assert_eq!(
-            agent_start_params("w1:p1", "codex", None, ""),
+            agent_start_params("w1:p1", "codex", None, &[]),
             json!({ "pane_id": "w1:p1", "kind": "codex", "name": "codex" })
         );
     }
