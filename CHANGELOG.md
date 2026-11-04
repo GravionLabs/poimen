@@ -5,6 +5,38 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.8.0] — 2026-11-04
+
+### Bug Fixes
+- **app**: Hide console windows of child processes on Windows (#319)
+
+
+### Documentation
+- Name milestones M<n> while open (#323)
+- Name milestones M<n> while open
+- Closed milestones are renumbered M1 to M7
+
+
+### Features
+- **tasks**: Task modes in the settings (#304)
+- **github**: Shared gh client with repository detection and cache (#306)
+- **github**: Pull request view with checks and review state (#231) (#307)
+- **github**: Issues tree over native sub-issues with linked PRs (#308)
+- **github**: Current milestone with progress (#233) (#309)
+- **agents**: Harness registry for Claude Code and Copilot CLI with model choice (#311)
+- **sidebar**: Dirty state and ahead/behind next to the branch (#312)
+- **project**: .poimen/config.json with layout, setup, teardown, commands and presets (#313)
+- **sidebar**: Linked pull request with checks per space (#314)
+- **project**: Trust a repository before running its commands (#315)
+- **settings**: Split the settings view into categories with a tree and search (#316)
+- **app**: Auto-update via tauri-plugin-updater (#320)
+- **github**: Recognize M<n> milestone titles for the current milestone (#322)
+
+
+### Refactoring
+- **plugins**: Remove the herdr plugin integration and the plugin-based deliver board (#310)
+
+
 ## [0.7.1] — 2026-11-04
 
 ### Bug Fixes
@@ -13,6 +45,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - Describe the 0.6.1 changes in README and site features (#298) (#299)
+- Update CHANGELOG.md for v0.7.1 [skip ci]
 
 
 ## [0.7.0] — 2026-11-04
