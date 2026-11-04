@@ -248,6 +248,12 @@ export class SettingsStore {
     );
   }
 
+  /** Writes `notifications.blocked` or `notifications.done` of config.json and applies it at once. */
+  async setNotification(kind: "blocked" | "done", on: boolean): Promise<void> {
+    const patch = kind === "blocked" ? { notifyOnBlocked: on } : { notifyOnDone: on };
+    await this.write(patch, `the ${kind} notification option`, "set_notification", { kind, on });
+  }
+
   /** Writes `herdr.autoStart` of config.json and applies it at once. */
   async setHerdrAutoStart(herdrAutoStart: boolean): Promise<void> {
     await this.write({ herdrAutoStart }, "the herdr auto start option", "set_herdr_auto_start", {

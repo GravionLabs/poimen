@@ -531,6 +531,13 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
+/// Writes only `notifications.<kind>` (`blocked` or `done`); the settings watcher emits the change.
+#[tauri::command]
+fn set_notification(kind: String, on: bool) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_notification(&home, &kind, on)
+}
+
 /// Writes only `herdr.autoStart`; the settings watcher emits the change.
 #[tauri::command]
 fn set_herdr_auto_start(on: bool) -> Result<(), String> {
@@ -888,6 +895,7 @@ pub fn run() {
             herdr_info,
             ensure_backend,
             set_herdr_auto_start,
+            set_notification,
             pane_split,
             pane_close,
             space_close,

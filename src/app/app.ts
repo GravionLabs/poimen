@@ -197,20 +197,26 @@ export class App {
     return id ? this.sizes().get(id) : undefined;
   });
 
+  /** Panes whose tab is on screen: the active tab of each editor group. */
+  private readonly viewedPanes = computed(
+    () => new Set(this.editor.groups().flatMap((g) => (g.activeId ? [g.activeId] : []))),
+  );
+
   constructor() {
     const title = inject(Title);
     // Marks follow herdr's statuses; the active tab of each group counts as viewed.
     effect(() => {
       const panes = this.store.panes();
-      const viewed = new Set(this.editor.groups().flatMap((g) => (g.activeId ? [g.activeId] : [])));
+      const viewed = this.viewedPanes();
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
       untracked(() => {
         const changes = this.attention.observe(statuses, viewed);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
         const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
         this.notifier.notify(changes, {
-          viewed,
-          focused: document.hasFocus(),
+          // Read live: a delayed done notification checks again when it is due.
+          seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
+          status: (id) => this.store.panes().get(id)?.agent_status,
           onBlocked: notifyOnBlocked,
           onDone: notifyOnDone,
           label: (id) => this.tabTitle(id),

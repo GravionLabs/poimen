@@ -1126,6 +1126,19 @@ pub fn save_herdr_auto_start(home: &Path, on: bool) -> Result<(), String> {
     save_with(home, |text| set_herdr_auto_start_text(text, on))
 }
 
+/// Returns `text` with `notifications.<kind>` set (`blocked` or `done`), touching nothing else.
+pub fn set_notification_text(text: &str, kind: &str, on: bool) -> Result<String, String> {
+    if !matches!(kind, "blocked" | "done") {
+        return Err(format!("unknown notification kind `{kind}`"));
+    }
+    set_path_text(text, &["notifications", kind], &on.to_string())
+}
+
+/// Writes `notifications.<kind>` below `home`, like `save_theme`.
+pub fn save_notification(home: &Path, kind: &str, on: bool) -> Result<(), String> {
+    save_with(home, |text| set_notification_text(text, kind, on))
+}
+
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
 pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> {
     save_with(home, |text| set_explorer_show_hidden_text(text, show))
@@ -1262,6 +1275,31 @@ mod tests {
             assert!(s.herdr_auto_start, "{json}");
             assert_eq!(s.warnings.len(), 1, "{json}");
         }
+    }
+
+    #[test]
+    fn set_notification_keeps_comments_and_other_keys() {
+        let text = "{\n  // keep\n  \"theme\": \"dark\"\n}";
+        let out = set_notification_text(text, "done", false).unwrap();
+        assert!(out.contains("// keep"), "{out}");
+        assert!(
+            out.contains("\"notifications\": { \"done\": false }"),
+            "{out}"
+        );
+        let created = set_notification_text("{\"theme\":\"dark\"}", "done", false).unwrap();
+        let r = resolve(Some(&created), || None);
+        assert!(!r.notify_on_done && r.notify_on_blocked);
+        assert_eq!(r.theme, "dark");
+        let both = set_notification_text(&created, "blocked", false).unwrap();
+        let r = resolve(Some(&both), || None);
+        assert!(!r.notify_on_blocked && !r.notify_on_done);
+        let back = set_notification_text(&both, "done", true).unwrap();
+        assert!(resolve(Some(&back), || None).notify_on_done);
+    }
+
+    #[test]
+    fn set_notification_rejects_an_unknown_kind() {
+        assert!(set_notification_text("{}", "sound", true).is_err());
     }
 
     #[test]

@@ -1,7 +1,8 @@
 import { Injector } from "@angular/core";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentStatus } from "./herdr";
 import { notificationMessage } from "./notification-center";
-import { Notifier, type NotifyContext } from "./notifier";
+import { DONE_DELAY_MS, Notifier, type NotifyContext } from "./notifier";
 import { TauriBridge } from "./tauri";
 
 function setup() {
@@ -27,9 +28,11 @@ function setup() {
   const injector = Injector.create({
     providers: [{ provide: TauriBridge, useValue: bridge }, Notifier],
   });
+  const status = new Map<string, AgentStatus>();
+  const seen = new Set<string>();
   const ctx = (o: Partial<NotifyContext> = {}): NotifyContext => ({
-    viewed: new Set(),
-    focused: false,
+    seen: (id) => seen.has(id),
+    status: (id) => status.get(id) ?? "done",
     onBlocked: true,
     onDone: true,
     label: (id) => `tab ${id}`,
@@ -43,10 +46,15 @@ function setup() {
     calls,
     click: (extra: Record<string, unknown>) => clickHandler(extra),
     ctx,
+    status,
+    seen,
   };
 }
 
 describe("Notifier", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("notifies blocked and done while the window is in the background", () => {
     const { notifier, sent, ctx } = setup();
     notifier.notify(
@@ -56,6 +64,8 @@ describe("Notifier", () => {
       ],
       ctx(),
     );
+    expect(sent).toEqual(["tab p1 is waiting for you"]);
+    vi.advanceTimersByTime(DONE_DELAY_MS);
     expect(sent).toEqual(["tab p1 is waiting for you", "tab p2 is done"]);
   });
 
@@ -68,25 +78,74 @@ describe("Notifier", () => {
       ],
       ctx(),
     );
+    vi.advanceTimersByTime(DONE_DELAY_MS);
     expect(sent).toEqual([
       notificationMessage("tab p1", "blocked"),
       notificationMessage("tab p2", "done"),
     ]);
   });
 
-  it("stays quiet for a visible tab in a focused window, but not for another tab", () => {
-    const { notifier, sent, ctx } = setup();
-    const changes = [{ paneId: "p1", status: "blocked" as const }];
-    notifier.notify(changes, ctx({ focused: true, viewed: new Set(["p1"]) }));
+  it("stays quiet for a pane the user sees, but not for another one", () => {
+    const { notifier, sent, ctx, seen } = setup();
+    seen.add("p1");
+    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx());
     expect(sent).toEqual([]);
-    notifier.notify(changes, ctx({ focused: true, viewed: new Set(["p9"]) }));
+    notifier.notify([{ paneId: "p2", status: "blocked" }], ctx());
     expect(sent).toHaveLength(1);
   });
 
-  it("notifies a viewed tab when the window is not focused", () => {
+  it("sends done only after the pane stayed done for the delay", () => {
     const { notifier, sent, ctx } = setup();
-    notifier.notify([{ paneId: "p1", status: "done" }], ctx({ viewed: new Set(["p1"]) }));
-    expect(sent).toHaveLength(1);
+    notifier.notify([{ paneId: "p1", status: "done" }], ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS - 1);
+    expect(sent).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(sent).toEqual(["tab p1 is done"]);
+  });
+
+  it("drops a done that flickers back to working before the delay", () => {
+    const { notifier, sent, ctx, status } = setup();
+    notifier.notify([{ paneId: "p1", status: "done" }], ctx());
+    vi.advanceTimersByTime(2000);
+    status.set("p1", "working");
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual([]);
+    status.set("p1", "done");
+    notifier.notify([{ paneId: "p1", status: "done" }], ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done"]);
+  });
+
+  it("drops a due done when the user looked at the pane meanwhile", () => {
+    const { notifier, sent, ctx, seen } = setup();
+    notifier.notify([{ paneId: "p1", status: "done" }], ctx());
+    seen.add("p1");
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual([]);
+  });
+
+  it("sends done once per pane until the user has seen it", () => {
+    const { notifier, sent, ctx, seen } = setup();
+    const done = [{ paneId: "p1", status: "done" as const }];
+    notifier.notify(done, ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    notifier.notify(done, ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done"]);
+    seen.add("p1");
+    notifier.notify([], ctx());
+    seen.delete("p1");
+    notifier.notify(done, ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done", "tab p1 is done"]);
+  });
+
+  it("keeps sending blocked every time, without delay", () => {
+    const { notifier, sent, ctx } = setup();
+    const blocked = [{ paneId: "p1", status: "blocked" as const }];
+    notifier.notify(blocked, ctx());
+    notifier.notify(blocked, ctx());
+    expect(sent).toHaveLength(2);
   });
 
   it("honors the per-kind settings", () => {
@@ -96,6 +155,7 @@ describe("Notifier", () => {
       { paneId: "p2", status: "done" as const },
     ];
     notifier.notify(changes, ctx({ onDone: false }));
+    vi.advanceTimersByTime(DONE_DELAY_MS);
     expect(sent).toEqual(["tab p1 is waiting for you"]);
   });
 
@@ -108,6 +168,7 @@ describe("Notifier", () => {
       ],
       ctx(),
     );
+    vi.advanceTimersByTime(DONE_DELAY_MS);
     expect(extras).toEqual([{ paneId: "p1" }, { paneId: "p2" }]);
   });
 
