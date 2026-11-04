@@ -15,6 +15,10 @@ pub struct SpaceOutcome {
     /// Why the layout of a new space was not applied (or only partly); empty otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// Whether the `setup` command of the project file was started in a `setup` tab. A setup that
+    /// fails to start is a warning; the space stays.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub setup_started: bool,
     /// Set instead of creating anything when the project file of the repository is not trusted
     /// yet: the commands to show. `workspace_id` is empty then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
