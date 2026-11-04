@@ -215,6 +215,43 @@ describe("renderRow", () => {
     expect(texts(renderRow("terminal", lines, a, ctx))).toEqual([]);
   });
 
+  describe("dirty and sync", () => {
+    const lines = [[{ token: "dirty" }, { token: "sync" }]];
+    const ws = (r: ReturnType<typeof row>) => {
+      const sp = space([r, r]);
+      return texts(renderRow("workspace", lines, sp, spaceContext(sp)));
+    };
+
+    it("renders the count and the arrows on the workspace row", () => {
+      expect(ws(row({ dirty: 3, ahead: 2, behind: 1 }))).toEqual([["●3", "↑2 ↓1"]]);
+      expect(ws(row({ dirty: 1, ahead: 0, behind: 4 }))).toEqual([["●1", "↓4"]]);
+      expect(ws(row({ ahead: 5, behind: 0 }))).toEqual([["↑5"]]);
+    });
+
+    it("renders nothing when clean, even, without upstream or unknown", () => {
+      expect(ws(row({ dirty: 0, ahead: 0, behind: 0 }))).toEqual([]);
+      expect(ws(row({}))).toEqual([]);
+    });
+
+    it("shows the workspace row after the branch in the default layout", () => {
+      const r = row({ dir: "/a/b/c", branch: "main", dirty: 2, ahead: 1, behind: 0 });
+      const sp = space([r, r]);
+      expect(
+        texts(renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, sp, spaceContext(sp))),
+      ).toEqual([["One", "idle", "main", "●2", "↑1", "…/b/c"]]);
+    });
+
+    it("shows a pane value only when it differs from the workspace", () => {
+      const clean = row({ dirty: 0 });
+      const dirty = row({ dirty: 2, ahead: 1 });
+      const mixed = spaceContext(space([clean, dirty]));
+      expect(texts(renderRow("terminal", lines, dirty, mixed))).toEqual([["●2", "↑1"]]);
+      expect(texts(renderRow("terminal", lines, clean, mixed))).toEqual([]);
+      const same = spaceContext(space([dirty, dirty]));
+      expect(texts(renderRow("terminal", lines, dirty, same))).toEqual([]);
+    });
+  });
+
   it("renders herdr tokens, tab, emphasis, the status classes data and separators", () => {
     const r = row({ tab: "build", pane: { tokens: { deliver_step: " review ", x: "" } } });
     const [line] = renderRow(

@@ -2,7 +2,9 @@
 //! herdr's pane list carries no branch, so the sidebar asks the repository itself.
 
 use std::collections::HashMap;
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -12,6 +14,99 @@ pub struct RepoInfo {
     pub branch: Option<String>,
     /// True for a linked worktree (not the main checkout).
     pub worktree: bool,
+    /// Changed plus untracked files; `None` when `git status` failed or timed out.
+    pub dirty: Option<u32>,
+    /// Commits ahead of the upstream; `None` without upstream or when unknown.
+    pub ahead: Option<u32>,
+    /// Commits behind the upstream; `None` without upstream or when unknown.
+    pub behind: Option<u32>,
+}
+
+/// Working tree state read from `git status --porcelain=v2 --branch`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Status {
+    pub dirty: u32,
+    pub ahead_behind: Option<(u32, u32)>,
+}
+
+/// Longest a `git status` may run before it is cancelled.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Parses `git status --porcelain=v2 --branch`: entry lines (`1`, `2`, `u`, `?`) count as dirty,
+/// `# branch.ab +A -B` gives ahead and behind (absent without upstream).
+pub fn parse_status(output: &str) -> Status {
+    let mut dirty = 0;
+    let mut ahead_behind = None;
+    for line in output.lines() {
+        if let Some(ab) = line.strip_prefix("# branch.ab ") {
+            let mut parts = ab.split_whitespace();
+            let a = parts.next().and_then(|p| p.strip_prefix('+')?.parse().ok());
+            let b = parts.next().and_then(|p| p.strip_prefix('-')?.parse().ok());
+            ahead_behind = a.zip(b);
+        } else if matches!(line.as_bytes().first(), Some(b'1' | b'2' | b'u' | b'?')) {
+            dirty += 1;
+        }
+    }
+    Status {
+        dirty,
+        ahead_behind,
+    }
+}
+
+/// Runs `git status` in a directory; `None` on failure or when `timeout` passes (child killed).
+pub trait StatusRunner {
+    fn status(&self, dir: &str, timeout: Duration) -> Option<String>;
+}
+
+struct GitRunner;
+
+impl StatusRunner for GitRunner {
+    fn status(&self, dir: &str, timeout: Duration) -> Option<String> {
+        let mut child = Command::new("git")
+            .args(["-C", dir, "status", "--porcelain=v2", "--branch"])
+            .args(["--no-renames", "--untracked-files=normal"])
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        let mut stdout = child.stdout.take()?;
+        let reader = std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = stdout.read_to_string(&mut text);
+            text
+        });
+        let deadline = Instant::now() + timeout;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        };
+        let text = reader.join().ok()?;
+        status.success().then_some(text)
+    }
+}
+
+/// The working tree state of `dir`, `None` when unknown (failure or timeout).
+pub fn status_with(runner: &dyn StatusRunner, dir: &str, timeout: Duration) -> Option<Status> {
+    runner.status(dir, timeout).map(|out| parse_status(&out))
+}
+
+fn apply_status(info: &mut RepoInfo, status: Option<Status>) {
+    if let Some(s) = status {
+        info.dirty = Some(s.dirty);
+        info.ahead = s.ahead_behind.map(|(a, _)| a);
+        info.behind = s.ahead_behind.map(|(_, b)| b);
+    }
 }
 
 /// Parses the output of `rev-parse --abbrev-ref HEAD --absolute-git-dir --git-common-dir`.
@@ -26,6 +121,9 @@ pub fn parse_rev_parse(output: &str) -> Option<RepoInfo> {
     Some(RepoInfo {
         branch: (head != "HEAD").then(|| head.to_string()),
         worktree: git_dir != common,
+        dirty: None,
+        ahead: None,
+        behind: None,
     })
 }
 
@@ -42,7 +140,9 @@ pub fn info(dir: &str) -> Option<RepoInfo> {
     if !out.status.success() {
         return None;
     }
-    parse_rev_parse(&String::from_utf8_lossy(&out.stdout))
+    let mut info = parse_rev_parse(&String::from_utf8_lossy(&out.stdout))?;
+    apply_status(&mut info, status_with(&GitRunner, dir, STATUS_TIMEOUT));
+    Some(info)
 }
 
 /// The top-level directory of the repository containing `dir`; `None` outside a repository.
@@ -110,7 +210,10 @@ mod tests {
             parse_rev_parse(out),
             Some(RepoInfo {
                 branch: Some("main".into()),
-                worktree: false
+                worktree: false,
+                dirty: None,
+                ahead: None,
+                behind: None
             })
         );
     }
@@ -122,7 +225,10 @@ mod tests {
             parse_rev_parse(out),
             Some(RepoInfo {
                 branch: Some("feat/x".into()),
-                worktree: true
+                worktree: true,
+                dirty: None,
+                ahead: None,
+                behind: None
             })
         );
     }
@@ -157,5 +263,91 @@ mod tests {
     #[test]
     fn outside_a_repository_is_none() {
         assert_eq!(info("/nonexistent-poimen-dir"), None);
+    }
+
+    const CLEAN: &str =
+        "# branch.oid abc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n";
+
+    #[test]
+    fn clean_tree_is_not_dirty() {
+        assert_eq!(
+            parse_status(CLEAN),
+            Status {
+                dirty: 0,
+                ahead_behind: Some((0, 0))
+            }
+        );
+    }
+
+    #[test]
+    fn counts_changed_and_untracked_files() {
+        let out = format!(
+            "{CLEAN}1 .M N... 100644 100644 100644 a b src/a.rs\n2 R. N... 100644 100644 100644 a b R100 new\told\nu UU N... 1 2 3 4 a b c f\n? new.txt\n! ignored.log\n"
+        );
+        assert_eq!(parse_status(&out).dirty, 4);
+    }
+
+    #[test]
+    fn reads_ahead_and_behind() {
+        let out = "# branch.head main\n# branch.upstream origin/main\n# branch.ab +2 -1\n";
+        assert_eq!(parse_status(out).ahead_behind, Some((2, 1)));
+    }
+
+    #[test]
+    fn no_upstream_has_no_ahead_behind() {
+        let out = "# branch.oid abc\n# branch.head feat\n? x\n";
+        assert_eq!(
+            parse_status(out),
+            Status {
+                dirty: 1,
+                ahead_behind: None
+            }
+        );
+    }
+
+    #[test]
+    fn detached_head_has_no_ahead_behind() {
+        let out = "# branch.oid abc\n# branch.head (detached)\n1 M. N... 1 1 1 a b f\n";
+        assert_eq!(
+            parse_status(out),
+            Status {
+                dirty: 1,
+                ahead_behind: None
+            }
+        );
+    }
+
+    struct Fake(Option<&'static str>);
+    impl StatusRunner for Fake {
+        fn status(&self, _dir: &str, _timeout: Duration) -> Option<String> {
+            self.0.map(str::to_owned)
+        }
+    }
+
+    #[test]
+    fn a_timed_out_status_leaves_the_fields_unknown() {
+        assert_eq!(status_with(&Fake(None), "/r", STATUS_TIMEOUT), None);
+        let mut info = parse_rev_parse("main\n/r/.git\n/r/.git\n").unwrap();
+        apply_status(&mut info, None);
+        assert_eq!((info.dirty, info.ahead, info.behind), (None, None, None));
+    }
+
+    #[test]
+    fn a_status_fills_the_fields() {
+        let status = status_with(&Fake(Some(CLEAN)), "/r", STATUS_TIMEOUT);
+        let mut info = parse_rev_parse("main\n/r/.git\n/r/.git\n").unwrap();
+        apply_status(&mut info, status);
+        assert_eq!(
+            (info.dirty, info.ahead, info.behind),
+            (Some(0), Some(0), Some(0))
+        );
+    }
+
+    #[test]
+    fn the_real_runner_gives_nothing_for_a_missing_directory() {
+        assert_eq!(
+            GitRunner.status("/nonexistent-poimen-dir", Duration::from_secs(2)),
+            None
+        );
     }
 }

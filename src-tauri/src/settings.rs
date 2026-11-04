@@ -54,6 +54,8 @@ pub const ROW_TOKENS: &[&str] = &[
     "agent",
     "title",
     "branch",
+    "dirty",
+    "sync",
     "dir",
     "tab",
 ];
