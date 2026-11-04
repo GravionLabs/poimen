@@ -76,7 +76,7 @@ With the herdr `deliver-board` plugin installed, a native tab shows one table pe
 
 Light, dark or follow the system. Choose a bundled scheme, use the one of your herdr configuration, or drop WezTerm color scheme files into `~/.config/poimen/themes/`; the window chrome is derived from the scheme.
 
-<Screenshot src="schemes-dark.png" light="schemes-light.png" alt="The settings view with the appearance switch and the color scheme picker listing dark and light schemes with their palettes" caption="Appearance and color scheme in the settings view (demo data, follows the site theme)." />
+<Screenshot src="schemas-dark.png" light="schemas-light.png" alt="The settings view with the appearance switch and the color scheme picker listing dark and light schemes with their palettes" caption="Appearance and color scheme in the settings view (demo data, follows the site theme)." />
 
 ## Learn more
 
