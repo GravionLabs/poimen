@@ -1,4 +1,49 @@
+.update-button.available {
+  color: #3fb950;
+  font-weight: 600;
+}
+
+.update-button.failed,
+.update-details h3.failed {
+  color: #f85149;
+}
+
+.update-details {
+  position: absolute;
+  right: 10px;
+  bottom: 24px;
+  z-index: 10;
+  width: min(420px, calc(100vw - 20px));
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--h-text-color);
+  background: var(--h-surface-color, var(--h-background-color));
+  border: 1px solid var(--h-border-color);
+  border-radius: 6px;
+}
+
+.update-details h3 {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.update-details .message {
+  margin: 4px 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  font: inherit;
+}
+
+.update-details .install {
+  font: inherit;
+  cursor: pointer;
+}
+
 .bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;

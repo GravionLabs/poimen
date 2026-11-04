@@ -24,6 +24,7 @@ import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
+import { Updater } from "./core/updater";
 import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
@@ -97,6 +98,7 @@ const ZOOM_STEP = 1;
 })
 export class App {
   protected readonly store = inject(HerdrStore);
+  protected readonly updater = inject(Updater);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);

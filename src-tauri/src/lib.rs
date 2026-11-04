@@ -20,6 +20,7 @@ mod stream;
 mod tasks;
 mod transcripts;
 mod trust;
+mod updater;
 mod watch;
 
 use std::collections::{BTreeMap, HashMap};
@@ -874,6 +875,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::PendingUpdate::default())
         .manage(client.clone())
         .manage::<GithubClient>(std::sync::Arc::new(github::Client::system(
             home_dir()
@@ -950,6 +953,8 @@ pub fn run() {
             list_dirs,
             list_child_dirs,
             app_version,
+            updater::update_check,
+            updater::update_install,
             get_settings,
             get_harnesses,
             get_task_modes,
