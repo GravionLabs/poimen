@@ -14,6 +14,7 @@ import {
   type PaletteItem,
   type PoimenCommand,
 } from "../core/command-palette";
+import { EditorTabs } from "../core/editor-tabs";
 import { palettePosition, PALETTE_MAX_HEIGHT } from "./palette-position";
 import { titleParts } from "./title-parts";
 import type { PluginPaneDef } from "../core/plugin-panes";
@@ -27,6 +28,7 @@ import type { PluginPaneDef } from "../core/plugin-panes";
 })
 export class CommandPalette {
   protected readonly palette = inject(Palette);
+  private readonly tabs = inject(EditorTabs);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The pane that has focus in the editor; the context of a plugin action. */
   readonly activePaneId = input<string | null>(null);
@@ -41,8 +43,13 @@ export class CommandPalette {
   /** Top-left corner of the popup, centred on the editor area. */
   protected readonly position = signal({ left: 0, top: 0 });
 
+  /** The editor area, or null while no tab is open (it then only shows the empty-state hint). */
+  private editorArea(): Element | null {
+    return this.tabs.openIds().size > 0 ? document.querySelector(".editor-area") : null;
+  }
+
   private place(): void {
-    const area = document.querySelector(".editor-area")?.getBoundingClientRect() ?? null;
+    const area = this.editorArea()?.getBoundingClientRect() ?? null;
     this.position.set(
       palettePosition(
         area,
@@ -58,7 +65,7 @@ export class CommandPalette {
       this.place();
       const place = () => this.place();
       window.addEventListener("resize", place);
-      const area = document.querySelector(".editor-area");
+      const area = this.editorArea();
       const observer = area ? new ResizeObserver(place) : null;
       if (area) observer?.observe(area);
       onCleanup(() => {
