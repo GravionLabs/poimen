@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, mpsc};
@@ -40,17 +40,17 @@ pub fn augmented_path(shell_path: Option<&str>, home: &str, current: &str) -> St
     let mut seen = HashSet::new();
     let mut parts = Vec::new();
     let extra = usual_dirs(home);
-    let sources = shell_path
-        .unwrap_or("")
-        .split(':')
-        .chain(extra.iter().map(String::as_str))
-        .chain(current.split(':'));
+    let sources = std::env::split_paths(shell_path.unwrap_or(""))
+        .chain(extra.iter().map(PathBuf::from))
+        .chain(std::env::split_paths(current));
     for part in sources {
-        if !part.is_empty() && seen.insert(part.to_owned()) {
-            parts.push(part.to_owned());
+        if !part.as_os_str().is_empty() && seen.insert(part.clone()) {
+            parts.push(part);
         }
     }
-    parts.join(":")
+    std::env::join_paths(&parts)
+        .map(|joined| joined.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| current.to_owned())
 }
 
 /// Resolves `program` against `path` (a name without slash) the way a shell would.
@@ -58,9 +58,9 @@ pub fn resolve_program(program: &str, path: &str) -> Option<PathBuf> {
     if program.contains('/') {
         return Some(PathBuf::from(program));
     }
-    path.split(':')
-        .filter(|d| !d.is_empty())
-        .map(|d| Path::new(d).join(program))
+    std::env::split_paths(path)
+        .filter(|d| !d.as_os_str().is_empty())
+        .map(|d| d.join(program))
         .find(|candidate| candidate.is_file())
 }
 
@@ -128,10 +128,24 @@ fn login_shell_path() -> Option<String> {
         .clone()
 }
 
+/// The `PATH` for a child. Windows has no login shell and a GUI app inherits the full `PATH`, so
+/// it is returned as is; elsewhere the login shell is probed (`shell_path`, called only then).
+pub fn child_path_for(
+    windows: bool,
+    shell_path: impl FnOnce() -> Option<String>,
+    home: &str,
+    current: &str,
+) -> String {
+    if windows {
+        return current.to_owned();
+    }
+    augmented_path(shell_path().as_deref(), home, current)
+}
+
 pub fn child_path() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let current = std::env::var("PATH").unwrap_or_default();
-    augmented_path(login_shell_path().as_deref(), &home, &current)
+    child_path_for(cfg!(windows), login_shell_path, &home, &current)
 }
 
 #[cfg(test)]
@@ -166,6 +180,28 @@ mod tests {
         assert!(parts.contains(&"/usr/bin"));
         assert_eq!(parts.iter().filter(|p| **p == "/b").count(), 1);
         assert!(augmented_path(None, "/h", "").contains("/h/.local/bin"));
+    }
+
+    #[test]
+    fn windows_keeps_the_inherited_path_and_skips_the_login_shell() {
+        let current = r"C:\Windows\System32;C:\Users\me\.cargo\bin";
+        let path = child_path_for(true, || panic!("login shell probed"), "", current);
+        assert_eq!(path, current);
+    }
+
+    #[test]
+    fn other_systems_probe_the_login_shell() {
+        let path = child_path_for(false, || Some("/a".into()), "/nonexistent-home", "/b");
+        assert!(path.starts_with("/a") || cfg!(windows));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_is_split_at_semicolons_not_drive_colons() {
+        let path = augmented_path(None, r"C:\h", r"C:\a;D:\b");
+        let parts: Vec<_> = std::env::split_paths(&path).collect();
+        assert!(parts.contains(&PathBuf::from(r"C:\a")));
+        assert!(parts.contains(&PathBuf::from(r"D:\b")));
     }
 
     #[test]
