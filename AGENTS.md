@@ -27,7 +27,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - Frontend stack: Angular 22 and helix-ui, and when a component goes to helix-ui ([ADR 0001](docs/adr/0001-frontend-stack.md)).
 - Color schemes: bundled and imported schemes, a derived chrome and the `colorSchema` setting ([ADR 0002](docs/adr/0002-color-schemes.md)).
 - Own terminal backend `poimen-server` next to herdr, agent status from Claude Code and Copilot hooks (proposed, [ADR 0003](docs/adr/0003-own-terminal-backend-without-herdr.md)).
-- Native views for herdr plugins: `deliver-board` and `review-popup` get one, through a `data` action that prints versioned JSON; `deliver-view` stays an agent view (superseded by ADR 0005, [ADR 0004](docs/adr/0004-native-views-for-herdr-plugins.md)).
+- Native views for herdr plugins: `deliver-board` and `review-popup` get one, through a `data` action that prints versioned JSON; `deliver-view` stays an agent view ([ADR 0004](docs/adr/0004-native-views-for-herdr-plugins.md), superseded by [ADR 0005](docs/adr/0005-github-views-and-agent-harnesses.md)).
 - GitHub views and agent harnesses native in poimen; replaces the plugin views of ADR 0004 (accepted, [ADR 0005](docs/adr/0005-github-views-and-agent-harnesses.md)).
 
 ## Verification

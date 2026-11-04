@@ -743,6 +743,11 @@ fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>, config: &Path) {
 
 /// Reads and resolves the settings below `home`; a missing file means defaults.
 pub fn load(home: &Path) -> Settings {
+    load_with(home, &herdr_config_path(home))
+}
+
+/// `load` with the herdr `config.toml` given, so tests never read the real herdr directory.
+fn load_with(home: &Path, herdr_config: &Path) -> Settings {
     let json = match std::fs::read_to_string(config_path(home)) {
         Ok(text) => Some(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -759,9 +764,8 @@ pub fn load(home: &Path) -> Settings {
         std::fs::read_to_string(ghostty_path(home)).ok()
     });
     if s.color_schema == Some(ColorSchema::Name("herdr".into())) {
-        let path = herdr_config_path(home);
-        let toml = std::fs::read_to_string(&path).ok();
-        apply_herdr(&mut s, toml.as_deref(), &path);
+        let toml = std::fs::read_to_string(herdr_config).ok();
+        apply_herdr(&mut s, toml.as_deref(), herdr_config);
     }
     s.home = Some(home.to_string_lossy().into_owned());
     s
@@ -1785,16 +1789,17 @@ mod tests {
     #[test]
     fn load_follows_the_herdr_config_in_a_temp_home() {
         let home = std::env::temp_dir().join(format!("poimen-herdr-{}", std::process::id()));
+        let herdr = herdr_config_path_in(false, &home, "");
+        assert!(herdr.starts_with(&home));
         std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
-        std::fs::create_dir_all(herdr_config_path(&home).parent().unwrap()).unwrap();
+        std::fs::create_dir_all(herdr.parent().unwrap()).unwrap();
         std::fs::write(config_path(&home), r#"{"colorSchema":"herdr"}"#).unwrap();
-        assert_eq!(load(&home).color_schema, None);
-        std::fs::write(herdr_config_path(&home), "[theme]\nname = \"vesper\"\n").unwrap();
+        assert_eq!(load_with(&home, &herdr).color_schema, None);
+        std::fs::write(&herdr, "[theme]\nname = \"vesper\"\n").unwrap();
         assert_eq!(
-            load(&home).color_schema,
+            load_with(&home, &herdr).color_schema,
             Some(ColorSchema::Name("vesper".into()))
         );
-        assert!(stamp(&home)[2].is_some());
         std::fs::remove_dir_all(&home).unwrap();
     }
 
