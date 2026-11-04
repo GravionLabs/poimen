@@ -49,7 +49,7 @@ export interface LayoutState {
   splitWorkspace?: string;
   /** Shares of the Spaces and Agents sections in the split sidebar layout; they sum to 1. */
   splitSizes?: [number, number];
-  /** Plugin name per plugin pane id poimen opened (UI bookkeeping; pruned against live panes). */
+  /** Legacy: plugin panes poimen opened; read once so their tabs can be dropped, never written. */
   pluginPanes?: Record<string, string>;
   /** The bottom panel below the editor area: shown, its height and its selected tab. */
   panelOpen: boolean;
@@ -176,8 +176,10 @@ export class UiState {
   readonly splitSizes = signal<readonly [number, number]>(
     this.initial.splitSizes ?? SPLIT_DEFAULT_SIZES,
   );
-  /** Plugin name per plugin pane id poimen opened; `PluginPanes` prunes it against live panes. */
-  readonly pluginPanes = signal<Readonly<Record<string, string>>>(this.initial.pluginPanes ?? {});
+  /** Ids of the panes the removed plugin integration opened as tabs; `EditorTabs` drops them on restore. */
+  readonly legacyPluginPaneIds: ReadonlySet<string> = new Set(
+    Object.keys(this.initial.pluginPanes ?? {}),
+  );
   /** The bottom panel (Output) below the editor area. */
   readonly panelOpen = signal(this.initial.panelOpen);
   readonly panelHeight = signal(this.initial.panelHeight);
@@ -250,12 +252,6 @@ export class UiState {
     this.save();
   }
 
-  /** Stores which plugin pane ids belong to which plugin. */
-  setPluginPanes(names: Readonly<Record<string, string>>): void {
-    this.pluginPanes.set(names);
-    this.save();
-  }
-
   /** Persists the editor area (open tabs, groups, split sizes, focus). */
   saveEditor(editor: unknown): void {
     this.editor = editor;
@@ -324,7 +320,6 @@ export class UiState {
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,
-      pluginPanes: Object.keys(this.pluginPanes()).length ? { ...this.pluginPanes() } : undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

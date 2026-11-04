@@ -13,8 +13,8 @@ import {
 /** The id of the settings tab; it is not a herdr pane, so it never reaches the terminal logic. */
 export const SETTINGS_TAB = "poimen:settings";
 
-/** The id of the native deliver board tab (ADR 0004); like settings it is no herdr pane. */
-export const BOARD_TAB = "poimen:deliver-board";
+/** The id of the removed deliver board tab (ADR 0005); a stored one opens the GitHub tab instead. */
+const LEGACY_BOARD_TAB = "poimen:deliver-board";
 
 /** The id of the GitHub pull request tab; like settings it is no herdr pane. */
 export const GITHUB_TAB = "poimen:github";
@@ -33,14 +33,13 @@ export function flowPane(id: string): string | null {
 }
 
 /**
- * What a tab shows: a herdr pane (live terminal), the settings view, the deliver board or the flow
- * of a pane's agent run.
+ * What a tab shows: a herdr pane (live terminal), the settings view, GitHub or the flow of a
+ * pane's agent run.
  */
-export type TabKind = "pane" | "settings" | "board" | "github" | "flow";
+export type TabKind = "pane" | "settings" | "github" | "flow";
 
 export function tabKind(id: string): TabKind {
   if (id === SETTINGS_TAB) return "settings";
-  if (id === BOARD_TAB) return "board";
   if (id === GITHUB_TAB) return "github";
   return flowPane(id) !== null ? "flow" : "pane";
 }
@@ -102,8 +101,15 @@ function validLayout(node: unknown, seen: number[]): node is LayoutNode {
   );
 }
 
-/** Checks stored editor state; anything inconsistent yields `null` (start with a blank editor). */
-export function parseEditor(raw: unknown): EditorSnapshot | null {
+/**
+ * Checks stored editor state; anything inconsistent yields `null` (start with a blank editor).
+ * Migration: a stored deliver board tab becomes the GitHub tab (merged when that is open too), and
+ * the tabs in `dropIds` (panes of the removed plugin integration) are dropped.
+ */
+export function parseEditor(
+  raw: unknown,
+  dropIds: ReadonlySet<string> = new Set(),
+): EditorSnapshot | null {
   if (typeof raw !== "object" || raw === null) return null;
   const { groups, layout, focusedId } = raw as Record<string, unknown>;
   if (!Array.isArray(groups) || groups.length === 0) return null;
@@ -114,16 +120,22 @@ export function parseEditor(raw: unknown): EditorSnapshot | null {
     if (typeof g !== "object" || g === null || !Number.isInteger(g["id"])) return null;
     if (!Array.isArray(g["tabs"])) return null;
     const tabs: EditorTab[] = [];
+    const active = g["activeId"];
+    let migratedActive: string | null = null;
     for (const t of g["tabs"] as Record<string, unknown>[]) {
       if (typeof t?.["paneId"] !== "string" || typeof t["pinned"] !== "boolean") return null;
-      if (panes.has(t["paneId"])) return null;
-      panes.add(t["paneId"]);
-      tabs.push({ paneId: t["paneId"], pinned: t["pinned"] });
+      const stored = t["paneId"];
+      if (panes.has(stored)) return null;
+      panes.add(stored);
+      if (dropIds.has(stored)) continue;
+      const paneId = stored === LEGACY_BOARD_TAB ? GITHUB_TAB : stored;
+      if (stored === active) migratedActive = paneId;
+      if (!tabs.some((x) => x.paneId === paneId)) tabs.push({ paneId, pinned: t["pinned"] });
     }
-    const active = g["activeId"];
-    if (active !== null && !tabs.some((t) => t.paneId === active)) return null;
+    if (active !== null && (typeof active !== "string" || !panes.has(active))) return null;
+    const shown = migratedActive ?? tabs[0]?.paneId ?? null;
     ids.push(g["id"] as number);
-    clean.push({ id: g["id"] as number, tabs, activeId: active as string | null });
+    clean.push({ id: g["id"] as number, tabs, activeId: active === null ? null : shown });
   }
   const leaves: number[] = [];
   if (!validLayout(layout, leaves)) return null;
@@ -151,7 +163,7 @@ function without<V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<strin
 @Injectable({ providedIn: "root" })
 export class EditorTabs {
   private readonly ui = inject(UiState);
-  private readonly restored = parseEditor(this.ui.storedEditor);
+  private readonly restored = parseEditor(this.ui.storedEditor, this.ui.legacyPluginPaneIds);
   readonly groups = signal<readonly EditorGroup[]>(
     this.restored?.groups ?? [{ id: 1, tabs: [], activeId: null }],
   );
@@ -232,11 +244,6 @@ export class EditorTabs {
   /** Opens the settings tab (at most one) as a pinned tab, or activates it when open. */
   openSettings(): void {
     this.openPinned(SETTINGS_TAB);
-  }
-
-  /** Opens the deliver board tab (at most one) as a pinned tab, or activates it when open. */
-  openBoard(): void {
-    this.openPinned(BOARD_TAB);
   }
 
   /** Opens the GitHub pull request tab (at most one) as a pinned tab, or activates it. */

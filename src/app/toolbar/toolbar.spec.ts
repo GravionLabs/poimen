@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
-import { Component, signal } from "@angular/core";
+import { Component } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
-import type { PluginAction } from "../core/herdr";
 import { nextTheme, type ThemeSetting } from "../core/settings";
 import { fixedLabel, themeLabel } from "./toolbar";
 
@@ -36,12 +35,8 @@ describe("theme button", () => {
       fixedBy = () => fixedBy;
       fixed = fixedLabel;
       themeChange = { emit: (t: ThemeSetting) => emitted.push(t) };
-      pluginsOpen = signal(false);
       outputOpen = () => false;
       outputToggle = { emit: () => undefined };
-      plugins = () => [];
-      pluginsError = () => null;
-      togglePlugins = () => undefined;
       label = themeLabel;
       next = nextTheme;
     }
@@ -80,83 +75,6 @@ describe("theme button", () => {
   });
 });
 
-describe("Plugins menu", () => {
-  const act = (id: string, title: string): PluginAction => ({
-    plugin_id: "p",
-    action_id: id,
-    title,
-    description: null,
-  });
-
-  const render = (plugins: PluginAction[], error: string | null = null) => {
-    const opened: number[] = [];
-    const chosen: PluginAction[] = [];
-    @Component({
-      selector: "app-host",
-      template: readFileSync("src/app/toolbar/toolbar.html", "utf8"),
-    })
-    class Host {
-      theme = () => "system";
-      fixedBy = () => null;
-      fixed = fixedLabel;
-      themeChange = { emit: () => undefined };
-      label = themeLabel;
-      next = nextTheme;
-      pluginsOpen = signal(false);
-      outputOpen = () => false;
-      outputToggle = { emit: () => undefined };
-      plugins = () => plugins;
-      pluginsError = () => error;
-      togglePlugins() {
-        this.pluginsOpen.update((o) => !o);
-        if (this.pluginsOpen()) opened.push(1);
-      }
-      choosePlugin(a: PluginAction) {
-        this.pluginsOpen.set(false);
-        chosen.push(a);
-      }
-    }
-    TestBed.resetTestingModule();
-    const fixture = TestBed.createComponent(Host);
-    fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    const button = root.querySelector<HTMLButtonElement>("button[aria-haspopup=menu]")!;
-    return { fixture, root, button, opened, chosen };
-  };
-
-  it("lists the actions after opening and reports the pick", () => {
-    const first = act("a", "First");
-    const { fixture, root, button, opened, chosen } = render([first, act("b", "Second")]);
-    expect(root.querySelector("[role=menu]")).toBeNull();
-    button.click();
-    fixture.detectChanges();
-    const items = [...root.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
-    expect(items.map((i) => i.textContent?.replace(/\s+/g, " ").trim())).toEqual([
-      "First p",
-      "Second p",
-    ]);
-    expect(opened).toHaveLength(1);
-    items[0].click();
-    fixture.detectChanges();
-    expect(chosen).toEqual([first]);
-    expect(root.querySelector("[role=menu]")).toBeNull();
-  });
-
-  it("says why nothing is listed", () => {
-    const { fixture, root, button } = render([], "herdr socket: refused");
-    button.click();
-    fixture.detectChanges();
-    expect(root.querySelector("[role=menu]")?.textContent).toContain("herdr socket: refused");
-  });
-
-  it("says there are no actions when herdr lists none", () => {
-    const { fixture, root, button } = render([]);
-    button.click();
-    fixture.detectChanges();
-    expect(root.querySelector("[role=menu]")?.textContent).toContain("No plugin actions");
-  });
-});
-
 describe("output button", () => {
   it("shows the pressed state and emits a toggle on click", () => {
     let toggled = 0;
@@ -169,12 +87,8 @@ describe("output button", () => {
       fixedBy = () => null;
       fixed = fixedLabel;
       themeChange = { emit: () => undefined };
-      pluginsOpen = signal(false);
       outputOpen = () => true;
       outputToggle = { emit: () => toggled++ };
-      plugins = () => [];
-      pluginsError = () => null;
-      togglePlugins = () => undefined;
       label = themeLabel;
       next = nextTheme;
     }

@@ -2,8 +2,8 @@
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { BOARD_TAB, EditorTabs, SETTINGS_TAB, tabKind } from "./editor-tabs";
-import { UI_STORAGE } from "./ui-state";
+import { EditorTabs, GITHUB_TAB, SETTINGS_TAB, parseEditor, tabKind } from "./editor-tabs";
+import { UI_STORAGE, UI_STATE_KEY } from "./ui-state";
 
 beforeAll(() => {
   getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
@@ -58,34 +58,65 @@ describe("settings tab", () => {
   });
 });
 
-describe("deliver board tab", () => {
-  let tabs: EditorTabs;
-
-  beforeEach(() => {
-    TestBed.resetTestingModule();
-    TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: null }] });
-    tabs = TestBed.inject(EditorTabs);
+describe("restoring a layout of the removed plugin integration", () => {
+  const layout = { kind: "group", id: 1 };
+  const editor = (tabs: string[], activeId: string | null) => ({
+    groups: [{ id: 1, tabs: tabs.map((paneId) => ({ paneId, pinned: true })), activeId }],
+    layout,
+    focusedId: 1,
   });
+  const restore = (stored: object) => {
+    const data = new Map<string, string>([[UI_STATE_KEY, JSON.stringify(stored)]]);
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: UI_STORAGE,
+          useValue: {
+            getItem: (k: string) => data.get(k) ?? null,
+            setItem: (k: string, v: string) => void data.set(k, v),
+          },
+        },
+      ],
+    });
+    return TestBed.inject(EditorTabs);
+  };
 
-  it("is told from panes and settings", () => {
-    expect(tabKind(BOARD_TAB)).toBe("board");
+  it("has no board tab kind any more", () => {
+    expect(tabKind("poimen:deliver-board")).toBe("pane");
     expect(tabKind(SETTINGS_TAB)).toBe("settings");
   });
 
-  it("opens once as a pinned tab and is only activated afterwards", () => {
-    tabs.open("a", true);
-    tabs.openBoard();
-    tabs.open("b", true);
-    tabs.openBoard();
-    expect(tabs.tabs().filter((t) => t.paneId === BOARD_TAB)).toEqual([
-      { paneId: BOARD_TAB, pinned: true },
-    ]);
-    expect(tabs.activeId()).toBe(BOARD_TAB);
+  it("opens the GitHub tab for a stored board tab, keeping it active", () => {
+    const tabs = restore({ editor: editor(["a", "poimen:deliver-board"], "poimen:deliver-board") });
+    expect(tabs.tabs().map((t) => t.paneId)).toEqual(["a", GITHUB_TAB]);
+    expect(tabs.activeId()).toBe(GITHUB_TAB);
   });
 
-  it("survives a snapshot that does not list it as a pane", () => {
-    tabs.openBoard();
-    tabs.prune(new Set(["a"]));
-    expect(tabs.activeId()).toBe(BOARD_TAB);
+  it("merges a stored board tab with an open GitHub tab", () => {
+    const parsed = parseEditor(
+      editor([GITHUB_TAB, "poimen:deliver-board"], "poimen:deliver-board"),
+    );
+    expect(parsed?.groups[0].tabs.map((t) => t.paneId)).toEqual([GITHUB_TAB]);
+    expect(parsed?.groups[0].activeId).toBe(GITHUB_TAB);
+  });
+
+  it("drops the tabs of stored plugin panes and picks another active tab", () => {
+    const tabs = restore({
+      editor: editor(["a", "w1:p5", "b"], "w1:p5"),
+      pluginPanes: { "w1:p5": "board" },
+    });
+    expect(tabs.tabs().map((t) => t.paneId)).toEqual(["a", "b"]);
+    expect(tabs.activeId()).toBe("a");
+  });
+
+  it("restores an empty editor when only a plugin pane tab was open", () => {
+    const tabs = restore({ editor: editor(["w1:p5"], "w1:p5"), pluginPanes: { "w1:p5": "x" } });
+    expect(tabs.tabs()).toEqual([]);
+    expect(tabs.activeId()).toBeNull();
+  });
+
+  it("still rejects an active tab that was never stored", () => {
+    expect(parseEditor(editor(["a"], "zzz"))).toBeNull();
   });
 });

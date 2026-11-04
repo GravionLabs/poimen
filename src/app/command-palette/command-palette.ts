@@ -4,7 +4,6 @@ import {
   ElementRef,
   effect,
   inject,
-  input,
   output,
   signal,
   viewChild,
@@ -17,7 +16,6 @@ import {
 import { EditorTabs } from "../core/editor-tabs";
 import { palettePosition, PALETTE_MAX_HEIGHT } from "./palette-position";
 import { titleParts } from "./title-parts";
-import type { PluginPaneDef } from "../core/plugin-panes";
 
 /** The command palette dialog: type to filter, arrows to move, Enter to run, Escape to close. */
 @Component({
@@ -30,14 +28,8 @@ export class CommandPalette {
   protected readonly palette = inject(Palette);
   private readonly tabs = inject(EditorTabs);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  /** The pane that has focus in the editor; the context of a plugin action. */
-  readonly activePaneId = input<string | null>(null);
   /** A poimen command was chosen; the host runs it. */
   readonly commandChosen = output<PoimenCommand["id"]>();
-  /** A plugin pane was chosen; the host opens it as a tab. */
-  readonly paneChosen = output<PluginPaneDef>();
-  /** A plugin action failed; the host shows the message as a notice. */
-  readonly failed = output<string>();
   private readonly field = viewChild<ElementRef<HTMLInputElement>>("field");
 
   /** Top-left corner of the popup, centred on the editor area. */
@@ -99,24 +91,15 @@ export class CommandPalette {
     else if (event.key === "ArrowUp") this.palette.move(-1);
     else if (event.key === "Enter") {
       const item = this.palette.current();
-      if (item) void this.run(item);
+      if (item) this.run(item);
     } else if (event.key === "Escape") this.palette.close();
     else return;
     event.preventDefault();
   }
 
-  protected async run(item: PaletteItem): Promise<void> {
+  protected run(item: PaletteItem): void {
     this.palette.recordRun(item);
     this.palette.close();
-    if (item.kind === "command") {
-      this.commandChosen.emit(item.command);
-      return;
-    }
-    if (item.kind === "pane") {
-      this.paneChosen.emit(item.def);
-      return;
-    }
-    const error = await this.palette.invoke(item.action, this.activePaneId());
-    if (error) this.failed.emit(error);
+    this.commandChosen.emit(item.command);
   }
 }

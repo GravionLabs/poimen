@@ -17,13 +17,11 @@ import {
   type AgentStatus,
   type Pane,
   type PaneRow,
-  type PluginAction,
   type SpaceNode,
   type Workspace,
 } from "../core/herdr";
 import { Attention, workspaceUnread } from "../core/attention";
 import { HerdrStore } from "../core/herdr-store";
-import { pluginMenuId } from "../core/plugin-actions";
 import {
   DEFAULT_SIDEBAR_ROWS,
   aggregateStatus,
@@ -194,8 +192,7 @@ export interface SidebarMenuAction {
     | "start-agent"
     | "rename"
     | "close"
-    | "close-space"
-    | `plugin:${string}`;
+    | "close-space";
 }
 
 /** One entry of a context menu. */
@@ -204,7 +201,7 @@ export interface SidebarMenuItem {
   label: string;
 }
 
-/** A group of context menu entries; `label` is the heading (the plugin name), `null` for the built-in group. */
+/** A group of context menu entries; `label` is the heading, `null` for the built-in group. */
 export interface SidebarMenuGroup {
   id: string;
   label: string | null;
@@ -212,14 +209,9 @@ export interface SidebarMenuGroup {
 }
 
 /**
- * Groups of the context menu of a workspace row or a pane row: the built-in actions first, then
- * (pane rows) one group per plugin by plugin name, its actions by title. A plugin without actions
- * produces no group.
+ * Groups of the context menu of a workspace row or a pane row: the built-in actions.
  */
-export function sidebarMenuItems(
-  kind: SidebarMenuAction["kind"],
-  plugins: readonly PluginAction[] = [],
-): SidebarMenuGroup[] {
+export function sidebarMenuItems(kind: SidebarMenuAction["kind"]): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
     label: null,
@@ -237,23 +229,7 @@ export function sidebarMenuItems(
             { action: "close", label: "Close pane..." },
           ],
   };
-  if (kind === "workspace") return [builtin];
-  const byPlugin = new Map<string, { name: string; actions: PluginAction[] }>();
-  for (const a of plugins) {
-    const group = byPlugin.get(a.plugin_id);
-    if (group) group.actions.push(a);
-    else byPlugin.set(a.plugin_id, { name: a.plugin_name || a.plugin_id, actions: [a] });
-  }
-  const groups = [...byPlugin.entries()]
-    .sort(([xi, x], [yi, y]) => x.name.localeCompare(y.name) || xi.localeCompare(yi))
-    .map<SidebarMenuGroup>(([id, { name, actions }]) => ({
-      id: `plugin:${id}`,
-      label: name,
-      items: actions
-        .sort((x, y) => x.title.localeCompare(y.title))
-        .map((a) => ({ action: pluginMenuId(a) as SidebarMenuAction["action"], label: a.title })),
-    }));
-  return [builtin, ...groups];
+  return [builtin];
 }
 
 /**
@@ -308,8 +284,6 @@ export class Sidebar {
   readonly openIds = input<ReadonlySet<string>>(new Set());
   /** Id of the pane whose tab is active in the editor. */
   readonly activeId = input<string | null>(null);
-  /** The herdr plugin actions the pane context menu offers. */
-  readonly pluginActions = input<readonly PluginAction[]>([]);
   readonly selected = output<Pane>();
   /** A second click on the same row within {@link DOUBLE_CLICK_MS}: pin the tab. */
   readonly pinned = output<Pane>();
@@ -323,7 +297,7 @@ export class Sidebar {
     y: number;
   } | null>(null);
   protected menuItems(kind: SidebarMenuAction["kind"]) {
-    return sidebarMenuItems(kind, this.pluginActions());
+    return sidebarMenuItems(kind);
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {

@@ -32,9 +32,6 @@
         (keydown)="key($event)"
       />
     </div>
-    @if (palette.loadError(); as error) {
-      <p class="warn">Plugin actions are unavailable: {{ error }}</p>
-    }
     <ul id="palette-list" role="listbox">
       @for (row of palette.rows(); track row.key) {
         @if (row.type === "heading") {
@@ -60,9 +57,6 @@
                   }
                 }
               </span>
-              @if (row.item.origin) {
-                <span class="origin">{{ row.item.origin }}</span>
-              }
               @if (row.item.shortcut) {
                 <kbd class="shortcut">{{ row.item.shortcut }}</kbd>
               }

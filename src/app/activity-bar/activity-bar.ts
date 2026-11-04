@@ -12,7 +12,7 @@ export interface ActivityView {
   tab?: "github";
 }
 
-/** The views the activity bar offers; plugins follow later. */
+/** The views the activity bar offers. */
 export const ACTIVITY_VIEWS: readonly ActivityView[] = [
   { id: "spaces", label: "Spaces", icon: "spaces" },
   { id: "explorer", label: "Explorer", icon: "folder" },

@@ -1,13 +1,4 @@
 <header class="bar">
-  <button
-    type="button"
-    class="item"
-    aria-haspopup="menu"
-    [attr.aria-expanded]="pluginsOpen()"
-    (click)="togglePlugins()"
-  >
-    Plugins
-  </button>
   <span class="spacer"></span>
   <button
     type="button"
@@ -50,29 +41,3 @@
     <span>{{ theme() }}</span>
   </button>
 </header>
-@if (pluginsOpen()) {
-  <button
-    type="button"
-    class="menu-backdrop"
-    tabindex="-1"
-    aria-label="Close menu"
-    (click)="pluginsOpen.set(false)"
-  ></button>
-  <div class="menu" role="menu">
-    @for (action of plugins(); track action.plugin_id + "/" + action.action_id) {
-      <button
-        type="button"
-        role="menuitem"
-        class="menu-item"
-        [title]="action.description ?? ''"
-        (click)="choosePlugin(action)"
-        (keydown.escape)="pluginsOpen.set(false)"
-      >
-        {{ action.title }}
-        <span class="plugin">{{ action.plugin_id }}</span>
-      </button>
-    } @empty {
-      <div class="menu-empty">{{ pluginsError() ?? "No plugin actions" }}</div>
-    }
-  </div>
-}
