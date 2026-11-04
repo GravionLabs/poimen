@@ -328,6 +328,7 @@ async fn create_space(
                 workspace_id,
                 created: false,
                 warnings: Vec::new(),
+                setup_started: false,
                 trust: None,
             });
         }
@@ -346,6 +347,7 @@ async fn create_space(
                     workspace_id: String::new(),
                     created: false,
                     warnings: Vec::new(),
+                    setup_started: false,
                     trust: Some(request),
                 });
             }
@@ -369,11 +371,15 @@ async fn create_space(
             .ok_or("herdr did not report the new workspace")?;
         call("workspace.focus", spaces::focus_params(&workspace_id))?;
         let user_layout = user.and_then(|s| s.spaces_layout);
-        let warnings = build_layout(&call, &dir, &result, &sources, user_layout.as_ref(), allow);
+        let mut warnings =
+            build_layout(&call, &dir, &result, &sources, user_layout.as_ref(), allow);
+        let (setup_started, warning) = run_setup(&call, &workspace_id, &dir, &sources, allow);
+        warnings.extend(warning);
         Ok(spaces::SpaceOutcome {
             workspace_id,
             created: true,
             warnings,
+            setup_started,
             trust: None,
         })
     })
@@ -413,6 +419,29 @@ fn build_layout(
         warnings.push(format!("layout not fully applied: {e}"));
     }
     warnings
+}
+
+/// Starts the `setup` command of the project file in a `setup` tab of a just-created space. Only
+/// when project commands are allowed (trusted); a failure is a warning, never a reason to close
+/// the space. Returns whether it started and the warning, if any.
+fn run_setup(
+    call: &impl Fn(&str, Value) -> Result<Value, String>,
+    workspace_id: &str,
+    dir: &str,
+    sources: &trust::Sources,
+    allow_project_commands: bool,
+) -> (bool, Option<String>) {
+    if !allow_project_commands {
+        return (false, None);
+    }
+    let (project, _) = sources.refs();
+    let Some(command) = project::setup_of(project) else {
+        return (false, None);
+    };
+    match project::start_setup(call, workspace_id, dir, &command) {
+        Ok(()) => (true, None),
+        Err(e) => (false, Some(format!("setup not started: {e}"))),
+    }
 }
 
 /// Revokes the trust of the project file of `root`; the settings watcher emits the change.
@@ -1106,6 +1135,76 @@ mod build_layout_tests {
     fn trusted_project_layout_types_its_commands() {
         let calls = run(&sources(PROJECT_TEXT), None, true);
         assert_eq!(typed(&calls).len(), 2);
+    }
+
+    type SetupRun = ((bool, Option<String>), Vec<(String, Value)>);
+
+    fn setup_calls(sources: &trust::Sources, allow: bool, fail_on: Option<&str>) -> SetupRun {
+        let calls = RefCell::new(Vec::new());
+        let call = |method: &str, params: Value| -> Result<Value, String> {
+            calls.borrow_mut().push((method.to_owned(), params));
+            if fail_on == Some(method) {
+                return Err("boom".into());
+            }
+            Ok(match method {
+                "tab.create" => json!({ "root_pane": { "pane_id": "w1:s1" } }),
+                _ => json!({}),
+            })
+        };
+        let out = run_setup(&call, "w1", "/work/app", sources, allow);
+        (out, calls.into_inner())
+    }
+
+    #[test]
+    fn a_trusted_setup_runs_in_a_setup_tab_of_the_new_space() {
+        let ((started, warning), calls) =
+            setup_calls(&sources(r#"{"setup":"pnpm install"}"#), true, None);
+        assert!(started && warning.is_none());
+        assert_eq!(
+            calls,
+            [
+                (
+                    "tab.create".to_owned(),
+                    json!({ "workspace_id": "w1", "cwd": "/work/app" })
+                ),
+                (
+                    "pane.rename".to_owned(),
+                    json!({ "pane_id": "w1:s1", "label": "setup" })
+                ),
+                (
+                    "pane.send_input".to_owned(),
+                    json!({ "pane_id": "w1:s1", "text": "pnpm install", "keys": ["enter"] })
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_untrusted_project_runs_no_setup() {
+        let ((started, warning), calls) =
+            setup_calls(&sources(r#"{"setup":"pnpm install"}"#), false, None);
+        assert!(!started && warning.is_none());
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn no_setup_in_the_file_means_no_tab() {
+        let ((started, _), calls) = setup_calls(&sources(PROJECT_TEXT), true, None);
+        assert!(!started);
+        assert!(calls.is_empty());
+        let ((started, _), calls) = setup_calls(&trust::Sources::default(), true, None);
+        assert!(!started && calls.is_empty());
+    }
+
+    #[test]
+    fn a_failing_setup_start_is_a_warning() {
+        let ((started, warning), _) = setup_calls(
+            &sources(r#"{"setup":"make"}"#),
+            true,
+            Some("pane.send_input"),
+        );
+        assert!(!started);
+        assert_eq!(warning.as_deref(), Some("setup not started: boom"));
     }
 
     #[test]

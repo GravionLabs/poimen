@@ -2,8 +2,9 @@
 
 `.poimen/config.json` at the repository root describes how poimen treats the project. Schema:
 [project-config.schema.json](project-config.schema.json). Parsing is tolerant: an invalid entry is
-dropped with a warning naming the file and the key, and the rest loads. Nothing in this file runs
-yet; it is only parsed and validated.
+dropped with a warning naming the file and the key, and the rest loads. Layout pane commands and
+`setup` run when a space is created (after you trusted the repository, see Trust); `teardown`,
+`commands[]` and `presets[]` are only parsed and validated so far.
 
 ```json
 {
@@ -30,7 +31,11 @@ yet; it is only parsed and validated.
 - `layout`: the pane layout of a new space, `panes[]` as in the README (`spaces.layout`): `name`,
   optional `command`, and from the second pane on `split.from`, `split.direction` (`right` or
   `down`), `split.ratio` (0 to 1, default 0.5).
-- `setup`, `teardown`: a command.
+- `setup`: a command that runs once, visibly, in a tab labelled `setup` of a newly created space
+  (in the space directory). It does not run when an existing space is focused or when the
+  repository is not trusted. If it cannot be started, the space stays and a warning names the
+  reason. The agent pane starts in parallel; it does not wait for the setup.
+- `teardown`: a command.
 - `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`).
 - `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`.
 
