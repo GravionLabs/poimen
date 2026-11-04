@@ -51,4 +51,4 @@ The Milestones section lists the open milestones of each repository ordered by v
 
 ## Settings
 
-Optional `~/.config/poimen/config.json`, applied without a restart; it holds preferences only. Examples: `theme`, `colorSchema`, `terminal.fontFamily`, `terminal.fontSize`, `terminal.autoControl`, `shortcuts`, `spaces.layout` (the pane layout of a new space), `explorer.roots`, `sidebar.layout`, `sidebar.rows`, `herdr.autoStart`, `notifications`. The full list is in the [README](https://github.com/GravionLabs/poimen#settings).
+Optional `~/.config/poimen/config.json`, applied without a restart; it holds preferences only. Examples: `theme`, `colorSchema`, `terminal.fontFamily`, `terminal.fontSize`, `terminal.autoControl`, `terminal.scrollback`, `backend` (`herdr` or `poimen`, needs a restart), `shortcuts`, `spaces.layout` (the pane layout of a new space), `explorer.roots`, `sidebar.layout`, `sidebar.rows`, `herdr.autoStart`, `notifications`. The full list is in the [README](https://github.com/GravionLabs/poimen#settings).

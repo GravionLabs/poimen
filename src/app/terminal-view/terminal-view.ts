@@ -17,9 +17,15 @@ import { HxButton } from "@gravionlabs/helix-ui";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { Terminal } from "@xterm/xterm";
+import { Terminal as XTerm } from "@xterm/xterm";
 import { TauriBridge } from "../core/tauri";
-import { agentKind, decodeBase64, type Mode, type Pane, type StreamRecord } from "../core/herdr";
+import {
+  agentKind,
+  decodeBase64,
+  type Mode,
+  type Terminal,
+  type StreamRecord,
+} from "../core/herdr";
 import { SettingsStore } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
@@ -83,7 +89,7 @@ function ansiColors(
   host: { "[class.controlling]": "mode() === 'control'" },
 })
 export class TerminalView implements OnDestroy {
-  readonly pane = input.required<Pane>();
+  readonly pane = input.required<Terminal>();
   /** The mode the tab asks for; `control` is tried without a takeover and may fall back. */
   readonly wanted = input<Mode>("observe");
   /** The mode the stream really has. */
@@ -106,9 +112,11 @@ export class TerminalView implements OnDestroy {
   private readonly tauri = inject(TauriBridge);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
-  private term?: Terminal;
+  private term?: XTerm;
   private fit?: FitAddon;
   private session?: TerminalSession;
+  /** Whether the stream opened last is emulated; stays after the stream closed (scrollback keeps). */
+  private streamEmulated = false;
   private themeObserver?: MutationObserver;
   private resizeObserver?: ResizeObserver;
   private resizeTimer?: ReturnType<typeof setTimeout>;
@@ -117,6 +125,8 @@ export class TerminalView implements OnDestroy {
   private framed = false;
   /** Grid of the last `terminal.frame`; herdr's pane may differ from xterm's during a resize. */
   private frameGrid: { cols: number; rows: number } | undefined;
+  /** The snapshot of an emulated controller stream was just reset: refit once it is written. */
+  private refitAfterSnapshot = false;
   private detachMouse?: () => void;
   private detachClipboard?: () => void;
   /** Whether the pointer is over a link (xterm reports it for every renderer). */
@@ -159,6 +169,7 @@ export class TerminalView implements OnDestroy {
   private applyLook(): void {
     if (!this.term) return;
     Object.assign(this.term.options, this.look());
+    this.applyScrollback();
     // A new font changes the cell size, so cols/rows change without a body resize.
     this.applySize();
   }
@@ -201,13 +212,15 @@ export class TerminalView implements OnDestroy {
       hover: () => (this.linkHovered = true),
       leave: () => (this.linkHovered = false),
     };
-    const term = new Terminal({
+    const term = new XTerm({
       // OSC 8 hyperlinks: xterm's default would confirm() and window.open(); use the opener instead.
       linkHandler: {
         activate: openLink,
         ...hoverCallbacks,
       },
-      scrollback: 0, // herdr owns scrollback; wheel events are forwarded instead
+      // herdr owns scrollback (wheel events are forwarded instead); an emulated stream gets
+      // xterm.js's own once it is open (`applyScrollback`).
+      scrollback: 0,
       cursorBlink: true,
       allowProposedApi: true,
       ...this.look(),
@@ -437,6 +450,7 @@ export class TerminalView implements OnDestroy {
   private async connect(mode: Mode, takeover: boolean): Promise<void> {
     this.framed = false;
     this.frameGrid = undefined;
+    this.refitAfterSnapshot = false;
     this.attempt = mode;
     const generation = ++this.generation;
     let session: TerminalSession | undefined;
@@ -446,7 +460,7 @@ export class TerminalView implements OnDestroy {
       session = await this.streams.open(
         {
           mode,
-          target: this.pane().pane_id,
+          target: this.pane().terminal_id,
           cols: this.size.cols,
           rows: this.size.rows,
           takeover,
@@ -462,6 +476,8 @@ export class TerminalView implements OnDestroy {
         return;
       }
       this.session = session;
+      this.streamEmulated = session.emulated;
+      this.applyScrollback();
       for (const record of early.splice(0)) this.onRecord(session, record);
     } catch (err) {
       if (generation === this.generation) this.failed(mode, String(err));
@@ -514,15 +530,33 @@ export class TerminalView implements OnDestroy {
     switch (record.type) {
       case "reset":
         this.framed = true;
-        this.frameGrid = { cols: record.cols, rows: record.rows };
+        if (session.emulated) {
+          // A snapshot follows as bytes. Reset first, so a reattach does not stack the snapshot
+          // (and its scrollback) on the old screen; the grid is the server's until the
+          // controller has refit.
+          this.term?.reset();
+          this.term?.resize(record.cols, record.rows);
+          this.refitAfterSnapshot = this.attempt === "control";
+        } else {
+          this.frameGrid = { cols: record.cols, rows: record.rows };
+        }
         this.term?.write(decodeBase64(record.bytes));
         return;
       case "output":
         this.framed = true;
         this.term?.write(decodeBase64(record.bytes));
         return;
+      case "bytes":
+        this.framed = true;
+        this.writeBytes(record.data);
+        return;
       case "resized":
-        this.frameGrid = { cols: record.cols, rows: record.rows };
+        if (!session.emulated) {
+          this.frameGrid = { cols: record.cols, rows: record.rows };
+        } else if (this.attempt !== "control") {
+          // An observer renders at the controller's size.
+          this.term?.resize(record.cols, record.rows);
+        }
         return;
       case "controller":
         // Input is reported only once the backend says this client holds the controller.
@@ -531,9 +565,36 @@ export class TerminalView implements OnDestroy {
       case "closed":
         this.session = undefined;
         if (record.reason === "detached") return;
+        if (record.code === "exited") {
+          // The process ended: keep the last screen and say how; nothing to fall back to.
+          this.setState("observe", null);
+          this.banner.set(record.reason);
+          return;
+        }
         this.failed(this.attempt, record.reason, this.framed, record.code === "controller_held");
         return;
     }
+  }
+
+  /** Raw PTY bytes; the first ones after a snapshot are followed by the controller's refit. */
+  private writeBytes(data: Uint8Array): void {
+    if (!this.refitAfterSnapshot) {
+      this.term?.write(data);
+      return;
+    }
+    this.refitAfterSnapshot = false;
+    this.term?.write(data, () => {
+      // The snapshot is on the screen: take our own size back and tell the server.
+      if (this.attempt !== "control" || !this.session?.open) return;
+      this.size = { cols: 0, rows: 0 };
+      this.applySize();
+    });
+  }
+
+  /** Lines of scrollback: xterm.js keeps its own on an emulated stream; herdr owns it otherwise. */
+  private applyScrollback(): void {
+    if (!this.term) return;
+    this.term.options.scrollback = this.streamEmulated ? this.prefs.settings().scrollback : 0;
   }
 
   private scheduleResize(): void {
@@ -544,6 +605,8 @@ export class TerminalView implements OnDestroy {
   /** Refits, and when cols/rows changed tells the status bar and herdr (resize or reopen). */
   private applySize(): void {
     if (!this.term || !this.fit) return;
+    // An emulated observer renders at the controller's size and is clipped by its container.
+    if (this.session?.emulated && this.attempt !== "control") return;
     this.fit.fit();
     const { cols, rows } = this.term;
     if (cols === this.size.cols && rows === this.size.rows) return;

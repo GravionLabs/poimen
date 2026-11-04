@@ -20,7 +20,7 @@ const request = {
     { what: "setup", command: "pnpm install" },
   ],
 };
-const created = { workspace_id: "w2", created: true };
+const created = { space_id: "w2", created: true };
 
 async function setup() {
   TestBed.resetTestingModule();
@@ -48,7 +48,7 @@ async function setup() {
   // The first create_space answers with the request; later ones with the created space.
   bridge.invoke.mockImplementation(async (command: string, args?: { decision?: unknown }) => {
     if (command !== "create_space") return [];
-    return args?.decision ? created : { workspace_id: "", created: false, trust: request };
+    return args?.decision ? created : { space_id: "", created: false, trust: request };
   });
   await actions.create("/work/app", "app");
   await settle();
@@ -110,7 +110,7 @@ describe("TrustDialog", () => {
     // The backend sees another hash: it answers with a new request instead of creating.
     bridge.invoke.mockImplementation(async (command: string) =>
       command === "create_space"
-        ? { workspace_id: "", created: false, trust: { ...request, hash: "h2" } }
+        ? { space_id: "", created: false, trust: { ...request, hash: "h2" } }
         : [],
     );
     await click(".confirm");

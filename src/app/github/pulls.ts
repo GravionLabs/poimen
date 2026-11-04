@@ -221,7 +221,7 @@ export class GithubPulls {
   /** Space and explorer directories; the backend resolves them to repositories. */
   private dirs(): string[] {
     const found = new Set<string>();
-    for (const pane of this.store.snapshot().panes) {
+    for (const pane of this.store.snapshot().terminals) {
       const dir = paneDir(pane);
       if (dir) found.add(dir);
     }

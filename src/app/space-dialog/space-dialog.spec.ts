@@ -10,16 +10,16 @@ import { SpaceDialog } from "./space-dialog";
 
 const bridge = { invoke: vi.fn(), pickDirectory: vi.fn() };
 const snapshot = {
-  workspaces: [
-    { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
-    { workspace_id: "w2", label: "Two", number: 2, agent_status: "idle" },
+  spaces: [
+    { space_id: "w1", label: "One", number: 1, agent_status: "idle" },
+    { space_id: "w2", label: "Two", number: 2, agent_status: "idle" },
   ],
   tabs: [],
-  panes: [
+  terminals: [
     {
-      pane_id: "w1:p1",
+      terminal_id: "w1:p1",
       tab_id: "w1:t1",
-      workspace_id: "w1",
+      space_id: "w1",
       agent_status: "working",
       agent: "claude",
     },
@@ -80,7 +80,7 @@ describe("SpaceDialog", () => {
   it("defaults the label to the directory name and creates the space", async () => {
     const { actions, root, settle, type } = await setup();
     bridge.invoke.mockImplementation(async (command: string) =>
-      command === "create_space" ? { workspace_id: "w2", created: true } : [],
+      command === "create_space" ? { space_id: "w2", created: true } : [],
     );
     actions.ask();
     await settle();

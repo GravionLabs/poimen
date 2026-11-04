@@ -31,6 +31,18 @@ describe("connectionLabel", () => {
   });
 });
 
+describe("connectionLabel on the poimen backend", () => {
+  it("names the backend instead of herdr", () => {
+    expect(connectionLabel({ state: "connected" }, "poimen")).toBe("poimen connected");
+    expect(connectionLabel({ state: "reconnecting", reason: "gone" }, "poimen")).toBe(
+      "poimen reconnecting: gone",
+    );
+    expect(connectionLabel({ state: "unreachable", reason: "" }, "poimen")).toBe(
+      "poimen unreachable",
+    );
+  });
+});
+
 describe("sizeLabel", () => {
   it("formats cols by rows", () => {
     expect(sizeLabel({ cols: 120, rows: 30 })).toBe("120×30");
@@ -92,6 +104,7 @@ describe("mode button", () => {
       appLabel = () => "";
       herdrLabel = () => "";
       warning = () => "";
+      backend = () => "herdr";
     }
     TestBed.resetTestingModule();
     const fixture = TestBed.createComponent(Host);

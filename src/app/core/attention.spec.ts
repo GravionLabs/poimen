@@ -61,7 +61,7 @@ describe("Attention", () => {
   });
 
   it("sums unread panes per workspace", () => {
-    const row = (id: string) => ({ pane: { pane_id: id } }) as SpaceNode["rows"][number];
+    const row = (id: string) => ({ pane: { terminal_id: id } }) as SpaceNode["rows"][number];
     const space = { workspace: {}, rows: [row("a"), row("b"), row("c")] } as SpaceNode;
     expect(workspaceUnread(space, new Set(["a", "c", "z"]))).toBe(2);
     expect(workspaceUnread(space, none)).toBe(0);

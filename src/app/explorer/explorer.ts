@@ -79,7 +79,7 @@ export class Explorer {
   );
 
   /** Directories that already have a space. */
-  protected readonly withSpace = computed(() => spaceDirs(this.store.snapshot().panes));
+  protected readonly withSpace = computed(() => spaceDirs(this.store.snapshot().terminals));
   protected readonly menuAt = signal<{ path: string; x: number; y: number } | null>(null);
 
   protected openMenu(event: MouseEvent, path: string): void {

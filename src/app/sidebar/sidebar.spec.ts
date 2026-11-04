@@ -4,10 +4,10 @@ import { filterValues, isDoubleClick, menuTarget, sidebarMenuItems, spaceNodes }
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
 
 const space: SpaceNode = {
-  workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
+  workspace: { space_id: "w1", label: "One", number: 1, agent_status: "idle" },
   rows: [
     {
-      pane: { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "idle" },
+      pane: { terminal_id: "w1:p1", tab_id: "w1:t1", space_id: "w1", agent_status: "idle" },
       tab: "agent",
       name: "claude",
       agent: "claude",

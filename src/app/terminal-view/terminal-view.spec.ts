@@ -4,7 +4,7 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Pane, StreamRecord } from "../core/herdr";
+import type { Terminal, StreamRecord } from "../core/herdr";
 import { SettingsStore, DEFAULT_SETTINGS, type Settings } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { TerminalStreamService } from "../core/terminal-stream";
@@ -13,6 +13,10 @@ const fake = vi.hoisted(() => ({
   cols: 80,
   rows: 24,
   nextCols: 80,
+  /** Everything written to xterm, and its reset and resize calls, in order. */
+  writes: [] as unknown[],
+  calls: [] as string[],
+  onData: undefined as ((data: string) => void) | undefined,
   observers: [] as (() => void)[],
   addons: [] as unknown[],
   openUrl: undefined as unknown,
@@ -39,7 +43,9 @@ vi.mock("@xterm/xterm", () => ({
       fake.addons.push(addon);
     }
     open() {}
-    onData() {}
+    onData(handler: (data: string) => void) {
+      fake.onData = handler;
+    }
     attachCustomWheelEventHandler(handler: (event: WheelEvent) => boolean) {
       fake.wheelHandler = handler;
     }
@@ -55,7 +61,17 @@ vi.mock("@xterm/xterm", () => ({
     paste(text: string) {
       this.pasted.push(text);
     }
-    write() {}
+    write(data: unknown, callback?: () => void) {
+      fake.writes.push(data);
+      callback?.();
+    }
+    reset() {
+      fake.calls.push("reset");
+    }
+    resize(cols: number, rows: number) {
+      fake.cols = cols;
+      fake.calls.push(`resize ${cols}x${rows}`);
+    }
     dispose() {}
   },
 }));
@@ -85,7 +101,12 @@ vi.mock("@xterm/addon-webgl", () => ({
 
 import { TerminalView } from "./terminal-view";
 
-const pane: Pane = { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "idle" };
+const pane: Terminal = {
+  terminal_id: "w1:p1",
+  tab_id: "w1:t1",
+  space_id: "w1",
+  agent_status: "idle",
+};
 const attached: StreamRecord = { type: "controller", attached: true };
 
 beforeAll(() => {
@@ -103,11 +124,13 @@ beforeAll(() => {
 
 afterEach(() => TestBed.resetTestingModule());
 
-async function setup(wanted: "control" | "observe", target: Pane = pane, emulated = false) {
+async function setup(wanted: "control" | "observe", target: Terminal = pane, emulated = false) {
   fake.cols = 80;
   fake.nextCols = 80;
   fake.observers = [];
   fake.addons = [];
+  fake.writes = [];
+  fake.calls = [];
   const openUrl = vi.fn(async () => undefined);
   const settings = signal<Settings>(DEFAULT_SETTINGS);
   const session = {
@@ -941,7 +964,7 @@ describe("TerminalView copy and paste (#35)", () => {
 describe("TerminalView prompt bar (#293)", () => {
   const bar = (fixture: { nativeElement: HTMLElement }) =>
     fixture.nativeElement.querySelector("app-prompt-bar") as HTMLElement | null;
-  const agentPane: Pane = { ...pane, agent: "claude" };
+  const agentPane: Terminal = { ...pane, agent: "claude" };
 
   it("is not rendered in a terminal tab without an agent", async () => {
     const { fixture } = await setup("observe");
@@ -973,5 +996,142 @@ describe("TerminalView prompt bar (#293)", () => {
   it("collapses the hidden bar although the component sets display", () => {
     const css = readFileSync("src/app/terminal-view/terminal-view.css", "utf8");
     expect(css).toMatch(/app-prompt-bar\[hidden\]\s*\{[^}]*display:\s*none/);
+  });
+});
+
+describe("TerminalView on an emulated stream (poimen backend)", () => {
+  const reset = (cols = 100, rows = 30): StreamRecord => ({ type: "reset", cols, rows, bytes: "" });
+  const bytes = (...values: number[]): StreamRecord => ({
+    type: "bytes",
+    data: new Uint8Array(values),
+  });
+  const scrollbackOf = () => (fake.term as unknown as { options: { scrollback: number } }).options;
+
+  it("resets xterm before a snapshot, so a reattach does not stack scrollback", async () => {
+    const { send } = await setup("observe", pane, true);
+    await send(0, reset());
+    await send(0, bytes(104, 105));
+    expect(fake.calls).toEqual(["reset", "resize 100x30"]);
+    expect(fake.writes.at(-1)).toEqual(new Uint8Array([104, 105]));
+  });
+
+  it("writes raw bytes to xterm without decoding", async () => {
+    const { send } = await setup("control", pane, true);
+    await send(0, bytes(27, 91, 72));
+    expect(fake.writes).toContainEqual(new Uint8Array([27, 91, 72]));
+  });
+
+  it("leaves a rendered stream alone: no reset, no resize", async () => {
+    const { send } = await setup("observe", pane, false);
+    await send(0, reset());
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("sizes an observer to the controller instead of fitting, on the snapshot and on resized", async () => {
+    const { send } = await setup("observe", pane, true);
+    await send(0, reset(90, 20));
+    await send(0, { type: "resized", cols: 120, rows: 40 });
+    expect(fake.calls).toEqual(["reset", "resize 90x20", "resize 120x40"]);
+  });
+
+  it("does not reopen or resize an observer when its container resizes", async () => {
+    const { fixture, settings, session, open, sized } = await setup("observe", pane, true);
+    const before = sized.length;
+    fake.nextCols = 100;
+    settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(session.resize).not.toHaveBeenCalled();
+    expect(sized).toHaveLength(before);
+  });
+
+  it("gives a controller its own size back after the snapshot and tells the server", async () => {
+    const { send, session } = await setup("control", pane, true);
+    await send(0, attached);
+    await send(0, reset(100, 30));
+    await send(0, bytes(1));
+    // The fit takes xterm back to the window (80 columns here) and the server follows.
+    expect(session.resize).toHaveBeenCalledWith(80, 24);
+  });
+
+  it("ignores the resized echo of its own size as a controller", async () => {
+    const { send } = await setup("control", pane, true);
+    await send(0, attached);
+    await send(0, { type: "resized", cols: 80, rows: 24 });
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("keeps xterm's own scrollback from the settings on an emulated stream only", async () => {
+    const emulated = await setup("observe", pane, true);
+    expect(scrollbackOf().scrollback).toBe(DEFAULT_SETTINGS.scrollback);
+    emulated.settings.set({ ...DEFAULT_SETTINGS, scrollback: 500 });
+    emulated.fixture.detectChanges();
+    expect(scrollbackOf().scrollback).toBe(500);
+    TestBed.resetTestingModule();
+    await setup("observe", pane, false);
+    expect(scrollbackOf().scrollback).toBe(0);
+  });
+
+  it("sends typed input and terminal answers from the controller only", async () => {
+    const observer = await setup("observe", pane, true);
+    await observer.send(0, reset());
+    fake.onData?.("\x1b[?1;2c"); // a device attributes answer
+    expect(observer.session.input).not.toHaveBeenCalled();
+    TestBed.resetTestingModule();
+
+    const controller = await setup("control", pane, true);
+    fake.onData?.("early");
+    expect(controller.session.input).not.toHaveBeenCalled(); // not the controller yet
+    await controller.send(0, attached);
+    fake.onData?.("ls\r");
+    expect(controller.session.input).toHaveBeenCalledWith("ls\r");
+  });
+
+  it("keeps the last screen with a banner when the process exits, and does not reattach", async () => {
+    const { send, open, fixture, modes } = await setup("control", pane, true);
+    await send(0, attached);
+    await send(0, {
+      type: "closed",
+      reason: "the process exited with code 3",
+      exit_code: 3,
+      code: "exited",
+    });
+    expect(fixture.componentInstance.banner()).toBe("the process exited with code 3");
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
+    expect(fake.calls).not.toContain("reset");
+  });
+
+  it("keeps the scrollback of an emulated stream after the process exited", async () => {
+    const { send, settings, fixture } = await setup("control", pane, true);
+    await send(0, attached);
+    await send(0, { type: "closed", reason: "the process exited", exit_code: 0, code: "exited" });
+    settings.set({ ...DEFAULT_SETTINGS, scrollback: 500 });
+    fixture.detectChanges();
+    expect(scrollbackOf().scrollback).toBe(500);
+  });
+
+  it("closes silently when the server detaches the stream", async () => {
+    const { send, open, fixture } = await setup("observe", pane, true);
+    await send(0, { type: "closed", reason: "detached" });
+    expect(fixture.componentInstance.banner()).toBeNull();
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the read-only state with the input action when the controller is held", async () => {
+    const { send, open, fixture, modes } = await setup("control", pane, true);
+    await send(0, {
+      type: "closed",
+      reason: "another client controls this terminal",
+      code: "controller_held",
+    });
+    expect(modes.at(-1)).toEqual({
+      mode: "observe",
+      blocked: "another client controls this terminal",
+    });
+    expect(fixture.nativeElement.textContent).toContain("Take over");
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open.mock.calls[1][0]).toMatchObject({ mode: "observe", takeover: false });
   });
 });

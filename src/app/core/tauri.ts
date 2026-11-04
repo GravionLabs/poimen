@@ -1,5 +1,5 @@
 import { Injectable } from "@angular/core";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -29,6 +29,16 @@ const OPEN_ACTION = "open";
 export class TauriBridge {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     return invoke<T>(command, args);
+  }
+
+  /**
+   * A channel for a command to push messages through (`onMessage` runs for each, in order). JSON
+   * messages arrive as values; raw bytes as an `ArrayBuffer`.
+   */
+  channel<T>(onMessage: (message: T) => void): Channel<T> {
+    const channel = new Channel<T>();
+    channel.onmessage = onMessage;
+    return channel;
   }
 
   /** Opens `url` in the default browser through the opener plugin (callers check the scheme). */

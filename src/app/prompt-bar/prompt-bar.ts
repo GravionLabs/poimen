@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, input, signal } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { AgentPrompts, promptMessage, promptSucceeded } from "../core/agent-prompt";
-import type { Pane } from "../core/herdr";
+import type { Terminal } from "../core/herdr";
 
 /** A one-line input that sends a prompt to the agent of a pane; works in a read-only tab. */
 @Component({
@@ -12,7 +12,7 @@ import type { Pane } from "../core/herdr";
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PromptBar {
-  readonly pane = input.required<Pane>();
+  readonly pane = input.required<Terminal>();
   protected readonly text = signal("");
   protected readonly sending = signal(false);
   protected readonly result = signal<{ message: string; ok: boolean } | null>(null);
@@ -28,7 +28,7 @@ export class PromptBar {
     if (!text || this.sending()) return;
     this.sending.set(true);
     this.result.set(null);
-    const outcome = await this.prompts.send(this.pane().pane_id, text);
+    const outcome = await this.prompts.send(this.pane().terminal_id, text);
     this.sending.set(false);
     this.result.set({ message: promptMessage(outcome), ok: promptSucceeded(outcome) });
     if (outcome.kind === "started" || outcome.kind === "stalled") this.text.set("");

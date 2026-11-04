@@ -175,6 +175,11 @@ pub struct Settings {
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
     pub explorer_show_hidden: bool,
+    /// The terminal backend (`backend`): `herdr` (default) or `poimen`. Read at start; a change
+    /// needs a restart.
+    pub backend: String,
+    /// Lines of scrollback xterm.js keeps on an emulated stream (`terminal.scrollback`).
+    pub scrollback: u32,
     /// Start the herdr server when nothing answers on its socket (`herdr.autoStart`).
     pub herdr_auto_start: bool,
     /// System notification when an agent turns blocked (`notifications.blocked`).
@@ -193,6 +198,10 @@ pub struct Settings {
     pub home: Option<String>,
     pub warnings: Vec<String>,
 }
+
+/// Default and upper bound of `terminal.scrollback`.
+pub const DEFAULT_SCROLLBACK: u32 = 10_000;
+const MAX_SCROLLBACK: u32 = 1_000_000;
 
 /// Menu/shortcut actions with their default accelerators (VS Code style). `CmdOrCtrl` is Cmd on
 /// macOS and Ctrl elsewhere.
@@ -352,6 +361,8 @@ impl Default for Settings {
             sidebar_layout: "tree".into(),
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
+            backend: "herdr".into(),
+            scrollback: DEFAULT_SCROLLBACK,
             herdr_auto_start: true,
             notify_on_blocked: true,
             notify_on_done: true,
@@ -728,6 +739,15 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     if let Some(value) = root.get("herdr") {
         resolve_herdr(value, &mut s);
     }
+    match root.get("backend") {
+        None => {}
+        Some(Value::String(b)) if matches!(b.as_str(), "herdr" | "poimen") => {
+            s.backend = b.clone();
+        }
+        Some(other) => s.warnings.push(format!(
+            "backend {other} must be \"herdr\" or \"poimen\"; using herdr"
+        )),
+    }
 
     if let Some(value) = root.get("notifications") {
         resolve_notifications(value, &mut s);
@@ -771,6 +791,15 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
                         "terminal.fontSize {v} must be a number from {MIN_FONT_SIZE} to {MAX_FONT_SIZE}"
                     )),
                 }
+            }
+            match term.get("scrollback") {
+                None => {}
+                Some(v) => match v.as_u64().filter(|n| *n <= u64::from(MAX_SCROLLBACK)) {
+                    Some(n) => s.scrollback = n as u32,
+                    None => s.warnings.push(format!(
+                        "terminal.scrollback {v} must be a whole number from 0 to {MAX_SCROLLBACK}; using {DEFAULT_SCROLLBACK}"
+                    )),
+                },
             }
             match term.get("autoControl") {
                 None => {}
@@ -1525,6 +1554,49 @@ mod tests {
             let s = rows(json);
             assert!(s.notify_on_blocked && s.notify_on_done, "{json}");
             assert_eq!(s.warnings.len(), 1, "{json}");
+        }
+    }
+
+    #[test]
+    fn backend_defaults_to_herdr_and_accepts_poimen() {
+        assert_eq!(rows("{}").backend, "herdr");
+        assert_eq!(rows(r#"{"backend":"poimen"}"#).backend, "poimen");
+        assert_eq!(rows(r#"{"backend":"herdr"}"#).backend, "herdr");
+    }
+
+    #[test]
+    fn an_unknown_backend_warns_and_keeps_herdr() {
+        for json in [
+            r#"{"backend":"tmux"}"#,
+            r#"{"backend":true}"#,
+            r#"{"backend":""}"#,
+        ] {
+            let s = rows(json);
+            assert_eq!(s.backend, "herdr", "{json}");
+            assert!(
+                s.warnings.iter().any(|w| w.starts_with("backend ")),
+                "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn scrollback_defaults_to_10000_and_validates() {
+        assert_eq!(rows("{}").scrollback, 10_000);
+        assert_eq!(rows(r#"{"terminal":{"scrollback":500}}"#).scrollback, 500);
+        assert_eq!(rows(r#"{"terminal":{"scrollback":0}}"#).scrollback, 0);
+        for json in [
+            r#"{"terminal":{"scrollback":-1}}"#,
+            r#"{"terminal":{"scrollback":"many"}}"#,
+            r#"{"terminal":{"scrollback":2000000}}"#,
+            r#"{"terminal":{"scrollback":1.5}}"#,
+        ] {
+            let s = rows(json);
+            assert_eq!(s.scrollback, 10_000, "{json}");
+            assert!(
+                s.warnings.iter().any(|w| w.contains("terminal.scrollback")),
+                "{json}"
+            );
         }
     }
 

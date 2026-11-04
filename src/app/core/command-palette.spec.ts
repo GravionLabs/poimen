@@ -17,10 +17,10 @@ vi.mock("@tauri-apps/api/event", async () => ({
 }));
 
 const snapshot: Snapshot = {
-  workspaces: [{ workspace_id: "w1", label: "One", number: 1, agent_status: "idle" }],
-  tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "main", number: 1, agent_status: "idle" }],
-  panes: [
-    { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "idle", cwd: "/a" },
+  spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+  tabs: [{ tab_id: "w1:t1", space_id: "w1", label: "main", number: 1, agent_status: "idle" }],
+  terminals: [
+    { terminal_id: "w1:p1", tab_id: "w1:t1", space_id: "w1", agent_status: "idle", cwd: "/a" },
   ],
 };
 

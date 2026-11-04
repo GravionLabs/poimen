@@ -30,7 +30,7 @@ describe("SpaceActions", () => {
   beforeEach(() => {
     tauri.reset();
     pick.mockReset();
-    tauri.answer("snapshot", () => ({ workspaces: [], tabs: [], panes: [] }));
+    tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
     const injector = Injector.create({ providers: [TauriBridge, HerdrStore, SpaceActions] });
     actions = injector.get(SpaceActions);
   });
@@ -137,29 +137,29 @@ describe("SpaceActions", () => {
 });
 
 const space = (id: string, number: number) => ({
-  workspace_id: id,
+  space_id: id,
   label: `Space ${number}`,
   number,
   agent_status: "idle" as const,
 });
 const pane = (id: string, workspace: string, agent?: string) => ({
-  pane_id: id,
+  terminal_id: id,
   tab_id: `${workspace}:t1`,
-  workspace_id: workspace,
+  space_id: workspace,
   agent_status: "idle" as const,
   agent,
 });
 const snap = (): Snapshot => ({
-  workspaces: [space("w1", 1), space("w2", 2), space("w3", 3)],
+  spaces: [space("w1", 1), space("w2", 2), space("w3", 3)],
   tabs: [],
-  panes: [pane("w1:p1", "w1"), pane("w2:p1", "w2", "claude"), pane("w2:p2", "w2")],
+  terminals: [pane("w1:p1", "w1"), pane("w2:p1", "w2", "claude"), pane("w2:p2", "w2")],
 });
 
 describe("neighbourSpace", () => {
   it("is the next space, else the previous, else null", () => {
     expect(neighbourSpace(snap(), "w1")).toBe("w2");
     expect(neighbourSpace(snap(), "w3")).toBe("w2");
-    expect(neighbourSpace({ workspaces: [space("w1", 1)], tabs: [], panes: [] }, "w1")).toBeNull();
+    expect(neighbourSpace({ spaces: [space("w1", 1)], tabs: [], terminals: [] }, "w1")).toBeNull();
     expect(neighbourSpace(snap(), "nope")).toBeNull();
   });
 });
@@ -210,7 +210,7 @@ describe("SpaceActions close", () => {
   });
 
   it("closing the last space sends no neighbour", async () => {
-    tauri.answer("snapshot", () => ({ workspaces: [space("w1", 1)], tabs: [], panes: [] }));
+    tauri.answer("snapshot", () => ({ spaces: [space("w1", 1)], tabs: [], terminals: [] }));
     const injector = Injector.create({ providers: [TauriBridge, HerdrStore, SpaceActions] });
     await injector.get(HerdrStore).refresh();
     const last = injector.get(SpaceActions);
