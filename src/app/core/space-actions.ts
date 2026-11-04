@@ -8,8 +8,10 @@ export interface SpaceOutcome {
   workspace_id: string;
   /** False when an existing space for the directory was focused instead. */
   created: boolean;
-  /** Why the pane layout of a new space was not (fully) applied. */
+  /** Why the pane layout of a new space was not (fully) applied, or the setup not started. */
   warnings?: string[];
+  /** The `setup` command of the project file runs in a `setup` tab of the new space. */
+  setup_started?: boolean;
   /** Set instead of creating anything: the project file is not trusted yet. */
   trust?: TrustRequest;
 }

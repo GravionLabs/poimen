@@ -6,6 +6,30 @@
     "layout": { "$ref": "#/$defs/layout" },
     "setup": { "$ref": "#/$defs/command" },
     "teardown": { "$ref": "#/$defs/command" },
+    "tasks": {
+      "type": "object",
+      "description": "Task modes of this repository; merged by name over the user's modes (project wins). Needs trust.",
+      "properties": {
+        "worktreeDir": {
+          "type": "string",
+          "description": "Template of the worktree directory, relative to the repository root (placeholders: nr, title, url, repo, slug, type)."
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "command"],
+            "properties": {
+              "name": { "type": "string" },
+              "command": { "type": "string" },
+              "worktree": { "type": "boolean", "default": true },
+              "branch": { "type": "string", "default": "{type}/{nr}-{slug}" },
+              "cleanup": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
     "commands": {
       "type": "array",
       "description": "Entries need a unique name; an invalid entry is skipped with a warning.",

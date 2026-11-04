@@ -42,12 +42,47 @@ pub struct ProjectConfig {
     pub teardown: Option<String>,
     pub commands: Vec<ProjectCommand>,
     pub presets: Vec<Preset>,
+    /// `tasks`: modes and `worktreeDir` that override the user's (merged by name).
+    pub tasks: Option<crate::settings::TaskOverride>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Loaded {
     pub config: ProjectConfig,
     pub warnings: Vec<String>,
+}
+
+/// Label of the pane that runs the `setup` command.
+pub const SETUP_LABEL: &str = "setup";
+
+/// Runs `command` visibly in a new tab of the workspace, labelled `setup`, in `cwd`: the tab is
+/// created, named, and the command typed with Enter. The caller decides whether it may run (trust).
+pub fn start_setup(
+    request: &impl Fn(&str, Value) -> Result<Value, String>,
+    workspace_id: &str,
+    cwd: &str,
+    command: &str,
+) -> Result<(), String> {
+    let result = request(
+        "tab.create",
+        crate::herdr::tab_create_params(workspace_id, Some(cwd)),
+    )?;
+    let pane = crate::herdr::created_pane_id(&result).ok_or("herdr did not report the new tab")?;
+    request(
+        "pane.rename",
+        crate::herdr::pane_rename_params(&pane, Some(SETUP_LABEL)),
+    )?;
+    request(
+        "pane.send_input",
+        crate::herdr::send_input_params(&pane, command),
+    )?;
+    Ok(())
+}
+
+/// The `setup` command of the project file for the current platform; `None` without one.
+pub fn setup_of(project: Option<(&str, &str)>) -> Option<String> {
+    let (path, text) = project?;
+    parse(path, text, platform()).config.setup
 }
 
 /// The platform key used in per-platform commands.
@@ -127,6 +162,16 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
             }
             Ok(None) => warn(&mut out, key, format!("no command for {platform}; skipped")),
             Err(e) => warn(&mut out, key, e),
+        }
+    }
+
+    if !data["tasks"].is_null() {
+        let mut warnings = Vec::new();
+        let tasks = crate::settings::parse_tasks(&data["tasks"], "ignored", &mut warnings);
+        out.warnings
+            .extend(warnings.into_iter().map(|w| format!("{file}: {w}")));
+        if tasks.modes.is_some() || tasks.worktree_dir.is_some() {
+            out.config.tasks = Some(tasks);
         }
     }
 
