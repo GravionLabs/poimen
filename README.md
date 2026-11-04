@@ -197,13 +197,13 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 
 ## Site
 
-<https://gravionlabs.github.io/poimen/>: landing page, download links of the latest release (resolved from the GitHub API when the page opens, falling back to the release page), installation guide and the decision records of `docs/adr/`. It lives in `site/` (VitePress, own `package.json` and `package-lock.json`, npm; not part of the app's pnpm setup, and excluded from its lint and format checks).
+<https://gravionlabs.github.io/poimen/>: landing page, download links of the latest release (resolved from the GitHub API when the page opens, falling back to the release page), installation guide and feature overview; the decision records of `docs/adr/` stay in the repository and are not published. It lives in `site/` (VitePress, own `package.json` and `package-lock.json`, npm; not part of the app's pnpm setup, and excluded from its lint and format checks).
 
 ```sh
 cd site && npm ci && npm run dev    # local preview; `npm run build` (dead links fail it), `npm test`
 ```
 
-`.github/workflows/pages.yml` builds it on pull requests that touch `site/` or `docs/` (dry run) and deploys on a push to `main` while the repository variable `DEPLOY_PAGES` is `true` (Settings > Pages > Source: GitHub Actions). The screenshots in `site/public/screenshots/` are real captures with demo data, except the Flow tab and the deliver board, which are still labeled placeholders (#264).
+`.github/workflows/pages.yml` builds it on pull requests that touch `site/` (dry run) and deploys on a push to `main` while the repository variable `DEPLOY_PAGES` is `true` (Settings > Pages > Source: GitHub Actions). The screenshots in `site/public/screenshots/` are real captures with demo data, except the Flow tab and the deliver board, which are still labeled placeholders (#264).
 
 ## License
 
