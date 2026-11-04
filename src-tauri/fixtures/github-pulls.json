@@ -1,0 +1,97 @@
+{
+  "data": {
+    "repository": {
+      "pullRequests": {
+        "nodes": [
+          {
+            "number": 231,
+            "title": "feat(github): pull request view",
+            "url": "https://github.com/GravionLabs/poimen/pull/231",
+            "author": { "login": "jkaufmann" },
+            "isDraft": false,
+            "additions": 420,
+            "deletions": 12,
+            "createdAt": "2026-11-01T09:30:00Z",
+            "headRefName": "feat/231-github-pulls-view",
+            "baseRefName": "release/next",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "reviewRequests": {
+              "nodes": [
+                { "requestedReviewer": { "__typename": "User", "login": "octocat" } },
+                { "requestedReviewer": { "__typename": "Team", "slug": "maintainers" } }
+              ]
+            },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "state": "PENDING",
+                      "contexts": {
+                        "checkRunCountsByState": [
+                          { "state": "SUCCESS", "count": 5 },
+                          { "state": "NEUTRAL", "count": 1 },
+                          { "state": "SKIPPED", "count": 2 },
+                          { "state": "IN_PROGRESS", "count": 1 },
+                          { "state": "TIMED_OUT", "count": 1 }
+                        ],
+                        "statusContextCountsByState": [
+                          { "state": "SUCCESS", "count": 1 },
+                          { "state": "PENDING", "count": 1 }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 230,
+            "title": "wip: draft without checks",
+            "url": "https://github.com/GravionLabs/poimen/pull/230",
+            "author": null,
+            "isDraft": true,
+            "additions": 3,
+            "deletions": 0,
+            "createdAt": "2026-10-20T08:00:00Z",
+            "headRefName": "wip",
+            "baseRefName": "main",
+            "reviewDecision": null,
+            "reviewRequests": { "nodes": [] },
+            "commits": { "nodes": [{ "commit": { "statusCheckRollup": null } }] }
+          },
+          {
+            "number": 229,
+            "title": "fix: approved and green",
+            "url": "https://github.com/GravionLabs/poimen/pull/229",
+            "author": { "login": "octocat" },
+            "isDraft": false,
+            "additions": 1,
+            "deletions": 1,
+            "createdAt": "2026-10-30T12:00:00Z",
+            "headRefName": "fix/x",
+            "baseRefName": "main",
+            "reviewDecision": "APPROVED",
+            "reviewRequests": { "nodes": [] },
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "state": "SUCCESS",
+                      "contexts": {
+                        "checkRunCountsByState": [{ "state": "SUCCESS", "count": 3 }],
+                        "statusContextCountsByState": []
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

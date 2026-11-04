@@ -2,6 +2,7 @@ mod backend;
 mod copilot;
 mod git;
 mod github;
+mod github_pulls;
 mod gui_path;
 mod herdr;
 mod layout;
@@ -268,6 +269,26 @@ async fn deliver_board(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+type GithubClient = std::sync::Arc<github::Client<github::SystemRunner>>;
+
+/// Open pull requests of the GitHub repositories among `dirs` (space and explorer directories),
+/// one GraphQL query per repository. A failing repository carries its own error. Read-only.
+#[tauri::command]
+async fn github_pulls(
+    client: State<'_, GithubClient>,
+    dirs: Vec<String>,
+) -> Result<github_pulls::Pulls, String> {
+    let client = client.inner().clone();
+    let home = home_dir();
+    let dirs: Vec<String> = dirs
+        .iter()
+        .map(|d| github_pulls::expand_home(d, home.as_deref()))
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || github_pulls::load(&client, &dirs))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Where poimen keeps the state (the `gh` cache) of a plugin it runs itself: herdr does not report
@@ -855,6 +876,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(client.clone())
+        .manage::<GithubClient>(std::sync::Arc::new(github::Client::system(
+            home_dir()
+                .map(|h| {
+                    h.join(".config")
+                        .join("poimen")
+                        .join("cache")
+                        .join("github")
+                })
+                .unwrap_or_else(|| std::env::temp_dir().join("poimen-github")),
+        )))
         .manage(Sessions::default())
         .manage(SubagentWatch::default())
         .manage(HerdrBin(bin))
@@ -916,6 +947,7 @@ pub fn run() {
             plugin_invoke,
             plugin_pane_defs,
             deliver_board,
+            github_pulls,
             plugin_pane_open,
             plugin_pane_focus,
             plugin_pane_close,

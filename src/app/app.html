@@ -145,6 +145,8 @@
           <ng-template #tabContent let-tab>
             @if (isBoard(tab.id)) {
               <span class="mode ro" title="Native view">BD</span>
+            } @else if (isGithub(tab.id)) {
+              <span class="mode ro" title="GitHub">GH</span>
             } @else if (isFlow(tab.id)) {
               <span class="mode ro" title="Agent flow">FL</span>
             } @else if (isSettings(tab.id)) {
@@ -173,6 +175,9 @@
         }
         @if (isBoard(g.activeId)) {
           <app-deliver-board-view (terminalRequested)="openTerminalBoard()" />
+        }
+        @if (isGithub(g.activeId)) {
+          <app-github-view />
         }
         @for (flowPaneId of [flowOf(g)]; track flowPaneId) {
           @if (flowPaneId) {

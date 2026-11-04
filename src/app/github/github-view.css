@@ -1,0 +1,117 @@
+:host {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+}
+.page {
+  padding: 16px 24px 32px;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+h1 {
+  font-size: 18px;
+  margin: 0;
+}
+h2 {
+  font-size: 14px;
+  margin: 20px 0 8px;
+}
+.path,
+.hint {
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+  font-weight: normal;
+}
+.problem {
+  color: var(--h-danger-color, #d33);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+th,
+td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--h-content-border-color);
+  vertical-align: top;
+}
+th {
+  color: var(--h-text-muted-color);
+  font-weight: normal;
+}
+.mono {
+  font-family: monospace;
+  font-size: 12px;
+}
+.unclaimed {
+  color: var(--h-text-muted-color);
+}
+.badge {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 8px;
+  font-size: 11px;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.toolbar .active {
+  font-weight: bold;
+  text-decoration: underline;
+}
+.count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+}
+.num {
+  text-align: right;
+  white-space: nowrap;
+}
+.add {
+  color: var(--h-success-color, #2a8a3e);
+}
+.del {
+  color: var(--h-danger-color, #d33);
+}
+.checks-passing {
+  color: var(--h-success-color, #2a8a3e);
+}
+.checks-pending {
+  color: var(--h-warning-color, #b8860b);
+}
+.checks-failing {
+  color: var(--h-danger-color, #d33);
+}
+tr.cursor {
+  outline: 1px solid var(--h-accent-color, currentColor);
+  outline-offset: -1px;
+}
+tr.selected {
+  background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
+}
+tbody:focus-visible {
+  outline: none;
+}
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--h-accent-color, inherit);
+  cursor: pointer;
+  text-decoration: underline;
+}
