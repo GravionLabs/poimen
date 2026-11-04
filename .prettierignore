@@ -10,6 +10,8 @@ Cargo.lock
 docs
 *.md
 LICENSE
+.agents
 .claude
+skills-lock.json
 src-tauri
 site

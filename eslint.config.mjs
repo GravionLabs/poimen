@@ -10,6 +10,7 @@ export default tseslint.config(
       ".angular/**",
       "node_modules/**",
       "out-tsc/**",
+      ".agents/**",
       ".claude/**",
       "src-tauri/**",
     ],
