@@ -180,6 +180,8 @@ pub struct Settings {
     pub notify_on_done: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
+    /// The task modes (`tasks`); the default is one `agent` mode.
+    pub tasks: crate::tasks::TaskModes,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -347,6 +349,7 @@ impl Default for Settings {
             notify_on_blocked: true,
             notify_on_done: true,
             spaces_layout: None,
+            tasks: crate::tasks::TaskModes::default(),
             home: None,
             warnings: Vec::new(),
         }
@@ -502,6 +505,111 @@ fn resolve_spaces(value: &Value, s: &mut Settings) {
     }
 }
 
+/// `tasks`: `modes[]` and `worktreeDir`. Invalid entries warn and are skipped; without a valid
+/// mode the default `agent` mode stays.
+fn resolve_tasks(value: &Value, s: &mut Settings) {
+    use crate::tasks::{
+        COMMAND_PLACEHOLDERS, DEFAULT_BRANCH, PATH_PLACEHOLDERS, TaskMode, unknown_placeholder,
+    };
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("tasks must be an object".into());
+        return;
+    };
+    match obj.get("worktreeDir") {
+        None => {}
+        Some(Value::String(d)) if !d.trim().is_empty() => {
+            match unknown_placeholder(d, PATH_PLACEHOLDERS) {
+                Some(p) => s.warnings.push(format!(
+                    "tasks.worktreeDir: unknown placeholder {{{p}}}; using the default"
+                )),
+                None => s.tasks.worktree_dir = d.clone(),
+            }
+        }
+        Some(_) => s
+            .warnings
+            .push("tasks.worktreeDir must be a non-empty string; using the default".into()),
+    }
+    let Some(modes) = obj.get("modes") else {
+        return;
+    };
+    let Some(modes) = modes.as_array() else {
+        s.warnings.push("tasks.modes must be an array".into());
+        return;
+    };
+    let mut out: Vec<TaskMode> = Vec::new();
+    for (i, m) in modes.iter().enumerate() {
+        let at = format!("tasks.modes[{i}]");
+        let Some(m) = m.as_object() else {
+            s.warnings.push(format!("{at} must be an object; ignored"));
+            continue;
+        };
+        let text = |key: &str, at: &str, warnings: &mut Vec<String>| match m.get(key) {
+            None => None,
+            Some(Value::String(v)) if !v.trim().is_empty() => Some(v.clone()),
+            Some(_) => {
+                warnings.push(format!("{at}.{key} must be a non-empty string; ignored"));
+                None
+            }
+        };
+        let Some(name) = text("name", &at, &mut s.warnings) else {
+            if !m.contains_key("name") {
+                s.warnings.push(format!("{at}.name is missing; ignored"));
+            }
+            continue;
+        };
+        let at = format!("tasks.modes[{name}]");
+        if out.iter().any(|o| o.name == name) {
+            s.warnings
+                .push(format!("{at}: duplicate name; the first one wins"));
+            continue;
+        }
+        let Some(command) = text("command", &at, &mut s.warnings) else {
+            if !m.contains_key("command") {
+                s.warnings.push(format!("{at}.command is missing; ignored"));
+            }
+            continue;
+        };
+        let worktree = match m.get("worktree") {
+            None => true,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => {
+                s.warnings
+                    .push(format!("{at}.worktree must be a boolean; using true"));
+                true
+            }
+        };
+        let branch = text("branch", &at, &mut s.warnings).unwrap_or_else(|| DEFAULT_BRANCH.into());
+        let cleanup = text("cleanup", &at, &mut s.warnings);
+        let checks = [
+            ("command", Some(&command), COMMAND_PLACEHOLDERS),
+            ("cleanup", cleanup.as_ref(), COMMAND_PLACEHOLDERS),
+            ("branch", Some(&branch), PATH_PLACEHOLDERS),
+        ];
+        let bad = checks.iter().find_map(|(k, v, allowed)| {
+            v.and_then(|v| unknown_placeholder(v, allowed))
+                .map(|p| (*k, p))
+        });
+        if let Some((key, p)) = bad {
+            s.warnings
+                .push(format!("{at}.{key}: unknown placeholder {{{p}}}; ignored"));
+            continue;
+        }
+        out.push(TaskMode {
+            name,
+            worktree,
+            command,
+            branch,
+            cleanup,
+        });
+    }
+    if !out.is_empty() {
+        s.tasks.modes = out;
+    } else if !modes.is_empty() {
+        s.warnings
+            .push("tasks.modes has no valid mode; using the default agent mode".into());
+    }
+}
+
 /// Resolves the settings from the file contents. `read_ghostty` is only called when the
 /// `terminal.ghostty` flag is set.
 pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>) -> Settings {
@@ -582,6 +690,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("spaces") {
         resolve_spaces(value, &mut s);
+    }
+    if let Some(value) = root.get("tasks") {
+        resolve_tasks(value, &mut s);
     }
 
     let mut use_ghostty = false;
@@ -1215,6 +1326,76 @@ mod tests {
         assert_eq!(s.explorer_roots, ["/srv", "~/code"]);
         assert!(s.explorer_show_hidden);
         assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn tasks_default_to_one_agent_mode() {
+        let s = resolve(None, || None);
+        assert_eq!(s.tasks.modes.len(), 1);
+        let m = &s.tasks.modes[0];
+        assert_eq!(m.name, "agent");
+        assert!(m.worktree);
+        assert_eq!(m.command, "claude {prompt}");
+        assert_eq!(m.branch, "{type}/{nr}-{slug}");
+        assert_eq!(m.cleanup, None);
+        assert_eq!(s.tasks.worktree_dir, "../{repo}-{nr}");
+        assert_eq!(resolve(Some(r#"{"tasks":{}}"#), || None).tasks, s.tasks);
+    }
+
+    #[test]
+    fn tasks_parse_modes_and_worktree_dir() {
+        let s = resolve(
+            Some(
+                r#"{"tasks":{"worktreeDir":"../wt/{nr}","modes":[
+                {"name":"agent","command":"claude {prompt}"},
+                {"name":"quick","worktree":false,"command":"vim {url}","branch":"x/{nr}","cleanup":"echo {branch}"}]}}"#,
+            ),
+            || None,
+        );
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert_eq!(s.tasks.worktree_dir, "../wt/{nr}");
+        assert_eq!(s.tasks.modes.len(), 2);
+        let q = &s.tasks.modes[1];
+        assert!(!q.worktree);
+        assert_eq!(q.branch, "x/{nr}");
+        assert_eq!(q.cleanup.as_deref(), Some("echo {branch}"));
+        assert_eq!(s.tasks.modes[0].branch, "{type}/{nr}-{slug}");
+    }
+
+    #[test]
+    fn tasks_invalid_entries_warn_and_the_rest_loads() {
+        let s = resolve(
+            Some(
+                r#"{"theme":"dark","tasks":{"modes":[
+                {"name":"a","command":"run"},
+                {"name":"a","command":"again"},
+                {"name":"nocmd"},
+                {"name":"bad","command":"run {nope}"},
+                {"command":"x"},
+                {"name":"b","command":"ok","branch":"{prompt}"},
+                {"name":"c","command":"ok","worktree":"yes"}]}}"#,
+            ),
+            || None,
+        );
+        assert_eq!(s.theme, "dark");
+        let names: Vec<_> = s.tasks.modes.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["a", "c"]);
+        assert_eq!(s.tasks.modes[0].command, "run");
+        assert_eq!(s.warnings.len(), 6, "{:?}", s.warnings);
+        assert!(s.warnings.iter().any(|w| w.contains("duplicate")));
+        assert!(s.warnings.iter().any(|w| w.contains("{nope}")));
+        assert!(s.warnings.iter().any(|w| w.contains("{prompt}")));
+    }
+
+    #[test]
+    fn tasks_without_a_valid_mode_keep_the_default() {
+        let s = resolve(
+            Some(r#"{"tasks":{"worktreeDir":"../{bad}","modes":[{"name":"x"}]}}"#),
+            || None,
+        );
+        assert_eq!(s.tasks, crate::tasks::TaskModes::default());
+        assert_eq!(s.warnings.len(), 3, "{:?}", s.warnings);
+        assert_eq!(resolve(Some(r#"{"tasks":3}"#), || None).warnings.len(), 1);
     }
 
     #[test]

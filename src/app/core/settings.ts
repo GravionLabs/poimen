@@ -27,6 +27,54 @@ export interface GhosttyColors {
   palette: (string | null)[];
 }
 
+/** A task mode (`tasks.modes[]`, wire shape of `tasks.rs`). */
+export interface TaskMode {
+  name: string;
+  worktree: boolean;
+  command: string;
+  branch: string;
+  cleanup: string | null;
+}
+
+export interface TaskModes {
+  modes: TaskMode[];
+  worktreeDir: string;
+}
+
+export const DEFAULT_TASKS: TaskModes = {
+  modes: [
+    {
+      name: "agent",
+      worktree: true,
+      command: "claude {prompt}",
+      branch: "{type}/{nr}-{slug}",
+      cleanup: null,
+    },
+  ],
+  worktreeDir: "../{repo}-{nr}",
+};
+
+/** The resolved task modes; the default when the shape is wrong. */
+export function parseTaskModes(raw: unknown): TaskModes {
+  if (typeof raw !== "object" || raw === null) return DEFAULT_TASKS;
+  const r = raw as Record<string, unknown>;
+  if (!Array.isArray(r["modes"]) || typeof r["worktreeDir"] !== "string") return DEFAULT_TASKS;
+  const modes: TaskMode[] = [];
+  for (const m of r["modes"]) {
+    if (typeof m !== "object" || m === null) continue;
+    const o = m as Record<string, unknown>;
+    if (typeof o["name"] !== "string" || typeof o["command"] !== "string") continue;
+    modes.push({
+      name: o["name"],
+      worktree: o["worktree"] !== false,
+      command: o["command"],
+      branch: typeof o["branch"] === "string" ? o["branch"] : DEFAULT_TASKS.modes[0].branch,
+      cleanup: typeof o["cleanup"] === "string" ? o["cleanup"] : null,
+    });
+  }
+  return modes.length > 0 ? { modes, worktreeDir: r["worktreeDir"] } : DEFAULT_TASKS;
+}
+
 /** The resolved user settings from `~/.config/poimen/config.json` (wire shape of `settings.rs`). */
 export interface Settings {
   theme: ThemeSetting;
@@ -57,6 +105,8 @@ export interface Settings {
   notifyOnDone: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
+  /** `tasks`: the task modes and the worktree directory template. */
+  tasks: TaskModes;
   /** The home directory `~` stands for; `null` until the backend knows it. */
   home: string | null;
   warnings: string[];
@@ -83,6 +133,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnBlocked: true,
   notifyOnDone: true,
   spacesLayout: null,
+  tasks: DEFAULT_TASKS,
   home: null,
   warnings: [],
 };
@@ -167,6 +218,7 @@ export function parseSettings(raw: unknown): Settings {
     notifyOnBlocked: r["notifyOnBlocked"] !== false,
     notifyOnDone: r["notifyOnDone"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
+    tasks: parseTaskModes(r["tasks"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
