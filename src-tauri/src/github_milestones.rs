@@ -1,6 +1,7 @@
 //! Open milestones per repository for the GitHub view (ADR 0005, #233): REST through the shared
-//! `github::Client` (ETag cache), ordered by version; the current one is the lowest `x.y.z` that
-//! still has open issues. Read-only.
+//! `github::Client` (ETag cache), ordered by version; the current one is the lowest versioned
+//! milestone that still has open issues. Versioned are the legacy `x.y.z` titles and `M<n>` /
+//! `M<n> (x.y.z)` (sprint number, version added when released); legacy ones sort first. Read-only.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -18,7 +19,7 @@ pub struct Milestone {
     pub due_on: Option<String>,
     pub open: u64,
     pub closed: u64,
-    /// The lowest `x.y.z` milestone with open issues.
+    /// The lowest versioned milestone (`x.y.z`, `M<n>`, `M<n> (x.y.z)`) with open issues.
     pub current: bool,
 }
 
@@ -53,20 +54,44 @@ pub fn parse_version(title: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
-/// Milestones by version ascending (numerically, so 1.10.0 follows 1.2.0), the others by title
-/// after them; marks the current one.
+/// `M<n>` or `M<n> (x.y.z)` as the sprint number; anything else is not a sprint milestone.
+pub fn parse_sprint(title: &str) -> Option<u64> {
+    let t = title.trim();
+    let rest = t.strip_prefix('M').or_else(|| t.strip_prefix('m'))?;
+    let (digits, tail) = match rest.split_once(' ') {
+        Some((d, tail)) => (d, Some(tail.trim())),
+        None => (rest, None),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if let Some(tail) = tail {
+        let version = tail.strip_prefix('(')?.strip_suffix(')')?;
+        parse_version(version)?;
+    }
+    digits.parse().ok()
+}
+
+/// Sort key of a versioned milestone: legacy `x.y.z` before `M<n>`, each numerically.
+fn rank(title: &str) -> Option<(u8, u64, u64, u64)> {
+    if let Some((x, y, z)) = parse_version(title) {
+        return Some((0, x, y, z));
+    }
+    parse_sprint(title).map(|n| (1, n, 0, 0))
+}
+
+/// Milestones by version ascending (numerically, so 1.10.0 follows 1.2.0 and M10 follows M2;
+/// legacy versions first), the others by title after them; marks the current one.
 pub fn order(mut milestones: Vec<Milestone>) -> Vec<Milestone> {
-    milestones.sort_by(
-        |a, b| match (parse_version(&a.title), parse_version(&b.title)) {
-            (Some(x), Some(y)) => x.cmp(&y).then_with(|| a.title.cmp(&b.title)),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
-        },
-    );
+    milestones.sort_by(|a, b| match (rank(&a.title), rank(&b.title)) {
+        (Some(x), Some(y)) => x.cmp(&y).then_with(|| a.title.cmp(&b.title)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
+    });
     if let Some(m) = milestones
         .iter_mut()
-        .find(|m| m.open > 0 && parse_version(&m.title).is_some())
+        .find(|m| m.open > 0 && rank(&m.title).is_some())
     {
         m.current = true;
     }
@@ -156,12 +181,56 @@ mod tests {
     }
 
     #[test]
-    fn versions_sort_numerically_and_other_names_come_last() {
+    fn sprint_titles_parse_with_an_optional_version() {
+        assert_eq!(parse_sprint("M2"), Some(2));
+        assert_eq!(parse_sprint("M10 (0.9.0)"), Some(10));
+        for bad in [
+            "M",
+            "M2x",
+            "M2 0.9.0",
+            "M2 (0.9)",
+            "M2 ()",
+            "Milestone",
+            "2",
+            "M-1",
+            "",
+        ] {
+            assert_eq!(parse_sprint(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn versions_sort_numerically_legacy_first_and_other_names_come_last() {
         let m = parse_milestones(FIXTURE).unwrap();
         assert_eq!(
             titles(&m),
-            ["v1.1.0", "1.1.5", "1.2.0", "1.10.0", "Backlog"]
+            [
+                "v1.1.0",
+                "1.1.5",
+                "1.2.0",
+                "1.10.0",
+                "M2",
+                "M10 (1.3.0)",
+                "Backlog"
+            ]
         );
+    }
+
+    #[test]
+    fn the_lowest_sprint_with_open_issues_is_current_after_the_legacy_ones_are_done() {
+        let m = parse_milestones(
+            r#"[{"number":3,"title":"M10","open_issues":1,"closed_issues":0},
+                {"number":2,"title":"M2 (0.9.0)","open_issues":0,"closed_issues":4},
+                {"number":1,"title":"M3","open_issues":2,"closed_issues":0}]"#,
+        )
+        .unwrap();
+        assert_eq!(titles(&m), ["M2 (0.9.0)", "M3", "M10"]);
+        let current: Vec<&str> = m
+            .iter()
+            .filter(|m| m.current)
+            .map(|m| m.title.as_str())
+            .collect();
+        assert_eq!(current, ["M3"]);
     }
 
     #[test]
