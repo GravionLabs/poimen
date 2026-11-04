@@ -58,9 +58,27 @@ describe("parseSettings", () => {
       notifyOnBlocked: false,
       notifyOnDone: true,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+      tasks: DEFAULT_SETTINGS.tasks,
       home: "/Users/x",
       warnings: ["w"],
     });
+  });
+
+  it("parses tasks and falls back to the default agent mode", () => {
+    expect(parseSettings({}).tasks.modes[0].name).toBe("agent");
+    const t = parseSettings({
+      tasks: {
+        worktreeDir: "../w",
+        modes: [{ name: "q", worktree: false, command: "vim", branch: "b", cleanup: "c" }, 3],
+      },
+    }).tasks;
+    expect(t).toEqual({
+      worktreeDir: "../w",
+      modes: [{ name: "q", worktree: false, command: "vim", branch: "b", cleanup: "c" }],
+    });
+    expect(parseSettings({ tasks: { modes: [], worktreeDir: "x" } }).tasks).toEqual(
+      DEFAULT_SETTINGS.tasks,
+    );
   });
 
   it("keeps colorSchema only as a non-empty string or a complete pair", () => {

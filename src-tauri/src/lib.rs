@@ -11,6 +11,7 @@ mod schemes;
 mod settings;
 mod spaces;
 mod stream;
+mod tasks;
 mod transcripts;
 mod watch;
 
@@ -490,6 +491,12 @@ fn get_settings() -> settings::Settings {
     home_dir().map(|h| settings::load(&h)).unwrap_or_default()
 }
 
+/// The resolved task modes (`tasks` in config.json).
+#[tauri::command]
+fn get_task_modes() -> tasks::TaskModes {
+    get_settings().tasks
+}
+
 /// The user color schemes (`~/.config/poimen/themes/*.toml`); changes arrive as `color-schemes` events.
 #[tauri::command]
 fn get_color_schemes() -> schemes::Schemes {
@@ -916,6 +923,7 @@ pub fn run() {
             list_child_dirs,
             app_version,
             get_settings,
+            get_task_modes,
             get_color_schemes,
             set_theme,
             set_color_schema,
