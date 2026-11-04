@@ -1,20 +1,136 @@
 :host {
-  display: block;
+  display: flex;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   background: var(--h-content-background);
   color: var(--h-text-color);
 }
 
-.page {
-  max-width: 720px;
-  padding: 16px 24px 32px;
+.shell {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
-h1 {
-  font-size: 18px;
-  margin: 0 0 16px;
+.nav {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 240px;
+  min-height: 0;
+  padding: 10px 8px;
+  gap: 8px;
+  overflow-y: auto;
+  border-right: 1px solid var(--h-content-border-color);
+}
+
+.search {
+  box-sizing: border-box;
+  width: 100%;
+  height: 26px;
+  padding: 2px 8px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--h-text-color);
+  font: inherit;
+  font-size: 12px;
+}
+
+.search:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}
+
+.tree,
+.pages {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  user-select: none;
+}
+
+.node.group {
+  font-weight: 600;
+}
+
+.node.page-node {
+  padding-left: 26px;
+}
+
+.chev {
+  width: 10px;
+  color: var(--h-text-muted-color);
+  font-size: 10px;
+}
+
+.node:hover,
+.node:focus-visible {
+  background: color-mix(in srgb, var(--h-text-color) 10%, transparent);
+  outline: none;
+}
+
+.node.on {
+  border-left-color: var(--status-working);
+  background: color-mix(in srgb, var(--h-text-color) 18%, transparent);
+  font-weight: 600;
+}
+
+.empty {
+  padding: 4px 8px;
+}
+
+.page-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.crumb {
+  flex: none;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--h-content-border-color);
+}
+
+.crumb h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.crumb-group {
+  color: var(--h-text-muted-color);
+  font-weight: 400;
+}
+
+/* A setting whose label matches the search; the tint keeps the text readable (settings-contrast.spec.ts). */
+.hit {
+  background: color-mix(in srgb, var(--h-text-color) 22%, transparent);
+  border-radius: 3px;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.page {
+  max-width: 720px;
+  padding: 8px 24px 32px;
 }
 
 h2 {

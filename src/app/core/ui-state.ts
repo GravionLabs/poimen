@@ -59,6 +59,10 @@ export interface LayoutState {
   recentCommands?: string[];
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
   collapsedIssues?: Record<string, number[]>;
+  /** The page selected in the settings view (an id of its category list); may no longer exist. */
+  settingsPage?: string;
+  /** Ids of the collapsed groups of the settings category tree. */
+  settingsCollapsed?: string[];
 }
 
 export function clampPanelHeight(height: number): number {
@@ -112,6 +116,8 @@ export function parseLayout(raw: string | null): LayoutState {
       panelTab,
       recentCommands,
       collapsedIssues,
+      settingsPage,
+      settingsCollapsed,
     } = data as Record<string, unknown>;
     if (
       typeof collapsedIssues === "object" &&
@@ -125,6 +131,11 @@ export function parseLayout(raw: string | null): LayoutState {
         ])
         .filter(([, nrs]) => nrs.length > 0);
       if (entries.length) state.collapsedIssues = Object.fromEntries(entries);
+    }
+    if (typeof settingsPage === "string" && settingsPage) state.settingsPage = settingsPage;
+    if (Array.isArray(settingsCollapsed)) {
+      const ids = settingsCollapsed.filter((d): d is string => typeof d === "string" && d !== "");
+      if (ids.length) state.settingsCollapsed = [...new Set(ids)];
     }
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
@@ -190,6 +201,12 @@ export class UiState {
   readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
     this.initial.collapsedIssues ?? {},
   );
+  /** The selected page of the settings view; `null` until one is picked. */
+  readonly settingsPage = signal<string | null>(this.initial.settingsPage ?? null);
+  /** Collapsed groups of the settings category tree. */
+  readonly settingsCollapsed = signal<ReadonlySet<string>>(
+    new Set(this.initial.settingsCollapsed ?? []),
+  );
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -199,6 +216,19 @@ export class UiState {
 
   setSidebarWidth(width: number): void {
     this.sidebarWidth.set(clampSidebarWidth(width));
+    this.save();
+  }
+
+  selectSettingsPage(id: string): void {
+    this.settingsPage.set(id);
+    this.save();
+  }
+
+  setSettingsGroupCollapsed(id: string, collapsed: boolean): void {
+    const next = new Set(this.settingsCollapsed());
+    if (collapsed) next.add(id);
+    else next.delete(id);
+    this.settingsCollapsed.set(next);
     this.save();
   }
 
@@ -320,6 +350,8 @@ export class UiState {
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,
+      settingsPage: this.settingsPage() ?? undefined,
+      settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

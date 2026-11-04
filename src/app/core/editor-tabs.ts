@@ -241,8 +241,9 @@ export class EditorTabs {
     this.patch(group.id, { tabs, activeId: paneId });
   }
 
-  /** Opens the settings tab (at most one) as a pinned tab, or activates it when open. */
-  openSettings(): void {
+  /** Opens the settings tab (at most one) as a pinned tab, or activates it; on `page` when given. */
+  openSettings(page?: string): void {
+    if (page) this.ui.selectSettingsPage(page);
     this.openPinned(SETTINGS_TAB);
   }
 

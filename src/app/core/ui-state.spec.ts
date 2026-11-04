@@ -232,3 +232,29 @@ describe("stored plugin panes", () => {
     expect(parseLayout("{}").pluginPanes).toBeUndefined();
   });
 });
+
+describe("settings view state", () => {
+  it("round-trips the selected page and the collapsed groups", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    expect(state.settingsPage()).toBeNull();
+    state.selectSettingsPage("herdr");
+    state.setSettingsGroupCollapsed("workspace", true);
+    state.setSettingsGroupCollapsed("backend", true);
+    state.setSettingsGroupCollapsed("backend", false);
+    const stored = storage.data.get(UI_STATE_KEY)!;
+    expect(parseLayout(stored).settingsPage).toBe("herdr");
+    expect(parseLayout(stored).settingsCollapsed).toEqual(["workspace"]);
+  });
+
+  it("ignores malformed stored values", () => {
+    const layout = parseLayout(
+      JSON.stringify({ settingsPage: 3, settingsCollapsed: ["a", 1, "", "a"] }),
+    );
+    expect(layout.settingsPage).toBeUndefined();
+    expect(layout.settingsCollapsed).toEqual(["a"]);
+    expect(
+      parseLayout(JSON.stringify({ settingsCollapsed: "x" })).settingsCollapsed,
+    ).toBeUndefined();
+  });
+});
