@@ -37,16 +37,26 @@ impl From<io::Error> for Error {
     }
 }
 
+/// herdr's directory (socket, `config.toml`): `%APPDATA%\herdr` on Windows, `<home>/.config/herdr`
+/// elsewhere. The one place that knows it; the socket path and the settings both derive from it.
+pub fn herdr_dir(windows: bool, home: &str, appdata: &str) -> PathBuf {
+    if windows {
+        PathBuf::from(appdata).join("herdr")
+    } else {
+        PathBuf::from(home).join(".config").join("herdr")
+    }
+}
+
 /// Resolves the socket path like the herdr CLI does (minus the explicit `--session` flag).
 pub fn socket_path_from(env: impl Fn(&str) -> Option<String>) -> PathBuf {
     if let Some(path) = env("HERDR_SOCKET_PATH").filter(|p| !p.is_empty()) {
         return PathBuf::from(path);
     }
-    let base = if cfg!(windows) {
-        PathBuf::from(env("APPDATA").unwrap_or_default()).join("herdr")
-    } else {
-        PathBuf::from(env("HOME").unwrap_or_default()).join(".config/herdr")
-    };
+    let base = herdr_dir(
+        cfg!(windows),
+        &env("HOME").unwrap_or_default(),
+        &env("APPDATA").unwrap_or_default(),
+    );
     match env("HERDR_SESSION").filter(|s| !s.is_empty() && s != "default") {
         Some(session) => base.join("sessions").join(session).join("herdr.sock"),
         None => base.join("herdr.sock"),
@@ -948,6 +958,18 @@ mod tests {
         assert_eq!(
             path,
             PathBuf::from(r"C:\Users\u\AppData\Roaming\herdr\herdr.sock")
+        );
+    }
+
+    #[test]
+    fn herdr_dir_is_appdata_on_windows_and_dot_config_elsewhere() {
+        assert_eq!(
+            herdr_dir(true, "/ignored", "A"),
+            PathBuf::from("A").join("herdr")
+        );
+        assert_eq!(
+            herdr_dir(false, "/home/u", "ignored"),
+            PathBuf::from("/home/u").join(".config").join("herdr")
         );
     }
 

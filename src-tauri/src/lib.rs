@@ -15,7 +15,7 @@ mod transcripts;
 mod watch;
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
@@ -245,9 +245,14 @@ async fn deliver_board(
 /// Where poimen keeps the state (the `gh` cache) of a plugin it runs itself: herdr does not report
 /// the plugin's own state directory, so it is `~/.config/poimen/plugin-state/<id>`.
 fn plugin_state_dir(plugin_id: &str) -> PathBuf {
-    home_dir()
-        .unwrap_or_default()
-        .join(".config/poimen/plugin-state")
+    plugin_state_dir_in(&home_dir().unwrap_or_default(), plugin_id)
+}
+
+/// Under `<home>/.config/poimen` on every system, Windows included (see `settings::config_path`).
+fn plugin_state_dir_in(home: &Path, plugin_id: &str) -> PathBuf {
+    home.join(".config")
+        .join("poimen")
+        .join("plugin-state")
         .join(plugin_id)
 }
 
@@ -468,56 +473,56 @@ fn get_color_schemes() -> schemes::Schemes {
 /// Writes only the `theme` setting (the toolbar button); the settings watcher emits the change.
 #[tauri::command]
 fn set_theme(theme: String) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_theme(&home, &theme)
 }
 
 /// Writes only the `colorSchema` setting (the settings view): a name or a `{light, dark}` pair.
 #[tauri::command]
 fn set_color_schema(schema: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_color_schema(&home, &schema)
 }
 
 /// Writes only `sidebar.layout` (`tree` or `split`); the settings watcher emits the change.
 #[tauri::command]
 fn set_sidebar_layout(layout: String) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_sidebar_layout(&home, &layout)
 }
 
 /// Writes only `explorer.roots` (paths under the home directory as `~/…`); the watcher emits it.
 #[tauri::command]
 fn set_explorer_roots(roots: Vec<String>) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_explorer_roots(&home, &roots)
 }
 
 /// Writes only `explorer.showHidden`; the settings watcher emits the change.
 #[tauri::command]
 fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_explorer_show_hidden(&home, show)
 }
 
 /// Writes only `herdr.autoStart`; the settings watcher emits the change.
 #[tauri::command]
 fn set_herdr_auto_start(on: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_herdr_auto_start(&home, on)
 }
 
 /// Writes only `spaces.layout` after validating it; the settings watcher emits the change.
 #[tauri::command]
 fn set_spaces_layout(layout: serde_json::Value) -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_spaces_layout(&home, &layout)
 }
 
 /// Removes `spaces.layout`, so new spaces use the built-in default again.
 #[tauri::command]
 fn remove_spaces_layout() -> Result<(), String> {
-    let home = home_dir().ok_or("HOME is not set")?;
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::remove_spaces_layout(&home)
 }
 
@@ -901,6 +906,25 @@ pub fn run() {
                 app.state::<Sessions>().close_all();
             }
         });
+}
+
+#[cfg(test)]
+mod plugin_state_tests {
+    use super::plugin_state_dir_in;
+    use std::path::Path;
+
+    #[test]
+    fn plugin_state_lives_under_the_poimen_config_of_the_home() {
+        let expected = Path::new("/h")
+            .join(".config")
+            .join("poimen")
+            .join("plugin-state")
+            .join("deliver-board");
+        assert_eq!(
+            plugin_state_dir_in(Path::new("/h"), "deliver-board"),
+            expected
+        );
+    }
 }
 
 #[cfg(test)]

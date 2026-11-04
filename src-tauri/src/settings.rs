@@ -664,16 +664,28 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     s
 }
 
+/// poimen's own files live under `<home>/.config/poimen` on every system, Windows included
+/// (deliberately not `%APPDATA%`: one documented location, like `~/.config/poimen/themes`).
 pub fn config_path(home: &Path) -> PathBuf {
-    home.join(".config/poimen/config.json")
+    home.join(".config").join("poimen").join("config.json")
 }
 
+/// Ghostty's config. Ghostty has no Windows build, so this is intentionally Unix-only.
 pub fn ghostty_path(home: &Path) -> PathBuf {
-    home.join(".config/ghostty/config")
+    home.join(".config").join("ghostty").join("config")
 }
 
+/// herdr's `config.toml` in the herdr directory (`herdr::herdr_dir`, also home of the socket).
 pub fn herdr_config_path(home: &Path) -> PathBuf {
-    home.join(".config/herdr/config.toml")
+    herdr_config_path_in(
+        cfg!(windows),
+        home,
+        &std::env::var("APPDATA").unwrap_or_default(),
+    )
+}
+
+fn herdr_config_path_in(windows: bool, home: &Path, appdata: &str) -> PathBuf {
+    crate::herdr::herdr_dir(windows, &home.to_string_lossy(), appdata).join("config.toml")
 }
 
 /// The `[theme] name` of a herdr `config.toml` (minimal read: no full TOML parser needed).
@@ -706,7 +718,7 @@ pub fn parse_herdr_theme(text: &str) -> Option<String> {
 /// Replaces `colorSchema: "herdr"` by the scheme named in herdr's config. `terminal`, a missing
 /// file or no name warns and falls back to `poimen` (which follows `theme`). Unknown scheme names
 /// are warned about and replaced by the frontend, like any other name.
-fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>) {
+fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>, config: &Path) {
     if s.color_schema != Some(ColorSchema::Name("herdr".into())) {
         return;
     }
@@ -721,10 +733,10 @@ fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>) {
         }
         None => {
             s.color_schema = None;
-            s.warnings.push(
-                "colorSchema \"herdr\": no [theme] name in ~/.config/herdr/config.toml; using poimen"
-                    .into(),
-            );
+            s.warnings.push(format!(
+                "colorSchema \"herdr\": no [theme] name in {}; using poimen",
+                config.display()
+            ));
         }
     }
 }
@@ -747,8 +759,9 @@ pub fn load(home: &Path) -> Settings {
         std::fs::read_to_string(ghostty_path(home)).ok()
     });
     if s.color_schema == Some(ColorSchema::Name("herdr".into())) {
-        let toml = std::fs::read_to_string(herdr_config_path(home)).ok();
-        apply_herdr(&mut s, toml.as_deref());
+        let path = herdr_config_path(home);
+        let toml = std::fs::read_to_string(&path).ok();
+        apply_herdr(&mut s, toml.as_deref(), &path);
     }
     s.home = Some(home.to_string_lossy().into_owned());
     s
@@ -1720,7 +1733,7 @@ mod tests {
     fn herdr_schema_follows_the_herdr_theme_or_falls_back_with_a_warning() {
         let herdr = |toml: Option<&str>| {
             let mut s = resolve(Some(r#"{"colorSchema":"herdr"}"#), none);
-            apply_herdr(&mut s, toml);
+            apply_herdr(&mut s, toml, Path::new("/h/herdr/config.toml"));
             s
         };
         let s = herdr(Some("[theme]\nname = \"dracula\""));
@@ -1732,15 +1745,48 @@ mod tests {
             assert_eq!(s.warnings.len(), 1, "{toml:?}");
         }
         let mut other = resolve(Some(r#"{"colorSchema":"vesper"}"#), none);
-        apply_herdr(&mut other, Some("[theme]\nname = \"dracula\""));
+        apply_herdr(
+            &mut other,
+            Some("[theme]\nname = \"dracula\""),
+            Path::new("x"),
+        );
         assert_eq!(other.color_schema, Some(ColorSchema::Name("vesper".into())));
+    }
+
+    #[test]
+    fn the_herdr_warning_names_the_real_config_path() {
+        let mut s = resolve(Some(r#"{"colorSchema":"herdr"}"#), none);
+        apply_herdr(&mut s, None, Path::new("/h/herdr/config.toml"));
+        assert!(
+            s.warnings[0].contains("/h/herdr/config.toml"),
+            "{:?}",
+            s.warnings
+        );
+    }
+
+    #[test]
+    fn herdr_config_sits_in_the_herdr_directory_of_each_system() {
+        let home = Path::new("/home/u");
+        assert_eq!(
+            herdr_config_path_in(false, home, "ignored"),
+            Path::new("/home/u")
+                .join(".config")
+                .join("herdr")
+                .join("config.toml")
+        );
+        assert_eq!(
+            herdr_config_path_in(true, home, r"C:\Users\u\AppData\Roaming"),
+            Path::new(r"C:\Users\u\AppData\Roaming")
+                .join("herdr")
+                .join("config.toml")
+        );
     }
 
     #[test]
     fn load_follows_the_herdr_config_in_a_temp_home() {
         let home = std::env::temp_dir().join(format!("poimen-herdr-{}", std::process::id()));
         std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
-        std::fs::create_dir_all(home.join(".config/herdr")).unwrap();
+        std::fs::create_dir_all(herdr_config_path(&home).parent().unwrap()).unwrap();
         std::fs::write(config_path(&home), r#"{"colorSchema":"herdr"}"#).unwrap();
         assert_eq!(load(&home).color_schema, None);
         std::fs::write(herdr_config_path(&home), "[theme]\nname = \"vesper\"\n").unwrap();

@@ -32,7 +32,8 @@ pub struct Schemes {
 }
 
 pub fn themes_dir(home: &Path) -> PathBuf {
-    home.join(".config/poimen/themes")
+    // `<home>/.config/poimen` on every system, Windows included (see `settings::config_path`).
+    home.join(".config").join("poimen").join("themes")
 }
 
 /// `#rrggbb` (also `#rgb`) as lowercase `#rrggbb`.
