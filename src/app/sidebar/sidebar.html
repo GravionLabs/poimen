@@ -95,9 +95,24 @@
                   >
                 }
                 @default {
-                  <span class="space-meta" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
-                    (seg.sep ? "· " : "") + seg.text
-                  }}</span>
+                  @if (seg.url; as url) {
+                    <button
+                      type="button"
+                      class="space-meta pr-link"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      [title]="seg.tip"
+                      [attr.aria-label]="'Open pull request: ' + seg.text"
+                      (click)="openPull(url, $event)"
+                      (keydown)="$event.stopPropagation()"
+                    >
+                      {{ (seg.sep ? "· " : "") + seg.text }}
+                    </button>
+                  } @else {
+                    <span class="space-meta" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                      (seg.sep ? "· " : "") + seg.text
+                    }}</span>
+                  }
                 }
               }
             }
@@ -175,9 +190,24 @@
                   >
                 }
                 @default {
-                  <span class="text" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
-                    (seg.sep ? "· " : "") + seg.text
-                  }}</span>
+                  @if (seg.url; as url) {
+                    <button
+                      type="button"
+                      class="text pr-link"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      [title]="seg.tip"
+                      [attr.aria-label]="'Open pull request: ' + seg.text"
+                      (click)="openPull(url, $event)"
+                      (keydown)="$event.stopPropagation()"
+                    >
+                      {{ (seg.sep ? "· " : "") + seg.text }}
+                    </button>
+                  } @else {
+                    <span class="text" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+                      (seg.sep ? "· " : "") + seg.text
+                    }}</span>
+                  }
                 }
               }
             }

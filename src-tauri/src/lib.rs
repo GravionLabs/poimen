@@ -2,6 +2,7 @@ mod backend;
 mod copilot;
 mod git;
 mod github;
+mod github_branches;
 mod github_issues;
 mod github_milestones;
 mod github_pulls;
@@ -227,6 +228,19 @@ async fn github_pulls(
         .map(|d| github_pulls::expand_home(d, home.as_deref()))
         .collect();
     tauri::async_runtime::spawn_blocking(move || github_pulls::load(&client, &dirs))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The pull request (open or merged) of the branch of each directory, one GraphQL query per
+/// repository; directories without one are left out. Read-only; `gh` errors give an empty answer.
+#[tauri::command]
+async fn branch_pulls(
+    client: State<'_, GithubClient>,
+    dirs: Vec<String>,
+) -> Result<HashMap<String, github_branches::BranchPull>, String> {
+    let client = client.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || github_branches::load(&client, dirs))
         .await
         .map_err(|e| e.to_string())
 }
@@ -892,6 +906,7 @@ pub fn run() {
             pane_rename,
             terminal_create,
             github_pulls,
+            branch_pulls,
             github_issues,
             github_milestones,
             create_space,

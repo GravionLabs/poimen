@@ -107,6 +107,46 @@ describe("HerdrStore repos", () => {
     expect(tauri.calls("repo_info")).toHaveLength(1);
   });
 
+  it("asks for the pull requests of the pane directories and puts them on the rows", async () => {
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+    tauri.answer("repo_info", () => ({ "/src/a": { branch: "feat/x", worktree: false } }));
+    const pr = {
+      number: 5,
+      title: "T",
+      url: "https://github.com/o/r/pull/5",
+      state: "open",
+      isDraft: false,
+      checks: { state: "none", passed: 0, failed: 0, pending: 0 },
+    };
+    tauri.answer("branch_pulls", () => ({ "/src/a": pr }));
+
+    await store.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(tauri.calls("branch_pulls")).toEqual([{ dirs: ["/src/a"] }]);
+    expect(store.spaces()[0].rows[0].pr?.number).toBe(5);
+  });
+
+  it("keeps the previous pull requests when the lookup fails", async () => {
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+    tauri.answer("repo_info", () => ({ "/src/a": { branch: "feat/x", worktree: false } }));
+    tauri.answer("branch_pulls", () => ({
+      "/src/a": { number: 5, title: "T", url: "u", state: "open", isDraft: false, checks: {} },
+    }));
+    await store.start();
+    await vi.advanceTimersByTimeAsync(0);
+    tauri.answer("branch_pulls", () => {
+      throw new Error("boom");
+    });
+
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(tauri.calls("branch_pulls")).toHaveLength(2);
+    expect(store.spaces()[0].rows[0].pr?.number).toBe(5);
+    expect(store.connectionError()).toBeNull();
+  });
+
   it("keeps the spaces without branches when the lookup fails", async () => {
     tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
     tauri.answer("repo_info", () => {

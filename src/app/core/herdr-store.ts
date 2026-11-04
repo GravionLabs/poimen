@@ -11,6 +11,7 @@ import {
   type Pane,
   type RepoInfo,
   type Snapshot,
+  type BranchPull,
 } from "./herdr";
 import { TauriBridge, type Unlisten } from "./tauri";
 
@@ -48,6 +49,7 @@ export class HerdrStore {
   private readonly _connectionError = signal<string | null>(null);
   private readonly _watchLost = signal(false);
   private readonly _repos = signal<ReadonlyMap<string, RepoInfo>>(new Map());
+  private readonly _pulls = signal<ReadonlyMap<string, BranchPull>>(new Map());
 
   private readonly _loaded = signal(false);
   private readonly _info = signal<HerdrInfo | null>(null);
@@ -91,8 +93,10 @@ export class HerdrStore {
     return { state: this._watchLost() ? "reconnecting" : "unreachable", reason };
   });
   readonly repos = this._repos.asReadonly();
+  /** Pull request of the branch per pane directory (`branch_pulls`). */
+  readonly pulls = this._pulls.asReadonly();
   readonly tree = computed(() => buildTree(this._snapshot()));
-  readonly spaces = computed(() => buildSpaces(this._snapshot(), this._repos()));
+  readonly spaces = computed(() => buildSpaces(this._snapshot(), this._repos(), this._pulls()));
   readonly waiting = computed(() => waitingCount(this._snapshot().panes));
   readonly panes = computed(() => new Map(this._snapshot().panes.map((p) => [p.pane_id, p])));
 
@@ -208,9 +212,28 @@ export class HerdrStore {
       });
       this._repos.set(new Map(Object.entries(found ?? {})));
       this.reposKey = key;
+      void this.readPulls(dirs);
     } catch {
       // keep the previous values and try again at the next refresh
       this.reposKey = undefined;
+    }
+  }
+
+  /**
+   * Looks up the pull request of each directory's branch. It runs with the repo reads, so it has
+   * the same triggers; the 30 s cache of the gh client keeps it from asking GitHub more often. A
+   * failure keeps the previous values.
+   */
+  private async readPulls(dirs: string[]): Promise<void> {
+    if (dirs.length === 0) return;
+    try {
+      const found = await this.bridge.invoke<Record<string, BranchPull> | undefined>(
+        "branch_pulls",
+        { dirs },
+      );
+      this._pulls.set(new Map(Object.entries(found ?? {})));
+    } catch {
+      // keep the previous values
     }
   }
 
