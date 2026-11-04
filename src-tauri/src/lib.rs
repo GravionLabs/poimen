@@ -11,6 +11,7 @@ mod herdr;
 mod layout;
 #[cfg(test)]
 mod live;
+mod project;
 mod schemes;
 mod settings;
 mod spaces;
@@ -333,8 +334,8 @@ async fn create_space(
     .map_err(|e| e.to_string())?
 }
 
-/// Builds the pane layout in a just-created space: the project file (git toplevel of `dir`), else
-/// `spaces.layout` of the config, else the default. Problems come back as warnings; the space then
+/// Builds the pane layout in a just-created space: `.poimen/config.json` (git toplevel of `dir`), else
+/// the deprecated `.agents/herdr-layout.json`, else `spaces.layout` of the config, else the default. Problems come back as warnings; the space then
 /// keeps the panes created so far (at least its single root pane).
 fn build_layout(
     call: &impl Fn(&str, Value) -> Result<Value, String>,
@@ -343,22 +344,41 @@ fn build_layout(
     created: &Value,
 ) -> Vec<String> {
     let root = git::toplevel(dir).unwrap_or_else(|| dir.to_owned());
-    let path = std::path::Path::new(&root).join(layout::REPO_LAYOUT_FILE);
-    let text = std::fs::read_to_string(&path).ok();
+    let read = |rel: &str| {
+        let path = std::path::Path::new(&root).join(rel);
+        std::fs::read_to_string(&path)
+            .ok()
+            .map(|text| (path.to_string_lossy().into_owned(), text))
+    };
+    let project = read(project::PROJECT_FILE);
+    let legacy = read(layout::REPO_LAYOUT_FILE);
     let config = home.map(settings::load).and_then(|s| s.spaces_layout);
-    let path = path.to_string_lossy().into_owned();
-    let layout = match layout::resolve(text.as_deref().map(|t| (path.as_str(), t)), config.as_ref())
-    {
-        Ok(l) => l,
+    let (layout, mut warnings) = match layout::resolve(
+        project.as_ref().map(|(p, t)| (p.as_str(), t.as_str())),
+        legacy.as_ref().map(|(p, t)| (p.as_str(), t.as_str())),
+        config.as_ref(),
+    ) {
+        Ok(r) => r,
         Err(warning) => return vec![warning],
     };
     let Some(root_pane) = herdr::created_pane_id(created) else {
         return vec!["herdr did not report the root pane; no layout applied".into()];
     };
-    match layout::apply(call, &layout, dir, &root_pane) {
-        Ok(()) => Vec::new(),
-        Err(e) => vec![format!("layout not fully applied: {e}")],
+    if let Err(e) = layout::apply(call, &layout, dir, &root_pane) {
+        warnings.push(format!("layout not fully applied: {e}"));
     }
+    warnings
+}
+
+/// The project file `.poimen/config.json` of the repository containing `dir`, with warnings.
+#[tauri::command]
+async fn project_config(dir: String) -> Result<project::Loaded, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        project::load(&root)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Directories matching a typed path, for the completion of path fields.
@@ -890,6 +910,7 @@ pub fn run() {
             set_spaces_layout,
             remove_spaces_layout,
             default_spaces_layout,
+            project_config,
             repo_info,
             subagents_watch,
             subagents_unwatch,
