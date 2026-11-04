@@ -11,3 +11,7 @@
 .dl-links a:hover { background: var(--vp-c-brand-2); }
 .dl-links a.fallback { background: var(--vp-c-default-soft); color: var(--vp-c-text-1); }
 .dl-note { font-size: 14px; color: var(--vp-c-text-2); }
+.shot .shot-light { display: block; }
+.shot .shot-dark { display: none; }
+.dark .shot .shot-light { display: none; }
+.dark .shot .shot-dark { display: block; }
