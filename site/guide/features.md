@@ -22,7 +22,7 @@ Everything here is in the application today; the [README](https://github.com/Gra
 - Input by default; read-only when another client controls the pane, with an explicit *Take over*. A mode button toggles input and read-only per tab.
 - A read-only agent tab has a prompt bar above the terminal that sends a prompt without taking over the controller; it is hidden while the tab controls the terminal, and the typed text is kept.
 - Cmd+click (macOS) or Ctrl+click opens links; Shift bypasses mouse forwarding for text selection. Mouse cells follow the frame grid herdr sends.
-- Compact command palette (`CmdOrCtrl+Shift+P`, JetBrains style: highlighted matches, shortcuts, recent entries) with poimen commands and herdr plugin actions; every shortcut can be changed. It opens centered on the editor area, which also holds non-terminal tabs (on the window without an open tab). The ? button in the status bar (`CmdOrCtrl+/`) lists all shortcuts with your current bindings.
+- Compact command palette (`CmdOrCtrl+Shift+P`, JetBrains style: highlighted matches, shortcuts, recent entries) with the poimen commands; every shortcut can be changed. It opens centered on the editor area, which also holds non-terminal tabs (on the window without an open tab). The ? button in the status bar (`CmdOrCtrl+/`) lists all shortcuts with your current bindings.
 
 ## Agent status and attention
 
@@ -43,11 +43,6 @@ The GitHub item of the activity bar opens a tab with the open pull requests of y
 Below the pull requests, the Issues section shows the open issues of each repository as a tree over GitHub's native sub-issues, with level (epic, feature, PBI, bug), `[needs-refinement]` and `[needs-decision]` markers, assignees and linked pull requests with their checks. Filter by state, level, label, assignee or text; collapse nodes per repository.
 
 The Milestones section lists the open milestones of each repository ordered by version, marks the current one (the lowest `x.y.z` with open issues) and shows due date, open and closed counts and a progress bar. Select a milestone to filter the issues tree to it.
-
-## Deliver board
-
-- A view fed by the herdr `deliver-board` plugin (it must be installed): one table per repository among your pane directories, with the open PBIs, claim, labels, branch and pull request with check state. It refreshes on demand, on window focus and every 60 s. The issue and PR numbers open in the browser, and "Start deliver" runs the plugin's action.
-- It will be replaced by built-in GitHub views: an issues tree, a pull request view and milestones, read through the `gh` CLI, with no plugin and no Node.js needed.
 
 ## Color schemes
 

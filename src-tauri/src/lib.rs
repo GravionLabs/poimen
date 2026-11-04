@@ -10,7 +10,6 @@ mod herdr;
 mod layout;
 #[cfg(test)]
 mod live;
-mod plugin_view;
 mod schemes;
 mod settings;
 mod spaces;
@@ -20,7 +19,7 @@ mod transcripts;
 mod watch;
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
@@ -210,69 +209,6 @@ async fn pane_rename(
     Ok(())
 }
 
-/// Lists the actions of all herdr plugins (`plugin.action.list`).
-#[tauri::command]
-async fn plugin_actions(client: State<'_, Client>) -> Result<Vec<herdr::PluginAction>, String> {
-    let result = herdr_call(client.inner(), "plugin.action.list", json!({})).await?;
-    // Names are optional: without `plugin.list` the groups fall back to the plugin id.
-    let names = match herdr_call(client.inner(), "plugin.list", json!({})).await {
-        Ok(list) => herdr::parse_plugin_names(&list),
-        Err(_) => Default::default(),
-    };
-    Ok(herdr::parse_plugin_actions(&result, &names))
-}
-
-/// Runs a plugin action (`plugin.action.invoke`) with the focused pane and workspace as context.
-#[tauri::command]
-async fn plugin_invoke(
-    client: State<'_, Client>,
-    plugin_id: String,
-    action_id: String,
-    context: herdr::PluginContext,
-) -> Result<(), String> {
-    let params = herdr::plugin_invoke_params(&plugin_id, &action_id, &context);
-    herdr_call(client.inner(), "plugin.action.invoke", params).await?;
-    Ok(())
-}
-
-/// The deliver board for every repository among the pane directories of the herdr session: runs the
-/// plugin's `data` action per repository (ADR 0004). Repositories come from herdr's own panes, so
-/// only known spaces are ever passed to the plugin. Read-only.
-#[tauri::command]
-async fn deliver_board(
-    client: State<'_, Client>,
-    bin: State<'_, HerdrBin>,
-) -> Result<plugin_view::BoardView, String> {
-    let client = client.inner().clone();
-    let herdr_bin = bin.0.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let list = client
-            .request("plugin.list", json!({}))
-            .map_err(|e| e.to_string())?;
-        let panes = client
-            .request("pane.list", json!({}))
-            .map_err(|e| e.to_string())?;
-        let mut dirs: Vec<String> = panes["panes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|p| {
-                ["foreground_cwd", "cwd"]
-                    .iter()
-                    .find_map(|k| p.get(*k)?.as_str().filter(|s| !s.is_empty()))
-                    .map(str::to_owned)
-            })
-            .collect();
-        dirs.sort();
-        dirs.dedup();
-        let roots = git::repo_roots(&dirs);
-        let state = plugin_state_dir("deliver-board");
-        Ok(plugin_view::load_board(&list, &roots, &state, &herdr_bin))
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 type GithubClient = std::sync::Arc<github::Client<github::SystemRunner>>;
 
 /// Open pull requests of the GitHub repositories among `dirs` (space and explorer directories),
@@ -329,64 +265,6 @@ async fn github_milestones(
     tauri::async_runtime::spawn_blocking(move || github_milestones::load(&client, &dirs))
         .await
         .map_err(|e| e.to_string())
-}
-
-/// Where poimen keeps the state (the `gh` cache) of a plugin it runs itself: herdr does not report
-/// the plugin's own state directory, so it is `~/.config/poimen/plugin-state/<id>`.
-fn plugin_state_dir(plugin_id: &str) -> PathBuf {
-    plugin_state_dir_in(&home_dir().unwrap_or_default(), plugin_id)
-}
-
-/// Under `<home>/.config/poimen` on every system, Windows included (see `settings::config_path`).
-fn plugin_state_dir_in(home: &Path, plugin_id: &str) -> PathBuf {
-    home.join(".config")
-        .join("poimen")
-        .join("plugin-state")
-        .join(plugin_id)
-}
-
-/// Lists the panes plugins declare (`panes[]` of `plugin.list`).
-#[tauri::command]
-async fn plugin_pane_defs(client: State<'_, Client>) -> Result<Vec<herdr::PluginPaneDef>, String> {
-    let result = herdr_call(client.inner(), "plugin.list", json!({})).await?;
-    Ok(herdr::parse_plugin_pane_defs(&result))
-}
-
-/// Opens a plugin pane as a tab (`plugin.pane.open`); returns the pane herdr created.
-#[tauri::command]
-async fn plugin_pane_open(
-    client: State<'_, Client>,
-    plugin_id: String,
-    entrypoint: String,
-    workspace_id: Option<String>,
-) -> Result<herdr::PluginPane, String> {
-    let params = herdr::plugin_pane_open_params(&plugin_id, &entrypoint, workspace_id.as_deref());
-    let result = herdr_call(client.inner(), "plugin.pane.open", params).await?;
-    herdr::parse_plugin_pane(&result).ok_or_else(|| "herdr answered without a plugin pane".into())
-}
-
-/// Focuses a plugin pane in herdr (`plugin.pane.focus`).
-#[tauri::command]
-async fn plugin_pane_focus(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
-    herdr_call(
-        client.inner(),
-        "plugin.pane.focus",
-        json!({ "pane_id": pane_id }),
-    )
-    .await?;
-    Ok(())
-}
-
-/// Closes a plugin pane in herdr (`plugin.pane.close`); only on an explicit user action.
-#[tauri::command]
-async fn plugin_pane_close(client: State<'_, Client>, pane_id: String) -> Result<(), String> {
-    herdr_call(
-        client.inner(),
-        "plugin.pane.close",
-        json!({ "pane_id": pane_id }),
-    )
-    .await?;
-    Ok(())
 }
 
 /// Opens a new terminal in a workspace as a new tab (`tab.create`); returns its pane id.
@@ -983,16 +861,9 @@ pub fn run() {
             agent_prompt,
             pane_rename,
             terminal_create,
-            plugin_actions,
-            plugin_invoke,
-            plugin_pane_defs,
-            deliver_board,
             github_pulls,
             github_issues,
             github_milestones,
-            plugin_pane_open,
-            plugin_pane_focus,
-            plugin_pane_close,
             create_space,
             list_dirs,
             list_child_dirs,
@@ -1026,25 +897,6 @@ pub fn run() {
                 app.state::<Sessions>().close_all();
             }
         });
-}
-
-#[cfg(test)]
-mod plugin_state_tests {
-    use super::plugin_state_dir_in;
-    use std::path::Path;
-
-    #[test]
-    fn plugin_state_lives_under_the_poimen_config_of_the_home() {
-        let expected = Path::new("/h")
-            .join(".config")
-            .join("poimen")
-            .join("plugin-state")
-            .join("deliver-board");
-        assert_eq!(
-            plugin_state_dir_in(Path::new("/h"), "deliver-board"),
-            expected
-        );
-    }
 }
 
 #[cfg(test)]

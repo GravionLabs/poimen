@@ -80,48 +80,23 @@ describe("isDoubleClick", () => {
   });
 });
 
-describe("sidebarMenuItems with plugin actions", () => {
-  const act = (plugin_id: string, action_id: string, title: string, plugin_name?: string) => ({
-    plugin_id,
-    plugin_name,
-    action_id,
-    title,
-    description: null,
-  });
-
-  it("puts built-in actions first, then one group per plugin by name and title", () => {
-    const groups = sidebarMenuItems("pane", [
-      act("review-popup", "open", "Review", "Review Popup"),
-      act("deliver-board", "start", "Start deliver", "Deliver Board"),
-      act("deliver-board", "open", "Open board", "Deliver Board"),
-    ]);
-    expect(groups.map((g) => g.label)).toEqual([null, "Deliver Board", "Review Popup"]);
-    expect(groups[0].items).toHaveLength(5);
-    expect(groups[1].items).toEqual([
-      { action: 'plugin:["deliver-board","open"]', label: "Open board" },
-      { action: 'plugin:["deliver-board","start"]', label: "Start deliver" },
+describe("sidebarMenuItems", () => {
+  it("offers the built-in pane actions in one group", () => {
+    const groups = sidebarMenuItems("pane");
+    expect(groups.map((g) => g.label)).toEqual([null]);
+    expect(groups[0].items.map((i) => i.label)).toEqual([
+      "Split right",
+      "Split down",
+      "Start agent...",
+      "Rename...",
+      "Close pane...",
     ]);
   });
 
-  it("orders by plugin name, not id, and falls back to the id without a name", () => {
-    const groups = sidebarMenuItems("pane", [
-      act("a-id", "1", "X", "Zeta"),
-      act("z-id", "1", "X", "Alpha"),
-      act("m", "1", "X"),
-    ]);
-    expect(groups.slice(1).map((g) => g.label)).toEqual(["Alpha", "m", "Zeta"]);
-  });
-
-  it("keeps the order stable regardless of the input order", () => {
-    const a = [act("b", "1", "Y"), act("a", "2", "Z"), act("a", "3", "X")];
-    expect(sidebarMenuItems("pane", a)).toEqual(sidebarMenuItems("pane", [...a].reverse()));
-  });
-
-  it("makes no group for a plugin without actions and none on a workspace row", () => {
-    expect(sidebarMenuItems("pane")).toHaveLength(1);
-    const groups = sidebarMenuItems("workspace", [act("p", "x", "X")]);
+  it("offers new terminal and close space on a workspace row", () => {
+    const groups = sidebarMenuItems("workspace");
     expect(groups).toHaveLength(1);
-    expect(groups[0].items).toHaveLength(2);
+    expect(groups[0].items.map((i) => i.action)).toEqual(["new-terminal", "close-space"]);
   });
 });
 

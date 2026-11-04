@@ -8,7 +8,7 @@ poimen is a window onto [herdr](https://herdr.dev); it does not work without it.
 2. Make sure `herdr` is on the `PATH` of your **login shell** (check with `herdr --version` in a new terminal). A macOS app does not see your shell's `PATH`, so poimen reads it from your login shell and also looks in Homebrew, `~/.local/bin` and `~/.cargo/bin`. `HERDR_BIN_PATH` overrides the lookup.
 3. You do not have to start the server. poimen starts a detached `herdr server` when nothing listens on the socket, and never restarts or stops one that answers. The setting `herdr.autoStart` turns this off.
 
-Optional: Claude Code or GitHub Copilot CLI for the subagent and Flow views, and the herdr plugin `deliver-board` for the Deliver board (until the built-in GitHub views replace it).
+Optional: Claude Code or GitHub Copilot CLI for the subagent and Flow views.
 
 ## Download
 

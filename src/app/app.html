@@ -1,8 +1,4 @@
 <app-toolbar
-  [plugins]="plugins.actions()"
-  [pluginsError]="plugins.error()"
-  (pluginsOpened)="loadPlugins()"
-  (pluginChosen)="onPluginChosen($event)"
   [outputOpen]="ui.panelOpen()"
   (outputToggle)="ui.togglePanel()"
   [theme]="theme$()"
@@ -28,7 +24,6 @@
           [activeId]="editor.activeId()"
           (selected)="open($event)"
           (pinned)="open($event, true)"
-          [pluginActions]="plugins.actions()"
           (menuAction)="onSidebarMenu($event)"
         />
       }
@@ -100,12 +95,7 @@
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
 <app-space-dialog (closed)="onSpaceClosed($event)" />
 <app-shortcuts-dialog />
-<app-command-palette
-  [activePaneId]="activePaneId()"
-  (commandChosen)="run($event)"
-  (paneChosen)="openPluginPane($event)"
-  (failed)="showError($event)"
-/>
+<app-command-palette (commandChosen)="run($event)" />
 
 <ng-template #nodeTpl let-node>
   @if (node.kind === "split") {
@@ -135,7 +125,7 @@
           [activeId]="g.activeId"
           [groupId]="'' + g.id"
           [menu]="menuFor(g)"
-          (selected)="onTabSelected($event)"
+          (selected)="editor.activate($event)"
           (closed)="editor.close($event)"
           (pinned)="editor.pin($event)"
           (moved)="editor.move($event.from, $event.to, g.id)"
@@ -143,9 +133,7 @@
           (menuAction)="onTabMenu($event.id, $event.action)"
         >
           <ng-template #tabContent let-tab>
-            @if (isBoard(tab.id)) {
-              <span class="mode ro" title="Native view">BD</span>
-            } @else if (isGithub(tab.id)) {
+            @if (isGithub(tab.id)) {
               <span class="mode ro" title="GitHub">GH</span>
             } @else if (isFlow(tab.id)) {
               <span class="mode ro" title="Agent flow">FL</span>
@@ -172,9 +160,6 @@
         </app-tab-bar>
         @if (isSettings(g.activeId)) {
           <app-settings-view />
-        }
-        @if (isBoard(g.activeId)) {
-          <app-deliver-board-view (terminalRequested)="openTerminalBoard()" />
         }
         @if (isGithub(g.activeId)) {
           <app-github-view />
