@@ -222,6 +222,19 @@ fn load_repo<R: Runner>(client: &Client<R>, repo: &Repo, closed: bool) -> Outcom
     }
 }
 
+/// The GitHub repositories among `dirs` as (root, repository), once each (case-insensitive).
+pub fn unique_repos(dirs: &[String]) -> Vec<(String, Repo)> {
+    let mut seen = std::collections::HashSet::new();
+    git::repo_roots(dirs)
+        .into_iter()
+        .filter_map(|root| {
+            let repo = repo_of(std::path::Path::new(&root))?;
+            seen.insert((repo.owner.to_lowercase(), repo.name.to_lowercase()))
+                .then_some((root, repo))
+        })
+        .collect()
+}
+
 /// Issues of the GitHub repositories among `dirs` (worktrees count as their main repository;
 /// directories without a GitHub `origin` are left out).
 pub fn load<R: Runner + Sync>(
@@ -229,15 +242,7 @@ pub fn load<R: Runner + Sync>(
     dirs: &[String],
     closed: bool,
 ) -> Vec<RepoIssues> {
-    let mut seen = std::collections::HashSet::new();
-    let repos: Vec<(String, Repo)> = git::repo_roots(dirs)
-        .into_iter()
-        .filter_map(|root| {
-            let repo = repo_of(std::path::Path::new(&root))?;
-            seen.insert((repo.owner.to_lowercase(), repo.name.to_lowercase()))
-                .then_some((root, repo))
-        })
-        .collect();
+    let repos = unique_repos(dirs);
     std::thread::scope(|scope| {
         let handles: Vec<_> = repos
             .iter()

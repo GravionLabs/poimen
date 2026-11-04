@@ -137,6 +137,22 @@ describe("filterTree and flattenTree", () => {
     expect(rows({ text: "nothing" })).toEqual([]);
   });
 
+  it("filters by milestone title and keeps the ancestors", () => {
+    const withMilestone = buildTree("o/n", [
+      issue(1, { labels: ["epic"] }),
+      issue(2, { parent: parent(1), milestone: "1.2.0" }),
+      issue(3, { parent: parent(1), milestone: "1.3.0" }),
+      issue(4),
+    ]);
+    const numbers = (milestone: string | null) =>
+      flattenTree(filterTree(withMilestone, { ...NO_ISSUE_FILTER, milestone }), () => false).map(
+        (r) => r.node.issue.number,
+      );
+    expect(numbers("1.2.0")).toEqual([1, 2]);
+    expect(numbers("9.9.9")).toEqual([]);
+    expect(numbers(null)).toEqual([1, 2, 3, 4]);
+  });
+
   it("leaves out the children of collapsed nodes", () => {
     const flat = flattenTree(tree, (n) => n === 1);
     expect(flat.map((r) => [r.node.issue.number, r.depth, r.collapsed])).toEqual([

@@ -10,6 +10,7 @@ import { UI_STORAGE } from "../core/ui-state";
 import { tauri } from "../core/tauri.mock";
 import { GithubView } from "./github-view";
 import { IssuesSection } from "./issues-section";
+import { MilestonesSection } from "./milestones-section";
 import {
   GithubPulls,
   ageText,
@@ -96,6 +97,13 @@ async function render(result: PullsResult = RESULT) {
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/github/issues-section.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(MilestonesSection, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/milestones-section.html", "utf8"),
     },
   });
   const fixture = TestBed.createComponent(GithubView);
