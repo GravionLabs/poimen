@@ -13,6 +13,7 @@ import {
   type PaletteItem,
   type PoimenCommand,
 } from "../core/command-palette";
+import { titleParts } from "./title-parts";
 import type { PluginPaneDef } from "../core/plugin-panes";
 
 /** The command palette dialog: type to filter, arrows to move, Enter to run, Escape to close. */
@@ -40,6 +41,11 @@ export class CommandPalette {
     });
   }
 
+  /** The title of a row as runs of text; matched characters are flagged for highlighting. */
+  protected parts(title: string, positions: readonly number[]): { text: string; hit: boolean }[] {
+    return titleParts(title, positions);
+  }
+
   protected type(event: Event): void {
     this.palette.setQuery((event.target as HTMLInputElement).value);
   }
@@ -56,6 +62,7 @@ export class CommandPalette {
   }
 
   protected async run(item: PaletteItem): Promise<void> {
+    this.palette.recordRun(item);
     this.palette.close();
     if (item.kind === "command") {
       this.commandChosen.emit(item.command);
