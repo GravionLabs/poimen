@@ -13,7 +13,7 @@ export interface Milestone {
   dueOn: string | null;
   open: number;
   closed: number;
-  /** The lowest `x.y.z` milestone with open issues. */
+  /** The lowest versioned milestone (`x.y.z`, `M<n>` or `M<n> (x.y.z)`) with open issues. */
   current: boolean;
 }
 
