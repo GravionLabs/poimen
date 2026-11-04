@@ -1,8 +1,10 @@
 # ADR 0004: Native views for herdr plugins
 
-- Status: Proposed
+- Status: Superseded by [ADR 0005](0005-github-views-and-agent-harnesses.md) (plugin view contract)
 - Date: 2026-11-02
 - Issues: #42, Feature #14
+
+> Superseded: poimen builds these views in (ADR 0005) and removes its herdr plugin integration (#234). Kept for the record.
 
 ## Context
 
