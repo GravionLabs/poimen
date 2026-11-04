@@ -14,6 +14,8 @@ export const PANEL_DEFAULT_HEIGHT = 260;
 /** Tabs of the bottom panel: subagent transcripts (Output) and the run as a graph (Flow). */
 export const PANEL_TABS = ["output", "flow"] as const;
 export const DEFAULT_PANEL_TAB = "output";
+/** How many run command palette entries are remembered as "Recent". */
+export const RECENT_COMMANDS_LIMIT = 5;
 export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
@@ -53,6 +55,8 @@ export interface LayoutState {
   panelOpen: boolean;
   panelHeight: number;
   panelTab: string;
+  /** Keys of the last command palette entries run, newest first. */
+  recentCommands?: string[];
 }
 
 export function clampPanelHeight(height: number): number {
@@ -104,6 +108,7 @@ export function parseLayout(raw: string | null): LayoutState {
       panelOpen,
       panelHeight,
       panelTab,
+      recentCommands,
     } = data as Record<string, unknown>;
     if (typeof sidebarWidth === "number") state.sidebarWidth = clampSidebarWidth(sidebarWidth);
     if (typeof sidebarCollapsed === "boolean") state.sidebarCollapsed = sidebarCollapsed;
@@ -127,6 +132,10 @@ export function parseLayout(raw: string | null): LayoutState {
     if (typeof panelHeight === "number") state.panelHeight = clampPanelHeight(panelHeight);
     if (typeof panelTab === "string" && (PANEL_TABS as readonly string[]).includes(panelTab)) {
       state.panelTab = panelTab;
+    }
+    if (Array.isArray(recentCommands)) {
+      const keys = recentCommands.filter((k): k is string => typeof k === "string" && k !== "");
+      state.recentCommands = [...new Set(keys)].slice(0, RECENT_COMMANDS_LIMIT);
     }
     if (editor !== undefined) state.editor = editor;
   } catch {
@@ -157,6 +166,8 @@ export class UiState {
   readonly panelOpen = signal(this.initial.panelOpen);
   readonly panelHeight = signal(this.initial.panelHeight);
   readonly panelTab = signal(this.initial.panelTab);
+  /** Keys of the last command palette entries run, newest first (at most 5). */
+  readonly recentCommands = signal<readonly string[]>(this.initial.recentCommands ?? []);
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -184,6 +195,15 @@ export class UiState {
     if (!(PANEL_TABS as readonly string[]).includes(tab)) return;
     this.panelTab.set(tab);
     this.panelOpen.set(true);
+    this.save();
+  }
+
+  /** Remembers a run command palette entry as the newest "Recent" one. */
+  addRecentCommand(key: string): void {
+    if (!key) return;
+    this.recentCommands.update((keys) =>
+      [key, ...keys.filter((k) => k !== key)].slice(0, RECENT_COMMANDS_LIMIT),
+    );
     this.save();
   }
 
@@ -270,6 +290,7 @@ export class UiState {
       panelOpen: this.panelOpen(),
       panelHeight: this.panelHeight(),
       panelTab: this.panelTab(),
+      recentCommands: this.recentCommands().length ? [...this.recentCommands()] : undefined,
       pluginPanes: Object.keys(this.pluginPanes()).length ? { ...this.pluginPanes() } : undefined,
     };
     try {

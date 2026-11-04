@@ -7,36 +7,65 @@
     (click)="palette.close()"
   ></button>
   <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
-    <input
-      #field
-      class="query"
-      type="text"
-      role="combobox"
-      aria-expanded="true"
-      aria-controls="palette-list"
-      placeholder="Type a command or plugin action"
-      [value]="palette.query()"
-      (input)="type($event)"
-      (keydown)="key($event)"
-    />
+    <div class="search">
+      <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="6.5" cy="6.5" r="4.5" />
+        <path d="M10 10l4.5 4.5" />
+      </svg>
+      <input
+        #field
+        class="query"
+        type="text"
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="palette-list"
+        placeholder="Type an action name"
+        [value]="palette.query()"
+        (input)="type($event)"
+        (keydown)="key($event)"
+      />
+    </div>
     @if (palette.loadError(); as error) {
       <p class="warn">Plugin actions are unavailable: {{ error }}</p>
     }
     <ul id="palette-list" role="listbox">
-      @for (item of palette.items(); track item.key; let i = $index) {
-        <li
-          role="option"
-          [class.selected]="i === palette.selected()"
-          [attr.aria-selected]="i === palette.selected()"
-        >
-          <button type="button" tabindex="-1" (click)="run(item)" (mousemove)="palette.hover(i)">
-            <span class="title">{{ item.title }}</span>
-            <span class="hint" [class.plugin]="item.kind === 'plugin'">{{ item.hint }}</span>
-          </button>
-        </li>
+      @for (row of palette.rows(); track row.key) {
+        @if (row.type === "heading") {
+          <li class="heading" role="presentation">{{ row.label }}</li>
+        } @else {
+          <li
+            role="option"
+            [class.selected]="row.index === palette.selected()"
+            [attr.aria-selected]="row.index === palette.selected()"
+          >
+            <button
+              type="button"
+              tabindex="-1"
+              (click)="run(row.item)"
+              (mousemove)="palette.hover(row.index)"
+            >
+              <span class="title">
+                @for (part of parts(row.item.title, row.positions); track $index) {
+                  @if (part.hit) {
+                    <mark>{{ part.text }}</mark>
+                  } @else {
+                    <span>{{ part.text }}</span>
+                  }
+                }
+              </span>
+              @if (row.item.origin) {
+                <span class="origin">{{ row.item.origin }}</span>
+              }
+              @if (row.item.shortcut) {
+                <kbd class="shortcut">{{ row.item.shortcut }}</kbd>
+              }
+            </button>
+          </li>
+        }
       } @empty {
-        <li class="empty">No matching command</li>
+        <li class="empty" role="presentation">No matching command</li>
       }
     </ul>
+    <p class="footer">↑↓ navigate · ↵ run · Esc close</p>
   </div>
 }

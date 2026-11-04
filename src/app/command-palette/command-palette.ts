@@ -13,6 +13,7 @@ import {
   type PaletteItem,
   type PoimenCommand,
 } from "../core/command-palette";
+import { titleParts } from "./title-parts";
 import type { PluginPaneDef } from "../core/plugin-panes";
 
 /** The command palette dialog: type to filter, arrows to move, Enter to run, Escape to close. */
@@ -24,6 +25,7 @@ import type { PluginPaneDef } from "../core/plugin-panes";
 })
 export class CommandPalette {
   protected readonly palette = inject(Palette);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The pane that has focus in the editor; the context of a plugin action. */
   readonly activePaneId = input<string | null>(null);
   /** A poimen command was chosen; the host runs it. */
@@ -38,6 +40,18 @@ export class CommandPalette {
     effect(() => {
       if (this.palette.isOpen()) this.field()?.nativeElement.focus();
     });
+    effect(() => {
+      this.palette.selected();
+      if (!this.palette.isOpen()) return;
+      queueMicrotask(() =>
+        this.host.nativeElement.querySelector(".selected")?.scrollIntoView({ block: "nearest" }),
+      );
+    });
+  }
+
+  /** The title of a row as runs of text; matched characters are flagged for highlighting. */
+  protected parts(title: string, positions: readonly number[]): { text: string; hit: boolean }[] {
+    return titleParts(title, positions);
   }
 
   protected type(event: Event): void {
@@ -56,6 +70,7 @@ export class CommandPalette {
   }
 
   protected async run(item: PaletteItem): Promise<void> {
+    this.palette.recordRun(item);
     this.palette.close();
     if (item.kind === "command") {
       this.commandChosen.emit(item.command);
