@@ -5,6 +5,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.0] — 2026-11-04
+
+### Bug Fixes
+- **sidebar**: Reach the focused treeitem with ::ng-deep to show the close icon (#290)
+- **command-palette**: Popup is centred on the window instead of the terminal (#292) (#297)
+- **command-palette**: Centre the popup on the editor area (#292)
+- **command-palette**: Fall back to window centre when no tab is open (#292)
+
+
+### Documentation
+- **site**: Stop publishing the ADRs on the site (#289) (#291)
+
+
+### Features
+- **sidebar**: Close a space with an icon left of the chevron (#290) (#295)
+- **sidebar**: Close a space with an icon left of the chevron (#290)
+- **prompt-bar**: Show the prompt bar only in read-only agent tabs (#293) (#296)
+
+
 ## [0.6.0] — 2026-11-04
 
 ### Bug Fixes
@@ -38,6 +57,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **site**: Real screenshots of sidebar, tabs and color schemes (#216) (#266)
 - **site**: Real screenshots of sidebar, tabs and color schemes (#216)
 - **site**: Fix the color scheme screenshot file names (#216)
+- Update CHANGELOG.md for v0.6.0 [skip ci]
 
 
 ### Features
