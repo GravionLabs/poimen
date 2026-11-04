@@ -5,6 +5,14 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.9.0] — 2026-11-04
+
+### Features
+- **status-bar**: Help and update link on the far right, items separated by | (#326)
+- **project**: Run the setup command in a new space (#328)
+- **project**: Task modes per repository (#329)
+
+
 ## [0.8.0] — 2026-11-04
 
 ### Bug Fixes
@@ -15,6 +23,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Name milestones M<n> while open (#323)
 - Name milestones M<n> while open
 - Closed milestones are renumbered M1 to M7
+- Update CHANGELOG.md for v0.8.0 [skip ci]
 
 
 ### Features
