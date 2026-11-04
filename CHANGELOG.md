@@ -5,6 +5,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.7.1] — 2026-11-04
+
+### Bug Fixes
+- **docs**: Correct close-space and palette placement wording (#302) (#303)
+
+
+### Documentation
+- Describe the 0.6.1 changes in README and site features (#298) (#299)
+
+
 ## [0.7.0] — 2026-11-04
 
 ### Bug Fixes
@@ -16,6 +26,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - **site**: Stop publishing the ADRs on the site (#289) (#291)
+- Update CHANGELOG.md for v0.7.0 [skip ci]
 
 
 ### Features
