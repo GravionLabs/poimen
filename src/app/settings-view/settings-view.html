@@ -152,6 +152,29 @@
     </div>
   </section>
 
+  <section aria-labelledby="notifications-h">
+    <h2 id="notifications-h">Notifications</h2>
+    <p class="hint">
+      System notifications while you do not see the agent's tab in the focused window.
+    </p>
+    <label class="check">
+      <input
+        type="checkbox"
+        [checked]="settings().notifyOnBlocked"
+        (change)="setNotification('blocked', $event)"
+      />
+      When an agent waits for you
+    </label>
+    <label class="check">
+      <input
+        type="checkbox"
+        [checked]="settings().notifyOnDone"
+        (change)="setNotification('done', $event)"
+      />
+      When an agent is done
+    </label>
+  </section>
+
   <section aria-labelledby="herdr-h">
     <h2 id="herdr-h">herdr</h2>
     <label class="check">

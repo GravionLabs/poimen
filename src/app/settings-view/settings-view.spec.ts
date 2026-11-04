@@ -322,4 +322,23 @@ describe("SettingsView explorer section", () => {
     fixture.detectChanges();
     expect(host.querySelector(".error")?.textContent).toContain("read-only");
   });
+
+  it("saves the notification switches", async () => {
+    tauri.reset();
+    const { host } = setup(null, ["~"]);
+    const section = host.querySelector('section[aria-labelledby="notifications-h"]')!;
+    const [blocked, done] = section.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(blocked.checked).toBe(true);
+    expect(done.checked).toBe(true);
+    done.checked = false;
+    done.dispatchEvent(new Event("change"));
+    blocked.checked = false;
+    blocked.dispatchEvent(new Event("change"));
+    await vi.waitFor(() =>
+      expect(tauri.calls("set_notification")).toEqual([
+        { kind: "done", on: false },
+        { kind: "blocked", on: false },
+      ]),
+    );
+  });
 });
