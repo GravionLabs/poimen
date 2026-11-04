@@ -17,6 +17,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: pick }));
 describe("dirName", () => {
   it("is the last path segment", () => {
     expect(dirName("/work/app")).toBe("app");
+    expect(dirName("C:\\work\\app\\")).toBe("app");
     expect(dirName("/work/app/ ")).toBe("app");
     expect(dirName("")).toBe("");
   });

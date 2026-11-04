@@ -1,5 +1,6 @@
 import { Injector } from "@angular/core";
 import { describe, expect, it } from "vitest";
+import { notificationMessage } from "./notification-center";
 import { Notifier, type NotifyContext } from "./notifier";
 import { TauriBridge } from "./tauri";
 
@@ -56,6 +57,21 @@ describe("Notifier", () => {
       ctx(),
     );
     expect(sent).toEqual(["tab p1 is waiting for you", "tab p2 is done"]);
+  });
+
+  it("words the system notification like the notification center", () => {
+    const { notifier, sent, ctx } = setup();
+    notifier.notify(
+      [
+        { paneId: "p1", status: "blocked" },
+        { paneId: "p2", status: "done" },
+      ],
+      ctx(),
+    );
+    expect(sent).toEqual([
+      notificationMessage("tab p1", "blocked"),
+      notificationMessage("tab p2", "done"),
+    ]);
   });
 
   it("stays quiet for a visible tab in a focused window, but not for another tab", () => {
