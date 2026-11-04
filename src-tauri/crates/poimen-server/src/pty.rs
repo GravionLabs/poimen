@@ -2,7 +2,9 @@
 
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use poimen_protocol::{ENV_SOCKET, ENV_TERMINAL_ID};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -79,11 +81,24 @@ pub(crate) fn program_name(program: &str) -> String {
         .to_string()
 }
 
-/// Starts the command in a new PTY. `on_exit` runs on a helper thread when the process ends,
-/// with its exit code. Output is drained and dropped (streaming comes with the next protocol
-/// version), so a chatty child never blocks on a full PTY buffer.
+/// Output is passed on in batches: what arrives within this time, up to [`MAX_BATCH`] bytes.
+const COALESCE: Duration = Duration::from_millis(4);
+pub(crate) const MAX_BATCH: usize = 32 * 1024;
+/// How long the exit report waits for the output of the dead process to be handled.
+const DRAIN_WAIT: Duration = Duration::from_secs(1);
+
+enum Chunk {
+    Data(Vec<u8>),
+    Eof,
+}
+
+/// Starts the command in a new PTY. A reader thread drains the PTY (a chatty child only blocks
+/// when `on_output` is slow), a second thread coalesces what it reads and calls `on_output`
+/// with batches of at most [`MAX_BATCH`] bytes. `on_exit` runs on a helper thread when the
+/// process ends, with its exit code, after the output has been handled.
 pub(crate) fn spawn(
     spec: &SpawnSpec<'_>,
+    mut on_output: impl FnMut(&[u8]) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Result<Pty, String> {
     let pair = native_pty_system()
@@ -108,12 +123,43 @@ pub(crate) fn spawn(
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
+    let (tx, rx) = mpsc::sync_channel::<Chunk>(32);
+    let (drained_tx, drained_rx) = mpsc::channel::<()>();
     thread::spawn(move || {
-        let mut buf = [0u8; 8192];
-        while matches!(reader.read(&mut buf), Ok(n) if n > 0) {}
+        let mut buf = [0u8; 16 * 1024];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 || tx.send(Chunk::Data(buf[..n].to_vec())).is_err() {
+                break;
+            }
+        }
+        let _ = tx.send(Chunk::Eof);
+    });
+    thread::spawn(move || {
+        while let Ok(Chunk::Data(mut batch)) = rx.recv() {
+            let deadline = Instant::now() + COALESCE;
+            let mut eof = false;
+            while batch.len() < MAX_BATCH {
+                let left = deadline.saturating_duration_since(Instant::now());
+                match rx.recv_timeout(left) {
+                    Ok(Chunk::Data(d)) => batch.extend_from_slice(&d),
+                    Ok(Chunk::Eof) | Err(RecvTimeoutError::Disconnected) => {
+                        eof = true;
+                        break;
+                    }
+                    Err(RecvTimeoutError::Timeout) => break,
+                }
+            }
+            on_output(&batch);
+            if eof {
+                break;
+            }
+        }
+        let _ = drained_tx.send(());
     });
     thread::spawn(move || {
         let code = child.wait().ok().map(|status| status.exit_code());
+        // A grandchild that keeps the PTY open must not delay the report for ever.
+        let _ = drained_rx.recv_timeout(DRAIN_WAIT);
         on_exit(code);
     });
 

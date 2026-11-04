@@ -3,6 +3,7 @@
 //!
 //! Requests use short-lived connections; [`Client::subscribe`] keeps its connection open.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -11,9 +12,9 @@ use std::time::Duration;
 
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
-    ErrorCode, Event, PingResult, Request, ServerLine, Space, SpaceClose, SpaceCreate, SpaceRename,
-    Terminal, TerminalClose, TerminalCreate, TerminalInput, TerminalList, TerminalRename,
-    TerminalResize,
+    AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, Space, SpaceClose,
+    SpaceCreate, SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate,
+    TerminalInput, TerminalList, TerminalRename, TerminalResize,
 };
 use serde_json::{Value, json};
 
@@ -226,6 +227,29 @@ impl Client {
         .map(drop)
     }
 
+    /// Attaches to a terminal on a connection of its own. The result carries the snapshot; the
+    /// [`Attachment`] then yields the stream records and sends input and resizes on the same
+    /// connection (the server accepts those only from the controller).
+    pub fn attach(
+        &self,
+        terminal_id: &str,
+        mode: AttachMode,
+        take_over: bool,
+    ) -> Result<Attachment, ClientError> {
+        let mut conn = Connection::open(&self.path, None)?;
+        let result = conn.call(
+            "terminal.attach",
+            to_value(&TerminalAttach {
+                terminal_id: terminal_id.into(),
+                mode,
+                take_over,
+            }),
+        )?;
+        let info: AttachResult = serde_json::from_value(result)
+            .map_err(|e| ClientError::Protocol(format!("terminal.attach: {e}")))?;
+        Ok(Attachment { info, conn })
+    }
+
     pub fn resize(&self, terminal_id: &str, cols: u16, rows: u16) -> Result<(), ClientError> {
         self.request(
             "terminal.resize",
@@ -239,6 +263,63 @@ impl Client {
     }
 }
 
+/// A connection attached to a terminal. Dropping it detaches.
+pub struct Attachment {
+    pub info: AttachResult,
+    #[cfg_attr(not(unix), allow(dead_code))]
+    conn: Connection,
+}
+
+impl Attachment {
+    /// Sets how long [`Attachment::next_record`] waits for a record (`None`: for ever).
+    #[cfg(unix)]
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<(), ClientError> {
+        self.conn
+            .reader
+            .get_ref()
+            .set_read_timeout(timeout)
+            .map_err(ClientError::Io)
+    }
+
+    /// The next stream record (`terminal.output`, `terminal.resized`, `terminal.detached`,
+    /// `terminal.exited`). An error when the connection ended or the wait timed out.
+    #[cfg(unix)]
+    pub fn next_record(&mut self) -> Result<Event, ClientError> {
+        loop {
+            if let Some(event) = self.conn.pending.pop_front() {
+                return Ok(event);
+            }
+            if let ServerLine::Event(event) = self.conn.read_line()? {
+                return Ok(event);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub fn next_record(&mut self) -> Result<Event, ClientError> {
+        unreachable!("connect_stream fails off Unix")
+    }
+
+    /// Input for the terminal (controller only).
+    pub fn input(&mut self, data: &str) -> Result<(), ClientError> {
+        let params = to_value(&TerminalInput {
+            terminal_id: self.info.terminal_id.clone(),
+            data: data.into(),
+        });
+        self.conn.call("terminal.input", params).map(drop)
+    }
+
+    /// Resizes the terminal (controller only; the size change reaches everyone as a record).
+    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), ClientError> {
+        let params = to_value(&TerminalResize {
+            terminal_id: self.info.terminal_id.clone(),
+            cols,
+            rows,
+        });
+        self.conn.call("terminal.resize", params).map(drop)
+    }
+}
+
 fn to_value<T: serde::Serialize>(params: &T) -> Value {
     // The protocol types always serialize.
     serde_json::to_value(params).unwrap_or_else(|_| json!({}))
@@ -246,6 +327,8 @@ fn to_value<T: serde::Serialize>(params: &T) -> Value {
 
 struct Connection {
     reader: BufReader<Stream>,
+    /// Events that arrived while a request waited for its response.
+    pending: VecDeque<Event>,
 }
 
 impl Connection {
@@ -256,6 +339,7 @@ impl Connection {
         stream.set_write_timeout(timeout).map_err(ClientError::Io)?;
         Ok(Self {
             reader: BufReader::new(stream),
+            pending: VecDeque::new(),
         })
     }
 
@@ -283,8 +367,9 @@ impl Connection {
             .map_err(ClientError::Io)?;
         loop {
             match self.read_line()? {
-                // Events may interleave on a subscribed connection; a request waits for its id.
-                ServerLine::Event(_) => {}
+                // Events may interleave on a subscribed or attached connection; a request waits
+                // for its id and keeps them for the reader.
+                ServerLine::Event(event) => self.pending.push_back(event),
                 ServerLine::Response(r) if r.id.as_deref() == Some(&id) || r.id.is_none() => {
                     return match (r.result, r.error) {
                         (_, Some(e)) => Err(ClientError::Server {
@@ -330,6 +415,9 @@ impl Iterator for EventStream {
     #[cfg(unix)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            if let Some(event) = self.conn.pending.pop_front() {
+                return Some(Ok(event));
+            }
             match self.conn.read_line() {
                 Ok(ServerLine::Event(event)) => return Some(Ok(event)),
                 Ok(ServerLine::Response(_)) => {}

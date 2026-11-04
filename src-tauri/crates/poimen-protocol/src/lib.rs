@@ -11,7 +11,7 @@ use serde_json::Value;
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
@@ -164,6 +164,11 @@ pub enum ErrorCode {
     Exited,
     /// The shell or command could not be started.
     SpawnFailed,
+    /// The request needs the controller of the terminal and this connection is not it (an
+    /// observer's input or resize, a resize while another connection controls).
+    NotController,
+    /// The terminal already has a controller and the attach did not ask to take over.
+    Conflict,
     Internal,
 }
 
@@ -321,6 +326,63 @@ pub struct TerminalResize {
     pub rows: u16,
 }
 
+/// How a connection attaches to a terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachMode {
+    /// Receives the output and size changes; cannot send input or resize.
+    Observe,
+    /// The one connection that sends input and sets the size.
+    Control,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalAttach {
+    pub terminal_id: String,
+    pub mode: AttachMode,
+    /// With `control`: replace the current controller (which gets `terminal.detached` with
+    /// reason `taken_over`) instead of failing with `conflict`.
+    #[serde(default)]
+    pub take_over: bool,
+}
+
+/// Result of `terminal.attach`. The records of the stream have a `seq` greater than `seq` here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachResult {
+    pub terminal_id: String,
+    pub seq: u64,
+    pub cols: u16,
+    pub rows: u16,
+    pub mode: AttachMode,
+    /// Base64 of the bytes that bring a fresh emulator of `cols` x `rows` to the current state
+    /// (screen, scrollback, modes, cursor, title). Write it to the emulator as is.
+    pub snapshot: String,
+}
+
+/// Why the server ended an attachment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetachReason {
+    /// The client did not keep up; attach again for a fresh snapshot.
+    Overflow,
+    /// Another connection took over the control.
+    TakenOver,
+    /// The terminal was closed.
+    Closed,
+}
+
+/// Encodes bytes for the wire (standard base64).
+pub fn encode_bytes(data: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(data)
+}
+
+/// Decodes [`encode_bytes`].
+pub fn decode_bytes(data: &str) -> Result<Vec<u8>, base64::DecodeError> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.decode(data)
+}
+
 // --- events ------------------------------------------------------------------------------------
 
 /// An event line: `{"event": "<name>", "data": {...}}`.
@@ -347,6 +409,33 @@ pub enum Event {
         terminal_id: String,
         exit_code: Option<u32>,
     },
+    /// Stream record of an attached connection: raw PTY bytes (base64).
+    #[serde(rename = "terminal.output")]
+    TerminalOutput {
+        terminal_id: String,
+        seq: u64,
+        data: String,
+    },
+    /// Stream record of an attached connection: the controller changed the size.
+    #[serde(rename = "terminal.resized")]
+    TerminalResized {
+        terminal_id: String,
+        seq: u64,
+        cols: u16,
+        rows: u16,
+    },
+    /// Stream record: the server ended this attachment (the process did not exit).
+    #[serde(rename = "terminal.detached")]
+    TerminalDetached {
+        terminal_id: String,
+        reason: DetachReason,
+    },
+    /// A controller attached (subscribers).
+    #[serde(rename = "terminal.controller_attached")]
+    TerminalControllerAttached { terminal_id: String },
+    /// The controller detached or was dropped (subscribers).
+    #[serde(rename = "terminal.controller_detached")]
+    TerminalControllerDetached { terminal_id: String },
     #[serde(rename = "agent.status_changed")]
     AgentStatusChanged {
         terminal_id: String,
@@ -426,6 +515,46 @@ mod tests {
                 agent: None
             }
         );
+    }
+
+    #[test]
+    fn attach_wire_shapes() {
+        let p: TerminalAttach =
+            serde_json::from_value(json!({"terminal_id":"t1","mode":"control","take_over":true}))
+                .unwrap();
+        assert_eq!(p.mode, AttachMode::Control);
+        assert!(p.take_over);
+        let p: TerminalAttach =
+            serde_json::from_value(json!({"terminal_id":"t1","mode":"observe"})).unwrap();
+        assert!(!p.take_over);
+        assert!(
+            serde_json::from_value::<TerminalAttach>(json!({"terminal_id":"t1","mode":"x"}))
+                .is_err()
+        );
+
+        let e = Event::TerminalDetached {
+            terminal_id: "t1".into(),
+            reason: DetachReason::TakenOver,
+        };
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            json!({"event":"terminal.detached","data":{"terminal_id":"t1","reason":"taken_over"}})
+        );
+        let line =
+            r#"{"event":"terminal.output","data":{"terminal_id":"t1","seq":3,"data":"aGk="}}"#;
+        match parse_server_line(line).unwrap() {
+            ServerLine::Event(Event::TerminalOutput { seq, data, .. }) => {
+                assert_eq!((seq, decode_bytes(&data).unwrap()), (3, b"hi".to_vec()));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn bytes_round_trip_including_non_utf8() {
+        let raw = [0u8, 0xff, 0x1b, b'[', 0xc3];
+        assert_eq!(decode_bytes(&encode_bytes(&raw)).unwrap(), raw);
+        assert!(decode_bytes("***").is_err());
     }
 
     #[test]
