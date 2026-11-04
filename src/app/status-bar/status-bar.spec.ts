@@ -128,6 +128,41 @@ describe("mode button", () => {
     expect(opened()).toBe(1);
   });
 
+  it("ends with the versions, the update link and the ? button, in this order", () => {
+    const { root } = render("control", null);
+    const items = Array.from(root.querySelectorAll(".bar > .item"));
+    const kinds = items.map((el) =>
+      el.classList.contains("help-button")
+        ? "help"
+        : el.classList.contains("update-button")
+          ? "update"
+          : el.classList.contains("version") && !el.classList.contains("notice")
+            ? "version"
+            : "other",
+    );
+    expect(kinds.slice(-4)).toEqual(["version", "version", "update", "help"]);
+    expect(items.at(-1)?.classList.contains("help-button")).toBe(true);
+    expect(items.at(-2)?.textContent?.trim()).toBe("Check for updates");
+  });
+
+  it("puts the pane id, mode and size before the versions", () => {
+    const { root } = render("control", null);
+    const items = Array.from(root.querySelectorAll(".bar > .item"));
+    const mode = items.findIndex((el) => el.classList.contains("mode-button"));
+    const firstVersion = items.findIndex(
+      (el) => el.classList.contains("version") && !el.classList.contains("notice"),
+    );
+    expect(mode).toBeGreaterThan(-1);
+    expect(mode).toBeLessThan(firstVersion);
+  });
+
+  it("separates items with a bar that is no element of its own", () => {
+    const { root } = render("control", null);
+    expect(root.querySelectorAll(".bar > .item").length).toBeGreaterThan(4);
+    // CSS draws the bar (.item + .item::before), so a screen reader never meets it.
+    expect(root.textContent).not.toContain("|");
+  });
+
   it("hides the panel button while the panel is open", () => {
     const { root } = render("control", null, true);
     expect(root.querySelector("button.panel-button")).toBeNull();
