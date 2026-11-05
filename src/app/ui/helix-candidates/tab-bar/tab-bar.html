@@ -1,28 +1,42 @@
+@if (overflowing()) {
+  <button
+    type="button"
+    class="hx-tab-nav hx-tab-nav-prev"
+    tabindex="-1"
+    aria-label="Scroll tabs left"
+    (click)="scrollBy(-1)"
+  >
+    ‹
+  </button>
+}
 <div
+  #strip
   class="strip"
   role="tablist"
+  (scroll)="measure()"
+  (wheel)="wheel($event)"
   aria-orientation="horizontal"
-  [class.drop-end]="foreignAt() === tabs().length"
+  [class.drop-end]="foreignAt() === tabs.length"
   (dragover)="stripOver($event)"
   (dragleave)="foreignAt.set(null)"
   (drop)="stripDrop($event)"
 >
-  @for (tab of tabs(); track tab.id; let i = $index) {
+  @for (tab of tabs; track tab.id; let i = $index) {
     <div
       class="tab"
       role="tab"
       draggable="true"
-      [class.active]="tab.id === activeId()"
+      [class.active]="tab.id === activeId"
       [class.preview]="tab.preview"
       [class.attention]="tab.attention"
       [class.drop-before]="
         (dropAt() === i && dragging() !== null && dragging()! > i) || foreignAt() === i
       "
       [class.drop-after]="dropAt() === i && dragging() !== null && dragging()! < i"
-      [attr.aria-selected]="tab.id === activeId()"
-      [attr.tabindex]="tab.id === activeId() ? 0 : -1"
+      [attr.aria-selected]="tab.id === activeId"
+      [attr.tabindex]="tab.id === activeId ? 0 : -1"
       [title]="tab.title ?? tab.label"
-      (click)="selected.emit(tab.id)"
+      (click)="activate(tab.id)"
       (dblclick)="pinned.emit(tab.id)"
       (contextmenu)="openMenu($event, tab.id)"
       (auxclick)="middleClick($event, tab.id)"
@@ -32,7 +46,7 @@
       (drop)="drop($event, i)"
       (dragend)="dragEnd()"
     >
-      @if (tabContent(); as tpl) {
+      @if (tabContent; as tpl) {
         <ng-container [ngTemplateOutlet]="tpl" [ngTemplateOutletContext]="{ $implicit: tab }" />
       }
       @if (tab.group) {
@@ -55,7 +69,58 @@
     </div>
   }
 </div>
+@if (overflowing()) {
+  <button
+    type="button"
+    class="hx-tab-nav hx-tab-nav-next"
+    tabindex="-1"
+    aria-label="Scroll tabs right"
+    (click)="scrollBy(1)"
+  >
+    ›
+  </button>
+}
 <div class="actions"><ng-content /></div>
+@if (overflowing()) {
+  <button
+    type="button"
+    class="hx-tab-nav all-tabs"
+    aria-label="Show all tabs"
+    aria-haspopup="menu"
+    (click)="openAll($event)"
+  >
+    ▾
+  </button>
+}
+@if (allAt(); as at) {
+  <button
+    type="button"
+    class="menu-backdrop"
+    tabindex="-1"
+    aria-label="Close menu"
+    (click)="closeAll()"
+  ></button>
+  <div class="menu all-menu" role="menu" [style.right.px]="at.right" [style.top.px]="at.y">
+    @for (tab of tabs; track tab.id) {
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        [class.active]="tab.id === activeId"
+        [class.attention]="tab.attention"
+        (click)="chooseTab(tab.id)"
+        (keydown.escape)="closeAll()"
+      >
+        <span class="label">{{ tab.group ? tab.group + " / " : "" }}{{ tab.label }}</span>
+        @if (tab.attention) {
+          <span class="mark attention-mark" role="img" aria-label="Needs attention"></span>
+        } @else if (tab.unread) {
+          <span class="mark unread" role="img" aria-label="Unread"></span>
+        }
+      </button>
+    }
+  </div>
+}
 @if (menuAt(); as at) {
   <button
     type="button"
