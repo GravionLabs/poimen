@@ -3,7 +3,7 @@
 Order of work and release assignment for the open issues. A bare `#<n>` is an issue of this repository.
 
 <!-- roadmap:begin intro -->
-Updated 2026-11-04. Last release `v0.9.0`.
+Updated 2026-11-05. Last release `v0.9.0`.
 <!-- roadmap:end -->
 
 ## Where we are
@@ -16,8 +16,8 @@ Updated 2026-11-04. Last release `v0.9.0`.
 | #4 [Epic] Delivery: CI, releases and distribution                                  | open: #16                                                                                                              | not scheduled |
 | #11 [Feature] Remote spaces with tasks                                             | open: #277, #278, #279, #280, #281, #282, #283, #284                                                                   | M12           |
 | #16 [Feature] Distribution                                                         | open: #45                                                                                                              | not scheduled |
-| #64 [Feature] Usage budget from tamias in poimen                                   | no open children                                                                                                       | not scheduled |
-| #148 [Feature] Own terminal backend without herdr                                  | open: #150, #151, #152, #153, #154, #155, #156, #171                                                                   | not scheduled |
+| #64 [Feature] Usage budget from tamias in poimen                                   | open: #359                                                                                                             | not scheduled |
+| #148 [Feature] Own terminal backend without herdr                                  | no open children                                                                                                       | not scheduled |
 | #169 [Feature] Switch to the poimen backend and remove herdr                       | open: #173, #174                                                                                                       | not scheduled |
 | #170 [Feature] poimen console: CLI and attach                                      | open: #172, #175, #176, #177                                                                                           | not scheduled |
 | #179 [Feature] Start a task from a GitHub issue                                    | open: #189, #190, #191, #192, #193, #349                                                                               | not scheduled |
@@ -208,62 +208,60 @@ Updated 2026-11-04. Last release `v0.9.0`.
 <!-- roadmap:begin plan M10 -->
 ## M10
 
-Progress: 0 % (0 of 27 issues closed).
+Progress: 30 % (11 of 37 issues closed).
 
-| Order | Issue | Title                                                                       | Size | Depends on / decision |
-| ----- | ----- | --------------------------------------------------------------------------- | ---- | --------------------- |
-| 1     | #150  | [PBI] refactor(backend): Backend trait over the herdr client                | M    |                       |
-| 2     | #151  | [PBI] feat(server): poimen-server with PTY sessions and socket API          | L    |                       |
-| 3     | #152  | [PBI] feat(server): headless terminal state and attach snapshot             | M    | blocked by #151       |
-| 4     | #153  | [PBI] feat(backend): poimen backend in the app                              | M    | blocked by #150, #152 |
-| 5     | #154  | [PBI] feat(agents): agent status from Claude Code hooks                     | M    | blocked by #151, #153 |
-| 6     | #155  | [PBI] feat(agents): agent status from GitHub Copilot CLI hooks              | M    | blocked by #154       |
-| 7     | #156  | [PBI] feat(agents): start an agent and send a prompt on the poimen backend  | M    | blocked by #154       |
-| 8     | #171  | [PBI] feat(server): answer terminal queries while no app is attached        | S    | blocked by #152       |
-| 9     | #189  | [PBI] feat(tasks): issue picker dialog                                      | M    |                       |
-| 10    | #190  | [PBI] feat(tasks): create the worktree for an issue                         | M    |                       |
-| 11    | #191  | [PBI] feat(tasks): start a task in a new space                              | M    | blocked by #189, #190 |
-| 12    | #192  | [PBI] feat(tasks): clean up merged task worktrees                           | M    | blocked by #191       |
-| 13    | #193  | [PBI] feat(tasks): start a task from an issue link in a terminal            | S    | blocked by #191       |
-| 14    | #236  | [PBI] feat(github): worktree for a pull request                             | M    | blocked by #190       |
-| 15    | #242  | [PBI] feat(changes): diff of a worktree against its base                    | M    |                       |
-| 16    | #243  | [PBI] feat(changes): Changes tab with file list and CodeMirror merge view   | M    | blocked by #242       |
-| 17    | #244  | [PBI] feat(changes): syntax highlighting in the diff                        | S    | blocked by #243       |
-| 18    | #245  | [PBI] feat(changes): line comments sent to the agent as one prompt          | M    | blocked by #243       |
-| 19    | #246  | [PBI] feat(changes): show review findings as comments in the diff           | M    | blocked by #245       |
-| 20    | #247  | [PBI] feat(changes): stage, commit and push from the Changes tab            | M    | blocked by #243       |
-| 21    | #251  | [PBI] feat(sidebar): latest agent notification text per space               | M    | blocked by #154, #155 |
-| 22    | #257  | [PBI] feat(project): teardown before worktree cleanup and on demand         | M    | blocked by #192       |
-| 23    | #258  | [PBI] feat(project): custom commands and presets in the command palette     | M    |                       |
-| 24    | #264  | [PBI] docs(site): screenshots of the Flow tab and the deliver board         | S    |                       |
-| 25    | #332  | [PBI] ci: allow squash and merge on release/**                              | ?    |                       |
-| 26    | #349  | [PBI] refactor(tasks): task modes start agents through the harness registry | M    |                       |
-| 27    | #350  | [PBI] feat(settings): color scheme on the Appearance page                   | S    |                       |
+| Order | Issue | Title                                                                             | Size | Depends on / decision             |
+| ----- | ----- | --------------------------------------------------------------------------------- | ---- | --------------------------------- |
+| 1     | #189  | [PBI] feat(tasks): issue picker dialog                                            | M    |                                   |
+| 2     | #190  | [PBI] feat(tasks): create the worktree for an issue                               | M    |                                   |
+| 3     | #191  | [PBI] feat(tasks): start a task in a new space                                    | M    | blocked by #189, #190             |
+| 4     | #192  | [PBI] feat(tasks): clean up merged task worktrees                                 | M    | blocked by #191                   |
+| 5     | #193  | [PBI] feat(tasks): start a task from an issue link in a terminal                  | S    | blocked by #191                   |
+| 6     | #236  | [PBI] feat(github): worktree for a pull request                                   | M    | blocked by #190                   |
+| 7     | #242  | [PBI] feat(changes): diff of a worktree against its base                          | M    |                                   |
+| 8     | #243  | [PBI] feat(changes): Changes tab with file list and CodeMirror merge view         | M    | blocked by #242                   |
+| 9     | #244  | [PBI] feat(changes): syntax highlighting in the diff                              | S    | blocked by #243                   |
+| 10    | #245  | [PBI] feat(changes): line comments sent to the agent as one prompt                | M    | blocked by #243                   |
+| 11    | #246  | [PBI] feat(changes): show review findings as comments in the diff                 | M    | blocked by #245                   |
+| 12    | #247  | [PBI] feat(changes): stage, commit and push from the Changes tab                  | M    | blocked by #243                   |
+| 13    | #251  | [PBI] feat(sidebar): latest agent notification text per space                     | M    |                                   |
+| 14    | #257  | [PBI] feat(project): teardown before worktree cleanup and on demand               | M    | blocked by #192                   |
+| 15    | #258  | [PBI] feat(project): custom commands and presets in the command palette           | M    |                                   |
+| 16    | #264  | [PBI] docs(site): screenshots of the Flow tab and the deliver board               | S    |                                   |
+| 17    | #349  | [PBI] refactor(tasks): task modes start agents through the harness registry       | M    |                                   |
+| 18    | #350  | [PBI] feat(settings): color scheme on the Appearance page                         | S    |                                   |
+| 19    | #354  | [Bug] fix(github): branch pull request query has an unbalanced brace              | ?    |                                   |
+| 20    | #355  | [Bug] fix(spaces): creating a space silently focuses an existing one              | ?    | `needs-decision`                  |
+| 21    | #356  | [Bug] fix(spaces): closing a space gives no feedback and flashes a disconnect     | ?    |                                   |
+| 22    | #359  | [PBI] feat(status-bar): Claude usage 5h, 7d, 1d and 1m from tamias                | M    | blocked by GravionLabs/tamias#119 |
+| 23    | #360  | [Bug] fix(settings): notification checkboxes are cramped on one line              | ?    |                                   |
+| 24    | #361  | [PBI] feat(settings): terminal and UI font family and size on the Appearance page | M    |                                   |
+| 25    | #370  | [PBI] feat(spaces): rename a space                                                | S    |                                   |
+| 26    | #371  | [Bug] fix(notify): taskbar icon notification count keeps growing                  | ?    |                                   |
 <!-- roadmap:end -->
 
 <!-- roadmap:begin plan M11 -->
 ## M11
 
-Progress: 0 % (0 of 16 issues closed).
+Progress: 0 % (0 of 15 issues closed).
 
-| Order | Issue | Title                                                                               | Size | Depends on / decision                   |
-| ----- | ----- | ----------------------------------------------------------------------------------- | ---- | --------------------------------------- |
-| 1     | #172  | [PBI] docs(adr): poimen console next to the app                                     | S    |                                         |
-| 2     | #173  | [PBI] feat(backend): poimen as the default backend                                  | S    | blocked by #153, #154, #155, #156, #171 |
-| 3     | #174  | [PBI] refactor(backend): remove the herdr backend                                   | M    | blocked by #173, #186                   |
-| 4     | #176  | [PBI] feat(cli): poimen attach for one terminal full screen                         | M    | blocked by #172, #152                   |
-| 5     | #177  | [PBI] build: rename the app binary to poimen-app                                    | S    | blocked by #172                         |
-| 6     | #175  | [PBI] feat(cli): poimen CLI to list and steer terminals and agents                  | M    | blocked by #172, #156, #177             |
-| 7     | #334  | [PBI] feat(github): sub-pages with a left navigation and a shared repository filter | M    |                                         |
-| 8     | #335  | [PBI] feat(github): readable density, status badges and grouped rows                | M    | blocked by #334                         |
-| 9     | #336  | [PBI] feat(github): pull request detail pane                                        | M    | blocked by #334                         |
-| 10    | #337  | [PBI] feat(github): issue detail pane                                               | M    | blocked by #336                         |
-| 11    | #344  | [PBI] feat(github): Inbox sub-page with what needs me                               | S    | blocked by #335                         |
-| 12    | #345  | [PBI] feat(settings): agent actions for issues and pull requests in the config      | M    |                                         |
-| 13    | #346  | [PBI] feat(github): run agent actions at the repository root                        | M    | blocked by #345, #337, #336             |
-| 14    | #347  | [PBI] feat(github): run agent actions in a worktree                                 | S    | blocked by #346, #236, #190, #191       |
-| 15    | #237  | [PBI] feat(github): review agent action with diff-only mode and posting on GitHub   | S    | blocked by #347                         |
-| 16    | #348  | [PBI] feat(github): badge for running agent actions on issues and PRs               | S    | blocked by #346                         |
+| Order | Issue | Title                                                                               | Size | Depends on / decision             |
+| ----- | ----- | ----------------------------------------------------------------------------------- | ---- | --------------------------------- |
+| 1     | #172  | [PBI] docs(adr): poimen console next to the app                                     | S    |                                   |
+| 2     | #173  | [PBI] feat(backend): poimen as the default backend                                  | S    |                                   |
+| 3     | #176  | [PBI] feat(cli): poimen attach for one terminal full screen                         | M    | blocked by #172                   |
+| 4     | #177  | [PBI] build: rename the app binary to poimen-app                                    | S    | blocked by #172                   |
+| 5     | #175  | [PBI] feat(cli): poimen CLI to list and steer terminals and agents                  | M    | blocked by #172, #177             |
+| 6     | #334  | [PBI] feat(github): sub-pages with a left navigation and a shared repository filter | M    |                                   |
+| 7     | #335  | [PBI] feat(github): readable density, status badges and grouped rows                | M    | blocked by #334                   |
+| 8     | #336  | [PBI] feat(github): pull request detail pane                                        | M    | blocked by #334                   |
+| 9     | #337  | [PBI] feat(github): issue detail pane                                               | M    | blocked by #336                   |
+| 10    | #344  | [PBI] feat(github): Inbox sub-page with what needs me                               | S    | blocked by #335                   |
+| 11    | #345  | [PBI] feat(settings): agent actions for issues and pull requests in the config      | M    |                                   |
+| 12    | #346  | [PBI] feat(github): run agent actions at the repository root                        | M    | blocked by #345, #337, #336       |
+| 13    | #347  | [PBI] feat(github): run agent actions in a worktree                                 | S    | blocked by #346, #236, #190, #191 |
+| 14    | #237  | [PBI] feat(github): review agent action with diff-only mode and posting on GitHub   | S    | blocked by #347                   |
+| 15    | #348  | [PBI] feat(github): badge for running agent actions on issues and PRs               | S    | blocked by #346                   |
 <!-- roadmap:end -->
 
 <!-- roadmap:begin plan M12 -->
@@ -274,8 +272,8 @@ Progress: 0 % (0 of 9 issues closed).
 | Order | Issue | Title                                                                              | Size | Depends on / decision       |
 | ----- | ----- | ---------------------------------------------------------------------------------- | ---- | --------------------------- |
 | 1     | #277  | [PBI] docs(adr): remote machines over poimen-server via SSH                        | S    |                             |
-| 2     | #278  | [PBI] feat(server): stdio mode and Linux release builds of poimen-server           | M    | blocked by #277, #151       |
-| 3     | #279  | [PBI] feat(remote): machines in the settings and an SSH connection per machine     | M    | blocked by #278, #153       |
+| 2     | #278  | [PBI] feat(server): stdio mode and Linux release builds of poimen-server           | M    | blocked by #277             |
+| 3     | #279  | [PBI] feat(remote): machines in the settings and an SSH connection per machine     | M    | blocked by #278             |
 | 4     | #280  | [PBI] feat(sidebar): remote machines and their spaces in the sidebar               | M    | blocked by #279             |
 | 5     | #281  | [PBI] feat(remote): machine check for prerequisites                                | S    | blocked by #279             |
 | 6     | #282  | [PBI] refactor(tasks): move worktree logic into a shared crate the server can call | M    | blocked by #190, #278       |
@@ -286,19 +284,20 @@ Progress: 0 % (0 of 9 issues closed).
 <!-- roadmap:begin plan M13 -->
 ## M13
 
-Progress: 0 % (0 of 9 issues closed).
+Progress: 0 % (0 of 10 issues closed).
 
 | Order | Issue | Title                                                                                                  | Size | Depends on / decision |
 | ----- | ----- | ------------------------------------------------------------------------------------------------------ | ---- | --------------------- |
 | 1     | #45   | [PBI] feat(bundle): signed and notarized macOS bundle on release                                       | M    |                       |
-| 2     | #239  | [PBI] feat(github): start a task from the issues tree                                                  | S    | blocked by #191, #346 |
-| 3     | #338  | [PBI] feat(github): review, draft and close actions on a pull request                                  | M    | blocked by #336       |
-| 4     | #339  | [PBI] feat(github): merge a pull request, re-run failed checks and set reviewers, labels and assignees | M    | blocked by #338       |
-| 5     | #238  | [PBI] feat(github): fix failing checks of a pull request with an agent                                 | M    | blocked by #347, #339 |
-| 6     | #340  | [PBI] feat(github): edit an issue from its detail pane                                                 | M    | blocked by #337, #339 |
-| 7     | #341  | [PBI] feat(github): create issues and sub-issues and change the parent                                 | M    | blocked by #340       |
-| 8     | #342  | [PBI] feat(github): multi-select and bulk actions in the issues tree                                   | M    | blocked by #340       |
-| 9     | #343  | [PBI] feat(github): create, edit and close milestones                                                  | S    | blocked by #335, #338 |
+| 2     | #174  | [PBI] refactor(backend): remove the herdr backend                                                      | M    | blocked by #173, #277 |
+| 3     | #239  | [PBI] feat(github): start a task from the issues tree                                                  | S    | blocked by #191, #346 |
+| 4     | #338  | [PBI] feat(github): review, draft and close actions on a pull request                                  | M    | blocked by #336       |
+| 5     | #339  | [PBI] feat(github): merge a pull request, re-run failed checks and set reviewers, labels and assignees | M    | blocked by #338       |
+| 6     | #238  | [PBI] feat(github): fix failing checks of a pull request with an agent                                 | M    | blocked by #347, #339 |
+| 7     | #340  | [PBI] feat(github): edit an issue from its detail pane                                                 | M    | blocked by #337, #339 |
+| 8     | #341  | [PBI] feat(github): create issues and sub-issues and change the parent                                 | M    | blocked by #340       |
+| 9     | #342  | [PBI] feat(github): multi-select and bulk actions in the issues tree                                   | M    | blocked by #340       |
+| 10    | #343  | [PBI] feat(github): create, edit and close milestones                                                  | S    | blocked by #335, #338 |
 <!-- roadmap:end -->
 
 <!-- roadmap:slot plan -->
@@ -308,7 +307,7 @@ Progress: 0 % (0 of 9 issues closed).
 <!-- roadmap:begin later -->
 | Issue | Title                                                              | Why later             |
 | ----- | ------------------------------------------------------------------ | --------------------- |
-| #64   | [Feature] Usage budget from tamias in poimen                       | no milestone          |
+| #148  | [Feature] Own terminal backend without herdr                       | no milestone          |
 | #183  | [Feature] Detect listening ports and open them in the browser      | no milestone          |
 | #184  | [Feature] Prompt editor with file mentions and drag and drop       | no milestone          |
 | #185  | [Feature] One task to several agents and compare the results       | blocked by #179, #181 |
