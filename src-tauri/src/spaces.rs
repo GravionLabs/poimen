@@ -25,9 +25,15 @@ pub struct SpaceOutcome {
     pub trust: Option<crate::trust::TrustRequest>,
 }
 
-fn inside(path: &str, dir: &str) -> bool {
-    let dir = dir.trim_end_matches('/');
-    path == dir || path.starts_with(&format!("{dir}/"))
+/// Whether two directories are the same, ignoring trailing slashes (`/` stays `/`).
+fn same_dir(a: &str, b: &str) -> bool {
+    fn trim(s: &str) -> &str {
+        match s.trim_end_matches('/') {
+            "" if s.starts_with('/') => "/",
+            t => t,
+        }
+    }
+    trim(a) == trim(b)
 }
 
 fn pane_dir(pane: &Value) -> Option<&str> {
@@ -45,15 +51,15 @@ fn panes_of<'a>(workspace: &Value, panes: &'a [Value]) -> Vec<&'a Value> {
         .collect()
 }
 
-/// The space of `dir`: the first with a pane in the directory itself or in an ancestor of it (a
-/// space whose panes sit only in a subdirectory is not the space of `dir`), else one labelled with
-/// the directory name whose panes report no directory elsewhere. `None` when there is none.
+/// The space of `dir`: the first with a pane exactly in the directory (a pane in an ancestor or in
+/// a subdirectory does not count), else one labelled with the directory name whose panes report no
+/// directory other than `dir`. `None` when there is none.
 pub fn find_space(dir: &str, workspaces: &[Value], panes: &[Value]) -> Option<String> {
     let id = |w: &Value| w["workspace_id"].as_str().map(str::to_owned);
     let by_pane = workspaces.iter().find(|w| {
         panes_of(w, panes)
             .iter()
-            .any(|p| pane_dir(p).is_some_and(|d| inside(dir, d)))
+            .any(|p| pane_dir(p).is_some_and(|d| same_dir(dir, d)))
     });
     if let Some(w) = by_pane {
         return id(w);
@@ -65,7 +71,7 @@ pub fn find_space(dir: &str, workspaces: &[Value], panes: &[Value]) -> Option<St
             w["label"].as_str() == Some(name)
                 && panes_of(w, panes)
                     .iter()
-                    .all(|p| pane_dir(p).is_none_or(|d| inside(dir, d)))
+                    .all(|p| pane_dir(p).is_none_or(|d| same_dir(dir, d)))
         })
         .and_then(id)
 }
@@ -231,12 +237,25 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_space_with_a_pane_in_an_ancestor_directory() {
+    fn a_space_with_a_pane_in_an_ancestor_directory_does_not_match() {
         let workspaces = [ws("w1", "other"), ws("w2", "app")];
         let panes = [pane("w1", "/work"), pane("w2", "/elsewhere")];
+        assert_eq!(find_space("/work/app", &workspaces, &panes), None);
+        // Not even through the label: the pane is in another directory.
+        let labelled = [ws("w1", "app")];
+        assert_eq!(find_space("/work/app", &labelled, &panes[..1]), None);
+    }
+
+    #[test]
+    fn an_equal_pane_wins_over_an_ancestor_pane_in_an_earlier_space() {
+        let workspaces = [ws("w1", "gravionlabs"), ws("w2", "x")];
+        let panes = [
+            pane("w1", "/src/gravionlabs"),
+            pane("w2", "/src/gravionlabs/app"),
+        ];
         assert_eq!(
-            find_space("/work/app", &workspaces, &panes),
-            Some("w1".into())
+            find_space("/src/gravionlabs/app", &workspaces, &panes),
+            Some("w2".into())
         );
     }
 
@@ -275,6 +294,16 @@ mod tests {
         let workspaces = [ws("w1", "x")];
         let panes = [pane("w1", "/work/app-two")];
         assert_eq!(find_space("/work/app", &workspaces, &panes), None);
+    }
+
+    #[test]
+    fn the_label_fallback_matches_panes_without_a_directory_or_in_dir() {
+        let workspaces = [ws("w1", "app")];
+        let mixed = [pane("w1", "/work/app"), json!({ "workspace_id": "w1" })];
+        assert_eq!(
+            find_space("/work/app/", &workspaces, &mixed),
+            Some("w1".into())
+        );
     }
 
     #[test]
