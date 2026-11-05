@@ -9,7 +9,7 @@ use crate::github::{Client, GhError, Repo, Runner, repo_of};
 
 pub(crate) const QUERY: &str = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { \
 pullRequests(states: OPEN, first: 50, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { \
-number title url author { login } isDraft additions deletions createdAt headRefName baseRefName \
+number title url author { login } isDraft additions deletions createdAt headRefName isCrossRepository baseRefName \
 reviewDecision reviewRequests(first: 20) { nodes { requestedReviewer { __typename \
 ... on User { login } ... on Team { slug } } } } \
 commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 1) { \
@@ -38,6 +38,8 @@ pub struct Pull {
     pub deletions: u64,
     pub created_at: String,
     pub head_ref: String,
+    /// The head branch lives in a fork (a missing answer counts as a fork).
+    pub is_cross_repository: bool,
     pub base_ref: String,
     /// `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED` or `None` (no review rule).
     pub review_decision: Option<String>,
@@ -153,6 +155,7 @@ fn parse_pull(node: &Value) -> Option<Pull> {
         deletions: count(&node["deletions"]),
         created_at: text(&node["createdAt"]),
         head_ref: text(&node["headRefName"]),
+        is_cross_repository: node["isCrossRepository"].as_bool().unwrap_or(true),
         base_ref: text(&node["baseRefName"]),
         review_decision: node["reviewDecision"].as_str().map(str::to_owned),
         review_requests,
@@ -264,6 +267,7 @@ mod tests {
         assert_eq!(p.review_decision.as_deref(), Some("REVIEW_REQUIRED"));
         assert_eq!(p.review_requests, vec!["octocat", "maintainers"]);
         assert_eq!(p.head_ref, "feat/231-github-pulls-view");
+        assert!(!p.is_cross_repository);
         // 5 + 1 + 1 passed, 1 timed out, 1 in progress + 1 pending, 2 skipped not counted.
         assert_eq!(
             p.checks,

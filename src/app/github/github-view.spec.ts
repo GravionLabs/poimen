@@ -49,6 +49,7 @@ function pull(number: number, over: Partial<Pull> = {}): Pull {
     deletions: 2,
     createdAt: "2026-11-01T00:00:00Z",
     headRef: "b",
+    isCrossRepository: false,
     baseRef: "main",
     reviewDecision: null,
     reviewRequests: [],
@@ -386,6 +387,11 @@ describe("pull request worktrees", () => {
     expect(worktreeOf(pull(1), wts)?.path).toBe("/src/n-pr1");
     expect(worktreeOf(pull(2, { headRef: "feat/b" }), wts)?.path).toBe("/src/n-b");
     expect(worktreeOf(pull(3), wts)).toBeNull();
+  });
+
+  it("does not match a local branch to the head branch of a fork pull request", () => {
+    const wts = [{ path: "/src/n", branch: "main" }];
+    expect(worktreeOf(pull(4, { headRef: "main", isCrossRepository: true }), wts)).toBeNull();
   });
 
   it("shows Open space for a pull request whose head is checked out and focuses its space", async () => {

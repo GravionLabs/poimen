@@ -29,6 +29,7 @@ export interface Pull {
   deletions: number;
   createdAt: string;
   headRef: string;
+  isCrossRepository: boolean;
   baseRef: string;
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   reviewRequests: string[];
@@ -59,11 +60,13 @@ export interface WorktreeInfo {
   branch: string | null;
 }
 
-/** The worktree whose branch is the head of `pull`: `pr/<number>` (fork pull requests) or its head branch. */
+/** The worktree whose branch is the head of `pull`: `pr/<number>`, or the head branch unless the head is in a fork. */
 export function worktreeOf(pull: Pull, worktrees: readonly WorktreeInfo[]): WorktreeInfo | null {
   return (
     worktrees.find((w) => w.branch === `pr/${pull.number}`) ??
-    worktrees.find((w) => w.branch !== null && w.branch === pull.headRef) ??
+    worktrees.find(
+      (w) => !pull.isCrossRepository && w.branch !== null && w.branch === pull.headRef,
+    ) ??
     null
   );
 }
