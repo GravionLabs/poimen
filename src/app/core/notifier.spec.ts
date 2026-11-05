@@ -208,7 +208,9 @@ describe("Notifier", () => {
   });
 
   it("withdraws the notifications of a pane once the user sees it", () => {
-    const { notifier, ids, removed, ctx, seen } = setup();
+    const { notifier, ids, removed, ctx, seen, status } = setup();
+    status.set("p1", "blocked");
+    status.set("p2", "blocked");
     notifier.notify(
       [
         { paneId: "p1", status: "blocked" },
@@ -234,5 +236,51 @@ describe("Notifier", () => {
     seen.add("p1");
     notifier.notify([], ctx());
     expect(removed).toEqual([[ids[0]]]);
+  });
+
+  it("withdraws a blocked notification when the agent resumes unseen", () => {
+    const { notifier, ids, removed, ctx, status } = setup();
+    status.set("p1", "blocked");
+    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx());
+    notifier.notify([], ctx());
+    expect(removed).toEqual([]);
+    status.set("p1", "working");
+    notifier.notify([], ctx());
+    expect(removed).toEqual([[ids[0]]]);
+  });
+
+  it("withdraws a done notification when the pane leaves done", () => {
+    const { notifier, ids, removed, ctx, status } = setup();
+    status.set("p1", "done");
+    notifier.notify([{ paneId: "p1", status: "done" }], ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    status.set("p1", "working");
+    notifier.notify([], ctx());
+    expect(removed).toEqual([[ids[0]]]);
+  });
+
+  it("withdraws and forgets the notifications of a closed pane", () => {
+    const { notifier, ids, removed, ctx } = setup();
+    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx({ status: () => "blocked" }));
+    notifier.notify([], ctx({ status: () => undefined }));
+    expect(removed).toEqual([[ids[0]]]);
+    notifier.notify([], ctx({ status: () => undefined }));
+    expect(removed).toHaveLength(1);
+  });
+
+  it("rechecks on window focus and stops after the returned function is called", () => {
+    const { notifier, ids, removed, ctx, seen, status } = setup();
+    status.set("p1", "blocked");
+    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx());
+    const win = new EventTarget();
+    const stop = notifier.watchFocus(win, () => ctx());
+    seen.add("p1");
+    win.dispatchEvent(new Event("focus"));
+    expect(removed).toEqual([[ids[0]]]);
+    stop();
+    notifier.notify([{ paneId: "p2", status: "blocked" }], ctx());
+    seen.add("p2");
+    win.dispatchEvent(new Event("focus"));
+    expect(removed).toHaveLength(1);
   });
 });
