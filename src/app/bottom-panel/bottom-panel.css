@@ -184,3 +184,13 @@ pre {
 .io.result {
   opacity: 0.9;
 }
+
+.log-line {
+  margin: 2px 0;
+  user-select: text;
+}
+
+.log-line.detail {
+  padding-left: 16px;
+  color: var(--h-text-muted-color);
+}

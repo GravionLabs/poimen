@@ -128,3 +128,14 @@
     }
   }
 }
+@if (ui.panelTab() === "log") {
+  <div class="body" aria-label="Task log">
+    @if (!taskLog.lines().length) {
+      <p class="empty">No task actions yet. "Clean up merged tasks" reports here.</p>
+    } @else {
+      @for (line of taskLog.lines(); track $index) {
+        <pre class="log-line" [class.detail]="line.detail">{{ line.text }}</pre>
+      }
+    }
+  </div>
+}
