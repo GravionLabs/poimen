@@ -509,7 +509,7 @@ describe("SettingsView categories", () => {
       "New space layout",
       "Trusted projects",
       "Backend",
-      "herdr",
+      "Server",
       "Agents",
     ]);
     expect(crumb(host)).toBe("Workspace › Explorer");
@@ -528,8 +528,8 @@ describe("SettingsView categories", () => {
     item(host, "p:herdr").click();
     item(host, "g:workspace").click();
     fixture.detectChanges();
-    expect(crumb(host)).toBe("Backend › herdr");
-    expect(host.textContent).toContain("Start the herdr server");
+    expect(crumb(host)).toBe("Backend › Server");
+    expect(host.textContent).toContain("Start the backend server");
     expect(item(host, "p:explorer")).toBeNull();
     const saved = JSON.parse(mem.data.get(UI_STATE_KEY)!);
     expect(saved.settingsPage).toBe("herdr");
@@ -637,7 +637,7 @@ describe("SettingsView categories", () => {
     const { fixture, host } = setup(undefined, undefined, "appearance");
     press(item(host, "p:herdr"), "Enter");
     fixture.detectChanges();
-    expect(crumb(host)).toBe("Backend › herdr");
+    expect(crumb(host)).toBe("Backend › Server");
     press(item(host, "p:agents"), " ");
     fixture.detectChanges();
     expect(crumb(host)).toBe("Backend › Agents");

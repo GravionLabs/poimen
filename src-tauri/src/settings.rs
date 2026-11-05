@@ -175,7 +175,7 @@ pub struct Settings {
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
     pub explorer_show_hidden: bool,
-    /// The terminal backend (`backend`): `herdr` (default) or `poimen`. Read at start; a change
+    /// The terminal backend (`backend`): `poimen` (default) or `herdr`. Read at start; a change
     /// needs a restart.
     pub backend: String,
     /// Lines of scrollback xterm.js keeps on an emulated stream (`terminal.scrollback`).
@@ -361,7 +361,7 @@ impl Default for Settings {
             sidebar_layout: "tree".into(),
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
-            backend: "herdr".into(),
+            backend: "poimen".into(),
             scrollback: DEFAULT_SCROLLBACK,
             herdr_auto_start: true,
             notify_on_blocked: true,
@@ -746,7 +746,7 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
             s.backend = b.clone();
         }
         Some(other) => s.warnings.push(format!(
-            "backend {other} must be \"herdr\" or \"poimen\"; using herdr"
+            "backend {other} must be \"poimen\" or \"herdr\"; using poimen"
         )),
     }
 
@@ -1578,21 +1578,21 @@ mod tests {
     }
 
     #[test]
-    fn backend_defaults_to_herdr_and_accepts_poimen() {
-        assert_eq!(rows("{}").backend, "herdr");
+    fn backend_defaults_to_poimen_and_keeps_an_explicit_herdr() {
+        assert_eq!(rows("{}").backend, "poimen");
         assert_eq!(rows(r#"{"backend":"poimen"}"#).backend, "poimen");
         assert_eq!(rows(r#"{"backend":"herdr"}"#).backend, "herdr");
     }
 
     #[test]
-    fn an_unknown_backend_warns_and_keeps_herdr() {
+    fn an_unknown_backend_warns_and_keeps_poimen() {
         for json in [
             r#"{"backend":"tmux"}"#,
             r#"{"backend":true}"#,
             r#"{"backend":""}"#,
         ] {
             let s = rows(json);
-            assert_eq!(s.backend, "herdr", "{json}");
+            assert_eq!(s.backend, "poimen", "{json}");
             assert!(
                 s.warnings.iter().any(|w| w.starts_with("backend ")),
                 "{json}"

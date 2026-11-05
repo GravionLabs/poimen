@@ -125,6 +125,8 @@ export interface LayoutState {
   settingsPage?: string;
   /** Ids of the collapsed groups of the settings category tree. */
   settingsCollapsed?: string[];
+  /** The user answered "Not now" to the offer to install the agent hooks of the poimen backend. */
+  hooksOfferDismissed?: boolean;
 }
 
 export function clampPanelHeight(height: number): number {
@@ -182,6 +184,7 @@ export function parseLayout(raw: string | null): LayoutState {
       collapsedIssues,
       settingsPage,
       settingsCollapsed,
+      hooksOfferDismissed,
     } = data as Record<string, unknown>;
     const comments = parseLineComments(lineComments);
     if (Object.keys(comments).length) state.lineComments = comments;
@@ -201,6 +204,7 @@ export function parseLayout(raw: string | null): LayoutState {
       if (entries.length) state.collapsedIssues = Object.fromEntries(entries);
     }
     if (typeof settingsPage === "string" && settingsPage) state.settingsPage = settingsPage;
+    if (hooksOfferDismissed === true) state.hooksOfferDismissed = true;
     if (Array.isArray(settingsCollapsed)) {
       const ids = settingsCollapsed.filter((d): d is string => typeof d === "string" && d !== "");
       if (ids.length) state.settingsCollapsed = [...new Set(ids)];
@@ -283,6 +287,8 @@ export class UiState {
   readonly settingsCollapsed = signal<ReadonlySet<string>>(
     new Set(this.initial.settingsCollapsed ?? []),
   );
+  /** Whether the hooks offer was declined; it is not shown again. */
+  readonly hooksOfferDismissed = signal(this.initial.hooksOfferDismissed === true);
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -319,6 +325,11 @@ export class UiState {
     if (collapsed) next.add(id);
     else next.delete(id);
     this.settingsCollapsed.set(next);
+    this.save();
+  }
+
+  dismissHooksOffer(): void {
+    this.hooksOfferDismissed.set(true);
     this.save();
   }
 
@@ -444,6 +455,7 @@ export class UiState {
       lineComments: Object.keys(this.lineComments()).length ? this.lineComments() : undefined,
       settingsPage: this.settingsPage() ?? undefined,
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
+      hooksOfferDismissed: this.hooksOfferDismissed() ? true : undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

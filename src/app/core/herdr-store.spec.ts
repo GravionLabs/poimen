@@ -56,19 +56,19 @@ describe("HerdrStore", () => {
     expect(store.connectionError()).toBeNull();
   });
 
-  it("names the backend of this run, herdr until the app says poimen", async () => {
-    expect(store.backendKind()).toBe("herdr");
-    tauri.answer("backend_kind", () => "poimen");
-    await store.start();
+  it("names the backend of this run, poimen until the app says herdr", async () => {
     expect(store.backendKind()).toBe("poimen");
+    tauri.answer("backend_kind", () => "herdr");
+    await store.start();
+    expect(store.backendKind()).toBe("herdr");
   });
 
-  it("keeps herdr when the backend kind cannot be read", async () => {
+  it("keeps poimen when the backend kind cannot be read", async () => {
     tauri.answer("backend_kind", () => {
       throw new Error("no such command");
     });
     await store.start();
-    expect(store.backendKind()).toBe("herdr");
+    expect(store.backendKind()).toBe("poimen");
   });
 
   it("loads the first snapshot on start and listens once", async () => {

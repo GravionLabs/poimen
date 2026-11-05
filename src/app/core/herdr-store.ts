@@ -58,7 +58,7 @@ export class HerdrStore {
   private readonly _info = signal<HerdrInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
   private readonly _backend = signal<BackendStatus | null>(null);
-  private readonly _backendKind = signal<BackendKind>("herdr");
+  private readonly _backendKind = signal<BackendKind>("poimen");
 
   readonly snapshot = this._snapshot.asReadonly();
   /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
@@ -204,13 +204,13 @@ export class HerdrStore {
     }
   }
 
-  /** Which backend this run talks to; a failure keeps herdr. */
+  /** Which backend this run talks to; a failure keeps poimen. */
   private async readBackendKind(): Promise<void> {
     try {
       const kind = await this.bridge.invoke<string | undefined>("backend_kind");
-      this._backendKind.set(kind === "poimen" ? "poimen" : "herdr");
+      this._backendKind.set(kind === "herdr" ? "herdr" : "poimen");
     } catch {
-      // stays herdr
+      // stays poimen
     }
   }
 

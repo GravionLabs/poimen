@@ -1,6 +1,6 @@
 # Bundled color schemes
 
-One JSON file per scheme (`ColorScheme` of `core/color-scheme.ts`). `poimen-light` and `poimen-dark` are poimen's own colors (the `--term-*` tokens of `styles.css`). The other 15 are the schemes of herdr, with the canonical palette values of the upstream projects (ANSI 0 to 15 in order; the cursor and selection colors follow the upstream terminal ports):
+One JSON file per scheme (`ColorScheme` of `core/color-scheme.ts`). `poimen-light` and `poimen-dark` are poimen's own colors (the `--term-*` tokens of `styles.css`). The other 15 are the schemes herdr ships (bundled with poimen, so they work without herdr; the name `herdr` in `colorSchema` reads herdr's own config and needs it), with the canonical palette values of the upstream projects (ANSI 0 to 15 in order; the cursor and selection colors follow the upstream terminal ports):
 
 | Scheme | Upstream | License |
 | --- | --- | --- |

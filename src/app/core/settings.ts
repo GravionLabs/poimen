@@ -154,7 +154,7 @@ export function nextTheme(theme: ThemeSetting): ThemeSetting {
   return theme === "system" ? "light" : theme === "light" ? "dark" : "system";
 }
 
-/** The terminal backend poimen talks to: herdr (default) or poimen-server. */
+/** The terminal backend poimen talks to: poimen-server (default) or herdr. */
 export type BackendKind = "herdr" | "poimen";
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -169,7 +169,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarLayout: "tree",
   explorerRoots: ["~"],
   explorerShowHidden: false,
-  backend: "herdr",
+  backend: "poimen",
   scrollback: 10000,
   herdrAutoStart: true,
   notifyOnBlocked: true,
@@ -265,7 +265,7 @@ export function parseSettings(raw: unknown): Settings {
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
-    backend: r["backend"] === "poimen" ? "poimen" : "herdr",
+    backend: r["backend"] === "herdr" ? "herdr" : "poimen",
     scrollback:
       typeof r["scrollback"] === "number" &&
       Number.isInteger(r["scrollback"]) &&

@@ -13,6 +13,7 @@ mod github_pulls;
 mod gui_path;
 mod harness;
 mod herdr;
+mod hooks;
 mod layout;
 #[cfg(test)]
 mod live;
@@ -610,6 +611,22 @@ async fn ensure_poimen_server(auto_start: bool) -> Result<&'static str, String> 
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Whether Claude Code and Copilot CLI have the poimen hooks (`poimen-server integration status`).
+#[tauri::command]
+async fn hooks_status() -> Result<Vec<hooks::HookStatus>, String> {
+    tauri::async_runtime::spawn_blocking(|| hooks::status_all(&hooks::SystemExec))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Installs the poimen hooks of one agent (`claude` or `copilot`); only on a user click.
+#[tauri::command]
+async fn hooks_install(agent: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || hooks::install(&hooks::SystemExec, &agent))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// The running poimen build's version (Tauri app version).
@@ -1251,26 +1268,26 @@ fn build_menu(
     Ok(menu)
 }
 
-/// The backend named by the `backend` setting (anything but `poimen` is herdr) and its name.
+/// The backend named by the `backend` setting (anything but `herdr` is poimen) and its name.
 fn make_backend(kind: &str) -> (Shared, &'static str) {
-    if kind == "poimen" {
-        let backend = poimen_backend::PoimenBackend::new(poimen_client::Client::default());
-        return (std::sync::Arc::new(backend), "poimen");
+    if kind == "herdr" {
+        let client = herdr::Client::from_env();
+        let backend = backend::HerdrBackend::new(
+            backend::SystemRunner::new(client.clone()),
+            client,
+            stream::resolve_bin_from_env(),
+        );
+        return (std::sync::Arc::new(backend), "herdr");
     }
-    let client = herdr::Client::from_env();
-    let backend = backend::HerdrBackend::new(
-        backend::SystemRunner::new(client.clone()),
-        client,
-        stream::resolve_bin_from_env(),
-    );
-    (std::sync::Arc::new(backend), "herdr")
+    let backend = poimen_backend::PoimenBackend::new(poimen_client::Client::default());
+    (std::sync::Arc::new(backend), "poimen")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let kind = home_dir()
         .map(|h| settings::load(&h).backend)
-        .unwrap_or_default();
+        .unwrap_or_else(|| "poimen".into());
     let (backend, kind) = make_backend(&kind);
 
     tauri::Builder::default()
@@ -1340,6 +1357,8 @@ pub fn run() {
             backend_kind,
             set_terminal_colors,
             ensure_poimen_server,
+            hooks_status,
+            hooks_install,
             set_herdr_auto_start,
             set_notification,
             pane_split,
@@ -1778,10 +1797,10 @@ mod build_layout_tests {
     }
 
     #[test]
-    fn the_backend_setting_picks_the_backend_and_unknown_means_herdr() {
+    fn the_backend_setting_picks_the_backend_() {
         assert_eq!(make_backend("poimen").1, "poimen");
         assert_eq!(make_backend("herdr").1, "herdr");
-        assert_eq!(make_backend("").1, "herdr");
+        assert_eq!(make_backend("").1, "poimen");
         assert!(make_backend("poimen").0.emulated());
         assert!(!make_backend("herdr").0.emulated());
     }

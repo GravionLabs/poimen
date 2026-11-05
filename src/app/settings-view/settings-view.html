@@ -285,17 +285,17 @@
             </section>
           }
           @case ("herdr") {
-            <section aria-label="herdr">
+            <section aria-label="Server">
               <label
                 class="check"
-                [class.hit]="hit('Start the herdr server when it is not running')"
+                [class.hit]="hit('Start the backend server when it is not running')"
               >
                 <input
                   type="checkbox"
                   [checked]="settings().herdrAutoStart"
                   (change)="setAutoStart($event)"
                 />
-                Start the herdr server when it is not running
+                Start the backend server when it is not running
               </label>
             </section>
           }

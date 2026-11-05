@@ -1,0 +1,38 @@
+@if (offer.visible()) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Not now"
+    (click)="offer.dismiss()"
+  ></button>
+  <div
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Install agent hooks"
+    (keydown.escape)="offer.dismiss()"
+  >
+    <h2>Show agent status in poimen?</h2>
+    <p class="hint">
+      poimen learns whether an agent works, waits or is done from hooks in its settings. These
+      agents do not have them yet:
+    </p>
+    <ul class="agents" aria-label="Agents without hooks">
+      @for (agent of offer.missing(); track agent) {
+        <li>{{ name(agent) }}</li>
+      }
+    </ul>
+    @if (offer.error(); as error) {
+      <p class="error" role="alert">{{ error }}</p>
+    }
+    <div class="buttons">
+      <button type="button" class="cancel" [disabled]="offer.busy()" (click)="offer.dismiss()">
+        Not now
+      </button>
+      <button type="button" class="confirm" [disabled]="offer.busy()" (click)="offer.install()">
+        Install hooks
+      </button>
+    </div>
+  </div>
+}

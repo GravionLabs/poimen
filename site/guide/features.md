@@ -2,15 +2,15 @@
 
 Everything here is in the application today; the [README](https://github.com/GravionLabs/poimen#readme) has every detail.
 
-## herdr as the backend
+## The backend
 
-- herdr owns the state. poimen never stores pane state; snapshots from herdr are authoritative and events only invalidate them.
-- Non-destructive: closing a tab or the app releases controllers and stops only the CLI child processes, never herdr panes. Taking over a controller is always an explicit action.
-- poimen talks to herdr's socket API (NDJSON over the Unix socket) and attaches terminals with `herdr terminal session observe|control`.
+- `poimen-server` is the default backend. It owns the terminals (PTYs) and the state; poimen never stores pane state, and closing a tab or the app leaves the terminals and their agents running. The installers bundle it and poimen starts it when needed.
+- Agent status comes from Claude Code and Copilot CLI hooks; on the first start poimen offers to install them.
+- Alternative: `"backend": "herdr"` makes poimen a window onto [herdr](https://herdr.dev) (its socket API, terminals via `herdr terminal session observe|control`). It is removed in a later release.
 
 ## Spaces sidebar
 
-- A tree of herdr workspaces with their panes, per row agent, status, branch and worktree (`git` is read-only). A filter field searches by name, agent or branch.
+- A tree of workspaces (spaces) with their panes, per row agent, status, branch and worktree (`git` is read-only). A filter field searches by name, agent or branch.
 - Create a space (directory with completion, native folder picker, label), a terminal in a space, split a pane right or down, start an agent in a shell pane, rename and close panes. Closing a pane always asks first and warns while an agent works.
 - Close a space from its context menu, the × icon left of the chevron on its row (shown on hover, keyboard focus and for the active space) or the command palette. A space with panes asks first and says how many panes and agents the close ends.
 - `sidebar.layout` switches between the tree and two lists (Spaces and the panes of the selected one); `sidebar.rows` defines what a row shows.
@@ -26,7 +26,7 @@ Everything here is in the application today; the [README](https://github.com/Gra
 
 ## Agent status and attention
 
-- Statuses (working, idle, blocked, done) come from herdr events.
+- Statuses (working, idle, blocked, done) come from the backend (hooks on `poimen-server`, events on herdr).
 - A pane that turns blocked while not viewed rings on its tab and sidebar row; one that turns done counts as unread; workspace rows sum their panes. Viewing the tab clears both.
 - Optional macOS notifications for blocked and done, and a dock badge with the number of waiting agents. A notification center view lists recent status changes.
 - `CmdOrCtrl+Shift+A` jumps to the next waiting agent.
@@ -51,4 +51,4 @@ The Milestones section lists the open milestones of each repository ordered by v
 
 ## Settings
 
-Optional `~/.config/poimen/config.json`, applied without a restart; it holds preferences only. Examples: `theme`, `colorSchema`, `terminal.fontFamily`, `terminal.fontSize`, `terminal.autoControl`, `terminal.scrollback`, `backend` (`herdr` or `poimen`, needs a restart), `shortcuts`, `spaces.layout` (the pane layout of a new space), `explorer.roots`, `sidebar.layout`, `sidebar.rows`, `herdr.autoStart`, `notifications`. The full list is in the [README](https://github.com/GravionLabs/poimen#settings).
+Optional `~/.config/poimen/config.json`, applied without a restart; it holds preferences only. Examples: `theme`, `colorSchema`, `terminal.fontFamily`, `terminal.fontSize`, `terminal.autoControl`, `terminal.scrollback`, `backend` (`poimen` by default, or `herdr`; needs a restart), `shortcuts`, `spaces.layout` (the pane layout of a new space), `explorer.roots`, `sidebar.layout`, `sidebar.rows`, `herdr.autoStart`, `notifications`. The full list is in the [README](https://github.com/GravionLabs/poimen#settings).
