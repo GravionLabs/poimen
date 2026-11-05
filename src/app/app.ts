@@ -14,6 +14,7 @@ import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import {
   flowSession,
+  paneDir,
   rowName,
   supportsFlow,
   tabHeader,
@@ -65,7 +66,8 @@ import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import { TaskDialog } from "./task-dialog/task-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
-import type { SidebarMenuAction } from "./sidebar/sidebar";
+import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
+import { TaskStarter } from "./core/task-start";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
 import {
@@ -122,6 +124,7 @@ export class App {
   private readonly palette = inject(CommandPalette);
   protected readonly shortcutsOverview = inject(ShortcutsOverview);
   private readonly subagents = inject(Subagents);
+  private readonly tasks = inject(TaskStarter);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -345,6 +348,10 @@ export class App {
       this.editor.openGithub();
       return;
     }
+    if (id === "startTask") {
+      this.startTaskInActiveRepo();
+      return;
+    }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
       this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);
@@ -404,11 +411,23 @@ export class App {
     }
   }
 
+  /** The palette entry: the picker for the repository of the active pane. */
+  private startTaskInActiveRepo(): void {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    const dir = pane ? paneDir(pane) : undefined;
+    if (dir && this.store.repos().has(dir)) void this.tasks.start(dir);
+    else this.spaceActions.notify("Start task: the active pane is not in a repository");
+  }
+
   /** Context menu of a sidebar row: new terminal in a workspace, split or close a pane. */
   protected onSidebarMenu(event: SidebarMenuAction): void {
     if (event.action === "new-terminal") this.paneActions.askNew(event.id);
     else if (event.action === "close-space") this.closeSpace(event.id);
-    else this.paneAction(event.id, event.action);
+    else if (event.action === "start-task") {
+      const dir = spaceRepoDir(this.store.spaces(), event.id);
+      if (dir) void this.tasks.start(dir);
+    } else this.paneAction(event.id, event.action);
   }
 
   /** Closes a space (asks first when it has panes); `undefined` is a no-op (no active space). */

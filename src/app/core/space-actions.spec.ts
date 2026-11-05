@@ -48,7 +48,7 @@ describe("SpaceActions", () => {
     const outcome = await actions.create(" /work/app ", " App ");
     expect(outcome).toEqual({ workspace_id: "w2", created: true });
     expect(tauri.calls("create_space")).toEqual([
-      { cwd: "/work/app", label: "App", decision: null },
+      { cwd: "/work/app", label: "App", decision: null, command: null },
     ]);
     expect(tauri.calls("snapshot")).toHaveLength(1);
     expect(actions.open()).toBe(false);
@@ -84,6 +84,7 @@ describe("SpaceActions", () => {
       cwd: "/work/app",
       label: "App",
       decision: { kind: "trust", hash: "h1" },
+      command: null,
     });
     expect(actions.trust()).toBeNull();
   });
@@ -100,7 +101,7 @@ describe("SpaceActions", () => {
   it("sends no label when it is blank", async () => {
     await actions.create("/work/app", "  ");
     expect(tauri.calls("create_space")).toEqual([
-      { cwd: "/work/app", label: null, decision: null },
+      { cwd: "/work/app", label: null, decision: null, command: null },
     ]);
   });
 

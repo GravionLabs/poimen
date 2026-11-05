@@ -181,6 +181,15 @@ pub fn resolve_origin(
 }
 
 impl Layout {
+    /// The same layout with `command` as the command of the root pane (the one without a split).
+    pub fn with_root_command(&self, command: &str) -> Layout {
+        let mut layout = self.clone();
+        if let Some(root) = layout.panes.iter_mut().find(|p| p.split.is_none()) {
+            root.command = Some(command.to_owned());
+        }
+        layout
+    }
+
     /// The same panes and splits with no command to type.
     pub fn without_commands(&self) -> Layout {
         Layout {

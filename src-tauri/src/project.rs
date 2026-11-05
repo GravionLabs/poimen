@@ -63,10 +63,21 @@ pub fn start_setup(
     cwd: &str,
     command: &str,
 ) -> Result<(), String> {
+    start_tab(backend, workspace_id, cwd, SETUP_LABEL, command)
+}
+
+/// Opens a tab named `name` in a space, in `cwd`, and types `command` into it.
+pub fn start_tab(
+    backend: &dyn crate::backend::Backend,
+    workspace_id: &str,
+    cwd: &str,
+    name: &str,
+    command: &str,
+) -> Result<(), String> {
     let pane = backend
         .create_terminal(workspace_id, Some(cwd))?
         .ok_or("herdr did not report the new tab")?;
-    backend.rename_terminal(&pane, Some(SETUP_LABEL))?;
+    backend.rename_terminal(&pane, Some(name))?;
     backend.send_input(&pane, command)?;
     Ok(())
 }

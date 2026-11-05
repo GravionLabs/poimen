@@ -57,6 +57,14 @@ describe("sidebarMenuItems", () => {
     ]);
   });
 
+  it("offers to start a task only for a space in a repository", () => {
+    const actions = (repo: boolean, kind: "workspace" | "pane") =>
+      sidebarMenuItems(kind, repo).flatMap((g) => g.items.map((i) => i.action));
+    expect(actions(true, "workspace")).toEqual(["new-terminal", "start-task", "close-space"]);
+    expect(actions(false, "workspace")).not.toContain("start-task");
+    expect(actions(true, "pane")).not.toContain("start-task");
+  });
+
   it("offers split and close on a pane", () => {
     expect(sidebarMenuItems("pane").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "split-right",

@@ -183,6 +183,14 @@ export function splitSections(
   return { spaces: spaceList, agents, selectedId: selected?.workspace.space_id ?? null };
 }
 
+/** The directory of the first pane of space `id` when it is a repository, else `undefined`. */
+export function spaceRepoDir(spaces: readonly SpaceNode[], id: string): string | undefined {
+  const row = spaces
+    .find((n) => n.workspace.space_id === id)
+    ?.rows.find((r) => r.dir !== undefined && r.branch !== undefined);
+  return row?.dir;
+}
+
 /** A row's context menu: `kind` says what was clicked, `action` what was picked. */
 export interface SidebarMenuAction {
   kind: "workspace" | "pane";
@@ -194,7 +202,8 @@ export interface SidebarMenuAction {
     | "start-agent"
     | "rename"
     | "close"
-    | "close-space";
+    | "close-space"
+    | "start-task";
 }
 
 /** One entry of a context menu. */
@@ -213,7 +222,11 @@ export interface SidebarMenuGroup {
 /**
  * Groups of the context menu of a workspace row or a pane row: the built-in actions.
  */
-export function sidebarMenuItems(kind: SidebarMenuAction["kind"]): SidebarMenuGroup[] {
+export function sidebarMenuItems(
+  kind: SidebarMenuAction["kind"],
+  /** The space is in a repository: it offers to start a task. */
+  repo = false,
+): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
     label: null,
@@ -221,6 +234,7 @@ export function sidebarMenuItems(kind: SidebarMenuAction["kind"]): SidebarMenuGr
       kind === "workspace"
         ? [
             { action: "new-terminal", label: "New terminal..." },
+            ...(repo ? [{ action: "start-task" as const, label: "Start task from issue…" }] : []),
             { action: "close-space", label: "Close space" },
           ]
         : [
@@ -298,8 +312,9 @@ export class Sidebar {
     x: number;
     y: number;
   } | null>(null);
-  protected menuItems(kind: SidebarMenuAction["kind"]) {
-    return sidebarMenuItems(kind);
+  protected menuItems(kind: SidebarMenuAction["kind"], id: string) {
+    const repo = kind === "workspace" && spaceRepoDir(this.store.spaces(), id) !== undefined;
+    return sidebarMenuItems(kind, repo);
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {

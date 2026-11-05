@@ -92,6 +92,7 @@ describe("SpaceDialog", () => {
       cwd: "/work/app",
       label: "app",
       decision: null,
+      command: null,
     });
     expect(root.querySelector("form")).toBeNull();
   });

@@ -21,6 +21,7 @@ mod schemes;
 mod settings;
 mod spaces;
 mod stream;
+mod task_start;
 mod tasks;
 mod terminal_colors;
 mod transcripts;
@@ -322,20 +323,30 @@ async fn create_space(
     cwd: String,
     label: Option<String>,
     decision: Option<trust::Decision>,
+    command: Option<String>,
 ) -> Result<spaces::SpaceOutcome, String> {
     on_backend(backend.inner(), move |b| {
-        create_space_with(b, home_dir().as_deref(), &cwd, label.as_deref(), decision)
+        create_space_with(
+            b,
+            home_dir().as_deref(),
+            &cwd,
+            label.as_deref(),
+            decision,
+            command.as_deref(),
+        )
     })
     .await
 }
 
-/// The body of `create_space`, against any backend.
+/// The body of `create_space`, against any backend. `root_command` replaces the command of the
+/// layout's root pane in a new space (a task's command); an existing space runs nothing.
 fn create_space_with(
     backend: &dyn Backend,
     home: Option<&std::path::Path>,
     cwd: &str,
     label: Option<&str>,
     decision: Option<trust::Decision>,
+    root_command: Option<&str>,
 ) -> Result<spaces::SpaceOutcome, String> {
     let dir = spaces::resolve_dir(cwd, home)?;
     let snapshot = backend.snapshot()?;
@@ -392,6 +403,7 @@ fn create_space_with(
         &sources,
         user_layout.as_ref(),
         allow,
+        root_command,
     );
     let (setup_started, warning) = run_setup(backend, &workspace_id, &dir, &sources, allow);
     warnings.extend(warning);
@@ -417,6 +429,7 @@ fn build_layout(
     sources: &trust::Sources,
     user_layout: Option<&layout::Layout>,
     allow_project_commands: bool,
+    root_command: Option<&str>,
 ) -> Vec<String> {
     let (project, legacy) = sources.refs();
     let (layout, mut warnings, from_project) =
@@ -428,6 +441,10 @@ fn build_layout(
         layout.without_commands()
     } else {
         layout
+    };
+    let layout = match root_command {
+        Some(command) => layout.with_root_command(command),
+        None => layout,
     };
     let Some(root_pane) = root_pane else {
         return vec!["herdr did not report the root pane; no layout applied".into()];
@@ -637,6 +654,44 @@ async fn task_worktree(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The expanded command, space label and tab name of `issue` in the task mode `mode` of the
+/// repository of `repo_dir` (see `task_start::plan`).
+#[tauri::command]
+async fn task_plan(
+    repo_dir: String,
+    issue: worktree::Issue,
+    mode: String,
+) -> Result<task_start::Plan, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = get_settings();
+        let root = git::toplevel(&repo_dir).unwrap_or_else(|| repo_dir.clone());
+        let sources = trust::Sources::read(&root);
+        let resolved = tasks::for_project(&settings.tasks, &sources, &settings.trusted_projects);
+        let repo = std::path::Path::new(&root)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        task_start::plan(&resolved.modes, &repo, &issue, &mode)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Opens the tab `name` in a space and runs `command` in it (a task mode without a worktree).
+#[tauri::command]
+async fn task_tab(
+    backend: State<'_, Shared>,
+    workspace_id: String,
+    dir: String,
+    name: String,
+    command: String,
+) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| {
+        task_start::start_tab(b, &workspace_id, &dir, &name, &command)
+    })
+    .await
 }
 
 /// The task modes for the repository of `dir` (the user's `tasks` in config.json with the trusted
@@ -1163,6 +1218,8 @@ pub fn run() {
             get_harnesses,
             get_task_modes,
             task_worktree,
+            task_plan,
+            task_tab,
             get_color_schemes,
             set_theme,
             set_color_schema,
@@ -1269,7 +1326,15 @@ mod build_layout_tests {
 
     fn run(sources: &trust::Sources, user: Option<&layout::Layout>, allow: bool) -> Vec<String> {
         let fake = FakeBackend::default();
-        let warnings = build_layout(&fake, "/work/app", Some("w1:root"), sources, user, allow);
+        let warnings = build_layout(
+            &fake,
+            "/work/app",
+            Some("w1:root"),
+            sources,
+            user,
+            allow,
+            None,
+        );
         assert!(warnings.is_empty(), "{warnings:?}");
         fake.calls()
     }
@@ -1300,7 +1365,15 @@ mod build_layout_tests {
     #[test]
     fn a_missing_root_pane_is_a_warning_and_nothing_is_called() {
         let fake = FakeBackend::default();
-        let warnings = build_layout(&fake, "/work/app", None, &sources(PROJECT_TEXT), None, true);
+        let warnings = build_layout(
+            &fake,
+            "/work/app",
+            None,
+            &sources(PROJECT_TEXT),
+            None,
+            true,
+            None,
+        );
         assert_eq!(warnings.len(), 1);
         assert!(fake.calls().is_empty());
     }
@@ -1379,7 +1452,7 @@ mod build_layout_tests {
     fn create_space_creates_focuses_and_lays_out_a_new_space() {
         let fake = FakeBackend::default();
         let dir = tmp_dir();
-        let outcome = create_space_with(&fake, None, &dir, Some("demo"), None).unwrap();
+        let outcome = create_space_with(&fake, None, &dir, Some("demo"), None, None).unwrap();
         assert!(outcome.created && outcome.trust.is_none());
         assert_eq!(outcome.workspace_id, "w9");
         let calls = fake.calls();
@@ -1400,24 +1473,47 @@ mod build_layout_tests {
             tabs: json!([]),
             panes: json!([{ "pane_id": "w2:p1", "workspace_id": "w2", "cwd": dir }]),
         };
-        let outcome = create_space_with(&fake, None, &dir, None, None).unwrap();
+        let outcome = create_space_with(&fake, None, &dir, None, None, Some("claude 'x'")).unwrap();
         assert!(!outcome.created);
         assert_eq!(outcome.workspace_id, "w2");
+        // Focused only: no layout, no command.
         assert_eq!(fake.calls(), ["snapshot", "focus w2"]);
+    }
+
+    #[test]
+    fn create_space_runs_the_task_command_in_the_root_pane_of_the_layout() {
+        let fake = FakeBackend::default();
+        let dir = tmp_dir();
+        let label = "#12 Add picker";
+        create_space_with(&fake, None, &dir, Some(label), None, Some("claude 'x'")).unwrap();
+        let calls = fake.calls();
+        assert_eq!(calls[1], format!("create_space {dir} {label}"));
+        assert!(calls.contains(&"rename w9:root agent".to_owned()));
+        assert!(calls.contains(&"input w9:root claude 'x'".to_owned()));
+        assert!(!calls.iter().any(|c| c == "input w9:root claude"));
+    }
+
+    #[test]
+    fn create_space_with_a_failing_create_runs_no_command() {
+        let fake = FakeBackend::default();
+        fake.fail_on("create_space");
+        let err = create_space_with(&fake, None, &tmp_dir(), None, None, Some("c")).unwrap_err();
+        assert_eq!(err, "boom");
+        assert!(!fake.calls().iter().any(|c| c.starts_with("input")));
     }
 
     #[test]
     fn create_space_reports_a_backend_error() {
         let fake = FakeBackend::default();
         fake.fail_on("create_space");
-        let err = create_space_with(&fake, None, &tmp_dir(), None, None).unwrap_err();
+        let err = create_space_with(&fake, None, &tmp_dir(), None, None, None).unwrap_err();
         assert_eq!(err, "boom");
     }
 
     #[test]
     fn create_space_rejects_a_missing_directory_before_calling_the_backend() {
         let fake = FakeBackend::default();
-        assert!(create_space_with(&fake, None, "/no/such/dir/at/all", None, None).is_err());
+        assert!(create_space_with(&fake, None, "/no/such/dir/at/all", None, None, None).is_err());
         assert!(fake.calls().is_empty());
     }
 

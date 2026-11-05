@@ -12,6 +12,7 @@ import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
 import { HerdrStore } from "../core/herdr-store";
 import { SpaceActions } from "../core/space-actions";
 import { SettingsStore } from "../core/settings";
+import { TaskStarter } from "../core/task-start";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
 
@@ -68,6 +69,7 @@ export class Explorer {
   private readonly settings = inject(SettingsStore);
   private readonly store = inject(HerdrStore);
   private readonly spaceActions = inject(SpaceActions);
+  private readonly tasks = inject(TaskStarter);
   private readonly children = signal<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
   private readonly requested = new Set<string>();
 
@@ -82,14 +84,36 @@ export class Explorer {
   protected readonly withSpace = computed(() => spaceDirs(this.store.snapshot().terminals));
   protected readonly menuAt = signal<{ path: string; x: number; y: number } | null>(null);
 
+  /** The directory of the open menu is a repository: it offers to start a task. */
+  protected readonly menuRepo = signal(false);
+
   protected openMenu(event: MouseEvent, path: string): void {
     event.preventDefault();
     event.stopPropagation();
+    this.menuRepo.set(false);
     this.menuAt.set({ path, x: event.clientX, y: event.clientY });
+    void this.checkRepo(path);
+  }
+
+  private async checkRepo(path: string): Promise<void> {
+    try {
+      const found = await this.bridge.invoke<Record<string, unknown> | undefined>("repo_info", {
+        dirs: [path],
+      });
+      if (this.menuAt()?.path === path) this.menuRepo.set(!!found && path in found);
+    } catch {
+      // no entry: the menu stays without the task entry
+    }
   }
 
   protected closeMenu(): void {
     this.menuAt.set(null);
+  }
+
+  /** Starts a task for the repository at `path`. */
+  protected startTask(path: string): void {
+    this.closeMenu();
+    void this.tasks.start(path);
   }
 
   /** Creates the space of a directory, or focuses the one it already has. */

@@ -6,7 +6,7 @@ import { UiState } from "./ui-state";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
 export interface PoimenCommand {
-  id: ShortcutAction | "openSettings" | "openGithub" | "closeSpace";
+  id: ShortcutAction | "openSettings" | "openGithub" | "closeSpace" | "startTask";
   title: string;
 }
 
@@ -29,6 +29,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "showShortcuts", title: "Keyboard Shortcuts" },
   { id: "openSettings", title: "Open Settings" },
   { id: "openGithub", title: "Open GitHub" },
+  { id: "startTask", title: "Start task from issue…" },
 ];
 
 /** An entry of the palette: a poimen command; `shortcut` is the key binding label (empty when none). */
@@ -76,7 +77,10 @@ export class CommandPalette {
       key: `command:${c.id}`,
       title: c.title,
       shortcut:
-        c.id === "openSettings" || c.id === "openGithub" || c.id === "closeSpace"
+        c.id === "openSettings" ||
+        c.id === "openGithub" ||
+        c.id === "closeSpace" ||
+        c.id === "startTask"
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
