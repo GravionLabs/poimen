@@ -309,9 +309,14 @@ h3 {
 }
 
 .check {
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
   align-items: center;
   gap: 6px;
+}
+
+.check + .check {
+  margin-top: 8px;
 }
 
 .badge {

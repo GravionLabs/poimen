@@ -336,6 +336,23 @@ describe("SettingsView explorer section", () => {
     expect(host.querySelector(".error")?.textContent).toContain("read-only");
   });
 
+  it("stacks the notification checkboxes instead of sharing a row (#360)", () => {
+    const { host } = setup(null, ["~"], "notifications");
+    const style = document.createElement("style");
+    style.textContent = readFileSync("src/app/settings-view/settings-view.css", "utf8");
+    document.head.append(style);
+    try {
+      const labels = host.querySelectorAll<HTMLElement>(
+        'section[aria-label="Notifications"] .check',
+      );
+      expect(labels.length).toBe(2);
+      expect(getComputedStyle(labels[0]).display).toBe("flex");
+      expect(getComputedStyle(labels[1]).marginTop).toBe("8px");
+    } finally {
+      style.remove();
+    }
+  });
+
   it("saves the notification switches", async () => {
     tauri.reset();
     const { host } = setup(null, ["~"], "notifications");
