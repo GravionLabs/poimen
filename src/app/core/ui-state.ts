@@ -57,6 +57,8 @@ export interface LayoutState {
   panelTab: string;
   /** Keys of the last command palette entries run, newest first. */
   recentCommands?: string[];
+  /** How the Changes tab shows a diff: `inline` (unified) or `split` (side by side). */
+  changesLayout?: string;
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
   collapsedIssues?: Record<string, number[]>;
   /** The page selected in the settings view (an id of its category list); may no longer exist. */
@@ -115,10 +117,13 @@ export function parseLayout(raw: string | null): LayoutState {
       panelHeight,
       panelTab,
       recentCommands,
+      changesLayout,
       collapsedIssues,
       settingsPage,
       settingsCollapsed,
     } = data as Record<string, unknown>;
+    if (changesLayout === "inline" || changesLayout === "split")
+      state.changesLayout = changesLayout;
     if (
       typeof collapsedIssues === "object" &&
       collapsedIssues !== null &&
@@ -201,6 +206,10 @@ export class UiState {
   readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
     this.initial.collapsedIssues ?? {},
   );
+  /** How the Changes tab shows a diff (side by side by default). */
+  readonly changesLayout = signal<"inline" | "split">(
+    this.initial.changesLayout === "inline" ? "inline" : "split",
+  );
   /** The selected page of the settings view; `null` until one is picked. */
   readonly settingsPage = signal<string | null>(this.initial.settingsPage ?? null);
   /** Collapsed groups of the settings category tree. */
@@ -216,6 +225,11 @@ export class UiState {
 
   setSidebarWidth(width: number): void {
     this.sidebarWidth.set(clampSidebarWidth(width));
+    this.save();
+  }
+
+  setChangesLayout(layout: "inline" | "split"): void {
+    this.changesLayout.set(layout);
     this.save();
   }
 
@@ -350,6 +364,7 @@ export class UiState {
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,
+      changesLayout: this.changesLayout() === "inline" ? "inline" : undefined,
       settingsPage: this.settingsPage() ?? undefined,
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
     };

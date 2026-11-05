@@ -9,6 +9,7 @@ import {
 } from "@angular/core";
 import { HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
+import { EditorTabs } from "../core/editor-tabs";
 import { HerdrStore } from "../core/herdr-store";
 import { SpaceActions } from "../core/space-actions";
 import { SettingsStore } from "../core/settings";
@@ -70,6 +71,7 @@ export class Explorer {
   private readonly store = inject(HerdrStore);
   private readonly spaceActions = inject(SpaceActions);
   private readonly tasks = inject(TaskStarter);
+  private readonly editor = inject(EditorTabs);
   private readonly children = signal<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
   private readonly requested = new Set<string>();
 
@@ -114,6 +116,12 @@ export class Explorer {
   protected startTask(path: string): void {
     this.closeMenu();
     void this.tasks.start(path);
+  }
+
+  /** Opens the Changes tab of the repository at `path`. */
+  protected showChanges(path: string): void {
+    this.closeMenu();
+    this.editor.openChanges(path);
   }
 
   /** Creates the space of a directory, or focuses the one it already has. */

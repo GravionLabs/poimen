@@ -22,6 +22,8 @@ export class Attention {
   readonly attention = signal<ReadonlySet<string>>(new Set());
   /** Panes that finished while no tab showed them. */
   readonly unread = signal<ReadonlySet<string>>(new Set());
+  /** The panes that turned blocked or done in the latest snapshot that had any (a new array each time). */
+  readonly lastChanges = signal<readonly StatusChange[]>([]);
 
   /**
    * Folds a snapshot of pane statuses in; `viewed` are the panes whose tab is on screen. Returns
@@ -51,6 +53,7 @@ export class Attention {
       }
     }
     this.previous = new Map(statuses);
+    if (changes.length) this.lastChanges.set(changes);
     if (!same(attention, this.attention())) this.attention.set(attention);
     if (!same(unread, this.unread())) this.unread.set(unread);
     return changes;
