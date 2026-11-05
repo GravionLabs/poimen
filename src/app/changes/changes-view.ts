@@ -151,6 +151,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
             } @else if (content?.state === "text") {
               @defer {
                 <app-diff-editor
+                  [path]="changes.selected() ?? ''"
                   [old]="content.old"
                   [new]="content.new"
                   [layout]="layout()"
