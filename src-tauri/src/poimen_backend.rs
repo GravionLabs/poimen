@@ -115,15 +115,7 @@ pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
                 "number": n + 1,
                 "agent_status": wire_status(terminal),
             }));
-            panes.push(json!({
-                "pane_id": terminal.id,
-                "tab_id": terminal.id,
-                "workspace_id": space.id,
-                "cwd": terminal.cwd,
-                "label": terminal.name,
-                "agent_status": wire_status(terminal),
-                "focused": false,
-            }));
+            panes.push(wire_pane(terminal, &space.id));
         }
     }
     Snapshot {
@@ -131,6 +123,29 @@ pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
         tabs: Value::Array(tabs),
         panes: Value::Array(panes),
     }
+}
+
+/// The pane of a terminal in the shape of herdr's `pane.list`: `agent` (the name the hooks
+/// report, `claude` or `copilot`) and `agent_session.value` are set only when known.
+fn wire_pane(terminal: &Terminal, space_id: &str) -> Value {
+    let mut pane = json!({
+        "pane_id": terminal.id,
+        "tab_id": terminal.id,
+        "workspace_id": space_id,
+        "cwd": terminal.cwd,
+        "label": terminal.name,
+        "agent_status": wire_status(terminal),
+        "focused": false,
+    });
+    if let Some(info) = &terminal.agent {
+        if let Some(agent) = info.agent.as_deref().filter(|a| !a.is_empty()) {
+            pane["agent"] = json!(agent);
+        }
+        if let Some(session) = &info.session_id {
+            pane["agent_session"] = json!({"value": session});
+        }
+    }
+    pane
 }
 
 /// The `agent_status` of the frontend for a terminal.
@@ -334,8 +349,16 @@ impl Backend for PoimenBackend {
         }
     }
 
-    fn agent_session(&self, _terminal_id: &str) -> Result<Option<AgentSession>, String> {
-        Ok(None)
+    fn agent_session(&self, terminal_id: &str) -> Result<Option<AgentSession>, String> {
+        let terminals = self.client.list_terminals(None).map_err(text)?;
+        let panes: Vec<Value> = terminals
+            .iter()
+            .map(|t| wire_pane(t, &t.space_id))
+            .collect();
+        Ok(crate::herdr::parse_agent_session(
+            &json!({"panes": panes}),
+            terminal_id,
+        ))
     }
 
     fn open_stream(
@@ -1011,9 +1034,58 @@ mod tests {
     }
 
     #[test]
-    fn no_transcript_session_is_known_yet() {
-        let (backend, _) = agent_backend("session", None);
-        assert_eq!(backend.agent_session("t1"), Ok(None));
+    fn the_agent_session_is_the_id_and_directory_the_hooks_reported() {
+        let path = temp_socket("session");
+        let log = Arc::new(Mutex::new(Vec::new()));
+        serve(
+            &path,
+            log,
+            |method, _| match method {
+                "terminal.list" => {
+                    let mut a = term_json("t1", "s1");
+                    a["agent"] =
+                        json!({"status": "idle", "agent": "claude", "session_id": "abc-1"});
+                    let mut b = term_json("t2", "s1");
+                    b["agent"] =
+                        json!({"status": "idle", "agent": "copilot", "session_id": "0b7e"});
+                    let mut c = term_json("t3", "s1");
+                    c["agent"] = json!({"status": "idle", "agent": "claude"});
+                    Ok(json!({"terminals": [a, b, c, term_json("t4", "s1")]}))
+                }
+                _ => Err(("unknown_method", "no")),
+            },
+            vec![],
+        );
+        let backend = PoimenBackend::new(Client::new(path));
+        let claude = backend.agent_session("t1").unwrap().unwrap();
+        assert_eq!(
+            (claude.agent, claude.session.as_str()),
+            (crate::herdr::TranscriptAgent::Claude, "abc-1")
+        );
+        assert!(!claude.cwd.is_empty());
+        let copilot = backend.agent_session("t2").unwrap().unwrap();
+        assert_eq!(
+            (copilot.agent, copilot.session.as_str()),
+            (crate::herdr::TranscriptAgent::Copilot, "0b7e")
+        );
+        assert_eq!(backend.agent_session("t3"), Ok(None));
+        assert_eq!(backend.agent_session("t4"), Ok(None));
+    }
+
+    #[test]
+    fn a_pane_carries_the_agent_and_session_only_when_reported() {
+        let mut with = terminal("t1", "s1", "zsh");
+        with.agent = Some(AgentInfo {
+            status: AgentStatus::Idle,
+            agent: Some("copilot".into()),
+            session_id: Some("s-9".into()),
+        });
+        let plain = terminal("t2", "s1", "zsh");
+        let panes = map_snapshot(&[space("s1", "api")], &[with, plain]).panes;
+        assert_eq!(panes[0]["agent"], "copilot");
+        assert_eq!(panes[0]["agent_session"]["value"], "s-9");
+        assert!(panes[1].get("agent").is_none());
+        assert!(panes[1].get("agent_session").is_none());
     }
 
     fn collect(
