@@ -429,6 +429,8 @@ fn canonical(path: &Path) -> PathBuf {
 
 /// The spaces in `worktree`: those with all their terminals in it (or, without terminals, whose
 /// own `cwd` of the poimen backend is in it) and those with only some of their terminals in it.
+/// The space's own `cwd` is matched by containment, as the terminals are, unlike the exact rule of
+/// `spaces::find_space`; it only counts for a space without terminals.
 fn spaces_in(snapshot: &crate::backend::Snapshot, worktree: &Path) -> (Vec<String>, Vec<String>) {
     let root = canonical(worktree);
     let mut seen: Vec<(String, bool, bool)> = Vec::new(); // (space, all in, any in)
@@ -1124,6 +1126,17 @@ mod tests {
             .filter(|c| c.starts_with("close_space"))
             .collect();
         assert_eq!(closes, vec!["close_space s2".to_owned()]);
+    }
+
+    #[test]
+    fn a_space_in_the_worktree_with_terminals_outside_is_not_closed() {
+        let f = Fixture::new(true);
+        let wt = f.task(7);
+        let backend = FakeBackend::default();
+        empty_spaces_in(&backend, &[("s2", &wt)]);
+        panes_in(&backend, &[("s2", &f.repo)]);
+        f.clean(&Fixture::merged(&[7]), &backend, None);
+        assert!(!backend.calls().iter().any(|c| c.starts_with("close_space")));
     }
 
     #[test]

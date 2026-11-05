@@ -53,8 +53,8 @@ fn panes_of<'a>(workspace: &Value, panes: &'a [Value]) -> Vec<&'a Value> {
 
 /// The space of `dir`: the first with a pane exactly in the directory (a pane in an ancestor or in
 /// a subdirectory does not count), else the first whose own `cwd` (poimen backend) is exactly the
-/// directory, else one labelled with the directory name whose panes report no directory other than
-/// `dir`. `None` when there is none.
+/// directory, else one labelled with the directory name whose own `cwd` (if any) and panes report
+/// no directory other than `dir`. `None` when there is none.
 pub fn find_space(dir: &str, workspaces: &[Value], panes: &[Value]) -> Option<String> {
     let id = |w: &Value| w["workspace_id"].as_str().map(str::to_owned);
     let by_pane = workspaces.iter().find(|w| {
@@ -79,6 +79,9 @@ pub fn find_space(dir: &str, workspaces: &[Value], panes: &[Value]) -> Option<St
         .iter()
         .find(|w| {
             w["label"].as_str() == Some(name)
+                && w["cwd"]
+                    .as_str()
+                    .is_none_or(|d| d.is_empty() || same_dir(dir, d))
                 && panes_of(w, panes)
                     .iter()
                     .all(|p| pane_dir(p).is_none_or(|d| same_dir(dir, d)))
@@ -347,6 +350,21 @@ mod tests {
         assert_eq!(
             find_space("/work/app", &workspaces, &panes),
             Some("w2".into())
+        );
+    }
+
+    #[test]
+    fn the_label_fallback_skips_a_space_in_another_directory() {
+        let workspaces = [ws_in("w1", "app-7", "/other/app-7")];
+        assert_eq!(find_space("/work/app-7", &workspaces, &[]), None);
+    }
+
+    #[test]
+    fn the_label_fallback_accepts_a_space_with_an_empty_directory() {
+        let workspaces = [ws_in("w1", "app-7", "")];
+        assert_eq!(
+            find_space("/work/app-7", &workspaces, &[]),
+            Some("w1".into())
         );
     }
 
