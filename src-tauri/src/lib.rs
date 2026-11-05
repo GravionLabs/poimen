@@ -666,6 +666,29 @@ async fn task_worktree(
     .map_err(|e| e.to_string())?
 }
 
+/// Creates or reuses a worktree with the head of pull request `nr` checked out (see
+/// `worktree::pr_worktree`).
+#[tauri::command]
+async fn pr_worktree(
+    repo_dir: String,
+    nr: u64,
+    head_ref: Option<String>,
+) -> Result<worktree::Worktree, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        worktree::pr_worktree(&repo_dir, nr, head_ref.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The worktrees of the repository of `dir` with their branches.
+#[tauri::command]
+async fn worktree_branches(dir: String) -> Result<Vec<worktree::Checkout>, String> {
+    tauri::async_runtime::spawn_blocking(move || worktree::list_worktrees(&dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// The expanded command, space label and tab name of `issue` in the task mode `mode` of the
 /// repository of `repo_dir` (see `task_start::plan`).
 #[tauri::command]
@@ -1271,6 +1294,8 @@ pub fn run() {
             get_harnesses,
             get_task_modes,
             task_worktree,
+            pr_worktree,
+            worktree_branches,
             task_plan,
             task_tab,
             task_cleanup,

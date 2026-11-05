@@ -129,6 +129,15 @@
                   >
                     Open in browser
                   </button>
+                  @if (pulls.worktreeFor(row)) {
+                    <button type="button" data-testid="open-space" (click)="pulls.openSpace(row)">
+                      Open space
+                    </button>
+                  } @else {
+                    <button type="button" data-testid="check-out" (click)="pulls.checkout(row)">
+                      Check out
+                    </button>
+                  }
                 </td>
               </tr>
             }

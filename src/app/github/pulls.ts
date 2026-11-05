@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from "@angular/core";
 import { HerdrStore } from "../core/herdr-store";
 import { paneDir } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
+import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 
 /** What a failed `gh` call came to (`GhError` of `github.rs`). */
@@ -28,6 +29,7 @@ export interface Pull {
   deletions: number;
   createdAt: string;
   headRef: string;
+  isCrossRepository: boolean;
   baseRef: string;
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   reviewRequests: string[];
@@ -50,6 +52,23 @@ export interface PullRow extends Pull {
   root: string;
   /** Unique over all repositories: `owner/name#number`. */
   key: string;
+}
+
+/** A worktree and its branch (`Checkout` of `worktree.rs`). */
+export interface WorktreeInfo {
+  path: string;
+  branch: string | null;
+}
+
+/** The worktree whose branch is the head of `pull`: `pr/<number>`, or the head branch unless the head is in a fork. */
+export function worktreeOf(pull: Pull, worktrees: readonly WorktreeInfo[]): WorktreeInfo | null {
+  return (
+    worktrees.find((w) => w.branch === `pr/${pull.number}`) ??
+    worktrees.find(
+      (w) => !pull.isCrossRepository && w.branch !== null && w.branch === pull.headRef,
+    ) ??
+    null
+  );
 }
 
 export type Scope = "review" | "mine" | "all";
@@ -179,6 +198,7 @@ export class GithubPulls {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(HerdrStore);
   private readonly settings = inject(SettingsStore);
+  private readonly spaces = inject(SpaceActions);
 
   private readonly _result = signal<PullsResult | null>(null);
   private readonly _loading = signal(false);
@@ -192,6 +212,8 @@ export class GithubPulls {
   readonly loading = this._loading.asReadonly();
   /** Why nothing could be read at all (the command itself failed); per-repository errors are in `result`. */
   readonly error = this._error.asReadonly();
+
+  private readonly _worktrees = signal<ReadonlyMap<string, readonly WorktreeInfo[]>>(new Map());
 
   readonly scope = signal<Scope>("review");
   readonly repoFilter = signal<string | null>(null);
@@ -241,6 +263,7 @@ export class GithubPulls {
       const result = await this.bridge.invoke<PullsResult>("github_pulls", { dirs: this.dirs() });
       this._result.set(result);
       this._error.set(null);
+      await this.loadWorktrees(result);
       const known = new Set(this.rows().map((r) => r.key));
       this._selected.update((s) => new Set([...s].filter((k) => known.has(k))));
     } catch (err) {
@@ -248,6 +271,52 @@ export class GithubPulls {
     } finally {
       this._loading.set(false);
     }
+  }
+
+  /** The worktree that has the head of `row` checked out, if any. */
+  worktreeFor(row: PullRow): WorktreeInfo | null {
+    return worktreeOf(row, this._worktrees().get(row.root) ?? []);
+  }
+
+  /** Reads the worktrees of the readable repositories; a failure only leaves them blank. */
+  private async loadWorktrees(result: PullsResult): Promise<void> {
+    const found = new Map<string, readonly WorktreeInfo[]>();
+    await Promise.all(
+      result.repos.map(async (r) => {
+        if (r.status !== "ok") return;
+        try {
+          found.set(
+            r.root,
+            await this.bridge.invoke<WorktreeInfo[]>("worktree_branches", { dir: r.root }),
+          );
+        } catch {
+          // No worktree marks for this repository.
+        }
+      }),
+    );
+    this._worktrees.set(found);
+  }
+
+  /** Focuses or creates the space of the worktree that has the head of `row` checked out. */
+  async openSpace(row: PullRow): Promise<void> {
+    const wt = this.worktreeFor(row);
+    if (wt) await this.spaces.create(wt.path, `#${row.number}`);
+  }
+
+  /** Creates or reuses the worktree of `row` (also for forks), then focuses or creates its space. */
+  async checkout(row: PullRow): Promise<void> {
+    try {
+      const wt = await this.bridge.invoke<{ path: string }>("pr_worktree", {
+        repoDir: row.root,
+        nr: row.number,
+        headRef: row.headRef,
+      });
+      await this.spaces.create(wt.path, `#${row.number}`);
+    } catch (err) {
+      this.spaces.notify(`Pull request #${row.number}: ${String(err)}`);
+    }
+    const result = this._result();
+    if (result) await this.loadWorktrees(result);
   }
 
   /** Opens a pull request in the browser; other links are ignored. */
