@@ -118,7 +118,7 @@ let storage: UiStorage | null = null;
 function setup(
   colorSchema: string | { light: string; dark: string } | null = "dracula",
   explorerRoots: string[] = ["~"],
-  page = "color-scheme",
+  page = "appearance",
 ) {
   tauri.reset();
   setDark.mockReset();
@@ -503,7 +503,6 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([
       "Appearance & Behavior",
       "Appearance",
-      "Color scheme",
       "Notifications",
       "Workspace",
       "Explorer",
@@ -557,7 +556,24 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(11);
+    expect(titles(host)).toHaveLength(10);
+  });
+
+  it("opens a retired color-scheme page as Appearance, with the scheme picker", () => {
+    const { host } = setup(undefined, undefined, "color-scheme");
+    expect(crumb(host)).toBe("Appearance & Behavior › Appearance");
+    expect(item(host, "p:appearance").getAttribute("aria-selected")).toBe("true");
+    expect(
+      host.querySelector('section[aria-label="Color scheme"] [role="listbox"]'),
+    ).not.toBeNull();
+  });
+
+  it("follows a deep link to a retired color-scheme page made while the view is open", () => {
+    const { fixture, host } = setup(undefined, undefined, "notifications");
+    TestBed.inject(UiState).selectSettingsPage("color-scheme");
+    fixture.detectChanges();
+    expect(crumb(host)).toBe("Appearance & Behavior › Appearance");
+    expect(host.querySelector('[role="listbox"]')).not.toBeNull();
   });
 
   it("expands collapsed groups while searching", () => {
@@ -595,8 +611,8 @@ describe("SettingsView categories", () => {
     document.body.append(host);
     const node = (n: string) => item(host, n);
     press(node("p:appearance"), "ArrowDown");
-    expect(document.activeElement).toBe(node("p:color-scheme"));
-    press(node("p:color-scheme"), "ArrowUp");
+    expect(document.activeElement).toBe(node("p:notifications"));
+    press(node("p:notifications"), "ArrowUp");
     press(node("p:appearance"), "ArrowLeft");
     expect(document.activeElement).toBe(node("g:appearance-behavior"));
     press(node("g:appearance-behavior"), "ArrowLeft");
