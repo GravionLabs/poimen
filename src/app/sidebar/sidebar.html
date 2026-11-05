@@ -311,7 +311,7 @@
     [style.top.px]="at.y"
     (keydown)="onMenuKey($event, menu)"
   >
-    @for (group of menuItems(at.kind); track group.id; let first = $first) {
+    @for (group of menuItems(at.kind, at.id); track group.id; let first = $first) {
       @if (!first) {
         <div class="menu-separator" role="separator"></div>
       }

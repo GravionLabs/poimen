@@ -1,0 +1,132 @@
+//! The pure parts of "start a task": which command, label and tab name an issue and a mode give,
+//! and the tab of a mode without a worktree. The steps themselves (worktree, space) are separate
+//! commands so the frontend can name the failing one.
+
+use crate::backend::Backend;
+use crate::tasks::{TaskModes, TaskVars, expand_mode};
+use crate::worktree::Issue;
+use serde::Serialize;
+
+/// The longest space label of a task, including `#<nr> `.
+const LABEL_MAX: usize = 40;
+
+/// What starting `issue` in a mode comes to.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Plan {
+    /// The mode wants a worktree of its own (and so a space for it).
+    pub worktree: bool,
+    /// The expanded command of the mode.
+    pub command: String,
+    /// The label of the space: `#<nr> <title>`, shortened.
+    pub label: String,
+    /// The name of the tab of a mode without a worktree: `#<nr> <mode>`.
+    pub tab: String,
+}
+
+/// `#<nr> <title>` cut to `LABEL_MAX` characters with an ellipsis; just `#<nr>` without a title.
+pub fn space_label(nr: u64, title: &str) -> String {
+    let title = title.trim();
+    let full = if title.is_empty() {
+        format!("#{nr}")
+    } else {
+        format!("#{nr} {title}")
+    };
+    if full.chars().count() <= LABEL_MAX {
+        return full;
+    }
+    let cut: String = full.chars().take(LABEL_MAX - 1).collect();
+    format!("{}…", cut.trim_end())
+}
+
+/// The plan of `issue` for the mode named `mode`; `repo` is the repository directory name.
+pub fn plan(modes: &TaskModes, repo: &str, issue: &Issue, mode: &str) -> Result<Plan, String> {
+    let found = modes
+        .modes
+        .iter()
+        .find(|m| m.name == mode)
+        .ok_or_else(|| format!("unknown task mode {mode:?}"))?;
+    let vars = TaskVars::new(issue.nr, &issue.title, &issue.url, repo);
+    let expanded = expand_mode(found, &modes.worktree_dir, vars);
+    Ok(Plan {
+        worktree: found.worktree,
+        command: expanded.command,
+        label: space_label(issue.nr, &issue.title),
+        tab: format!("#{} {}", issue.nr, found.name),
+    })
+}
+
+/// Opens the tab `name` in the space at `dir` and runs `command` in it.
+pub fn start_tab(
+    backend: &dyn Backend,
+    workspace_id: &str,
+    dir: &str,
+    name: &str,
+    command: &str,
+) -> Result<(), String> {
+    crate::project::start_tab(backend, workspace_id, dir, name, command)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend_fake::FakeBackend;
+
+    fn issue(title: &str) -> Issue {
+        Issue {
+            nr: 12,
+            title: title.into(),
+            url: "https://github.com/o/r/issues/12".into(),
+        }
+    }
+
+    #[test]
+    fn the_default_agent_mode_runs_claude_with_the_quoted_prompt_in_a_worktree() {
+        let plan = plan(
+            &TaskModes::default(),
+            "app",
+            &issue("feat: Add picker"),
+            "agent",
+        )
+        .unwrap();
+        assert!(plan.worktree);
+        assert!(plan.command.starts_with("claude "), "{}", plan.command);
+        assert!(plan.command.contains("#12"));
+        assert_eq!(plan.label, "#12 feat: Add picker");
+        assert_eq!(plan.tab, "#12 agent");
+    }
+
+    #[test]
+    fn an_unknown_mode_is_an_error() {
+        let err = plan(&TaskModes::default(), "app", &issue("x"), "nope").unwrap_err();
+        assert!(err.contains("nope"));
+    }
+
+    #[test]
+    fn long_titles_are_shortened_and_a_missing_title_gives_the_number() {
+        let label = space_label(12, &"word ".repeat(30));
+        assert_eq!(label, "#12 word word word word word word word…");
+        assert!(label.starts_with("#12 word") && label.ends_with('…'));
+        assert_eq!(space_label(7, ""), "#7");
+    }
+
+    #[test]
+    fn the_tab_is_created_named_and_typed_into() {
+        let fake = FakeBackend::default();
+        start_tab(&fake, "w1", "/work/app", "#12 plain", "sh -c 'x'").unwrap();
+        let calls = fake.calls();
+        assert!(calls[0].starts_with("create_terminal w1"), "{calls:?}");
+        assert!(calls[1].contains("#12 plain"), "{calls:?}");
+        assert!(calls[2].contains("sh -c 'x'"), "{calls:?}");
+    }
+
+    #[test]
+    fn a_failing_tab_step_is_reported() {
+        let fake = FakeBackend::default();
+        fake.fail_on("create_terminal");
+        assert_eq!(
+            start_tab(&fake, "w1", "/work/app", "t", "c"),
+            Err("boom".into())
+        );
+    }
+}

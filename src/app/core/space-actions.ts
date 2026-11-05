@@ -37,6 +37,10 @@ export type TrustDecision = { kind: "trust"; hash: string } | { kind: "without" 
 export interface TrustPending {
   cwd: string;
   label: string;
+  /** The command a task runs in the root pane of the new space. */
+  command: string | null;
+  /** Runs once the space exists, also after the trust answer (a task tab in the space). */
+  after?: (outcome: SpaceOutcome) => Promise<void>;
   request: TrustRequest;
 }
 
@@ -104,6 +108,11 @@ export class SpaceActions {
   /** Directories matching the typed path. */
   readonly dirs = this._dirs.asReadonly();
 
+  /** Shows `message` in the status bar like a layout warning (a failed step of a task). */
+  notify(message: string): void {
+    this._warning.set(message);
+  }
+
   ask(): void {
     this._error.set(null);
     this._dirs.set([]);
@@ -139,6 +148,8 @@ export class SpaceActions {
     cwd: string,
     label: string,
     decision: TrustDecision | null = null,
+    command: string | null = null,
+    after?: (outcome: SpaceOutcome) => Promise<void>,
   ): Promise<SpaceOutcome | undefined> {
     this._error.set(null);
     this._busy.set(true);
@@ -147,11 +158,18 @@ export class SpaceActions {
         cwd: cwd.trim(),
         label: label.trim() || null,
         decision,
+        command,
       });
       this._open.set(false);
       if (outcome.trust) {
         // Nothing exists yet: ask, then call again with the answer.
-        this._trust.set({ cwd: cwd.trim(), label: label.trim(), request: outcome.trust });
+        this._trust.set({
+          cwd: cwd.trim(),
+          label: label.trim(),
+          command,
+          after,
+          request: outcome.trust,
+        });
         return undefined;
       }
       this._trust.set(null);
@@ -159,6 +177,7 @@ export class SpaceActions {
       this._warning.set(warnings.length > 0 ? warnings.join("; ") : null);
       for (const w of warnings) console.warn(`poimen space layout: ${w}`);
       await this.store.refresh();
+      if (after) await after(outcome);
       return outcome;
     } catch (err) {
       this._error.set(String(err));
@@ -180,7 +199,7 @@ export class SpaceActions {
     if (answer === "cancel") return undefined;
     const decision: TrustDecision =
       answer === "trust" ? { kind: "trust", hash: pending.request.hash } : { kind: "without" };
-    return this.create(pending.cwd, pending.label, decision);
+    return this.create(pending.cwd, pending.label, decision, pending.command, pending.after);
   }
 
   /**

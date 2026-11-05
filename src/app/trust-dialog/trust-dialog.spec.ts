@@ -87,6 +87,7 @@ describe("TrustDialog", () => {
       cwd: "/work/app",
       label: "app",
       decision: { kind: "trust", hash: "h1" },
+      command: null,
     });
     expect(root.querySelector("[role=dialog]")).toBeNull();
   });
