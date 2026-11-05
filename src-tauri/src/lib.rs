@@ -277,6 +277,29 @@ async fn github_milestones(
         .map_err(|e| e.to_string())
 }
 
+/// Open issues of the GitHub repository of `dir` for the task picker (REST with ETag cache, pull
+/// requests filtered out, up to 300). Read-only.
+#[tauri::command]
+async fn task_issues(
+    client: State<'_, GithubClient>,
+    dir: String,
+) -> Result<Vec<github::OpenIssue>, github::GhError> {
+    let client = client.inner().clone();
+    let dir = github_pulls::expand_home(&dir, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = github::repo_of(std::path::Path::new(&dir)).ok_or(github::GhError::Other {
+            message: "no GitHub repository".into(),
+        })?;
+        github::open_issues(&client, &repo)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        Err(github::GhError::Other {
+            message: e.to_string(),
+        })
+    })
+}
+
 /// Opens a new terminal in a workspace as a new tab; returns its pane id.
 #[tauri::command]
 async fn terminal_create(
@@ -1098,6 +1121,7 @@ pub fn run() {
             branch_pulls,
             github_issues,
             github_milestones,
+            task_issues,
             create_space,
             list_dirs,
             list_child_dirs,
