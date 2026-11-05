@@ -21,7 +21,7 @@ Everything here is in the application today; the [README](https://github.com/Gra
 - One tab per pane; a preview tab becomes a pinned tab on use. One xterm.js shows the active tab with the WebGL renderer.
 - Input by default; read-only when another client controls the pane, with an explicit *Take over*. A mode button toggles input and read-only per tab.
 - A read-only agent tab has a prompt bar above the terminal that sends a prompt without taking over the controller; it is hidden while the tab controls the terminal, and the typed text is kept.
-- Cmd+click (macOS) or Ctrl+click opens links; Shift bypasses mouse forwarding for text selection. Mouse cells follow the frame grid herdr sends.
+- Cmd+click (macOS) or Ctrl+click opens links; Shift bypasses mouse forwarding for text selection. On herdr streams, mouse cells follow the frame grid herdr sends; on the poimen backend xterm.js handles the mouse.
 - Compact command palette (`CmdOrCtrl+Shift+P`, JetBrains style: highlighted matches, shortcuts, recent entries) with the poimen commands; every shortcut can be changed. It opens centered on the editor area, which also holds non-terminal tabs (on the window without an open tab). The ? button in the status bar (`CmdOrCtrl+/`) lists all shortcuts with your current bindings.
 
 ## Agent status and attention
