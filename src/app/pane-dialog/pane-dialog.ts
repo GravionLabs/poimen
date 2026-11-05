@@ -1,5 +1,13 @@
-import { ChangeDetectionStrategy, Component, inject, output, signal } from "@angular/core";
-import { AGENT_KINDS, type Terminal } from "../core/herdr";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  output,
+  signal,
+} from "@angular/core";
+import { agentKinds, type Terminal } from "../core/herdr";
+import { HerdrStore } from "../core/herdr-store";
 import { PaneActions } from "../core/pane-actions";
 
 /** The question for a new terminal (directory) or a pane close (confirmation), and action errors. */
@@ -15,7 +23,9 @@ export class PaneDialog {
   readonly created = output<Terminal>();
   /** A pane was closed; the host drops its tab. */
   readonly closed = output<string>();
-  protected readonly kinds = AGENT_KINDS;
+  private readonly store = inject(HerdrStore);
+  /** Only the kinds that can report on the active backend (#410). */
+  protected readonly kinds = computed(() => agentKinds(this.store.backendKind()));
   private readonly typed = signal<string | null>(null);
 
   protected cwd(fallback: string): string {

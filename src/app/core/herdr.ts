@@ -1,6 +1,7 @@
 // Shapes of herdr's workspace.list / tab.list / pane.list results (only the fields poimen uses).
 
 import type { Checks } from "../github/pulls";
+import type { BackendKind } from "./settings";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
@@ -439,3 +440,14 @@ export const AGENT_KINDS = [
   "maki",
   "muse",
 ] as const;
+
+/** Agent kinds that report their state through the poimen hooks
+ * (`poimen-server integration install claude|copilot`); `start_agent` waits for their
+ * `SessionStart`, so any other kind would time out although it runs. */
+export const HOOK_AGENT_KINDS = ["claude", "copilot"] as const;
+
+/** The kinds the "Start agent" dialog offers on `backend`: herdr detects all of `AGENT_KINDS`,
+ * the poimen backend only learns of the ones with hooks. */
+export function agentKinds(backend: BackendKind): readonly string[] {
+  return backend === "poimen" ? HOOK_AGENT_KINDS : AGENT_KINDS;
+}

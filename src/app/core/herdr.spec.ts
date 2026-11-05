@@ -15,6 +15,7 @@ import {
   tabHeader,
   toSnapshot,
   waitingCount,
+  agentKinds,
   closeWarning,
   workspaceDirs,
   type Terminal,
@@ -203,6 +204,19 @@ describe("workspaceDirs", () => {
 
   it("is empty for a workspace without panes", () => {
     expect(workspaceDirs(snapshot, "w9")).toEqual([]);
+  });
+});
+
+describe("agentKinds", () => {
+  it("offers only the kinds that report through hooks on the poimen backend", () => {
+    expect(agentKinds("poimen")).toEqual(["claude", "copilot"]);
+  });
+
+  it("keeps herdr's full list on the herdr backend", () => {
+    const kinds = agentKinds("herdr");
+    expect(kinds).toHaveLength(24);
+    expect(kinds.slice(0, 5)).toEqual(["claude", "codex", "gemini", "opencode", "copilot"]);
+    expect(kinds).toContain("muse");
   });
 });
 
