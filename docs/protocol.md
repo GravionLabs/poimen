@@ -7,7 +7,7 @@ Protocol version: **2** (version 1 had no terminal output; version 2 adds `termi
 ## Transport
 
 - NDJSON over a local socket (`interprocess::local_socket`, in `poimen_client::transport`): one JSON object per line, UTF-8, `\n` terminated. On Linux and macOS it is a Unix domain socket at the socket path; on Windows it is the named pipe `\\.\pipe\<socket path>`, and the socket path holds a marker file (`<pid>:<unix nanos>`) so "is a server running?" works the same on both. The pipe's DACL (`D:P(A;;GA;;;SY)(A;;GA;;;OW)`) admits SYSTEM and the owner only, and its buffers are 64 KiB.
-- Socket path: `$POIMEN_SOCKET`, else `$XDG_RUNTIME_DIR/poimen/server.sock`, else `<temp dir>/poimen-<user>/server.sock`. Unix: the directory has mode 0700, the socket 0600. One server per user (it holds `server.lock` next to the socket): a second server on a live socket exits; a stale socket file (Windows: a marker without a pipe) is replaced; anything else at the path is left alone and the server refuses to start.
+- Socket path: `$POIMEN_SOCKET`, else `$XDG_RUNTIME_DIR/poimen/server.sock`, else `<temp dir>/poimen-<user>/server.sock`. Windows: `$POIMEN_SOCKET`, else `%LOCALAPPDATA%\poimen-server\server.sock`, else `<temp dir>\poimen-%USERNAME%\server.sock`. Unix: the directory has mode 0700, the socket 0600. One server per user (it holds `server.lock` next to the socket): a second server on a live socket exits; a stale socket file (Windows: a marker without a pipe) is replaced; anything else at the path is left alone and the server refuses to start.
 - Named pipes have no I/O timeouts and no `shutdown`. On Windows a client bounds a request by waiting on a helper thread, and the server's write timeout for a client that stops reading (5 s) applies on Unix only.
 - Requests use short-lived connections (connect, one or more requests, close). A connection that sent `events.subscribe` only receives events afterwards.
 - A line that is not a request gets an error response and the connection stays open.
@@ -41,10 +41,10 @@ The server stores no layout: groups, splits and tabs are the client's business. 
 | `space.rename`    | `space_id`, `name`                                                      | `{space}`             | Persisted.                                                                                      |
 | `space.close`     | `space_id`                                                              | `{}`                  | Closes its terminals first (`terminal.closed` each). Persisted.                                 |
 | `terminal.list`   | `space_id?`                                                             | `{terminals: [Terminal]}` | Exited terminals stay listed until closed.                                                  |
-| `terminal.create` | `space_id`, `cwd?`, `name?`, `command?` (argv), `cols?`, `rows?`        | `{terminal}`          | `cwd` defaults to the space's, `command` to `$SHELL` (else `/bin/sh`), size to 80x24. Never through a shell. |
+| `terminal.create` | `space_id`, `cwd?`, `name?`, `command?` (argv), `cols?`, `rows?`        | `{terminal}`          | `cwd` defaults to the space's, `command` to `$SHELL` (else `/bin/sh`; Windows: `pwsh.exe`, else `powershell.exe` on `PATH`, else `%COMSPEC%`), size to 80x24. Never through a shell. |
 | `server.set_colors` | `foreground`, `background`, `cursor?`, `palette?` (16)                | `{}`                  | `#rrggbb` colors the server answers color queries with while no controller is attached; see Terminal queries. `cursor` defaults to `foreground`, an absent `palette` keeps the previous one. |
 | `terminal.rename` | `terminal_id`, `name`                                                   | `{terminal}`          |                                                                                                 |
-| `terminal.close`  | `terminal_id`                                                           | `{}`                  | Kills the process (SIGHUP) and forgets the terminal.                                            |
+| `terminal.close`  | `terminal_id`                                                           | `{}`                  | Kills the process (SIGHUP; Windows: TerminateProcess) and forgets the terminal.                                            |
 | `terminal.input`  | `terminal_id`, `data`                                                   | `{}`                  | `data` is written as is; `exited` error when the process has ended. An observer, or a controller that was taken over, gets `not_controller`. |
 | `terminal.resize` | `terminal_id`, `cols`, `rows`                                           | `{}`                  | Both at least 1. Resizes the PTY and the grid, and is the only way to set the size. `not_controller` from an observer, and from a connection that is not attached while a controller exists (without one, any connection may resize). |
 | `terminal.attach` | `terminal_id`, `mode` (`observe` or `control`), `take_over?` (default false) | `AttachResult`   | See Attach. The connection becomes a stream connection. `not_found`, `conflict`. |
@@ -106,7 +106,7 @@ Starting an agent and prompting it need no request of their own (`poimen_client:
 
 ## Persistence
 
-The space list (id, name, cwd) is stored in `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else `~/.local/state/poimen/server.json`, and read at start. Terminals are not persisted: a restarted server starts without terminals.
+The space list (id, name, cwd) is stored in `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else `~/.local/state/poimen/server.json` (Windows: `$POIMEN_STATE_DIR\server.json`, else `%LOCALAPPDATA%\poimen-server\server.json`, else `~\AppData\Local\poimen-server\server.json`), and read at start. Terminals are not persisted: a restarted server starts without terminals.
 
 ## Lifecycle
 

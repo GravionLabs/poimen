@@ -36,7 +36,20 @@ There is no Intel build; on an Intel Mac, build from source (see the README).
 
 1. Run the `.exe` setup (or the `.msi`).
 2. Microsoft Defender SmartScreen shows "Windows protected your PC" because the installer is not signed. Click **More info**, then **Run anyway**.
-3. Start poimen from the Start menu.
+3. Start poimen from the Start menu, **not as administrator**. poimen starts `poimen-server.exe` in the background (no console window), and it keeps running after you close poimen.
+
+How it runs on Windows:
+
+- The terminal server listens on a named pipe that only your user can open. Its state (`server.json`, the pipe's marker `server.sock`, `server.lock`) is in `%LOCALAPPDATA%\poimen-server\`. poimen starts a copy of the server from `%LOCALAPPDATA%\poimen-server\bin\<version>\`, so an update can replace the installed one while your terminals keep running.
+- A new terminal starts PowerShell 7 (`pwsh.exe`) when it is on the `PATH`, else Windows PowerShell, else `%COMSPEC%` (`cmd.exe`).
+- The agent hooks (`poimen-server integration install claude|copilot`, or the offer on the first start) run through PowerShell: Claude Code entries carry `"shell": "powershell"`, the Copilot file a `powershell` command. Claude Code versions without that field run hooks in Git Bash, where the hook fails harmlessly and no status is reported.
+- If poimen says access to `poimen-server` was denied, the server was started elevated (for example by a poimen run as administrator). Quit that server in the Task Manager and start poimen normally.
+
+Known limitations (Windows support is new; a hands-on check of a released build follows in [#417](https://github.com/GravionLabs/poimen/issues/417)):
+
+- Terminals run through ConPTY, which reports intermediate cursor positions while it repaints, so the cursor can flicker or jump during output. Input method (IME) composition, for example for CJK text, is only partly anchored. Older Windows 10 builds drop some keyboard sequences (modified keys such as Shift+Enter).
+- `poimen-server.exe` is not code-signed either, so Microsoft Defender may warn about it.
+- Only x64 is built; Windows on ARM may run it through emulation, untested.
 
 ## Linux (x64)
 
