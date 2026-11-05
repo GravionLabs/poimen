@@ -70,7 +70,13 @@ const items: TabBarItem[] = [
   />`,
 })
 class Host {
-  tabs = items;
+  private readonly tabList = signal<TabBarItem[]>(items);
+  get tabs(): TabBarItem[] {
+    return this.tabList();
+  }
+  set tabs(value: TabBarItem[]) {
+    this.tabList.set(value);
+  }
   menu = signal<{ action: string; label: string }[]>([]);
   active = signal<string | null>("a");
   picked: string[] = [];
@@ -226,6 +232,49 @@ describe("TabBar overflow", () => {
     expect(spies[0]).not.toHaveBeenCalled();
   });
 
+  it("reveals the already active tab when it is chosen from the all-tabs menu while scrolled away", () => {
+    const { fixture, root, strip } = mount();
+    TestBed.tick();
+    const spy = vi.fn();
+    root.querySelectorAll<HTMLElement>('[role="tab"]').forEach((t) => (t.scrollIntoView = spy));
+    overflow(strip, 900, 300);
+    fixture.detectChanges();
+    (root.querySelector('[aria-label="Show all tabs"]') as HTMLElement).click();
+    fixture.detectChanges();
+    root.querySelectorAll<HTMLElement>(".all-menu .menu-item")[0].click();
+    fixture.detectChanges();
+    TestBed.tick();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(fixture.componentInstance.picked).toEqual(["a"]);
+  });
+
+  it("reveals the active tab when it is clicked while scrolled away", () => {
+    const { fixture, root } = mount();
+    TestBed.tick();
+    const tab = root.querySelectorAll<HTMLElement>('[role="tab"]')[0];
+    const spy = vi.fn();
+    tab.scrollIntoView = spy;
+    tab.click();
+    fixture.detectChanges();
+    TestBed.tick();
+    expect(spy).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+  });
+
+  it("reveals the active tab again after it was removed and re-added with the same id", () => {
+    const spy = vi.fn();
+    HTMLElement.prototype.scrollIntoView = spy;
+    const { fixture } = mount();
+    TestBed.tick();
+    spy.mockClear();
+    fixture.componentInstance.tabs = items.slice(1);
+    fixture.detectChanges();
+    TestBed.tick();
+    fixture.componentInstance.tabs = items;
+    fixture.detectChanges();
+    TestBed.tick();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("still reorders by drag and drop", () => {
     const { fixture, root } = mount();
     const rows = root.querySelectorAll<HTMLElement>('[role="tab"]');
@@ -251,6 +300,7 @@ describe("TabBar overflow", () => {
     fixture.detectChanges();
     TestBed.tick();
     expect(spy).toHaveBeenCalledTimes(1);
+    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
   });
 
   it("scrolls wheel lines by 16 px each", () => {

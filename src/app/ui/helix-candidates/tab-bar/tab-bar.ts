@@ -116,15 +116,40 @@ export class TabBar implements OnChanges {
   /** The active id last brought into view; new arrays with the same active tab keep the user's scroll. */
   private revealed: string | null = null;
 
+  private pending = false;
+
   ngOnChanges(): void {
-    // After the new tabs are rendered: re-measure and bring a newly active tab into view.
+    this.schedule();
+  }
+
+  /** After the new tabs are rendered: re-measure and bring a newly (or again) requested active tab into view. */
+  private schedule(): void {
+    if (this.pending) return;
+    this.pending = true;
     afterNextRender(
       () => {
+        this.pending = false;
         this.measure();
-        if (this.activeId !== this.revealed && this.revealActive()) this.revealed = this.activeId;
+        if (this.activeId !== this.revealed) {
+          // An active tab that is not rendered (removed, or null) forgets the reveal so its return scrolls.
+          this.revealed = this.revealActive() ? this.activeId : null;
+        } else if (this.activeId !== null && !this.isRendered(this.activeId)) {
+          this.revealed = null;
+        }
       },
       { injector: this.injector },
     );
+  }
+
+  private isRendered(id: string): boolean {
+    return this.tabs.some((tab) => tab.id === id);
+  }
+
+  /** The user activated a tab (also the active one): emit and bring it into view. */
+  protected activate(id: string): void {
+    this.selected.emit(id);
+    this.revealed = null;
+    this.schedule();
   }
 
   /** Re-reads whether the strip overflows (resize, tab add/remove, scroll). */
@@ -169,7 +194,7 @@ export class TabBar implements OnChanges {
 
   protected chooseTab(id: string): void {
     this.closeAll();
-    this.selected.emit(id);
+    this.activate(id);
   }
 
   protected readonly dragging = signal<number | null>(null);
@@ -270,7 +295,7 @@ export class TabBar implements OnChanges {
     const tabs = this.tabs;
     const target = arrowTarget(event.key, index, tabs.length);
     if (target !== null) {
-      this.selected.emit(tabs[target].id);
+      this.activate(tabs[target].id);
       event.preventDefault();
     } else if (event.key === "Delete") {
       this.closed.emit(tabs[index].id);

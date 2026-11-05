@@ -36,7 +36,7 @@
       [attr.aria-selected]="tab.id === activeId"
       [attr.tabindex]="tab.id === activeId ? 0 : -1"
       [title]="tab.title ?? tab.label"
-      (click)="selected.emit(tab.id)"
+      (click)="activate(tab.id)"
       (dblclick)="pinned.emit(tab.id)"
       (contextmenu)="openMenu($event, tab.id)"
       (auxclick)="middleClick($event, tab.id)"
