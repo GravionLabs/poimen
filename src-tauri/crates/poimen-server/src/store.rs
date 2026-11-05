@@ -13,14 +13,43 @@ struct File {
     spaces: Vec<Space>,
 }
 
-/// `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else
-/// `~/.local/state/poimen/server.json`.
+/// Unix: `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else
+/// `~/.local/state/poimen/server.json`. Windows: `$POIMEN_STATE_DIR\server.json`, else
+/// `%LOCALAPPDATA%\poimen-server\server.json`, else `~\AppData\Local\poimen-server\server.json`.
 pub fn state_file_path() -> PathBuf {
-    state_file_from(
-        std::env::var_os("POIMEN_STATE_DIR"),
-        std::env::var_os("XDG_STATE_HOME"),
-        std::env::var_os("HOME"),
-    )
+    if cfg!(windows) {
+        windows_state_file_from(
+            std::env::var_os("POIMEN_STATE_DIR"),
+            std::env::var_os("LOCALAPPDATA"),
+            std::env::home_dir(),
+        )
+    } else {
+        state_file_from(
+            std::env::var_os("POIMEN_STATE_DIR"),
+            std::env::var_os("XDG_STATE_HOME"),
+            std::env::var_os("HOME"),
+        )
+    }
+}
+
+/// The Windows [`state_file_path`] with the environment passed in; empty values count as unset.
+pub(crate) fn windows_state_file_from(
+    state_dir: Option<std::ffi::OsString>,
+    local_app_data: Option<std::ffi::OsString>,
+    home: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(dir) = state_dir.filter(|s| !s.is_empty()) {
+        return PathBuf::from(dir).join("server.json");
+    }
+    poimen_protocol::windows_dir_from(local_app_data)
+        .unwrap_or_else(|| {
+            home.filter(|h| !h.as_os_str().is_empty())
+                .unwrap_or_else(std::env::temp_dir)
+                .join("AppData")
+                .join("Local")
+                .join(poimen_protocol::WINDOWS_DIR)
+        })
+        .join("server.json")
 }
 
 pub(crate) fn state_file_from(
@@ -168,6 +197,35 @@ mod tests {
         assert_eq!(
             state_file_from(None, Some("".into()), Some("/h".into())),
             PathBuf::from("/h/.local/state/poimen/server.json")
+        );
+    }
+
+    #[test]
+    fn windows_state_file_precedence() {
+        let local = PathBuf::from(r"C:\Users\u\AppData\Local");
+        let home = PathBuf::from(r"C:\Users\u");
+        assert_eq!(
+            windows_state_file_from(
+                Some(r"D:\s".into()),
+                Some(local.clone().into()),
+                Some(home.clone())
+            ),
+            PathBuf::from(r"D:\s").join("server.json")
+        );
+        assert_eq!(
+            windows_state_file_from(
+                Some("".into()),
+                Some(local.clone().into()),
+                Some(home.clone())
+            ),
+            local.join("poimen-server").join("server.json")
+        );
+        assert_eq!(
+            windows_state_file_from(None, None, Some(home.clone())),
+            home.join("AppData")
+                .join("Local")
+                .join("poimen-server")
+                .join("server.json")
         );
     }
 }
