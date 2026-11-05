@@ -21,6 +21,28 @@ describe("Attention", () => {
     expect(a.attention().size).toBe(0);
   });
 
+  it("treats each finished turn of the poimen backend (idle, working, done, working, done) as done", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "idle" }), none);
+    expect(a.observe(st({ p1: "working" }), none)).toEqual([]);
+    expect(a.observe(st({ p1: "done" }), none)).toEqual([{ paneId: "p1", status: "done" }]);
+    expect([...a.unread()]).toEqual(["p1"]);
+    a.observe(st({ p1: "done" }), new Set(["p1"]));
+    expect(a.unread().size).toBe(0);
+    a.observe(st({ p1: "working" }), none);
+    a.observe(st({ p1: "done" }), none);
+    expect([...a.unread()]).toEqual(["p1"]);
+    expect(a.count()).toBe(1);
+    expect(a.lastChanges()).toEqual([{ paneId: "p1", status: "done" }]);
+  });
+
+  it("does not mark an agent that only goes working to idle (what the poimen backend reported before #406)", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), none);
+    expect(a.observe(st({ p1: "idle" }), none)).toEqual([]);
+    expect(a.unread().size).toBe(0);
+  });
+
   it("does not mark panes that were already done when the real snapshot arrives", () => {
     const a = new Attention();
     a.observe(st({}), none);

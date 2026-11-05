@@ -149,6 +149,35 @@ describe("Notifier", () => {
     expect(sent).toEqual(["tab p1 is done", "tab p1 is done"]);
   });
 
+  it("follows the poimen backend sequence working, done, working, done", () => {
+    const { notifier, sent, ctx, status, seen } = setup();
+    const done = [{ paneId: "p1", status: "done" as const }];
+    status.set("p1", "done");
+    notifier.notify(done, ctx());
+    expect(sent).toEqual([]);
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done"]);
+
+    // Works again and finishes again without the user looking: no repeat.
+    status.set("p1", "working");
+    notifier.notify([], ctx());
+    status.set("p1", "done");
+    notifier.notify(done, ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done"]);
+
+    // Seen in between: the next done notifies again.
+    seen.add("p1");
+    notifier.notify([], ctx());
+    seen.delete("p1");
+    status.set("p1", "working");
+    notifier.notify([], ctx());
+    status.set("p1", "done");
+    notifier.notify(done, ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done", "tab p1 is done"]);
+  });
+
   it("keeps sending blocked every time, without delay", () => {
     const { notifier, sent, ctx } = setup();
     const blocked = [{ paneId: "p1", status: "blocked" as const }];
