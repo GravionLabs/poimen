@@ -27,6 +27,7 @@ mod transcripts;
 mod trust;
 mod updater;
 mod watch;
+mod worktree;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -608,6 +609,36 @@ async fn get_harnesses() -> Vec<harness::HarnessInfo> {
         .unwrap_or_default()
 }
 
+/// Creates or reuses the git worktree and branch of `issue` for the task mode `mode` of the
+/// repository of `repo_dir` (see `worktree::ensure`).
+#[tauri::command]
+async fn task_worktree(
+    repo_dir: String,
+    issue: worktree::Issue,
+    mode: String,
+) -> Result<worktree::Worktree, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = get_settings();
+        let root = git::toplevel(&repo_dir).unwrap_or_else(|| repo_dir.clone());
+        let sources = trust::Sources::read(&root);
+        let resolved = tasks::for_project(&settings.tasks, &sources, &settings.trusted_projects);
+        let found = resolved
+            .modes
+            .modes
+            .iter()
+            .find(|m| m.name == mode)
+            .ok_or_else(|| format!("unknown task mode {mode:?}"))?;
+        worktree::ensure(
+            &repo_dir,
+            &issue,
+            &found.branch,
+            &resolved.modes.worktree_dir,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The task modes for the repository of `dir` (the user's `tasks` in config.json with the trusted
 /// project file's `tasks` merged over them); without `dir` only the user's.
 #[tauri::command]
@@ -1131,6 +1162,7 @@ pub fn run() {
             get_settings,
             get_harnesses,
             get_task_modes,
+            task_worktree,
             get_color_schemes,
             set_theme,
             set_color_schema,
