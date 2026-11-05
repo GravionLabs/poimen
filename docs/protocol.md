@@ -6,8 +6,9 @@ Protocol version: **2** (version 1 had no terminal output; version 2 adds `termi
 
 ## Transport
 
-- NDJSON over a Unix socket: one JSON object per line, UTF-8, `\n` terminated.
-- Socket path: `$POIMEN_SOCKET`, else `$XDG_RUNTIME_DIR/poimen/server.sock`, else `<temp dir>/poimen-<user>/server.sock`. The directory has mode 0700, the socket 0600. One server per user: a second server on a live socket exits; a stale socket file is replaced.
+- NDJSON over a local socket (`interprocess::local_socket`, in `poimen_client::transport`): one JSON object per line, UTF-8, `\n` terminated. On Linux and macOS it is a Unix domain socket at the socket path; on Windows it is the named pipe `\\.\pipe\<socket path>`, and the socket path holds a marker file (`<pid>:<unix nanos>`) so "is a server running?" works the same on both. The pipe's DACL (`D:P(A;;GA;;;SY)(A;;GA;;;OW)`) admits SYSTEM and the owner only, and its buffers are 64 KiB.
+- Socket path: `$POIMEN_SOCKET`, else `$XDG_RUNTIME_DIR/poimen/server.sock`, else `<temp dir>/poimen-<user>/server.sock`. Unix: the directory has mode 0700, the socket 0600. One server per user (it holds `server.lock` next to the socket): a second server on a live socket exits; a stale socket file (Windows: a marker without a pipe) is replaced; anything else at the path is left alone and the server refuses to start.
+- Named pipes have no I/O timeouts and no `shutdown`. On Windows a client bounds a request by waiting on a helper thread, and the server's write timeout for a client that stops reading (5 s) applies on Unix only.
 - Requests use short-lived connections (connect, one or more requests, close). A connection that sent `events.subscribe` only receives events afterwards.
 - A line that is not a request gets an error response and the connection stays open.
 
