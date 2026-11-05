@@ -541,7 +541,7 @@ export class App {
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
       { action: "pane-rename", label: "Rename pane..." },
-      { action: "pane-close", label: "Close herdr pane..." },
+      { action: "pane-close", label: "Close pane..." },
     ];
   }
 

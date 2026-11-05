@@ -72,7 +72,9 @@ export class HerdrStore {
   /** Why herdr could not be started; `null` when it ran, started or auto start is off. */
   readonly startFailure = computed(() => {
     const b = this._backend();
-    return b?.state === "failed" ? (b.reason ?? "herdr could not be started") : null;
+    return b?.state === "failed"
+      ? (b.reason ?? `${this.backendKind()} could not be started`)
+      : null;
   });
   /**
    * The one message for a disconnected herdr (start failed, reconnecting, unreachable, auto start
@@ -81,12 +83,13 @@ export class HerdrStore {
   readonly disconnected = computed<string | null>(() => {
     const conn = this.connection();
     if (conn.state === "connected") return null;
+    const name = this._backendKind();
     const failure = this.startFailure();
-    if (failure !== null) return `herdr was not started: ${failure}`;
+    if (failure !== null) return `${name} was not started: ${failure}`;
     const reason = conn.reason ? `: ${conn.reason}` : "";
-    if (conn.state === "reconnecting") return `herdr connection lost, reconnecting${reason}`;
+    if (conn.state === "reconnecting") return `${name} connection lost, reconnecting${reason}`;
     const off = this._backend()?.state === "disabled" ? " (auto start is off)" : "";
-    return `herdr not reachable${off}${reason}`;
+    return `${name} not reachable${off}${reason}`;
   });
   /** The version of this poimen build. */
   readonly appVersion = this._appVersion.asReadonly();

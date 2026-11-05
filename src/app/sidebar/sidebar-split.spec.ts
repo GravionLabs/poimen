@@ -172,7 +172,7 @@ describe("Sidebar toggle", () => {
 
   it("switches the structure when the setting changes", async () => {
     const s = await setup("tree");
-    expect(s.labels()).toEqual(["herdr spaces"]);
+    expect(s.labels()).toEqual(["Spaces"]);
     s.settings.update((v) => ({ ...v, sidebarLayout: "split" }));
     await s.settle();
     expect(s.labels()).toEqual(["Spaces", "Agents"]);
