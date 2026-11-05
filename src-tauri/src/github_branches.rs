@@ -40,7 +40,7 @@ pub fn build_query(count: usize) -> String {
                 " b{i}: pullRequests(headRefName: $b{i}, states: [OPEN, MERGED], first: 1, \
 orderBy: {{field: UPDATED_AT, direction: DESC}}) {{ nodes {{ number title url state isDraft \
 commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ state contexts(first: 1) {{ \
-checkRunCountsByState {{ state count }} statusContextCountsByState {{ state count }} }} }} }} }} }} }} }} }}"
+checkRunCountsByState {{ state count }} statusContextCountsByState {{ state count }} }} }} }} }} }} }} }}"
             )
         })
         .collect();
@@ -229,6 +229,16 @@ mod tests {
         assert!(query.contains("b1: pullRequests(headRefName: $b1"));
         assert!(!query.contains("b2"));
         assert!(query.contains("orderBy: {field: UPDATED_AT, direction: DESC}"));
+    }
+
+    #[test]
+    fn the_query_has_balanced_braces() {
+        for count in [1, 3] {
+            let query = build_query(count);
+            let open = query.matches('{').count();
+            let close = query.matches('}').count();
+            assert_eq!(open, close, "unbalanced braces for {count} branches");
+        }
     }
 
     #[test]
