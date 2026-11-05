@@ -358,6 +358,159 @@ pub fn write_comments(dir: &str, content: &str, home: Option<&Path>) -> Result<S
     write_comments_in(&validate(dir, home)?, content)
 }
 
+/// Largest findings file the app reads.
+const MAX_FINDINGS: u64 = 1024 * 1024;
+const FINDINGS_PATH: [&str; 3] = [".agents", "state", "findings.json"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Blocking,
+    Note,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Rule {
+    #[serde(rename = "adr-missing")]
+    AdrMissing,
+    #[serde(rename = "spec-drift")]
+    SpecDrift,
+}
+
+/// One finding of `.agents/state/findings.json` (`docs/findings.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Finding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, rename = "endLine", skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+    pub severity: Severity,
+    pub title: String,
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<Rule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Findings {
+    pub version: u32,
+    pub sha: String,
+    pub source: String,
+    pub findings: Vec<Finding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum FindingsResult {
+    /// No findings file.
+    None,
+    Ok {
+        /// `HEAD` of the worktree now.
+        head: String,
+        /// The findings were made for another commit than `head`.
+        stale: bool,
+        findings: Findings,
+    },
+    /// The file exists but is not valid; the diff still works.
+    Invalid { error: String },
+}
+
+/// Parses and validates the text of a findings file (the rules of `docs/findings.schema.json`).
+pub fn parse_findings(src: &str) -> Result<Findings, String> {
+    let f: Findings = serde_json::from_str(src).map_err(|e| e.to_string())?;
+    if f.version != 1 {
+        return Err(format!("unsupported version {} (expected 1)", f.version));
+    }
+    let hex = f.sha.bytes().all(|b| b.is_ascii_hexdigit());
+    if !hex || !(7..=64).contains(&f.sha.len()) {
+        return Err("sha must be 7 to 64 hexadecimal characters".into());
+    }
+    for (i, x) in f.findings.iter().enumerate() {
+        let at = format!("findings[{i}]");
+        if x.title.trim().is_empty() || x.why.trim().is_empty() {
+            return Err(format!("{at}: title and why must not be empty"));
+        }
+        if x.file.as_deref().is_some_and(|p| p.trim().is_empty()) {
+            return Err(format!("{at}: file must not be empty"));
+        }
+        if x.line.is_some() && x.file.is_none() {
+            return Err(format!("{at}: line needs a file"));
+        }
+        if x.line == Some(0) {
+            return Err(format!("{at}: line must be at least 1"));
+        }
+        match (x.line, x.end_line) {
+            (None, Some(_)) => return Err(format!("{at}: endLine needs a line")),
+            (Some(l), Some(e)) if e < l => {
+                return Err(format!("{at}: endLine must not be before line"));
+            }
+            _ => {}
+        }
+    }
+    Ok(f)
+}
+
+/// A commit id and `head` name the same commit (either may be abbreviated).
+pub fn same_commit(sha: &str, head: &str) -> bool {
+    let (a, b) = (sha.to_ascii_lowercase(), head.to_ascii_lowercase());
+    !a.is_empty() && !b.is_empty() && (a.starts_with(&b) || b.starts_with(&a))
+}
+
+/// A path component that must be a real directory, never a symlink.
+fn real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir())
+}
+
+fn findings_in(top: &str) -> Result<FindingsResult, String> {
+    let mut path = Path::new(top).to_path_buf();
+    for part in &FINDINGS_PATH[..2] {
+        path.push(part);
+        if !real_dir(&path) {
+            return Ok(FindingsResult::None);
+        }
+    }
+    path.push(FINDINGS_PATH[2]);
+    let meta = match std::fs::symlink_metadata(&path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(FindingsResult::None),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let invalid = |error: String| Ok(FindingsResult::Invalid { error });
+    if !meta.file_type().is_file() {
+        return invalid("findings.json is not a regular file".into());
+    }
+    if meta.len() > MAX_FINDINGS {
+        return invalid("findings.json is too large (limit 1 MiB)".into());
+    }
+    let src = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => return invalid(format!("findings.json could not be read: {e}")),
+    };
+    match parse_findings(&src) {
+        Ok(findings) => {
+            let head = run_bytes(top, &["rev-parse", "HEAD"])
+                .map(|b| text(&b).trim().to_owned())
+                .unwrap_or_default();
+            let stale = !same_commit(&findings.sha, &head);
+            Ok(FindingsResult::Ok {
+                head,
+                stale,
+                findings,
+            })
+        }
+        Err(error) => invalid(error),
+    }
+}
+
+/// The review findings of the worktree (`<worktree>/.agents/state/findings.json`).
+pub fn findings(dir: &str, home: Option<&Path>) -> Result<FindingsResult, String> {
+    findings_in(&validate(dir, home)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -696,5 +849,127 @@ mod tests {
         assert_eq!(count_lines(b"a\nb"), 2);
         assert_eq!(count_lines(b"a\nb\n"), 2);
         assert_eq!(count_lines(b""), 0);
+    }
+
+    const FINDINGS: &str = include_str!("../fixtures/findings.json");
+    const FINDINGS_INVALID: &str = include_str!("../fixtures/findings-invalid.json");
+    const FIXTURE_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    #[test]
+    fn parses_the_findings_fixture() {
+        let f = parse_findings(FINDINGS).unwrap();
+        assert_eq!(f.source, "deliver");
+        assert_eq!(f.findings.len(), 4);
+        assert_eq!(f.findings[0].end_line, Some(5));
+        assert_eq!(f.findings[0].severity, Severity::Blocking);
+        assert_eq!(f.findings[0].rule, Some(Rule::SpecDrift));
+        assert_eq!(f.findings[3].file, None);
+    }
+
+    #[test]
+    fn rejects_invalid_findings() {
+        let err = parse_findings(FINDINGS_INVALID).unwrap_err();
+        assert!(
+            err.contains("findings[0]: line must be at least 1"),
+            "{err}"
+        );
+        assert!(parse_findings("{").is_err());
+        let version = FINDINGS.replace("\"version\": 1", "\"version\": 2");
+        assert!(parse_findings(&version).unwrap_err().contains("version"));
+        let severity = FINDINGS.replace("\"note\"", "\"info\"");
+        assert!(parse_findings(&severity).unwrap_err().contains("info"));
+        let sha = FINDINGS.replace(FIXTURE_SHA, "xyz");
+        assert!(parse_findings(&sha).unwrap_err().contains("sha"));
+        let extra = FINDINGS.replace("\"findings\"", "\"extra\": 1, \"findings\"");
+        assert!(parse_findings(&extra).is_err());
+        let range = FINDINGS.replace("\"endLine\": 5", "\"endLine\": 2");
+        assert!(parse_findings(&range).unwrap_err().contains("endLine"));
+        let empty = FINDINGS.replace("Unchecked input", " ");
+        assert!(parse_findings(&empty).unwrap_err().contains("title"));
+        let orphan = FINDINGS.replace("\"file\": \"docs/other.md\",", "");
+        assert!(
+            parse_findings(&orphan)
+                .unwrap_err()
+                .contains("line needs a file")
+        );
+    }
+
+    #[test]
+    fn a_review_result_without_findings_is_accepted() {
+        let src = r#"{"version":1,"sha":"abc1234","source":"x","findings":[]}"#;
+        assert!(parse_findings(src).unwrap().findings.is_empty());
+    }
+
+    #[test]
+    fn stale_detection_compares_abbreviated_ids() {
+        assert!(same_commit("abc1234", "abc1234def5678"));
+        assert!(same_commit("ABC1234DEF", "abc1234"));
+        assert!(!same_commit("abc1234", "fff0000"));
+        assert!(!same_commit("abc1234", ""));
+    }
+
+    #[test]
+    fn findings_file_is_read_from_the_worktree() {
+        let f = Fixture::new(false);
+        assert_eq!(findings_in(&f.dir()).unwrap(), FindingsResult::None);
+        let state = f.app.join(".agents/state");
+        std::fs::create_dir_all(&state).unwrap();
+        let head = text(&run_bytes(&f.dir(), &["rev-parse", "HEAD"]).unwrap())
+            .trim()
+            .to_owned();
+        std::fs::write(
+            state.join("findings.json"),
+            FINDINGS.replace(FIXTURE_SHA, &head),
+        )
+        .unwrap();
+        match findings_in(&f.dir()).unwrap() {
+            FindingsResult::Ok { stale, head: h, .. } => {
+                assert!(!stale);
+                assert_eq!(h, head);
+            }
+            other => panic!("{other:?}"),
+        }
+        std::fs::write(state.join("findings.json"), FINDINGS).unwrap();
+        assert!(matches!(
+            findings_in(&f.dir()).unwrap(),
+            FindingsResult::Ok { stale: true, .. }
+        ));
+        std::fs::write(state.join("findings.json"), FINDINGS_INVALID).unwrap();
+        assert!(matches!(
+            findings_in(&f.dir()).unwrap(),
+            FindingsResult::Invalid { .. }
+        ));
+    }
+
+    #[test]
+    fn findings_file_refuses_symlinks_and_large_files() {
+        let f = Fixture::new(false);
+        let state = f.app.join(".agents/state");
+        std::fs::create_dir_all(&state).unwrap();
+        let outside = f.base.join("outside.json");
+        std::fs::write(&outside, FINDINGS).unwrap();
+        std::os::unix::fs::symlink(&outside, state.join("findings.json")).unwrap();
+        assert!(matches!(
+            findings_in(&f.dir()).unwrap(),
+            FindingsResult::Invalid { .. }
+        ));
+        std::fs::remove_file(state.join("findings.json")).unwrap();
+        std::fs::write(
+            state.join("findings.json"),
+            vec![b' '; MAX_FINDINGS as usize + 1],
+        )
+        .unwrap();
+        assert!(matches!(
+            findings_in(&f.dir()).unwrap(),
+            FindingsResult::Invalid { .. }
+        ));
+        // A symlinked `state` directory is not followed.
+        std::fs::remove_dir_all(&state).unwrap();
+        let elsewhere = f.base.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("findings.json"), FINDINGS).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &state).unwrap();
+        assert_eq!(findings_in(&f.dir()).unwrap(), FindingsResult::None);
+        assert!(findings("/nonexistent/dir", None).is_err());
     }
 }

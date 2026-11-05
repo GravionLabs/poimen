@@ -7,6 +7,8 @@ const INTRO = "Please address these review comments on the changes in this workt
 
 /** `path:start-end`, or `path:line` for one line; removed lines (left side) are marked. */
 export function commentLocation(c: LineComment): string {
+  // Start 0 is a review finding without a line: just the path.
+  if (c.start === 0) return c.path;
   const lines = c.start === c.end ? `${c.start}` : `${c.start}-${c.end}`;
   return `${c.path}:${lines}${c.side === "old" ? " (removed lines)" : ""}`;
 }
@@ -21,7 +23,9 @@ export function fenced(text: string): string {
 /** The comments as Markdown: per comment its location, the quoted diff lines and the comment. */
 export function commentsMarkdown(comments: readonly LineComment[]): string {
   return comments
-    .map((c) => [commentLocation(c), fenced(c.quote), c.text.trim()].join("\n"))
+    .map((c) =>
+      [commentLocation(c), ...(c.quote ? [fenced(c.quote)] : []), c.text.trim()].join("\n"),
+    )
     .join("\n\n");
 }
 

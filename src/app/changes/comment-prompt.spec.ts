@@ -67,6 +67,11 @@ describe("comment prompt", () => {
     );
   });
 
+  it("writes a comment without a line as the path and no fence when there is no quote", () => {
+    const md = commentsMarkdown([comment({ start: 0, end: 0, quote: "", text: "Whole file." })]);
+    expect(md).toBe("src/a.ts\nWhole file.");
+  });
+
   it("uses a fence longer than any backtick run of the quote", () => {
     expect(fenced("plain")).toBe("```\nplain\n```");
     expect(fenced("a ``` b")).toBe("````\na ``` b\n````");

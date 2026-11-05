@@ -24,6 +24,16 @@ import {
 } from "./changes";
 import { CommentsPanel } from "./comments-panel";
 import { DiffEditor } from "./diff-editor";
+import type { FindingMark } from "./comment-extension";
+import {
+  Findings,
+  countLines,
+  findingComment,
+  lineCounts,
+  mapFindings,
+  type IndexedFinding,
+} from "./findings";
+import { FindingsPanel } from "./findings-panel";
 import { LineComments } from "./line-comments";
 
 const SCOPE_LABEL: Record<ChangesScope, string> = {
@@ -37,8 +47,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
  */
 @Component({
   selector: "app-changes-view",
-  imports: [DiffEditor, CommentsPanel],
-  providers: [Changes, LineComments],
+  imports: [DiffEditor, CommentsPanel, FindingsPanel],
+  providers: [Changes, LineComments, Findings],
   template: `
     <header>
       <div class="base" [title]="path()">
@@ -100,6 +110,15 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       </button>
     </header>
 
+    @if (findings.invalid(); as error) {
+      <p class="findings-note invalid" role="status">
+        The findings file is not valid and is ignored: {{ error }}
+      </p>
+    }
+    @if (findings.staleNote(); as note) {
+      <p class="findings-note stale" role="status">{{ note }}</p>
+    }
+
     @if (changes.error(); as error) {
       <p class="problem" role="alert">{{ error }}</p>
     } @else if (changes.list() && !changes.files().length) {
@@ -159,6 +178,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
                   [layout]="layout()"
                   [jump]="jump()"
                   [comments]="lineComments.forFile(changes.selected() ?? '')"
+                  [findings]="marks()"
+                  (findingSent)="sendMark($event.id, $event.quote)"
                   (commentAdded)="lineComments.add($event)"
                 />
               }
@@ -169,6 +190,9 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
           }
         </section>
       </div>
+    }
+    @if (mapped().other.length) {
+      <app-findings-panel [items]="mapped().other" (sendFinding)="sendOther($event)" />
     }
   `,
   styles: `
@@ -300,6 +324,15 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     .diff app-diff-editor {
       flex: 1;
     }
+    .findings-note {
+      margin: 0;
+      padding: 4px 12px;
+      color: var(--term-ansi-3);
+      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+    }
+    .findings-note.invalid {
+      color: var(--h-danger-color, #d33);
+    }
     .note,
     .empty,
     .problem {
@@ -317,6 +350,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
 export class ChangesView {
   protected readonly changes = inject(Changes);
   protected readonly lineComments = inject(LineComments);
+  protected readonly findings = inject(Findings);
   private readonly ui = inject(UiState);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The latest `n`/`p` press, handed to the diff as an input (a new object each time). */
@@ -330,6 +364,30 @@ export class ChangesView {
   @Input({ required: true }) set dir(dir: string) {
     this.path.set(dir);
   }
+
+  /** The findings split into markers of the open diff and "Other findings". */
+  protected readonly mapped = computed(() => {
+    const path = this.changes.selected();
+    const content = this.changes.content();
+    // A file shown without a diff (binary, too large) cannot hold markers.
+    let selected: { path: string; lines: number } | null = null;
+    if (path && content?.state === "text") selected = { path, lines: countLines(content.new) };
+    else if (path && content) selected = { path, lines: 0 };
+    return mapFindings(this.findings.all(), lineCounts(this.changes.files(), selected));
+  });
+  protected readonly marks = computed<FindingMark[]>(() => {
+    const path = this.changes.selected();
+    const added = this.findings.added();
+    return (path ? (this.mapped().located.get(path) ?? []) : []).map(({ id, finding }) => ({
+      id,
+      start: finding.line as number,
+      end: Math.max(finding.line as number, finding.endLine ?? (finding.line as number)),
+      severity: finding.severity,
+      title: finding.title,
+      why: finding.why,
+      added: added.has(id),
+    }));
+  });
 
   protected readonly scopes = CHANGES_SCOPES;
   protected readonly scopeLabel = SCOPE_LABEL;
@@ -351,6 +409,11 @@ export class ChangesView {
       this.lineComments.follow(dir);
       untracked(() => void this.changes.follow(dir));
     });
+    // Every read of the changes (open, refresh button, finished agent) reads the findings too.
+    effect(() => {
+      this.findings.follow(this.path());
+      if (this.changes.list()) untracked(() => void this.findings.refresh());
+    });
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver((entries) => {
         const width = entries[0]?.contentRect.width;
@@ -359,6 +422,18 @@ export class ChangesView {
       observer.observe(this.host.nativeElement);
       inject(DestroyRef).onDestroy(() => observer.disconnect());
     }
+  }
+
+  protected sendMark(id: string, quote: string): void {
+    const entry = this.findings.all()[Number(id)];
+    if (!entry) return;
+    this.lineComments.add(findingComment(entry, quote));
+    this.findings.markAdded(id);
+  }
+
+  protected sendOther(item: IndexedFinding): void {
+    this.lineComments.add(findingComment(item.finding));
+    this.findings.markAdded(item.id);
   }
 
   protected setLayout(layout: DiffLayout): void {
