@@ -63,7 +63,7 @@ function parseComment(value: unknown): LineComment | null {
     (c["side"] !== "old" && c["side"] !== "new") ||
     !Number.isInteger(c["start"]) ||
     !Number.isInteger(c["end"]) ||
-    (c["start"] as number) < 1 ||
+    (c["start"] as number) < 0 ||
     (c["end"] as number) < (c["start"] as number) ||
     typeof c["quote"] !== "string" ||
     typeof c["text"] !== "string"

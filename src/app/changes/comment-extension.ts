@@ -15,6 +15,18 @@ export interface DiffComment {
   text: string;
 }
 
+/** A review finding as the editor shows it: read-only, with a button to send it to the agent. */
+export interface FindingMark {
+  id: string;
+  start: number;
+  end: number;
+  severity: "blocking" | "note";
+  title: string;
+  why: string;
+  /** Already among the pending comments. */
+  added: boolean;
+}
+
 /** The range a comment is being written for. */
 export interface Draft {
   start: number;
@@ -26,10 +38,64 @@ export interface CommentHandlers {
   line(line: number, shift: boolean): void;
   save(text: string): void;
   cancel(): void;
+  /** "Send to agent" on a finding. */
+  finding(id: string): void;
 }
 
 export const setComments = StateEffect.define<readonly DiffComment[]>();
 export const setDraft = StateEffect.define<Draft | null>();
+export const setFindings = StateEffect.define<readonly FindingMark[]>();
+
+class FindingBox extends WidgetType {
+  constructor(
+    private readonly mark: FindingMark,
+    private readonly handlers: CommentHandlers,
+  ) {
+    super();
+  }
+  override eq(other: FindingBox): boolean {
+    const a = this.mark;
+    const b = other.mark;
+    return (
+      a.id === b.id &&
+      a.start === b.start &&
+      a.end === b.end &&
+      a.severity === b.severity &&
+      a.title === b.title &&
+      a.why === b.why &&
+      a.added === b.added
+    );
+  }
+  override toDOM(): HTMLElement {
+    const m = this.mark;
+    const box = document.createElement("div");
+    box.className = `cm-comment-box cm-finding-box cm-finding-${m.severity}`;
+    const head = document.createElement("div");
+    head.className = "cm-comment-range";
+    const lines = m.start === m.end ? `Line ${m.start}` : `Lines ${m.start}-${m.end}`;
+    head.textContent = `${m.severity} · ${lines}`;
+    const title = document.createElement("div");
+    title.className = "cm-finding-title";
+    title.textContent = m.title;
+    const why = document.createElement("div");
+    why.className = "cm-comment-text";
+    why.textContent = m.why;
+    const send = document.createElement("button");
+    send.type = "button";
+    send.className = "cm-finding-send";
+    send.textContent = m.added ? "Added to comments" : "Send to agent";
+    send.disabled = m.added;
+    send.addEventListener("click", () => this.handlers.finding(m.id));
+    const actions = document.createElement("div");
+    actions.className = "cm-comment-actions";
+    actions.append(send);
+    box.append(head, title, why, actions);
+    return box;
+  }
+  override ignoreEvent(): boolean {
+    return true;
+  }
+}
 
 class CommentBox extends WidgetType {
   constructor(private readonly comment: DiffComment) {
@@ -113,6 +179,7 @@ class DraftBox extends WidgetType {
 interface Shown {
   comments: readonly DiffComment[];
   draft: Draft | null;
+  findings: readonly FindingMark[];
   decorations: DecorationSet;
 }
 
@@ -120,18 +187,27 @@ function decorate(
   view: { doc: EditorView["state"]["doc"] },
   comments: readonly DiffComment[],
   draft: Draft | null,
+  findings: readonly FindingMark[],
   handlers: CommentHandlers,
 ): DecorationSet {
   const doc = view.doc;
   const ranges: Range<Decoration>[] = [];
-  const mark = (start: number, end: number, widget: WidgetType) => {
+  const mark = (start: number, end: number, widget: WidgetType, cls = "cm-commented-line") => {
     if (start < 1 || end < start || end > doc.lines) return;
     for (let n = start; n <= end; n++) {
-      ranges.push(Decoration.line({ class: "cm-commented-line" }).range(doc.line(n).from));
+      ranges.push(Decoration.line({ class: cls }).range(doc.line(n).from));
     }
     ranges.push(Decoration.widget({ widget, block: true, side: 1 }).range(doc.line(end).to));
   };
   for (const c of comments) mark(c.start, c.end, new CommentBox(c));
+  for (const f of findings) {
+    mark(
+      f.start,
+      f.end,
+      new FindingBox(f, handlers),
+      `cm-finding-line cm-finding-line-${f.severity}`,
+    );
+  }
   if (draft) mark(draft.start, draft.end, new DraftBox(draft, handlers));
   return Decoration.set(ranges, true);
 }
@@ -143,13 +219,16 @@ function decorate(
  */
 export function commentExtension(handlers: CommentHandlers): Extension {
   const field = StateField.define<Shown>({
-    create: () => ({ comments: [], draft: null, decorations: Decoration.none }),
+    create: () => ({ comments: [], draft: null, findings: [], decorations: Decoration.none }),
     update(value, tr) {
-      let { comments, draft } = value;
+      let { comments, draft, findings } = value;
       let changed = false;
       for (const effect of tr.effects) {
         if (effect.is(setComments)) {
           comments = effect.value;
+          changed = true;
+        } else if (effect.is(setFindings)) {
+          findings = effect.value;
           changed = true;
         } else if (effect.is(setDraft)) {
           draft = effect.value;
@@ -157,7 +236,12 @@ export function commentExtension(handlers: CommentHandlers): Extension {
         }
       }
       if (!changed) return value;
-      return { comments, draft, decorations: decorate(tr.state, comments, draft, handlers) };
+      return {
+        comments,
+        draft,
+        findings,
+        decorations: decorate(tr.state, comments, draft, findings, handlers),
+      };
     },
     provide: (f) => EditorView.decorations.from(f, (v) => v.decorations),
   });
@@ -176,6 +260,16 @@ export function commentExtension(handlers: CommentHandlers): Extension {
       ".cm-commented-line": {
         backgroundColor: "color-mix(in srgb, var(--term-ansi-4) 14%, transparent)",
       },
+      ".cm-finding-line-blocking": {
+        backgroundColor: "color-mix(in srgb, var(--term-ansi-1) 14%, transparent)",
+      },
+      ".cm-finding-line-note": {
+        backgroundColor: "color-mix(in srgb, var(--term-ansi-3) 14%, transparent)",
+      },
+      ".cm-finding-blocking": { borderColor: "var(--term-ansi-1)" },
+      ".cm-finding-note": { borderColor: "var(--term-ansi-3)" },
+      ".cm-finding-title": { fontWeight: "600" },
+      ".cm-finding-send:disabled": { opacity: "0.6", cursor: "default" },
       ".cm-comment-box": {
         margin: "4px 8px 4px 48px",
         padding: "6px 8px",

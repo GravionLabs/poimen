@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "sha": "0123456789abcdef0123456789abcdef01234567",
+  "source": "deliver",
+  "findings": [
+    {
+      "file": "src/a.ts",
+      "line": 3,
+      "endLine": 5,
+      "severity": "blocking",
+      "title": "Unchecked input",
+      "why": "The value is used before it is validated.",
+      "rule": "spec-drift"
+    },
+    {
+      "file": "src/a.ts",
+      "line": 40,
+      "severity": "note",
+      "title": "Name",
+      "why": "Consider a clearer name."
+    },
+    {
+      "file": "docs/other.md",
+      "line": 1,
+      "severity": "note",
+      "title": "Typo",
+      "why": "Misspelled word."
+    },
+    {
+      "severity": "blocking",
+      "title": "No ADR",
+      "why": "The decision is not recorded."
+    }
+  ]
+}

@@ -901,6 +901,14 @@ async fn changes_write_comments(dir: String, content: String) -> Result<String, 
     .map_err(|e| e.to_string())?
 }
 
+/// The review findings of the worktree `dir` (`.agents/state/findings.json`, read only).
+#[tauri::command]
+async fn changes_findings(dir: String) -> Result<changes::FindingsResult, String> {
+    tauri::async_runtime::spawn_blocking(move || changes::findings(&dir, home_dir().as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, String> {
@@ -1331,6 +1339,7 @@ pub fn run() {
             changes_list,
             changes_file,
             changes_write_comments,
+            changes_findings,
             pr_worktree,
             worktree_branches,
             task_plan,

@@ -20,7 +20,9 @@ import {
   commentExtension,
   setComments,
   setDraft,
+  setFindings,
   type DiffComment,
+  type FindingMark,
   type Draft,
 } from "./comment-extension";
 import type { NewComment } from "./line-comments";
@@ -135,6 +137,13 @@ export class DiffEditor {
   @Input() set comments(value: readonly FileComment[] | null) {
     this.shown.set(value ?? []);
   }
+  private readonly marks = signal<readonly FindingMark[]>([]);
+  /** The review findings of the open file (new side), shown read-only at their lines. */
+  @Input() set findings(value: readonly FindingMark[] | null) {
+    this.marks.set(value ?? []);
+  }
+  /** "Send to agent" on a finding: its id and the code at its lines. */
+  @Output() readonly findingSent = new EventEmitter<{ id: string; quote: string }>();
   /** A comment written in the draft box. */
   @Output() readonly commentAdded = new EventEmitter<NewComment>();
   @Input() set jump(request: DiffJump | null) {
@@ -162,6 +171,10 @@ export class DiffEditor {
     effect(() => {
       this.shown();
       this.pushComments();
+    });
+    effect(() => {
+      this.marks();
+      this.pushFindings();
     });
     inject(DestroyRef).onDestroy(() => this.dispose());
   }
@@ -240,6 +253,24 @@ export class DiffEditor {
     }
   }
 
+  private pushFindings(): void {
+    this.sideView("new")?.dispatch({ effects: setFindings.of(this.marks()) });
+  }
+
+  private sendFinding(id: string): void {
+    const mark = this.marks().find((m) => m.id === id);
+    const doc = this.sideView("new")?.state.doc;
+    if (!mark) return;
+    const quote =
+      doc && mark.start >= 1 && mark.end <= doc.lines
+        ? Array.from(
+            { length: mark.end - mark.start + 1 },
+            (_, i) => doc.line(mark.start + i).text,
+          ).join("\n")
+        : "";
+    this.findingSent.emit({ id, quote });
+  }
+
   private pushDraft(): void {
     for (const side of ["old", "new"] as const) {
       const draft = this.draft?.side === side ? this.draft : null;
@@ -262,6 +293,7 @@ export class DiffEditor {
         line: (line, shift) => this.lineClicked(side, line, shift),
         save: (text) => this.saveDraft(text),
         cancel: () => this.cancelDraft(),
+        finding: (id) => this.sendFinding(id),
       });
     const common: Extension[] = [
       language.of([]),
@@ -298,6 +330,7 @@ export class DiffEditor {
       });
     }
     this.pushComments();
+    this.pushFindings();
     const generation = this.generation;
     void loadLanguage(path).then((support) => {
       if (!support || generation !== this.generation) return;
