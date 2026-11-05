@@ -23,7 +23,7 @@ pub const CACHE_TTL: Duration = Duration::from_secs(30);
 /// How long one `gh` call may run before it is killed.
 const GH_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Repo {
     pub owner: String,
     pub name: String,

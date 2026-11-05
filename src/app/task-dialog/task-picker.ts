@@ -74,8 +74,8 @@ export class TaskPicker {
     return n > 0 && !this.issues().some((i) => i.number === n) ? n : null;
   });
 
-  /** Opens the dialog for the repository of `dir`; resolves with the choice, null when cancelled. */
-  async open(dir: string): Promise<TaskChoice | null> {
+  /** Opens the dialog for the repository of `dir` (with issue `preselect` highlighted); resolves with the choice, null when cancelled. */
+  async open(dir: string, preselect?: number): Promise<TaskChoice | null> {
     this.cancel();
     this.query.set("");
     this.level.set(null);
@@ -85,11 +85,11 @@ export class TaskPicker {
     this.loading.set(true);
     this.isOpen.set(true);
     const result = new Promise<TaskChoice | null>((r) => (this.resolve = r));
-    void this.load(dir);
+    void this.load(dir, preselect);
     return result;
   }
 
-  private async load(dir: string): Promise<void> {
+  private async load(dir: string, preselect?: number): Promise<void> {
     const [issues, modes] = await Promise.allSettled([
       this.bridge.invoke<PickIssue[]>("task_issues", { dir }),
       this.bridge.invoke<TaskModes>("get_task_modes", { dir }),
@@ -99,7 +99,15 @@ export class TaskPicker {
     else this.error.set(toGhError(issues.reason));
     this.modes.set(modes.status === "fulfilled" ? (modes.value?.modes ?? []) : []);
     this.mode.set(0);
+    if (preselect) this.select(preselect);
     this.loading.set(false);
+  }
+
+  /** Highlights the listed issue `nr`; one the list lacks is put in the filter as a typed number. */
+  private select(nr: number): void {
+    const at = this.visible().findIndex((i) => i.number === nr);
+    if (at >= 0) this.index.set(at);
+    else this.query.set(String(nr));
   }
 
   setQuery(text: string): void {
