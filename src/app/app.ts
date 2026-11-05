@@ -23,9 +23,9 @@ import {
 } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
-import { Attention } from "./core/attention";
+import { Attention, type StatusChange } from "./core/attention";
 import { DockBadge } from "./core/dock-badge";
-import { Notifier } from "./core/notifier";
+import { Notifier, type NotifyContext } from "./core/notifier";
 import { NotificationCenter } from "./core/notification-center";
 import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
@@ -150,7 +150,6 @@ export class App {
   private readonly attention = inject(Attention);
   private readonly notifier = inject(Notifier);
   private readonly center = inject(NotificationCenter);
-  private readonly dockBadge = inject(DockBadge);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
   protected readonly groupItems = computed(() => {
@@ -226,6 +225,8 @@ export class App {
   );
 
   constructor() {
+    // Instantiated for its effect: the dock badge follows `Attention.count`.
+    inject(DockBadge);
     const title = inject(Title);
     // Marks follow herdr's statuses; the active tab of each group counts as viewed.
     effect(() => {
@@ -235,25 +236,17 @@ export class App {
       untracked(() => {
         const changes = this.attention.observe(statuses, viewed);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
-        const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
-        this.notifier.notify(changes, {
-          // Read live: a delayed done notification checks again when it is due.
-          seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
-          status: (id) => this.store.panes().get(id)?.agent_status,
-          onBlocked: notifyOnBlocked,
-          onDone: notifyOnDone,
-          label: (id) => this.tabTitle(id),
-          now: Date.now(),
-        });
+        this.notifyChanges(changes);
       });
     });
     effect(() => {
       const waiting = this.store.waiting();
       title.setTitle(waiting > 0 ? `poimen (${waiting} waiting)` : "poimen");
-      untracked(() => this.dockBadge.set(waiting));
     });
 
     const destroyRef = inject(DestroyRef);
+    // Coming back to the window sees the active tabs again: withdraw their notifications.
+    destroyRef.onDestroy(this.notifier.watchFocus(window, () => this.notifyContext()));
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     // A click on a system notification opens the tab of the pane it was about.
@@ -671,6 +664,24 @@ export class App {
   protected jumpToWaiting(): void {
     const next = this.store.nextWaiting(this.editor.activeId());
     if (next) this.open(next);
+  }
+
+  /** Sends notifications for `changes` and withdraws those of panes the user sees now. */
+  private notifyChanges(changes: readonly StatusChange[]): void {
+    this.notifier.notify(changes, this.notifyContext());
+  }
+
+  private notifyContext(): NotifyContext {
+    const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
+    return {
+      // Read live: a delayed done notification checks again when it is due.
+      seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
+      status: (id) => this.store.panes().get(id)?.agent_status,
+      onBlocked: notifyOnBlocked,
+      onDone: notifyOnDone,
+      label: (id) => this.tabTitle(id),
+      now: Date.now(),
+    };
   }
 
   /** Space and name of a pane, as its tab shows them. */

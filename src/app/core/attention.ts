@@ -1,4 +1,4 @@
-import { Injectable, signal } from "@angular/core";
+import { Injectable, computed, signal } from "@angular/core";
 import type { AgentStatus, SpaceNode } from "./herdr";
 
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
@@ -22,6 +22,8 @@ export class Attention {
   readonly attention = signal<ReadonlySet<string>>(new Set());
   /** Panes that finished while no tab showed them. */
   readonly unread = signal<ReadonlySet<string>>(new Set());
+  /** Panes with a mark (ringing or unread): what the dock badge counts. */
+  readonly count = computed(() => new Set([...this.attention(), ...this.unread()]).size);
   /** The panes that turned blocked or done in the latest snapshot that had any (a new array each time). */
   readonly lastChanges = signal<readonly StatusChange[]>([]);
 
