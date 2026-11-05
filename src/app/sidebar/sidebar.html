@@ -71,6 +71,8 @@
     <span
       class="space"
       [class.chosen]="d.selected"
+      [class.closing]="isClosing(d.workspace.space_id)"
+      [attr.aria-busy]="isClosing(d.workspace.space_id) || null"
       (contextmenu)="openMenu($event, 'workspace', d.workspace.space_id)"
     >
       <span class="main space-main">
@@ -119,12 +121,16 @@
           </span>
         }
       </span>
+      @if (isClosing(d.workspace.space_id)) {
+        <span class="closing-label" role="status">Closing…</span>
+      }
       @if (unreadOf(d.workspace.space_id); as n) {
         <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
       }
       <button
         type="button"
         class="close"
+        [disabled]="isClosing(d.workspace.space_id)"
         [attr.aria-label]="'Close space ' + d.workspace.label"
         [title]="'Close space ' + d.workspace.label"
         (click)="closeSpace(d.workspace.space_id, $event)"

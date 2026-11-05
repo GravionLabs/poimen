@@ -328,6 +328,7 @@ export class Sidebar {
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
     event.preventDefault();
     event.stopPropagation();
+    if (kind === "workspace" && this.isClosing(id)) return;
     this.menuAt.set({ kind, id, x: event.clientX, y: event.clientY });
   }
 
@@ -389,6 +390,10 @@ export class Sidebar {
   }
 
   /** The close icon of a workspace row: the close flow of the context menu, no selection or toggle. */
+  protected isClosing(workspaceId: string): boolean {
+    return this.spaceActions.closingIds().has(workspaceId);
+  }
+
   protected closeSpace(workspaceId: string, event: Event): void {
     event.stopPropagation();
     this.menuAction.emit({ kind: "workspace", id: workspaceId, action: "close-space" });

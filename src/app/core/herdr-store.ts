@@ -111,6 +111,8 @@ export class HerdrStore {
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing = false;
   private refreshAgain = false;
+  /** Callers waiting for the queued re-read. */
+  private refreshWaiters: (() => void)[] = [];
   private unlisten: Promise<Unlisten> | undefined;
   private reposKey: string | undefined;
   private reposStale = false;
@@ -162,11 +164,14 @@ export class HerdrStore {
     return this.panes().get(paneId);
   }
 
-  /** Re-reads the snapshot. A call during a running re-read queues exactly one more. */
+  /**
+   * Re-reads the snapshot. A call during a running re-read queues exactly one more and resolves
+   * once that one finished, so the caller sees a snapshot read after the call.
+   */
   async refresh(): Promise<void> {
     if (this.refreshing) {
       this.refreshAgain = true;
-      return;
+      return new Promise<void>((resolve) => this.refreshWaiters.push(resolve));
     }
     this.refreshing = true;
     try {
@@ -184,7 +189,9 @@ export class HerdrStore {
       this.refreshing = false;
       if (this.refreshAgain) {
         this.refreshAgain = false;
-        void this.refresh();
+        const waiters = this.refreshWaiters;
+        this.refreshWaiters = [];
+        void this.refresh().finally(() => waiters.forEach((resolve) => resolve()));
       }
     }
   }

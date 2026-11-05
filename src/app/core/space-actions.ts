@@ -94,6 +94,9 @@ export class SpaceActions {
   private readonly _warning = signal<string | null>(null);
   private readonly _closing = signal<SpaceClosing | null>(null);
   private readonly _closeError = signal<string | null>(null);
+  private readonly _closingIds = signal<ReadonlySet<string>>(new Set());
+  /** Spaces whose close was confirmed and is not finished: shown as "Closing…", actions disabled. */
+  readonly closingIds = this._closingIds.asReadonly();
   /** The space waiting for a close confirmation; `null` when none. */
   readonly closing = this._closing.asReadonly();
   private readonly _trust = signal<TrustPending | null>(null);
@@ -250,10 +253,12 @@ export class SpaceActions {
   }
 
   private async close(workspaceId: string): Promise<string[] | undefined> {
+    if (this._closingIds().has(workspaceId)) return undefined;
     const snapshot = this.store.snapshot();
     const paneIds = snapshot.terminals
       .filter((p) => p.space_id === workspaceId)
       .map((p) => p.terminal_id);
+    this.markClosing(workspaceId, true);
     try {
       await this.bridge.invoke("space_close", {
         workspaceId,
@@ -261,9 +266,24 @@ export class SpaceActions {
       });
     } catch (err) {
       this._closeError.set(String(err));
+      this.markClosing(workspaceId, false);
       return undefined;
     }
-    await this.store.refresh();
+    try {
+      // A fresh snapshot: without the space, the busy state ends.
+      await this.store.refresh();
+    } finally {
+      this.markClosing(workspaceId, false);
+    }
     return paneIds;
+  }
+
+  private markClosing(workspaceId: string, on: boolean): void {
+    this._closingIds.update((ids) => {
+      const next = new Set(ids);
+      if (on) next.add(workspaceId);
+      else next.delete(workspaceId);
+      return next;
+    });
   }
 }

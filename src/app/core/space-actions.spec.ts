@@ -269,6 +269,29 @@ describe("SpaceActions close", () => {
     expect(actions.closeError()).toBeNull();
   });
 
+  it("marks the space as closing from the confirm click until the fresh snapshot, then clears", async () => {
+    let release!: () => void;
+    tauri.answer("space_close", () => new Promise<void>((resolve) => (release = resolve)));
+    await actions.requestClose("w2");
+    const done = actions.confirmClose();
+    expect(actions.closing()).toBeNull();
+    expect(actions.closingIds().has("w2")).toBe(true);
+    expect(await actions.confirmClose()).toBeUndefined();
+    release();
+    await done;
+    expect(actions.closingIds().has("w2")).toBe(false);
+  });
+
+  it("resets the closing state and shows the error when the close fails", async () => {
+    tauri.answer("space_close", () => {
+      throw "boom";
+    });
+    await actions.requestClose("w2");
+    await actions.confirmClose();
+    expect(actions.closingIds().size).toBe(0);
+    expect(actions.closeError()).toBe("boom");
+  });
+
   it("ignores an unknown space and a confirmation nobody asked for", async () => {
     expect(await actions.requestClose("nope")).toBeUndefined();
     expect(await actions.confirmClose()).toBeUndefined();
