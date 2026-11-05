@@ -64,3 +64,52 @@ export function holdsLinkModifier(
 ): boolean {
   return mac ? event.metaKey : event.ctrlKey;
 }
+
+/** A GitHub issue link found in terminal text. */
+export interface IssueLink {
+  owner: string;
+  repo: string;
+  number: number;
+}
+
+const ISSUE_LINK =
+  /^https:\/\/github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/issues\/([1-9]\d*)(?:[/?#].*)?$/;
+
+/** The parts of `https://github.com/<owner>/<repo>/issues/<nr>`; `null` for any other URL or name. */
+export function parseIssueLink(uri: string): IssueLink | null {
+  const m = ISSUE_LINK.exec(uri);
+  if (!m || [m[1], m[2]].some((n) => n === "." || n === "..")) return null;
+  return { owner: m[1], repo: m[2], number: Number(m[3]) };
+}
+
+/** Whether `link` points at the repository `owner/name` (GitHub names compare case-insensitively). */
+export function isRepo(link: IssueLink, repo: { owner: string; name: string } | null): boolean {
+  return (
+    !!repo &&
+    link.owner.toLowerCase() === repo.owner.toLowerCase() &&
+    link.repo.toLowerCase() === repo.name.toLowerCase()
+  );
+}
+
+/**
+ * The click handler for detected URLs and OSC 8 links with the task start: an issue link clicked
+ * with the link modifier goes to `startTask`; when that does not take it (`false`: other
+ * repository, no repository) or for any other click, the link opens as `detectedLinkHandler` does.
+ */
+export function taskLinkHandler(
+  open: (url: string) => Promise<void>,
+  startTask: (link: IssueLink) => Promise<boolean>,
+  modifier: (event: MouseEvent) => boolean = holdsLinkModifier,
+) {
+  const fallback = detectedLinkHandler(open);
+  return (event: MouseEvent, uri: string): void => {
+    const url = trimTrailingPunctuation(uri);
+    const link = parseIssueLink(url);
+    if (!link || !modifier(event)) return fallback(event, uri);
+    void startTask(link)
+      .catch(() => false)
+      .then((started) => {
+        if (!started) fallback(event, uri);
+      });
+  };
+}

@@ -6,6 +6,7 @@ import {
   afterNextRender,
   effect,
   inject,
+  Injector,
   input,
   output,
   signal,
@@ -18,6 +19,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
+import { TaskStarter } from "../core/task-start";
 import { TauriBridge } from "../core/tauri";
 import {
   agentKind,
@@ -31,7 +33,7 @@ import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
 import { PromptBar } from "../prompt-bar/prompt-bar";
-import { detectedLinkHandler, holdsLinkModifier, linkHandler } from "./links";
+import { holdsLinkModifier, isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -110,6 +112,7 @@ export class TerminalView implements OnDestroy {
   private readonly keymap = inject(Keymap);
   private readonly ui = inject(UiState);
   private readonly tauri = inject(TauriBridge);
+  private readonly injector = inject(Injector);
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
   private term?: XTerm;
@@ -205,6 +208,19 @@ export class TerminalView implements OnDestroy {
     void this.restartStream(takeover);
   }
 
+  /** Modifier click on an issue link: the task dialog when it is an issue of this pane's repository. */
+  private async startTask(link: IssueLink): Promise<boolean> {
+    const pane = this.pane();
+    const dir = pane.foreground_cwd || pane.cwd;
+    if (!dir) return false;
+    const repo = await this.tauri.invoke<{ owner: string; name: string } | null>("github_repo", {
+      dir,
+    });
+    if (!isRepo(link, repo)) return false;
+    void this.injector.get(TaskStarter).start(dir, link.number);
+    return true;
+  }
+
   private createTerminal(): void {
     const open = (url: string) => this.tauri.openUrl(url);
     const openLink = linkHandler(open);
@@ -231,7 +247,10 @@ export class TerminalView implements OnDestroy {
     this.linkHovered = false;
     term.loadAddon(
       // Detected URLs are trimmed before opening (the addon's range, and so the underline, stays).
-      new WebLinksAddon(detectedLinkHandler(open), hoverCallbacks),
+      new WebLinksAddon(
+        taskLinkHandler(open, (link) => this.startTask(link)),
+        hoverCallbacks,
+      ),
     );
     term.open(this.body().nativeElement);
     try {

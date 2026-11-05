@@ -279,6 +279,16 @@ async fn github_milestones(
         .map_err(|e| e.to_string())
 }
 
+/// `owner/name` of the GitHub `origin` of `dir`, `None` for a directory without one (read-only).
+#[tauri::command]
+async fn github_repo(dir: String) -> Option<github::Repo> {
+    let dir = github_pulls::expand_home(&dir, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || github::repo_of(std::path::Path::new(&dir)))
+        .await
+        .ok()
+        .flatten()
+}
+
 /// Open issues of the GitHub repository of `dir` for the task picker (REST with ETag cache, pull
 /// requests filtered out, up to 300). Read-only.
 #[tauri::command]
@@ -1250,6 +1260,7 @@ pub fn run() {
             github_issues,
             github_milestones,
             task_issues,
+            github_repo,
             create_space,
             list_dirs,
             list_child_dirs,

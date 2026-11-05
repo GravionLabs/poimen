@@ -51,9 +51,9 @@ export class TaskStarter {
   private readonly spaces = inject(SpaceActions);
   private readonly store = inject(HerdrStore);
 
-  /** Opens the picker for the repository at `dir`; resolves to whether a task was started. */
-  async start(dir: string): Promise<boolean> {
-    const choice = await this.picker.open(dir);
+  /** Opens the picker for the repository at `dir` (issue `preselect` highlighted); resolves to whether a task was started. */
+  async start(dir: string, preselect?: number): Promise<boolean> {
+    const choice = await this.picker.open(dir, preselect);
     return choice ? this.run(dir, choice) : false;
   }
 
