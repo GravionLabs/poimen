@@ -50,7 +50,7 @@
       <label>
         Agent
         <select class="cwd" name="kind">
-          @for (kind of kinds; track kind) {
+          @for (kind of kinds(); track kind) {
             <option [value]="kind">{{ kind }}</option>
           }
         </select>
