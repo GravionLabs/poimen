@@ -4,6 +4,7 @@ import { HerdrStore } from "./herdr-store";
 import { SpaceActions, closeSpaceWarning, dirName, neighbourSpace } from "./space-actions";
 import type { Snapshot } from "./herdr";
 import { TauriBridge } from "./tauri";
+import { UI_STORAGE, UiState } from "./ui-state";
 import { tauri } from "./tauri.mock";
 
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -26,12 +27,21 @@ describe("dirName", () => {
 
 describe("SpaceActions", () => {
   let actions: SpaceActions;
+  let injector: Injector;
 
   beforeEach(() => {
     tauri.reset();
     pick.mockReset();
     tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
-    const injector = Injector.create({ providers: [TauriBridge, HerdrStore, SpaceActions] });
+    injector = Injector.create({
+      providers: [
+        TauriBridge,
+        HerdrStore,
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        SpaceActions,
+      ],
+    });
     actions = injector.get(SpaceActions);
   });
 
@@ -66,6 +76,19 @@ describe("SpaceActions", () => {
     tauri.answer("create_space", () => ({ workspace_id: "w3", created: true }));
     await actions.create("/work/lib", "");
     expect(actions.warning()).toBeNull();
+  });
+
+  it("selects an existing space and names it in a notice when none was created", async () => {
+    tauri.answer("snapshot", () => ({
+      spaces: [{ space_id: "w1", label: "app", number: 1, agent_status: "idle" }],
+      tabs: [],
+      terminals: [],
+    }));
+    tauri.answer("create_space", () => ({ workspace_id: "w1", created: false }));
+    const ui = injector.get(UiState);
+    await actions.create("/work/app", "");
+    expect(ui.splitWorkspace()).toBe("w1");
+    expect(actions.warning()).toBe('Opened the existing space "app".');
   });
 
   it("holds an untrusted project and creates nothing until answered", async () => {
@@ -180,7 +203,15 @@ describe("SpaceActions close", () => {
   beforeEach(async () => {
     tauri.reset();
     tauri.answer("snapshot", snap);
-    const injector = Injector.create({ providers: [TauriBridge, HerdrStore, SpaceActions] });
+    const injector = Injector.create({
+      providers: [
+        TauriBridge,
+        HerdrStore,
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        SpaceActions,
+      ],
+    });
     await injector.get(HerdrStore).refresh();
     tauri.answer("space_close", () => undefined);
     actions = injector.get(SpaceActions);
@@ -212,7 +243,15 @@ describe("SpaceActions close", () => {
 
   it("closing the last space sends no neighbour", async () => {
     tauri.answer("snapshot", () => ({ spaces: [space("w1", 1)], tabs: [], terminals: [] }));
-    const injector = Injector.create({ providers: [TauriBridge, HerdrStore, SpaceActions] });
+    const injector = Injector.create({
+      providers: [
+        TauriBridge,
+        HerdrStore,
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        SpaceActions,
+      ],
+    });
     await injector.get(HerdrStore).refresh();
     const last = injector.get(SpaceActions);
     await last.requestClose("w1");

@@ -10,6 +10,11 @@ use serde_json::{Value, json};
 
 use crate::herdr::{Client, Event};
 
+/// A burst of pane changes (a layout template creating panes one by one) is answered by one
+/// resubscribe: after the first trigger the watcher waits this long, then reads the pane list once.
+/// Events of the burst that arrive meanwhile are covered by the `poimen.resync` after resubscribing.
+const RESUBSCRIBE_DEBOUNCE: Duration = Duration::from_millis(400);
+
 const GLOBAL_EVENTS: &[&str] = &[
     "workspace.created",
     "workspace.updated",
@@ -83,6 +88,7 @@ pub fn run(client: Client, emit: impl Fn(&Event)) {
                         Ok(event) => {
                             emit(&event);
                             if needs_resubscribe(&event.kind) {
+                                std::thread::sleep(RESUBSCRIBE_DEBOUNCE);
                                 break;
                             }
                         }
@@ -130,6 +136,12 @@ mod tests {
         assert!(needs_resubscribe("pane.closed"));
         assert!(!needs_resubscribe("pane.agent_status_changed"));
         assert!(!needs_resubscribe("pane.updated"));
+    }
+
+    #[test]
+    fn resubscribe_waits_for_a_burst_of_pane_changes() {
+        // A 3-pane template creates its panes within the window: one resubscribe covers them.
+        assert!(RESUBSCRIBE_DEBOUNCE >= Duration::from_millis(250));
     }
 
     #[test]

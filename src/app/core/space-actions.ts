@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from "@angular/core";
 import { agentKind, pathSegments, type Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import { TauriBridge } from "./tauri";
+import { UiState } from "./ui-state";
 
 /** Answer of the `create_space` command. */
 export interface SpaceOutcome {
@@ -84,6 +85,7 @@ export function closeSpaceWarning(snapshot: Snapshot, workspaceId: string): stri
 export class SpaceActions {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(HerdrStore);
+  private readonly ui = inject(UiState);
 
   private readonly _open = signal(false);
   private readonly _error = signal<string | null>(null);
@@ -111,6 +113,13 @@ export class SpaceActions {
   /** Shows `message` in the status bar like a layout warning (a failed step of a task). */
   notify(message: string): void {
     this._warning.set(message);
+  }
+
+  /** An existing space was focused instead of a new one: select it and say so. */
+  private announceExisting(id: string): void {
+    this.ui.setSplitWorkspace(id);
+    const label = this.store.snapshot().spaces.find((s) => s.space_id === id)?.label ?? id;
+    this._warning.set(`Opened the existing space "${label}".`);
   }
 
   ask(): void {
@@ -177,6 +186,7 @@ export class SpaceActions {
       this._warning.set(warnings.length > 0 ? warnings.join("; ") : null);
       for (const w of warnings) console.warn(`poimen space layout: ${w}`);
       await this.store.refresh();
+      if (!outcome.created) this.announceExisting(outcome.workspace_id);
       if (after) await after(outcome);
       return outcome;
     } catch (err) {
