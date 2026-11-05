@@ -117,6 +117,20 @@ describe("HerdrStore", () => {
     expect(tauri.calls("snapshot")).toHaveLength(1);
   });
 
+  it("resolves a call during a running re-read only after the queued re-read finished", async () => {
+    const first = deferred<Snapshot>();
+    tauri.answer("snapshot", () => first.promise);
+    void store.refresh();
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1"), pane("w1:p2")));
+    let resolved = false;
+    const waiting = store.refresh().then(() => (resolved = true));
+    first.resolve(snapshot(pane("w1:p1")));
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    await waiting;
+    expect(store.snapshot().terminals).toHaveLength(2);
+  });
+
   it("queues exactly one more re-read for calls during a running one", async () => {
     const first = deferred<Snapshot>();
     tauri.answer("snapshot", () => first.promise);

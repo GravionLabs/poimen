@@ -15,6 +15,10 @@ use crate::herdr::{Client, Event};
 /// Events of the burst that arrive meanwhile are covered by the `poimen.resync` after resubscribing.
 const RESUBSCRIBE_DEBOUNCE: Duration = Duration::from_millis(400);
 
+/// While panes close, a subscription naming a pane that just vanished is rejected. That is retried
+/// with a fresh `pane.list` (after the debounce) this many times before it counts as a lost connection.
+const SUBSCRIBE_ATTEMPTS: u32 = 3;
+
 const GLOBAL_EVENTS: &[&str] = &[
     "workspace.created",
     "workspace.updated",
@@ -63,6 +67,24 @@ pub fn pane_ids(pane_list: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Lists the panes and subscribes; a failure is retried with a fresh pane list, `pause` between attempts.
+fn subscribe_retrying<S, E>(
+    mut attempt: impl FnMut() -> Result<S, E>,
+    attempts: u32,
+    mut pause: impl FnMut(),
+) -> Result<S, E> {
+    let mut tries = 1;
+    loop {
+        match attempt() {
+            Err(_) if tries < attempts => {
+                tries += 1;
+                pause();
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Runs forever on the calling thread. `emit` receives herdr events plus the
 /// synthetic `poimen.connected` / `poimen.disconnected` kinds.
 pub fn run(client: Client, emit: impl Fn(&Event)) {
@@ -72,9 +94,15 @@ pub fn run(client: Client, emit: impl Fn(&Event)) {
     };
     let mut connected = None;
     loop {
-        let result = client
-            .request("pane.list", json!({}))
-            .and_then(|list| client.subscribe(subscriptions_for(&pane_ids(&list))));
+        let result = subscribe_retrying(
+            || {
+                client
+                    .request("pane.list", json!({}))
+                    .and_then(|list| client.subscribe(subscriptions_for(&pane_ids(&list))))
+            },
+            SUBSCRIBE_ATTEMPTS,
+            || std::thread::sleep(RESUBSCRIBE_DEBOUNCE),
+        );
         match result {
             Ok(mut subscription) => {
                 if connected != Some(true) {
@@ -142,6 +170,41 @@ mod tests {
     fn resubscribe_waits_for_a_burst_of_pane_changes() {
         // A 3-pane template creates its panes within the window: one resubscribe covers them.
         assert!(RESUBSCRIBE_DEBOUNCE >= Duration::from_millis(250));
+    }
+
+    #[test]
+    fn rejected_subscription_is_retried_with_a_fresh_attempt() {
+        let mut calls = 0;
+        let mut pauses = 0;
+        let result = subscribe_retrying(
+            || {
+                calls += 1;
+                if calls < 3 {
+                    Err("pane vanished")
+                } else {
+                    Ok(calls)
+                }
+            },
+            SUBSCRIBE_ATTEMPTS,
+            || pauses += 1,
+        );
+        assert_eq!(result, Ok(3));
+        assert_eq!(pauses, 2);
+    }
+
+    #[test]
+    fn persistent_failure_is_returned_after_the_attempts() {
+        let mut calls = 0;
+        let result: Result<(), &str> = subscribe_retrying(
+            || {
+                calls += 1;
+                Err("down")
+            },
+            SUBSCRIBE_ATTEMPTS,
+            || {},
+        );
+        assert_eq!(result, Err("down"));
+        assert_eq!(calls, SUBSCRIBE_ATTEMPTS);
     }
 
     #[test]
