@@ -1,5 +1,6 @@
 //! `poimen-server`: a headless daemon that owns the PTYs, so shells and agents keep running when
-//! the app closes. One server per user listens on a Unix socket (`docs/protocol.md`).
+//! the app closes. One server per user listens on a local socket (a Unix socket, a named pipe on
+//! Windows; `docs/protocol.md`).
 //!
 //! The server keeps a flat model: spaces (name, cwd) with terminals. Spaces persist across
 //! restarts, terminals do not. Layout (groups, splits, tabs) is the client's business.
@@ -39,8 +40,7 @@ use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
 /// thread of that client waits; the PTY and the other clients never do.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[cfg(unix)]
-use std::os::unix::net::{UnixListener, UnixStream};
+use poimen_client::transport::{self, Conn, Entry, Listener};
 
 /// Where the server listens and keeps its spaces.
 #[derive(Debug, Clone)]
@@ -176,63 +176,47 @@ fn not_found(what: &str, id: &str) -> (ErrorCode, String) {
 
 /// A bound server, ready to [`serve`](Server::serve).
 pub struct Server {
-    #[cfg(unix)]
-    listener: UnixListener,
+    listener: Listener,
     /// Keeps the lock next to the socket for as long as the server lives.
-    #[cfg(unix)]
     _lock: Option<std::fs::File>,
     shared: Arc<Shared>,
 }
 
 impl Server {
-    /// Binds the socket (directory mode 0700, socket 0600), replacing a stale socket file, and
-    /// loads the persisted spaces. Fails with [`StartError::AlreadyRunning`] when a server answers.
-    #[cfg(unix)]
+    /// Binds the socket (Unix: directory mode 0700, socket 0600; Windows: the named pipe and its
+    /// marker file), replacing a stale entry, and loads the persisted spaces. Fails with
+    /// [`StartError::AlreadyRunning`] when a server answers.
     pub fn bind(config: Config) -> Result<Self, StartError> {
-        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-
         let mut lock_file = None;
         if let Some(dir) = config.socket.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(dir)?;
-            // A directory that already existed may be someone else's or too open: tighten what
-            // is ours, refuse the rest.
-            proto::check_private_dir(dir, true)?;
+            let file = open_lock(dir)?;
             // Held for the life of the server: whoever holds it is the only one to judge the
-            // socket file stale.
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .mode(0o600)
-                .open(dir.join("server.lock"))?;
+            // socket entry stale.
             if file.try_lock().is_err() {
                 return Err(StartError::AlreadyRunning(config.socket));
             }
             lock_file = Some(file);
         }
-        if let Ok(meta) = std::fs::symlink_metadata(&config.socket) {
-            if !std::os::unix::fs::FileTypeExt::is_socket(&meta.file_type()) {
+        match transport::inspect(&config.socket)? {
+            Entry::Missing => {}
+            Entry::Other => {
                 return Err(StartError::Io(io::Error::new(
                     io::ErrorKind::AlreadyExists,
                     format!("{} exists and is not a socket", config.socket.display()),
                 )));
             }
-            if UnixStream::connect(&config.socket).is_ok() {
+            Entry::Socket if transport::is_listening(&config.socket) => {
                 return Err(StartError::AlreadyRunning(config.socket));
             }
-            std::fs::remove_file(&config.socket)?;
+            Entry::Socket => std::fs::remove_file(&config.socket)?,
         }
-        let listener = UnixListener::bind(&config.socket).map_err(|e| {
+        let listener = Listener::bind(&config.socket).map_err(|e| {
             if e.kind() == io::ErrorKind::AddrInUse {
                 StartError::AlreadyRunning(config.socket.clone())
             } else {
                 StartError::Io(e)
             }
         })?;
-        std::fs::set_permissions(&config.socket, std::fs::Permissions::from_mode(0o600))?;
 
         let spaces = store::load(&config.state_file);
         let next = store::next_id(&spaces);
@@ -255,20 +239,11 @@ impl Server {
         })
     }
 
-    #[cfg(not(unix))]
-    pub fn bind(_: Config) -> Result<Self, StartError> {
-        Err(StartError::Io(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "poimen-server needs Unix sockets",
-        )))
-    }
-
     pub fn socket(&self) -> &Path {
         &self.shared.socket
     }
 
     /// Accepts connections forever, one thread each.
-    #[cfg(unix)]
     pub fn serve(self) {
         for stream in self.listener.incoming() {
             match stream {
@@ -280,20 +255,15 @@ impl Server {
             }
         }
     }
-
-    #[cfg(not(unix))]
-    pub fn serve(self) {}
 }
 
 /// Where a connection's responses go: straight to the socket, or, once it attached, through the
 /// bounded queue of its writer thread (the stream records share that queue).
-#[cfg(unix)]
 enum Out {
-    Direct(UnixStream),
+    Direct(Conn),
     Queue(SyncSender<Line>),
 }
 
-#[cfg(unix)]
 impl Out {
     fn send<T: serde::Serialize>(&mut self, value: &T) -> io::Result<()> {
         match self {
@@ -316,8 +286,7 @@ pub(crate) struct Attachment {
     mode: AttachMode,
 }
 
-#[cfg(unix)]
-fn handle_connection(shared: &Arc<Shared>, stream: UnixStream) {
+fn handle_connection(shared: &Arc<Shared>, stream: Conn) {
     let mut attachment = None;
     serve_requests(shared, stream, &mut attachment);
     if let Some(a) = attachment {
@@ -325,15 +294,9 @@ fn handle_connection(shared: &Arc<Shared>, stream: UnixStream) {
     }
 }
 
-#[cfg(unix)]
-fn serve_requests(shared: &Arc<Shared>, stream: UnixStream, attachment: &mut Option<Attachment>) {
-    let Ok(read_half) = stream.try_clone() else {
-        return;
-    };
-    let Ok(mut out) = stream.try_clone().map(Out::Direct) else {
-        return;
-    };
-    for line in BufReader::new(read_half).lines() {
+fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<Attachment>) {
+    let mut out = Out::Direct(stream.clone());
+    for line in BufReader::new(stream.clone()).lines() {
         let Ok(line) = line else { return };
         if line.trim().is_empty() {
             continue;
@@ -390,11 +353,10 @@ fn serve_requests(shared: &Arc<Shared>, stream: UnixStream, attachment: &mut Opt
 
 /// `terminal.attach`: registers the connection with the terminal's stream and starts the writer
 /// thread that owns the socket's write side from now on.
-#[cfg(unix)]
 fn attach(
     shared: &Shared,
     request: &Request,
-    stream: &UnixStream,
+    stream: &Conn,
     attachment: &mut Option<Attachment>,
 ) -> Result<SyncSender<Line>, (ErrorCode, String)> {
     let p: TerminalAttach = parsed(request)?;
@@ -413,9 +375,7 @@ fn attach(
             .ok_or_else(|| not_found("terminal", &p.terminal_id))?;
         Arc::clone(&entry.stream)
     };
-    let writer_stream = stream
-        .try_clone()
-        .map_err(|e| (ErrorCode::Internal, e.to_string()))?;
+    let writer_stream = stream.clone();
     let (tx, rx) = sync_channel(CLIENT_QUEUE);
     let link = Arc::new(Link {
         overflowed: AtomicBool::new(false),
@@ -440,9 +400,9 @@ fn attach(
 
 /// The writer of an attached connection: the lines of its queue in order, then, when the stream
 /// ran over, a `detached` record. A client that stops reading blocks only this thread, which
-/// gives up after [`WRITE_TIMEOUT`].
-#[cfg(unix)]
-fn write_stream(mut stream: UnixStream, rx: &Receiver<Line>, link: &Link, terminal_id: &str) {
+/// gives up after [`WRITE_TIMEOUT`] (Unix; named pipes have no write timeout, so on Windows it
+/// waits for that client alone).
+fn write_stream(mut stream: Conn, rx: &Receiver<Line>, link: &Link, terminal_id: &str) {
     let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     loop {
         match rx.recv_timeout(Duration::from_millis(200)) {
@@ -464,18 +424,46 @@ fn write_stream(mut stream: UnixStream, rx: &Receiver<Line>, link: &Link, termin
         }
     }
     // Wakes the request loop of this connection, which then detaches.
-    let _ = stream.shutdown(std::net::Shutdown::Both);
+    let _ = stream.shutdown();
 }
 
-#[cfg(unix)]
-fn write_line(writer: &mut UnixStream, text: &str) -> io::Result<()> {
+fn write_line(writer: &mut Conn, text: &str) -> io::Result<()> {
     writer.write_all(text.as_bytes())?;
     writer.flush()
 }
 
-#[cfg(unix)]
-fn send<T: serde::Serialize>(writer: &mut UnixStream, value: &T) -> io::Result<()> {
+fn send<T: serde::Serialize>(writer: &mut Conn, value: &T) -> io::Result<()> {
     write_line(writer, &line_of(value))
+}
+
+/// Creates the socket directory and opens its `server.lock`. Unix: the directory is 0700 (an
+/// existing one is tightened if ours, refused otherwise) and the lock 0600.
+#[cfg(unix)]
+fn open_lock(dir: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)?;
+    proto::check_private_dir(dir, true)?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(dir.join("server.lock"))
+}
+
+/// Creates the socket directory and opens its `server.lock`. Windows: no modes; the pipe's DACL
+/// and the per-user directory protect the server.
+#[cfg(not(unix))]
+fn open_lock(dir: &Path) -> io::Result<std::fs::File> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("server.lock"))
 }
 
 fn parsed<T: for<'de> serde::Deserialize<'de>>(

@@ -543,7 +543,6 @@ fn backend_event(event: &Event) -> BackendEvent {
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::sync::mpsc;
 
@@ -811,7 +810,7 @@ mod tests {
     /// Answers requests with `reply(method, params)`; `Err` is an error response. A connection
     /// stays open until the client closes it. Requests are logged as `method params`.
     fn serve(
-        path: &PathBuf,
+        path: &std::path::Path,
         log: Arc<Mutex<Vec<String>>>,
         reply: impl Fn(&str, &Value) -> Result<Value, (&'static str, &'static str)>
         + Send
@@ -819,14 +818,14 @@ mod tests {
         + 'static,
         extra_lines: Vec<String>,
     ) {
-        let listener = UnixListener::bind(path).unwrap();
+        let listener = poimen_client::transport::Listener::bind(path).unwrap();
         let reply = Arc::new(reply);
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { break };
                 let (log, reply, extra) = (log.clone(), reply.clone(), extra_lines.clone());
                 std::thread::spawn(move || {
-                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut reader = BufReader::new(stream.clone());
                     let mut line = String::new();
                     while reader.read_line(&mut line).unwrap_or(0) > 0 {
                         let request: Value = serde_json::from_str(line.trim()).unwrap();

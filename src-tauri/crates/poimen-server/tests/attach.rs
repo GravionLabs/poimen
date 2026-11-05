@@ -324,14 +324,29 @@ fn an_observer_that_does_not_read_is_dropped_while_the_controller_keeps_receivin
     let mut controller = f.attach(&id, AttachMode::Control);
     let mut slow = f.attach(&id, AttachMode::Observe);
 
-    let mut received = 0usize;
-    let mut out = Vec::new();
-    read_until(&mut controller, &mut out, |e, _| {
-        if let Event::TerminalOutput { data, .. } = e {
-            received += data.len() / 4 * 3;
-        }
-        received >= 20_000_000
+    // The controller keeps reading on a thread of its own and signals once it received more
+    // than the observer's queue (128 records of at most 32 KiB) and socket buffer can hold, so
+    // the observer has overflowed by then.
+    let (overflowed, signal) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        let mut received = 0usize;
+        let mut out = Vec::new();
+        read_until(&mut controller, &mut out, |e, _| {
+            if let Event::TerminalOutput { data, .. } = e {
+                received += data.len() / 4 * 3;
+            }
+            if received >= 6_000_000 {
+                let _ = overflowed.send(());
+            }
+            received >= 20_000_000
+        });
+        controller
     });
+    // The observer must start reading before its writer's blocked write gives up (5 s, then the
+    // connection closes without a record), so it waits for the overflow, not for the whole flood.
+    signal
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the controller did not receive the flood");
 
     // The slow observer finds a detach record after what was queued for it.
     let mut ignored = Vec::new();
@@ -345,7 +360,8 @@ fn an_observer_that_does_not_read_is_dropped_while_the_controller_keeps_receivin
             reason: DetachReason::Overflow
         }
     );
-    // The controller is still attached and can still type.
+    // The controller received everything, is still attached and can still type.
+    let mut controller = reader.join().unwrap();
     controller.input("\n").unwrap();
 }
 

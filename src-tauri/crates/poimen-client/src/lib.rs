@@ -8,9 +8,12 @@ use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 pub mod agent;
+pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
     AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, SetColors, Space,
@@ -18,9 +21,6 @@ use poimen_protocol::{
     TerminalInput, TerminalList, TerminalRename, TerminalResize,
 };
 use serde_json::{Value, json};
-
-#[cfg(unix)]
-use std::os::unix::net::UnixStream;
 
 /// How long a request waits for its response.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -59,24 +59,12 @@ impl fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
-#[cfg(unix)]
-type Stream = UnixStream;
+type Stream = transport::Conn;
 
-#[cfg(not(unix))]
-struct Stream;
-
-#[cfg(not(unix))]
-fn connect_stream(_: &Path) -> io::Result<Stream> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "poimen-server needs Unix sockets",
-    ))
-}
-
-#[cfg(unix)]
 fn connect_stream(path: &Path) -> io::Result<Stream> {
     // Never talk to a socket in a directory another user could have replaced it in. A missing
-    // directory falls through to the connect error.
+    // directory falls through to the connect error. (Windows: the pipe's DACL protects it.)
+    #[cfg(unix)]
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         match poimen_protocol::check_private_dir(dir, false) {
             Ok(()) => {}
@@ -84,7 +72,13 @@ fn connect_stream(path: &Path) -> io::Result<Stream> {
             Err(e) => return Err(e),
         }
     }
-    UnixStream::connect(path)
+    transport::Conn::connect(path)
+}
+
+/// One request on a connection of its own, bounded by the socket timeouts where they exist.
+fn request_on(path: &Path, method: &str, params: Value) -> Result<Value, ClientError> {
+    let mut conn = Connection::open(path, Some(REQUEST_TIMEOUT))?;
+    conn.call(method, params)
 }
 
 /// A handle on the server socket. Cheap; holds no connection.
@@ -115,10 +109,27 @@ impl Client {
         &self.path
     }
 
-    /// Sends one request and returns its `result`.
+    /// Sends one request and returns its `result`, waiting at most [`REQUEST_TIMEOUT`].
     pub fn request(&self, method: &str, params: Value) -> Result<Value, ClientError> {
-        let mut conn = Connection::open(&self.path, Some(REQUEST_TIMEOUT))?;
-        conn.call(method, params)
+        if transport::TIMEOUTS_SUPPORTED {
+            return request_on(&self.path, method, params);
+        }
+        // Named pipes have no I/O timeouts: the request runs on a thread of its own, which ends
+        // when the connection does.
+        let (tx, rx) = mpsc::channel();
+        let (path, method) = (self.path.clone(), method.to_string());
+        thread::spawn(move || {
+            let _ = tx.send(request_on(&path, &method, params));
+        });
+        match rx.recv_timeout(REQUEST_TIMEOUT) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                Err(ClientError::Io(io::ErrorKind::TimedOut.into()))
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(ClientError::Io(io::Error::other(
+                "the request thread ended without an answer",
+            ))),
+        }
     }
 
     /// Opens a connection that receives every event after the call returns.
@@ -274,14 +285,19 @@ impl Client {
 /// A connection attached to a terminal. Dropping it detaches.
 pub struct Attachment {
     pub info: AttachResult,
-    #[cfg_attr(not(unix), allow(dead_code))]
     conn: Connection,
 }
 
 impl Attachment {
     /// Sets how long [`Attachment::next_record`] waits for a record (`None`: for ever).
-    #[cfg(unix)]
+    /// Unsupported on Windows (named pipes have no read timeout).
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<(), ClientError> {
+        if !transport::TIMEOUTS_SUPPORTED {
+            return Err(ClientError::Io(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "named pipes have no read timeout",
+            )));
+        }
         self.conn
             .reader
             .get_ref()
@@ -291,7 +307,6 @@ impl Attachment {
 
     /// The next stream record (`terminal.output`, `terminal.resized`, `terminal.detached`,
     /// `terminal.exited`). An error when the connection ended or the wait timed out.
-    #[cfg(unix)]
     pub fn next_record(&mut self) -> Result<Event, ClientError> {
         loop {
             if let Some(event) = self.conn.pending.pop_front() {
@@ -301,11 +316,6 @@ impl Attachment {
                 return Ok(event);
             }
         }
-    }
-
-    #[cfg(not(unix))]
-    pub fn next_record(&mut self) -> Result<Event, ClientError> {
-        unreachable!("connect_stream fails off Unix")
     }
 
     /// Input for the terminal (controller only).
@@ -332,7 +342,6 @@ impl Attachment {
 /// are sent on the attached connection (so the server applies the controller rules) and their
 /// responses are not awaited: [`Attachment::next_record`] skips them.
 pub struct AttachmentWriter {
-    #[cfg(unix)]
     stream: Stream,
     terminal_id: String,
 }
@@ -340,23 +349,11 @@ pub struct AttachmentWriter {
 impl Attachment {
     /// A writer on the same connection. Closing it ends the attachment and makes a blocked
     /// [`Attachment::next_record`] fail.
-    #[cfg(unix)]
     pub fn writer(&self) -> Result<AttachmentWriter, ClientError> {
-        let stream = self
-            .conn
-            .reader
-            .get_ref()
-            .try_clone()
-            .map_err(ClientError::Io)?;
         Ok(AttachmentWriter {
-            stream,
+            stream: self.conn.reader.get_ref().clone(),
             terminal_id: self.info.terminal_id.clone(),
         })
-    }
-
-    #[cfg(not(unix))]
-    pub fn writer(&self) -> Result<AttachmentWriter, ClientError> {
-        unreachable!("connect_stream fails off Unix")
     }
 }
 
@@ -380,16 +377,12 @@ impl AttachmentWriter {
         self.send("terminal.resize", params)
     }
 
-    /// Ends the attachment; the terminal keeps running.
-    #[cfg(unix)]
+    /// Ends the attachment; the terminal keeps running. (Windows: no effect until the server
+    /// side ends the connection; a cooperative detach follows with the Windows runtime.)
     pub fn close(&self) {
-        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+        let _ = self.stream.shutdown();
     }
 
-    #[cfg(not(unix))]
-    pub fn close(&self) {}
-
-    #[cfg(unix)]
     fn send(&mut self, method: &str, params: Value) -> Result<(), ClientError> {
         let request = Request {
             id: next_id(),
@@ -403,11 +396,6 @@ impl AttachmentWriter {
             .write_all(line.as_bytes())
             .and_then(|()| self.stream.flush())
             .map_err(ClientError::Io)
-    }
-
-    #[cfg(not(unix))]
-    fn send(&mut self, _: &str, _: Value) -> Result<(), ClientError> {
-        unreachable!("connect_stream fails off Unix")
     }
 }
 
@@ -423,7 +411,6 @@ struct Connection {
 }
 
 impl Connection {
-    #[cfg(unix)]
     fn open(path: &Path, timeout: Option<Duration>) -> Result<Self, ClientError> {
         let stream = connect_stream(path).map_err(ClientError::Connect)?;
         stream.set_read_timeout(timeout).map_err(ClientError::Io)?;
@@ -434,13 +421,6 @@ impl Connection {
         })
     }
 
-    #[cfg(not(unix))]
-    fn open(path: &Path, _: Option<Duration>) -> Result<Self, ClientError> {
-        connect_stream(path).map_err(ClientError::Connect)?;
-        unreachable!("connect_stream fails off Unix")
-    }
-
-    #[cfg(unix)]
     fn call(&mut self, method: &str, params: Value) -> Result<Value, ClientError> {
         let id = next_id();
         let request = Request {
@@ -476,12 +456,6 @@ impl Connection {
         }
     }
 
-    #[cfg(not(unix))]
-    fn call(&mut self, _: &str, _: Value) -> Result<Value, ClientError> {
-        unreachable!("connect_stream fails off Unix")
-    }
-
-    #[cfg(unix)]
     fn read_line(&mut self) -> Result<ServerLine, ClientError> {
         let mut line = String::new();
         let n = self.reader.read_line(&mut line).map_err(ClientError::Io)?;
@@ -496,14 +470,12 @@ impl Connection {
 /// The events of a subscribed connection; ends with an error when the connection drops (the
 /// server stopped), after which the caller resubscribes and re-reads the lists.
 pub struct EventStream {
-    #[cfg_attr(not(unix), allow(dead_code))]
     conn: Connection,
 }
 
 impl Iterator for EventStream {
     type Item = Result<Event, ClientError>;
 
-    #[cfg(unix)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(event) = self.conn.pending.pop_front() {
@@ -516,23 +488,19 @@ impl Iterator for EventStream {
             }
         }
     }
-
-    #[cfg(not(unix))]
-    fn next(&mut self) -> Option<Self::Item> {
-        None
-    }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::net::UnixListener;
-    use std::thread;
+    use transport::Listener;
 
     fn temp_socket(name: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("poimen-client-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        #[cfg(unix)]
         std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
             .unwrap();
         dir.join("s.sock")
@@ -540,10 +508,10 @@ mod tests {
 
     /// A server that answers each connection with the given lines, after reading one request.
     fn fake_server(path: &Path, lines: Vec<String>) -> thread::JoinHandle<String> {
-        let listener = UnixListener::bind(path).unwrap();
+        let listener = Listener::bind(path).unwrap();
         thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let stream = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.clone());
             let mut request = String::new();
             reader.read_line(&mut request).unwrap();
             let id = serde_json::from_str::<Value>(&request).unwrap()["id"]
@@ -630,10 +598,10 @@ mod tests {
     #[test]
     fn an_attachment_writer_sends_on_the_same_connection_and_close_ends_the_reader() {
         let path = temp_socket("writer");
-        let listener = UnixListener::bind(&path).unwrap();
+        let listener = Listener::bind(&path).unwrap();
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut stream = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.clone());
             let mut attach = String::new();
             reader.read_line(&mut attach).unwrap();
             let id = serde_json::from_str::<Value>(&attach).unwrap()["id"]
@@ -676,10 +644,12 @@ mod tests {
         assert!(input.contains(r#""data":"ls\r""#));
     }
 
+    /// Unix only on purpose: Windows has no directory modes; the pipe's DACL protects it.
+    #[cfg(unix)]
     #[test]
     fn a_socket_in_a_loose_directory_is_refused_before_connecting() {
         let path = temp_socket("loose");
-        let _server = UnixListener::bind(&path).unwrap();
+        let _server = Listener::bind(&path).unwrap();
         let dir = path.parent().unwrap();
         std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o777)).unwrap();
         let err = Client::new(&path).ping().unwrap_err();
