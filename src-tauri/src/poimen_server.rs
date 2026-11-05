@@ -155,11 +155,9 @@ pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathB
             .write(true)
             .open(&tmp)
             .and_then(|f| source.modified().and_then(|t| f.set_modified(t)))
-            .and_then(|()| std::fs::rename(&tmp, &target));
-        if let Err(e) = copied {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e);
-        }
+            .and_then(|()| std::fs::rename(&tmp, &target).or_else(|e| reuse_staged(e, &target)));
+        let _ = std::fs::remove_file(&tmp);
+        copied?;
     }
     if let Ok(entries) = std::fs::read_dir(bin_root) {
         for entry in entries.flatten() {
@@ -169,6 +167,30 @@ pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathB
         }
     }
     Ok(target)
+}
+
+/// A failed rename onto an existing staged copy (Windows: another poimen staged it and its server
+/// runs from it, so it is locked) keeps that copy; any other failure stays an error.
+fn reuse_staged(error: io::Error, target: &Path) -> io::Result<()> {
+    if target.is_file() { Ok(()) } else { Err(error) }
+}
+
+/// What a ping result means. Only on Windows is a denied connect [`Ping::Denied`] (the pipe of an
+/// elevated server); on Unix the client's directory check denies a loose or foreign socket
+/// directory, and starting a server heals that (it makes its own directory private again).
+fn classify(
+    result: Result<poimen_client::protocol::PingResult, ClientError>,
+    windows: bool,
+) -> Ping {
+    match result {
+        Ok(p) if p.protocol == poimen_client::protocol::PROTOCOL_VERSION => Ping::Answers,
+        Err(ref e @ ClientError::Connect(ref io))
+            if windows && io.kind() == io::ErrorKind::PermissionDenied =>
+        {
+            Ping::Denied(e.to_string())
+        }
+        _ => Ping::Absent,
+    }
 }
 
 /// The real runner: the socket of the environment, the server binary next to the app executable
@@ -195,15 +217,7 @@ impl Default for SystemRunner {
 
 impl Runner for SystemRunner {
     fn ping(&self) -> Ping {
-        match self.client.ping() {
-            Ok(p) if p.protocol == poimen_client::protocol::PROTOCOL_VERSION => Ping::Answers,
-            Err(ref e @ ClientError::Connect(ref io))
-                if io.kind() == io::ErrorKind::PermissionDenied =>
-            {
-                Ping::Denied(e.to_string())
-            }
-            _ => Ping::Absent,
-        }
+        classify(self.client.ping(), cfg!(windows))
     }
 
     fn resolve(&self) -> Option<PathBuf> {
@@ -408,6 +422,100 @@ mod tests {
         let dir = temp_dir("missing");
         assert!(stage(&dir.join("nope.exe"), &dir.join("bin"), "0.8.0").is_err());
         assert!(!dir.join("bin").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_rename_onto_an_existing_staged_copy_reuses_it() {
+        let dir = temp_dir("in-use");
+        let target = dir.join("poimen-server.exe");
+        let locked = || io::Error::from(io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            reuse_staged(locked(), &target).unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        std::fs::write(&target, "running").unwrap();
+        assert!(reuse_staged(locked(), &target).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn denied() -> ClientError {
+        ClientError::Connect(io::Error::from(io::ErrorKind::PermissionDenied))
+    }
+
+    #[test]
+    fn a_denied_connect_is_denied_on_windows_only() {
+        assert!(matches!(classify(Err(denied()), true), Ping::Denied(_)));
+        assert_eq!(classify(Err(denied()), false), Ping::Absent);
+        let refused = ClientError::Connect(io::Error::from(io::ErrorKind::ConnectionRefused));
+        assert_eq!(classify(Err(refused), true), Ping::Absent);
+    }
+
+    #[test]
+    fn a_ping_with_the_protocol_answers_and_another_is_absent() {
+        let pong = |protocol| {
+            Ok(poimen_client::protocol::PingResult {
+                version: "0.8.0".into(),
+                protocol,
+                pid: 1,
+            })
+        };
+        let current = poimen_client::protocol::PROTOCOL_VERSION;
+        assert_eq!(classify(pong(current), false), Ping::Answers);
+        assert_eq!(classify(pong(current + 1), false), Ping::Absent);
+    }
+
+    /// The real ping of a socket in a loose directory (0755), with a fake start.
+    #[cfg(unix)]
+    struct LooseDir {
+        system: SystemRunner,
+        fake: Fake,
+    }
+
+    #[cfg(unix)]
+    impl Runner for LooseDir {
+        fn ping(&self) -> Ping {
+            if self.fake.spawned.borrow().is_empty() {
+                self.system.ping()
+            } else {
+                self.fake.ping()
+            }
+        }
+        fn resolve(&self) -> Option<PathBuf> {
+            self.fake.resolve()
+        }
+        fn spawn(&self, program: &Path) -> io::Result<()> {
+            self.fake.spawn(program)
+        }
+        fn sleep(&self, d: Duration) {
+            self.fake.sleep(d)
+        }
+        fn now(&self) -> Duration {
+            self.fake.now()
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_loose_socket_directory_on_unix_starts_a_server_instead_of_denying() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("loose");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let client = Client::new(dir.join("poimen.sock"));
+        assert!(
+            matches!(client.ping(), Err(ClientError::Connect(ref e)) if e.kind() == io::ErrorKind::PermissionDenied),
+            "the directory check refuses the socket"
+        );
+        let runner = LooseDir {
+            system: SystemRunner {
+                client,
+                origin: Instant::now(),
+            },
+            fake: Fake::new(false, true, true),
+        };
+        assert_eq!(runner.system.ping(), Ping::Absent);
+        assert_eq!(ensure_running(&runner, true), Ok(Outcome::Started));
+        assert_eq!(runner.fake.spawned.borrow().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
