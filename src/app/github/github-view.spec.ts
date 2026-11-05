@@ -19,6 +19,7 @@ import {
   flattenPulls,
   keyRange,
   reviewText,
+  worktreeOf,
   type Pull,
   type PullsResult,
 } from "./pulls";
@@ -287,7 +288,9 @@ describe("GithubView", () => {
     const pulls = TestBed.inject(GithubPulls);
     pulls.scope.set("all");
     fixture.detectChanges();
-    const buttons = [...el.querySelectorAll<HTMLButtonElement>("tbody button")];
+    const buttons = [...el.querySelectorAll<HTMLButtonElement>("tbody button")].filter((b) =>
+      b.textContent!.includes("Open in browser"),
+    );
     expect(buttons[0].textContent).toContain("Open in browser");
     expect(buttons[0].disabled).toBe(false);
     expect(buttons[3].disabled).toBe(true);
@@ -363,5 +366,51 @@ describe("GitHub entry points", () => {
       tab: "github",
     });
     expect(POIMEN_COMMANDS).toContainEqual({ id: "openGithub", title: "Open GitHub" });
+  });
+});
+
+describe("pull request worktrees", () => {
+  beforeEach(() => {
+    tauri.reset();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => TestBed.resetTestingModule());
+
+  it("finds the worktree of the head branch or of pr/<number>", () => {
+    const wts = [
+      { path: "/src/n", branch: "main" },
+      { path: "/src/n-pr1", branch: "pr/1" },
+      { path: "/src/n-b", branch: "feat/b" },
+      { path: "/src/n-x", branch: null },
+    ];
+    expect(worktreeOf(pull(1), wts)?.path).toBe("/src/n-pr1");
+    expect(worktreeOf(pull(2, { headRef: "feat/b" }), wts)?.path).toBe("/src/n-b");
+    expect(worktreeOf(pull(3), wts)).toBeNull();
+  });
+
+  it("shows Open space for a pull request whose head is checked out and focuses its space", async () => {
+    tauri.answer("worktree_branches", (args) =>
+      args?.["dir"] === "/src/n" ? [{ path: "/src/n-pr1", branch: "pr/1" }] : [],
+    );
+    tauri.answer("create_space", () => ({ workspace_id: "w1" }));
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector("[data-testid=check-out]")).toBeNull();
+    (el.querySelector("[data-testid=open-space]") as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(tauri.calls("create_space")[0]).toMatchObject({ cwd: "/src/n-pr1" });
+  });
+
+  it("checks out a pull request without a worktree through pr_worktree", async () => {
+    tauri.answer("worktree_branches", () => []);
+    tauri.answer("pr_worktree", () => ({ path: "/src/n-pr1", branch: "pr/1", created: true }));
+    tauri.answer("create_space", () => ({ workspace_id: "w1" }));
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector("[data-testid=open-space]")).toBeNull();
+    (el.querySelector("[data-testid=check-out]") as HTMLButtonElement).click();
+    await fixture.whenStable();
+    expect(tauri.calls("pr_worktree")[0]).toEqual({ repoDir: "/src/n", nr: 1, headRef: "b" });
+    expect(tauri.calls("create_space")[0]).toMatchObject({ cwd: "/src/n-pr1" });
   });
 });

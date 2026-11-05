@@ -180,6 +180,122 @@ pub fn ensure(
     })
 }
 
+/// A worktree of a repository and the branch checked out in it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Checkout {
+    pub path: String,
+    pub branch: Option<String>,
+}
+
+/// The worktrees of the repository of `dir` with their branches (`git worktree list --porcelain`).
+pub fn list_worktrees(dir: &str) -> Result<Vec<Checkout>, String> {
+    let root = main_worktree(Path::new(dir))?;
+    Ok(
+        parse_worktrees(&git(&root, &["worktree", "list", "--porcelain"])?)
+            .into_iter()
+            .map(|(path, branch)| Checkout { path, branch })
+            .collect(),
+    )
+}
+
+/// Creates or reuses a worktree with the head of pull request `nr` checked out, also for forks.
+///
+/// The head is fetched from `origin` (`refs/pull/<nr>/head`). The branch is `head_ref` itself when
+/// that branch exists on `origin` at the same commit (an own pull request), else `pr/<nr>`. A
+/// branch already checked out in a worktree returns that worktree; the path is `../<repo>-pr<nr>`
+/// next to the main worktree. Never touches an existing worktree, and a local `pr/<nr>` is only
+/// moved forward (fast-forward to the fetched head), never reset.
+pub fn pr_worktree(repo_dir: &str, nr: u64, head_ref: Option<&str>) -> Result<Worktree, String> {
+    let root = main_worktree(Path::new(repo_dir))?;
+    let repo = root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let parent = root
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", root.display()))?;
+    let path = normalize(&parent.join(format!("{repo}-pr{nr}")));
+    let path_str = path.to_string_lossy().into_owned();
+
+    git(&root, &["fetch", "origin", &format!("refs/pull/{nr}/head")])
+        .map_err(|e| format!("pull request #{nr} could not be fetched from origin: {e}"))?;
+    let head = git(&root, &["rev-parse", "FETCH_HEAD^{commit}"])?;
+
+    // An own pull request: its head branch exists on origin at the same commit.
+    let own = match head_ref.map(str::trim).filter(|h| !h.is_empty()) {
+        Some(h)
+            if git(&root, &["check-ref-format", "--branch", h]).is_ok()
+                && git(
+                    &root,
+                    &[
+                        "fetch",
+                        "origin",
+                        &format!("+refs/heads/{h}:refs/remotes/origin/{h}"),
+                    ],
+                )
+                .is_ok()
+                && git(
+                    &root,
+                    &["rev-parse", &format!("refs/remotes/origin/{h}^{{commit}}")],
+                )
+                .is_ok_and(|sha| sha == head) =>
+        {
+            Some(h.to_owned())
+        }
+        _ => None,
+    };
+    let branch = own.clone().unwrap_or_else(|| format!("pr/{nr}"));
+
+    let listed = parse_worktrees(&git(&root, &["worktree", "list", "--porcelain"])?);
+    if let Some((existing, _)) = listed
+        .iter()
+        .find(|(_, b)| b.as_deref() == Some(branch.as_str()))
+    {
+        return Ok(Worktree {
+            path: existing.clone(),
+            branch,
+            created: false,
+        });
+    }
+    if path.exists() {
+        let same = |p: &str| canonical(Path::new(p)) == canonical(&path);
+        return match listed.iter().find(|(p, _)| same(p)) {
+            Some((existing, other)) => Ok(Worktree {
+                path: existing.clone(),
+                branch: other.clone().unwrap_or(branch),
+                created: false,
+            }),
+            None => Err(format!(
+                "{path_str} already exists and is not a worktree of this repository"
+            )),
+        };
+    }
+
+    let local = format!("refs/heads/{branch}");
+    if git_ok(&root, &["show-ref", "--verify", "--quiet", &local]) {
+        // Only forward: a local branch with commits of its own stays as it is.
+        if git_ok(&root, &["merge-base", "--is-ancestor", &local, &head]) {
+            git(&root, &["update-ref", &local, &head])?;
+        }
+        git(&root, &["worktree", "add", &path_str, &branch])?;
+    } else if own.is_some() {
+        let remote = format!("origin/{branch}");
+        git(
+            &root,
+            &[
+                "worktree", "add", "--track", "-b", &branch, &path_str, &remote,
+            ],
+        )?;
+    } else {
+        git(&root, &["worktree", "add", "-b", &branch, &path_str, &head])?;
+    }
+    Ok(Worktree {
+        path: path_str,
+        branch,
+        created: true,
+    })
+}
+
 // ---------------------------------------------------------------------------------------------
 // Clean up merged tasks: remove the worktrees, spaces and local branches of tasks whose pull
 // request is merged. Invariants: never a worktree with uncommitted or untracked changes, the main
@@ -1209,5 +1325,190 @@ mod tests {
             normalize(Path::new("/a/app/../app-7")),
             PathBuf::from("/a/app-7")
         );
+    }
+    // --- pull request worktrees -------------------------------------------------------------
+
+    impl Fixture {
+        /// Pushes a commit that is on no branch to `refs/pull/<nr>/head` (a fork-style head).
+        fn fork_pull(&self, nr: u64, file: &str) -> String {
+            let seed = self.base.join("seed");
+            run(&seed, &["checkout", "-q", "--detach", "main"]);
+            std::fs::write(seed.join(file), "x").unwrap();
+            run(&seed, &["add", "."]);
+            run(&seed, &["commit", "-m", "fork change"]);
+            let sha = run(&seed, &["rev-parse", "HEAD"]);
+            run(
+                &seed,
+                &["push", "origin", &format!("HEAD:refs/pull/{nr}/head")],
+            );
+            sha
+        }
+
+        /// Pushes branch `name` with a commit and points `refs/pull/<nr>/head` at it.
+        fn own_pull(&self, nr: u64, name: &str) {
+            let seed = self.base.join("seed");
+            run(&seed, &["checkout", "-q", "-B", name, "main"]);
+            std::fs::write(seed.join("own.txt"), "own").unwrap();
+            run(&seed, &["add", "."]);
+            run(&seed, &["commit", "-m", "own change"]);
+            run(&seed, &["push", "origin", name]);
+            run(
+                &seed,
+                &["push", "origin", &format!("HEAD:refs/pull/{nr}/head")],
+            );
+        }
+
+        fn pr(&self, dir: &Path, nr: u64, head: Option<&str>) -> Result<Worktree, String> {
+            pr_worktree(dir.to_str().unwrap(), nr, head)
+        }
+    }
+
+    #[test]
+    fn pr_worktree_of_a_fork_head_uses_pr_branch() {
+        let f = Fixture::new(false);
+        let sha = f.fork_pull(1, "fork.txt");
+        let wt = f.pr(&f.repo, 1, Some("main")).unwrap();
+        assert_eq!(wt.branch, "pr/1");
+        assert!(wt.created);
+        assert_eq!(PathBuf::from(&wt.path), f.base.join("app-pr1"));
+        assert!(f.base.join("app-pr1/fork.txt").exists());
+        assert_eq!(run(&f.base.join("app-pr1"), &["rev-parse", "HEAD"]), sha);
+    }
+
+    #[test]
+    fn pr_worktree_of_an_own_pull_request_uses_its_head_branch() {
+        let f = Fixture::new(false);
+        f.own_pull(2, "feat/own");
+        let wt = f.pr(&f.repo, 2, Some("feat/own")).unwrap();
+        assert_eq!(wt.branch, "feat/own");
+        assert!(f.base.join("app-pr2/own.txt").exists());
+        assert_eq!(
+            run(
+                &f.base.join("app-pr2"),
+                &["rev-parse", "--abbrev-ref", "feat/own@{upstream}"]
+            ),
+            "origin/feat/own"
+        );
+    }
+
+    #[test]
+    fn pr_worktree_reuses_a_worktree_with_the_branch_and_changes_nothing() {
+        let f = Fixture::new(false);
+        f.fork_pull(1, "fork.txt");
+        let first = f.pr(&f.repo, 1, None).unwrap();
+        let wt_dir = PathBuf::from(&first.path);
+        std::fs::write(wt_dir.join("dirty.txt"), "wip").unwrap();
+        let head = run(&wt_dir, &["rev-parse", "HEAD"]);
+        let again = f.pr(&f.repo, 1, None).unwrap();
+        assert!(!again.created);
+        assert_eq!(again.path, first.path);
+        assert_eq!(again.branch, "pr/1");
+        assert_eq!(run(&wt_dir, &["rev-parse", "HEAD"]), head);
+        assert_eq!(
+            std::fs::read_to_string(wt_dir.join("dirty.txt")).unwrap(),
+            "wip"
+        );
+    }
+
+    #[test]
+    fn pr_worktree_returns_the_worktree_where_the_head_branch_is_checked_out() {
+        let f = Fixture::new(false);
+        f.own_pull(2, "feat/own");
+        run(&f.repo, &["fetch", "origin"]);
+        let elsewhere = f.base.join("elsewhere");
+        run(
+            &f.repo,
+            &[
+                "worktree",
+                "add",
+                "--track",
+                "-b",
+                "feat/own",
+                elsewhere.to_str().unwrap(),
+                "origin/feat/own",
+            ],
+        );
+        let wt = f.pr(&f.repo, 2, Some("feat/own")).unwrap();
+        assert!(!wt.created);
+        assert_eq!(PathBuf::from(&wt.path), elsewhere);
+        assert!(!f.base.join("app-pr2").exists());
+    }
+
+    #[test]
+    fn pr_worktree_errors_naming_a_colliding_path() {
+        let f = Fixture::new(false);
+        f.fork_pull(1, "fork.txt");
+        let taken = f.base.join("app-pr1");
+        std::fs::create_dir_all(&taken).unwrap();
+        std::fs::write(taken.join("mine.txt"), "mine").unwrap();
+        let err = f.pr(&f.repo, 1, None).unwrap_err();
+        assert!(err.contains(taken.to_str().unwrap()), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(taken.join("mine.txt")).unwrap(),
+            "mine"
+        );
+    }
+
+    #[test]
+    fn pr_worktree_works_from_a_linked_worktree() {
+        let f = Fixture::new(true);
+        f.fork_pull(1, "fork.txt");
+        let linked = f.base.join("linked");
+        run(
+            &f.repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "other",
+                linked.to_str().unwrap(),
+                "origin/release/next",
+            ],
+        );
+        let wt = f.pr(&linked, 1, None).unwrap();
+        assert_eq!(PathBuf::from(&wt.path), f.base.join("app-pr1"));
+        assert!(f.base.join("app-pr1/fork.txt").exists());
+    }
+
+    #[test]
+    fn pr_worktree_keeps_a_local_branch_with_its_own_commits() {
+        let f = Fixture::new(false);
+        let sha = f.fork_pull(1, "fork.txt");
+        run(&f.repo, &["branch", "pr/1", "main"]);
+        run(&f.repo, &["checkout", "-q", "pr/1"]);
+        std::fs::write(f.repo.join("mine.txt"), "m").unwrap();
+        run(&f.repo, &["add", "."]);
+        run(&f.repo, &["commit", "-m", "local"]);
+        let mine = run(&f.repo, &["rev-parse", "HEAD"]);
+        run(&f.repo, &["checkout", "-q", "main"]);
+        assert_ne!(mine, sha);
+        f.pr(&f.repo, 1, None).unwrap();
+        assert_eq!(run(&f.repo, &["rev-parse", "pr/1"]), mine);
+    }
+
+    #[test]
+    fn pr_worktree_moves_an_old_local_branch_forward() {
+        let f = Fixture::new(false);
+        let sha = f.fork_pull(1, "fork.txt");
+        run(&f.repo, &["branch", "pr/1", "main"]);
+        f.pr(&f.repo, 1, None).unwrap();
+        assert_eq!(run(&f.repo, &["rev-parse", "pr/1"]), sha);
+    }
+
+    #[test]
+    fn pr_worktree_errors_for_a_missing_pull_request() {
+        let f = Fixture::new(false);
+        let err = f.pr(&f.repo, 99, None).unwrap_err();
+        assert!(err.contains("#99"), "{err}");
+    }
+
+    #[test]
+    fn lists_worktrees_with_branches() {
+        let f = Fixture::new(false);
+        f.fork_pull(1, "fork.txt");
+        f.pr(&f.repo, 1, None).unwrap();
+        let list = list_worktrees(f.repo.to_str().unwrap()).unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().any(|c| c.branch.as_deref() == Some("pr/1")));
     }
 }
