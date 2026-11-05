@@ -209,11 +209,22 @@ mod sys {
     }
 
     pub fn set_read_timeout(raw: &Raw, timeout: Option<Duration>) -> io::Result<()> {
-        inner(raw).set_read_timeout(timeout)
+        unless_shut_down(inner(raw).set_read_timeout(timeout))
     }
 
     pub fn set_write_timeout(raw: &Raw, timeout: Option<Duration>) -> io::Result<()> {
-        inner(raw).set_write_timeout(timeout)
+        unless_shut_down(inner(raw).set_write_timeout(timeout))
+    }
+
+    /// macOS refuses socket options on a socket the peer has shut down (`EINVAL` from
+    /// `setsockopt`; std reports its own zero-duration check without an OS code). Such a socket
+    /// never blocks again: reads return what is buffered, then end of file. So there is nothing to
+    /// bound and the timeout is moot.
+    fn unless_shut_down(result: io::Result<()>) -> io::Result<()> {
+        match result {
+            Err(e) if cfg!(target_vendor = "apple") && e.raw_os_error() == Some(22) => Ok(()),
+            other => other,
+        }
     }
 
     pub fn shutdown(raw: &Raw) -> io::Result<()> {
@@ -460,6 +471,38 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         conn.shutdown().unwrap();
         assert_eq!(read.join().unwrap().unwrap(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeouts_can_be_set_after_the_peer_shut_down_and_buffered_data_stays_readable() {
+        let path = temp_socket("after-shutdown");
+        let listener = Listener::bind(&path).unwrap();
+        let conn = Conn::connect(&path).unwrap();
+        let server = listener.accept().unwrap();
+        (&server).write_all(b"last\n").unwrap();
+        server.shutdown().unwrap();
+        drop(server);
+        thread::sleep(Duration::from_millis(20));
+        conn.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        conn.set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(&conn);
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(line, "last\n");
+        line.clear();
+        assert_eq!(reader.read_line(&mut line).unwrap(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_zero_timeout_is_still_refused() {
+        let path = temp_socket("zero");
+        let listener = Listener::bind(&path).unwrap();
+        let conn = Conn::connect(&path).unwrap();
+        let _server = listener.accept().unwrap();
+        assert!(conn.set_read_timeout(Some(Duration::ZERO)).is_err());
     }
 
     #[cfg(unix)]
