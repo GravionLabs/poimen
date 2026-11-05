@@ -102,26 +102,6 @@ pub fn parse_worktrees(output: &str) -> Vec<(String, Option<String>)> {
     list
 }
 
-/// The ref new branches start from: `origin/release/next`, else the default branch of `origin`.
-fn base_ref(root: &Path) -> Result<String, String> {
-    if git_ok(
-        root,
-        &[
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            "refs/remotes/origin/release/next",
-        ],
-    ) {
-        return Ok("origin/release/next".into());
-    }
-    let head = git(root, &["symbolic-ref", "refs/remotes/origin/HEAD"]).map_err(|_| {
-        "origin has no release/next and no default branch (refs/remotes/origin/HEAD)".to_owned()
-    })?;
-    let name = head.strip_prefix("refs/remotes/").unwrap_or(&head);
-    Ok(name.to_owned())
-}
-
 /// Creates or reuses the worktree of `issue`: `branch_template` and `worktree_dir` are expanded
 /// for it, `worktree_dir` relative to the main worktree of the repository of `repo_dir`.
 pub fn ensure(
@@ -170,7 +150,9 @@ pub fn ensure(
         git(&root, &["worktree", "add", &path_str, &branch])?;
     } else {
         git(&root, &["fetch", "origin"])?;
-        let base = base_ref(&root)?;
+        let base = crate::git::base_ref(&root.to_string_lossy()).ok_or_else(|| {
+            "origin has no release/next and no default branch (refs/remotes/origin/HEAD)".to_owned()
+        })?;
         git(&root, &["worktree", "add", "-b", &branch, &path_str, &base])?;
     }
     Ok(Worktree {

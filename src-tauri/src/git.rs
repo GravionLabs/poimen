@@ -199,6 +199,46 @@ pub fn infos(dirs: Vec<String>) -> HashMap<String, RepoInfo> {
         .collect()
 }
 
+/// Runs `git -C dir <args>` (argv, no shell) and returns its stdout bytes.
+pub fn run_bytes(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
+    let out = crate::gui_path::command("git")
+        .args(["-C", dir])
+        .args(args)
+        .output()
+        .map_err(|e| format!("git could not be started: {e}"))?;
+    if out.status.success() {
+        Ok(out.stdout)
+    } else {
+        Err(format!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
+}
+
+/// The ref work is based on, without fetching: `origin/release/next` if it exists, else the
+/// default branch of `origin` (`refs/remotes/origin/HEAD`); `None` when there is neither.
+pub fn base_ref(dir: &str) -> Option<String> {
+    if run_bytes(
+        dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "refs/remotes/origin/release/next",
+        ],
+    )
+    .is_ok()
+    {
+        return Some("origin/release/next".into());
+    }
+    let head = run_bytes(dir, &["symbolic-ref", "refs/remotes/origin/HEAD"]).ok()?;
+    let head = String::from_utf8_lossy(&head).trim().to_owned();
+    let name = head.strip_prefix("refs/remotes/").unwrap_or(&head);
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
