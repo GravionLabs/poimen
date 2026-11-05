@@ -38,6 +38,9 @@ export class Notifier {
   private readonly pending = new Map<string, ReturnType<typeof setTimeout>>();
   /** Panes that got a done notification the user has not seen since. */
   private readonly doneSent = new Set<string>();
+  /** Ids of the notifications sent per pane that may still be in the tray. */
+  private readonly shown = new Map<string, number[]>();
+  private nextId = 1;
 
   /** Calls `open` with the pane of every clicked notification; call before notifying. */
   listen(open: (paneId: string) => void): Promise<Unlisten> {
@@ -52,6 +55,7 @@ export class Notifier {
 
   /** Shows a notification per change that settings allow and the user cannot already see. */
   notify(changes: readonly StatusChange[], ctx: NotifyContext): void {
+    this.withdrawSeen(ctx);
     for (const id of this.doneSent) if (ctx.seen(id)) this.doneSent.delete(id);
     for (const { paneId, status } of changes) {
       if (!(status === "blocked" ? ctx.onBlocked : ctx.onDone)) continue;
@@ -59,6 +63,24 @@ export class Notifier {
       if (status === "blocked") this.send(paneId, status, ctx);
       else this.scheduleDone(paneId, ctx);
     }
+  }
+
+  /**
+   * Removes the notifications of panes the user sees now, so the tray (and the count GNOME, KDE
+   * and Ubuntu Dock draw on the icon from it) follows the in-app marks. Only Linux and the BSDs
+   * can close a shown notification; elsewhere the call does nothing.
+   */
+  private withdrawSeen(ctx: NotifyContext): void {
+    const ids: number[] = [];
+    for (const [paneId, list] of this.shown) {
+      if (!ctx.seen(paneId)) continue;
+      ids.push(...list);
+      this.shown.delete(paneId);
+    }
+    if (!ids.length) return;
+    void this.bridge
+      .removeNotifications(ids)
+      .catch((error: unknown) => console.warn("poimen: could not withdraw notifications", error));
   }
 
   private scheduleDone(paneId: string, ctx: NotifyContext): void {
@@ -74,8 +96,10 @@ export class Notifier {
 
   private send(paneId: string, status: StatusChange["status"], ctx: NotifyContext): void {
     const body = notificationMessage(ctx.label(paneId), status);
+    const id = this.nextId++;
+    this.shown.set(paneId, [...(this.shown.get(paneId) ?? []), id]);
     void this.bridge
-      .notify("poimen", body, { paneId })
+      .notify("poimen", body, { paneId }, id)
       .catch((error: unknown) => console.warn("poimen: notification failed", error));
   }
 }

@@ -23,7 +23,7 @@ import {
 } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
-import { Attention } from "./core/attention";
+import { Attention, type StatusChange } from "./core/attention";
 import { DockBadge } from "./core/dock-badge";
 import { Notifier } from "./core/notifier";
 import { NotificationCenter } from "./core/notification-center";
@@ -235,16 +235,7 @@ export class App {
       untracked(() => {
         const changes = this.attention.observe(statuses, viewed);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
-        const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
-        this.notifier.notify(changes, {
-          // Read live: a delayed done notification checks again when it is due.
-          seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
-          status: (id) => this.store.panes().get(id)?.agent_status,
-          onBlocked: notifyOnBlocked,
-          onDone: notifyOnDone,
-          label: (id) => this.tabTitle(id),
-          now: Date.now(),
-        });
+        this.notifyChanges(changes);
       });
     });
     effect(() => {
@@ -254,6 +245,10 @@ export class App {
     });
 
     const destroyRef = inject(DestroyRef);
+    // Coming back to the window sees the active tabs again: withdraw their notifications.
+    const onFocus = () => this.notifyChanges([]);
+    window.addEventListener("focus", onFocus);
+    destroyRef.onDestroy(() => window.removeEventListener("focus", onFocus));
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     // A click on a system notification opens the tab of the pane it was about.
@@ -674,6 +669,20 @@ export class App {
   }
 
   /** Space and name of a pane, as its tab shows them. */
+  /** Sends notifications for `changes` and withdraws those of panes the user sees now. */
+  private notifyChanges(changes: readonly StatusChange[]): void {
+    const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
+    this.notifier.notify(changes, {
+      // Read live: a delayed done notification checks again when it is due.
+      seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
+      status: (id) => this.store.panes().get(id)?.agent_status,
+      onBlocked: notifyOnBlocked,
+      onDone: notifyOnDone,
+      label: (id) => this.tabTitle(id),
+      now: Date.now(),
+    });
+  }
+
   private tabTitle(id: string): string {
     const snap = this.store.snapshot();
     const pane = this.pane(id);

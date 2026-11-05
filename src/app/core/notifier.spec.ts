@@ -8,10 +8,17 @@ import { TauriBridge } from "./tauri";
 function setup() {
   const sent: string[] = [];
   const extras: unknown[] = [];
+  const ids: (number | undefined)[] = [];
+  const removed: number[][] = [];
   const calls = { focus: 0 };
   let clickHandler: (extra: Record<string, unknown>) => void = () => undefined;
   const bridge = {
-    notify: (_title: string, body: string, extra?: Record<string, unknown>) => {
+    removeNotifications: (list: number[]) => {
+      removed.push(list);
+      return Promise.resolve();
+    },
+    notify: (_title: string, body: string, extra?: Record<string, unknown>, id?: number) => {
+      ids.push(id);
       sent.push(body);
       extras.push(extra);
       return Promise.resolve(true);
@@ -43,6 +50,8 @@ function setup() {
     notifier: injector.get(Notifier),
     sent,
     extras,
+    ids,
+    removed,
     calls,
     click: (extra: Record<string, unknown>) => clickHandler(extra),
     ctx,
@@ -196,5 +205,34 @@ describe("Notifier", () => {
     click({ paneId: 7 });
     expect(opened).toEqual([]);
     expect(calls.focus).toBe(0);
+  });
+
+  it("withdraws the notifications of a pane once the user sees it", () => {
+    const { notifier, ids, removed, ctx, seen } = setup();
+    notifier.notify(
+      [
+        { paneId: "p1", status: "blocked" },
+        { paneId: "p2", status: "blocked" },
+      ],
+      ctx(),
+    );
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    seen.add("p1");
+    notifier.notify([], ctx());
+    expect(removed).toEqual([[ids[0]]]);
+    notifier.notify([], ctx());
+    expect(removed).toHaveLength(1);
+  });
+
+  it("withdraws a done notification too and nothing for unseen panes", () => {
+    const { notifier, ids, removed, ctx, seen } = setup();
+    notifier.notify([{ paneId: "p1", status: "done" }], ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    notifier.notify([], ctx());
+    expect(removed).toEqual([]);
+    seen.add("p1");
+    notifier.notify([], ctx());
+    expect(removed).toEqual([[ids[0]]]);
   });
 });
