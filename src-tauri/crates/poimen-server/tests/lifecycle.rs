@@ -1,5 +1,7 @@
 //! The server end to end: a real socket, a real shell in a temp dir, the real client.
-#![cfg(unix)]
+//!
+//! The shell is `sh` on Unix and `cmd.exe` on Windows. Unix-only on purpose: the directory mode
+//! and symlink checks (Windows has no modes; the pipe's DACL protects the server there).
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
@@ -31,13 +33,14 @@ impl Env {
     }
 
     fn work(&self) -> String {
-        // /tmp may be a symlink (macOS); the shell reports the resolved path.
-        self.dir
-            .join("work")
-            .canonicalize()
-            .unwrap()
-            .display()
-            .to_string()
+        let work = self.dir.join("work");
+        // /tmp may be a symlink (macOS); the shell reports the resolved path. Windows: no
+        // canonicalize, its `\\?\` form is not a working directory cmd.exe accepts.
+        if cfg!(windows) {
+            work.display().to_string()
+        } else {
+            work.canonicalize().unwrap().display().to_string()
+        }
     }
 }
 
@@ -94,13 +97,18 @@ fn wait_for_file(path: &Path) -> String {
     }
 }
 
+/// The platform's shell: `sh`, on Windows `cmd.exe`.
 fn sh(space_id: &str) -> TerminalCreate {
+    let shell = if cfg!(windows) { "cmd.exe" } else { "sh" };
     TerminalCreate {
         space_id: space_id.into(),
-        command: Some(vec!["sh".into()]),
+        command: Some(vec![shell.into()]),
         ..Default::default()
     }
 }
+
+/// Enter in the terminal: a carriage return through ConPTY, a newline for `sh`.
+const ENTER: &str = if cfg!(windows) { "\r" } else { "\n" };
 
 #[test]
 fn ping_reports_the_protocol_version() {
@@ -122,6 +130,7 @@ fn a_second_server_on_the_same_socket_is_refused() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn an_existing_open_socket_directory_is_tightened_to_0700() {
     use std::os::unix::fs::PermissionsExt;
@@ -135,6 +144,7 @@ fn an_existing_open_socket_directory_is_tightened_to_0700() {
     assert_eq!(mode, 0o700);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_symlinked_socket_directory_is_refused() {
     let env = Env::new("linkdir");
@@ -195,6 +205,7 @@ fn spaces_persist_across_restarts_but_terminals_do_not() {
     assert!(spaces.iter().all(|s| s.id != third.id));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_real_shell_gets_its_environment_input_and_resize() {
     let env = Env::new("shell");
@@ -236,6 +247,39 @@ fn a_real_shell_gets_its_environment_input_and_resize() {
     assert_eq!((listed[0].cols, listed[0].rows), (100, 30));
 }
 
+#[cfg(windows)]
+#[test]
+fn a_real_cmd_gets_its_environment_input_and_resize() {
+    let env = Env::new("cmd");
+    let client = start(&env.config());
+    let space = client.create_space("work", &env.work()).unwrap();
+    let terminal = client.create_terminal(&sh(&space.id)).unwrap();
+    assert_eq!(terminal.name, "cmd");
+    assert_eq!(terminal.status, TerminalStatus::Running);
+    assert_eq!(terminal.cwd, env.work());
+
+    let out = env.dir.join("work").join("env.txt");
+    client
+        .input(
+            &terminal.id,
+            "echo %POIMEN_TERMINAL_ID%^|%POIMEN_SOCKET%^|%CD%> env.txt\r",
+        )
+        .unwrap();
+    assert_eq!(
+        wait_for_file(&out).trim_end(),
+        format!(
+            "{}|{}|{}",
+            terminal.id,
+            env.config().socket.display(),
+            env.work()
+        )
+    );
+
+    client.resize(&terminal.id, 100, 30).unwrap();
+    let listed = client.list_terminals(Some(&space.id)).unwrap();
+    assert_eq!((listed[0].cols, listed[0].rows), (100, 30));
+}
+
 #[test]
 fn exit_close_and_rename_are_reported() {
     let env = Env::new("exit");
@@ -248,7 +292,9 @@ fn exit_close_and_rename_are_reported() {
     assert_eq!(renamed.name, "build");
     wait_for_event(&rx, |e| matches!(e, Event::TerminalRenamed { .. }));
 
-    client.input(&terminal.id, "exit 3\n").unwrap();
+    client
+        .input(&terminal.id, &format!("exit 3{ENTER}"))
+        .unwrap();
     let exited = wait_for_event(&rx, |e| matches!(e, Event::TerminalExited { .. }));
     assert_eq!(
         exited,

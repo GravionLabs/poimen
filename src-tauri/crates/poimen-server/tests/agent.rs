@@ -1,5 +1,9 @@
 //! Starting an agent and prompting it against a fake agent: a shell script that sends hook
 //! reports through the real `poimen-server hook claude`, like Claude Code does.
+//!
+//! Unix-only on purpose: the fake agent is a `#!/bin/sh` script and the typed command line is
+//! POSIX-quoted. On Windows the hook paths are covered by the unit tests of `claude.rs` and
+//! `copilot.rs` (and the manual check of #417).
 #![cfg(unix)]
 
 use std::path::PathBuf;
