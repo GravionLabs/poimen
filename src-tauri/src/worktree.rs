@@ -455,20 +455,21 @@ pub fn cleanup(
             )));
             continue;
         }
+        match git(Path::new(&path), &["status", "--porcelain"]) {
+            Ok(status) if status.is_empty() => {}
+            Ok(_) => {
+                report
+                    .left
+                    .push(left("it has uncommitted or untracked changes".into()));
+                continue;
+            }
+            Err(e) => {
+                report.left.push(left(e));
+                continue;
+            }
+        }
         match mode {
-            CleanupMode::Builtin => match git(Path::new(&path), &["status", "--porcelain"]) {
-                Ok(status) if status.is_empty() => {}
-                Ok(_) => {
-                    report
-                        .left
-                        .push(left("it has uncommitted or untracked changes".into()));
-                    continue;
-                }
-                Err(e) => {
-                    report.left.push(left(e));
-                    continue;
-                }
-            },
+            CleanupMode::Builtin => {}
             CleanupMode::Command(_) => {
                 if issue_of_branch(&branch).is_none() {
                     report
@@ -1049,6 +1050,32 @@ mod tests {
             report.left
         );
         assert!(report.left[0].command.contains("107"));
+    }
+
+    #[test]
+    fn a_dirty_worktree_is_left_in_command_mode_and_the_command_does_not_run() {
+        for untracked in [false, true] {
+            let f = Fixture::new(true);
+            let wt = f.task(7);
+            let file = if untracked { "new.txt" } else { "a.txt" };
+            std::fs::write(wt.join(file), "changed").unwrap();
+            let backend = FakeBackend::default();
+            panes_in(&backend, &[("w2", &wt)]);
+            let report = cleanup(
+                &f.repo,
+                &Fixture::merged(&[7]),
+                &CleanupMode::Command("touch ran".into()),
+                &backend,
+                None,
+            )
+            .unwrap();
+            assert!(report.removed.is_empty(), "{report:?}");
+            assert_eq!(report.left.len(), 1);
+            assert!(report.left[0].reason.contains("uncommitted"));
+            assert!(!f.repo.join("ran").exists(), "the command must not run");
+            assert!(!backend.calls().iter().any(|c| c.starts_with("close_space")));
+            assert!(wt.join(file).exists());
+        }
     }
 
     #[test]
