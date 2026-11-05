@@ -1658,6 +1658,23 @@ mod build_layout_tests {
     }
 
     #[test]
+    fn create_space_focuses_a_task_space_without_terminals_on_the_poimen_backend() {
+        let fake = FakeBackend::default();
+        let dir = tmp_dir();
+        let space = poimen_client::protocol::Space {
+            id: "s3".into(),
+            name: "#12 Add picker".into(),
+            cwd: dir.clone(),
+        };
+        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
+        let outcome =
+            create_space_with(&fake, None, &dir, Some("#12 Add picker"), None, Some("c")).unwrap();
+        assert!(!outcome.created);
+        assert_eq!(outcome.workspace_id, "s3");
+        assert_eq!(fake.calls(), ["snapshot", "focus s3"]);
+    }
+
+    #[test]
     fn create_space_runs_the_task_command_in_the_root_pane_of_the_layout() {
         let fake = FakeBackend::default();
         let dir = tmp_dir();

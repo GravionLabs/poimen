@@ -85,7 +85,8 @@ fn text(err: ClientError) -> String {
 
 /// The tree the frontend builds from: a space is a workspace, a terminal is a tab with one pane
 /// (the server has no tabs). Numbers follow the server's order. Agent status is what the agent's
-/// hooks reported (`unknown` without an agent); a workspace shows its most urgent terminal.
+/// hooks reported (`unknown` without an agent); a workspace shows its most urgent terminal and
+/// carries the space's `cwd` (herdr workspaces have none).
 pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
     let mut workspaces = Vec::new();
     let mut tabs = Vec::new();
@@ -97,12 +98,17 @@ pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
             .map(wire_status)
             .max_by_key(|s| urgency(s))
             .unwrap_or("unknown");
-        workspaces.push(json!({
+        let mut workspace = json!({
             "workspace_id": space.id,
             "label": space.name,
             "number": i + 1,
             "agent_status": space_status,
-        }));
+        });
+        // The space's own directory, so a space without terminals is still found by it.
+        if !space.cwd.is_empty() {
+            workspace["cwd"] = json!(space.cwd);
+        }
+        workspaces.push(workspace);
         for (n, terminal) in terminals
             .iter()
             .filter(|t| t.space_id == space.id)
@@ -583,8 +589,8 @@ mod tests {
         assert_eq!(
             snapshot.workspaces,
             json!([
-                {"workspace_id": "s1", "label": "api", "number": 1, "agent_status": "unknown"},
-                {"workspace_id": "s2", "label": "web", "number": 2, "agent_status": "unknown"},
+                {"workspace_id": "s1", "label": "api", "number": 1, "agent_status": "unknown", "cwd": "/work/api"},
+                {"workspace_id": "s2", "label": "web", "number": 2, "agent_status": "unknown", "cwd": "/work/web"},
             ])
         );
         assert_eq!(
@@ -609,6 +615,21 @@ mod tests {
         let snapshot = map_snapshot(&[], &[]);
         assert_eq!(snapshot.workspaces, json!([]));
         assert_eq!(snapshot.panes, json!([]));
+    }
+
+    #[test]
+    fn a_space_without_terminals_keeps_its_directory() {
+        let snapshot = map_snapshot(&[space("s1", "app-7")], &[]);
+        assert_eq!(snapshot.workspaces[0]["cwd"], "/work/app-7");
+        assert_eq!(snapshot.panes, json!([]));
+    }
+
+    #[test]
+    fn a_space_without_a_directory_has_no_cwd() {
+        let mut s = space("s1", "a");
+        s.cwd = String::new();
+        let snapshot = map_snapshot(&[s], &[]);
+        assert!(snapshot.workspaces[0].get("cwd").is_none());
     }
 
     #[test]
