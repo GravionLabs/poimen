@@ -8,6 +8,7 @@ repository = "https://github.com/GravionLabs/poimen"
 rust-version = "1.94"
 publish = false
 edition = "2024"
+default-run = "poimen"
 
 [workspace]
 members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server"]
