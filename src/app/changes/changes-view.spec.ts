@@ -55,8 +55,17 @@ const LIST: ChangeList = {
       additions: 3,
       deletions: 1,
       binary: false,
+      staged: false,
     },
-    { path: "img.png", old_path: null, status: "added", additions: 0, deletions: 0, binary: true },
+    {
+      path: "img.png",
+      old_path: null,
+      status: "added",
+      additions: 0,
+      deletions: 0,
+      binary: true,
+      staged: false,
+    },
     {
       path: "big.txt",
       old_path: null,
@@ -64,6 +73,7 @@ const LIST: ChangeList = {
       additions: 9,
       deletions: 9,
       binary: false,
+      staged: false,
     },
   ],
 };
@@ -480,5 +490,129 @@ describe("line comments", () => {
     click(labeled(f, "Send to agent"));
     await settle(f);
     expect(tauri.calls("agent_prompt")[0]).toMatchObject({ target: "p2" });
+  });
+});
+
+describe("Stage, commit and push", () => {
+  const staged = new Set<string>();
+
+  async function renderUncommitted() {
+    staged.clear();
+    const f = await render();
+    tauri.answer("changes_list", (args) => ({
+      ...LIST,
+      scope: args?.["scope"],
+      files: LIST.files.map((x) => ({ ...x, staged: staged.has(x.path) })),
+    }));
+    click(button(f, "Uncommitted"));
+    await settle(f);
+    f.detectChanges();
+    return f;
+  }
+
+  const box = (f: { nativeElement: HTMLElement }, label: string) =>
+    el(f).querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+  const message = (f: { nativeElement: HTMLElement }, text: string) => {
+    const area = el(f).querySelector<HTMLTextAreaElement>("textarea.message")!;
+    area.value = text;
+    area.dispatchEvent(new Event("input"));
+  };
+  const commitButton = (f: { nativeElement: HTMLElement }) =>
+    el(f).querySelector<HTMLButtonElement>("button.commit")!;
+
+  it("shows no git controls in the base scope", async () => {
+    const f = await render();
+    expect(el(f).querySelector("textarea.message")).toBeNull();
+    expect(el(f).querySelector("input.stage")).toBeNull();
+  });
+
+  it("stages a file through its checkbox and shows it staged after the refresh", async () => {
+    const f = await renderUncommitted();
+    tauri.answer("changes_stage", (args) => {
+      for (const p of args?.["paths"] as string[]) staged.add(p);
+    });
+    expect(box(f, "Stage src/a.ts").checked).toBe(false);
+    box(f, "Stage src/a.ts").click();
+    await settle(f);
+    f.detectChanges();
+    expect(tauri.calls("changes_stage")).toEqual([
+      { dir: "/repo", paths: ["src/a.ts"], stage: true },
+    ]);
+    expect(box(f, "Unstage src/a.ts").checked).toBe(true);
+    // The click did not select another file.
+    expect(el(f).querySelector(".file.selected .path")!.textContent).toBe("src/a.ts");
+  });
+
+  it("unstages a staged file", async () => {
+    const f = await renderUncommitted();
+    staged.add("img.png");
+    tauri.answer("changes_stage", () => staged.clear());
+    click(button(f, "Refresh"));
+    await settle(f);
+    f.detectChanges();
+    box(f, "Unstage img.png").click();
+    await settle(f);
+    expect(tauri.calls("changes_stage").at(-1)).toEqual({
+      dir: "/repo",
+      paths: ["img.png"],
+      stage: false,
+    });
+  });
+
+  it("keeps Commit disabled without staged files or a message", async () => {
+    const f = await renderUncommitted();
+    message(f, "feat: x");
+    f.detectChanges();
+    expect(commitButton(f).disabled).toBe(true);
+
+    staged.add("src/a.ts");
+    click(button(f, "Refresh"));
+    await settle(f);
+    message(f, "   ");
+    f.detectChanges();
+    expect(commitButton(f).disabled).toBe(true);
+
+    message(f, "feat: x");
+    f.detectChanges();
+    expect(commitButton(f).disabled).toBe(false);
+    expect(commitButton(f).textContent!.trim()).toBe("Commit (1)");
+  });
+
+  it("commits with the message, clears it and reads the list again", async () => {
+    const f = await renderUncommitted();
+    staged.add("src/a.ts");
+    click(button(f, "Refresh"));
+    await settle(f);
+    tauri.answer("changes_commit", () => {
+      staged.clear();
+      return "[feat/x abc] feat: x";
+    });
+    message(f, "feat: x");
+    f.detectChanges();
+    commitButton(f).click();
+    await settle(f);
+    f.detectChanges();
+    expect(tauri.calls("changes_commit")).toEqual([{ dir: "/repo", message: "feat: x" }]);
+    expect(el(f).querySelector<HTMLTextAreaElement>("textarea.message")!.value).toBe("");
+    expect(el(f).querySelector(".result")!.textContent).toContain("feat: x");
+  });
+
+  it("shows the output of a push and the refusal of a protected branch", async () => {
+    const f = await renderUncommitted();
+    tauri.answer("changes_push", () => "To origin\n * [new branch] feat/x -> feat/x");
+    click(el(f).querySelector("button.push"));
+    await settle(f);
+    f.detectChanges();
+    expect(tauri.calls("changes_push")).toEqual([{ dir: "/repo" }]);
+    expect(el(f).querySelector(".result")!.textContent).toContain("new branch");
+    expect(el(f).querySelector(".result.failed")).toBeNull();
+
+    tauri.answer("changes_push", () => {
+      throw "Refused: poimen does not push main";
+    });
+    click(el(f).querySelector("button.push"));
+    await settle(f);
+    f.detectChanges();
+    expect(el(f).querySelector(".result.failed")!.textContent).toContain("Refused");
   });
 });

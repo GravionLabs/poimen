@@ -110,6 +110,44 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       </button>
     </header>
 
+    @if (changes.scope() === "uncommitted" && changes.list()) {
+      <div class="git" role="group" aria-label="Commit and push">
+        <textarea
+          class="message"
+          rows="2"
+          placeholder="Commit message"
+          aria-label="Commit message"
+          [value]="changes.commitMessage()"
+          (input)="changes.commitMessage.set($any($event.target).value)"
+        ></textarea>
+        <button
+          type="button"
+          class="commit"
+          [disabled]="!changes.canCommit()"
+          [title]="commitHint()"
+          (click)="changes.commit()"
+        >
+          Commit ({{ changes.stagedCount() }})
+        </button>
+        <button
+          type="button"
+          class="push"
+          title="Push the current branch (never forced; not main, release/* or a detached HEAD)"
+          [disabled]="changes.busy()"
+          (click)="changes.push()"
+        >
+          Push
+        </button>
+      </div>
+    }
+    @if (changes.actionResult(); as result) {
+      <pre
+        class="result"
+        [class.failed]="!result.ok"
+        [attr.role]="result.ok ? 'status' : 'alert'"
+        >{{ result.text }}</pre>
+    }
+
     @if (findings.invalid(); as error) {
       <p class="findings-note invalid" role="status">
         The findings file is not valid and is ignored: {{ error }}
@@ -145,6 +183,17 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
               (click)="changes.select(file.path)"
               (keydown.enter)="changes.select(file.path)"
             >
+              @if (changes.scope() === "uncommitted") {
+                <input
+                  type="checkbox"
+                  class="stage"
+                  [checked]="file.staged"
+                  [disabled]="changes.busy()"
+                  [attr.aria-label]="(file.staged ? 'Unstage ' : 'Stage ') + file.path"
+                  (click)="$event.stopPropagation()"
+                  (change)="changes.setStaged(file, !file.staged)"
+                />
+              }
               <span class="status s-{{ file.status }}" [attr.aria-label]="file.status">{{
                 statusLetter(file.status)
               }}</span>
@@ -324,6 +373,35 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     .diff app-diff-editor {
       flex: 1;
     }
+    .git {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+    }
+    .message {
+      flex: 1;
+      min-width: 0;
+      font: inherit;
+      color: inherit;
+      background: transparent;
+      border: 1px solid var(--h-border-color, var(--h-surface-300));
+      padding: 2px 6px;
+      resize: vertical;
+    }
+    .result {
+      margin: 0;
+      padding: 4px 12px;
+      max-height: 120px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: var(--font-mono);
+      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+    }
+    .result.failed {
+      color: var(--h-danger-color, #d33);
+    }
     .findings-note {
       margin: 0;
       padding: 4px 12px;
@@ -440,6 +518,12 @@ export class ChangesView {
     this.ui.setChangesLayout(layout);
   }
 
+  protected commitHint(): string {
+    if (!this.changes.stagedCount()) return "Nothing is staged";
+    if (!this.changes.commitMessage().trim()) return "Enter a commit message";
+    return "Commit the staged files";
+  }
+
   protected title(file: ChangedFile): string {
     return file.old_path ? `${file.old_path} → ${file.path}` : file.path;
   }
@@ -456,7 +540,10 @@ export class ChangesView {
   @HostListener("keydown", ["$event"])
   protected onKey(event: KeyboardEvent): void {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.target instanceof HTMLElement && event.target.closest("button, input, select"))
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest("button, input, select, textarea")
+    )
       return;
     if (event.key === "n") this.jump.set({ step: "next" });
     else if (event.key === "p") this.jump.set({ step: "previous" });
