@@ -461,7 +461,7 @@ fn build_layout(
         None => layout,
     };
     let Some(root_pane) = root_pane else {
-        return vec!["herdr did not report the root pane; no layout applied".into()];
+        return vec!["the backend did not report the root pane; no layout applied".into()];
     };
     if let Err(e) = layout::apply(backend, &layout, dir, root_pane) {
         warnings.push(format!("layout not fully applied: {e}"));
@@ -1518,6 +1518,24 @@ mod build_layout_tests {
 
     fn typed(calls: &[String]) -> Vec<&String> {
         calls.iter().filter(|c| c.starts_with("input ")).collect()
+    }
+
+    #[test]
+    fn missing_root_pane_warning_names_no_backend() {
+        let fake = FakeBackend::default();
+        let warnings = build_layout(
+            &fake,
+            "/work/app",
+            None,
+            &sources(PROJECT_TEXT),
+            None,
+            false,
+            None,
+        );
+        assert_eq!(
+            warnings,
+            ["the backend did not report the root pane; no layout applied"]
+        );
     }
 
     #[test]
