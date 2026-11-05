@@ -72,7 +72,22 @@ fn connect_stream(path: &Path) -> io::Result<Stream> {
             Err(e) => return Err(e),
         }
     }
-    transport::Conn::connect(path)
+    transport::Conn::connect(path).map_err(|e| if cfg!(windows) { explain_denied(e) } else { e })
+}
+
+/// A denied connect on Windows: the pipe admits only its owner, and a server started elevated
+/// is owned by Administrators. The error says so (it keeps its kind).
+fn explain_denied(e: io::Error) -> io::Error {
+    if e.kind() != io::ErrorKind::PermissionDenied {
+        return e;
+    }
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!(
+            "access denied ({e}); poimen-server probably runs elevated (as administrator): \
+             quit it and start poimen normally, not as administrator"
+        ),
+    )
 }
 
 /// One request on a connection of its own, bounded by the socket timeouts where they exist.
@@ -651,6 +666,16 @@ mod tests {
         assert!(input.contains(r#""method":"terminal.input""#));
         assert!(input.contains(r#""terminal_id":"t1""#));
         assert!(input.contains(r#""data":"ls\r""#));
+    }
+
+    #[test]
+    fn a_denied_connect_explains_elevation_and_keeps_its_kind() {
+        let e = explain_denied(io::Error::from(io::ErrorKind::PermissionDenied));
+        assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
+        assert!(e.to_string().contains("not as administrator"), "{e}");
+        let other = explain_denied(io::Error::from(io::ErrorKind::NotFound));
+        assert_eq!(other.kind(), io::ErrorKind::NotFound);
+        assert!(!other.to_string().contains("administrator"));
     }
 
     /// Unix only on purpose: Windows has no directory modes; the pipe's DACL protects it.
