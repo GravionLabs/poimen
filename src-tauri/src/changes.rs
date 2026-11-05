@@ -67,12 +67,15 @@ fn resolve(dir: &str, scope: Scope) -> (String, String) {
     let Some(base) = base_ref(dir) else {
         return ("HEAD".into(), "HEAD".into());
     };
-    let from = run_bytes(dir, &["merge-base", "HEAD", &base])
+    // Without a merge base the comparison is against `HEAD`, and `base` says so.
+    match run_bytes(dir, &["merge-base", "HEAD", &base])
         .ok()
         .map(|b| String::from_utf8_lossy(&b).trim().to_owned())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "HEAD".into());
-    (base, from)
+    {
+        Some(from) => (base, from),
+        None => ("HEAD".into(), "HEAD".into()),
+    }
 }
 
 fn text(b: &[u8]) -> String {
@@ -138,8 +141,26 @@ pub fn parse_numstat(out: &[u8]) -> HashMap<String, (u32, u32, bool)> {
     map
 }
 
-fn read_worktree_file(dir: &str, path: &str) -> Option<Vec<u8>> {
-    std::fs::read(Path::new(dir).join(path)).ok()
+/// A file of the working tree, read without following symlinks (a link yields its target
+/// path) and only up to `MAX_CONTENT` bytes: `Err(())` means too large, `Ok(None)` unreadable.
+fn read_worktree_file(root: &str, path: &str) -> Result<Option<Vec<u8>>, ()> {
+    use std::os::unix::ffi::OsStringExt;
+    let full = Path::new(root).join(path);
+    let Ok(meta) = std::fs::symlink_metadata(&full) else {
+        return Ok(None);
+    };
+    if meta.file_type().is_symlink() {
+        return Ok(std::fs::read_link(&full)
+            .ok()
+            .map(|t| t.into_os_string().into_vec()));
+    }
+    if !meta.is_file() {
+        return Ok(None);
+    }
+    if meta.len() > MAX_CONTENT as u64 {
+        return Err(());
+    }
+    Ok(std::fs::read(&full).ok())
 }
 
 fn count_lines(b: &[u8]) -> u32 {
@@ -172,7 +193,10 @@ fn list_in(dir: &str, scope: Scope) -> Result<ChangeList, String> {
     let untracked = run_bytes(dir, &["ls-files", "--others", "--exclude-standard", "-z"])?;
     for path in untracked.split(|b| *b == 0).filter(|t| !t.is_empty()) {
         let path = text(path);
-        let content = read_worktree_file(dir, &path).unwrap_or_default();
+        let content = read_worktree_file(dir, &path)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let binary = content.contains(&0);
         files.push(ChangedFile {
             additions: if binary { 0 } else { count_lines(&content) },
@@ -212,8 +236,11 @@ fn file_in(dir: &str, scope: Scope, path: &str) -> Result<FileContent, String> {
     let new = if file.status == Status::Deleted {
         Vec::new()
     } else {
-        read_worktree_file(dir, &file.path)
-            .ok_or_else(|| format!("{} could not be read", file.path))?
+        match read_worktree_file(dir, &file.path) {
+            Ok(Some(b)) => b,
+            Ok(None) => return Err(format!("{} could not be read", file.path)),
+            Err(()) => return Ok(FileContent::TooLarge),
+        }
     };
     if old.len() > MAX_CONTENT || new.len() > MAX_CONTENT {
         return Ok(FileContent::TooLarge);
@@ -227,11 +254,12 @@ fn file_in(dir: &str, scope: Scope, path: &str) -> Result<FileContent, String> {
     }
 }
 
-/// `dir` as in `create_space` (an existing absolute directory) and inside a git repository.
+/// `dir` as in `create_space` (an existing absolute directory) and inside a git repository;
+/// returns the repository's top level, the base of every path and git call here (git prints
+/// root-relative paths for `diff` and cwd-relative ones for `ls-files`).
 fn validate(dir: &str, home: Option<&Path>) -> Result<String, String> {
     let dir = crate::spaces::resolve_dir(dir, home)?;
-    crate::git::toplevel(&dir).ok_or_else(|| format!("{dir} is not in a git repository"))?;
-    Ok(dir)
+    crate::git::toplevel(&dir).ok_or_else(|| format!("{dir} is not in a git repository"))
 }
 
 pub fn list(dir: &str, scope: Scope, home: Option<&Path>) -> Result<ChangeList, String> {
@@ -443,6 +471,54 @@ mod tests {
         let list = list_in(&f.dir(), Scope::Base).unwrap();
         assert_eq!(list.base, "HEAD");
         assert_eq!(list.files.len(), 1);
+    }
+
+    #[test]
+    fn subdirectory_dir_uses_the_repository_root_for_paths() {
+        let f = Fixture::new(true);
+        std::fs::create_dir_all(f.app.join("sub")).unwrap();
+        std::fs::write(f.app.join("sub/in.txt"), "i\n").unwrap();
+        run(&f.app, &["add", "sub/in.txt"]);
+        std::fs::write(f.app.join("keep.txt"), "one\nTWO\nthree\n").unwrap();
+        std::fs::write(f.app.join("outside.txt"), "o\n").unwrap();
+        std::fs::write(f.app.join("sub/loose.txt"), "l\n").unwrap();
+        let sub = f.app.join("sub").to_string_lossy().into_owned();
+        let list = list(&sub, Scope::Base, None).unwrap();
+        let paths: Vec<_> = list.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["keep.txt", "outside.txt", "sub/in.txt", "sub/loose.txt"]
+        );
+        for p in ["keep.txt", "outside.txt", "sub/loose.txt"] {
+            assert!(matches!(
+                file(&sub, Scope::Base, p, None).unwrap(),
+                FileContent::Text { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn no_merge_base_reports_head_as_base() {
+        let f = Fixture::new(false);
+        run(&f.app, &["checkout", "--orphan", "lone"]);
+        run(&f.app, &["commit", "-m", "unrelated", "--allow-empty"]);
+        let list = list_in(&f.dir(), Scope::Base).unwrap();
+        assert_eq!((list.base.as_str(), list.from.as_str()), ("HEAD", "HEAD"));
+    }
+
+    #[test]
+    fn symlinks_are_not_followed() {
+        let f = Fixture::new(true);
+        let secret = f.base.join("secret.txt");
+        std::fs::write(&secret, "secret\n").unwrap();
+        std::os::unix::fs::symlink(&secret, f.app.join("link")).unwrap();
+        assert_eq!(
+            file_in(&f.dir(), Scope::Base, "link").unwrap(),
+            FileContent::Text {
+                old: String::new(),
+                new: secret.to_string_lossy().into_owned()
+            }
+        );
     }
 
     #[test]
