@@ -34,10 +34,11 @@ fn stage_in(top: &str, paths: &[String], stage: bool) -> Result<(), String> {
     for p in paths {
         check_path(p)?;
     }
+    // Literal pathspecs: `*.txt`, `:(top)x` or `:!x` name files, never patterns.
     let mut args: Vec<&str> = if stage {
-        vec!["add", "-A", "--"]
+        vec!["--literal-pathspecs", "add", "-A", "--"]
     } else {
-        vec!["restore", "--staged", "--"]
+        vec!["--literal-pathspecs", "restore", "--staged", "--"]
     };
     args.extend(paths.iter().map(String::as_str));
     run_bytes(top, &args).map(|_| ())
@@ -51,8 +52,7 @@ fn commit_in(top: &str, message: &str) -> Result<String, String> {
     if nothing_staged {
         return Err("Nothing is staged".into());
     }
-    let out = run_bytes(top, &["commit", "-m", message])?;
-    Ok(String::from_utf8_lossy(&out).trim().to_owned())
+    run_git(top, &["commit", "-m", message], PUSH_TIMEOUT, "commit")
 }
 
 /// Branches a push from here is refused on.
@@ -91,7 +91,7 @@ fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8
 }
 
 /// Runs git with no prompts and a deadline; returns the combined output.
-fn run_push(top: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
+fn run_git(top: &str, args: &[&str], timeout: Duration, what: &str) -> Result<String, String> {
     let mut cmd = crate::gui_path::command("git");
     cmd.args(["-C", top]).args(args);
     cmd.env("GIT_TERMINAL_PROMPT", "0");
@@ -125,7 +125,7 @@ fn run_push(top: &str, args: &[&str], timeout: Duration) -> Result<String, Strin
     let text = redact(format!("{}\n{}", out.trim(), err.trim()).trim());
     match status {
         None => Err(format!(
-            "The push timed out after {} s and was stopped.\n{text}",
+            "The {what} timed out after {} s and was stopped.\n{text}",
             timeout.as_secs().max(1)
         )
         .trim()
@@ -148,27 +148,53 @@ fn run_push(top: &str, args: &[&str], timeout: Duration) -> Result<String, Strin
 }
 
 fn push_in(top: &str, timeout: Duration) -> Result<String, String> {
-    let branch = run_bytes(top, &["symbolic-ref", "--short", "-q", "HEAD"])
+    // The full ref, so a tag or branch named like another ref cannot change the name.
+    let head = run_bytes(top, &["symbolic-ref", "-q", "HEAD"])
         .map(|b| String::from_utf8_lossy(&b).trim().to_owned())
         .unwrap_or_default();
-    if branch.is_empty() {
+    let Some(branch) = head.strip_prefix("refs/heads/").filter(|b| !b.is_empty()) else {
         return Err("Refused: HEAD is detached, check out a branch first".into());
-    }
-    if protected(&branch) {
+    };
+    if protected(branch) {
         return Err(format!(
             "Refused: poimen does not push {branch} (main and release/* are protected)"
         ));
     }
-    let has_upstream = run_bytes(
-        top,
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-    )
-    .is_ok();
+    let config = |key: &str| {
+        run_bytes(top, &["config", "--get", &format!("branch.{branch}.{key}")])
+            .map(|b| String::from_utf8_lossy(&b).trim().to_owned())
+            .unwrap_or_default()
+    };
+    let merge = config("merge");
+    let has_upstream = !merge.is_empty();
     if has_upstream {
-        run_push(top, &["push"], timeout)
-    } else {
-        run_push(top, &["push", "-u", "origin", &branch], timeout)
+        let remote = config("remote");
+        let target = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
+        if remote != "origin" {
+            return Err(format!(
+                "Refused: {branch} tracks {remote}/{target}; poimen pushes to origin only"
+            ));
+        }
+        if target != branch {
+            return Err(format!(
+                "Refused: {branch} tracks origin/{target}, a different branch; poimen pushes a branch only to the same name"
+            ));
+        }
     }
+    // Always explicit, so push.default and remote.*.push (even a `+` refspec) are not used.
+    let refspec = format!("HEAD:refs/heads/{branch}");
+    let mut args = vec![
+        "-c",
+        "push.default=simple",
+        "-c",
+        "push.followTags=false",
+        "push",
+    ];
+    if !has_upstream {
+        args.push("-u");
+    }
+    args.extend(["origin", &refspec]);
+    run_git(top, &args, timeout, "push")
 }
 
 pub fn stage(dir: &str, paths: &[String], stage: bool, home: Option<&Path>) -> Result<(), String> {
@@ -387,6 +413,67 @@ mod tests {
         );
         let err = push_in(f.top(), SECS).unwrap_err();
         assert!(err.to_lowercase().contains("rejected"), "{err}");
+    }
+
+    #[test]
+    fn push_ignores_configured_targets_and_refspecs() {
+        let f = Fixture::new();
+        let origin = f.base.join("origin.git");
+        // Upstream of feat/x is origin/main with push.default=upstream: refused, main untouched.
+        git(&f.app, &["push", "origin", "main"]);
+        let main_before = git(&origin, &["rev-parse", "main"]);
+        git(&f.app, &["config", "branch.feat/x.remote", "origin"]);
+        git(
+            &f.app,
+            &["config", "branch.feat/x.merge", "refs/heads/main"],
+        );
+        git(&f.app, &["config", "push.default", "upstream"]);
+        git(&f.app, &["commit", "--allow-empty", "-m", "work"]);
+        let err = push_in(f.top(), SECS).unwrap_err();
+        assert!(
+            err.starts_with("Refused") && err.contains("origin/main"),
+            "{err}"
+        );
+        assert_eq!(git(&origin, &["rev-parse", "main"]), main_before);
+        // A forcing wildcard refspec in config pushes only feat/x, without force.
+        git(&f.app, &["config", "--unset", "branch.feat/x.merge"]);
+        git(&f.app, &["config", "--unset", "branch.feat/x.remote"]);
+        git(
+            &f.app,
+            &["config", "remote.origin.push", "+refs/heads/*:refs/heads/*"],
+        );
+        push_in(f.top(), SECS).unwrap();
+        assert_eq!(git(&origin, &["rev-parse", "main"]), main_before);
+        assert_eq!(
+            git(&origin, &["rev-parse", "feat/x"]),
+            git(&f.app, &["rev-parse", "HEAD"])
+        );
+        git(
+            &f.app,
+            &["commit", "--allow-empty", "--amend", "-m", "rewritten"],
+        );
+        let err = push_in(f.top(), SECS).unwrap_err();
+        assert!(err.to_lowercase().contains("rejected"), "{err}");
+    }
+
+    #[test]
+    fn a_tag_named_like_the_branch_does_not_hide_main() {
+        let f = Fixture::new();
+        git(&f.app, &["checkout", "main"]);
+        git(&f.app, &["tag", "heads/main"]);
+        let err = push_in(f.top(), SECS).unwrap_err();
+        assert!(err.starts_with("Refused"), "{err}");
+    }
+
+    #[test]
+    fn staging_uses_literal_pathspecs() {
+        let f = Fixture::new();
+        std::fs::write(f.app.join("b.txt"), "b\n").unwrap();
+        assert!(stage(f.top(), &v(&["*.txt"]), true, None).is_err());
+        assert!(stage(f.top(), &v(&[":(top)b.txt"]), true, None).is_err());
+        assert!(staged_of(&f).is_empty());
+        stage(f.top(), &v(&["b.txt"]), true, None).unwrap();
+        assert_eq!(staged_of(&f), vec!["b.txt".to_owned()]);
     }
 
     #[test]
