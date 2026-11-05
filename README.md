@@ -23,7 +23,7 @@ Site, downloads and installation guide: <https://gravionlabs.github.io/poimen/>.
 ```
 
 - **`poimen-server` is the default backend.** The release bundles it next to the app (`externalBin`), poimen starts it detached when nothing answers and never stops it. Closing poimen, or closing a tab, only closes the view; the terminal and its agent keep running. The protocol is in [docs/protocol.md](docs/protocol.md), the setting is `backend` (see "Settings").
-- **Agent status needs hooks.** Claude Code and GitHub Copilot CLI report working, blocked and done through hooks that call `poimen-server hook`. On the first start with the poimen backend, poimen offers to install them when they are missing (an *Install hooks* button runs `poimen-server integration install` for the agents without them; *Not now* is remembered in the UI state). You can do it by hand any time: `poimen-server integration install|uninstall|status claude|copilot [--settings <path>]`.
+- **Agent status needs hooks.** Claude Code and GitHub Copilot CLI report working, blocked and done through hooks (`Stop` / `agentStop` report done, which stays until the next prompt; `SessionStart` reports idle) that call `poimen-server hook`. On the first start with the poimen backend, poimen offers to install them when they are missing (an *Install hooks* button runs `poimen-server integration install` for the agents without them; *Not now* is remembered in the UI state). You can do it by hand any time: `poimen-server integration install|uninstall|status claude|copilot [--settings <path>]`.
 
 ### The herdr backend
 

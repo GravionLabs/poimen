@@ -126,8 +126,8 @@ fn start_resolves_with_the_session_start_report_then_a_prompt_reaches_the_agent(
     let result = client.prompt_agent(&id, "fix the bug", LONG).unwrap();
     assert_eq!(result, PromptResult::Started(AgentStatus::Working));
     wait_until("the prompt", || env.prompts() == "fix the bug\n");
-    wait_until("idle again", || {
-        status(&client, &id) == Some(AgentStatus::Idle)
+    wait_until("done after the turn", || {
+        status(&client, &id) == Some(AgentStatus::Done)
     });
 }
 

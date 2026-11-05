@@ -46,7 +46,7 @@ fn normalize(event: &str) -> String {
         .to_ascii_lowercase()
 }
 
-/// Maps a hook payload to a report: `sessionStart`/`agentStop` idle,
+/// Maps a hook payload to a report: `sessionStart` idle, `agentStop` done,
 /// `userPromptSubmitted`/`postToolUse` working, a `permission_prompt` notification blocked,
 /// `sessionEnd` gone. `event_hint` is the event the hook was registered for; the payload's own
 /// event name wins. Subagent events (an `agentId`/`agent_id`) and everything else give `None`.
@@ -62,7 +62,8 @@ pub fn map_hook(event_hint: Option<&str>, payload: &Value) -> Option<Report> {
     }
     let event = first_str(payload, &["hook_event_name", "hookEventName"]).or(event_hint)?;
     let status = match normalize(event).as_str() {
-        "sessionstart" | "agentstop" | "stop" => AgentStatus::Idle,
+        "sessionstart" => AgentStatus::Idle,
+        "agentstop" | "stop" => AgentStatus::Done,
         "userpromptsubmitted" | "userpromptsubmit" | "posttooluse" => AgentStatus::Working,
         "notification" => match first_str(payload, &["notification_type", "notificationType"]) {
             Some("permission_prompt") => AgentStatus::Blocked,
@@ -214,7 +215,7 @@ mod tests {
         let tool = json!({"sessionId": "s1", "toolName": "bash", "toolResult": {}});
         assert_eq!(st(Some("postToolUse"), tool), Some(AgentStatus::Working));
         let stop = json!({"sessionId": "s1", "stopReason": "end_turn"});
-        assert_eq!(st(Some("agentStop"), stop), Some(AgentStatus::Idle));
+        assert_eq!(st(Some("agentStop"), stop), Some(AgentStatus::Done));
         let end = json!({"sessionId": "s1", "reason": "user_exit"});
         assert_eq!(st(Some("sessionEnd"), end), Some(AgentStatus::Gone));
     }
@@ -230,7 +231,7 @@ mod tests {
         );
         assert_eq!(st(None, ev("UserPromptSubmit")), Some(AgentStatus::Working));
         assert_eq!(st(None, ev("PostToolUse")), Some(AgentStatus::Working));
-        assert_eq!(st(None, ev("Stop")), Some(AgentStatus::Idle));
+        assert_eq!(st(None, ev("Stop")), Some(AgentStatus::Done));
         assert_eq!(st(None, ev("SessionEnd")), Some(AgentStatus::Gone));
         // The payload's name wins over the hint.
         assert_eq!(
@@ -269,7 +270,7 @@ mod tests {
         let r = request_for(Some("agentStop"), "t4", 9, &json!({"sessionId": "s1"})).unwrap();
         assert_eq!(
             serde_json::to_value(r).unwrap(),
-            json!({"terminal_id":"t4","seq":9,"status":"idle","agent":"copilot","session_id":"s1"})
+            json!({"terminal_id":"t4","seq":9,"status":"done","agent":"copilot","session_id":"s1"})
         );
         assert!(request_for(Some("preToolUse"), "t4", 9, &json!({})).is_none());
     }

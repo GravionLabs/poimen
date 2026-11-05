@@ -35,7 +35,7 @@ pub struct Report {
     pub session_id: Option<String>,
 }
 
-/// Maps a hook payload to a report: `SessionStart`/`Stop` idle, `UserPromptSubmit`/`PostToolUse`
+/// Maps a hook payload to a report: `SessionStart` idle, `Stop` done (the turn finished), `UserPromptSubmit`/`PostToolUse`
 /// working, a permission `Notification` blocked, `SessionEnd` gone. Events of subagents (the
 /// payload has an `agent_id`) and everything else give `None`.
 pub fn map_hook(payload: &Value) -> Option<Report> {
@@ -43,7 +43,8 @@ pub fn map_hook(payload: &Value) -> Option<Report> {
         return None;
     }
     let status = match payload.get("hook_event_name")?.as_str()? {
-        "SessionStart" | "Stop" => AgentStatus::Idle,
+        "SessionStart" => AgentStatus::Idle,
+        "Stop" => AgentStatus::Done,
         "UserPromptSubmit" | "PostToolUse" => AgentStatus::Working,
         "Notification" => match payload.get("notification_type").and_then(Value::as_str) {
             Some("permission_prompt") => AgentStatus::Blocked,
@@ -282,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_and_tool_events_are_working_and_stop_is_idle() {
+    fn prompt_and_tool_events_are_working_and_stop_is_done() {
         let mut tool = event("PostToolUse");
         tool["tool_name"] = json!("Bash");
         assert_eq!(
@@ -290,7 +291,7 @@ mod tests {
             Some(AgentStatus::Working)
         );
         assert_eq!(status_of(&tool), Some(AgentStatus::Working));
-        assert_eq!(status_of(&event("Stop")), Some(AgentStatus::Idle));
+        assert_eq!(status_of(&event("Stop")), Some(AgentStatus::Done));
     }
 
     #[test]
@@ -328,7 +329,7 @@ mod tests {
         let r = request_for("t4", 9, &event("Stop")).unwrap();
         assert_eq!(
             serde_json::to_value(r).unwrap(),
-            json!({"terminal_id":"t4","seq":9,"status":"idle","agent":"claude","session_id":"abc"})
+            json!({"terminal_id":"t4","seq":9,"status":"done","agent":"claude","session_id":"abc"})
         );
         assert!(request_for("t4", 9, &event("PreToolUse")).is_none());
     }
