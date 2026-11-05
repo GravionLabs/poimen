@@ -275,6 +275,89 @@ pub fn file(
     file_in(&validate(dir, home)?, scope, path)
 }
 
+/// Largest comments file the app writes.
+const MAX_COMMENTS: usize = 1024 * 1024;
+const EXCLUDE_LINE: &str = ".agents/state/";
+
+/// A directory component that is a real directory (created when missing), never a symlink.
+fn plain_dir(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_dir() => Ok(()),
+        Ok(_) => Err(format!("{} is not a plain directory", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(path).map_err(|e| format!("{}: {e}", path.display()))
+        }
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Adds `.agents/state/` to the repository's `info/exclude` (once).
+fn exclude_state(top: &str) -> Result<(), String> {
+    let out = run_bytes(top, &["rev-parse", "--git-path", "info/exclude"])?;
+    let rel = text(&out).trim().to_string();
+    if rel.is_empty() {
+        return Err("git reported no info/exclude path".into());
+    }
+    let path = Path::new(top).join(rel);
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    if current.lines().any(|l| l.trim() == EXCLUDE_LINE) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut next = current;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str(EXCLUDE_LINE);
+    next.push('\n');
+    std::fs::write(&path, next).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Writes `content` to a new `comments-<unix seconds>.md` in `<top>/.agents/state/` and returns
+/// its absolute path. Refuses symlinked `.agents` / `state` directories and never overwrites.
+fn write_comments_in(top: &str, content: &str) -> Result<String, String> {
+    if content.len() > MAX_COMMENTS {
+        return Err("the comments are too large".into());
+    }
+    let agents = Path::new(top).join(".agents");
+    plain_dir(&agents)?;
+    let state = agents.join("state");
+    plain_dir(&state)?;
+    exclude_state(top)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    for n in 0..100 {
+        let name = if n == 0 {
+            format!("comments-{stamp}.md")
+        } else {
+            format!("comments-{stamp}-{n}.md")
+        };
+        let file = state.join(&name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file)
+        {
+            Ok(mut f) => {
+                use std::io::Write;
+                f.write_all(content.as_bytes())
+                    .map_err(|e| format!("{}: {e}", file.display()))?;
+                return Ok(file.to_string_lossy().into_owned());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("{}: {e}", file.display())),
+        }
+    }
+    Err("could not find a free comments file name".into())
+}
+
+pub fn write_comments(dir: &str, content: &str, home: Option<&Path>) -> Result<String, String> {
+    write_comments_in(&validate(dir, home)?, content)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,6 +608,60 @@ mod tests {
     fn rejects_unusable_directories() {
         assert!(list("relative/dir", Scope::Base, None).is_err());
         assert!(list("/definitely/not/here", Scope::Base, None).is_err());
+    }
+
+    #[test]
+    fn comments_file_lands_in_agents_state_and_is_excluded_once() {
+        let fx = Fixture::new(false);
+        let first = write_comments_in(&fx.dir(), "# one\n").unwrap();
+        let second = write_comments_in(&fx.dir(), "# two\n").unwrap();
+        assert_ne!(first, second);
+        assert!(first.starts_with(&format!("{}/.agents/state/comments-", fx.dir())));
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "# one\n");
+        let exclude = std::fs::read_to_string(fx.app.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude.matches(".agents/state/").count(), 1);
+        let status = crate::git::run_bytes(&fx.dir(), &["status", "--porcelain"]).unwrap();
+        assert!(!text(&status).contains(".agents"));
+    }
+
+    #[test]
+    fn comments_file_refuses_symlinked_directories() {
+        let fx = Fixture::new(false);
+        let outside = fx.base.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, fx.app.join(".agents")).unwrap();
+        assert!(write_comments_in(&fx.dir(), "x").is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+
+        std::fs::remove_file(fx.app.join(".agents")).unwrap();
+        std::fs::create_dir_all(fx.app.join(".agents")).unwrap();
+        std::os::unix::fs::symlink(&outside, fx.app.join(".agents/state")).unwrap();
+        assert!(write_comments_in(&fx.dir(), "x").is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn comments_file_rejects_oversized_content_and_non_repositories() {
+        let fx = Fixture::new(false);
+        assert!(write_comments_in(&fx.dir(), &"x".repeat(MAX_COMMENTS + 1)).is_err());
+        let plain = fx.base.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(write_comments(&plain.to_string_lossy(), "x", None).is_err());
+    }
+
+    #[test]
+    fn comments_file_works_in_a_linked_worktree() {
+        let fx = Fixture::new(false);
+        let wt = fx.base.join("wt");
+        run(
+            &fx.app,
+            &["worktree", "add", wt.to_str().unwrap(), "-b", "feat/y"],
+        );
+        let path = write_comments_in(&wt.to_string_lossy(), "hi").unwrap();
+        assert!(path.starts_with(&format!("{}/.agents/state/", wt.display())));
+        let status =
+            crate::git::run_bytes(&wt.to_string_lossy(), &["status", "--porcelain"]).unwrap();
+        assert!(!text(&status).contains(".agents"));
     }
 
     #[test]
