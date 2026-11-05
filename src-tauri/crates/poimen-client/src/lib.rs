@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+pub mod agent;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
     AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, Space, SpaceClose,
