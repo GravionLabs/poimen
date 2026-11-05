@@ -427,13 +427,13 @@ fn canonical(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| normalize(path))
 }
 
-/// The spaces with terminals in `worktree`: those with all their terminals in it and those with
-/// only some of them in it.
+/// The spaces in `worktree`: those with all their terminals in it (or, without terminals, whose
+/// own `cwd` of the poimen backend is in it) and those with only some of their terminals in it.
 fn spaces_in(snapshot: &crate::backend::Snapshot, worktree: &Path) -> (Vec<String>, Vec<String>) {
     let root = canonical(worktree);
     let mut seen: Vec<(String, bool, bool)> = Vec::new(); // (space, all in, any in)
     for pane in snapshot.panes.as_array().into_iter().flatten() {
-        let Some(space) = pane["space_id"].as_str() else {
+        let Some(space) = pane["workspace_id"].as_str() else {
             continue;
         };
         let dir = ["foreground_cwd", "cwd"]
@@ -447,6 +447,21 @@ fn spaces_in(snapshot: &crate::backend::Snapshot, worktree: &Path) -> (Vec<Strin
                 s.2 |= inside;
             }
             None => seen.push((space.to_owned(), inside, inside)),
+        }
+    }
+    for workspace in snapshot.workspaces.as_array().into_iter().flatten() {
+        let Some(space) = workspace["workspace_id"].as_str() else {
+            continue;
+        };
+        if seen.iter().any(|s| s.0 == space) {
+            continue; // its terminals decide
+        }
+        let inside = workspace["cwd"]
+            .as_str()
+            .filter(|d| !d.is_empty())
+            .is_some_and(|d| canonical(Path::new(d)).starts_with(&root));
+        if inside {
+            seen.push((space.to_owned(), true, true));
         }
     }
     let whole = seen.iter().filter(|s| s.1).map(|s| s.0.clone()).collect();
@@ -897,7 +912,7 @@ mod tests {
     fn panes_in(backend: &FakeBackend, panes: &[(&str, &Path)]) {
         let list: Vec<_> = panes
             .iter()
-            .map(|(space, dir)| json!({"space_id": space, "cwd": dir.to_str().unwrap()}))
+            .map(|(space, dir)| json!({"workspace_id": space, "cwd": dir.to_str().unwrap()}))
             .collect();
         backend.snapshot.lock().unwrap().panes = json!(list);
     }
@@ -1079,6 +1094,47 @@ mod tests {
         let report = f.clean(&Fixture::merged(&[7]), &backend, None);
         assert!(wt.exists());
         assert!(report.left[0].reason.contains("outside"));
+        assert!(!backend.calls().iter().any(|c| c.starts_with("close_space")));
+    }
+
+    /// A snapshot of the poimen backend: spaces in `(id, dir)` without any terminal.
+    fn empty_spaces_in(backend: &FakeBackend, spaces: &[(&str, &Path)]) {
+        let spaces: Vec<_> = spaces
+            .iter()
+            .map(|(id, dir)| poimen_client::protocol::Space {
+                id: (*id).into(),
+                name: format!("#7 {id}"),
+                cwd: dir.to_str().unwrap().into(),
+            })
+            .collect();
+        *backend.snapshot.lock().unwrap() = crate::poimen_backend::map_snapshot(&spaces, &[]);
+    }
+
+    #[test]
+    fn a_space_without_terminals_in_the_worktree_is_closed() {
+        let f = Fixture::new(true);
+        let wt = f.task(7);
+        let backend = FakeBackend::default();
+        empty_spaces_in(&backend, &[("s2", &wt), ("s1", &f.repo)]);
+        let report = f.clean(&Fixture::merged(&[7]), &backend, None);
+        assert_eq!(report.removed.len(), 1, "{report:?}");
+        let closes: Vec<_> = backend
+            .calls()
+            .into_iter()
+            .filter(|c| c.starts_with("close_space"))
+            .collect();
+        assert_eq!(closes, vec!["close_space s2".to_owned()]);
+    }
+
+    #[test]
+    fn a_focused_space_without_terminals_keeps_its_worktree() {
+        let f = Fixture::new(true);
+        let wt = f.task(7);
+        let backend = FakeBackend::default();
+        empty_spaces_in(&backend, &[("s2", &wt)]);
+        let report = f.clean(&Fixture::merged(&[7]), &backend, Some("s2"));
+        assert!(wt.exists());
+        assert!(report.left[0].reason.contains("focused"));
         assert!(!backend.calls().iter().any(|c| c.starts_with("close_space")));
     }
 
