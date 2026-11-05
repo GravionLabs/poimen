@@ -75,10 +75,16 @@ pub fn request_for(terminal_id: &str, seq: u64, payload: &Value) -> Option<Termi
 /// Runs the hook: reads the payload from `stdin` and reports it. Returns quietly in every
 /// failure case, and gives up after a short time so Claude Code is never held up. `terminal_id`
 /// is `$POIMEN_TERMINAL_ID`; unset (not a poimen terminal) means nothing happens.
-pub fn run_hook(
+pub fn run_hook(stdin: impl Read + Send + 'static, terminal_id: Option<String>, socket: PathBuf) {
+    run_hook_with(stdin, terminal_id, socket, request_for);
+}
+
+/// [`run_hook`] for any agent: `build` turns the payload into the report request.
+pub fn run_hook_with(
     mut stdin: impl Read + Send + 'static,
     terminal_id: Option<String>,
     socket: PathBuf,
+    build: impl FnOnce(&str, u64, &Value) -> Option<TerminalReportAgent> + Send + 'static,
 ) {
     let Some(terminal_id) = terminal_id.filter(|t| !t.is_empty()) else {
         return;
@@ -89,7 +95,7 @@ pub fn run_hook(
         let _ = (&mut stdin).take(1 << 20).read_to_end(&mut raw);
         if let Some(request) = serde_json::from_slice::<Value>(&raw)
             .ok()
-            .and_then(|payload| request_for(&terminal_id, now_nanos(), &payload))
+            .and_then(|payload| build(&terminal_id, now_nanos(), &payload))
         {
             let _ = Client::new(socket).request(
                 "terminal.report_agent",
@@ -106,7 +112,7 @@ pub fn terminal_id_from_env() -> Option<String> {
     std::env::var(ENV_TERMINAL_ID).ok()
 }
 
-fn now_nanos() -> u64 {
+pub(crate) fn now_nanos() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))

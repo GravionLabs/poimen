@@ -73,6 +73,8 @@ Agent status comes from hooks only; the server never reads the screen. A reporte
 
 Claude Code: `poimen-server integration install|uninstall|status claude [--settings <path>]` registers `poimen-server hook claude` in `~/.claude/settings.json` (entries marked with `# poimen-agent-hook`, next to existing ones such as herdr's; uninstall removes only these). The hook does nothing when `POIMEN_TERMINAL_ID` is unset, gives up after 1.5 s and always exits 0. Mapping: `SessionStart` and `Stop` idle, `UserPromptSubmit` and `PostToolUse` working, `Notification` of type `permission_prompt` blocked, `SessionEnd` gone; events with an `agent_id` (subagents) are ignored.
 
+Copilot CLI: `poimen-server integration install|uninstall|status copilot [--settings <path>]` writes `~/.copilot/hooks/poimen-agent-state.json` (a file of our own, marked with `# poimen-agent-hook`; an existing file without the marker is never touched), registering `poimen-server hook copilot <event>`. Same hook behavior as for Claude Code. Mapping: `sessionStart` and `agentStop` idle, `userPromptSubmitted` and `postToolUse` working, `notification` of type `permission_prompt` blocked (reported by Copilot CLI 1.0.71), `sessionEnd` gone; subagent events are ignored. Both payload styles are accepted: camelCase (`sessionId`, `notificationType`, event from the command line) and PascalCase names with snake_case fields (`hook_event_name`, `session_id`, `notification_type`).
+
 ## Events
 
 | Event                  | `data`                                       | When                                                  |

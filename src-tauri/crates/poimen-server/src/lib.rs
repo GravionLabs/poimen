@@ -5,6 +5,7 @@
 //! restarts, terminals do not. Layout (groups, splits, tabs) is the client's business.
 
 pub mod claude;
+pub mod copilot;
 mod emulator;
 mod pty;
 mod store;
