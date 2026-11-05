@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use poimen_client::agent::{self, PromptResult};
 use poimen_client::protocol::{
     AgentStatus, AttachMode, DetachReason, ErrorCode, Event, PROTOCOL_VERSION, Space, Terminal,
     TerminalCreate,
@@ -25,7 +26,6 @@ use crate::backend::{
 use crate::herdr::{AgentSession, PromptOutcome, ServerInfo};
 use crate::poimen_server;
 
-const NO_AGENTS: &str = "agents are not supported by the poimen backend yet";
 const NO_RENDERED_INPUT: &str = "xterm.js handles the mouse and the scrollback on this backend";
 
 /// One open stream: the write half of its attachment.
@@ -295,23 +295,42 @@ impl Backend for PoimenBackend {
             .map_err(text)
     }
 
+    /// Runs the agent in the terminal and returns when its `SessionStart` report arrives (30 s).
+    /// A name renames the terminal; without one the terminal keeps its name.
     fn agent_start(
         &self,
-        _terminal_id: &str,
-        _kind: &str,
-        _name: Option<&str>,
-        _args: &[String],
+        terminal_id: &str,
+        kind: &str,
+        name: Option<&str>,
+        args: &[String],
     ) -> Result<(), String> {
-        Err(NO_AGENTS.into())
+        self.client
+            .start_agent(terminal_id, kind, args, agent::START_TIMEOUT)
+            .map_err(|e| e.to_string())?;
+        match name.map(str::trim).filter(|n| !n.is_empty()) {
+            Some(name) => self.agent_rename(terminal_id, Some(name)),
+            None => Ok(()),
+        }
     }
 
-    fn agent_rename(&self, _target: &str, _name: Option<&str>) -> Result<(), String> {
-        Err(NO_AGENTS.into())
+    /// The agent's name is the name of its terminal; a blank name restores the default.
+    fn agent_rename(&self, target: &str, name: Option<&str>) -> Result<(), String> {
+        self.rename_terminal(target, name)
     }
 
-    fn agent_prompt(&self, _target: &str, _text: &str) -> PromptOutcome {
-        PromptOutcome::Failed {
-            message: NO_AGENTS.into(),
+    fn agent_prompt(&self, target: &str, text: &str) -> PromptOutcome {
+        let failed = |message: &str| PromptOutcome::Failed {
+            message: message.into(),
+        };
+        match self.client.prompt_agent(target, text, agent::PROMPT_WAIT) {
+            Ok(PromptResult::Started(status)) => PromptOutcome::Started {
+                status: status_name(status).into(),
+            },
+            Ok(PromptResult::Stalled) => PromptOutcome::Stalled,
+            Ok(PromptResult::Blocked) => PromptOutcome::Blocked,
+            Ok(PromptResult::Working) => failed("the agent is working; wait until it is idle"),
+            Ok(PromptResult::NoAgent) => failed("no agent reported in this terminal"),
+            Err(e) => failed(&e.to_string()),
         }
     }
 
@@ -907,14 +926,93 @@ mod tests {
         );
     }
 
+    /// A server whose terminal t1 has an agent with `status` (none: no agent).
+    fn agent_backend(
+        name: &str,
+        status: Option<&'static str>,
+    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>) {
+        let path = temp_socket(name);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        serve(
+            &path,
+            log.clone(),
+            move |method, _| match method {
+                "terminal.list" => {
+                    let mut t = term_json("t1", "s1");
+                    if let Some(status) = status {
+                        t["agent"] = json!({"status": status, "agent": "claude"});
+                    }
+                    Ok(json!({"terminals": [t]}))
+                }
+                "terminal.input" => Ok(json!({})),
+                "terminal.rename" => Ok(json!({"terminal": term_json("t1", "s1")})),
+                _ => Err(("unknown_method", "no")),
+            },
+            vec![],
+        );
+        (PoimenBackend::new(Client::new(path)), log)
+    }
+
+    fn typed(log: &Arc<Mutex<Vec<String>>>) -> bool {
+        lock(log).iter().any(|l| l.starts_with("terminal.input"))
+    }
+
     #[test]
-    fn agents_are_not_available_yet() {
-        let (backend, _) = backend_for("agents", vec![], false);
-        assert!(backend.agent_start("t1", "claude", None, &[]).is_err());
+    fn a_prompt_is_refused_while_the_agent_works_or_is_blocked_and_nothing_is_typed() {
+        for (status, expected) in [("working", "working"), ("blocked", "blocked")] {
+            let (backend, log) = agent_backend(&format!("prompt-{status}"), Some(status));
+            let outcome = backend.agent_prompt("t1", "hi");
+            match status {
+                "blocked" => assert_eq!(outcome, PromptOutcome::Blocked),
+                _ => assert!(
+                    matches!(&outcome, PromptOutcome::Failed { message } if message.contains(expected))
+                ),
+            }
+            assert!(!typed(&log));
+        }
+    }
+
+    #[test]
+    fn a_prompt_without_an_agent_fails_and_types_nothing() {
+        let (backend, log) = agent_backend("prompt-none", None);
         assert!(matches!(
             backend.agent_prompt("t1", "hi"),
             PromptOutcome::Failed { .. }
         ));
+        assert!(!typed(&log));
+    }
+
+    #[test]
+    fn a_prompt_to_an_idle_agent_is_typed_with_enter() {
+        let (backend, log) = agent_backend("prompt-idle", Some("idle"));
+        // The fake never reports work, so the wait ends; the text was typed all the same.
+        let _ = backend
+            .client
+            .prompt_agent("t1", "hi", Duration::from_millis(100));
+        assert_eq!(params_of(&log, "terminal.input")["data"], "hi\r");
+    }
+
+    #[test]
+    fn starting_in_a_terminal_that_has_an_agent_is_refused_untouched() {
+        let (backend, log) = agent_backend("start-busy", Some("idle"));
+        let err = backend.agent_start("t1", "claude", None, &[]).unwrap_err();
+        assert!(err.contains("already has an agent"));
+        assert!(!typed(&log));
+    }
+
+    #[test]
+    fn the_agent_name_is_the_terminal_name() {
+        let (backend, log) = agent_backend("agent-rename", Some("idle"));
+        backend.agent_rename("t1", Some(" review ")).unwrap();
+        assert_eq!(params_of(&log, "terminal.rename")["name"], "review");
+        let (backend, log) = agent_backend("agent-rename-blank", Some("idle"));
+        backend.agent_rename("t1", None).unwrap();
+        assert_eq!(params_of(&log, "terminal.rename")["name"], "api");
+    }
+
+    #[test]
+    fn no_transcript_session_is_known_yet() {
+        let (backend, _) = agent_backend("session", None);
         assert_eq!(backend.agent_session("t1"), Ok(None));
     }
 
