@@ -679,6 +679,46 @@ async fn task_plan(
     .map_err(|e| e.to_string())?
 }
 
+/// Removes the worktrees, spaces and local branches of the repository of `dir` whose pull request
+/// is merged (see `worktree::cleanup`). The first task mode with a `cleanup` command replaces the
+/// built-in removal. `focused_space` is never touched. Destructive, so only on a user action.
+#[tauri::command]
+async fn task_cleanup(
+    backend: State<'_, Shared>,
+    dir: String,
+    focused_space: Option<String>,
+) -> Result<worktree::CleanupReport, String> {
+    let backend = backend.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = worktree::main_worktree(std::path::Path::new(&dir))?;
+        let repo = github::repo_of(&root)
+            .ok_or_else(|| "the repository has no GitHub origin".to_owned())?;
+        let merged = worktree::merged_prs(&github::SystemRunner, &repo)?;
+        let settings = get_settings();
+        let root_str = root.to_string_lossy().into_owned();
+        let sources = trust::Sources::read(&root_str);
+        let resolved = tasks::for_project(&settings.tasks, &sources, &settings.trusted_projects);
+        let mode = resolved
+            .modes
+            .modes
+            .iter()
+            .find_map(|m| m.cleanup.clone())
+            .map_or(
+                worktree::CleanupMode::Builtin,
+                worktree::CleanupMode::Command,
+            );
+        worktree::cleanup(
+            &root,
+            &merged,
+            &mode,
+            backend.as_ref(),
+            focused_space.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Opens the tab `name` in a space and runs `command` in it (a task mode without a worktree).
 /// The command comes from the webview (already expanded by `task_plan`) because the frontend is
 /// the only caller; like the `command` of `create_space` it is not a surface for other clients.
@@ -1222,6 +1262,7 @@ pub fn run() {
             task_worktree,
             task_plan,
             task_tab,
+            task_cleanup,
             get_color_schemes,
             set_theme,
             set_color_schema,

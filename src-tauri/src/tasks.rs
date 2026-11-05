@@ -12,9 +12,15 @@ pub const DEFAULT_PROMPT: &str = "Work on GitHub issue #{nr}: {title} ({url})";
 
 /// Placeholders allowed in `branch` and `worktreeDir`.
 pub const PATH_PLACEHOLDERS: &[&str] = &["nr", "title", "url", "repo", "slug", "type"];
-/// Placeholders allowed in `command` and `cleanup`.
+/// Placeholders allowed in `command`.
 pub const COMMAND_PLACEHOLDERS: &[&str] = &[
     "nr", "title", "url", "branch", "repo", "slug", "type", "prompt",
+];
+/// Placeholders allowed in `cleanup`: those of `command` plus `pr`, the merged pull request.
+/// A cleanup only knows the branch, the issue number and the pull request; `title`, `url` and
+/// `prompt` are empty there (`slug` is empty, `type` is `issue`).
+pub const CLEANUP_PLACEHOLDERS: &[&str] = &[
+    "nr", "title", "url", "branch", "repo", "slug", "type", "prompt", "pr",
 ];
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -202,6 +208,8 @@ pub struct TaskVars {
     pub repo: String,
     pub branch: String,
     pub prompt: String,
+    /// The merged pull request of a cleanup; empty otherwise.
+    pub pr: String,
 }
 
 impl TaskVars {
@@ -224,6 +232,7 @@ impl TaskVars {
             "repo" => self.repo.clone(),
             "branch" => self.branch.clone(),
             "prompt" => self.prompt.clone(),
+            "pr" => self.pr.clone(),
             "slug" => slug(&self.title),
             "type" => title_type(&self.title).into(),
             _ => return None,

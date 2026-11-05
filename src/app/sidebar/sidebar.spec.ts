@@ -60,8 +60,14 @@ describe("sidebarMenuItems", () => {
   it("offers to start a task only for a space in a repository", () => {
     const actions = (repo: boolean, kind: "workspace" | "pane") =>
       sidebarMenuItems(kind, repo).flatMap((g) => g.items.map((i) => i.action));
-    expect(actions(true, "workspace")).toEqual(["new-terminal", "start-task", "close-space"]);
+    expect(actions(true, "workspace")).toEqual([
+      "new-terminal",
+      "start-task",
+      "cleanup-tasks",
+      "close-space",
+    ]);
     expect(actions(false, "workspace")).not.toContain("start-task");
+    expect(actions(false, "workspace")).not.toContain("cleanup-tasks");
     expect(actions(true, "pane")).not.toContain("start-task");
   });
 

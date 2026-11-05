@@ -203,7 +203,8 @@ export interface SidebarMenuAction {
     | "rename"
     | "close"
     | "close-space"
-    | "start-task";
+    | "start-task"
+    | "cleanup-tasks";
 }
 
 /** One entry of a context menu. */
@@ -234,7 +235,12 @@ export function sidebarMenuItems(
       kind === "workspace"
         ? [
             { action: "new-terminal", label: "New terminal..." },
-            ...(repo ? [{ action: "start-task" as const, label: "Start task from issue…" }] : []),
+            ...(repo
+              ? [
+                  { action: "start-task" as const, label: "Start task from issue…" },
+                  { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
+                ]
+              : []),
             { action: "close-space", label: "Close space" },
           ]
         : [

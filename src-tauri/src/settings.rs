@@ -556,7 +556,8 @@ pub struct TaskOverride {
 /// valid mode ("using the default agent mode", "using your modes").
 pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) -> TaskOverride {
     use crate::tasks::{
-        COMMAND_PLACEHOLDERS, DEFAULT_BRANCH, PATH_PLACEHOLDERS, TaskMode, unknown_placeholder,
+        CLEANUP_PLACEHOLDERS, COMMAND_PLACEHOLDERS, DEFAULT_BRANCH, PATH_PLACEHOLDERS, TaskMode,
+        unknown_placeholder,
     };
     let mut result = TaskOverride::default();
     let Some(obj) = value.as_object() else {
@@ -628,7 +629,7 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
         let cleanup = text("cleanup", &at, warnings);
         let checks = [
             ("command", Some(&command), COMMAND_PLACEHOLDERS),
-            ("cleanup", cleanup.as_ref(), COMMAND_PLACEHOLDERS),
+            ("cleanup", cleanup.as_ref(), CLEANUP_PLACEHOLDERS),
             ("branch", Some(&branch), PATH_PLACEHOLDERS),
         ];
         let bad = checks.iter().find_map(|(k, v, allowed)| {
@@ -1457,6 +1458,25 @@ mod tests {
         assert_eq!(m.cleanup, None);
         assert_eq!(s.tasks.worktree_dir, "../{repo}-{nr}");
         assert_eq!(resolve(Some(r#"{"tasks":{}}"#), || None).tasks, s.tasks);
+    }
+
+    #[test]
+    fn pr_is_a_placeholder_of_cleanup_only() {
+        let s = resolve(
+            Some(
+                r#"{"tasks":{"modes":[
+                {"name":"a","command":"x","cleanup":"Remove-PbiWorktrees.ps1 -Pr {pr} -Issue {nr}"},
+                {"name":"b","command":"run {pr}"}]}}"#,
+            ),
+            || None,
+        );
+        assert_eq!(s.warnings.len(), 1, "{:?}", s.warnings);
+        assert!(s.warnings[0].contains("command: unknown placeholder {pr}"));
+        assert_eq!(s.tasks.modes.len(), 1);
+        assert_eq!(
+            s.tasks.modes[0].cleanup.as_deref(),
+            Some("Remove-PbiWorktrees.ps1 -Pr {pr} -Issue {nr}")
+        );
     }
 
     #[test]

@@ -68,6 +68,7 @@ import { TaskDialog } from "./task-dialog/task-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
 import { TaskStarter } from "./core/task-start";
+import { TaskCleanup } from "./core/task-cleanup";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
 import {
@@ -125,6 +126,7 @@ export class App {
   protected readonly shortcutsOverview = inject(ShortcutsOverview);
   private readonly subagents = inject(Subagents);
   private readonly tasks = inject(TaskStarter);
+  private readonly cleanup = inject(TaskCleanup);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -352,6 +354,10 @@ export class App {
       this.startTaskInActiveRepo();
       return;
     }
+    if (id === "cleanupTasks") {
+      this.cleanupInActiveRepo();
+      return;
+    }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
       this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);
@@ -413,17 +419,34 @@ export class App {
 
   /** The palette entry: the picker for the repository of the active pane. */
   private startTaskInActiveRepo(): void {
+    const repo = this.activeRepo();
+    if (repo) void this.tasks.start(repo);
+    else this.spaceActions.notify("Start task: the active pane is not in a repository");
+  }
+
+  /** The palette entry: clean up the merged tasks of the repository of the active pane. */
+  private cleanupInActiveRepo(): void {
+    const repo = this.activeRepo();
+    if (repo) void this.cleanup.run(repo, this.focusedSpace());
+    else this.spaceActions.notify("Clean up merged tasks: the active pane is not in a repository");
+  }
+
+  /** The space of the active pane: a cleanup never removes it. */
+  private focusedSpace(): string | null {
+    const id = this.activePaneId();
+    return (id ? this.pane(id)?.space_id : undefined) ?? null;
+  }
+
+  /** The repository of the active pane (a pane in a subdirectory: the deepest known one above). */
+  private activeRepo(): string | undefined {
     const id = this.activePaneId();
     const pane = id ? this.pane(id) : undefined;
     const dir = pane ? paneDir(pane) : undefined;
-    // A pane in a subdirectory belongs to the deepest known repository above it.
-    const repo = dir
+    return dir
       ? [...this.store.repos().keys()]
           .filter((r) => dir === r || dir.startsWith(r.endsWith("/") ? r : `${r}/`))
           .sort((a, b) => b.length - a.length)[0]
       : undefined;
-    if (repo) void this.tasks.start(repo);
-    else this.spaceActions.notify("Start task: the active pane is not in a repository");
   }
 
   /** Context menu of a sidebar row: new terminal in a workspace, split or close a pane. */
@@ -433,6 +456,9 @@ export class App {
     else if (event.action === "start-task") {
       const dir = spaceRepoDir(this.store.spaces(), event.id);
       if (dir) void this.tasks.start(dir);
+    } else if (event.action === "cleanup-tasks") {
+      const dir = spaceRepoDir(this.store.spaces(), event.id);
+      if (dir) void this.cleanup.run(dir, this.focusedSpace());
     } else this.paneAction(event.id, event.action);
   }
 
