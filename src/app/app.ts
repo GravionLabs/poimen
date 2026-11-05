@@ -41,6 +41,7 @@ import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 import {
   EditorTabs,
+  changesDir,
   flowPane,
   flowTab,
   tabKind,
@@ -53,6 +54,7 @@ import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
+import { ChangesView } from "./changes/changes-view";
 import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
@@ -97,6 +99,7 @@ const ZOOM_STEP = 1;
     Toolbar,
     BottomPanel,
     FlowTab,
+    ChangesView,
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
@@ -168,6 +171,15 @@ export class App {
               label: "Pull requests",
               group: "GitHub",
               title: "GitHub pull requests",
+            };
+          }
+          const changesOf = changesDir(tab.paneId);
+          if (changesOf !== null) {
+            const name = changesOf.split("/").filter(Boolean).pop() ?? changesOf;
+            return {
+              id: tab.paneId,
+              label: `Changes: ${name}`,
+              title: `Changes of ${changesOf}`,
             };
           }
           const flowOf = flowPane(tab.paneId);
@@ -350,6 +362,10 @@ export class App {
       this.editor.openGithub();
       return;
     }
+    if (id === "showChanges") {
+      this.showChangesOfActiveSpace();
+      return;
+    }
     if (id === "startTask") {
       this.startTaskInActiveRepo();
       return;
@@ -417,6 +433,15 @@ export class App {
     }
   }
 
+  /** The palette entry: the Changes tab of the directory of the focused space's active pane. */
+  private showChangesOfActiveSpace(): void {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    const dir = pane ? paneDir(pane) : undefined;
+    if (dir) this.editor.openChanges(this.activeRepo() ?? dir);
+    else this.spaceActions.notify("Show Changes: there is no focused space");
+  }
+
   /** The palette entry: the picker for the repository of the active pane. */
   private startTaskInActiveRepo(): void {
     const repo = this.activeRepo();
@@ -453,7 +478,10 @@ export class App {
   protected onSidebarMenu(event: SidebarMenuAction): void {
     if (event.action === "new-terminal") this.paneActions.askNew(event.id);
     else if (event.action === "close-space") this.closeSpace(event.id);
-    else if (event.action === "start-task") {
+    else if (event.action === "show-changes") {
+      const dir = spaceRepoDir(this.store.spaces(), event.id);
+      if (dir) this.editor.openChanges(dir);
+    } else if (event.action === "start-task") {
       const dir = spaceRepoDir(this.store.spaces(), event.id);
       if (dir) void this.tasks.start(dir);
     } else if (event.action === "cleanup-tasks") {
@@ -605,6 +633,15 @@ export class App {
   protected openAgentOutput(agentId: string): void {
     this.subagents.pick(agentId);
     this.ui.selectPanelTab("output");
+  }
+
+  /** The directory of the group's active tab when that is a changes tab. */
+  protected changesOf(group: EditorGroup): string | null {
+    return group.activeId === null ? null : changesDir(group.activeId);
+  }
+
+  protected isChanges(id: string): boolean {
+    return tabKind(id) === "changes";
   }
 
   protected isGithub(id: string | null): boolean {

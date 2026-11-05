@@ -4,6 +4,8 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   EditorTabs,
+  changesDir,
+  changesTab,
   flowPane,
   flowTab,
   moveItem,
@@ -12,6 +14,26 @@ import {
   tabPaneId,
 } from "./editor-tabs";
 import { UI_STATE_KEY, UI_STORAGE } from "./ui-state";
+
+describe("changes tab ids", () => {
+  it("map a directory to its changes tab and back", () => {
+    expect(changesTab("/src/repo")).toBe("changes:/src/repo");
+    expect(changesDir(changesTab("/src/repo"))).toBe("/src/repo");
+    expect(changesDir("w1:p2")).toBeNull();
+    expect(tabKind(changesTab("/src/repo"))).toBe("changes");
+    expect(tabPaneId(changesTab("/src/repo"))).toBeNull();
+  });
+
+  it("restore like the other kinds", () => {
+    const id = changesTab("/src/repo");
+    const stored = {
+      groups: [{ id: 1, tabs: [{ paneId: id, pinned: true }], activeId: id }],
+      layout: { kind: "group", id: 1 },
+      focusedId: 1,
+    };
+    expect(parseEditor(stored)?.groups[0].activeId).toBe(id);
+  });
+});
 
 describe("flow tab ids", () => {
   it("map a pane to its flow tab and back", () => {
@@ -61,6 +83,15 @@ describe("EditorTabs", () => {
     expect(ids()).toEqual(["a", flowTab("a"), "b", flowTab("b")]);
     expect(tabs.activeId()).toBe(flowTab("a"));
     expect(tabs.tabs().every((t) => t.pinned)).toBe(true);
+  });
+
+  it("opens one pinned changes tab per directory and keeps it when panes are pruned", () => {
+    tabs.open("a", true);
+    tabs.openChanges("/r");
+    tabs.openChanges("/r");
+    expect(ids()).toEqual(["a", changesTab("/r")]);
+    expect(tabs.activeId()).toBe(changesTab("/r"));
+    expect(tabs.prune(new Set(["a"]))).toEqual([]);
   });
 
   it("closes a flow tab with its pane when the pane is gone", () => {

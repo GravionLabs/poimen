@@ -81,4 +81,17 @@ describe("Attention changes", () => {
       { paneId: "p1", status: "blocked" },
     ]);
   });
+
+  it("keeps the latest changes for observers, replaced only by a snapshot that has some", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), none);
+    a.observe(st({ p1: "done" }), none);
+    const first = a.lastChanges();
+    expect(first).toEqual([{ paneId: "p1", status: "done" }]);
+    a.observe(st({ p1: "done" }), none);
+    expect(a.lastChanges()).toBe(first);
+    a.observe(st({ p1: "working" }), none);
+    a.observe(st({ p1: "done" }), none);
+    expect(a.lastChanges()).not.toBe(first);
+  });
 });

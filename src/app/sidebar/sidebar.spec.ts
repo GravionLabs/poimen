@@ -62,11 +62,13 @@ describe("sidebarMenuItems", () => {
       sidebarMenuItems(kind, repo).flatMap((g) => g.items.map((i) => i.action));
     expect(actions(true, "workspace")).toEqual([
       "new-terminal",
+      "show-changes",
       "start-task",
       "cleanup-tasks",
       "close-space",
     ]);
     expect(actions(false, "workspace")).not.toContain("start-task");
+    expect(actions(false, "workspace")).not.toContain("show-changes");
     expect(actions(false, "workspace")).not.toContain("cleanup-tasks");
     expect(actions(true, "pane")).not.toContain("start-task");
   });

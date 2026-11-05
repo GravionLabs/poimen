@@ -204,7 +204,8 @@ export interface SidebarMenuAction {
     | "close"
     | "close-space"
     | "start-task"
-    | "cleanup-tasks";
+    | "cleanup-tasks"
+    | "show-changes";
 }
 
 /** One entry of a context menu. */
@@ -237,6 +238,7 @@ export function sidebarMenuItems(
             { action: "new-terminal", label: "New terminal..." },
             ...(repo
               ? [
+                  { action: "show-changes" as const, label: "Show changes" },
                   { action: "start-task" as const, label: "Start task from issue…" },
                   { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
                 ]
