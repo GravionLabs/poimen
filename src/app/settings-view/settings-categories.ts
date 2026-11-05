@@ -65,8 +65,8 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
     pages: [
       {
         id: "herdr",
-        title: "herdr",
-        labels: ["Start the herdr server when it is not running"],
+        title: "Server",
+        labels: ["Start the backend server when it is not running"],
       },
       { id: "agents", title: "Agents", labels: ["Harnesses", "Models"] },
     ],

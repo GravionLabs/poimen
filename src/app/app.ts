@@ -67,6 +67,7 @@ import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
 import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import { TaskDialog } from "./task-dialog/task-dialog";
+import { HooksDialog } from "./hooks-dialog/hooks-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
 import { TaskStarter } from "./core/task-start";
@@ -103,6 +104,7 @@ const ZOOM_STEP = 1;
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
+    HooksDialog,
     TrustDialog,
     TaskDialog,
     PaletteView,

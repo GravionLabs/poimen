@@ -6,7 +6,7 @@ If a newer version exists, the status bar shows **Update available**; clicking i
 notes and **Install and restart**, which downloads, verifies and installs the update, then
 restarts poimen.
 
-herdr panes are not touched: closing or restarting poimen never closes a pane.
+Terminals are not touched: `poimen-server` (and herdr, on the herdr backend) keeps them running, so closing or restarting poimen never closes a terminal or pane.
 
 ## Errors
 

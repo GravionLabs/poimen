@@ -15,7 +15,7 @@ describe("settings categories", () => {
     expect(tree).toEqual({
       "Appearance & Behavior": ["Appearance", "Notifications"],
       Workspace: ["Explorer", "New space layout", "Trusted projects"],
-      Backend: ["herdr", "Agents"],
+      Backend: ["Server", "Agents"],
     });
   });
 
