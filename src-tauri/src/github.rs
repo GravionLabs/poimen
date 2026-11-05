@@ -438,6 +438,91 @@ impl<R: Runner> Client<R> {
     }
 }
 
+/// Most open issues the task picker reads per repository.
+pub const OPEN_ISSUES_LIMIT: usize = 300;
+const PAGE_SIZE: usize = 100;
+
+/// An open issue for the task picker (pull requests are not issues here).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenIssue {
+    pub number: u64,
+    pub title: String,
+    /// `epic`, `feature`, `pbi` or `bug`; `None` when neither label nor title prefix says one.
+    pub level: Option<String>,
+    pub labels: Vec<String>,
+    pub assignees: Vec<String>,
+    pub url: String,
+}
+
+/// The level of an issue: its `epic`/`feature`/`pbi`/`bug` label, else a `[Epic]`... title prefix.
+pub fn level_of(labels: &[String], title: &str) -> Option<&'static str> {
+    const LEVELS: [&str; 4] = ["epic", "feature", "pbi", "bug"];
+    for level in LEVELS {
+        if labels.iter().any(|l| l.eq_ignore_ascii_case(level)) {
+            return Some(level);
+        }
+    }
+    let rest = title.trim_start().strip_prefix('[')?;
+    let (tag, _) = rest.split_once(']')?;
+    LEVELS.into_iter().find(|l| tag.eq_ignore_ascii_case(l))
+}
+
+/// The issues of one `repos/{o}/{r}/issues` page (pull requests and entries without a number or
+/// title skipped) and the number of entries on the page, pull requests included.
+pub fn parse_open_issues(body: &str) -> Result<(Vec<OpenIssue>, usize), GhError> {
+    let other = |m: String| GhError::Other { message: m };
+    let value: Value =
+        serde_json::from_str(body).map_err(|e| other(format!("unexpected GitHub answer: {e}")))?;
+    let list = value
+        .as_array()
+        .ok_or_else(|| other("unexpected GitHub answer".into()))?;
+    let names = |v: &Value, key: &str| -> Vec<String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x[key].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let issues = list
+        .iter()
+        .filter(|i| i.get("pull_request").is_none_or(Value::is_null))
+        .filter_map(|i| {
+            let title = i["title"].as_str()?.to_owned();
+            let labels = names(&i["labels"], "name");
+            Some(OpenIssue {
+                number: i["number"].as_u64()?,
+                level: level_of(&labels, &title).map(str::to_owned),
+                title,
+                labels,
+                assignees: names(&i["assignees"], "login"),
+                url: i["html_url"].as_str().unwrap_or_default().to_owned(),
+            })
+        })
+        .collect();
+    Ok((issues, list.len()))
+}
+
+/// Open issues of `repo` (REST pages of 100 through the cached `rest`), up to `OPEN_ISSUES_LIMIT`.
+pub fn open_issues<R: Runner>(client: &Client<R>, repo: &Repo) -> Result<Vec<OpenIssue>, GhError> {
+    let mut all = Vec::new();
+    for page in 1..=OPEN_ISSUES_LIMIT / PAGE_SIZE {
+        let path = format!(
+            "repos/{}/{}/issues?state=open&per_page={PAGE_SIZE}&page={page}",
+            repo.owner, repo.name
+        );
+        let (issues, raw) = parse_open_issues(&client.rest(&path)?)?;
+        all.extend(issues);
+        if raw < PAGE_SIZE {
+            break;
+        }
+    }
+    all.truncate(OPEN_ISSUES_LIMIT);
+    Ok(all)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -781,5 +866,77 @@ mod tests {
         let f = fake(vec![out(1, "", "error connecting to api.github.com")]);
         let c = Client::new(&f, temp_dir("gqlerr"));
         assert_eq!(c.graphql("q", &json!({})), Err(GhError::Offline));
+    }
+
+    const OPEN_ISSUES: &str = include_str!("../fixtures/github-open-issues.json");
+
+    #[test]
+    fn levels_come_from_labels_then_title_prefix() {
+        let l = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(level_of(&l(&["Bug", "x"]), "t"), Some("bug"));
+        assert_eq!(level_of(&l(&["pbi"]), "[Epic] t"), Some("pbi"));
+        assert_eq!(level_of(&[], " [Epic] Big"), Some("epic"));
+        assert_eq!(level_of(&[], "[feature] f"), Some("feature"));
+        assert_eq!(level_of(&[], "[Other] x"), None);
+        assert_eq!(level_of(&[], "plain [bug]"), None);
+        assert_eq!(level_of(&[], "[Epic"), None);
+    }
+
+    #[test]
+    fn open_issues_parse_without_pull_requests() {
+        let (issues, raw) = parse_open_issues(OPEN_ISSUES).unwrap();
+        assert_eq!(raw, 4);
+        assert_eq!(
+            issues.iter().map(|i| i.number).collect::<Vec<_>>(),
+            vec![12, 10, 7]
+        );
+        assert_eq!(issues[0].level.as_deref(), Some("pbi"));
+        assert_eq!(issues[0].labels, vec!["pbi", "needs-refinement"]);
+        assert_eq!(issues[0].assignees, vec!["octo"]);
+        assert_eq!(issues[0].url, "https://github.com/o/r/issues/12");
+        assert_eq!(issues[1].level.as_deref(), Some("epic"));
+        assert_eq!(issues[2].level, None);
+    }
+
+    #[test]
+    fn open_issues_reject_unexpected_answers() {
+        assert!(matches!(
+            parse_open_issues("{\"message\":\"x\"}"),
+            Err(GhError::Other { .. })
+        ));
+        assert!(parse_open_issues("nope").is_err());
+        assert_eq!(parse_open_issues("[]").unwrap(), (vec![], 0));
+    }
+
+    #[test]
+    fn open_issues_page_until_a_short_page_and_stop_at_the_limit() {
+        let page = |from: u64, n: u64| {
+            let items: Vec<String> = (from..from + n)
+                .map(|i| format!("{{\"number\":{i},\"title\":\"t{i}\"}}"))
+                .collect();
+            let body = format!("[{}]", items.join(","));
+            out(0, &format!("HTTP/2.0 200 OK\r\n\r\n{body}"), "")
+        };
+        let dir = temp_dir("open-issues");
+        let r = Repo {
+            owner: "o".into(),
+            name: "r".into(),
+        };
+        let f = fake(vec![page(1, 100), page(101, 40)]);
+        let client = Client::new(&f, dir.clone());
+        assert_eq!(open_issues(&client, &r).unwrap().len(), 140);
+        let calls = f.calls.borrow();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[1][2].ends_with("issues?state=open&per_page=100&page=2"));
+        drop(calls);
+
+        let dir2 = temp_dir("open-issues-full");
+        let f = fake(vec![page(1, 100), page(101, 100), page(201, 100)]);
+        let client = Client::new(&f, dir2);
+        assert_eq!(open_issues(&client, &r).unwrap().len(), 300);
+        assert_eq!(f.calls.borrow().len(), 3);
+        let f = fake(vec![out(1, "", "gh: command failed: HTTP 404")]);
+        let _ = std::fs::remove_dir_all(dir);
+        assert!(open_issues(&Client::new(&f, temp_dir("open-issues-err")), &r).is_err());
     }
 }
