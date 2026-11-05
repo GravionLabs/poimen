@@ -18,7 +18,7 @@ pub use poimen_protocol as protocol;
 use poimen_protocol::{
     AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, SetColors, Space,
     SpaceClose, SpaceCreate, SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate,
-    TerminalInput, TerminalList, TerminalRename, TerminalResize,
+    TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalResize,
 };
 use serde_json::{Value, json};
 
@@ -377,13 +377,18 @@ impl AttachmentWriter {
         self.send("terminal.resize", params)
     }
 
-    /// Ends the attachment; the terminal keeps running. (Windows: no effect until the server
-    /// side ends the connection; a cooperative detach follows with the Windows runtime.)
+    /// Ends the attachment; the terminal keeps running. Sends `terminal.detach`, after which the
+    /// server closes the connection (named pipes on Windows have no `shutdown`), and on Unix
+    /// also shuts the socket down, so a blocked [`Attachment::next_record`] fails at once.
     pub fn close(&self) {
+        let params = to_value(&TerminalDetach {
+            terminal_id: self.terminal_id.clone(),
+        });
+        let _ = self.send("terminal.detach", params);
         let _ = self.stream.shutdown();
     }
 
-    fn send(&mut self, method: &str, params: Value) -> Result<(), ClientError> {
+    fn send(&self, method: &str, params: Value) -> Result<(), ClientError> {
         let request = Request {
             id: next_id(),
             method: method.into(),
@@ -392,9 +397,10 @@ impl AttachmentWriter {
         let mut line =
             serde_json::to_string(&request).map_err(|e| ClientError::Protocol(e.to_string()))?;
         line.push('\n');
-        self.stream
+        let mut stream = &self.stream;
+        stream
             .write_all(line.as_bytes())
-            .and_then(|()| self.stream.flush())
+            .and_then(|()| stream.flush())
             .map_err(ClientError::Io)
     }
 }
@@ -622,10 +628,11 @@ mod tests {
                 r#"{{"event":"terminal.output","data":{{"terminal_id":"t1","seq":1,"data":"YQ=="}}}}"#
             )
             .unwrap();
-            let mut rest = String::new();
-            // Ends when the client closes its writer.
-            reader.read_line(&mut rest).unwrap();
-            input
+            // Closing the writer asks the server to detach; the server then ends the connection
+            // (all a named pipe can do), which makes the blocked reader fail.
+            let mut detach = String::new();
+            reader.read_line(&mut detach).unwrap();
+            (input, detach)
         });
         let mut attachment = Client::new(&path)
             .attach("t1", AttachMode::Control, false)
@@ -638,7 +645,9 @@ mod tests {
         ));
         writer.close();
         assert!(attachment.next_record().is_err());
-        let input = server.join().unwrap();
+        let (input, detach) = server.join().unwrap();
+        assert!(detach.contains(r#""method":"terminal.detach""#), "{detach}");
+        assert!(detach.contains(r#""terminal_id":"t1""#), "{detach}");
         assert!(input.contains(r#""method":"terminal.input""#));
         assert!(input.contains(r#""terminal_id":"t1""#));
         assert!(input.contains(r#""data":"ls\r""#));

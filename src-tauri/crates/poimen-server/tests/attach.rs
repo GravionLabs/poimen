@@ -1,6 +1,7 @@
 //! `terminal.attach` end to end: snapshot, stream, roles, backpressure.
 #![cfg(unix)]
 
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -9,6 +10,7 @@ use std::time::{Duration, Instant};
 use poimen_client::protocol::{
     AttachMode, DetachReason, ErrorCode, Event, SetColors, TerminalCreate, decode_bytes,
 };
+use poimen_client::transport::Conn;
 use poimen_client::{Attachment, Client, ClientError};
 use poimen_server::{Config, Server};
 
@@ -34,6 +36,7 @@ impl Drop for Env {
 struct Fixture {
     _env: Env,
     client: Client,
+    socket: PathBuf,
     space: String,
 }
 
@@ -55,6 +58,7 @@ fn fixture(name: &str) -> Fixture {
     Fixture {
         _env: env,
         client,
+        socket: config.socket,
         space,
     }
 }
@@ -418,6 +422,116 @@ fn closing_a_terminal_detaches_its_clients() {
             reason: DetachReason::Closed
         }
     );
+}
+
+/// A raw connection: lines are written as they are, read on a helper thread so a test never
+/// hangs (named pipes have no read timeout).
+struct Raw {
+    conn: Conn,
+    lines: Receiver<Option<String>>,
+}
+
+impl Raw {
+    fn connect(socket: &std::path::Path) -> Self {
+        let conn = Conn::connect(socket).unwrap();
+        let reader = conn.clone();
+        let (tx, lines) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(reader).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(Some(line)).is_err() {
+                    return;
+                }
+            }
+            let _ = tx.send(None);
+        });
+        Self { conn, lines }
+    }
+
+    fn send(&self, line: &str) {
+        let mut w = &self.conn;
+        writeln!(w, "{line}").unwrap();
+    }
+
+    /// The next line with this response id (stream records are skipped); `None` when the
+    /// connection ended first.
+    fn response(&self, id: &str) -> Option<serde_json::Value> {
+        loop {
+            let line = self
+                .lines
+                .recv_timeout(Duration::from_secs(10))
+                .expect("no line within 10 s")?;
+            let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if value["id"] == id {
+                return Some(value);
+            }
+        }
+    }
+
+    /// Whether the server ends the connection within 10 s.
+    fn ends(&self) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while let Ok(line) = self
+            .lines
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            if line.is_none() {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+#[test]
+fn terminal_detach_answers_and_then_ends_the_connection() {
+    let f = fixture("detach");
+    let id = f.run("sleep 30");
+    let events = f.events();
+    let raw = Raw::connect(&f.socket);
+    raw.send(&format!(
+        r#"{{"id":"a","method":"terminal.attach","params":{{"terminal_id":"{id}","mode":"control"}}}}"#
+    ));
+    assert_eq!(raw.response("a").unwrap()["result"]["mode"], "control");
+    wait_for_event(&events, |e| {
+        matches!(e, Event::TerminalControllerAttached { .. })
+    });
+
+    // Another terminal's id is refused and the attachment stays.
+    raw.send(r#"{"id":"w","method":"terminal.detach","params":{"terminal_id":"t999"}}"#);
+    assert_eq!(
+        raw.response("w").unwrap()["error"]["code"],
+        "invalid_request"
+    );
+
+    raw.send(&format!(
+        r#"{{"id":"d","method":"terminal.detach","params":{{"terminal_id":"{id}"}}}}"#
+    ));
+    assert_eq!(
+        raw.response("d").unwrap()["result"],
+        serde_json::json!({"detached": true})
+    );
+    assert!(raw.ends(), "the server did not close the connection");
+    assert_eq!(
+        wait_for_event(&events, |e| matches!(
+            e,
+            Event::TerminalControllerDetached { .. }
+        )),
+        Event::TerminalControllerDetached { terminal_id: id }
+    );
+}
+
+#[test]
+fn terminal_detach_needs_an_attached_connection() {
+    let f = fixture("detach-plain");
+    let raw = Raw::connect(&f.socket);
+    raw.send(r#"{"id":"d","method":"terminal.detach","params":{"terminal_id":"t1"}}"#);
+    assert_eq!(
+        raw.response("d").unwrap()["error"]["code"],
+        "invalid_request"
+    );
+    raw.send(r#"{"id":"p","method":"ping"}"#);
+    assert!(raw.response("p").unwrap()["result"]["pid"].is_number());
 }
 
 #[test]

@@ -402,6 +402,14 @@ pub struct TerminalClose {
     pub terminal_id: String,
 }
 
+/// `terminal.detach`: ends the attachment of this connection to `terminal_id`; the server
+/// answers `{"detached": true}` and then closes the connection. For clients that cannot shut
+/// a connection down themselves (named pipes on Windows).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalDetach {
+    pub terminal_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalInput {
     pub terminal_id: String,
@@ -644,6 +652,9 @@ mod tests {
             serde_json::from_value::<TerminalAttach>(json!({"terminal_id":"t1","mode":"x"}))
                 .is_err()
         );
+        let d: TerminalDetach = serde_json::from_value(json!({"terminal_id":"t1"})).unwrap();
+        assert_eq!(d.terminal_id, "t1");
+        assert!(serde_json::from_value::<TerminalDetach>(json!({})).is_err());
 
         let e = Event::TerminalDetached {
             terminal_id: "t1".into(),
