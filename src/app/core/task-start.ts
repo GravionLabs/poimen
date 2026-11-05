@@ -1,7 +1,7 @@
 import { Injectable, inject } from "@angular/core";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
 import { HerdrStore } from "./herdr-store";
-import { SpaceActions } from "./space-actions";
+import { SpaceActions, type SpaceOutcome } from "./space-actions";
 import { TauriBridge } from "./tauri";
 
 /** The steps of starting a task; a failure names the one that failed. */
@@ -98,23 +98,28 @@ export class TaskStarter {
   }
 
   private async inTab(dir: string, plan: TaskPlan): Promise<boolean> {
-    const outcome = await this.spaces.create(dir, "");
-    if (!outcome) {
-      if (this.spaces.trust()) return true;
-      return this.fail("space", this.spaces.error() ?? "the space was not created");
-    }
-    try {
-      await this.bridge.invoke("task_tab", {
-        workspaceId: outcome.workspace_id,
-        dir,
-        name: plan.tab,
-        command: plan.command,
-      });
-    } catch (err) {
-      return this.fail("tab", err);
-    }
-    await this.store.refresh();
-    return true;
+    // The tab is created by `after`, also when the trust answer creates the space later.
+    let tabFailed = false;
+    const after = async (outcome: SpaceOutcome): Promise<void> => {
+      try {
+        await this.bridge.invoke("task_tab", {
+          workspaceId: outcome.workspace_id,
+          dir,
+          name: plan.tab,
+          command: plan.command,
+        });
+      } catch (err) {
+        tabFailed = true;
+        this.fail("tab", err);
+        return;
+      }
+      await this.store.refresh();
+    };
+    const outcome = await this.spaces.create(dir, "", null, null, after);
+    if (outcome) return !tabFailed;
+    // Held for the trust question: the answer creates the space, then the tab.
+    if (this.spaces.trust()) return true;
+    return this.fail("space", this.spaces.error() ?? "the space was not created");
   }
 
   private fail(step: TaskStep, reason: unknown): false {

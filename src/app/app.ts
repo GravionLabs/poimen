@@ -416,7 +416,13 @@ export class App {
     const id = this.activePaneId();
     const pane = id ? this.pane(id) : undefined;
     const dir = pane ? paneDir(pane) : undefined;
-    if (dir && this.store.repos().has(dir)) void this.tasks.start(dir);
+    // A pane in a subdirectory belongs to the deepest known repository above it.
+    const repo = dir
+      ? [...this.store.repos().keys()]
+          .filter((r) => dir === r || dir.startsWith(r.endsWith("/") ? r : `${r}/`))
+          .sort((a, b) => b.length - a.length)[0]
+      : undefined;
+    if (repo) void this.tasks.start(repo);
     else this.spaceActions.notify("Start task: the active pane is not in a repository");
   }
 

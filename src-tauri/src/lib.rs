@@ -680,6 +680,8 @@ async fn task_plan(
 }
 
 /// Opens the tab `name` in a space and runs `command` in it (a task mode without a worktree).
+/// The command comes from the webview (already expanded by `task_plan`) because the frontend is
+/// the only caller; like the `command` of `create_space` it is not a surface for other clients.
 #[tauri::command]
 async fn task_tab(
     backend: State<'_, Shared>,

@@ -148,6 +148,22 @@ describe("TaskStarter", () => {
     });
   });
 
+  it("an untrusted project holds a tab task: the answer creates the space, then the tab", async () => {
+    tauri.answer("task_plan", () => plan({ worktree: false, tab: "#12 agent" }));
+    const request = { root: "/work/app", files: ["f"], hash: "h1", commands: [] };
+    tauri.answer("create_space", (args) =>
+      args?.["decision"]
+        ? { workspace_id: "w2", created: true }
+        : { workspace_id: "", created: false, trust: request },
+    );
+    expect(await starter.run("/work/app", CHOICE)).toBe(true);
+    expect(tauri.calls("task_tab")).toEqual([]);
+    await spaces.answerTrust("without");
+    expect(tauri.calls("task_tab")).toEqual([
+      { workspaceId: "w2", dir: "/work/app", name: "#12 agent", command: "claude 'x'" },
+    ]);
+  });
+
   it("does nothing when the picker is cancelled", async () => {
     const injector = Injector.create({
       providers: [TauriBridge, HerdrStore, SpaceActions, TaskPicker, TaskStarter],
