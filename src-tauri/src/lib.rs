@@ -22,6 +22,7 @@ mod settings;
 mod spaces;
 mod stream;
 mod tasks;
+mod terminal_colors;
 mod transcripts;
 mod trust;
 mod updater;
@@ -482,6 +483,30 @@ fn backend_kind(kind: State<'_, BackendKind>) -> &'static str {
     kind.0
 }
 
+/// Gives `poimen-server` the colors of the active scheme (`foreground`, `background`, `cursor`,
+/// 16 `palette` entries as `#rrggbb`), so it answers color queries while no app is attached. Kept
+/// for when the server starts; a no-op for the herdr backend, and an unreachable server is no error.
+#[tauri::command]
+async fn set_terminal_colors(
+    colors: poimen_client::protocol::SetColors,
+    store: State<'_, terminal_colors::TerminalColors>,
+    kind: State<'_, BackendKind>,
+) -> Result<(), String> {
+    let poimen = kind.0 == "poimen";
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = poimen_client::Client::default();
+        // The server may not be up yet: the colors are pushed after `ensure_backend`.
+        let _ = store.set(
+            colors,
+            poimen.then_some(&client as &dyn terminal_colors::ColorSink),
+        );
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Version and protocol of the running backend; `None` when unreachable or too old.
 #[tauri::command]
 async fn herdr_info(backend: State<'_, Shared>) -> Result<Option<backend::BackendInfo>, String> {
@@ -495,14 +520,23 @@ async fn herdr_info(backend: State<'_, Shared>) -> Result<Option<backend::Backen
 async fn ensure_backend(
     backend: State<'_, Shared>,
     lock: State<'_, StartLock>,
+    colors: State<'_, terminal_colors::TerminalColors>,
+    kind: State<'_, BackendKind>,
 ) -> Result<backend::BackendStatus, String> {
     let lock = lock.0.clone();
+    let colors = colors.inner().clone();
+    let poimen = kind.0 == "poimen";
     on_backend(backend.inner(), move |b| {
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let auto_start = home_dir()
             .map(|h| settings::load(&h).herdr_auto_start)
             .unwrap_or(true);
-        Ok(b.ensure_running(auto_start).into())
+        let status: backend::BackendStatus = b.ensure_running(auto_start).into();
+        if poimen {
+            // The server answers color queries with the scheme the frontend sent before it ran.
+            let _ = colors.push(&poimen_client::Client::default());
+        }
+        Ok(status)
     })
     .await
 }
@@ -1003,6 +1037,7 @@ pub fn run() {
         )))
         .manage(SubagentWatch::default())
         .manage(StartLock::default())
+        .manage(terminal_colors::TerminalColors::default())
         .setup(move |app| {
             let handle = app.handle().clone();
             let shortcuts = home_dir()
@@ -1047,6 +1082,7 @@ pub fn run() {
             herdr_info,
             ensure_backend,
             backend_kind,
+            set_terminal_colors,
             ensure_poimen_server,
             set_herdr_auto_start,
             set_notification,

@@ -13,8 +13,8 @@ use std::time::Duration;
 pub mod agent;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
-    AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, Space, SpaceClose,
-    SpaceCreate, SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate,
+    AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, SetColors, Space,
+    SpaceClose, SpaceCreate, SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate,
     TerminalInput, TerminalList, TerminalRename, TerminalResize,
 };
 use serde_json::{Value, json};
@@ -194,6 +194,13 @@ impl Client {
 
     pub fn create_terminal(&self, params: &TerminalCreate) -> Result<Terminal, ClientError> {
         self.typed("terminal.create", to_value(params), Some("terminal"))
+    }
+
+    /// Sends the colors the server answers terminal color queries with while no controller is
+    /// attached (`server.set_colors`).
+    pub fn set_colors(&self, colors: &SetColors) -> Result<(), ClientError> {
+        self.request("server.set_colors", to_value(colors))?;
+        Ok(())
     }
 
     pub fn rename_terminal(&self, terminal_id: &str, name: &str) -> Result<Terminal, ClientError> {

@@ -24,17 +24,101 @@ use alacritty_terminal::vte::ansi::{
 /// The scrollback kept per terminal unless configured otherwise.
 pub const DEFAULT_SCROLLBACK: usize = 10_000;
 
-/// Remembers the window title the emulator reports; everything else is ignored (answers to
-/// terminal queries are the client's business, or #171's).
+/// The colors terminal queries are answered with (OSC 10, 11, 12 and 4): the active scheme,
+/// which the app sends with `server.set_colors`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Colors {
+    pub foreground: Rgb,
+    pub background: Rgb,
+    pub cursor: Rgb,
+    /// The 16 ANSI colors; 16..=255 are the xterm cube and gray ramp.
+    pub ansi: [Rgb; 16],
+}
+
+impl Default for Colors {
+    /// A dark scheme, used until the app has sent its own.
+    fn default() -> Self {
+        let c = |r, g, b| Rgb { r, g, b };
+        Self {
+            foreground: c(0xd8, 0xd8, 0xd8),
+            background: c(0x18, 0x18, 0x18),
+            cursor: c(0xd8, 0xd8, 0xd8),
+            ansi: [
+                c(0x00, 0x00, 0x00),
+                c(0xcd, 0x00, 0x00),
+                c(0x00, 0xcd, 0x00),
+                c(0xcd, 0xcd, 0x00),
+                c(0x00, 0x00, 0xee),
+                c(0xcd, 0x00, 0xcd),
+                c(0x00, 0xcd, 0xcd),
+                c(0xe5, 0xe5, 0xe5),
+                c(0x7f, 0x7f, 0x7f),
+                c(0xff, 0x00, 0x00),
+                c(0x00, 0xff, 0x00),
+                c(0xff, 0xff, 0x00),
+                c(0x5c, 0x5c, 0xff),
+                c(0xff, 0x00, 0xff),
+                c(0x00, 0xff, 0xff),
+                c(0xff, 0xff, 0xff),
+            ],
+        }
+    }
+}
+
+impl Colors {
+    /// The color a query for `index` (alacritty's numbering: 0..=255 palette, 256 foreground,
+    /// 257 background, 258 cursor) is answered with; `None` for an index that is not a color.
+    fn get(&self, index: usize) -> Option<Rgb> {
+        let c = |r: u8, g: u8, b: u8| Rgb { r, g, b };
+        match index {
+            0..=15 => Some(self.ansi[index]),
+            16..=231 => {
+                let i = u8::try_from(index - 16).ok()?;
+                let level = |n: u8| if n == 0 { 0 } else { 55 + 40 * n };
+                Some(c(level(i / 36), level(i / 6 % 6), level(i % 6)))
+            }
+            232..=255 => {
+                let v = 8 + 10 * u8::try_from(index - 232).ok()?;
+                Some(c(v, v, v))
+            }
+            256 => Some(self.foreground),
+            257 => Some(self.background),
+            258 => Some(self.cursor),
+            _ => None,
+        }
+    }
+}
+
+type Formatter = Arc<dyn Fn(Rgb) -> String + Send + Sync>;
+
+#[derive(Default)]
+struct Shared {
+    title: Option<String>,
+    /// Answers the grid wants written to the PTY.
+    replies: Vec<String>,
+    /// Color queries; the formatter is applied once the grid is up to date.
+    color_requests: Vec<(usize, Formatter)>,
+}
+
+/// Remembers the window title the emulator reports and collects the answers it wants to give to
+/// terminal queries (see [`Emulator::take_replies`]); everything else is ignored.
 #[derive(Clone, Default)]
-struct Listener(Arc<Mutex<Option<String>>>);
+struct Listener(Arc<Mutex<Shared>>);
+
+impl Listener {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Shared> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
 
 impl EventListener for Listener {
     fn send_event(&self, event: Event) {
-        let mut title = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shared = self.lock();
         match event {
-            Event::Title(t) => *title = Some(t),
-            Event::ResetTitle => *title = None,
+            Event::Title(t) => shared.title = Some(t),
+            Event::ResetTitle => shared.title = None,
+            Event::PtyWrite(text) => shared.replies.push(text),
+            Event::ColorRequest(index, format) => shared.color_requests.push((index, format)),
             _ => {}
         }
     }
@@ -106,11 +190,7 @@ impl Emulator {
     }
 
     pub fn title(&self) -> Option<String> {
-        self.title
-            .0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
+        self.title.lock().title.clone()
     }
 
     /// The scroll region as 0-based inclusive `(top, bottom)` rows, `None` when it spans the
@@ -124,6 +204,27 @@ impl Emulator {
     pub fn cursor(&self) -> (usize, usize) {
         let p = self.term.grid().cursor.point;
         (usize::try_from(p.line.0).unwrap_or(0), p.column.0)
+    }
+
+    /// The answers to the queries fed so far (DA1/DA2, DSR, OSC 10/11/12/4 color queries), as
+    /// bytes for the PTY, in order. Taken once: the next call only returns newer ones. A color
+    /// the program set itself (OSC 4, 10, 11) wins over `colors`.
+    pub fn take_replies(&mut self, colors: &Colors) -> Vec<u8> {
+        let (replies, requests) = {
+            let mut shared = self.title.lock();
+            (
+                std::mem::take(&mut shared.replies),
+                std::mem::take(&mut shared.color_requests),
+            )
+        };
+        let mut out = replies.concat().into_bytes();
+        for (index, format) in requests {
+            let own = self.term.colors()[index];
+            if let Some(rgb) = own.or_else(|| colors.get(index)) {
+                out.extend(format(rgb).into_bytes());
+            }
+        }
+        out
     }
 
     pub fn feed(&mut self, bytes: &[u8]) {
@@ -673,5 +774,56 @@ mod tests {
         let mut s = Scanner::default();
         assert!(s.scan(b"\x1b]0;title ?1049h r\x07").is_empty());
         assert_eq!(s.scan(b"\x1b[?1049h"), vec![Hit::EnterAlt(7)]);
+    }
+
+    fn replies(input: &[u8]) -> String {
+        let mut e = fresh(20, 5);
+        e.feed(input);
+        String::from_utf8(e.take_replies(&Colors::default())).unwrap()
+    }
+
+    #[test]
+    fn cursor_position_report_is_one_based() {
+        assert_eq!(replies(b"\x1b[3;7H\x1b[6n"), "\x1b[3;7R");
+    }
+
+    #[test]
+    fn device_attributes_are_answered() {
+        assert_eq!(replies(b"\x1b[c"), "\x1b[?6c");
+        assert!(replies(b"\x1b[>c").starts_with("\x1b[>0;"));
+    }
+
+    #[test]
+    fn color_queries_come_from_the_scheme_and_a_program_setting_wins() {
+        let colors = Colors {
+            foreground: Rgb { r: 1, g: 2, b: 3 },
+            background: Rgb {
+                r: 0xaa,
+                g: 0xbb,
+                b: 0xcc,
+            },
+            ..Colors::default()
+        };
+        let mut e = fresh(20, 5);
+        e.feed(b"\x1b]10;?\x1b\\\x1b]11;?\x07\x1b]4;1;?\x07\x1b]4;232;?\x07");
+        let out = String::from_utf8(e.take_replies(&colors)).unwrap();
+        assert_eq!(
+            out,
+            "\x1b]10;rgb:0101/0202/0303\x1b\\\x1b]11;rgb:aaaa/bbbb/cccc\x07\
+             \x1b]4;1;rgb:cdcd/0000/0000\x07\x1b]4;232;rgb:0808/0808/0808\x07"
+        );
+        e.feed(b"\x1b]11;rgb:10/20/30\x07\x1b]11;?\x07");
+        assert_eq!(
+            String::from_utf8(e.take_replies(&colors)).unwrap(),
+            "\x1b]11;rgb:1010/2020/3030\x07"
+        );
+    }
+
+    #[test]
+    fn replies_are_taken_once() {
+        let mut e = fresh(20, 5);
+        e.feed(b"\x1b[c");
+        assert_eq!(e.take_replies(&Colors::default()), b"\x1b[?6c");
+        assert!(e.take_replies(&Colors::default()).is_empty());
     }
 }

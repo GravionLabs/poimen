@@ -41,6 +41,7 @@ The server stores no layout: groups, splits and tabs are the client's business. 
 | `space.close`     | `space_id`                                                              | `{}`                  | Closes its terminals first (`terminal.closed` each). Persisted.                                 |
 | `terminal.list`   | `space_id?`                                                             | `{terminals: [Terminal]}` | Exited terminals stay listed until closed.                                                  |
 | `terminal.create` | `space_id`, `cwd?`, `name?`, `command?` (argv), `cols?`, `rows?`        | `{terminal}`          | `cwd` defaults to the space's, `command` to `$SHELL` (else `/bin/sh`), size to 80x24. Never through a shell. |
+| `server.set_colors` | `foreground`, `background`, `cursor?`, `palette?` (16)                | `{}`                  | `#rrggbb` colors the server answers color queries with while no controller is attached; see Terminal queries. `cursor` defaults to `foreground`, an absent `palette` keeps the previous one. |
 | `terminal.rename` | `terminal_id`, `name`                                                   | `{terminal}`          |                                                                                                 |
 | `terminal.close`  | `terminal_id`                                                           | `{}`                  | Kills the process (SIGHUP) and forgets the terminal.                                            |
 | `terminal.input`  | `terminal_id`, `data`                                                   | `{}`                  | `data` is written as is; `exited` error when the process has ended. An observer, or a controller that was taken over, gets `not_controller`. |
@@ -66,6 +67,10 @@ From then on the connection carries stream records (the events below) and still 
 - Closing the connection detaches. Attach and detach of the controller are published to subscribers as `terminal.controller_attached` and `terminal.controller_detached`, so the server (and tools) know when nobody answers the terminal's queries.
 - Backpressure: output is coalesced (what arrives within 4 ms, at most 32 KiB per record). Each client has a bounded queue (128 records); the PTY is never blocked by a client. A client whose queue is full is detached with `terminal.detached` reason `overflow` (a client that does not read at all is cut off after a 5 s write timeout) and must attach again for a fresh snapshot.
 - `terminal.detached` (the server ended the attachment: `overflow`, `taken_over`, `closed`) and `terminal.exited` (the process ended, with its exit code; the stream ends after it) are distinct. Attaching to an exited terminal returns the final snapshot, then `terminal.exited`.
+
+## Terminal queries
+
+Programs ask the terminal for its colors (OSC 10, 11, 12 and 4 with `?`), the cursor position (DSR `CSI 6 n`) and its attributes (DA1 `CSI c`, DA2 `CSI > c`). The headless grid of the terminal (`alacritty_terminal`) produces the answers and the server writes them to the PTY, but only while the terminal has no controller. With a controller attached, its xterm.js answers the same bytes (#96) and the server stays silent, so a query never gets two answers; the hand-over is at attach and detach of the controller (observers do not count). What the grid produced while a controller was attached is dropped, never answered late. Colors come from `server.set_colors` (a dark default until the app has sent one); a color the program set itself with OSC 4, 10 or 11 wins. The app sends the active scheme on start and on every scheme change. Adding the request is backwards compatible, so the protocol version stays 2.
 
 ## Agent status
 
