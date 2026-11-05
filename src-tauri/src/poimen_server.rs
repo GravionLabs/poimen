@@ -76,6 +76,16 @@ pub fn ensure_running(runner: &impl Runner, auto_start: bool) -> Result<Outcome,
     Err(StartError::Timeout(START_TIMEOUT))
 }
 
+/// The file name of the bundled server next to the app executable: Tauri installs the sidecar
+/// as `poimen-server.exe` on Windows (not the first `PATHEXT` candidate, `.COM`).
+pub fn beside_name(windows: bool) -> String {
+    if windows {
+        format!("{PROGRAM}.exe")
+    } else {
+        PROGRAM.to_string()
+    }
+}
+
 /// The real runner: the socket of the environment, the server binary next to the app executable
 /// or on the login-shell PATH.
 pub struct SystemRunner {
@@ -106,13 +116,9 @@ impl Runner for SystemRunner {
     }
 
     fn resolve(&self) -> Option<PathBuf> {
-        let name = gui_path::executable_names(PROGRAM, cfg!(windows), None)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| PROGRAM.to_string());
         let beside = std::env::current_exe()
             .ok()
-            .and_then(|exe| exe.parent().map(|dir| dir.join(&name)))
+            .and_then(|exe| exe.parent().map(|dir| dir.join(beside_name(cfg!(windows)))))
             .filter(|p| p.is_file());
         beside.or_else(|| gui_path::resolve_program(PROGRAM, &gui_path::child_path()))
     }
@@ -192,6 +198,12 @@ mod tests {
         fn now(&self) -> Duration {
             self.clock.get()
         }
+    }
+
+    #[test]
+    fn the_bundled_server_has_the_exe_suffix_on_windows_only() {
+        assert_eq!(beside_name(true), "poimen-server.exe");
+        assert_eq!(beside_name(false), "poimen-server");
     }
 
     #[test]

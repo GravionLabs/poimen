@@ -77,11 +77,13 @@ impl Exec for SystemExec {
         let program: PathBuf = SystemRunner::new()
             .resolve()
             .ok_or("`poimen-server` was not found next to poimen or on PATH")?;
-        let output = gui_path::command(program)
-            .args(args)
-            .env("PATH", gui_path::child_path())
-            .output()
-            .map_err(|e| e.to_string())?;
+        let mut command = gui_path::command(program);
+        command.args(args);
+        // A GUI app on Windows already has the user's PATH (as in `backend.rs`).
+        if !cfg!(windows) {
+            command.env("PATH", gui_path::child_path());
+        }
+        let output = command.output().map_err(|e| e.to_string())?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
