@@ -27,6 +27,8 @@ pub const EVENTS: [&str; 6] = [
 ];
 /// Seconds Claude Code waits for the hook before giving up on it.
 const HOOK_TIMEOUT_SECS: u64 = 2;
+/// On Windows: the hook runs through PowerShell, whose start alone can take a second.
+pub(crate) const WINDOWS_HOOK_TIMEOUT_SECS: u64 = 5;
 
 /// What one hook event says about the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +129,46 @@ pub fn hook_command(exe: &Path) -> String {
     format!("'{quoted}' hook claude {MARKER}")
 }
 
+/// The PowerShell command of the hook: `& '<exe>' hook <args> # poimen-agent-hook` (the call
+/// operator runs a quoted path; `#` starts a comment there too, so the marker stays inert).
+pub fn powershell_command(exe: &Path, args: &str) -> String {
+    format!(
+        "& {} hook {args} {MARKER}",
+        powershell_quote(&exe.display().to_string())
+    )
+}
+
+/// A PowerShell single-quoted string: every single quote, including the typographic ones
+/// PowerShell also accepts as quotes, is doubled.
+pub fn powershell_quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('\'');
+    for c in text.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
+}
+
+/// Our hook entry in `settings.json`. Unix: a shell command. Windows: the same in PowerShell
+/// (`"shell": "powershell"`; shell-form hooks would otherwise run in Git Bash when installed),
+/// with a longer timeout for the PowerShell start.
+pub fn hook_entry(exe: &Path, windows: bool) -> Value {
+    if windows {
+        json!({
+            "type": "command",
+            "shell": "powershell",
+            "command": powershell_command(exe, "claude"),
+            "timeout": WINDOWS_HOOK_TIMEOUT_SECS
+        })
+    } else {
+        json!({"type": "command", "command": hook_command(exe), "timeout": HOOK_TIMEOUT_SECS})
+    }
+}
+
 /// `<home>/.claude/settings.json`.
 pub fn default_settings_path(home: &Path) -> PathBuf {
     home.join(".claude").join("settings.json")
@@ -198,7 +240,7 @@ pub fn install(settings_path: &Path, exe: &Path) -> Result<(), String> {
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or("\"hooks\" in settings.json is not an object; left untouched")?;
-    let command = hook_command(exe);
+    let entry = hook_entry(exe, cfg!(windows));
     for event in EVENTS {
         let groups = hooks
             .entry(event)
@@ -206,9 +248,7 @@ pub fn install(settings_path: &Path, exe: &Path) -> Result<(), String> {
             .as_array_mut()
             .ok_or_else(|| format!("hooks.{event} is not an array; left untouched"))?;
         strip(groups);
-        groups.push(json!({
-            "hooks": [{"type": "command", "command": command, "timeout": HOOK_TIMEOUT_SECS}]
-        }));
+        groups.push(json!({ "hooks": [entry.clone()] }));
     }
     write_atomic(settings_path, &settings)
 }
@@ -397,11 +437,11 @@ mod tests {
         let start = s["hooks"]["SessionStart"].as_array().unwrap();
         assert_eq!(start.len(), 2);
         assert_eq!(start[0], herdr_settings()["hooks"]["SessionStart"][0]);
+        // The entry of this platform (`hook_entry` is checked literally for both).
         assert_eq!(
-            start[1]["hooks"][0]["command"],
-            "'/opt/poimen-server' hook claude # poimen-agent-hook"
+            start[1]["hooks"][0],
+            hook_entry(Path::new("/opt/poimen-server"), cfg!(windows))
         );
-        assert_eq!(start[1]["hooks"][0]["timeout"], 2);
         assert_eq!(status(&path).unwrap(), EVENTS.to_vec());
         cleanup(&path);
     }
@@ -417,9 +457,15 @@ mod tests {
         let s = read(&path);
         assert_eq!(s["hooks"]["Stop"].as_array().unwrap().len(), 1);
         assert_eq!(
-            s["hooks"]["Stop"][0]["hooks"][0]["command"],
-            r"'/b/it'\''s/poimen-server' hook claude # poimen-agent-hook"
+            s["hooks"]["Stop"][0]["hooks"][0],
+            hook_entry(Path::new("/b/it's/poimen-server"), cfg!(windows))
         );
+        if !cfg!(windows) {
+            assert_eq!(
+                s["hooks"]["Stop"][0]["hooks"][0]["command"],
+                r"'/b/it'\''s/poimen-server' hook claude # poimen-agent-hook"
+            );
+        }
         cleanup(&path);
     }
 
@@ -476,6 +522,42 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&path).unwrap(), bad);
         }
         cleanup(&path);
+    }
+
+    #[test]
+    fn the_windows_entry_runs_in_powershell_with_a_longer_timeout() {
+        let exe = Path::new(r"C:\Users\Jo O'Neil\AppData\Local\poimen\poimen-server.exe");
+        assert_eq!(
+            hook_entry(exe, true),
+            json!({
+                "type": "command",
+                "shell": "powershell",
+                "command": r"& 'C:\Users\Jo O''Neil\AppData\Local\poimen\poimen-server.exe' hook claude # poimen-agent-hook",
+                "timeout": 5
+            })
+        );
+        assert!(is_ours(&hook_entry(exe, true)));
+    }
+
+    #[test]
+    fn the_unix_entry_is_unchanged() {
+        assert_eq!(
+            hook_entry(Path::new("/opt/poimen-server"), false),
+            json!({
+                "type": "command",
+                "command": "'/opt/poimen-server' hook claude # poimen-agent-hook",
+                "timeout": 2
+            })
+        );
+    }
+
+    #[test]
+    fn powershell_quoting_doubles_every_single_quote() {
+        assert_eq!(powershell_quote("plain"), "'plain'");
+        assert_eq!(powershell_quote(""), "''");
+        assert_eq!(powershell_quote("a'b"), "'a''b'");
+        assert_eq!(powershell_quote("a\u{2019}b"), "'a\u{2019}\u{2019}b'");
+        assert_eq!(powershell_quote("$x `n"), "'$x `n'");
     }
 
     #[cfg(unix)]

@@ -118,17 +118,26 @@ pub fn default_hook_path(home: &Path) -> PathBuf {
     home.join(".copilot").join("hooks").join(FILE_NAME)
 }
 
-fn hook_file(exe: &Path) -> Value {
+/// The hook file. Windows: Copilot CLI runs the `powershell` command there (the `bash` one
+/// stays for Git Bash setups), with a longer timeout for the PowerShell start.
+pub fn hook_file(exe: &Path, windows: bool) -> Value {
     let mut hooks = Map::new();
     for event in EVENTS {
-        hooks.insert(
-            event.to_owned(),
-            json!([{
+        let entry = if windows {
+            json!({
+                "type": "command",
+                "bash": hook_command(exe, event),
+                "powershell": crate::claude::powershell_command(exe, &format!("copilot {event}")),
+                "timeoutSec": crate::claude::WINDOWS_HOOK_TIMEOUT_SECS
+            })
+        } else {
+            json!({
                 "type": "command",
                 "bash": hook_command(exe, event),
                 "timeoutSec": HOOK_TIMEOUT_SECS
-            }]),
-        );
+            })
+        };
+        hooks.insert(event.to_owned(), json!([entry]));
     }
     json!({"version": 1, "hooks": hooks})
 }
@@ -153,7 +162,8 @@ pub fn install(path: &Path, exe: &Path) -> Result<(), String> {
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).map_err(err)?;
     let tmp = dir.join(format!(".{FILE_NAME}.poimen-{}", std::process::id()));
-    let mut text = serde_json::to_string_pretty(&hook_file(exe)).map_err(|e| e.to_string())?;
+    let mut text =
+        serde_json::to_string_pretty(&hook_file(exe, cfg!(windows))).map_err(|e| e.to_string())?;
     text.push('\n');
     std::fs::write(&tmp, text).map_err(err)?;
     std::fs::rename(&tmp, path).map_err(|e| {
@@ -181,9 +191,11 @@ pub fn status(path: &Path) -> Result<Vec<&'static str>, String> {
                 .and_then(|f| f.get("hooks")?.get(*event)?.as_array())
                 .is_some_and(|entries| {
                     entries.iter().any(|h| {
-                        h.get("bash")
-                            .and_then(Value::as_str)
-                            .is_some_and(|c| c.contains(MARKER))
+                        ["bash", "powershell"].iter().any(|shell| {
+                            h.get(*shell)
+                                .and_then(Value::as_str)
+                                .is_some_and(|c| c.contains(MARKER))
+                        })
                     })
                 })
         })
@@ -312,9 +324,15 @@ mod tests {
         let first = std::fs::read_to_string(&path).unwrap();
         let file: Value = serde_json::from_str(&first).unwrap();
         assert_eq!(file["version"], 1);
+        if !cfg!(windows) {
+            assert_eq!(
+                file["hooks"]["agentStop"][0],
+                json!({"type": "command", "bash": "'/opt/poimen-server' hook copilot agentStop # poimen-agent-hook", "timeoutSec": 2})
+            );
+        }
         assert_eq!(
-            file["hooks"]["agentStop"][0],
-            json!({"type": "command", "bash": "'/opt/poimen-server' hook copilot agentStop # poimen-agent-hook", "timeoutSec": 2})
+            file,
+            hook_file(Path::new("/opt/poimen-server"), cfg!(windows))
         );
         assert_eq!(status(&path).unwrap(), EVENTS.to_vec());
         install(&path, Path::new("/opt/poimen-server")).unwrap();
@@ -322,6 +340,36 @@ mod tests {
         install(&path, Path::new("/b/it's/poimen-server")).unwrap();
         let moved = std::fs::read_to_string(&path).unwrap();
         assert!(moved.contains(r"'/b/it'\\''s/poimen-server' hook copilot sessionEnd"));
+        cleanup(&path);
+    }
+
+    #[test]
+    fn the_windows_file_adds_a_powershell_command() {
+        let exe = Path::new(r"C:\P\it's\poimen-server.exe");
+        let file = hook_file(exe, true);
+        assert_eq!(
+            file["hooks"]["agentStop"][0],
+            json!({
+                "type": "command",
+                "bash": r"'C:\P\it'\''s\poimen-server.exe' hook copilot agentStop # poimen-agent-hook",
+                "powershell": r"& 'C:\P\it''s\poimen-server.exe' hook copilot agentStop # poimen-agent-hook",
+                "timeoutSec": 5
+            })
+        );
+        assert!(
+            hook_file(exe, false)["hooks"]["agentStop"][0]
+                .get("powershell")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn status_finds_our_marker_in_a_powershell_only_entry() {
+        let path = temp("ps-only");
+        let file = json!({"version": 1, "hooks": {"agentStop": [{"type": "command",
+            "powershell": "& 'C:\\x.exe' hook copilot agentStop # poimen-agent-hook"}]}});
+        std::fs::write(&path, file.to_string()).unwrap();
+        assert_eq!(status(&path).unwrap(), vec!["agentStop"]);
         cleanup(&path);
     }
 
