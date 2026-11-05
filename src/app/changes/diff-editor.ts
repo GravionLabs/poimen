@@ -10,8 +10,9 @@ import {
 } from "@angular/core";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import { MergeView, goToNextChunk, goToPreviousChunk, unifiedMergeView } from "@codemirror/merge";
-import { EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { diffHighlight, loadLanguage } from "./diff-language";
 import type { DiffJump, DiffLayout } from "./changes";
 
 /**
@@ -98,12 +99,16 @@ export class DiffEditor {
   // Decorator inputs (set into signals): the specs run without Angular's compiler transform.
   private readonly oldText = signal("");
   private readonly newText = signal("");
+  private readonly filePath = signal("");
   private readonly mode = signal<DiffLayout>("split");
   @Input({ required: true }) set old(value: string) {
     this.oldText.set(value);
   }
   @Input({ required: true }) set new(value: string) {
     this.newText.set(value);
+  }
+  @Input() set path(value: string) {
+    this.filePath.set(value);
   }
   @Input() set layout(value: DiffLayout) {
     this.mode.set(value);
@@ -117,6 +122,7 @@ export class DiffEditor {
   private readonly hxTheme = inject(HxTheme);
   private view: EditorView | null = null;
   private merge: MergeView | null = null;
+  private generation = 0;
 
   constructor() {
     effect(() => {
@@ -124,7 +130,8 @@ export class DiffEditor {
       const next = this.newText();
       const layout = this.mode();
       const dark = this.hxTheme.dark();
-      this.build(old, next, layout, dark);
+      const path = this.filePath();
+      this.build(old, next, layout, dark, path);
     });
     inject(DestroyRef).onDestroy(() => this.dispose());
   }
@@ -151,9 +158,12 @@ export class DiffEditor {
     return this.merge?.b ?? this.view;
   }
 
-  private build(old: string, next: string, layout: DiffLayout, dark: boolean): void {
+  private build(old: string, next: string, layout: DiffLayout, dark: boolean, path: string): void {
     this.dispose();
+    const language = new Compartment();
     const common: Extension[] = [
+      language.of([]),
+      diffHighlight(),
       EditorState.readOnly.of(true),
       EditorView.theme(diffThemeRules(), { dark }),
       EditorView.lineWrapping,
@@ -184,9 +194,16 @@ export class DiffEditor {
         gutter: true,
       });
     }
+    const generation = this.generation;
+    void loadLanguage(path).then((support) => {
+      if (!support || generation !== this.generation) return;
+      const effects = language.reconfigure(support);
+      for (const view of [this.view, this.merge?.a, this.merge?.b]) view?.dispatch({ effects });
+    });
   }
 
   private dispose(): void {
+    this.generation++;
     this.view?.destroy();
     this.merge?.destroy();
     this.view = null;
