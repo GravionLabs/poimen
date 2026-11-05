@@ -212,13 +212,13 @@ Progress: 74 % (20 of 27 issues closed).
 
 | Order | Issue | Title                                                                         | Size | Depends on / decision |
 | ----- | ----- | ----------------------------------------------------------------------------- | ---- | --------------------- |
-| 1     | #354  | [Bug] fix(github): branch pull request query has an unbalanced brace          | ?    |                       |
-| 2     | #355  | [Bug] fix(spaces): creating a space silently focuses an existing one          | ?    | `needs-decision`      |
-| 3     | #356  | [Bug] fix(spaces): closing a space gives no feedback and flashes a disconnect | ?    |                       |
-| 4     | #360  | [Bug] fix(settings): notification checkboxes are cramped on one line          | ?    |                       |
-| 5     | #371  | [Bug] fix(notify): taskbar icon notification count keeps growing              | ?    |                       |
-| 6     | #373  | [PBI] docs(roadmap): update ROADMAP.md for M10 to M13                         | S    |                       |
-| 7     | #376  | [Bug] fix(tabs): overflowing tabs cannot be reached with the mouse            | ?    |                       |
+| 1     | #354  | [Bug] fix(github): branch pull request query has an unbalanced brace          | S    |                       |
+| 2     | #355  | [Bug] fix(spaces): creating a space silently focuses an existing one          | M    |                       |
+| 3     | #356  | [Bug] fix(spaces): closing a space gives no feedback and flashes a disconnect | M    |                       |
+| 4     | #360  | [Bug] fix(settings): notification checkboxes are cramped on one line          | S    |                       |
+| 5     | #371  | [Bug] fix(notify): taskbar icon notification count keeps growing              | M    |                       |
+| 6     | #373  | [PBI] docs(roadmap): update ROADMAP.md for M10 to M14                         | S    |                       |
+| 7     | #376  | [Bug] fix(tabs): overflowing tabs cannot be reached with the mouse            | M    |                       |
 <!-- roadmap:end -->
 
 <!-- roadmap:begin plan M11 -->
