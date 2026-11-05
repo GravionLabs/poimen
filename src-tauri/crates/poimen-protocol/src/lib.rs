@@ -53,9 +53,13 @@ pub fn socket_path_from(
 #[cfg(unix)]
 pub fn current_uid() -> std::io::Result<u32> {
     use std::os::unix::fs::MetadataExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Threads of one process may probe within the same clock tick (macOS: microseconds).
+    static PROBE: AtomicU64 = AtomicU64::new(0);
     let probe = std::env::temp_dir().join(format!(
-        "poimen-uid-{}-{}",
+        "poimen-uid-{}-{}-{}",
         std::process::id(),
+        PROBE.fetch_add(1, Ordering::Relaxed),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos())

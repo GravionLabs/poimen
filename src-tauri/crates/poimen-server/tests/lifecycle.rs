@@ -163,8 +163,9 @@ fn a_stale_socket_file_is_replaced() {
     let env = Env::new("stale");
     let config = env.config();
     std::fs::create_dir_all(config.socket.parent().unwrap()).unwrap();
-    // A socket file nobody listens on, as left by a killed server.
-    drop(std::os::unix::net::UnixListener::bind(&config.socket).unwrap());
+    // A socket entry nobody listens on, as left by a killed server (Unix: the socket file;
+    // Windows: the marker file).
+    drop(poimen_client::transport::Listener::bind(&config.socket).unwrap());
     start(&config).ping().unwrap();
 }
 
@@ -342,7 +343,7 @@ fn a_bad_line_gets_an_error_and_the_connection_survives() {
     let env = Env::new("raw");
     let config = env.config();
     start(&config);
-    let mut stream = std::os::unix::net::UnixStream::connect(&config.socket).unwrap();
+    let mut stream = poimen_client::transport::Conn::connect(&config.socket).unwrap();
     stream
         .write_all(b"garbage\n{\"id\":\"9\",\"method\":\"ping\"}\n")
         .unwrap();
