@@ -102,7 +102,7 @@ pnpm tauri dev
 | Live smoke tests (read-only, need a running herdr) | `cd src-tauri && cargo test -- --ignored` |
 | Lint | `cd src-tauri && cargo clippy --all-targets -- -D warnings` |
 
-CI (`.github/workflows/ci.yml`, built on GravionLabs/ci) runs the frontend checks and `cargo fmt`, `clippy` and `test` of `src-tauri` on every pull request; its gate job `ci` and the `pr-checks / PR checks` job are the required checks. The Rust toolchain is pinned in `rust-toolchain.toml`, Node.js in `.nvmrc`.
+CI (`.github/workflows/ci.yml`, built on GravionLabs/ci) runs the frontend checks and `cargo fmt`, `clippy` and `test` of `src-tauri` on every pull request, and on `windows-latest` the tests of the server crates and `clippy` of the app crate; its gate job `ci` and the `pr-checks / PR checks` job are the required checks. The Rust toolchain is pinned in `rust-toolchain.toml`, Node.js in `.nvmrc`.
 
 ### Editors
 
