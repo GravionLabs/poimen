@@ -23,6 +23,7 @@ Site, downloads and installation guide: <https://gravionlabs.github.io/poimen/>.
 ```
 
 - **`poimen-server` is the default backend.** The release bundles it next to the app (`externalBin`), poimen starts it detached when nothing answers and never stops it. Closing poimen, or closing a tab, only closes the view; the terminal and its agent keep running. The protocol is in [docs/protocol.md](docs/protocol.md), the setting is `backend` (see "Settings").
+- **Windows.** The Windows x64 installers run the same backend: `poimen-server.exe` listens on a named pipe instead of a Unix socket, terminals run through ConPTY (`pwsh`, else Windows PowerShell, else `cmd.exe` by default), and its state lives in `%LOCALAPPDATA%\poimen-server`. The hooks run through PowerShell there. Windows support is new and covered by CI (`windows-latest`); a hands-on check of a released build follows in [#417](https://github.com/GravionLabs/poimen/issues/417). Start poimen normally, not as administrator. Known limitations are in the [installation guide](https://gravionlabs.github.io/poimen/guide/installation#windows-x64).
 - **Agent status needs hooks.** Claude Code and GitHub Copilot CLI report working, blocked and done through hooks (`Stop` / `agentStop` report done, which stays until the next prompt; `SessionStart` reports idle) that call `poimen-server hook`. On the first start with the poimen backend, poimen offers to install them when they are missing (an *Install hooks* button runs `poimen-server integration install` for the agents without them; *Not now* is remembered in the UI state). You can do it by hand any time: `poimen-server integration install|uninstall|status claude|copilot [--settings <path>]`.
 
 ### The herdr backend
@@ -102,7 +103,7 @@ pnpm tauri dev
 | Live smoke tests (read-only, need a running herdr) | `cd src-tauri && cargo test -- --ignored` |
 | Lint | `cd src-tauri && cargo clippy --all-targets -- -D warnings` |
 
-CI (`.github/workflows/ci.yml`, built on GravionLabs/ci) runs the frontend checks and `cargo fmt`, `clippy` and `test` of `src-tauri` on every pull request; its gate job `ci` and the `pr-checks / PR checks` job are the required checks. The Rust toolchain is pinned in `rust-toolchain.toml`, Node.js in `.nvmrc`.
+CI (`.github/workflows/ci.yml`, built on GravionLabs/ci) runs the frontend checks and `cargo fmt`, `clippy` and `test` of `src-tauri` on every pull request, and on `windows-latest` the tests of the server crates and `clippy` of the app crate; its gate job `ci` and the `pr-checks / PR checks` job are the required checks. The Rust toolchain is pinned in `rust-toolchain.toml`, Node.js in `.nvmrc`.
 
 ### Editors
 

@@ -1,6 +1,9 @@
 //! `terminal.attach` end to end: snapshot, stream, roles, backpressure.
-#![cfg(unix)]
+//!
+//! Most tests drive POSIX shell scripts (`sh -c`, `printf`, `stty`, `head`) and are Unix-only on
+//! purpose; Windows runs the platform-free ones, `terminal.detach` and a `cmd.exe` smoke test.
 
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
@@ -9,6 +12,7 @@ use std::time::{Duration, Instant};
 use poimen_client::protocol::{
     AttachMode, DetachReason, ErrorCode, Event, SetColors, TerminalCreate, decode_bytes,
 };
+use poimen_client::transport::{self, Conn};
 use poimen_client::{Attachment, Client, ClientError};
 use poimen_server::{Config, Server};
 
@@ -34,6 +38,7 @@ impl Drop for Env {
 struct Fixture {
     _env: Env,
     client: Client,
+    socket: PathBuf,
     space: String,
 }
 
@@ -55,26 +60,44 @@ fn fixture(name: &str) -> Fixture {
     Fixture {
         _env: env,
         client,
+        socket: config.socket,
         space,
     }
 }
 
 impl Fixture {
-    /// A terminal running `script` with `sh -c`.
-    fn run(&self, script: &str) -> String {
+    fn create(&self, argv: &[&str]) -> String {
         self.client
             .create_terminal(&TerminalCreate {
                 space_id: self.space.clone(),
-                command: Some(vec!["sh".into(), "-c".into(), script.into()]),
+                command: Some(argv.iter().map(|a| (*a).to_string()).collect()),
                 ..Default::default()
             })
             .unwrap()
             .id
     }
 
+    /// A terminal running `script` with `sh -c`.
+    #[cfg(unix)]
+    fn run(&self, script: &str) -> String {
+        self.create(&["sh", "-c", script])
+    }
+
+    /// A terminal that prints nothing and runs for 30 s.
+    fn idle(&self) -> String {
+        if cfg!(windows) {
+            self.create(&["cmd.exe", "/d", "/c", "ping -n 30 127.0.0.1 >nul"])
+        } else {
+            self.create(&["sh", "-c", "sleep 30"])
+        }
+    }
+
+    /// Attaches; the reads time out after 20 s where the transport has timeouts (not Windows).
     fn attach(&self, id: &str, mode: AttachMode) -> Attachment {
         let a = self.client.attach(id, mode, false).unwrap();
-        a.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        if transport::TIMEOUTS_SUPPORTED {
+            a.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        }
         a
     }
 
@@ -143,6 +166,7 @@ fn wait_for_snapshot(f: &Fixture, id: &str, needle: &str) {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn output_written_before_attach_is_in_the_snapshot() {
     let f = fixture("before");
@@ -153,6 +177,7 @@ fn output_written_before_attach_is_in_the_snapshot() {
     assert_eq!((a.info.cols, a.info.rows), (80, 24));
 }
 
+#[cfg(unix)]
 #[test]
 fn snapshot_plus_stream_cover_every_line_exactly_once() {
     let f = fixture("cover");
@@ -191,6 +216,7 @@ fn snapshot_plus_stream_cover_every_line_exactly_once() {
     assert_eq!(*numbers.last().unwrap(), 399);
 }
 
+#[cfg(unix)]
 #[test]
 fn the_snapshot_carries_the_terminal_modes() {
     let f = fixture("modes");
@@ -207,6 +233,7 @@ fn the_snapshot_carries_the_terminal_modes() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn only_the_controller_sends_input_and_sets_the_size() {
     let f = fixture("roles");
@@ -262,12 +289,13 @@ fn only_the_controller_sends_input_and_sets_the_size() {
 #[test]
 fn without_a_controller_a_short_lived_connection_may_resize() {
     let f = fixture("noctl");
-    let id = f.run("sleep 30");
+    let id = f.idle();
     f.client.resize(&id, 90, 20).unwrap();
     let a = f.attach(&id, AttachMode::Observe);
     assert_eq!((a.info.cols, a.info.rows), (90, 20));
 }
 
+#[cfg(unix)]
 #[test]
 fn taking_over_the_control_is_explicit_and_reported() {
     let f = fixture("takeover");
@@ -316,6 +344,7 @@ fn taking_over_the_control_is_explicit_and_reported() {
     assert!(f.client.attach(&id, AttachMode::Control, false).is_ok());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_observer_that_does_not_read_is_dropped_while_the_controller_keeps_receiving() {
     let f = fixture("slow");
@@ -365,6 +394,7 @@ fn an_observer_that_does_not_read_is_dropped_while_the_controller_keeps_receivin
     controller.input("\n").unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn exit_and_detach_are_distinct_records() {
     let f = fixture("exit");
@@ -404,7 +434,7 @@ fn exit_and_detach_are_distinct_records() {
 #[test]
 fn closing_a_terminal_detaches_its_clients() {
     let f = fixture("close");
-    let id = f.run("sleep 30");
+    let id = f.idle();
     let mut a = f.attach(&id, AttachMode::Observe);
     f.client.close_terminal(&id).unwrap();
     let mut out = Vec::new();
@@ -418,6 +448,116 @@ fn closing_a_terminal_detaches_its_clients() {
             reason: DetachReason::Closed
         }
     );
+}
+
+/// A raw connection: lines are written as they are, read on a helper thread so a test never
+/// hangs (named pipes have no read timeout).
+struct Raw {
+    conn: Conn,
+    lines: Receiver<Option<String>>,
+}
+
+impl Raw {
+    fn connect(socket: &std::path::Path) -> Self {
+        let conn = Conn::connect(socket).unwrap();
+        let reader = conn.clone();
+        let (tx, lines) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(reader).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(Some(line)).is_err() {
+                    return;
+                }
+            }
+            let _ = tx.send(None);
+        });
+        Self { conn, lines }
+    }
+
+    fn send(&self, line: &str) {
+        let mut w = &self.conn;
+        writeln!(w, "{line}").unwrap();
+    }
+
+    /// The next line with this response id (stream records are skipped); `None` when the
+    /// connection ended first.
+    fn response(&self, id: &str) -> Option<serde_json::Value> {
+        loop {
+            let line = self
+                .lines
+                .recv_timeout(Duration::from_secs(10))
+                .expect("no line within 10 s")?;
+            let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if value["id"] == id {
+                return Some(value);
+            }
+        }
+    }
+
+    /// Whether the server ends the connection within 10 s.
+    fn ends(&self) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while let Ok(line) = self
+            .lines
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            if line.is_none() {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+#[test]
+fn terminal_detach_answers_and_then_ends_the_connection() {
+    let f = fixture("detach");
+    let id = f.idle();
+    let events = f.events();
+    let raw = Raw::connect(&f.socket);
+    raw.send(&format!(
+        r#"{{"id":"a","method":"terminal.attach","params":{{"terminal_id":"{id}","mode":"control"}}}}"#
+    ));
+    assert_eq!(raw.response("a").unwrap()["result"]["mode"], "control");
+    wait_for_event(&events, |e| {
+        matches!(e, Event::TerminalControllerAttached { .. })
+    });
+
+    // Another terminal's id is refused and the attachment stays.
+    raw.send(r#"{"id":"w","method":"terminal.detach","params":{"terminal_id":"t999"}}"#);
+    assert_eq!(
+        raw.response("w").unwrap()["error"]["code"],
+        "invalid_request"
+    );
+
+    raw.send(&format!(
+        r#"{{"id":"d","method":"terminal.detach","params":{{"terminal_id":"{id}"}}}}"#
+    ));
+    assert_eq!(
+        raw.response("d").unwrap()["result"],
+        serde_json::json!({"detached": true})
+    );
+    assert!(raw.ends(), "the server did not close the connection");
+    assert_eq!(
+        wait_for_event(&events, |e| matches!(
+            e,
+            Event::TerminalControllerDetached { .. }
+        )),
+        Event::TerminalControllerDetached { terminal_id: id }
+    );
+}
+
+#[test]
+fn terminal_detach_needs_an_attached_connection() {
+    let f = fixture("detach-plain");
+    let raw = Raw::connect(&f.socket);
+    raw.send(r#"{"id":"d","method":"terminal.detach","params":{"terminal_id":"t1"}}"#);
+    assert_eq!(
+        raw.response("d").unwrap()["error"]["code"],
+        "invalid_request"
+    );
+    raw.send(r#"{"id":"p","method":"ping"}"#);
+    assert!(raw.response("p").unwrap()["result"]["pid"].is_number());
 }
 
 #[test]
@@ -441,6 +581,7 @@ fn attach_errors() {
 }
 
 /// Waits for `file` in the work directory to have the given content.
+#[cfg(unix)]
 fn wait_for_file(f: &Fixture, name: &str, expected: &str) {
     let path = f._env.dir.join("work").join(name);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -458,6 +599,7 @@ fn wait_for_file(f: &Fixture, name: &str, expected: &str) {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_program_without_an_app_gets_answers_to_its_terminal_queries() {
     let f = fixture("queries");
@@ -500,4 +642,27 @@ fn set_colors_rejects_a_bad_color_or_palette() {
         }
     }
     set("#000000", Some(vec!["#010203".into(); 16])).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn a_cmd_terminal_streams_takes_input_and_detaches_on_close() {
+    let f = fixture("cmd");
+    let id = f.create(&["cmd.exe", "/d", "/k", "echo marker-before"]);
+    wait_for_snapshot(&f, &id, "marker-before");
+    let mut a = f.attach(&id, AttachMode::Control);
+    let mut writer = a.writer().unwrap();
+    // Named pipes have no read timeout: the reader runs on a thread, the test waits with one.
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut out = Vec::new();
+        read_until(&mut a, &mut out, |_, out| contains(out, "111105"));
+        tx.send("output").unwrap();
+        while a.next_record().is_ok() {}
+        tx.send("ended").unwrap();
+    });
+    writer.input("set /a 12345*9\r").unwrap();
+    assert_eq!(rx.recv_timeout(Duration::from_secs(20)), Ok("output"));
+    writer.close();
+    assert_eq!(rx.recv_timeout(Duration::from_secs(10)), Ok("ended"));
 }

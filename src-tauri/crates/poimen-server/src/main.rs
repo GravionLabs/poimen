@@ -55,7 +55,7 @@ fn integration(args: &[String]) -> ExitCode {
     };
     let path = match args.get(2).map(String::as_str) {
         Some("--settings") => args.get(3).map(PathBuf::from),
-        None => std::env::var_os("HOME").map(|h| default(&PathBuf::from(h))),
+        None => std::env::home_dir().map(|h| default(&h)),
         _ => None,
     };
     let Some(path) = path else {

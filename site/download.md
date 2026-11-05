@@ -6,6 +6,6 @@ The latest release of poimen, for 64-bit systems. The buttons resolve the instal
 
 - Linux x64: `.AppImage` (runs anywhere), `.deb` (Debian, Ubuntu) and `.rpm` (Fedora, openSUSE).
 - macOS: Apple Silicon (arm64) `.dmg`. There is no Intel build.
-- Windows x64: `.exe` setup and `.msi`.
+- Windows x64: `.exe` setup and `.msi`. The terminal server runs natively (named pipe, ConPTY); Windows support is new, see the [known limitations](/guide/installation#windows-x64).
 
 No other tool is needed: the installers bundle `poimen-server`. ([herdr](https://herdr.dev) 0.9.5 or newer is only needed for the alternative `herdr` backend.) The installers are **not code-signed** yet ([#45](https://github.com/GravionLabs/poimen/issues/45)), so macOS and Windows warn on the first start. [How to open the app](/guide/installation).

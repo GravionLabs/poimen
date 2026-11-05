@@ -27,8 +27,9 @@ use emulator::Colors;
 use poimen_protocol::{
     self as proto, AgentInfo, AgentStatus, AttachMode, DetachReason, ErrorCode, Event,
     PROTOCOL_VERSION, PingResult, Request, Response, SetColors, Space, SpaceClose, SpaceCreate,
-    SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalInput,
-    TerminalList, TerminalRename, TerminalReportAgent, TerminalResize, TerminalStatus,
+    SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalDetach,
+    TerminalInput, TerminalList, TerminalRename, TerminalReportAgent, TerminalResize,
+    TerminalStatus,
 };
 use serde_json::{Value, json};
 
@@ -341,6 +342,19 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
             }
             continue;
         }
+        if request.method == "terminal.detach" {
+            let response = match detach(&request, attachment.as_ref()) {
+                Ok(()) => Response::ok(&request.id, json!({ "detached": true })),
+                Err((code, message)) => Response::err(Some(&request.id), code, message),
+            };
+            let detached = response.error.is_none();
+            // After the answer every handle of the connection is dropped, which closes it; the
+            // caller then detaches (named pipes have no shutdown to wake the client's reader).
+            if out.send(&response).is_err() || detached {
+                return;
+            }
+            continue;
+        }
         let response = match dispatch(shared, &request, attachment.as_ref()) {
             Ok(result) => Response::ok(&request.id, result),
             Err((code, message)) => Response::err(Some(&request.id), code, message),
@@ -348,6 +362,18 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
         if out.send(&response).is_err() {
             return;
         }
+    }
+}
+
+/// `terminal.detach`: allowed on a connection attached to that terminal.
+fn detach(request: &Request, attachment: Option<&Attachment>) -> Result<(), (ErrorCode, String)> {
+    let p: TerminalDetach = parsed(request)?;
+    match attachment {
+        Some(a) if a.terminal_id == p.terminal_id => Ok(()),
+        _ => Err((
+            ErrorCode::InvalidRequest,
+            format!("this connection is not attached to {}", p.terminal_id),
+        )),
     }
 }
 

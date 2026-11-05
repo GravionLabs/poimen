@@ -53,7 +53,8 @@ impl Pty {
             .map_err(|e| e.to_string())
     }
 
-    /// Ends the child (SIGHUP); the master closes when the `Pty` is dropped.
+    /// Ends the child (SIGHUP on Unix, TerminateProcess on Windows); the master closes when the
+    /// `Pty` is dropped.
     pub fn kill(mut self) {
         let _ = self.killer.kill();
     }
@@ -68,21 +69,61 @@ fn size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
-/// `$SHELL`, else `/bin/sh`.
+/// Unix: `$SHELL`, else `/bin/sh`. Windows: `pwsh.exe` on `PATH`, else `powershell.exe` on
+/// `PATH`, else `%COMSPEC%`, else `cmd.exe`.
 pub(crate) fn default_shell() -> String {
-    std::env::var("SHELL")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/bin/sh".into())
+    if cfg!(windows) {
+        let dirs = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+            .unwrap_or_default();
+        windows_shell(&dirs, std::env::var("COMSPEC").ok(), |p| p.is_file())
+    } else {
+        std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "/bin/sh".into())
+    }
 }
 
-/// The file name of a program path, for the default terminal name.
+/// The Windows [`default_shell`]: the full path of the first PowerShell found in `dirs`.
+pub(crate) fn windows_shell(
+    dirs: &[std::path::PathBuf],
+    comspec: Option<String>,
+    is_file: impl Fn(&Path) -> bool,
+) -> String {
+    ["pwsh.exe", "powershell.exe"]
+        .iter()
+        .find_map(|name| {
+            dirs.iter()
+                .filter(|d| !d.as_os_str().is_empty())
+                .map(|d| d.join(name))
+                .find(|p| is_file(p))
+        })
+        .map(|p| p.to_string_lossy().into_owned())
+        .or_else(|| comspec.filter(|c| !c.is_empty()))
+        .unwrap_or_else(|| "cmd.exe".into())
+}
+
+/// The file name of a program path, for the default terminal name (on Windows without `.exe`).
 pub(crate) fn program_name(program: &str) -> String {
-    Path::new(program)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(program)
-        .to_string()
+    program_name_for(program, cfg!(windows))
+}
+
+pub(crate) fn program_name_for(program: &str, windows: bool) -> String {
+    if !windows {
+        return Path::new(program)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(program)
+            .to_string();
+    }
+    let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    match name.len().checked_sub(4) {
+        Some(i) if i > 0 && name.is_char_boundary(i) && name[i..].eq_ignore_ascii_case(".exe") => {
+            name[..i].to_string()
+        }
+        _ => name.to_string(),
+    }
 }
 
 /// Output is passed on in batches: what arrives within this time, up to [`MAX_BATCH`] bytes.
@@ -177,10 +218,49 @@ pub(crate) fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn program_name_is_the_file_name() {
         assert_eq!(program_name("/usr/bin/zsh"), "zsh");
         assert_eq!(program_name("sh"), "sh");
+        assert_eq!(program_name_for("/opt/x.exe", false), "x.exe");
+    }
+
+    #[test]
+    fn a_windows_program_name_drops_the_directory_and_exe() {
+        assert_eq!(
+            program_name_for(r"C:\Program Files\PowerShell\7\pwsh.exe", true),
+            "pwsh"
+        );
+        assert_eq!(program_name_for("CMD.EXE", true), "CMD");
+        assert_eq!(program_name_for("tool", true), "tool");
+        assert_eq!(program_name_for(".exe", true), ".exe");
+    }
+
+    #[test]
+    fn the_windows_shell_prefers_pwsh_then_powershell_then_comspec() {
+        let dirs = [PathBuf::new(), PathBuf::from("win"), PathBuf::from("ps7")];
+        let ps7 = PathBuf::from("ps7").join("pwsh.exe");
+        let win = PathBuf::from("win").join("powershell.exe");
+        let found = |files: Vec<PathBuf>| move |p: &Path| files.iter().any(|f| f == p);
+        let comspec = || Some(r"C:\Windows\cmd.exe".to_string());
+        assert_eq!(
+            windows_shell(&dirs, comspec(), found(vec![win.clone(), ps7.clone()])),
+            ps7.to_string_lossy()
+        );
+        assert_eq!(
+            windows_shell(&dirs, comspec(), found(vec![win.clone()])),
+            win.to_string_lossy()
+        );
+        assert_eq!(
+            windows_shell(&dirs, comspec(), found(vec![])),
+            r"C:\Windows\cmd.exe"
+        );
+        assert_eq!(
+            windows_shell(&dirs, Some(String::new()), found(vec![])),
+            "cmd.exe"
+        );
+        assert_eq!(windows_shell(&[], None, found(vec![])), "cmd.exe");
     }
 }

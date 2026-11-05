@@ -1,6 +1,6 @@
 //! Wire types of the `poimen-server` socket API, documented in `docs/protocol.md`.
 //!
-//! NDJSON over a Unix socket: one JSON object per line. A client sends [`Request`]s and reads one
+//! NDJSON over a local socket (a Unix socket, a named pipe on Windows): one JSON object per line. A client sends [`Request`]s and reads one
 //! [`Response`] per request; after `events.subscribe` the connection also carries [`Event`]s. The
 //! crate has no I/O and no dependency on the app, so any client (the app, a CLI) can use it.
 
@@ -18,15 +18,60 @@ pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
 /// Environment variable set in every terminal: its own id.
 pub const ENV_TERMINAL_ID: &str = "POIMEN_TERMINAL_ID";
 
-/// The socket path: `$POIMEN_SOCKET`, else `$XDG_RUNTIME_DIR/poimen/server.sock`, else
-/// `<temp dir>/poimen-<user>/server.sock`. One server per user listens there.
+/// The directory under `%LOCALAPPDATA%` that holds the socket marker, `server.lock`,
+/// `server.json` and the started server copies on Windows (not the install directory).
+pub const WINDOWS_DIR: &str = "poimen-server";
+
+/// The socket path. Unix: `$POIMEN_SOCKET`, else `$XDG_RUNTIME_DIR/poimen/server.sock`, else
+/// `<temp dir>/poimen-<user>/server.sock`. Windows: `$POIMEN_SOCKET`, else
+/// `%LOCALAPPDATA%\poimen-server\server.sock` (a marker file; the server listens on the named
+/// pipe of that path), else `<temp dir>\poimen-<user>\server.sock`. One server per user.
 pub fn socket_path() -> PathBuf {
-    socket_path_from(
-        std::env::var_os(ENV_SOCKET),
-        std::env::var_os("XDG_RUNTIME_DIR"),
-        std::env::var("USER").ok(),
-        std::env::temp_dir(),
-    )
+    if cfg!(windows) {
+        windows_socket_path_from(
+            std::env::var_os(ENV_SOCKET),
+            std::env::var_os("LOCALAPPDATA"),
+            std::env::var("USERNAME").ok(),
+            std::env::temp_dir(),
+        )
+    } else {
+        socket_path_from(
+            std::env::var_os(ENV_SOCKET),
+            std::env::var_os("XDG_RUNTIME_DIR"),
+            std::env::var("USER").ok(),
+            std::env::temp_dir(),
+        )
+    }
+}
+
+/// The Windows [`socket_path`] with the environment passed in; empty values count as unset.
+pub fn windows_socket_path_from(
+    socket: Option<std::ffi::OsString>,
+    local_app_data: Option<std::ffi::OsString>,
+    user: Option<String>,
+    temp_dir: PathBuf,
+) -> PathBuf {
+    if let Some(socket) = socket.filter(|s| !s.is_empty()) {
+        return PathBuf::from(socket);
+    }
+    if let Some(dir) = windows_dir_from(local_app_data) {
+        return dir.join("server.sock");
+    }
+    temp_dir.join(user_dir_name(user)).join("server.sock")
+}
+
+/// `%LOCALAPPDATA%\poimen-server` when `LOCALAPPDATA` is set and not empty.
+pub fn windows_dir_from(local_app_data: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    local_app_data
+        .filter(|s| !s.is_empty())
+        .map(|dir| PathBuf::from(dir).join(WINDOWS_DIR))
+}
+
+fn user_dir_name(user: Option<String>) -> String {
+    let user = user
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| "user".into());
+    format!("poimen-{user}")
 }
 
 /// [`socket_path`] with the environment passed in; empty values count as unset.
@@ -42,10 +87,7 @@ pub fn socket_path_from(
     if let Some(dir) = runtime_dir.filter(|s| !s.is_empty()) {
         return PathBuf::from(dir).join("poimen").join("server.sock");
     }
-    let user = user
-        .filter(|u| !u.is_empty())
-        .unwrap_or_else(|| "user".into());
-    temp_dir.join(format!("poimen-{user}")).join("server.sock")
+    temp_dir.join(user_dir_name(user)).join("server.sock")
 }
 
 /// The effective user id of this process, read as the owner of a file created now (std has no
@@ -360,6 +402,14 @@ pub struct TerminalClose {
     pub terminal_id: String,
 }
 
+/// `terminal.detach`: ends the attachment of this connection to `terminal_id`; the server
+/// answers `{"detached": true}` and then closes the connection. For clients that cannot shut
+/// a connection down themselves (named pipes on Windows).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalDetach {
+    pub terminal_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalInput {
     pub terminal_id: String,
@@ -602,6 +652,9 @@ mod tests {
             serde_json::from_value::<TerminalAttach>(json!({"terminal_id":"t1","mode":"x"}))
                 .is_err()
         );
+        let d: TerminalDetach = serde_json::from_value(json!({"terminal_id":"t1"})).unwrap();
+        assert_eq!(d.terminal_id, "t1");
+        assert!(serde_json::from_value::<TerminalDetach>(json!({})).is_err());
 
         let e = Event::TerminalDetached {
             terminal_id: "t1".into(),
@@ -672,6 +725,48 @@ mod tests {
             socket_path_from(None, None, Some("jk".into()), tmp),
             PathBuf::from("/tmp/poimen-jk/server.sock")
         );
+    }
+
+    #[test]
+    fn windows_socket_path_precedence() {
+        let tmp = PathBuf::from(r"C:\Temp");
+        let local = PathBuf::from(r"C:\Users\u\AppData\Local");
+        assert_eq!(
+            windows_socket_path_from(
+                Some(r"D:\x.sock".into()),
+                Some(local.clone().into()),
+                None,
+                tmp.clone()
+            ),
+            PathBuf::from(r"D:\x.sock")
+        );
+        assert_eq!(
+            windows_socket_path_from(
+                Some("".into()),
+                Some(local.clone().into()),
+                None,
+                tmp.clone()
+            ),
+            local.join("poimen-server").join("server.sock")
+        );
+        assert_eq!(
+            windows_socket_path_from(None, Some("".into()), Some("jk".into()), tmp.clone()),
+            tmp.join("poimen-jk").join("server.sock")
+        );
+        assert_eq!(
+            windows_socket_path_from(None, None, None, tmp.clone()),
+            tmp.join("poimen-user").join("server.sock")
+        );
+    }
+
+    #[test]
+    fn the_windows_dir_needs_local_app_data() {
+        assert_eq!(
+            windows_dir_from(Some(r"C:\L".into())),
+            Some(PathBuf::from(r"C:\L").join("poimen-server"))
+        );
+        assert_eq!(windows_dir_from(Some("".into())), None);
+        assert_eq!(windows_dir_from(None), None);
     }
 }
 

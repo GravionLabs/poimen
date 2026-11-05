@@ -92,12 +92,44 @@ jobs:
           working-directory: src-tauri
           tauri-linux-deps: "true"
 
-  # The one check to require: green when frontend and rust passed or were skipped because no app files changed;
+  # The poimen backend on Windows: the server crates are tested on windows-latest (named pipes, ConPTY, cmd.exe),
+  # the app crate is linted for the Windows target (its tests have Unix-only parts and run in `rust`).
+  windows:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    name: windows (server crates test, app clippy)
+    runs-on: windows-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+      # The Tauri macros read the built frontend (frontendDist in tauri.conf.json).
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # fmt is platform-independent and checked in `rust`.
+      - uses: GravionLabs/ci/rust/ci@v1
+        with:
+          working-directory: src-tauri
+          packages: "poimen-protocol poimen-client poimen-server"
+          run-fmt: "false"
+      - name: App crate (clippy)
+        shell: bash
+        working-directory: src-tauri
+        run: cargo clippy -p poimen --locked -- -D warnings
+
+  # The one check to require: green when frontend, rust and windows passed or were skipped because no app files changed;
   # red when any of them (or `changes`) failed or was cancelled.
   ci:
     name: ci
     if: always()
-    needs: [changes, frontend, rust]
+    needs: [changes, frontend, rust, windows]
     runs-on: ubuntu-24.04
     steps:
       - env:

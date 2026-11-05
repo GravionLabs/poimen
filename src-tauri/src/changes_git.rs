@@ -484,6 +484,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // the hook is a shell script
     fn a_slow_push_is_stopped_at_the_timeout() {
         let f = Fixture::new();
         let hook = f.base.join("origin.git/hooks/pre-receive");

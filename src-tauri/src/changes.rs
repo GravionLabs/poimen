@@ -146,7 +146,6 @@ pub fn parse_numstat(out: &[u8]) -> HashMap<String, (u32, u32, bool)> {
 /// A file of the working tree, read without following symlinks (a link yields its target
 /// path) and only up to `MAX_CONTENT` bytes: `Err(())` means too large, `Ok(None)` unreadable.
 fn read_worktree_file(root: &str, path: &str) -> Result<Option<Vec<u8>>, ()> {
-    use std::os::unix::ffi::OsStringExt;
     let full = Path::new(root).join(path);
     let Ok(meta) = std::fs::symlink_metadata(&full) else {
         return Ok(None);
@@ -154,7 +153,7 @@ fn read_worktree_file(root: &str, path: &str) -> Result<Option<Vec<u8>>, ()> {
     if meta.file_type().is_symlink() {
         return Ok(std::fs::read_link(&full)
             .ok()
-            .map(|t| t.into_os_string().into_vec()));
+            .map(|t| t.into_os_string().into_encoded_bytes()));
     }
     if !meta.is_file() {
         return Ok(None);
@@ -756,6 +755,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // symlinks need privileges on Windows
     fn symlinks_are_not_followed() {
         let f = Fixture::new(true);
         let secret = f.base.join("secret.txt");
@@ -791,6 +791,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // symlinks need privileges on Windows
     fn comments_file_refuses_symlinked_directories() {
         let fx = Fixture::new(false);
         let outside = fx.base.join("outside");
@@ -955,6 +956,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // symlinks need privileges on Windows
     fn findings_file_refuses_symlinks_and_large_files() {
         let f = Fixture::new(false);
         let state = f.app.join(".agents/state");
