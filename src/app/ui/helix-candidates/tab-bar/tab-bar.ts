@@ -2,10 +2,18 @@ import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
+  ContentChild,
+  DestroyRef,
+  ElementRef,
+  EventEmitter,
+  Injector,
+  Input,
+  OnChanges,
+  Output,
   TemplateRef,
-  contentChild,
-  input,
-  output,
+  ViewChild,
+  afterNextRender,
+  inject,
   signal,
 } from "@angular/core";
 
@@ -66,24 +74,98 @@ export function arrowTarget(key: string, index: number, count: number): number |
   styleUrl: "./tab-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class TabBar {
-  readonly tabs = input.required<readonly TabBarItem[]>();
-  readonly activeId = input<string | null>(null);
-  readonly selected = output<string>();
-  readonly closed = output<string>();
+export class TabBar implements OnChanges {
+  @Input({ required: true }) tabs: readonly TabBarItem[] = [];
+  @Input() activeId: string | null = null;
+  @Output() readonly selected = new EventEmitter<string>();
+  @Output() readonly closed = new EventEmitter<string>();
   /** Double click on a tab. */
-  readonly pinned = output<string>();
-  readonly moved = output<{ from: number; to: number }>();
+  @Output() readonly pinned = new EventEmitter<string>();
+  @Output() readonly moved = new EventEmitter<{ from: number; to: number }>();
   /** Identifies this bar when a tab is dragged between bars. */
-  readonly groupId = input("");
+  @Input() groupId = "";
   /** A tab dragged from another bar was dropped here, at `index`. */
-  readonly received = output<{ from: string; id: string; index: number }>();
+  @Output() readonly received = new EventEmitter<{ from: string; id: string; index: number }>();
   /** Entries of the context menu; none disables it. */
-  readonly menu = input<readonly TabBarMenuItem[]>([]);
-  readonly menuAction = output<{ id: string; action: string }>();
+  @Input() menu: readonly TabBarMenuItem[] = [];
+  @Output() readonly menuAction = new EventEmitter<{ id: string; action: string }>();
 
   /** Optional template for the content of a tab (`let-tab`), rendered after the label. */
-  readonly tabContent = contentChild<TemplateRef<{ $implicit: TabBarItem }>>("tabContent");
+  @ContentChild("tabContent") tabContent?: TemplateRef<{ $implicit: TabBarItem }>;
+  @ViewChild("strip") private readonly strip?: ElementRef<HTMLElement>;
+
+  private readonly injector = inject(Injector);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  /** Whether the tabs are wider than the strip: scroll buttons and the all-tabs button show. */
+  protected readonly overflowing = signal(false);
+  /** Whether the all-tabs menu is open, with its anchor. */
+  protected readonly allAt = signal<{ right: number; y: number } | null>(null);
+
+  constructor() {
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      this.measure();
+      if (typeof ResizeObserver === "undefined") return;
+      const observer = new ResizeObserver(() => this.measure());
+      observer.observe(this.host.nativeElement);
+      destroyRef.onDestroy(() => observer.disconnect());
+    });
+  }
+
+  ngOnChanges(): void {
+    // After the new tabs are rendered: re-measure and bring the active tab into view.
+    afterNextRender(
+      () => {
+        this.measure();
+        this.revealActive();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /** Re-reads whether the strip overflows (resize, tab add/remove, scroll). */
+  protected measure(): void {
+    const el = this.strip?.nativeElement;
+    if (el) this.overflowing.set(el.scrollWidth > el.clientWidth + 1);
+  }
+
+  /** Scrolls the strip by 60% of its width in `direction` (-1 left, 1 right). */
+  protected scrollBy(direction: -1 | 1): void {
+    const el = this.strip?.nativeElement;
+    el?.scrollBy?.({ left: direction * el.clientWidth * 0.6, behavior: "smooth" });
+  }
+
+  /** The vertical wheel scrolls the strip sideways while it overflows. */
+  protected wheel(event: WheelEvent): void {
+    const el = this.strip?.nativeElement;
+    if (!el || !this.overflowing() || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    event.preventDefault();
+    el.scrollLeft += event.deltaY;
+  }
+
+  /** Scrolls the active tab into view. */
+  private revealActive(): void {
+    const el = this.strip?.nativeElement;
+    if (!el || this.activeId === null) return;
+    const index = this.tabs.findIndex((tab) => tab.id === this.activeId);
+    const tab = el.querySelectorAll<HTMLElement>('[role="tab"]')[index];
+    tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }
+
+  protected openAll(event: MouseEvent): void {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.allAt.set({ right: window.innerWidth - rect.right, y: rect.bottom });
+  }
+
+  protected closeAll(): void {
+    this.allAt.set(null);
+  }
+
+  protected chooseTab(id: string): void {
+    this.closeAll();
+    this.selected.emit(id);
+  }
 
   protected readonly dragging = signal<number | null>(null);
   protected readonly dropAt = signal<number | null>(null);
@@ -91,20 +173,20 @@ export class TabBar {
   protected readonly foreignAt = signal<number | null>(null);
   /** The entries offered for the tab `id`. */
   protected menuItems(id: string): readonly TabBarMenuItem[] {
-    return itemsForTab(this.menu(), id);
+    return itemsForTab(this.menu, id);
   }
 
   protected readonly menuAt = signal<{ id: string; x: number; y: number } | null>(null);
 
   protected dragStart(event: DragEvent, index: number): void {
     this.dragging.set(index);
-    activeDrag = { group: this.groupId(), id: this.tabs()[index].id };
+    activeDrag = { group: this.groupId, id: this.tabs[index].id };
     event.dataTransfer?.setData("text/plain", String(index));
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
   }
 
   private foreign(): boolean {
-    return activeDrag !== null && activeDrag.group !== this.groupId();
+    return activeDrag !== null && activeDrag.group !== this.groupId;
   }
 
   protected dragOver(event: DragEvent, index: number): void {
@@ -123,11 +205,11 @@ export class TabBar {
   protected stripOver(event: DragEvent): void {
     if (!this.foreign()) return;
     event.preventDefault();
-    this.foreignAt.set(this.tabs().length);
+    this.foreignAt.set(this.tabs.length);
   }
 
   protected stripDrop(event: DragEvent): void {
-    this.drop(event, this.tabs().length);
+    this.drop(event, this.tabs.length);
   }
 
   protected drop(event: DragEvent, index: number): void {
@@ -153,7 +235,7 @@ export class TabBar {
   }
 
   protected openMenu(event: MouseEvent, id: string): void {
-    if (this.menu().length === 0) return;
+    if (this.menu.length === 0) return;
     event.preventDefault();
     this.menuAt.set({ id, x: event.clientX, y: event.clientY });
   }
@@ -176,8 +258,11 @@ export class TabBar {
 
   /** Arrow keys move between tabs, Delete closes the focused one. */
   protected key(event: KeyboardEvent, index: number): void {
-    if (event.key === "Escape") this.closeMenu();
-    const tabs = this.tabs();
+    if (event.key === "Escape") {
+      this.closeMenu();
+      this.closeAll();
+    }
+    const tabs = this.tabs;
     const target = arrowTarget(event.key, index, tabs.length);
     if (target !== null) {
       this.selected.emit(tabs[target].id);
