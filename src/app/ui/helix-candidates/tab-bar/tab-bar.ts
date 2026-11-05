@@ -113,12 +113,15 @@ export class TabBar implements OnChanges {
     });
   }
 
+  /** The active id last brought into view; new arrays with the same active tab keep the user's scroll. */
+  private revealed: string | null = null;
+
   ngOnChanges(): void {
-    // After the new tabs are rendered: re-measure and bring the active tab into view.
+    // After the new tabs are rendered: re-measure and bring a newly active tab into view.
     afterNextRender(
       () => {
         this.measure();
-        this.revealActive();
+        if (this.activeId !== this.revealed && this.revealActive()) this.revealed = this.activeId;
       },
       { injector: this.injector },
     );
@@ -141,16 +144,18 @@ export class TabBar implements OnChanges {
     const el = this.strip?.nativeElement;
     if (!el || !this.overflowing() || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
     event.preventDefault();
-    el.scrollLeft += event.deltaY;
+    el.scrollLeft += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
   }
 
   /** Scrolls the active tab into view. */
-  private revealActive(): void {
+  private revealActive(): boolean {
     const el = this.strip?.nativeElement;
-    if (!el || this.activeId === null) return;
+    if (!el || this.activeId === null) return false;
     const index = this.tabs.findIndex((tab) => tab.id === this.activeId);
     const tab = el.querySelectorAll<HTMLElement>('[role="tab"]')[index];
-    tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    if (!tab) return false;
+    tab.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    return true;
   }
 
   protected openAll(event: MouseEvent): void {

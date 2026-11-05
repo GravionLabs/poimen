@@ -63,6 +63,7 @@ const items: TabBarItem[] = [
   template: `<app-tab-bar
     [tabs]="tabs"
     [activeId]="active()"
+    [menu]="menu()"
     (selected)="picked.push($event)"
     (moved)="moves.push($event)"
     (received)="gets.push($event)"
@@ -70,6 +71,7 @@ const items: TabBarItem[] = [
 })
 class Host {
   tabs = items;
+  menu = signal<{ action: string; label: string }[]>([]);
   active = signal<string | null>("a");
   picked: string[] = [];
   moves: { from: number; to: number }[] = [];
@@ -97,6 +99,55 @@ function overflow(strip: HTMLElement, scroll: number, client: number): void {
   Object.defineProperty(strip, "clientWidth", { configurable: true, value: client });
   strip.dispatchEvent(new Event("scroll"));
 }
+
+@Component({
+  selector: "app-host-two",
+  imports: [TabBar],
+  template: `<app-tab-bar
+      class="one"
+      groupId="g1"
+      [tabs]="tabsOne"
+      activeId="a"
+      (moved)="moves.push($event)"
+    /><app-tab-bar
+      class="two"
+      groupId="g2"
+      [tabs]="tabsTwo"
+      activeId="x"
+      (received)="gets.push($event)"
+    />`,
+})
+class HostTwo {
+  tabsOne = items;
+  tabsTwo: TabBarItem[] = [
+    { id: "x", label: "ex" },
+    { id: "y", label: "why" },
+  ];
+  moves: { from: number; to: number }[] = [];
+  gets: { from: string; id: string; index: number }[] = [];
+}
+
+function mountTwo(): { fixture: ComponentFixture<HostTwo>; one: HTMLElement; two: HTMLElement } {
+  TestBed.resetTestingModule();
+  TestBed.overrideComponent(TabBar, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/ui/helix-candidates/tab-bar/tab-bar.html", "utf8"),
+    },
+  });
+  const fixture = TestBed.createComponent(HostTwo);
+  fixture.detectChanges();
+  const root = fixture.nativeElement as HTMLElement;
+  return {
+    fixture,
+    one: root.querySelector("app-tab-bar.one") as HTMLElement,
+    two: root.querySelector("app-tab-bar.two") as HTMLElement,
+  };
+}
+
+const dragEvent = (type: string): DragEvent =>
+  new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
 
 describe("TabBar overflow", () => {
   it("shows no scroll or all-tabs buttons while the tabs fit", () => {
@@ -185,5 +236,59 @@ describe("TabBar overflow", () => {
     rows[0].dispatchEvent(ev("dragstart"));
     rows[2].dispatchEvent(ev("drop"));
     expect(fixture.componentInstance.moves).toEqual([{ from: 0, to: 2 }]);
+  });
+
+  it("does not scroll the active tab again when only the tabs or menu arrays change", () => {
+    const { fixture, root } = mount();
+    const spy = vi.fn();
+    root.querySelectorAll<HTMLElement>('[role="tab"]').forEach((t) => (t.scrollIntoView = spy));
+    fixture.componentInstance.tabs = [...items];
+    fixture.componentInstance.menu.set([{ action: "close", label: "Close" }]);
+    fixture.detectChanges();
+    TestBed.tick();
+    expect(spy).not.toHaveBeenCalled();
+    fixture.componentInstance.active.set("b");
+    fixture.detectChanges();
+    TestBed.tick();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("scrolls wheel lines by 16 px each", () => {
+    const { fixture, strip } = mount();
+    overflow(strip, 900, 300);
+    fixture.detectChanges();
+    strip.dispatchEvent(new WheelEvent("wheel", { deltaY: 2, deltaMode: 1, cancelable: true }));
+    expect(strip.scrollLeft).toBe(32);
+  });
+
+  it("reorders by drag and drop while the strip is scrolled", () => {
+    const { fixture, root, strip } = mount();
+    overflow(strip, 900, 300);
+    strip.scrollLeft = 200;
+    fixture.detectChanges();
+    const rows = root.querySelectorAll<HTMLElement>('[role="tab"]');
+    rows[2].dispatchEvent(dragEvent("dragstart"));
+    rows[0].dispatchEvent(dragEvent("drop"));
+    expect(strip.scrollLeft).toBe(200);
+    expect(fixture.componentInstance.moves).toEqual([{ from: 2, to: 0 }]);
+  });
+
+  it("accepts a tab dropped from another group onto a tab and onto the scrolled strip", () => {
+    const { fixture, one, two } = mountTwo();
+    const strip = two.querySelector(".strip") as HTMLElement;
+    overflow(strip, 900, 300);
+    strip.scrollLeft = 200;
+    fixture.detectChanges();
+    const from = one.querySelectorAll<HTMLElement>('[role="tab"]');
+    const target = two.querySelectorAll<HTMLElement>('[role="tab"]');
+    from[1].dispatchEvent(dragEvent("dragstart"));
+    target[1].dispatchEvent(dragEvent("drop"));
+    from[2].dispatchEvent(dragEvent("dragstart"));
+    strip.dispatchEvent(dragEvent("drop"));
+    expect(fixture.componentInstance.gets).toEqual([
+      { from: "g1", id: "b", index: 1 },
+      { from: "g1", id: "c", index: 2 },
+    ]);
+    expect(fixture.componentInstance.moves).toEqual([]);
   });
 });
