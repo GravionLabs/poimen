@@ -32,7 +32,7 @@ beforeAll(() => {
 });
 
 function file(path: string, status: ChangedFile["status"] = "modified"): ChangedFile {
-  return { path, old_path: null, status, additions: 1, deletions: 0, binary: false };
+  return { path, old_path: null, status, additions: 1, deletions: 0, binary: false, staged: false };
 }
 
 const f = (over: Partial<Finding>): Finding => ({

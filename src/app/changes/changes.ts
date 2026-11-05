@@ -33,6 +33,8 @@ export interface ChangedFile {
   additions: number;
   deletions: number;
   binary: boolean;
+  /** The index holds a change for the file. */
+  staged: boolean;
 }
 
 /** The answer of `changes_list`: `base` is the ref used, `from` the commit the old content comes from. */
@@ -102,8 +104,19 @@ export class Changes {
   readonly content = signal<FileContent | null>(null);
   readonly contentError = signal<string | null>(null);
 
+  readonly commitMessage = signal("");
+  /** A stage, commit or push is running. */
+  readonly busy = signal(false);
+  /** The output or error of the last stage, commit or push. */
+  readonly actionResult = signal<{ ok: boolean; text: string } | null>(null);
+
   readonly files = computed(() => this.list()?.files ?? []);
   readonly totals = computed(() => totals(this.files()));
+  readonly stagedCount = computed(() => this.files().filter((f) => f.staged).length);
+  /** Something is staged, the message is not blank and no action is running. */
+  readonly canCommit = computed(
+    () => !this.busy() && this.stagedCount() > 0 && this.commitMessage().trim() !== "",
+  );
   readonly selectedFile = computed(() => this.files().find((f) => f.path === this.selected()));
 
   private listRun = 0;
@@ -187,6 +200,52 @@ export class Changes {
       this.content.set(null);
       this.contentError.set(String(error));
     }
+  }
+
+  /** Stages or unstages a file (both paths of a rename), then reads the list again. */
+  async setStaged(file: ChangedFile, staged: boolean): Promise<void> {
+    const paths = file.old_path ? [file.old_path, file.path] : [file.path];
+    await this.act(async () => {
+      await this.bridge.invoke("changes_stage", { dir: this.dir(), paths, stage: staged });
+      return null;
+    });
+  }
+
+  /** Commits the staged files with the message; the message is cleared on success. */
+  async commit(): Promise<void> {
+    if (!this.canCommit()) return;
+    await this.act(async () => {
+      const out = await this.bridge.invoke<string>("changes_commit", {
+        dir: this.dir(),
+        message: this.commitMessage(),
+      });
+      this.commitMessage.set("");
+      return out || "Committed.";
+    });
+  }
+
+  /** Pushes the current branch; the output of git (or the refusal) is shown. */
+  async push(): Promise<void> {
+    if (this.busy()) return;
+    await this.act(async () => {
+      const out = await this.bridge.invoke<string>("changes_push", { dir: this.dir() });
+      return out || "Pushed.";
+    });
+  }
+
+  /** Runs a git action, shows its output or error, and reads the list again. */
+  private async act(action: () => Promise<string | null>): Promise<void> {
+    if (!this.dir()) return;
+    this.busy.set(true);
+    try {
+      const text = await action();
+      this.actionResult.set(text === null ? null : { ok: true, text });
+    } catch (error) {
+      this.actionResult.set({ ok: false, text: String(error) });
+    } finally {
+      this.busy.set(false);
+    }
+    await this.refresh();
   }
 
   /** Moves the selection by `delta` files (clamped). */

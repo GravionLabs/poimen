@@ -39,6 +39,8 @@ pub struct ChangedFile {
     pub additions: u32,
     pub deletions: u32,
     pub binary: bool,
+    /// The index holds a change for the file (`git diff --cached`).
+    pub staged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -187,6 +189,7 @@ fn list_in(dir: &str, scope: Scope) -> Result<ChangeList, String> {
                 additions,
                 deletions,
                 binary,
+                staged: false,
             }
         })
         .collect();
@@ -205,7 +208,17 @@ fn list_in(dir: &str, scope: Scope) -> Result<ChangeList, String> {
             status: Status::Untracked,
             deletions: 0,
             binary,
+            staged: false,
         });
+    }
+    let cached = run_bytes(dir, &["diff", "--cached", "--name-only", "-z"]).unwrap_or_default();
+    let staged: std::collections::HashSet<String> = cached
+        .split(|b| *b == 0)
+        .filter(|t| !t.is_empty())
+        .map(text)
+        .collect();
+    for f in &mut files {
+        f.staged = staged.contains(&f.path);
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(ChangeList {
@@ -257,7 +270,7 @@ fn file_in(dir: &str, scope: Scope, path: &str) -> Result<FileContent, String> {
 /// `dir` as in `create_space` (an existing absolute directory) and inside a git repository;
 /// returns the repository's top level, the base of every path and git call here (git prints
 /// root-relative paths for `diff` and cwd-relative ones for `ls-files`).
-fn validate(dir: &str, home: Option<&Path>) -> Result<String, String> {
+pub(crate) fn validate(dir: &str, home: Option<&Path>) -> Result<String, String> {
     let dir = crate::spaces::resolve_dir(dir, home)?;
     crate::git::toplevel(&dir).ok_or_else(|| format!("{dir} is not in a git repository"))
 }
