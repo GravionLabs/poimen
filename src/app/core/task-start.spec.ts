@@ -5,6 +5,7 @@ import { HerdrStore } from "./herdr-store";
 import { SpaceActions } from "./space-actions";
 import { TaskStarter, stepFailure, type TaskPlan } from "./task-start";
 import { TauriBridge } from "./tauri";
+import { UI_STORAGE, UiState } from "./ui-state";
 import { tauri } from "./tauri.mock";
 
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -48,7 +49,15 @@ describe("TaskStarter", () => {
     tauri.answer("create_space", () => ({ workspace_id: "w2", created: true }));
     tauri.answer("task_tab", () => undefined);
     const injector = Injector.create({
-      providers: [TauriBridge, HerdrStore, SpaceActions, TaskPicker, TaskStarter],
+      providers: [
+        TauriBridge,
+        HerdrStore,
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        SpaceActions,
+        TaskPicker,
+        TaskStarter,
+      ],
     });
     starter = injector.get(TaskStarter);
     spaces = injector.get(SpaceActions);
@@ -73,7 +82,7 @@ describe("TaskStarter", () => {
     expect(await starter.run("/work/app", CHOICE)).toBe(true);
     expect(tauri.calls("create_space")).toHaveLength(1);
     expect(tauri.calls("task_tab")).toEqual([]);
-    expect(spaces.warning()).toBeNull();
+    expect(spaces.warning()).toBe(`Opened the existing space "w1".`);
   });
 
   it("a mode without a worktree runs the command in a tab of the repository's space", async () => {
@@ -166,7 +175,15 @@ describe("TaskStarter", () => {
 
   it("does nothing when the picker is cancelled", async () => {
     const injector = Injector.create({
-      providers: [TauriBridge, HerdrStore, SpaceActions, TaskPicker, TaskStarter],
+      providers: [
+        TauriBridge,
+        HerdrStore,
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        SpaceActions,
+        TaskPicker,
+        TaskStarter,
+      ],
     });
     const picker = injector.get(TaskPicker);
     const started = injector.get(TaskStarter).start("/work/app");

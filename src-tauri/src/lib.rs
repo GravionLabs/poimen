@@ -328,7 +328,7 @@ async fn terminal_create(
 }
 
 /// Creates a space for a directory and focuses it; when a space for the directory exists (a pane
-/// inside it, else one labelled with its name) that one is focused.
+/// in it or in an ancestor, else one labelled with its name) that one is focused.
 #[tauri::command]
 async fn create_space(
     backend: State<'_, Shared>,

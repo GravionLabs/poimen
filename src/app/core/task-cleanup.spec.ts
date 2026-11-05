@@ -76,6 +76,7 @@ describe("TaskCleanup", () => {
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
         HerdrStore,
+        UiState,
         SpaceActions,
         TaskLog,
         UiState,
