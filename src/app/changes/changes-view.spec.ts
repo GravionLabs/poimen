@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { signal } from "@angular/core";
+import { signal, type DebugElement } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
+import { By } from "@angular/platform-browser";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { goToNextChunk, goToPreviousChunk } from "@codemirror/merge";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -335,5 +336,149 @@ describe("helpers", () => {
 
   it("exports the editor component", () => {
     expect(DiffEditor).toBeDefined();
+  });
+});
+
+describe("line comments", () => {
+  const original = CONTENT["src/a.ts"];
+  beforeEach(() => {
+    CONTENT["src/a.ts"] = { state: "text", old: "a\nb\nc\nd", new: "a\nB\nC\nd\ne" };
+  });
+  afterEach(() => {
+    CONTENT["src/a.ts"] = original;
+  });
+
+  const editor = (f: { debugElement: DebugElement }) =>
+    f.debugElement.query(By.directive(DiffEditor)).componentInstance as DiffEditor;
+  const box = (f: { nativeElement: HTMLElement }) =>
+    el(f).querySelector<HTMLTextAreaElement>(".cm-comment-draft textarea")!;
+  const panel = (f: { nativeElement: HTMLElement }) => el(f).querySelector("app-comments-panel");
+  const labeled = (f: { nativeElement: HTMLElement }, text: string) =>
+    [...el(f).querySelectorAll("button")].find((b) => b.textContent!.trim() === text)!;
+
+  async function comment(f: Awaited<ReturnType<typeof render>>, text: string, to = 3) {
+    editor(f).lineClicked("new", 2, false);
+    editor(f).lineClicked("new", to, true);
+    f.detectChanges();
+    box(f).value = text;
+    click(labeled(f, "Add comment"));
+    await settle(f);
+    f.detectChanges();
+  }
+
+  it("opens a box on a line number click and extends it to a range with Shift", async () => {
+    const f = await render();
+    editor(f).lineClicked("new", 2, false);
+    expect(box(f).placeholder).toBe("Comment on line 2");
+    editor(f).lineClicked("new", 4, true);
+    expect(box(f).placeholder).toBe("Comment on lines 2-4");
+    editor(f).lineClicked("new", 1, true);
+    expect(box(f).placeholder).toBe("Comment on lines 1-2");
+    editor(f).lineClicked("old", 3, true);
+    expect(el(f).querySelectorAll(".cm-comment-draft")).toHaveLength(1);
+    expect(box(f).placeholder).toBe("Comment on line 3");
+  });
+
+  it("reacts to a click on a line number of the editor", async () => {
+    const f = await render();
+    const numbers = el(f).querySelectorAll(".cm-lineNumbers .cm-gutterElement");
+    expect(numbers.length).toBeGreaterThan(0);
+    // jsdom has no layout: CodeMirror resolves every click to the first line.
+    numbers[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    expect(box(f)?.placeholder).toBe("Comment on line 1");
+  });
+
+  it("collects a comment with the quoted lines and lists it in the panel", async () => {
+    const f = await render();
+    await comment(f, "  Why uppercase?  ");
+    expect(el(f).querySelector(".cm-comment-draft")).toBeNull();
+    expect(el(f).querySelector(".cm-comment-text")!.textContent).toBe("Why uppercase?");
+    expect(panel(f)!.textContent).toContain("src/a.ts:2-3");
+    expect(panel(f)!.textContent).toContain("Why uppercase?");
+    const stored = JSON.parse(storage.data.get(UI_STATE_KEY)!).lineComments["/repo"];
+    expect(stored.pending[0]).toMatchObject({ path: "src/a.ts", quote: "B\nC", start: 2, end: 3 });
+  });
+
+  it("cancels a draft and ignores an empty comment", async () => {
+    const f = await render();
+    editor(f).lineClicked("new", 2, false);
+    f.detectChanges();
+    click(labeled(f, "Add comment"));
+    expect(box(f)).not.toBeNull();
+    click(labeled(f, "Cancel"));
+    expect(box(f)).toBeNull();
+    expect(panel(f)).toBeNull();
+  });
+
+  it("edits and removes a pending comment in the panel", async () => {
+    const f = await render();
+    await comment(f, "first");
+    click(labeled(f, "Edit"));
+    f.detectChanges();
+    const field = panel(f)!.querySelector("textarea")!;
+    field.value = "second";
+    click(labeled(f, "Save"));
+    f.detectChanges();
+    expect(panel(f)!.textContent).toContain("second");
+    click(labeled(f, "Remove"));
+    f.detectChanges();
+    expect(panel(f)).toBeNull();
+  });
+
+  it("disables sending with the reason when no agent runs in the worktree", async () => {
+    const f = await render();
+    await comment(f, "text");
+    const send = labeled(f, "Send to agent") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(send.title).toContain("No agent");
+    expect(panel(f)!.textContent).toContain("No agent");
+  });
+
+  it("sends to the agent of the worktree and moves the comments to sent", async () => {
+    panes.set(new Map([["p1", { ...pane("p1", "/repo", "idle"), agent: "claude" }]]));
+    tauri.answer("agent_prompt", () => ({ kind: "started", status: "working" }));
+    const f = await render();
+    await comment(f, "text");
+    click(labeled(f, "Send to agent"));
+    await settle(f);
+    f.detectChanges();
+    expect(tauri.calls("agent_prompt")).toHaveLength(1);
+    expect(panel(f)!.querySelector(".pending li")).toBeNull();
+    expect(panel(f)!.querySelector(".sent summary")!.textContent).toContain("Sent (1)");
+    expect(el(f).querySelector(".cm-comment-box")).toBeNull();
+  });
+
+  it("shows the error and keeps the comment when the send fails", async () => {
+    panes.set(new Map([["p1", { ...pane("p1", "/repo", "idle"), agent: "claude" }]]));
+    const f = await render();
+    tauri.answer("agent_prompt", () => ({ kind: "failed", message: "no such pane" }));
+    await comment(f, "text");
+    click(labeled(f, "Send to agent"));
+    await settle(f);
+    f.detectChanges();
+    expect(panel(f)!.querySelector("[role=alert]")!.textContent).toContain("no such pane");
+    expect(panel(f)!.querySelectorAll(".pending li")).toHaveLength(1);
+  });
+
+  it("asks which agent when the worktree has several", async () => {
+    panes.set(
+      new Map([
+        ["p1", { ...pane("p1", "/repo", "idle"), agent: "claude" }],
+        ["p2", { ...pane("p2", "/repo", "idle"), agent: "copilot" }],
+      ]),
+    );
+    tauri.answer("agent_prompt", () => ({ kind: "started", status: "working" }));
+    const f = await render();
+    await comment(f, "text");
+    const send = labeled(f, "Send to agent") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    const select = panel(f)!.querySelector("select")!;
+    select.value = "p2";
+    select.dispatchEvent(new Event("change"));
+    f.detectChanges();
+    expect((labeled(f, "Send to agent") as HTMLButtonElement).disabled).toBe(false);
+    click(labeled(f, "Send to agent"));
+    await settle(f);
+    expect(tauri.calls("agent_prompt")[0]).toMatchObject({ target: "p2" });
   });
 });

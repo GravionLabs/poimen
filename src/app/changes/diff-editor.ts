@@ -5,7 +5,9 @@ import {
   ElementRef,
   effect,
   inject,
+  EventEmitter,
   Input,
+  Output,
   signal,
 } from "@angular/core";
 import { HxTheme } from "@gravionlabs/helix-ui";
@@ -14,6 +16,21 @@ import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { diffHighlight, loadLanguage } from "./diff-language";
 import type { DiffJump, DiffLayout } from "./changes";
+import {
+  commentExtension,
+  setComments,
+  setDraft,
+  type DiffComment,
+  type Draft,
+} from "./comment-extension";
+import type { NewComment } from "./line-comments";
+
+type Side = "old" | "new";
+
+/** A pending comment of the open file, as handed to the editor. */
+export interface FileComment extends DiffComment {
+  side: Side;
+}
 
 /**
  * The CodeMirror theme as style rules over poimen's color tokens (`--term-*` on `<html>`, set by
@@ -113,6 +130,13 @@ export class DiffEditor {
   @Input() set layout(value: DiffLayout) {
     this.mode.set(value);
   }
+  private readonly shown = signal<readonly FileComment[]>([]);
+  /** The pending comments of the open file; they show as boxes below their lines. */
+  @Input() set comments(value: readonly FileComment[] | null) {
+    this.shown.set(value ?? []);
+  }
+  /** A comment written in the draft box. */
+  @Output() readonly commentAdded = new EventEmitter<NewComment>();
   @Input() set jump(request: DiffJump | null) {
     if (request?.step === "next") this.next();
     else if (request?.step === "previous") this.previous();
@@ -123,6 +147,8 @@ export class DiffEditor {
   private view: EditorView | null = null;
   private merge: MergeView | null = null;
   private generation = 0;
+  private draft: (Draft & { side: Side }) | null = null;
+  private anchor: { side: Side; line: number } | null = null;
 
   constructor() {
     effect(() => {
@@ -132,6 +158,10 @@ export class DiffEditor {
       const dark = this.hxTheme.dark();
       const path = this.filePath();
       this.build(old, next, layout, dark, path);
+    });
+    effect(() => {
+      this.shown();
+      this.pushComments();
     });
     inject(DestroyRef).onDestroy(() => this.dispose());
   }
@@ -153,6 +183,70 @@ export class DiffEditor {
     this.active()?.focus();
   }
 
+  /**
+   * A click on a line number: starts a comment on the line; with Shift on the same side it
+   * extends the range from where the comment was started.
+   */
+  lineClicked(side: Side, line: number, shift: boolean): void {
+    const anchor = this.anchor;
+    if (shift && anchor && anchor.side === side && this.draft?.side === side) {
+      this.draft = {
+        side,
+        start: Math.min(anchor.line, line),
+        end: Math.max(anchor.line, line),
+      };
+    } else {
+      this.anchor = { side, line };
+      this.draft = { side, start: line, end: line };
+    }
+    this.pushDraft();
+  }
+
+  private saveDraft(text: string): void {
+    const draft = this.draft;
+    const view = draft && this.sideView(draft.side);
+    const value = text.trim();
+    if (!draft || !view || !value) return;
+    const doc = view.state.doc;
+    const quote = Array.from(
+      { length: draft.end - draft.start + 1 },
+      (_, i) => doc.line(draft.start + i).text,
+    ).join("\n");
+    this.cancelDraft();
+    this.commentAdded.emit({
+      path: this.filePath(),
+      side: draft.side,
+      start: draft.start,
+      end: draft.end,
+      quote,
+      text: value,
+    });
+  }
+
+  private cancelDraft(): void {
+    this.draft = null;
+    this.anchor = null;
+    this.pushDraft();
+  }
+
+  private sideView(side: Side): EditorView | null {
+    return side === "old" ? (this.merge?.a ?? null) : (this.merge?.b ?? this.view);
+  }
+
+  private pushComments(): void {
+    for (const side of ["old", "new"] as const) {
+      const list = this.shown().filter((c) => c.side === side);
+      this.sideView(side)?.dispatch({ effects: setComments.of(list) });
+    }
+  }
+
+  private pushDraft(): void {
+    for (const side of ["old", "new"] as const) {
+      const draft = this.draft?.side === side ? this.draft : null;
+      this.sideView(side)?.dispatch({ effects: setDraft.of(draft) });
+    }
+  }
+
   /** The view the chunk commands act on: the editor of the new content. */
   private active(): EditorView | null {
     return this.merge?.b ?? this.view;
@@ -160,7 +254,15 @@ export class DiffEditor {
 
   private build(old: string, next: string, layout: DiffLayout, dark: boolean, path: string): void {
     this.dispose();
+    this.draft = null;
+    this.anchor = null;
     const language = new Compartment();
+    const comments = (side: Side): Extension =>
+      commentExtension({
+        line: (line, shift) => this.lineClicked(side, line, shift),
+        save: (text) => this.saveDraft(text),
+        cancel: () => this.cancelDraft(),
+      });
     const common: Extension[] = [
       language.of([]),
       diffHighlight(),
@@ -168,13 +270,14 @@ export class DiffEditor {
       EditorView.theme(diffThemeRules(), { dark }),
       EditorView.lineWrapping,
     ];
+    const forSide = (side: Side): Extension[] => [...common, comments(side)];
     const collapse = { margin: 3, minSize: 4 };
     if (layout === "inline") {
       this.view = new EditorView({
         parent: this.host.nativeElement,
         doc: next,
         extensions: [
-          ...common,
+          ...forSide("new"),
           unifiedMergeView({
             original: old,
             collapseUnchanged: collapse,
@@ -187,13 +290,14 @@ export class DiffEditor {
     } else {
       this.merge = new MergeView({
         parent: this.host.nativeElement,
-        a: { doc: old, extensions: common },
-        b: { doc: next, extensions: common },
+        a: { doc: old, extensions: forSide("old") },
+        b: { doc: next, extensions: forSide("new") },
         collapseUnchanged: collapse,
         highlightChanges: true,
         gutter: true,
       });
     }
+    this.pushComments();
     const generation = this.generation;
     void loadLanguage(path).then((support) => {
       if (!support || generation !== this.generation) return;

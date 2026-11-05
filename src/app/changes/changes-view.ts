@@ -22,7 +22,9 @@ import {
   type ChangedFile,
   type ChangesScope,
 } from "./changes";
+import { CommentsPanel } from "./comments-panel";
 import { DiffEditor } from "./diff-editor";
+import { LineComments } from "./line-comments";
 
 const SCOPE_LABEL: Record<ChangesScope, string> = {
   base: "Base",
@@ -35,8 +37,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
  */
 @Component({
   selector: "app-changes-view",
-  imports: [DiffEditor],
-  providers: [Changes],
+  imports: [DiffEditor, CommentsPanel],
+  providers: [Changes, LineComments],
   template: `
     <header>
       <div class="base" [title]="path()">
@@ -156,9 +158,14 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
                   [new]="content.new"
                   [layout]="layout()"
                   [jump]="jump()"
+                  [comments]="lineComments.forFile(changes.selected() ?? '')"
+                  (commentAdded)="lineComments.add($event)"
                 />
               }
             }
+          }
+          @if (lineComments.pending().length || lineComments.sent().length) {
+            <app-comments-panel (open)="changes.select($event.path)" />
           }
         </section>
       </div>
@@ -309,6 +316,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
 })
 export class ChangesView {
   protected readonly changes = inject(Changes);
+  protected readonly lineComments = inject(LineComments);
   private readonly ui = inject(UiState);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The latest `n`/`p` press, handed to the diff as an input (a new object each time). */
@@ -339,7 +347,9 @@ export class ChangesView {
     // Opening the tab (it is created when it gets focus) reads the changes.
     effect(() => {
       const dir = this.path();
-      if (dir) untracked(() => void this.changes.follow(dir));
+      if (!dir) return;
+      this.lineComments.follow(dir);
+      untracked(() => void this.changes.follow(dir));
     });
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver((entries) => {

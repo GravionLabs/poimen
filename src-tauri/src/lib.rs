@@ -890,6 +890,17 @@ async fn changes_file(
     .map_err(|e| e.to_string())?
 }
 
+/// Writes review comments to a new `.agents/state/comments-<timestamp>.md` of the worktree `dir`
+/// (excluded from git) and returns its absolute path.
+#[tauri::command]
+async fn changes_write_comments(dir: String, content: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        changes::write_comments(&dir, &content, home_dir().as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, String> {
@@ -1319,6 +1330,7 @@ pub fn run() {
             task_worktree,
             changes_list,
             changes_file,
+            changes_write_comments,
             pr_worktree,
             worktree_branches,
             task_plan,
