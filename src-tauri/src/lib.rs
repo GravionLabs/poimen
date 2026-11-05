@@ -596,23 +596,6 @@ async fn ensure_backend(
     .await
 }
 
-/// Starts `poimen-server` when none answers (never stops it); the status is `already-running`,
-/// `started` or `disabled`. The UI starts the selected backend through `ensure_backend`.
-#[tauri::command]
-async fn ensure_poimen_server(auto_start: bool) -> Result<&'static str, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        poimen_server::ensure_running(&poimen_server::SystemRunner::new(), auto_start)
-            .map(|outcome| match outcome {
-                backend::Outcome::AlreadyRunning => "already-running",
-                backend::Outcome::Started => "started",
-                backend::Outcome::Disabled => "disabled",
-            })
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 /// Whether Claude Code and Copilot CLI have the poimen hooks (`poimen-server integration status`).
 #[tauri::command]
 async fn hooks_status() -> Result<Vec<hooks::HookStatus>, String> {
@@ -1356,7 +1339,6 @@ pub fn run() {
             ensure_backend,
             backend_kind,
             set_terminal_colors,
-            ensure_poimen_server,
             hooks_status,
             hooks_install,
             set_herdr_auto_start,
