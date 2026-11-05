@@ -17,15 +17,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, sync_channel};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::Duration;
 
+use alacritty_terminal::vte::ansi::Rgb;
+use emulator::Colors;
 use poimen_protocol::{
     self as proto, AgentInfo, AgentStatus, AttachMode, DetachReason, ErrorCode, Event,
-    PROTOCOL_VERSION, PingResult, Request, Response, Space, SpaceClose, SpaceCreate, SpaceRename,
-    Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalInput, TerminalList,
-    TerminalRename, TerminalReportAgent, TerminalResize, TerminalStatus,
+    PROTOCOL_VERSION, PingResult, Request, Response, SetColors, Space, SpaceClose, SpaceCreate,
+    SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalInput,
+    TerminalList, TerminalRename, TerminalReportAgent, TerminalResize, TerminalStatus,
 };
 use serde_json::{Value, json};
 
@@ -117,6 +119,8 @@ pub(crate) struct Shared {
     socket: PathBuf,
     state_file: PathBuf,
     scrollback: usize,
+    /// The scheme colors for terminal queries, shared with every terminal's stream.
+    colors: Arc<RwLock<Colors>>,
 }
 
 impl Shared {
@@ -242,6 +246,7 @@ impl Server {
             socket: config.socket,
             state_file: config.state_file,
             scrollback: config.scrollback,
+            colors: Arc::default(),
         };
         Ok(Self {
             listener,
@@ -497,6 +502,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.create" => terminal_create(shared, parsed(request)?),
         "terminal.rename" => terminal_rename(shared, parsed(request)?),
         "terminal.close" => terminal_close(shared, parsed(request)?),
+        "server.set_colors" => server_set_colors(shared, parsed(request)?),
         "terminal.report_agent" => terminal_report_agent(shared, parsed(request)?),
         "terminal.input" => terminal_input(shared, parsed(request)?, ctx),
         "terminal.resize" => terminal_resize(shared, parsed(request)?, ctx),
@@ -589,6 +595,53 @@ fn terminal_list(shared: &Shared, p: TerminalList) -> ApiResult {
     Ok(json!({ "terminals": terminals }))
 }
 
+/// `#rrggbb` (the `#` optional).
+fn parse_hex(value: &str) -> Result<Rgb, (ErrorCode, String)> {
+    let bad = || {
+        (
+            ErrorCode::InvalidParams,
+            format!("{value:?} is not a #rrggbb color"),
+        )
+    };
+    let hex = value.strip_prefix('#').unwrap_or(value);
+    if hex.len() != 6 || !hex.is_ascii() {
+        return Err(bad());
+    }
+    let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| bad());
+    Ok(Rgb {
+        r: byte(0)?,
+        g: byte(2)?,
+        b: byte(4)?,
+    })
+}
+
+fn server_set_colors(shared: &Shared, p: SetColors) -> ApiResult {
+    let mut colors = Colors {
+        foreground: parse_hex(&p.foreground)?,
+        background: parse_hex(&p.background)?,
+        ..Colors::default()
+    };
+    colors.cursor = match &p.cursor {
+        Some(c) => parse_hex(c)?,
+        None => colors.foreground,
+    };
+    let mut current = shared.colors.write().unwrap_or_else(|e| e.into_inner());
+    colors.ansi = current.ansi;
+    if let Some(palette) = &p.palette {
+        if palette.len() != 16 {
+            return Err((
+                ErrorCode::InvalidParams,
+                "palette needs exactly 16 colors".into(),
+            ));
+        }
+        for (slot, c) in colors.ansi.iter_mut().zip(palette) {
+            *slot = parse_hex(c)?;
+        }
+    }
+    *current = colors;
+    Ok(json!({}))
+}
+
 fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
     let mut inner = lock(&shared.inner);
     let space = inner
@@ -613,14 +666,21 @@ fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
         .filter(|n| !n.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| pty::program_name(&command[0]));
-    let stream = Arc::new(TermStream::new(&id, cols, rows, shared.scrollback, {
-        let weak = Arc::downgrade(shared);
-        Arc::new(move |event| {
-            if let Some(shared) = weak.upgrade() {
-                shared.publish(event);
-            }
-        })
-    }));
+    let stream = Arc::new(TermStream::new(
+        &id,
+        cols,
+        rows,
+        shared.scrollback,
+        Arc::clone(&shared.colors),
+        {
+            let weak = Arc::downgrade(shared);
+            Arc::new(move |event| {
+                if let Some(shared) = weak.upgrade() {
+                    shared.publish(event);
+                }
+            })
+        },
+    ));
     let spawned = pty::spawn(
         &pty::SpawnSpec {
             terminal_id: &id,
@@ -642,6 +702,7 @@ fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
         },
     )
     .map_err(|e| (ErrorCode::SpawnFailed, e))?;
+    stream.set_writer(spawned.writer());
     let info = Terminal {
         id,
         space_id: p.space_id,

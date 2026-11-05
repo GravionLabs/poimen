@@ -12,15 +12,15 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use poimen_protocol::{
     AttachMode, AttachResult, DetachReason, ErrorCode, Event, Response, encode_bytes,
 };
 use serde_json::json;
 
-use crate::emulator::Emulator;
-use crate::pty::MAX_BATCH;
+use crate::emulator::{Colors, Emulator};
+use crate::pty::{MAX_BATCH, PtyWriter};
 
 /// Records a client may have queued before it counts as too slow.
 pub(crate) const CLIENT_QUEUE: usize = 128;
@@ -60,6 +60,10 @@ pub(crate) struct TermStream {
     terminal_id: String,
     state: Mutex<State>,
     publish: Arc<dyn Fn(Event) + Send + Sync>,
+    /// The scheme colors for color queries, shared by all terminals.
+    colors: Arc<RwLock<Colors>>,
+    /// Where answers to terminal queries go while no controller is attached.
+    writer: Mutex<Option<PtyWriter>>,
 }
 
 /// An attachment: the id the connection uses to detach and to prove it is the controller.
@@ -82,6 +86,7 @@ impl TermStream {
         cols: u16,
         rows: u16,
         scrollback: usize,
+        colors: Arc<RwLock<Colors>>,
         publish: Arc<dyn Fn(Event) + Send + Sync>,
     ) -> Self {
         Self {
@@ -95,7 +100,14 @@ impl TermStream {
                 exited: None,
             }),
             publish,
+            colors,
+            writer: Mutex::new(None),
         }
+    }
+
+    /// The PTY the server answers terminal queries on while no controller is attached.
+    pub fn set_writer(&self, writer: PtyWriter) {
+        *self.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(writer);
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -111,11 +123,20 @@ impl TermStream {
         self.lock().controller == Some(client_id)
     }
 
-    /// Feeds PTY output to the emulator and passes it on to every client.
+    /// Feeds PTY output to the emulator and passes it on to every client. The queries in it
+    /// (colors, cursor position, device attributes) are answered here while no controller is
+    /// attached; a controller's xterm.js answers them from the same bytes, and then the
+    /// answers of the grid are dropped so a query never gets two replies. The hand-over is at
+    /// attach and detach of the controller.
     pub fn output(&self, bytes: &[u8]) {
         for chunk in bytes.chunks(MAX_BATCH) {
             let mut st = self.lock();
             st.emulator.feed(chunk);
+            let replies = {
+                let colors = self.colors.read().unwrap_or_else(|e| e.into_inner());
+                st.emulator.take_replies(&colors)
+            };
+            let answer = st.controller.is_none() && !replies.is_empty();
             st.seq += 1;
             let line = line_of(&Event::TerminalOutput {
                 terminal_id: self.terminal_id.clone(),
@@ -123,6 +144,23 @@ impl TermStream {
                 data: encode_bytes(chunk),
             });
             self.broadcast(&mut st, &line);
+            drop(st);
+            if answer {
+                self.answer(&replies);
+            }
+        }
+    }
+
+    /// Writes the answers to the PTY, outside the stream lock (a write may block).
+    fn answer(&self, replies: &[u8]) {
+        let writer = self
+            .writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(writer) = writer {
+            // The process may be gone; nobody waits for the answer then.
+            let _ = writer.write(replies);
         }
     }
 
@@ -311,6 +349,7 @@ mod tests {
             20,
             5,
             100,
+            Arc::default(),
             Arc::new(move |e| sink.lock().unwrap().push(e)),
         );
         (s, events)
@@ -454,5 +493,77 @@ mod tests {
             ),
             (Some(30), Some(9), Some(1))
         );
+    }
+
+    /// A writer that collects what the stream answers.
+    #[derive(Clone, Default)]
+    struct Sink(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Sink {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn answering() -> (TermStream, Sink) {
+        let (s, _) = stream();
+        let sink = Sink::default();
+        s.set_writer(PtyWriter::new(Box::new(sink.clone())));
+        (s, sink)
+    }
+
+    fn answered(sink: &Sink) -> String {
+        String::from_utf8_lossy(&sink.0.lock().unwrap()).into_owned()
+    }
+
+    #[test]
+    fn without_a_controller_queries_are_answered_on_the_pty() {
+        let (s, sink) = answering();
+        s.output(b"ab\x1b[6n\x1b[c\x1b[>c");
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(
+            answered(&sink).starts_with("\x1b[1;3R\x1b[?6c\x1b[>0;"),
+            "{version}"
+        );
+    }
+
+    #[test]
+    fn color_queries_use_the_colors_set_by_the_app() {
+        let (s, sink) = answering();
+        {
+            let mut colors = s.colors.write().unwrap();
+            colors.background = alacritty_terminal::vte::ansi::Rgb {
+                r: 0x11,
+                g: 0x22,
+                b: 0x33,
+            };
+        }
+        s.output(b"\x1b]11;?\x07");
+        assert_eq!(answered(&sink), "\x1b]11;rgb:1111/2222/3333\x07");
+    }
+
+    #[test]
+    fn with_a_controller_the_server_stays_silent_and_answers_again_after_it_left() {
+        let (s, sink) = answering();
+        let (c, _rx) = client(&s, AttachMode::Control, false, 8).unwrap();
+        s.output(b"\x1b[c\x1b]10;?\x07\x1b[6n");
+        assert_eq!(answered(&sink), "");
+        s.detach(c.client_id);
+        s.output(b"\x1b[c");
+        assert_eq!(answered(&sink), "\x1b[?6c");
+    }
+
+    #[test]
+    fn replies_of_a_silent_period_are_not_delivered_late() {
+        let (s, sink) = answering();
+        let (c, _rx) = client(&s, AttachMode::Control, false, 8).unwrap();
+        s.output(b"\x1b[c");
+        s.detach(c.client_id);
+        s.output(b"x");
+        assert_eq!(answered(&sink), "");
     }
 }

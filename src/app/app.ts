@@ -29,6 +29,7 @@ import { NotificationCenter } from "./core/notification-center";
 import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
+import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { Updater } from "./core/updater";
@@ -110,6 +111,7 @@ export class App {
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
   private readonly userSchemes = inject(UserSchemes);
+  private readonly terminalColors = inject(TerminalColorSync);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
   private readonly paneActions = inject(PaneActions);
@@ -245,6 +247,17 @@ export class App {
       if (this.schemes.sync(pickSchemeName(colorSchema, setting, systemDark))) return;
       this.theme.setDark(setting === "system" ? systemDark : setting === "dark");
     });
+    // poimen-server answers color queries while no app is attached, with the colors shown here.
+    // The tokens land on <html> after the effect above, so they are read when they change.
+    const tokens = new MutationObserver(() =>
+      this.terminalColors.update(this.prefs.settings().colors),
+    );
+    tokens.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme", "style"],
+    });
+    destroyRef.onDestroy(() => tokens.disconnect());
+    effect(() => this.terminalColors.update(this.prefs.settings().colors));
     destroyRef.onDestroy(this.followSystemTheme());
     // The output panel follows the active tab's agent (Claude Code, Copilot CLI); nothing is watched while it is hidden.
     effect(() => {

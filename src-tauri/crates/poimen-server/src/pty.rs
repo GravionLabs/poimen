@@ -30,6 +30,10 @@ pub(crate) struct Pty {
 pub(crate) struct PtyWriter(std::sync::Arc<std::sync::Mutex<Box<dyn Write + Send>>>);
 
 impl PtyWriter {
+    pub fn new(writer: Box<dyn Write + Send>) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(writer)))
+    }
+
     pub fn write(&self, data: &[u8]) -> Result<(), String> {
         let mut w = self.0.lock().unwrap_or_else(|e| e.into_inner());
         w.write_all(data)
@@ -165,7 +169,7 @@ pub(crate) fn spawn(
 
     Ok(Pty {
         master: pair.master,
-        writer: PtyWriter(std::sync::Arc::new(std::sync::Mutex::new(writer))),
+        writer: PtyWriter::new(writer),
         killer,
     })
 }

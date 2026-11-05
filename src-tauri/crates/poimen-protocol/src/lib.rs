@@ -266,6 +266,20 @@ pub struct AgentInfo {
     pub session_id: Option<String>,
 }
 
+/// Params of `server.set_colors`: the colors the server answers terminal color queries with
+/// while no controller is attached. `#rrggbb` strings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetColors {
+    pub foreground: String,
+    pub background: String,
+    /// Defaults to the foreground.
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// The 16 ANSI colors; when absent the previous ones stay.
+    #[serde(default)]
+    pub palette: Option<Vec<String>>,
+}
+
 /// Params of `terminal.report_agent`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalReportAgent {
@@ -548,6 +562,13 @@ mod tests {
                 session_id: None
             }
         );
+    }
+
+    #[test]
+    fn set_colors_params_have_optional_cursor_and_palette() {
+        let p: SetColors =
+            serde_json::from_value(json!({"foreground":"#ffffff","background":"#000000"})).unwrap();
+        assert_eq!((p.cursor, p.palette), (None, None));
     }
 
     #[test]

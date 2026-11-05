@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use poimen_client::protocol::{
-    AttachMode, DetachReason, ErrorCode, Event, TerminalCreate, decode_bytes,
+    AttachMode, DetachReason, ErrorCode, Event, SetColors, TerminalCreate, decode_bytes,
 };
 use poimen_client::{Attachment, Client, ClientError};
 use poimen_server::{Config, Server};
@@ -422,4 +422,66 @@ fn attach_errors() {
             ..
         })
     ));
+}
+
+/// Waits for `file` in the work directory to have the given content.
+fn wait_for_file(f: &Fixture, name: &str, expected: &str) {
+    let path = f._env.dir.join("work").join(name);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let text = std::fs::read(&path).unwrap_or_default();
+        if text == expected.as_bytes() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{name}: got {:?}",
+            String::from_utf8_lossy(&text)
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_program_without_an_app_gets_answers_to_its_terminal_queries() {
+    let f = fixture("queries");
+    f.client
+        .set_colors(&SetColors {
+            foreground: "#c0c0c0".into(),
+            background: "#112233".into(),
+            cursor: None,
+            palette: None,
+        })
+        .unwrap();
+    // 25 bytes: ESC ] 11 ; rgb:1111/2222/3333 ESC \
+    f.run(
+        "stty raw -echo; printf '\\033]11;?\\033\\\\'; head -c 25 > osc.txt; \
+         printf '\\033[c'; head -c 5 > da.txt",
+    );
+    wait_for_file(&f, "osc.txt", "\x1b]11;rgb:1111/2222/3333\x1b\\");
+    wait_for_file(&f, "da.txt", "\x1b[?6c");
+}
+
+#[test]
+fn set_colors_rejects_a_bad_color_or_palette() {
+    let f = fixture("colors-bad");
+    let set = |bg: &str, palette: Option<Vec<String>>| {
+        f.client.set_colors(&SetColors {
+            foreground: "#ffffff".into(),
+            background: bg.into(),
+            cursor: None,
+            palette,
+        })
+    };
+    for result in [
+        set("blue", None),
+        set("#12345", None),
+        set("#000000", Some(vec![])),
+    ] {
+        match result {
+            Err(ClientError::Server { code, .. }) => assert_eq!(code, ErrorCode::InvalidParams),
+            other => panic!("{other:?}"),
+        }
+    }
+    set("#000000", Some(vec!["#010203".into(); 16])).unwrap();
 }
