@@ -97,7 +97,7 @@ jobs:
   rust:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    name: rust (app crate: clippy, test)
+    name: rust (app crate, clippy, test)
     runs-on: ubuntu-24.04
     env:
       CARGO_INCREMENTAL: 0
