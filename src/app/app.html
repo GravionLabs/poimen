@@ -82,6 +82,7 @@
   (control)="setControl($event)"
   [size]="termSize()"
   [appVersion]="store.appVersion()"
+  [usage]="usage.report()"
   [update]="updater.state()"
   (checkUpdate)="updater.check()"
   (installUpdate)="updater.install()"
