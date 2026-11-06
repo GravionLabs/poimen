@@ -74,14 +74,25 @@ pub fn install(exec: &impl Exec, agent: &str) -> Result<(), String> {
 /// hooks call its stable link, not the mount of this run.
 pub struct SystemExec;
 
+/// Only `install` stages the server (the hooks it writes must call the stable link); a read-only
+/// query like `status` runs the bundled binary as it is and changes no files.
+fn staged_for(
+    args: &[&str],
+    program: &std::path::Path,
+    prepare: impl FnOnce(&std::path::Path) -> Option<poimen_server::Staged>,
+) -> Option<poimen_server::Staged> {
+    let installs = args.get(1) == Some(&"install");
+    (installs && !cfg!(windows))
+        .then(|| prepare(program))
+        .flatten()
+}
+
 impl Exec for SystemExec {
     fn run(&self, args: &[&str]) -> Result<String, String> {
         let program: PathBuf = SystemRunner::new()
             .resolve()
             .ok_or("`poimen-server` was not found next to poimen or on PATH")?;
-        let staged = (!cfg!(windows))
-            .then(|| poimen_server::prepare_here(&program))
-            .flatten();
+        let staged = staged_for(args, &program, poimen_server::prepare_here);
         let mut command = match &staged {
             Some(staged) => {
                 let mut command = gui_path::command(&staged.program);
@@ -184,5 +195,34 @@ mod tests {
         assert!(install(&exec, "../x").is_err());
         assert!(exec.calls.borrow().is_empty());
         assert_eq!(install(&fake(Err("boom")), "claude"), Err("boom".into()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn status_does_not_stage_and_install_does() {
+        use std::cell::Cell;
+        use std::path::Path;
+        let program = Path::new("/mnt/app/poimen-server");
+        let staged = || poimen_server::Staged {
+            program: "/data/bin/1/poimen-server".into(),
+            hook_exe: Some("/data/bin/current".into()),
+        };
+
+        let calls = Cell::new(0);
+        let prepare = |_: &Path| {
+            calls.set(calls.get() + 1);
+            Some(staged())
+        };
+        assert_eq!(
+            staged_for(&["integration", "status", "claude"], program, prepare),
+            None
+        );
+        assert_eq!(calls.get(), 0);
+
+        assert_eq!(
+            staged_for(&["integration", "install", "claude"], program, prepare),
+            Some(staged())
+        );
+        assert_eq!(calls.get(), 1);
     }
 }
