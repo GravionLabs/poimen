@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { MAIN_NODE_ID, buildFlowGraph, flowDuration, inputField } from "./flow-graph";
+import {
+  MAIN_NODE_ID,
+  buildFlowGraph,
+  flowContextLine,
+  flowDuration,
+  flowTokenLine,
+  flowTooltip,
+  inputField,
+} from "./flow-graph";
 import { layoutFlow, FLOW_NODE_WIDTH } from "./flow-layout";
-import type { MainCall, SubagentInfo, TranscriptEntry } from "./transcripts";
+import type {
+  MainCall,
+  SubagentInfo,
+  TokenUsage,
+  TranscriptEntry,
+  UsageSample,
+} from "./transcripts";
 
 const at = (s: number) => new Date(Date.UTC(2026, 10, 2, 4, 0, s)).toISOString();
 
@@ -227,6 +241,160 @@ describe("buildFlowGraph", () => {
     });
     expect(flowDuration(node(g, "sr"), Date.parse(at(5)))).toBe(5000);
     expect(flowDuration(node(g, MAIN_NODE_ID), 1)).toBeNull();
+  });
+});
+
+const tok = (input: number, output: number, cache_read = 0, cache_creation = 0): TokenUsage => ({
+  input,
+  output,
+  cache_read,
+  cache_creation,
+});
+
+const sample = (id: string, s: number, usage: TokenUsage): UsageSample => ({
+  id,
+  timestamp: at(s),
+  model: "claude-opus-4-7",
+  usage,
+});
+
+const withUsage = (e: TranscriptEntry, id: string, usage: TokenUsage): TranscriptEntry => ({
+  ...e,
+  message_id: id,
+  model: "claude-haiku-4-5",
+  usage,
+});
+
+describe("token usage per node", () => {
+  it("sums the main agent and shows the context fill of its latest message", () => {
+    const g = buildFlowGraph([], noEntries, {
+      calls: [],
+      tools: 0,
+      usage: [sample("m1", 1, tok(2, 10, 1000, 100)), sample("m2", 5, tok(3, 20, 5000, 0))],
+    });
+    const main = node(g, MAIN_NODE_ID);
+    expect(main.tokens).toEqual({
+      input: 6105,
+      output: 30,
+      rawInput: 5,
+      cacheRead: 6000,
+      cacheCreation: 100,
+    });
+    expect(main.context).toBe(5003);
+    expect(main.model).toBe("claude-opus-4-7");
+    expect(flowTokenLine(main)).toBe("6.1k in · 30 out");
+    expect(flowContextLine(main)).toBe("context 5k");
+  });
+
+  it("sums a skill from the messages between its call and its result", () => {
+    const g = buildFlowGraph([], noEntries, {
+      calls: [mainCall("sr", "Skill", { started: at(2), ended: at(8), context: 900 })],
+      tools: 0,
+      usage: [
+        sample("m0", 2, tok(1, 1)), // the message that made the call is not the skill's
+        sample("m1", 4, tok(10, 100, 50, 5)),
+        sample("m2", 8, tok(20, 200)),
+        sample("m3", 9, tok(40, 400)),
+      ],
+    });
+    const skill = node(g, "sr");
+    expect(skill.tokens).toEqual({
+      input: 85,
+      output: 300,
+      rawInput: 30,
+      cacheRead: 50,
+      cacheCreation: 5,
+    });
+    expect(skill.context).toBe(900);
+    expect(flowContextLine(skill)).toBe("context 900 at start");
+  });
+
+  it("sums a running skill up to the latest message", () => {
+    const g = buildFlowGraph([], noEntries, {
+      calls: [mainCall("sr", "Skill", { started: at(2) })],
+      tools: 0,
+      usage: [sample("m1", 4, tok(10, 100)), sample("m2", 9, tok(20, 200))],
+    });
+    expect(node(g, "sr").tokens?.output).toBe(300);
+  });
+
+  it("sums a subagent from its own transcript and counts a message of several lines once", () => {
+    const a = agent("1", { tool_use_id: "ta" });
+    const first = withUsage(use("x", "Bash", { command: "ls" }, 11), "msg_1", tok(1, 5, 100, 0));
+    const second = withUsage(
+      { ...use("y", "Bash", { command: "ls" }, 12), uuid: "u2" },
+      "msg_1",
+      tok(1, 50, 100, 0),
+    );
+    const third = withUsage(
+      { ...use("z", "Read", {}, 15), uuid: "u3" },
+      "msg_2",
+      tok(2, 7, 300, 20),
+    );
+    const g = buildFlowGraph([a], new Map([["1", [first, second, third]]]), {
+      calls: [mainCall("ta", "Agent", { context: 777 })],
+      tools: 0,
+      usage: [sample("m1", 1, tok(500, 500))],
+    });
+    const sub = node(g, "ta");
+    expect(sub.tokens).toEqual({
+      input: 423,
+      output: 57,
+      rawInput: 3,
+      cacheRead: 400,
+      cacheCreation: 20,
+    });
+    expect(sub.model).toBe("claude-haiku-4-5");
+    expect(sub.context).toBe(777);
+    // not counted again in the parent
+    expect(node(g, MAIN_NODE_ID).tokens?.output).toBe(500);
+    expect(node(g, MAIN_NODE_ID).tokens?.input).toBe(500);
+  });
+
+  it("takes the context fill at the start of a call made by a subagent from its message", () => {
+    const a = agent("1", { tool_use_id: "ta" });
+    const call = withUsage(
+      use("sk", "Skill", { skill: "grill-me" }, 12),
+      "msg_1",
+      tok(1, 5, 4000, 90),
+    );
+    const g = buildFlowGraph([a], new Map([["1", [call]]]), {
+      calls: [mainCall("ta", "Agent")],
+      tools: 0,
+    });
+    expect(node(g, "sk").context).toBe(4091);
+  });
+
+  it("has no tokens, context or model without usage data (no zeros)", () => {
+    const g = buildFlowGraph([agent("1")], new Map([["1", [use("x", "Bash", {}, 11)]]]), {
+      calls: [mainCall("sr", "Skill"), mainCall("toolu_1", "Agent")],
+      tools: 0,
+    });
+    for (const n of g.nodes) {
+      expect(n.tokens).toBeNull();
+      expect(n.context).toBeNull();
+      expect(n.model).toBeNull();
+      expect(flowTokenLine(n)).toBe("");
+      expect(flowContextLine(n)).toBe("");
+      expect(flowTooltip(n)).not.toContain("tokens");
+    }
+  });
+
+  it("lists the four values, the context and the model in the tooltip", () => {
+    const g = buildFlowGraph([], noEntries, {
+      calls: [],
+      tools: 0,
+      usage: [sample("m1", 1, tok(2, 10, 1000, 100))],
+    });
+    expect(flowTooltip(node(g, MAIN_NODE_ID)).split("\n")).toEqual([
+      "Main agent (main)",
+      "Input tokens: 2",
+      "Output tokens: 10",
+      "Cache read tokens: 1,000",
+      "Cache creation tokens: 100",
+      "Context fill: 1.1k",
+      "Model: claude-opus-4-7",
+    ]);
   });
 });
 

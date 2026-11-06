@@ -6,6 +6,7 @@ import {
   Subagents,
   defaultSubagent,
   formatDuration,
+  formatTokens,
   parseSubagentEvent,
   reportIndex,
   subagentDuration,
@@ -77,7 +78,15 @@ describe("parseSubagentEvent", () => {
       kind: "entries",
       agent_id: "a1",
       entries: [
-        { uuid: "u", role: "assistant", timestamp: null, blocks: [{ type: "text", text: "hi" }] },
+        {
+          uuid: "u",
+          role: "assistant",
+          timestamp: null,
+          blocks: [{ type: "text", text: "hi" }],
+          message_id: null,
+          model: null,
+          usage: null,
+        },
       ],
     });
   });
@@ -205,10 +214,11 @@ describe("Subagents", () => {
         started: null,
         ended: "x",
         is_error: false,
+        context: null,
       },
     ]);
     await s.follow("w1:p2", "S2");
-    expect(s.main()).toEqual({ calls: [], tools: 0 });
+    expect(s.main()).toEqual({ calls: [], tools: 0, usage: [] });
   });
 
   it("does not show entries twice when the file is read again after a truncation", async () => {
@@ -285,6 +295,73 @@ describe("Subagents", () => {
     expect(tauri.calls("subagents_unwatch")).toHaveLength(1);
     expect(s.agents()).toEqual([]);
     expect(s.supported()).toBe(false);
+  });
+});
+
+describe("token usage", () => {
+  const wire = (usage: unknown) => ({
+    session: "S",
+    update: {
+      kind: "entries",
+      agent_id: "a1",
+      entries: [{ uuid: "u", role: "assistant", blocks: [], usage, model: "claude-opus-4-7" }],
+    },
+  });
+  const usageOf = (raw: unknown) => {
+    const update = parseSubagentEvent(raw)?.update;
+    return update?.kind === "entries" ? update.entries[0] : undefined;
+  };
+
+  it("reads usage and model of an entry", () => {
+    const entry = usageOf(wire({ input: 3, output: 4, cache_read: 5, cache_creation: 6 }));
+    expect(entry?.usage).toEqual({ input: 3, output: 4, cache_read: 5, cache_creation: 6 });
+    expect(entry?.model).toBe("claude-opus-4-7");
+  });
+
+  it("treats missing or malformed usage as unknown", () => {
+    expect(usageOf(wire(undefined))?.usage).toBeNull();
+    expect(usageOf(wire({ input: "3" }))?.usage).toBeNull();
+    expect(
+      usageOf(wire({ input: 1, output: -2, cache_read: 0, cache_creation: 0 }))?.usage,
+    ).toBeNull();
+  });
+
+  it("keeps the usage samples of the main snapshot and drops malformed ones", () => {
+    const update = parseSubagentEvent({
+      session: "S",
+      update: {
+        kind: "main",
+        tools: 0,
+        calls: [{ tool_use_id: "t", name: "Skill", context: 1032 }],
+        usage: [
+          {
+            id: "m1",
+            timestamp: "2026-11-02T04:00:00Z",
+            model: "m",
+            usage: { input: 1, output: 2, cache_read: 3, cache_creation: 4 },
+          },
+          { id: "m2", usage: "many" },
+        ],
+      },
+    })?.update;
+    expect(update?.kind === "main" && update.usage).toEqual([
+      {
+        id: "m1",
+        timestamp: "2026-11-02T04:00:00Z",
+        model: "m",
+        usage: { input: 1, output: 2, cache_read: 3, cache_creation: 4 },
+      },
+    ]);
+    expect(update?.kind === "main" && update.calls[0].context).toBe(1032);
+  });
+
+  it("formats counts compactly", () => {
+    expect(formatTokens(0)).toBe("0");
+    expect(formatTokens(842)).toBe("842");
+    expect(formatTokens(1000)).toBe("1k");
+    expect(formatTokens(12_345)).toBe("12.3k");
+    expect(formatTokens(123_456)).toBe("123k");
+    expect(formatTokens(1_234_567)).toBe("1.2M");
   });
 });
 

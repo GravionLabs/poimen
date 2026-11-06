@@ -25,8 +25,8 @@ use serde_json::{Map, Value};
 
 use crate::herdr::is_safe_session_id;
 use crate::transcripts::{
-    self, Block, Entry, INPUT_LIMIT, MainCall, SubagentInfo, TEXT_LIMIT, Tailer, Update,
-    WatchHandle, truncate,
+    self, Block, Entry, INPUT_LIMIT, MainCall, SubagentInfo, TEXT_LIMIT, Tailer, Update, Usage,
+    UsageSample, WatchHandle, truncate,
 };
 
 /// `~/.copilot/session-state`.
@@ -107,6 +107,34 @@ struct Agent {
     done: bool,
 }
 
+/// `session.usage_record` data: model and token counts (`usage.inputTokens`, `outputTokens`,
+/// `cacheReadTokens`, `cacheWriteTokens`). `None` when no count is present or one is not a
+/// non-negative integer.
+fn parse_usage_record(data: &Value) -> Option<(Option<String>, Usage)> {
+    let usage = data.get("usage")?.as_object()?;
+    let mut known = false;
+    let mut count = |key: &str| -> Option<u64> {
+        match usage.get(key) {
+            None | Some(Value::Null) => Some(0),
+            Some(v) => {
+                known = true;
+                v.as_u64()
+            }
+        }
+    };
+    let parsed = Usage {
+        input: count("inputTokens")?,
+        output: count("outputTokens")?,
+        cache_read: count("cacheReadTokens")?,
+        cache_creation: count("cacheWriteTokens")?,
+    };
+    let model = usage
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    known.then_some((model, parsed))
+}
+
 /// Follows the event log of one session.
 pub struct Tracker {
     events: Tailer,
@@ -117,6 +145,9 @@ pub struct Tracker {
     calls: Vec<MainCall>,
     plain: HashSet<String>,
     sent_main: (Vec<MainCall>, u32),
+    /// One sample per `session.usage_record` of the main session.
+    usage: Vec<UsageSample>,
+    sent_usage: usize,
 }
 
 /// Event lines worth parsing: subagent events and the main session's messages and tool calls.
@@ -124,6 +155,7 @@ fn relevant(line: &str) -> bool {
     line.contains("\"agentId\"")
         || line.contains("\"tool.execution_")
         || line.contains("\"subagent.")
+        || line.contains("\"session.usage_record\"")
 }
 
 impl Tracker {
@@ -137,6 +169,8 @@ impl Tracker {
             calls: Vec::new(),
             plain: HashSet::new(),
             sent_main: (Vec::new(), 0),
+            usage: Vec::new(),
+            sent_usage: 0,
         }
     }
 
@@ -178,11 +212,15 @@ impl Tracker {
             updates.push(Update::Entries { agent_id, entries });
         }
         let tools = u32::try_from(self.plain.len()).unwrap_or(u32::MAX);
-        if (&self.calls, tools) != (&self.sent_main.0, self.sent_main.1) {
+        if self.usage.len() != self.sent_usage
+            || (&self.calls, tools) != (&self.sent_main.0, self.sent_main.1)
+        {
+            self.sent_usage = self.usage.len();
             self.sent_main = (self.calls.clone(), tools);
             updates.push(Update::Main {
                 calls: self.calls.clone(),
                 tools,
+                usage: self.usage.clone(),
             });
         }
         updates
@@ -213,6 +251,17 @@ impl Tracker {
         }
 
         let Some(agent_id) = agent_id else {
+            if kind == "session.usage_record" {
+                if let Some((model, usage)) = parse_usage_record(data) {
+                    self.usage.push(UsageSample {
+                        id: text(event, "id").to_owned(),
+                        timestamp,
+                        model,
+                        usage,
+                    });
+                }
+                return;
+            }
             self.apply_main(kind, data, call_id, timestamp);
             return;
         };
@@ -250,6 +299,9 @@ impl Tracker {
             role: role.to_owned(),
             timestamp: timestamp.clone(),
             blocks,
+            message_id: None,
+            model: None,
+            usage: None,
         };
         let message = match kind {
             "user.message" => {
@@ -344,6 +396,7 @@ impl Tracker {
                     started: timestamp,
                     ended: None,
                     is_error: false,
+                    context: None,
                 });
             }
             "tool.execution_complete" => {
@@ -433,7 +486,7 @@ mod tests {
         updates
             .iter()
             .find_map(|u| match u {
-                Update::Main { calls, tools } => Some((calls.as_slice(), *tools)),
+                Update::Main { calls, tools, .. } => Some((calls.as_slice(), *tools)),
                 _ => None,
             })
             .expect("a main update")
@@ -495,6 +548,50 @@ mod tests {
         assert_eq!(calls[1].ended.as_deref(), Some("2026-11-03T10:00:14.500Z"));
         assert_eq!(calls[2].ended, None);
         assert!(calls.iter().all(|c| !c.is_error));
+    }
+
+    fn usage(updates: &[Update]) -> Vec<UsageSample> {
+        updates
+            .iter()
+            .find_map(|u| match u {
+                Update::Main { usage, .. } => Some(usage.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn usage_records_become_main_usage_samples() {
+        let line = r#"{"type":"session.usage_record","data":{"usage":{"model":"gpt-6-luna","inputTokens":100,"outputTokens":7,"cacheReadTokens":50,"cacheWriteTokens":3}},"id":"u1","timestamp":"2026-11-03T10:00:05.000Z","parentId":null}"#;
+        let updates = Tracker::new(&session("usage", &format!("{line}\n"))).refresh();
+        let samples = usage(&updates);
+        assert_eq!(samples.len(), 1);
+        let s = &samples[0];
+        assert_eq!(
+            (s.id.as_str(), s.model.as_deref()),
+            ("u1", Some("gpt-6-luna"))
+        );
+        assert_eq!(
+            (
+                s.usage.input,
+                s.usage.output,
+                s.usage.cache_read,
+                s.usage.cache_creation
+            ),
+            (100, 7, 50, 3)
+        );
+    }
+
+    #[test]
+    fn missing_or_malformed_usage_stays_unknown() {
+        assert!(usage(&Tracker::new(&session("nousage", FIXTURE)).refresh()).is_empty());
+        let bad = [
+            r#"{"type":"session.usage_record","data":{"usage":{}},"id":"a"}"#,
+            r#"{"type":"session.usage_record","data":{"usage":{"inputTokens":"9"}},"id":"b"}"#,
+            r#"{"type":"session.usage_record","data":{},"id":"c"}"#,
+        ];
+        let updates = Tracker::new(&session("badusage", &bad.join("\n"))).refresh();
+        assert!(usage(&updates).is_empty());
     }
 
     #[test]

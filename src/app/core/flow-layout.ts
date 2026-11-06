@@ -2,7 +2,7 @@ import { graphlib, layout } from "@dagrejs/dagre";
 import type { FlowGraph } from "./flow-graph";
 
 export const FLOW_NODE_WIDTH = 220;
-export const FLOW_NODE_HEIGHT = 84;
+export const FLOW_NODE_HEIGHT = 100;
 
 export interface FlowPoint {
   x: number;
