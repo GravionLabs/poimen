@@ -73,6 +73,8 @@ import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
 import { TaskStarter } from "./core/task-start";
 import { ProjectTeardown } from "./core/project-teardown";
+import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
+import { AgentPicker as AgentPickerView } from "./agent-picker/agent-picker";
 import { TaskCleanup } from "./core/task-cleanup";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
@@ -109,6 +111,7 @@ const ZOOM_STEP = 1;
     HooksDialog,
     TrustDialog,
     ResultDialog,
+    AgentPickerView,
     TaskDialog,
     PaletteView,
     ShortcutsDialog,
@@ -136,6 +139,7 @@ export class App {
   private readonly tasks = inject(TaskStarter);
   private readonly cleanup = inject(TaskCleanup);
   private readonly teardown = inject(ProjectTeardown);
+  private readonly projectEntries = inject(ProjectEntries);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -231,6 +235,11 @@ export class App {
   );
 
   constructor() {
+    effect(() => {
+      const id = this.activePaneId();
+      const pane = id ? this.pane(id) : undefined;
+      this.projectEntries.setDir(pane ? paneDir(pane) : undefined);
+    });
     // Instantiated for its effect: the dock badge follows `Attention.count`.
     inject(DockBadge);
     const title = inject(Title);
@@ -457,6 +466,15 @@ export class App {
     const repo = this.activeRepo();
     if (repo) void this.cleanup.run(repo, this.focusedSpace());
     else this.spaceActions.notify("Clean up merged tasks: the active pane is not in a repository");
+  }
+
+  /** A command or preset of the project file, run in the space of the active pane. */
+  protected runEntry(entry: ProjectEntry): void {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    const dir = pane ? paneDir(pane) : undefined;
+    if (pane && dir) void this.projectEntries.run(entry, pane.space_id, dir);
+    else this.spaceActions.notify(`Project: ${entry.name}: there is no focused space`);
   }
 
   /** The palette entry: run the project's teardown in the directory of the active pane. */

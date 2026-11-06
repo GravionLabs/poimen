@@ -100,10 +100,11 @@
 <app-space-dialog (closed)="onSpaceClosed($event)" />
 <app-trust-dialog />
 <app-result-dialog />
+<app-agent-picker />
 <app-hooks-dialog />
 <app-task-dialog />
 <app-shortcuts-dialog />
-<app-command-palette (commandChosen)="run($event)" />
+<app-command-palette (commandChosen)="run($event)" (entryChosen)="runEntry($event)" />
 
 <ng-template #nodeTpl let-node>
   @if (node.kind === "split") {

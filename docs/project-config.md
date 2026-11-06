@@ -3,8 +3,8 @@
 `.poimen/config.json` at the repository root describes how poimen treats the project. Schema:
 [project-config.schema.json](project-config.schema.json). Parsing is tolerant: an invalid entry is
 dropped with a warning naming the file and the key, and the rest loads. Layout pane commands and
-`setup` run when a space is created (after you trusted the repository, see Trust); `teardown`,
-`commands[]` and `presets[]` are only parsed and validated so far.
+`setup` run when a space is created (after you trusted the repository, see Trust); `teardown` runs before a
+worktree cleanup and from the palette; `commands[]` and `presets[]` are palette entries (below).
 
 ```json
 {
@@ -41,8 +41,15 @@ dropped with a warning naming the file and the key, and the rest loads. Layout p
   the user's mode of the same name, new ones are added) and `worktreeDir` overrides. They count as
   commands for the trust question; for an untrusted repository only the user's modes are offered,
   with a note. `get_task_modes(dir)` returns the merged result.
-- `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`).
-- `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`.
+- `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`). Each is a palette
+  entry `Project: <name>`: `terminal` opens a tab named after it in the directory of the focused
+  space and types the command; `agent` sends it as a prompt to the space's agent (a picker when
+  there are several).
+- `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`. Each is a palette entry
+  `Preset: <name>` that builds a new tab in the focused space from its panes.
+
+The entries are read for the focused space and again when the palette opens. While the project
+file is not trusted they show a lock; running one opens the trust dialog (see Trust).
 
 ## Commands
 

@@ -1,6 +1,10 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentPicker } from "./agent-picker";
+import { AgentPrompts } from "./agent-prompt";
 import { CommandPalette, POIMEN_COMMANDS } from "./command-palette";
+import { ProjectEntries } from "./project-entries";
+import { SpaceActions } from "./space-actions";
 import type { Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import { Keymap } from "./keymap";
@@ -26,6 +30,7 @@ const snapshot: Snapshot = {
 
 describe("CommandPalette", () => {
   let palette: CommandPalette;
+  let project: ProjectEntries;
 
   beforeEach(async () => {
     tauri.reset();
@@ -38,11 +43,16 @@ describe("CommandPalette", () => {
         SettingsStore,
         Keymap,
         UiState,
+        SpaceActions,
+        AgentPrompts,
+        AgentPicker,
+        ProjectEntries,
         CommandPalette,
       ],
     });
     await injector.get(HerdrStore).refresh();
     palette = injector.get(CommandPalette);
+    project = injector.get(ProjectEntries);
   });
 
   it("lists the poimen commands in order and nothing else", () => {
@@ -143,5 +153,76 @@ describe("CommandPalette", () => {
     palette.move(1);
     palette.setQuery("a");
     expect(palette.selected()).toBe(0);
+  });
+
+  describe("project entries", () => {
+    const list = (locked: boolean) => ({
+      commands: [
+        { name: "test", target: "terminal" },
+        { name: "review", target: "agent" },
+      ],
+      presets: ["duo"],
+      locked,
+    });
+
+    it("lists Project and Preset entries after the poimen commands, in their own group", async () => {
+      tauri.answer("project_entries", () => list(false));
+      project.setDir("/a");
+      await project.reload();
+      palette.open();
+      const items = palette.items();
+      expect(items.slice(-3).map((i) => i.title)).toEqual([
+        "Project: test",
+        "Project: review",
+        "Preset: duo",
+      ]);
+      expect(items.at(-1)).toMatchObject({
+        command: "projectEntry",
+        entry: { kind: "preset", name: "duo" },
+        locked: false,
+      });
+      const headings = palette.rows().flatMap((r) => (r.type === "heading" ? [r.label] : []));
+      expect(headings).toEqual(["Poimen", "Project"]);
+    });
+
+    it("marks every entry locked while the file is untrusted", async () => {
+      tauri.answer("project_entries", () => list(true));
+      project.setDir("/a");
+      await project.reload();
+      palette.open();
+      expect(
+        palette
+          .items()
+          .filter((i) => i.entry)
+          .every((i) => i.locked),
+      ).toBe(true);
+    });
+
+    it("finds an entry by its name and offers none without a project file", async () => {
+      tauri.answer("project_entries", () => list(false));
+      project.setDir("/a");
+      await project.reload();
+      palette.open();
+      palette.setQuery("duo");
+      expect(palette.items()[0]).toMatchObject({ title: "Preset: duo" });
+      project.setDir(undefined);
+      await project.reload();
+      palette.setQuery("duo");
+      expect(palette.items().some((i) => i.entry)).toBe(false);
+    });
+
+    it("reads the file again when the palette opens and when the directory changes", async () => {
+      tauri.answer("project_entries", () => list(false));
+      project.setDir("/a");
+      project.setDir("/b");
+      await project.reload();
+      palette.open();
+      expect(tauri.calls("project_entries").map((a) => (a as { dir: string }).dir)).toEqual([
+        "/a",
+        "/b",
+        "/b",
+        "/b",
+      ]);
+    });
   });
 });
