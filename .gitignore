@@ -31,3 +31,8 @@ out-tsc
 
 # Tauri sidecar built by scripts/prepare-sidecar.sh
 src-tauri/binaries/
+
+# local agent runtime data
+/.agents/deliver-loop/
+/.agents/deliver-loop*.log
+/.claude/worktrees/
