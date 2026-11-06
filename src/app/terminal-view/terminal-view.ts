@@ -28,7 +28,7 @@ import {
   type Terminal,
   type StreamRecord,
 } from "../core/herdr";
-import { SettingsStore, defaultTerminalFontFamily } from "../core/settings";
+import { SettingsStore, defaultTerminalFontFamily, windowsPtyOption } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
@@ -614,6 +614,8 @@ export class TerminalView implements OnDestroy {
   private applyScrollback(): void {
     if (!this.term) return;
     this.term.options.scrollback = this.streamEmulated ? this.prefs.settings().scrollback : 0;
+    // An emulated stream is a ConPTY on Windows (the poimen server runs on this machine).
+    this.term.options.windowsPty = this.streamEmulated ? windowsPtyOption() : undefined;
   }
 
   private scheduleResize(): void {

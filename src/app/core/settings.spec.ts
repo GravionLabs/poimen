@@ -8,6 +8,7 @@ import {
   defaultTerminalFontSize,
   parseSettings,
   parseTaskModes,
+  windowsPtyOption,
 } from "./settings";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -343,6 +344,13 @@ describe("parseTaskModes", () => {
       [null, null, null, "claude {prompt}"],
     ]);
     expect(got.modes[1].cleanup).toEqual(["git", "branch", "-D", "{branch}"]);
+  });
+});
+
+describe("windowsPtyOption", () => {
+  it("marks a Windows PTY as ConPTY and leaves other platforms unset", () => {
+    expect(windowsPtyOption(true)).toEqual({ backend: "conpty", buildNumber: 21376 });
+    expect(windowsPtyOption(false)).toBeUndefined();
   });
 });
 
