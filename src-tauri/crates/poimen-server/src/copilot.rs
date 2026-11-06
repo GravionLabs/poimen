@@ -73,7 +73,14 @@ pub fn map_hook(event_hint: Option<&str>, payload: &Value) -> Option<Report> {
         _ => return None,
     };
     let session_id = first_str(payload, &["session_id", "sessionId"]).map(str::to_owned);
-    Some(Report { status, session_id })
+    let message = (status == AgentStatus::Blocked)
+        .then(|| first_str(payload, &["message"]).and_then(poimen_protocol::clean_message))
+        .flatten();
+    Some(Report {
+        status,
+        session_id,
+        message,
+    })
 }
 
 /// The report request for a payload in the terminal `terminal_id`.
@@ -90,6 +97,7 @@ pub fn request_for(
         status: report.status,
         agent: Some("copilot".into()),
         session_id: report.session_id,
+        message: report.message,
     })
 }
 
@@ -251,6 +259,33 @@ mod tests {
             st(Some("sessionStart"), ev("SessionEnd")),
             Some(AgentStatus::Gone)
         );
+    }
+
+    #[test]
+    fn a_permission_notification_carries_its_cleaned_text() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../fixtures/copilot-notification.json")).unwrap();
+        let r = map_hook(Some("notification"), &fixture).unwrap();
+        assert_eq!(r.status, AgentStatus::Blocked);
+        assert_eq!(
+            r.message.as_deref(),
+            Some("Copilot wants to run: rm -rf build [0m Allow?")
+        );
+        let mut long = fixture.clone();
+        long["message"] = json!("y".repeat(301));
+        assert_eq!(
+            map_hook(Some("notification"), &long)
+                .unwrap()
+                .message
+                .unwrap()
+                .chars()
+                .count(),
+            300
+        );
+        let stop = json!({"sessionId": "s", "message": "x"});
+        assert_eq!(map_hook(Some("agentStop"), &stop).unwrap().message, None);
+        let request = request_for(Some("notification"), "t1", 1, &fixture).unwrap();
+        assert_eq!(request.message, r.message);
     }
 
     #[test]

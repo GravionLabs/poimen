@@ -318,6 +318,30 @@ pub struct AgentInfo {
     pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// The latest notification text of the agent (see [`clean_message`]); cleared when the agent
+    /// turns `working` again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// When `message` was accepted, milliseconds since the epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_at: Option<u64>,
+}
+
+/// Longest notification text, in characters.
+pub const MAX_MESSAGE_CHARS: usize = 300;
+
+/// A notification text as the protocol carries it: control characters (newlines, tabs included)
+/// become a space, runs of whitespace collapse, the result is trimmed and cut to
+/// [`MAX_MESSAGE_CHARS`] characters. `None` when nothing is left.
+pub fn clean_message(text: &str) -> Option<String> {
+    let flat: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let joined = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cut: String = joined.chars().take(MAX_MESSAGE_CHARS).collect();
+    let cut = cut.trim_end().to_owned();
+    (!cut.is_empty()).then_some(cut)
 }
 
 /// Params of `server.set_colors`: the colors the server answers terminal color queries with
@@ -346,6 +370,9 @@ pub struct TerminalReportAgent {
     pub agent: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Notification text of the agent; optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 // --- request params and results ----------------------------------------------------------------
@@ -550,6 +577,10 @@ pub enum Event {
         agent: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_at: Option<u64>,
     },
 }
 
@@ -621,8 +652,28 @@ mod tests {
                 terminal_id: "t1".into(),
                 status: AgentStatus::Blocked,
                 agent: None,
-                session_id: None
+                session_id: None,
+                message: None,
+                message_at: None
             }
+        );
+    }
+
+    #[test]
+    fn clean_message_strips_controls_collapses_and_truncates() {
+        assert_eq!(
+            clean_message("  Allow\u{1b}[31m Bash?\n\tnow\u{0} ").as_deref(),
+            Some("Allow [31m Bash? now")
+        );
+        assert_eq!(clean_message("\n\t \u{7}"), None);
+        assert_eq!(clean_message(""), None);
+        let long = "ab ".repeat(200);
+        let cut = clean_message(&long).unwrap();
+        assert_eq!(cut.chars().count(), 299);
+        assert!(cut.ends_with('b'));
+        assert_eq!(
+            clean_message(&"é".repeat(400)).unwrap().chars().count(),
+            300
         );
     }
 
@@ -638,7 +689,12 @@ mod tests {
         let p: TerminalReportAgent =
             serde_json::from_value(json!({"terminal_id":"t1","seq":5,"status":"gone"})).unwrap();
         assert_eq!(p.status, AgentStatus::Gone);
-        assert_eq!((p.agent, p.session_id), (None, None));
+        assert_eq!((p.agent, p.session_id, p.message), (None, None, None));
+        let p: TerminalReportAgent = serde_json::from_value(
+            json!({"terminal_id":"t1","seq":6,"status":"blocked","message":"Allow Bash?"}),
+        )
+        .unwrap();
+        assert_eq!(p.message.as_deref(), Some("Allow Bash?"));
         let t: Terminal = serde_json::from_value(json!({"id":"t1","space_id":"s1","name":"n",
             "cwd":"/","cols":80,"rows":24,"status":"running",
             "agent":{"status":"working","agent":"claude","session_id":"abc"}}))

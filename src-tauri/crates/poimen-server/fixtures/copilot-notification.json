@@ -1,0 +1,8 @@
+{
+  "sessionId": "s1",
+  "timestamp": 1760000000000,
+  "cwd": "/work/api",
+  "notificationType": "permission_prompt",
+  "title": "Permission needed",
+  "message": "Copilot wants to run: rm -rf build\u001b[0m\nAllow?"
+}

@@ -65,6 +65,20 @@ export interface SpaceContext {
   sync?: string;
   /** The pull request every pane of the space shares. */
   pr?: BranchPull;
+  /** The newest notification text of the space's agents. */
+  notification?: string;
+}
+
+/** Newest notification text among the panes of a space (`undefined` when none has one). */
+export function newestNotification(rows: readonly PaneRow[]): string | undefined {
+  let best: { text: string; at: number } | undefined;
+  for (const { pane } of rows) {
+    const text = pane.agent_message?.trim();
+    if (!text) continue;
+    const at = pane.agent_message_at ?? 0;
+    if (!best || at > best.at) best = { text, at };
+  }
+  return best?.text;
 }
 
 /** `●3` for three changed or untracked files; empty when clean or unknown. */
@@ -108,6 +122,7 @@ export function spaceContext(space: SpaceNode): SpaceContext {
     dirty: sharedText((r) => dirtyText(r.dirty)),
     sync: sharedText((r) => syncText(r.ahead, r.behind)),
     pr: rest.every((r) => r.pr?.url === first.pr?.url) ? first.pr : undefined,
+    notification: newestNotification(space.rows),
   };
 }
 
@@ -187,6 +202,7 @@ export const ROW_TOKENS = [
   "dirty",
   "sync",
   "pr",
+  "notification",
   "dir",
   "tab",
 ] as const;
@@ -205,7 +221,7 @@ export interface Segment {
   dim: boolean;
   /** Preceded by another text value on the line: shown after a " · ". */
   sep: boolean;
-  /** `pr` token: the pull request to open on a click and the tooltip text. */
+  /** `pr` token: the pull request to open on a click; `tip`: tooltip (`pr`, `notification`). */
   url?: string;
   tip?: string;
 }
@@ -244,6 +260,8 @@ export function renderRow(
         return pane ? paneDetail(pane) : undefined;
       case "tab":
         return pane?.tab;
+      case "notification":
+        return pane ? pane.pane.agent_message : ctx.notification;
       case "branch":
         if (!pane) return ctx.branch ? branchText(ctx.branch, ctx.worktree) : undefined;
         return pane.branch && pane.branch !== ctx.branch
@@ -303,7 +321,13 @@ export function renderRow(
         }
         if (seen.has(same(text))) continue;
         seen.add(same(text));
-        out.push({ ...base, kind: "text", text, sep: out.at(-1)?.kind === "text" });
+        out.push({
+          ...base,
+          kind: "text",
+          text,
+          sep: out.at(-1)?.kind === "text",
+          ...(token === "notification" && { tip: text }),
+        });
       }
       return out;
     })

@@ -777,10 +777,26 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     if entry.info.status == TerminalStatus::Exited {
         return Ok(json!({ "accepted": true }));
     }
+    // The latest notification text: a new one replaces it, `working` clears it, else it stays.
+    let (message, message_at) = match p
+        .message
+        .as_deref()
+        .and_then(poimen_protocol::clean_message)
+    {
+        Some(text) => (Some(text), Some(now_millis())),
+        None if p.status == AgentStatus::Working => (None, None),
+        None => entry
+            .info
+            .agent
+            .as_ref()
+            .map_or((None, None), |a| (a.message.clone(), a.message_at)),
+    };
     let next = (p.status != AgentStatus::Gone).then(|| AgentInfo {
         status: p.status,
         agent: p.agent.clone(),
         session_id: p.session_id.clone(),
+        message: message.clone(),
+        message_at,
     });
     if entry.info.agent != next {
         entry.info.agent = next;
@@ -789,6 +805,8 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
             status: p.status,
             agent: p.agent,
             session_id: p.session_id,
+            message,
+            message_at,
         });
     }
     Ok(json!({ "accepted": true }))
@@ -877,4 +895,10 @@ fn terminal_resize(shared: &Shared, p: TerminalResize, ctx: Option<&Attachment>)
     entry.info.rows = p.rows;
     entry.stream.resized(p.cols, p.rows);
     Ok(json!({}))
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
