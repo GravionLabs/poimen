@@ -4,6 +4,8 @@ import {
   DEFAULT_SETTINGS,
   SettingsStore,
   nextTheme,
+  defaultTerminalFontFamily,
+  defaultTerminalFontSize,
   parseSettings,
   parseTaskModes,
 } from "./settings";
@@ -341,5 +343,27 @@ describe("parseTaskModes", () => {
       [null, null, null, "claude {prompt}"],
     ]);
     expect(got.modes[1].cleanup).toEqual(["git", "branch", "-D", "{branch}"]);
+  });
+});
+
+describe("platform terminal font defaults", () => {
+  it("uses 14 on Windows and 13 elsewhere", () => {
+    expect(defaultTerminalFontSize(true)).toBe(14);
+    expect(defaultTerminalFontSize(false)).toBe(13);
+  });
+
+  it("puts the Windows monospace fonts before the base stack only on Windows", () => {
+    expect(defaultTerminalFontFamily("", true)).toBe(
+      '"Cascadia Mono", "Cascadia Code", Consolas, Menlo, monospace',
+    );
+    expect(defaultTerminalFontFamily("JetBrains Mono, monospace", true)).toBe(
+      '"Cascadia Mono", "Cascadia Code", Consolas, JetBrains Mono, monospace',
+    );
+    expect(defaultTerminalFontFamily("", false)).toBe("Menlo, monospace");
+  });
+
+  it("a configured size wins over the platform default", () => {
+    expect(parseSettings({ fontSize: 16 }).fontSize).toBe(16);
+    expect(parseSettings({ fontFamily: "Hack" }).fontFamily).toBe("Hack");
   });
 });

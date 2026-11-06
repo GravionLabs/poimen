@@ -28,7 +28,7 @@ import {
   type Terminal,
   type StreamRecord,
 } from "../core/herdr";
-import { SettingsStore } from "../core/settings";
+import { SettingsStore, defaultTerminalFontFamily } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
@@ -183,7 +183,7 @@ export class TerminalView implements OnDestroy {
     const fontSize = Math.min(72, Math.max(6, configured + this.ui.zoom()));
     const foreground = colors?.foreground ?? cssVar("--term-fg");
     return {
-      fontFamily: fontFamily ?? (cssVar("--font-mono") || "Menlo, monospace"),
+      fontFamily: fontFamily ?? defaultTerminalFontFamily(cssVar("--font-mono")),
       fontSize,
       theme: {
         background: colors?.background ?? cssVar("--term-bg"),

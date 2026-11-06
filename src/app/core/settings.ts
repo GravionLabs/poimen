@@ -188,11 +188,32 @@ export function nextTheme(theme: ThemeSetting): ThemeSetting {
 /** The terminal backend poimen talks to: poimen-server (default) or herdr. */
 export type BackendKind = "herdr" | "poimen";
 
+/** Whether the app runs on Windows (the webview reports `Win32`). */
+export function isWindows(): boolean {
+  return typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
+}
+
+/** Default `terminal.fontSize`: 14 on Windows, 13 elsewhere (mirrors `settings.rs`). */
+export function defaultTerminalFontSize(windows: boolean = isWindows()): number {
+  return windows ? 14 : 13;
+}
+
+const WINDOWS_MONO = '"Cascadia Mono", "Cascadia Code", Consolas';
+
+/**
+ * The terminal font stack when `terminal.fontFamily` is not set: on Windows the system
+ * monospace fonts come first, then `--font-mono` (`mono`) or `Menlo, monospace`.
+ */
+export function defaultTerminalFontFamily(mono: string, windows: boolean = isWindows()): string {
+  const base = mono || "Menlo, monospace";
+  return windows ? `${WINDOWS_MONO}, ${base}` : base;
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   colorSchema: null,
   fontFamily: null,
-  fontSize: 13,
+  fontSize: defaultTerminalFontSize(),
   uiFontFamily: null,
   uiFontSize: 13,
   colors: null,

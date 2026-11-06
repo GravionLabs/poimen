@@ -17,6 +17,8 @@ import {
 } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import {
+  defaultTerminalFontFamily,
+  defaultTerminalFontSize,
   parseHarnesses,
   SettingsStore,
   type ColorSchemeSetting,
@@ -362,6 +364,11 @@ export class SettingsView {
   protected readonly monoFonts = COMMON_MONO_FONTS;
   protected readonly uiFonts = COMMON_UI_FONTS;
   protected readonly uiSizeRange = [MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE] as const;
+  /** The effective default terminal font, shown as placeholder and reset target. */
+  protected readonly defaultTerminalFont = defaultTerminalFontFamily(
+    getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
+  );
+  protected readonly defaultTerminalSize = defaultTerminalFontSize();
   protected readonly terminalSizeRange = [MIN_TERMINAL_FONT_SIZE, MAX_TERMINAL_FONT_SIZE] as const;
 
   protected setFont(which: "terminal" | "ui", event: Event): void {
@@ -373,7 +380,13 @@ export class SettingsView {
 
   protected setFontSize(which: "terminal" | "ui", event: Event): void {
     const input = event.target as HTMLInputElement;
-    const size = input.value.trim() === "" ? Number.NaN : Number(input.value);
+    const empty = input.value.trim() === "";
+    // An empty terminal size goes back to the platform default.
+    const size = empty
+      ? which === "terminal"
+        ? defaultTerminalFontSize()
+        : Number.NaN
+      : Number(input.value);
     const write =
       which === "terminal" ? this.store.setTerminalFontSize(size) : this.store.setUiFontSize(size);
     void write.then((ok) => {

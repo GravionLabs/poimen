@@ -170,7 +170,7 @@
                     <input
                       type="text"
                       list="mono-fonts"
-                      placeholder="Default monospace"
+                      [placeholder]="defaultTerminalFont"
                       [value]="settings().fontFamily ?? ''"
                       (change)="setFont('terminal', $event)"
                     />
@@ -181,6 +181,7 @@
                       type="number"
                       [attr.min]="terminalSizeRange[0]"
                       [attr.max]="terminalSizeRange[1]"
+                      [placeholder]="defaultTerminalSize"
                       [value]="settings().fontSize"
                       (change)="setFontSize('terminal', $event)"
                     />

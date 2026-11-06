@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use serde_json::Value;
 
-pub const DEFAULT_FONT_SIZE: f64 = 13.0;
+pub const DEFAULT_FONT_SIZE: f64 = if cfg!(windows) { 14.0 } else { 13.0 };
 const MIN_FONT_SIZE: f64 = 6.0;
 const MAX_FONT_SIZE: f64 = 72.0;
 pub const DEFAULT_UI_FONT_SIZE: f64 = 13.0;
@@ -2899,7 +2899,7 @@ mod tests {
     #[test]
     fn serializes_camel_case() {
         let v = serde_json::to_value(Settings::default()).unwrap();
-        assert_eq!(v["fontSize"], 13.0);
+        assert_eq!(v["fontSize"], DEFAULT_FONT_SIZE);
         assert!(v["fontFamily"].is_null());
         assert_eq!(v["autoControl"], true);
         assert_eq!(v["shortcuts"]["toggleSidebar"], "CmdOrCtrl+B");
