@@ -1,6 +1,6 @@
 # poimen-server protocol
 
-Protocol version: **2** (version 1 had no terminal output; version 2 adds `terminal.attach`, the stream records and the controller rules for `terminal.input` and `terminal.resize`).
+Protocol version: **3** (version 1 had no terminal output; version 2 adds `terminal.attach`, the stream records and the controller rules for `terminal.input` and `terminal.resize`; version 3 adds tokens per terminal: `terminal.report_tokens`, `terminal.clear_tokens`, `tokens` of Terminal and the `terminal.tokens_changed` event).
 
 `poimen-server` is a headless daemon that owns the PTYs, so shells and agents keep running when the app closes. The protocol is client-neutral: no Tauri or app concept appears in it. The wire types live in `src-tauri/crates/poimen-protocol`, a client in `src-tauri/crates/poimen-client`.
 
@@ -34,7 +34,7 @@ The server stores no layout: groups, splits and tabs are the client's business. 
 
 | Method            | Params                                                                  | Result                | Notes                                                                                           |
 | ----------------- | ----------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
-| `ping`            | none                                                                    | `{version, protocol, pid}` | `protocol` is the protocol version (2).                                                    |
+| `ping`            | none                                                                    | `{version, protocol, pid}` | `protocol` is the protocol version (3).                                                    |
 | `events.subscribe`| none                                                                    | `{subscribed: true}`  | The connection then carries events only. List after subscribing to avoid missing changes.       |
 | `space.list`      | none                                                                    | `{spaces: [Space]}`   |                                                                                                 |
 | `space.create`    | `name`, `cwd`                                                           | `{space}`             | Non-empty `name` and `cwd`. Persisted.                                                          |
@@ -50,6 +50,8 @@ The server stores no layout: groups, splits and tabs are the client's business. 
 | `terminal.attach` | `terminal_id`, `mode` (`observe` or `control`), `take_over?` (default false) | `AttachResult`   | See Attach. The connection becomes a stream connection. `not_found`, `conflict`. |
 | `terminal.detach` | `terminal_id`                                                           | `{detached: true}`    | Only on a connection attached to that terminal (else `invalid_request`). The server answers, detaches and closes the connection. See Attach. |
 | `terminal.report_agent` | `terminal_id`, `seq`, `status` (`idle`, `working`, `blocked`, `done`, `gone`), `agent?`, `session_id?`, `message?` | `{accepted}` | See Agent status. `not_found` for an unknown terminal. |
+| `terminal.report_tokens` | `terminal_id`, `tokens` (name to string or `null`), `ttl_s?`, `source` | `{accepted}` | See Tokens. `invalid_params` for a bad name, more than 16 tokens, `ttl_s` of 0 or an empty `source`; `not_found` for an unknown terminal. |
+| `terminal.clear_tokens` | `terminal_id`, `source` | `{cleared}` | Removes every token the `source` set. |
 
 Terminals get `POIMEN_SOCKET` (the server's socket) and `POIMEN_TERMINAL_ID` in their environment, and `TERM=xterm-256color` when the server has none.
 
@@ -75,6 +77,8 @@ From then on the connection carries stream records (the events below) and still 
 Programs ask the terminal for its colors (OSC 10, 11, 12 and 4 with `?`), the cursor position (DSR `CSI 6 n`) and its attributes (DA1 `CSI c`, DA2 `CSI > c`). The headless grid of the terminal (`alacritty_terminal`) produces the answers and the server writes them to the PTY, but only while the terminal has no controller. With a controller attached, its xterm.js answers the same bytes (#96) and the server stays silent, so a query never gets two answers; the hand-over is at attach and detach of the controller (observers do not count). What the grid produced while a controller was attached is dropped, never answered late. Colors come from `server.set_colors` (a dark default until the app has sent one); a color the program set itself with OSC 4, 10 or 11 wins. The app sends the active scheme on start and on every scheme change. Adding the request is backwards compatible, so the protocol version stays 2.
 
 ## Agent status
+
+Tokens are free-form key/value strings per terminal, with herdr's semantics (`pane report-metadata`, `pane tokens`) so a tool only switches the command: a name is 1 to 32 ASCII letters, digits, `_` or `-`, a report carries at most 16, a `null` value removes the token, `ttl_s` (above 0) expires the tokens that report set after that many seconds, and `terminal.clear_tokens` removes everything one `source` set. A token belongs to the source that set it last. The visible tokens are the `tokens` map of the terminal in `terminal.list` (absent when empty); `terminal.tokens_changed` `{terminal_id, tokens}` carries all of them and is published only when they changed, also when a TTL ran out (the server checks twice a second) and when the process ended (they are cleared with the terminal's exit). The app maps `tokens` to the `tokens` of the pane, so `$<name>` in `sidebar.rows` works as on herdr. The CLI is `poimen-server report tokens|clear|agent` (README, "Tokens from scripts").
 
 Agent status comes from hooks only; the server never reads the screen. A reporter (the Claude Code hook) sends `terminal.report_agent` with a `seq` that increases with every report (the hook uses nanoseconds since the epoch). A report whose `seq` is not above the last accepted one of that terminal is stale: it is dropped and the result is `{"accepted": false}`. `message` is the notification text of the agent (the `message` of Claude Code's permission `Notification`, of Copilot CLI's `notification`); the hooks and the server clean it: control characters become spaces, whitespace collapses, at most 300 characters. The server keeps the latest text with its time (`message`, `message_at` in epoch milliseconds in the terminal's `agent`); a report without `message` leaves it, a `working` report clears it. `status` `gone` means the agent ended and clears the terminal's `agent`. `agent.status_changed` is published only when the state of the terminal actually changed. Adding the request, the `agent` field of Terminal and `session_id` of the event is backwards compatible, so the protocol version stays 2.
 
@@ -102,6 +106,7 @@ Starting an agent and prompting it need no request of their own (`poimen_client:
 | `terminal.detached`    | `{terminal_id, reason}`                      | stream record: `overflow`, `taken_over` or `closed`   |
 | `terminal.controller_attached` | `{terminal_id}`                      | subscribers: a controller attached                    |
 | `terminal.controller_detached` | `{terminal_id}`                      | subscribers: the controller detached or was dropped   |
+| `terminal.tokens_changed` | `{terminal_id, tokens}` | the tokens of a terminal changed (after `terminal.report_tokens` / `terminal.clear_tokens`, or a TTL ran out); `tokens` is the full map. |
 | `agent.status_changed` | `{terminal_id, status, agent?, session_id?, message?, message_at?}` | the agent state of a terminal changed (after `terminal.report_agent`); `status` is `idle`, `working`, `blocked`, `done` or `gone`. |
 
 ## Persistence

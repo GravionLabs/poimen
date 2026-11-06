@@ -1,13 +1,13 @@
 //! `poimen-server`: one per user, started by the app (or by hand), never stopped by the app.
 //!
-//! Subcommands: `hook claude` / `hook copilot <event>` (run by Claude Code and Copilot CLI, see
+//! Subcommands: `report tokens|clear|agent` (see `report.rs`), `hook claude` / `hook copilot <event>` (run by Claude Code and Copilot CLI, see
 //! `claude.rs` and `copilot.rs`) and `integration install|uninstall|status claude|copilot
 //! [--settings <path>]`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use poimen_server::{Config, Server, StartError, claude, copilot};
+use poimen_server::{Config, Server, StartError, claude, copilot, report};
 
 const USAGE: &str =
     "usage: poimen-server integration install|uninstall|status claude|copilot [--settings <path>]";
@@ -37,6 +37,11 @@ fn main() -> ExitCode {
             }
             ExitCode::SUCCESS
         }
+        Some("report") => ExitCode::from(report::run(
+            &args[1..],
+            claude::terminal_id_from_env(),
+            poimen_protocol::socket_path(),
+        )),
         Some("integration") => integration(&args[1..]),
         _ => serve(),
     }

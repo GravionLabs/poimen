@@ -4,6 +4,7 @@
 //! [`Response`] per request; after `events.subscribe` the connection also carries [`Event`]s. The
 //! crate has no I/O and no dependency on the app, so any client (the app, a CLI) can use it.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ use serde_json::Value;
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
@@ -295,6 +296,10 @@ pub struct Terminal {
     /// The agent in the terminal, as its hooks last reported it; absent when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
+    /// The free-form tokens tools in the terminal reported (`terminal.report_tokens`); expired
+    /// ones are gone. Empty when there are none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tokens: BTreeMap<String, String>,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the
@@ -373,6 +378,38 @@ pub struct TerminalReportAgent {
     /// Notification text of the agent; optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// Most tokens in one `terminal.report_tokens` (as herdr).
+pub const MAX_TOKENS_PER_REPORT: usize = 16;
+/// Longest token name (as herdr).
+pub const MAX_TOKEN_NAME: usize = 32;
+
+/// A token name is 1 to [`MAX_TOKEN_NAME`] ASCII letters, digits, `_` or `-` (as herdr).
+pub fn valid_token_name(name: &str) -> bool {
+    (1..=MAX_TOKEN_NAME).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// Params of `terminal.report_tokens`: sets the tokens of `source` on the terminal; a `null`
+/// value removes the token. `ttl_s` (above 0) expires the tokens set by this report after that
+/// many seconds. A token is owned by the source that set it last.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalReportTokens {
+    pub terminal_id: String,
+    pub tokens: BTreeMap<String, Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_s: Option<u64>,
+    pub source: String,
+}
+
+/// Params of `terminal.clear_tokens`: removes every token `source` set on the terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalClearTokens {
+    pub terminal_id: String,
+    pub source: String,
 }
 
 // --- request params and results ----------------------------------------------------------------
@@ -569,6 +606,12 @@ pub enum Event {
     /// The controller detached or was dropped (subscribers).
     #[serde(rename = "terminal.controller_detached")]
     TerminalControllerDetached { terminal_id: String },
+    /// The tokens of a terminal changed (reported, cleared or expired); carries all of them.
+    #[serde(rename = "terminal.tokens_changed")]
+    TerminalTokensChanged {
+        terminal_id: String,
+        tokens: BTreeMap<String, String>,
+    },
     #[serde(rename = "agent.status_changed")]
     AgentStatusChanged {
         terminal_id: String,
@@ -700,6 +743,50 @@ mod tests {
             "agent":{"status":"working","agent":"claude","session_id":"abc"}}))
         .unwrap();
         assert_eq!(t.agent.unwrap().session_id.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn token_wire_shapes_and_names() {
+        let p: TerminalReportTokens = serde_json::from_value(json!({"terminal_id":"t1",
+            "tokens":{"deliver_step":"build","deliver_pr":null},"ttl_s":30,"source":"deliver"}))
+        .unwrap();
+        assert_eq!(p.tokens["deliver_step"].as_deref(), Some("build"));
+        assert_eq!(p.tokens["deliver_pr"], None);
+        assert_eq!(p.ttl_s, Some(30));
+        let p: TerminalReportTokens =
+            serde_json::from_value(json!({"terminal_id":"t1","tokens":{},"source":"s"})).unwrap();
+        assert_eq!(p.ttl_s, None);
+        assert!(
+            serde_json::from_value::<TerminalReportTokens>(
+                json!({"terminal_id":"t1","tokens":{"a":1},"source":"s"})
+            )
+            .is_err()
+        );
+        let c: TerminalClearTokens =
+            serde_json::from_value(json!({"terminal_id":"t1","source":"deliver"})).unwrap();
+        assert_eq!(c.source, "deliver");
+        let t: Terminal = serde_json::from_value(json!({"id":"t1","space_id":"s1","name":"n",
+            "cwd":"/","cols":80,"rows":24,"status":"running","tokens":{"deliver":"on"}}))
+        .unwrap();
+        assert_eq!(t.tokens["deliver"], "on");
+        let event: Event = serde_json::from_str(
+            r#"{"event":"terminal.tokens_changed","data":{"terminal_id":"t1","tokens":{"a":"b"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            event,
+            Event::TerminalTokensChanged {
+                terminal_id: "t1".into(),
+                tokens: [("a".to_owned(), "b".to_owned())].into()
+            }
+        );
+        assert!(valid_token_name("deliver_step-2"));
+        assert!(valid_token_name(&"a".repeat(32)));
+        assert!(!valid_token_name(""));
+        assert!(!valid_token_name(&"a".repeat(33)));
+        assert!(!valid_token_name("a b"));
+        assert!(!valid_token_name("é"));
+        assert!(!valid_token_name("a.b"));
     }
 
     #[test]
