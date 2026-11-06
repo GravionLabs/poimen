@@ -124,7 +124,15 @@ pub fn command_line(program: &str, args: &[String], kind: ShellKind) -> Option<S
 }
 
 fn quote(word: &str, kind: ShellKind) -> String {
-    let plain = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
+    // PowerShell reads `,` as the array operator, a leading `@` as splatting and a bare `%` as
+    // ForEach-Object, so its bare set is narrower than POSIX's.
+    let plain = |c: char| {
+        c.is_ascii_alphanumeric()
+            || match kind {
+                ShellKind::PowerShell => r"_+=:./\-".contains(c),
+                _ => "_@%+=:,./-".contains(c),
+            }
+    };
     if word.chars().all(plain) {
         word.to_owned()
     } else if kind == ShellKind::PowerShell {
@@ -249,6 +257,18 @@ mod tests {
         assert_eq!(
             line(ShellKind::PowerShell, &["two words", "$x"]).unwrap(),
             "claude 'two words' '$x'"
+        );
+    }
+
+    #[test]
+    fn powershell_quotes_comma_at_and_percent() {
+        assert_eq!(
+            line(ShellKind::PowerShell, &["a,b", "@x", "%", r"C:\tmp\f.txt"]).unwrap(),
+            r"claude 'a,b' '@x' '%' C:\tmp\f.txt"
+        );
+        assert_eq!(
+            line(ShellKind::Posix, &["a,b", "@x", "%"]).unwrap(),
+            "claude a,b @x %"
         );
     }
 
