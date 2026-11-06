@@ -228,7 +228,7 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 cd site && npm ci && npm run dev    # local preview; `npm run build` (dead links fail it), `npm test`
 ```
 
-`.github/workflows/pages.yml` builds it on pull requests that touch `site/` (dry run) and deploys on a push to `main` while the repository variable `DEPLOY_PAGES` is `true` (Settings > Pages > Source: GitHub Actions). The screenshots in `site/public/screenshots/` are real captures with demo data, except the Flow tab and the deliver board, which are still labeled placeholders (#264).
+`.github/workflows/pages.yml` builds it on pull requests that touch `site/` (dry run) and deploys on a push to `main` while the repository variable `DEPLOY_PAGES` is `true` (Settings > Pages > Source: GitHub Actions). The screenshots in `site/public/screenshots/` are real captures with demo data.
 
 ## License
 
