@@ -7,6 +7,7 @@ import {
   HostListener,
   inject,
   signal,
+  untracked,
 } from "@angular/core";
 import {
   appearance,
@@ -22,6 +23,7 @@ import {
   type HarnessInfo,
   type ThemeSetting,
 } from "../core/settings";
+import { HooksOffer, agentName } from "../core/hooks-offer";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
 import { UserSchemes } from "../core/user-schemes";
@@ -143,6 +145,8 @@ export class SettingsView {
   private readonly user = inject(UserSchemes);
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState);
+  protected readonly hooks = inject(HooksOffer);
+  protected readonly agentName = agentName;
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The search text; filters the category tree and highlights the labels on the page. */
@@ -272,6 +276,9 @@ export class SettingsView {
   protected readonly harnesses = signal<HarnessInfo[]>([]);
 
   constructor() {
+    effect(() => {
+      if (this.current().page.id === "herdr") untracked(() => void this.hooks.refresh());
+    });
     // The harnesses come from config.json, so they are read again when the settings change.
     effect(() => {
       this.settings();

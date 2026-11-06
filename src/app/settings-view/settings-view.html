@@ -297,6 +297,28 @@
                 />
                 Start the backend server when it is not running
               </label>
+              <h3 [class.hit]="hit('Agent hooks')">Agent hooks</h3>
+              <ul class="harnesses">
+                @for (h of hooks.statuses(); track h.agent) {
+                  <li>
+                    <strong>{{ agentName(h.agent) }}</strong>
+                    <span>{{ h.state }}</span>
+                    @if (h.state !== "installed") {
+                      <button
+                        type="button"
+                        [class.hit]="hit('Install hooks')"
+                        [disabled]="hooks.busy()"
+                        (click)="hooks.installAgent(h.agent)"
+                      >
+                        Install hooks
+                      </button>
+                    }
+                  </li>
+                }
+              </ul>
+              @if (hooks.error()) {
+                <p class="hint" role="alert">{{ hooks.error() }}</p>
+              }
             </section>
           }
           @case ("agents") {
