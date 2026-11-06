@@ -755,7 +755,7 @@ async fn task_plan(
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        task_start::plan(&resolved.modes, &repo, &issue, &mode)
+        task_start::plan(&resolved.modes, &settings.harnesses, &repo, &issue, &mode)
     })
     .await
     .map_err(|e| e.to_string())?

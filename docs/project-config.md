@@ -40,7 +40,10 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
   (`modes[]`, `worktreeDir`). They merge by `name` over the user's modes (a project mode replaces
   the user's mode of the same name, new ones are added) and `worktreeDir` overrides. They count as
   commands for the trust question; for an untrusted repository only the user's modes are offered,
-  with a note. `get_task_modes(dir)` returns the merged result.
+  with a note. `get_task_modes(dir)` returns the merged result. A mode is an agent (`harness`,
+  `model`, `prompt`) or a command as an argv array (`["pwsh", "run.ps1", "{nr}"]`, each element
+  expanded on its own, no shell); `cleanup` is an argv array. A string `command` or `cleanup` still
+  works for one release with a deprecation warning.
 - `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`). Each is a palette
   entry `Project: <name>`: `terminal` opens a tab named after it in the directory of the focused
   space and types the command; `agent` sends it as a prompt to the space's agent (a picker when

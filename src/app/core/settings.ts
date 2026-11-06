@@ -31,9 +31,14 @@ export interface GhosttyColors {
 export interface TaskMode {
   name: string;
   worktree: boolean;
-  command: string;
+  /** Agent mode: the harness (`null`: the first of the registry), model and prompt template. */
+  harness: string | null;
+  model: string | null;
+  prompt: string | null;
+  /** An argv list, or a deprecated shell string; `null` for an agent mode. */
+  command: string[] | string | null;
   branch: string;
-  cleanup: string | null;
+  cleanup: string[] | string | null;
 }
 
 export interface TaskModes {
@@ -46,7 +51,10 @@ export const DEFAULT_TASKS: TaskModes = {
     {
       name: "agent",
       worktree: true,
-      command: "claude {prompt}",
+      harness: null,
+      model: null,
+      prompt: null,
+      command: null,
       branch: "{type}/{nr}-{slug}",
       cleanup: null,
     },
@@ -85,6 +93,12 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
   });
 }
 
+function commandSpec(v: unknown): string[] | string | null {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as string[];
+  return null;
+}
+
 /** The resolved task modes; the default when the shape is wrong. */
 export function parseTaskModes(raw: unknown): TaskModes {
   if (typeof raw !== "object" || raw === null) return DEFAULT_TASKS;
@@ -94,13 +108,16 @@ export function parseTaskModes(raw: unknown): TaskModes {
   for (const m of r["modes"]) {
     if (typeof m !== "object" || m === null) continue;
     const o = m as Record<string, unknown>;
-    if (typeof o["name"] !== "string" || typeof o["command"] !== "string") continue;
+    if (typeof o["name"] !== "string") continue;
     modes.push({
       name: o["name"],
       worktree: o["worktree"] !== false,
-      command: o["command"],
+      harness: typeof o["harness"] === "string" ? o["harness"] : null,
+      model: typeof o["model"] === "string" ? o["model"] : null,
+      prompt: typeof o["prompt"] === "string" ? o["prompt"] : null,
+      command: commandSpec(o["command"]),
       branch: typeof o["branch"] === "string" ? o["branch"] : DEFAULT_TASKS.modes[0].branch,
-      cleanup: typeof o["cleanup"] === "string" ? o["cleanup"] : null,
+      cleanup: commandSpec(o["cleanup"]),
     });
   }
   return modes.length > 0 ? { modes, worktreeDir: r["worktreeDir"] } : DEFAULT_TASKS;

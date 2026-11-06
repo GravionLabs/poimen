@@ -102,12 +102,12 @@ impl Sources {
                     add(&mut out, "task worktreeDir".into(), dir);
                 }
                 for m in t.modes.iter().flatten() {
-                    add(&mut out, format!("task mode \"{}\"", m.name), &m.command);
+                    add(&mut out, format!("task mode \"{}\"", m.name), &m.describe());
                     if let Some(cleanup) = &m.cleanup {
                         add(
                             &mut out,
                             format!("task mode \"{}\" cleanup", m.name),
-                            cleanup,
+                            &cleanup.display(),
                         );
                     }
                 }

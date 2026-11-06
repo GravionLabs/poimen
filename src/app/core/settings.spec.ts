@@ -1,6 +1,12 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, SettingsStore, nextTheme, parseSettings } from "./settings";
+import {
+  DEFAULT_SETTINGS,
+  SettingsStore,
+  nextTheme,
+  parseSettings,
+  parseTaskModes,
+} from "./settings";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -100,7 +106,18 @@ describe("parseSettings", () => {
     }).tasks;
     expect(t).toEqual({
       worktreeDir: "../w",
-      modes: [{ name: "q", worktree: false, command: "vim", branch: "b", cleanup: "c" }],
+      modes: [
+        {
+          name: "q",
+          worktree: false,
+          harness: null,
+          model: null,
+          prompt: null,
+          command: "vim",
+          branch: "b",
+          cleanup: "c",
+        },
+      ],
     });
     expect(parseSettings({ tasks: { modes: [], worktreeDir: "x" } }).tasks).toEqual(
       DEFAULT_SETTINGS.tasks,
@@ -225,5 +242,28 @@ describe("notifications", () => {
     const s = parseSettings({ notifyOnBlocked: false, notifyOnDone: "no" });
     expect(s.notifyOnBlocked).toBe(false);
     expect(s.notifyOnDone).toBe(true);
+  });
+});
+
+describe("parseTaskModes", () => {
+  it("keeps harness modes, argv commands and deprecated string commands", () => {
+    const got = parseTaskModes({
+      worktreeDir: "../{repo}-{nr}",
+      modes: [
+        { name: "agent", harness: "copilot", model: "auto", prompt: "Fix #{nr}" },
+        {
+          name: "loop",
+          command: ["pwsh", "run.ps1", "{nr}"],
+          cleanup: ["git", "branch", "-D", "{branch}"],
+        },
+        { name: "old", command: "claude {prompt}" },
+      ],
+    });
+    expect(got.modes.map((m) => [m.harness, m.model, m.prompt, m.command])).toEqual([
+      ["copilot", "auto", "Fix #{nr}", null],
+      [null, null, null, ["pwsh", "run.ps1", "{nr}"]],
+      [null, null, null, "claude {prompt}"],
+    ]);
+    expect(got.modes[1].cleanup).toEqual(["git", "branch", "-D", "{branch}"]);
   });
 });

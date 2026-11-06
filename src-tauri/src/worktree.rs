@@ -420,7 +420,7 @@ pub struct CleanupReport {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CleanupMode {
     Builtin,
-    Command(String),
+    Command(crate::tasks::CommandSpec),
 }
 
 /// The command that removes a worktree (and its branch) by hand.
@@ -484,16 +484,26 @@ fn spaces_in(snapshot: &crate::backend::Snapshot, worktree: &Path) -> (Vec<Strin
     (whole, partial)
 }
 
-/// Runs the expanded cleanup command in `root` through the platform shell.
-fn run_cleanup_command(root: &Path, command: &str) -> Result<(), String> {
-    let mut cmd = if cfg!(windows) {
-        let mut c = crate::gui_path::command("powershell");
-        c.args(["-NoProfile", "-Command", command]);
-        c
-    } else {
-        let mut c = crate::gui_path::command("sh");
-        c.args(["-c", command]);
-        c
+/// Runs the expanded cleanup command in `root`: an argv directly, a (deprecated) shell line
+/// through the platform shell.
+fn run_cleanup_command(root: &Path, command: &crate::tasks::Cmd) -> Result<(), String> {
+    use crate::tasks::Cmd;
+    let mut cmd = match command {
+        Cmd::Argv(argv) => {
+            let mut c = crate::gui_path::command(&argv[0]);
+            c.args(&argv[1..]);
+            c
+        }
+        Cmd::Shell(line) if cfg!(windows) => {
+            let mut c = crate::gui_path::command("powershell");
+            c.args(["-NoProfile", "-Command", line]);
+            c
+        }
+        Cmd::Shell(line) => {
+            let mut c = crate::gui_path::command("sh");
+            c.args(["-c", line]);
+            c
+        }
     };
     let out = cmd
         .current_dir(root)
@@ -644,7 +654,7 @@ pub fn cleanup(
                 let mut vars = TaskVars::new(nr, "", "", &repo);
                 vars.branch = branch.clone();
                 vars.pr = pr.number.to_string();
-                let command = expand(template, &vars, true);
+                let command = crate::tasks::expand_command(template, &vars);
                 match run_cleanup_command(&root, &command) {
                     Ok(()) => report.removed.push(Removed {
                         path: path.clone(),
@@ -661,7 +671,10 @@ pub fn cleanup(
                         ),
                         note: None,
                     }),
-                    Err(e) => report.left.push(Left { command, ..left(e) }),
+                    Err(e) => report.left.push(Left {
+                        command: command.line(),
+                        ..left(e)
+                    }),
                 }
             }
         }
@@ -1281,8 +1294,9 @@ mod tests {
     fn a_cleanup_command_replaces_the_built_in_removal() {
         let f = Fixture::new(true);
         let wt = f.task(7);
-        let mode =
-            CleanupMode::Command("printf '%s-%s-%s' {pr} {nr} {branch} > cleanup.out".into());
+        let mode = CleanupMode::Command(crate::tasks::CommandSpec::Shell(
+            "printf '%s-%s-%s' {pr} {nr} {branch} > cleanup.out".into(),
+        ));
         let report = cleanup(
             &f.repo,
             &Fixture::merged(&[7]),
@@ -1302,10 +1316,44 @@ mod tests {
     }
 
     #[test]
+    fn an_argv_cleanup_runs_without_a_shell_and_each_element_stays_one_argument() {
+        let f = Fixture::new(true);
+        f.task(7);
+        let mode = CleanupMode::Command(crate::tasks::CommandSpec::Argv(
+            [
+                "sh",
+                "-c",
+                "printf '%s|%s' \"$1\" \"$2\" > cleanup.out",
+                "sh",
+                "pr {pr};$(x)",
+                "{branch}",
+            ]
+            .map(String::from)
+            .to_vec(),
+        ));
+        let report = cleanup(
+            &f.repo,
+            &Fixture::merged(&[7]),
+            &mode,
+            &FakeBackend::default(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(report.removed.len(), 1, "{report:?}");
+        assert_eq!(
+            std::fs::read_to_string(f.repo.join("cleanup.out")).unwrap(),
+            "pr 107;$(x)|feat/7-x"
+        );
+    }
+
+    #[test]
     fn a_failing_cleanup_command_leaves_the_worktree_with_its_command() {
         let f = Fixture::new(true);
         f.task(7);
-        let mode = CleanupMode::Command("echo boom >&2; exit 3 # {pr}".into());
+        let mode = CleanupMode::Command(crate::tasks::CommandSpec::Shell(
+            "echo boom >&2; exit 3 # {pr}".into(),
+        ));
         let report = cleanup(
             &f.repo,
             &Fixture::merged(&[7]),
@@ -1336,7 +1384,7 @@ mod tests {
             let report = cleanup(
                 &f.repo,
                 &Fixture::merged(&[7]),
-                &CleanupMode::Command("touch ran".into()),
+                &CleanupMode::Command(crate::tasks::CommandSpec::Shell("touch ran".into())),
                 &backend,
                 None,
                 None,
@@ -1373,7 +1421,7 @@ mod tests {
         let report = cleanup(
             &f.repo,
             &merged,
-            &CleanupMode::Command("touch ran".into()),
+            &CleanupMode::Command(crate::tasks::CommandSpec::Shell("touch ran".into())),
             &FakeBackend::default(),
             None,
             None,
