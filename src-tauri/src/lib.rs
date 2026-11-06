@@ -4,6 +4,7 @@ mod backend_fake;
 mod changes;
 mod changes_git;
 mod copilot;
+mod deliver;
 mod git;
 mod github;
 mod github_branches;
@@ -58,6 +59,10 @@ struct StartLock(std::sync::Arc<Mutex<()>>);
 /// each visible flow tab), each with at most one watch.
 #[derive(Default)]
 struct SubagentWatch(Mutex<Watches<transcripts::WatchHandle>>);
+
+/// The running watches of deliver loop status files by repository root.
+#[derive(Default)]
+struct DeliverWatch(Mutex<deliver::Watches>);
 
 /// Values by key, each with the generation of the latest command for that key.
 ///
@@ -1231,6 +1236,45 @@ fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
     }
 }
 
+/// Watches the deliver loop status file (`.agents/deliver-loop/status.json`) of the repositories
+/// of `dirs` (one watch per repository toplevel; worktrees count as their own), replacing the
+/// watched set; each change arrives as a `deliver` event `{ root, read }`, first with the current
+/// content. Returns the watched roots. Read-only.
+#[tauri::command]
+async fn deliver_watch(
+    app: AppHandle,
+    watch: State<'_, DeliverWatch>,
+    dirs: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let roots = tauri::async_runtime::spawn_blocking(move || {
+        let mut roots: Vec<String> = Vec::new();
+        for dir in dirs {
+            if let Some(top) = git::toplevel(&dir)
+                && !roots.contains(&top)
+            {
+                roots.push(top);
+            }
+        }
+        roots
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+    let current = watches.keys().cloned().collect();
+    let (stop, start) = deliver::plan(&current, &roots);
+    for root in stop {
+        watches.remove(&root);
+    }
+    for root in start {
+        let (app, name) = (app.clone(), root.clone());
+        let handle = deliver::watch(PathBuf::from(&root), move |read| {
+            let _ = app.emit("deliver", json!({ "root": name, "read": read }));
+        });
+        watches.insert(root, handle);
+    }
+    Ok(roots)
+}
+
 /// What goes over the channel of a stream for one record. On an emulated stream the PTY bytes
 /// (snapshot and output) are sent raw, which the webview receives as an `ArrayBuffer`; the other
 /// records are JSON. A rendered stream (herdr frames) sends JSON only.
@@ -1519,6 +1563,7 @@ pub fn run() {
                 .unwrap_or_else(|| std::env::temp_dir().join("poimen-github")),
         )))
         .manage(SubagentWatch::default())
+        .manage(DeliverWatch::default())
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
         .setup(move |app| {
@@ -1640,6 +1685,7 @@ pub fn run() {
             repo_info,
             subagents_watch,
             subagents_unwatch,
+            deliver_watch,
             open_terminal,
             terminal_input,
             terminal_resize,
