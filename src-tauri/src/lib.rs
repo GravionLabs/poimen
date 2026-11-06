@@ -348,6 +348,57 @@ async fn terminal_create(
     .await
 }
 
+/// The space template that applies to `dir`; `origin` is read only when a template matches by
+/// remote.
+fn template_for<'a>(
+    dir: &str,
+    user: &'a settings::Settings,
+    home: Option<&std::path::Path>,
+) -> Option<&'a templates::Template> {
+    let remote = user
+        .space_templates
+        .iter()
+        .any(|t| t.remote.is_some())
+        .then(|| git::origin_url(dir).and_then(|u| remote::parse(&u)))
+        .flatten();
+    templates::resolve(dir, remote.as_ref(), &user.space_templates, home)
+}
+
+/// The template a new space for a directory would use, for the new-space dialog.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+struct TemplateHint {
+    name: String,
+    agent: String,
+}
+
+fn resolve_space_template_with(home: Option<&std::path::Path>, cwd: &str) -> Option<TemplateHint> {
+    let dir = spaces::resolve_dir(cwd, home).ok()?;
+    let user = settings::load(home?);
+    template_for(&dir, &user, home).map(|t| TemplateHint {
+        name: t.name.clone(),
+        agent: t.agent.clone(),
+    })
+}
+
+/// The space template that applies to `cwd` (read-only; the rules of `create_space`), or `None`
+/// for the default.
+#[tauri::command]
+async fn resolve_space_template(cwd: String) -> Option<TemplateHint> {
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_space_template_with(home_dir().as_deref(), &cwd)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Writes only `spaceTemplates` after validating it; the settings watcher emits the change.
+#[tauri::command]
+fn set_space_templates(templates: serde_json::Value) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_space_templates(&home, &templates)
+}
+
 /// Creates a space for a directory and focuses it; when a space for the directory exists (a pane
 /// exactly in it, else one labelled with its name whose panes report no other directory) that one
 /// is focused.
@@ -429,17 +480,9 @@ fn create_space_with(
     let created = backend.create_space(&dir, &label)?;
     let workspace_id = created.space_id.clone();
     backend.focus_space(&workspace_id)?;
-    let template = user.as_ref().and_then(|s| {
-        // `origin` is read only when a template matches by remote.
-        let remote = s
-            .space_templates
-            .iter()
-            .any(|t| t.remote.is_some())
-            .then(|| git::origin_url(&dir).and_then(|u| remote::parse(&u)))
-            .flatten();
-        templates::resolve(&dir, remote.as_ref(), &s.space_templates, home)
-            .map(|t| (t, &s.harnesses))
-    });
+    let template = user
+        .as_ref()
+        .and_then(|s| template_for(&dir, s, home).map(|t| (t, &s.harnesses)));
     let mut template_warnings = Vec::new();
     let agent_command = template.and_then(|(t, harnesses)| {
         let path = gui_path::child_path();
@@ -1578,6 +1621,8 @@ pub fn run() {
             set_explorer_roots,
             set_explorer_show_hidden,
             set_spaces_layout,
+            set_space_templates,
+            resolve_space_template,
             revoke_project,
             remove_spaces_layout,
             default_spaces_layout,
@@ -1894,6 +1939,27 @@ mod build_layout_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let dir = dir.to_string_lossy().into_owned();
         (home, dir)
+    }
+
+    #[test]
+    fn resolve_space_template_names_the_template_or_nothing() {
+        let (home, dir) = home_with_templates(
+            r#"{"spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"claude"}]}"#,
+        );
+        assert_eq!(
+            resolve_space_template_with(Some(&home), &dir),
+            Some(TemplateHint {
+                name: "app".into(),
+                agent: "claude".into()
+            })
+        );
+        let outside = home.to_string_lossy().into_owned();
+        assert_eq!(resolve_space_template_with(Some(&home), &outside), None);
+        assert_eq!(
+            resolve_space_template_with(Some(&home), "/no/such/dir"),
+            None
+        );
+        assert_eq!(resolve_space_template_with(None, &dir), None);
     }
 
     #[test]

@@ -24,6 +24,7 @@ export class SpaceDialog {
     const value = (event.target as HTMLInputElement).value;
     this.path.set(value);
     void this.actions.complete(value);
+    void this.actions.lookupTemplate(value);
   }
 
   protected typeLabel(event: Event): void {
@@ -32,7 +33,15 @@ export class SpaceDialog {
 
   protected async browse(): Promise<void> {
     const dir = await this.actions.pick();
-    if (dir) this.path.set(dir);
+    if (dir) {
+      this.path.set(dir);
+      void this.actions.lookupTemplate(dir);
+    }
+  }
+
+  /** The harness id with a capital: `claude` is "Claude". */
+  protected agent(id: string): string {
+    return id.charAt(0).toUpperCase() + id.slice(1);
   }
 
   protected async submit(): Promise<void> {
@@ -57,5 +66,6 @@ export class SpaceDialog {
   private reset(): void {
     this.path.set("");
     this.typedLabel.set(null);
+    void this.actions.lookupTemplate("");
   }
 }

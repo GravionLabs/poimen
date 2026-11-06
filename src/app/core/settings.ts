@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
+import { parseSpaceTemplates, templateConfig, type SpaceTemplate } from "./space-templates";
 import { TauriBridge } from "./tauri";
 import {
   MAX_TERMINAL_FONT_SIZE,
@@ -168,6 +169,8 @@ export interface Settings {
   notifyOnDone: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
+  /** `spaceTemplates`: directory or remote matched templates with agent and layout. */
+  spaceTemplates: SpaceTemplate[];
   /** `trustedProjects`: repository root to the hash of the project file the user trusted. */
   trustedProjects: Record<string, string>;
   /** `tasks`: the task modes and the worktree directory template. */
@@ -205,6 +208,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnBlocked: true,
   notifyOnDone: true,
   spacesLayout: null,
+  spaceTemplates: [],
   trustedProjects: {},
   tasks: DEFAULT_TASKS,
   home: null,
@@ -311,6 +315,7 @@ export function parseSettings(raw: unknown): Settings {
     notifyOnBlocked: r["notifyOnBlocked"] !== false,
     notifyOnDone: r["notifyOnDone"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
+    spaceTemplates: parseSpaceTemplates(r["spaceTemplates"]),
     trustedProjects: parseTrusted(r["trustedProjects"]),
     tasks: parseTaskModes(r["tasks"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
@@ -471,6 +476,13 @@ export class SettingsStore {
     } catch {
       return null;
     }
+  }
+
+  /** Writes `spaceTemplates` (validated again by the backend); `false` when the write failed. */
+  setSpaceTemplates(spaceTemplates: SpaceTemplate[]): Promise<boolean> {
+    return this.write({ spaceTemplates }, "the space templates", "set_space_templates", {
+      templates: spaceTemplates.map(templateConfig),
+    });
   }
 
   /** Drops the trust of the project file of `root` (`trustedProjects`) and applies it at once. */

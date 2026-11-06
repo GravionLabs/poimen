@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { agentKind, pathSegments, type Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
+import type { TemplateHint } from "./space-templates";
 import { TauriBridge } from "./tauri";
 import { UiState } from "./ui-state";
 
@@ -146,6 +147,7 @@ export class SpaceActions {
   }
 
   ask(): void {
+    this._template.set(null);
     this._error.set(null);
     this._dirs.set([]);
     this._open.set(true);
@@ -154,6 +156,32 @@ export class SpaceActions {
   cancel(): void {
     this._open.set(false);
     this._error.set(null);
+  }
+
+  private readonly _template = signal<TemplateHint | null>(null);
+  /** The space template that applies to the directory typed in the dialog; `null`: the default. */
+  readonly template = this._template.asReadonly();
+  private templateSeq = 0;
+
+  /** Looks up the template for the typed or picked directory (the newest lookup wins). */
+  async lookupTemplate(dir: string): Promise<void> {
+    const seq = ++this.templateSeq;
+    const cwd = dir.trim();
+    let hint: TemplateHint | null = null;
+    if (cwd) {
+      try {
+        const raw = await this.bridge.invoke<Partial<TemplateHint> | null>(
+          "resolve_space_template",
+          { cwd },
+        );
+        if (raw && typeof raw.name === "string" && typeof raw.agent === "string") {
+          hint = { name: raw.name, agent: raw.agent };
+        }
+      } catch {
+        hint = null;
+      }
+    }
+    if (seq === this.templateSeq) this._template.set(hint);
   }
 
   /** Looks up directories for the typed path (completion). */

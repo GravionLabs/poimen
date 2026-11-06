@@ -44,6 +44,7 @@ import {
   MIN_UI_FONT_SIZE,
 } from "../core/ui-font";
 import { SpaceLayoutEditor } from "./space-layout-editor";
+import { SpaceTemplatesEditor } from "./space-templates-editor";
 
 export type SchemeMode = "single" | "pair";
 
@@ -142,7 +143,7 @@ export function withRoot(
 /** The settings view (an editor tab): appearance and the color scheme picker with live preview. */
 @Component({
   selector: "app-settings-view",
-  imports: [SpaceLayoutEditor],
+  imports: [SpaceLayoutEditor, SpaceTemplatesEditor],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

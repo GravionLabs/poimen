@@ -1453,6 +1453,20 @@ pub fn remove_spaces_layout_text(text: &str) -> Result<String, String> {
     remove_path_text(text, &["spaces", "layout"])
 }
 
+/// Returns `text` with `spaceTemplates` replaced by `templates` after validating it like the
+/// settings loader does (any warning rejects the write); other keys and comments stay.
+pub fn set_space_templates_text(text: &str, templates: &Value) -> Result<String, String> {
+    let mut warnings = Vec::new();
+    let parsed = parse_space_templates(templates, &mut warnings);
+    if warnings.is_empty() && parsed.len() != templates.as_array().map_or(0, Vec::len) {
+        warnings.push("a template was not accepted".into());
+    }
+    if !warnings.is_empty() {
+        return Err(format!("spaceTemplates: {}", warnings.join("; ")));
+    }
+    set_key_text(text, "spaceTemplates", &templates.to_string())
+}
+
 /// Returns `text` with `trustedProjects` replaced by `projects`, touching nothing else (comments
 /// inside the old `trustedProjects` object go with it).
 pub fn set_trusted_projects_text(
@@ -1662,6 +1676,11 @@ pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> 
 /// Writes `spaces.layout` below `home`, like `save_theme`.
 pub fn save_spaces_layout(home: &Path, layout: &Value) -> Result<(), String> {
     save_with(home, |text| set_spaces_layout_text(text, layout))
+}
+
+/// Writes `spaceTemplates` below `home`, like `save_theme`.
+pub fn save_space_templates(home: &Path, templates: &Value) -> Result<(), String> {
+    save_with(home, |text| set_space_templates_text(text, templates))
 }
 
 /// Removes `spaces.layout` below `home`; a missing file stays missing.
@@ -2409,6 +2428,59 @@ mod tests {
         remove_spaces_layout(&home).unwrap();
         assert!(load(&home).spaces_layout.is_none());
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn save_space_templates_writes_only_that_key_and_keeps_the_rest() {
+        let home = std::env::temp_dir().join(format!("poimen-tpls-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+        std::fs::write(
+            config_path(&home),
+            "{\n  \"theme\": \"dark\",\n  \"spaceTemplates\": []\n}\n",
+        )
+        .unwrap();
+        let templates = serde_json::json!([
+            {"name": "work", "match": {"dir": "~/src", "remote": {"provider": "github", "owner": "acme"}},
+             "agent": "claude", "model": "opus",
+             "layout": {"panes": [{"name": "main", "command": "ls"}]}},
+            {"name": "az", "match": {"remote": {"provider": "azure-devops", "organization": "o", "project": "p"}},
+             "agent": "copilot"}
+        ]);
+        save_space_templates(&home, &templates).unwrap();
+        let text = std::fs::read_to_string(config_path(&home)).unwrap();
+        assert!(text.contains("\"theme\": \"dark\""));
+        let s = load(&home);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert_eq!(s.theme, "dark");
+        assert_eq!(s.space_templates.len(), 2);
+        assert_eq!(s.space_templates[0].model.as_deref(), Some("opus"));
+        save_space_templates(&home, &serde_json::json!([])).unwrap();
+        assert!(load(&home).space_templates.is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn save_space_templates_creates_the_file_and_rejects_invalid_input() {
+        let ok = serde_json::json!([{"name": "a", "match": {"dir": "~/a"}, "agent": "claude"}]);
+        assert!(
+            set_space_templates_text("{}", &ok)
+                .unwrap()
+                .contains("\"spaceTemplates\"")
+        );
+        for bad in [
+            serde_json::json!([{"name": "a", "match": {}, "agent": "claude"}]),
+            serde_json::json!([{"name": "a", "match": {"dir": "rel"}, "agent": "claude"}]),
+            serde_json::json!([{"name": "a", "match": {"dir": "~/a"}}]),
+            serde_json::json!([
+                {"name": "a", "match": {"dir": "~/a"}, "agent": "claude"},
+                {"name": "a", "match": {"dir": "~/b"}, "agent": "claude"}
+            ]),
+            serde_json::json!({"name": "a"}),
+        ] {
+            let err = set_space_templates_text("{}", &bad).unwrap_err();
+            assert!(err.starts_with("spaceTemplates: "), "{err}");
+        }
     }
 
     #[test]
