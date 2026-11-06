@@ -3,6 +3,13 @@ import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
 import { TauriBridge } from "./tauri";
 import {
+  MAX_TERMINAL_FONT_SIZE,
+  MAX_UI_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  MIN_UI_FONT_SIZE,
+  sizeError,
+} from "./ui-font";
+import {
   DEFAULT_SIDEBAR_ROWS,
   isRowToken,
   type RowLines,
@@ -131,6 +138,10 @@ export interface Settings {
   /** `null` keeps the app's default monospace stack. */
   fontFamily: string | null;
   fontSize: number;
+  /** App UI font family (`ui.fontFamily`); `null` keeps the default `--font-ui`. */
+  uiFontFamily: string | null;
+  /** App UI font size in px (`ui.fontSize`). */
+  uiFontSize: number;
   /** Terminal colors taken from Ghostty; `null` keeps the theme colors. */
   colors: GhosttyColors | null;
   /** Open panes for input when no other client controls them (`terminal.autoControl`). */
@@ -179,6 +190,8 @@ export const DEFAULT_SETTINGS: Settings = {
   colorSchema: null,
   fontFamily: null,
   fontSize: 13,
+  uiFontFamily: null,
+  uiFontSize: 13,
   colors: null,
   autoControl: true,
   shortcuts: DEFAULT_SHORTCUTS,
@@ -263,6 +276,11 @@ export function parseSettings(raw: unknown): Settings {
       typeof r["fontSize"] === "number" && Number.isFinite(r["fontSize"])
         ? r["fontSize"]
         : DEFAULT_SETTINGS.fontSize,
+    uiFontFamily: typeof r["uiFontFamily"] === "string" ? r["uiFontFamily"] : null,
+    uiFontSize:
+      typeof r["uiFontSize"] === "number" && Number.isFinite(r["uiFontSize"])
+        ? r["uiFontSize"]
+        : DEFAULT_SETTINGS.uiFontSize,
     colors:
       colors && typeof colors === "object"
         ? {
@@ -380,6 +398,51 @@ export class SettingsStore {
   async setNotification(kind: "blocked" | "done", on: boolean): Promise<void> {
     const patch = kind === "blocked" ? { notifyOnBlocked: on } : { notifyOnDone: on };
     await this.write(patch, `the ${kind} notification option`, "set_notification", { kind, on });
+  }
+
+  /** Writes `terminal.fontFamily` (empty removes it: the default stack) and applies it at once. */
+  async setTerminalFontFamily(family: string): Promise<boolean> {
+    const trimmed = family.trim();
+    return this.write(
+      { fontFamily: trimmed || null },
+      "the terminal font",
+      "set_terminal_font_family",
+      { family: trimmed },
+    );
+  }
+
+  /** Writes `terminal.fontSize`; an out-of-range size is not written and sets the write error. */
+  async setTerminalFontSize(size: number): Promise<boolean> {
+    const bad = sizeError(
+      "The terminal font size",
+      size,
+      MIN_TERMINAL_FONT_SIZE,
+      MAX_TERMINAL_FONT_SIZE,
+    );
+    if (bad) return this.reject(bad);
+    return this.write({ fontSize: size }, "the terminal font size", "set_terminal_font_size", {
+      size,
+    });
+  }
+
+  /** Writes `ui.fontFamily` (empty removes it: the default `--font-ui`) and applies it at once. */
+  async setUiFontFamily(family: string): Promise<boolean> {
+    const trimmed = family.trim();
+    return this.write({ uiFontFamily: trimmed || null }, "the UI font", "set_ui_font_family", {
+      family: trimmed,
+    });
+  }
+
+  /** Writes `ui.fontSize`; an out-of-range size is not written and sets the write error. */
+  async setUiFontSize(size: number): Promise<boolean> {
+    const bad = sizeError("The UI font size", size, MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE);
+    if (bad) return this.reject(bad);
+    return this.write({ uiFontSize: size }, "the UI font size", "set_ui_font_size", { size });
+  }
+
+  private reject(message: string): false {
+    this._writeError.set(message);
+    return false;
   }
 
   /** Writes `herdr.autoStart` of config.json and applies it at once. */

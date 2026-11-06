@@ -938,6 +938,34 @@ fn set_notification(kind: String, on: bool) -> Result<(), String> {
     settings::save_notification(&home, &kind, on)
 }
 
+/// Writes only `terminal.fontFamily`; the settings watcher emits the change.
+#[tauri::command]
+fn set_terminal_font_family(family: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_terminal_font_family(&home, &family)
+}
+
+/// Writes only `terminal.fontSize`; the settings watcher emits the change.
+#[tauri::command]
+fn set_terminal_font_size(size: f64) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_terminal_font_size(&home, size)
+}
+
+/// Writes only `ui.fontFamily`; the settings watcher emits the change.
+#[tauri::command]
+fn set_ui_font_family(family: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_ui_font_family(&home, &family)
+}
+
+/// Writes only `ui.fontSize`; the settings watcher emits the change.
+#[tauri::command]
+fn set_ui_font_size(size: f64) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_ui_font_size(&home, size)
+}
+
 /// Writes only `herdr.autoStart`; the settings watcher emits the change.
 #[tauri::command]
 fn set_herdr_auto_start(on: bool) -> Result<(), String> {
@@ -1446,6 +1474,10 @@ pub fn run() {
             hooks_install,
             set_herdr_auto_start,
             set_notification,
+            set_terminal_font_family,
+            set_terminal_font_size,
+            set_ui_font_family,
+            set_ui_font_size,
             pane_split,
             pane_close,
             space_close,
