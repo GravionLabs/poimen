@@ -35,7 +35,7 @@ dropped with a warning naming the file and the key, and the rest loads. Layout p
   (in the space directory). It does not run when an existing space is focused or when the
   repository is not trusted. If it cannot be started, the space stays and a warning names the
   reason. The agent pane starts in parallel; it does not wait for the setup.
-- `teardown`: a command.
+- `teardown`: a command. It runs in the worktree through your shell (`$SHELL -lc`; on Windows `pwsh`, else `powershell.exe`, with `-NoProfile -Command`) before "Clean up merged tasks" removes a worktree, and from the palette entry "Project: Run teardown" (in the directory of the focused space). Timeout 5 minutes, output capped at 1 MB. A failing or timed-out teardown stops the removal of that worktree and shows its output; it does not run when a space closes. In an untrusted project it does not run; the cleanup then asks whether to remove without it.
 - `tasks`: task modes of this repository, same schema as `tasks` in the user `config.json`
   (`modes[]`, `worktreeDir`). They merge by `name` over the user's modes (a project mode replaces
   the user's mode of the same name, new ones are added) and `worktreeDir` overrides. They count as

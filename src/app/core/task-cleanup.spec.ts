@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HerdrStore } from "./herdr-store";
 import { SpaceActions } from "./space-actions";
 import { TaskCleanup, cleanupLog, cleanupSummary, type CleanupReport } from "./task-cleanup";
+import { ResultDialog } from "./result-dialog";
 import { TaskLog } from "./task-log";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -67,11 +68,12 @@ describe("TaskCleanup", () => {
   let spaces: SpaceActions;
   let log: TaskLog;
   let ui: UiState;
+  let injector: Injector;
 
   beforeEach(() => {
     tauri.reset();
     tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
-    const injector = Injector.create({
+    injector = Injector.create({
       providers: [
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
@@ -79,7 +81,7 @@ describe("TaskCleanup", () => {
         UiState,
         SpaceActions,
         TaskLog,
-        UiState,
+        ResultDialog,
         TaskCleanup,
       ],
     });
@@ -92,11 +94,28 @@ describe("TaskCleanup", () => {
   it("passes the repository and the focused space, then notifies and logs", async () => {
     tauri.answer("task_cleanup", () => REPORT);
     expect(await cleanup.run("/work/app", "w1")).toEqual(REPORT);
-    expect(tauri.calls("task_cleanup")).toEqual([{ dir: "/work/app", focusedSpace: "w1" }]);
+    expect(tauri.calls("task_cleanup")).toEqual([
+      { dir: "/work/app", focusedSpace: "w1", skipTeardown: false },
+    ]);
     expect(spaces.warning()).toBe("Clean up merged tasks: 2 removed, 1 left");
     expect(log.lines().map((l) => l.text)).toHaveLength(4);
     expect(ui.panelTab()).toBe("log");
     expect(ui.panelOpen()).toBe(true);
+  });
+
+  it("asks before removing without teardown when the project is untrusted", async () => {
+    const dialog = injector.get(ResultDialog);
+    tauri.answer("task_cleanup", (args) =>
+      (args as { skipTeardown: boolean }).skipTeardown
+        ? REPORT
+        : { removed: [], left: [], teardownUntrusted: true },
+    );
+    await cleanup.run("/work/app", "w1");
+    expect(log.lines()).toHaveLength(0);
+    expect(dialog.content()?.action?.label).toBe("Remove without teardown");
+    dialog.runAction();
+    await vi.waitFor(() => expect(tauri.calls("task_cleanup")).toHaveLength(2));
+    expect(tauri.calls("task_cleanup")[1]).toMatchObject({ skipTeardown: true });
   });
 
   it("does not open the log when nothing was left", async () => {

@@ -68,9 +68,11 @@ import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import { TaskDialog } from "./task-dialog/task-dialog";
 import { HooksDialog } from "./hooks-dialog/hooks-dialog";
+import { ResultDialog } from "./result-dialog/result-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
 import { TaskStarter } from "./core/task-start";
+import { ProjectTeardown } from "./core/project-teardown";
 import { TaskCleanup } from "./core/task-cleanup";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
@@ -106,6 +108,7 @@ const ZOOM_STEP = 1;
     SpaceDialog,
     HooksDialog,
     TrustDialog,
+    ResultDialog,
     TaskDialog,
     PaletteView,
     ShortcutsDialog,
@@ -132,6 +135,7 @@ export class App {
   private readonly subagents = inject(Subagents);
   private readonly tasks = inject(TaskStarter);
   private readonly cleanup = inject(TaskCleanup);
+  private readonly teardown = inject(ProjectTeardown);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -369,6 +373,10 @@ export class App {
       this.cleanupInActiveRepo();
       return;
     }
+    if (id === "projectTeardown") {
+      this.teardownInActiveSpace();
+      return;
+    }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
       this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);
@@ -449,6 +457,15 @@ export class App {
     const repo = this.activeRepo();
     if (repo) void this.cleanup.run(repo, this.focusedSpace());
     else this.spaceActions.notify("Clean up merged tasks: the active pane is not in a repository");
+  }
+
+  /** The palette entry: run the project's teardown in the directory of the active pane. */
+  private teardownInActiveSpace(): void {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    const dir = pane ? paneDir(pane) : undefined;
+    if (dir) void this.teardown.run(dir);
+    else this.spaceActions.notify("Project: Run teardown: the active pane has no directory");
   }
 
   /** The space of the active pane: a cleanup never removes it. */

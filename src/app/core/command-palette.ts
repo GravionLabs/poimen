@@ -13,7 +13,8 @@ export interface PoimenCommand {
     | "showChanges"
     | "closeSpace"
     | "startTask"
-    | "cleanupTasks";
+    | "cleanupTasks"
+    | "projectTeardown";
   title: string;
 }
 
@@ -39,6 +40,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "showChanges", title: "Show Changes" },
   { id: "startTask", title: "Start task from issue…" },
   { id: "cleanupTasks", title: "Clean up merged tasks" },
+  { id: "projectTeardown", title: "Project: Run teardown" },
 ];
 
 /** An entry of the palette: a poimen command; `shortcut` is the key binding label (empty when none). */
@@ -91,7 +93,8 @@ export class CommandPalette {
         c.id === "showChanges" ||
         c.id === "closeSpace" ||
         c.id === "startTask" ||
-        c.id === "cleanupTasks"
+        c.id === "cleanupTasks" ||
+        c.id === "projectTeardown"
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
