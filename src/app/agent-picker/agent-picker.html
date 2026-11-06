@@ -1,0 +1,28 @@
+@if (state.choices(); as choices) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Cancel"
+    (click)="state.answer(null)"
+  ></button>
+  <div
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Choose an agent"
+    (keydown.escape)="state.answer(null)"
+  >
+    <h2>Send to which agent?</h2>
+    <ul>
+      @for (c of choices; track c.paneId) {
+        <li>
+          <button type="button" (click)="state.answer(c.paneId)">{{ c.label }}</button>
+        </li>
+      }
+    </ul>
+    <div class="buttons">
+      <button type="button" (click)="state.answer(null)">Cancel</button>
+    </div>
+  </div>
+}

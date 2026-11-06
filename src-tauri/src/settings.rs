@@ -11,9 +11,12 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use serde_json::Value;
 
-pub const DEFAULT_FONT_SIZE: f64 = 13.0;
+pub const DEFAULT_FONT_SIZE: f64 = if cfg!(windows) { 14.0 } else { 13.0 };
 const MIN_FONT_SIZE: f64 = 6.0;
 const MAX_FONT_SIZE: f64 = 72.0;
+pub const DEFAULT_UI_FONT_SIZE: f64 = 13.0;
+const MIN_UI_FONT_SIZE: f64 = 10.0;
+const MAX_UI_FONT_SIZE: f64 = 20.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +60,7 @@ pub const ROW_TOKENS: &[&str] = &[
     "dirty",
     "sync",
     "pr",
+    "notification",
     "dir",
     "tab",
 ];
@@ -160,6 +164,10 @@ pub struct Settings {
     /// `None` keeps the app's default monospace stack.
     pub font_family: Option<String>,
     pub font_size: f64,
+    /// App UI font family (`ui.fontFamily`); `None` keeps the default `--font-ui`.
+    pub ui_font_family: Option<String>,
+    /// App UI font size in px (`ui.fontSize`).
+    pub ui_font_size: f64,
     /// Terminal colors taken from Ghostty; `None` keeps the theme colors.
     pub colors: Option<Colors>,
     /// Open panes for input when no other client controls them (`terminal.autoControl`).
@@ -188,6 +196,8 @@ pub struct Settings {
     pub notify_on_done: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
+    /// The space templates (`spaceTemplates`); invalid entries are skipped with a warning.
+    pub space_templates: Vec<crate::templates::Template>,
     /// Repository root to the SHA-256 of the project file the user trusted (`trustedProjects`).
     pub trusted_projects: BTreeMap<String, String>,
     /// The task modes (`tasks`); the default is one `agent` mode.
@@ -354,6 +364,8 @@ impl Default for Settings {
             color_schema: None,
             font_family: None,
             font_size: DEFAULT_FONT_SIZE,
+            ui_font_family: None,
+            ui_font_size: DEFAULT_UI_FONT_SIZE,
             colors: None,
             auto_control: true,
             shortcuts: default_shortcuts(),
@@ -367,6 +379,7 @@ impl Default for Settings {
             notify_on_blocked: true,
             notify_on_done: true,
             spaces_layout: None,
+            space_templates: Vec::new(),
             trusted_projects: BTreeMap::new(),
             tasks: crate::tasks::TaskModes::default(),
             harnesses: crate::harness::default_harnesses(),
@@ -391,6 +404,10 @@ pub struct Ghostty {
 
 fn valid_size(size: f64) -> bool {
     size.is_finite() && (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&size)
+}
+
+fn valid_ui_size(size: f64) -> bool {
+    size.is_finite() && (MIN_UI_FONT_SIZE..=MAX_UI_FONT_SIZE).contains(&size)
 }
 
 fn hex_color(value: &str) -> Option<String> {
@@ -551,13 +568,172 @@ pub struct TaskOverride {
     pub worktree_dir: Option<String>,
 }
 
+/// A command of a task mode: an argv array (non-empty strings, first one the program) or, still
+/// accepted for one release, a string. `Ok(None)` when absent; `Err` (after a warning) when invalid,
+/// which skips the mode.
+fn spec(
+    m: &serde_json::Map<String, Value>,
+    key: &str,
+    at: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Option<crate::tasks::CommandSpec>, ()> {
+    use crate::tasks::CommandSpec;
+    match m.get(key) {
+        None => Ok(None),
+        Some(Value::String(v)) if !v.trim().is_empty() => Ok(Some(CommandSpec::Shell(v.clone()))),
+        Some(Value::Array(items)) => {
+            let argv: Option<Vec<String>> = items
+                .iter()
+                .map(|i| i.as_str().map(str::to_owned))
+                .collect();
+            match argv {
+                Some(a) if a.first().is_some_and(|p| !p.trim().is_empty()) => {
+                    Ok(Some(CommandSpec::Argv(a)))
+                }
+                _ => {
+                    warnings.push(format!(
+                        "{at}.{key} must be a non-empty array of strings; ignored"
+                    ));
+                    Err(())
+                }
+            }
+        }
+        Some(_) => {
+            warnings.push(format!(
+                "{at}.{key} must be an array of strings or a non-empty string; ignored"
+            ));
+            Err(())
+        }
+    }
+}
+
+/// `match.remote`: `{ provider: "github", owner }` or
+/// `{ provider: "azure-devops", organization, project }`.
+fn parse_remote_match(value: &Value) -> Result<crate::remote::Remote, String> {
+    use crate::remote::Remote;
+    let obj = value.as_object().ok_or("must be an object")?;
+    let field = |k: &str| match obj.get(k) {
+        Some(Value::String(s)) if !s.trim().is_empty() => Ok(s.trim().to_owned()),
+        _ => Err(format!("{k} must be a non-empty string")),
+    };
+    match obj.get("provider").and_then(Value::as_str) {
+        Some("github") => Ok(Remote::GitHub {
+            owner: field("owner")?,
+        }),
+        Some("azure-devops") => Ok(Remote::AzureDevOps {
+            organization: field("organization")?,
+            project: field("project")?,
+        }),
+        _ => Err("provider must be \"github\" or \"azure-devops\"".into()),
+    }
+}
+
+/// Parses `spaceTemplates[]`: `name` (unique), `match.dir` and/or `match.remote`, `agent`, optional `model` and `layout`.
+/// Invalid entries warn and are skipped. The agent is checked against `harnesses` at use.
+pub fn parse_space_templates(
+    value: &Value,
+    warnings: &mut Vec<String>,
+) -> Vec<crate::templates::Template> {
+    let Some(list) = value.as_array() else {
+        warnings.push("spaceTemplates must be an array".into());
+        return Vec::new();
+    };
+    let mut out: Vec<crate::templates::Template> = Vec::new();
+    for (i, entry) in list.iter().enumerate() {
+        let at = format!("spaceTemplates[{i}]");
+        let Some(obj) = entry.as_object() else {
+            warnings.push(format!("{at} must be an object; ignored"));
+            continue;
+        };
+        let text = |v: Option<&Value>| match v {
+            Some(Value::String(s)) if !s.trim().is_empty() => Some(s.trim().to_owned()),
+            _ => None,
+        };
+        let Some(name) = text(obj.get("name")) else {
+            warnings.push(format!("{at}.name must be a non-empty string; ignored"));
+            continue;
+        };
+        let at = format!("spaceTemplates[{name}]");
+        if out.iter().any(|t| t.name == name) {
+            warnings.push(format!("{at}: duplicate name; the first one wins"));
+            continue;
+        }
+        let m = obj.get("match").and_then(Value::as_object);
+        let dir = match m.and_then(|m| m.get("dir")) {
+            None => None,
+            Some(v) => match text(Some(v)) {
+                Some(d) if crate::templates::is_valid_dir(&d) => Some(d),
+                Some(_) => {
+                    warnings.push(format!(
+                        "{at}.match.dir must be absolute or start with ~; ignored"
+                    ));
+                    continue;
+                }
+                None => {
+                    warnings.push(format!(
+                        "{at}.match.dir must be a non-empty string; ignored"
+                    ));
+                    continue;
+                }
+            },
+        };
+        let remote = match m.and_then(|m| m.get("remote")) {
+            None => None,
+            Some(v) => match parse_remote_match(v) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    warnings.push(format!("{at}.match.remote: {e}; ignored"));
+                    continue;
+                }
+            },
+        };
+        if dir.is_none() && remote.is_none() {
+            warnings.push(format!("{at}.match needs dir or remote; ignored"));
+            continue;
+        }
+        let Some(agent) = text(obj.get("agent")) else {
+            warnings.push(format!("{at}.agent must be a non-empty string; ignored"));
+            continue;
+        };
+        let model = match obj.get("model") {
+            None => None,
+            Some(v) => match text(Some(v)) {
+                Some(m) => Some(m),
+                None => {
+                    warnings.push(format!("{at}.model must be a non-empty string; ignored"));
+                    continue;
+                }
+            },
+        };
+        let layout = match obj.get("layout") {
+            None => None,
+            Some(l) => match crate::layout::parse_layout_value(l) {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    warnings.push(format!("{at}.layout: {e}; ignored"));
+                    continue;
+                }
+            },
+        };
+        out.push(crate::templates::Template {
+            name,
+            dir,
+            remote,
+            agent,
+            model,
+            layout,
+        });
+    }
+    out
+}
+
 /// Parses a `tasks` object (`modes[]`, `worktreeDir`) of the user config or of a project file.
 /// Invalid entries warn and are skipped. `fallback` ends the warning for a `modes` list without any
 /// valid mode ("using the default agent mode", "using your modes").
 pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) -> TaskOverride {
     use crate::tasks::{
-        CLEANUP_PLACEHOLDERS, COMMAND_PLACEHOLDERS, DEFAULT_BRANCH, PATH_PLACEHOLDERS, TaskMode,
-        unknown_placeholder,
+        CLEANUP_PLACEHOLDERS, COMMAND_PLACEHOLDERS, CommandSpec, DEFAULT_BRANCH, PATH_PLACEHOLDERS,
+        PROMPT_PLACEHOLDERS, TaskMode, unknown_placeholder,
     };
     let mut result = TaskOverride::default();
     let Some(obj) = value.as_object() else {
@@ -611,12 +787,19 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
             warnings.push(format!("{at}: duplicate name; the first one wins"));
             continue;
         }
-        let Some(command) = text("command", &at, warnings) else {
-            if !m.contains_key("command") {
-                warnings.push(format!("{at}.command is missing; ignored"));
-            }
-            continue;
+        let command = match spec(m, "command", &at, warnings) {
+            Ok(c) => c,
+            Err(()) => continue,
         };
+        let harness = text("harness", &at, warnings);
+        let model = text("model", &at, warnings);
+        let prompt = text("prompt", &at, warnings);
+        if command.is_some() && (harness.is_some() || model.is_some() || prompt.is_some()) {
+            warnings.push(format!(
+                "{at}: command cannot be combined with harness, model or prompt; ignored"
+            ));
+            continue;
+        }
         let worktree = match m.get("worktree") {
             None => true,
             Some(Value::Bool(b)) => *b,
@@ -626,23 +809,52 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
             }
         };
         let branch = text("branch", &at, warnings).unwrap_or_else(|| DEFAULT_BRANCH.into());
-        let cleanup = text("cleanup", &at, warnings);
+        let cleanup = spec(m, "cleanup", &at, warnings).unwrap_or(None);
+        let templates = |spec: &Option<CommandSpec>| -> Vec<String> {
+            match spec {
+                None => Vec::new(),
+                Some(CommandSpec::Shell(line)) => vec![line.clone()],
+                Some(CommandSpec::Argv(argv)) => argv.clone(),
+            }
+        };
         let checks = [
-            ("command", Some(&command), COMMAND_PLACEHOLDERS),
-            ("cleanup", cleanup.as_ref(), CLEANUP_PLACEHOLDERS),
-            ("branch", Some(&branch), PATH_PLACEHOLDERS),
+            ("command", templates(&command), COMMAND_PLACEHOLDERS),
+            ("cleanup", templates(&cleanup), CLEANUP_PLACEHOLDERS),
+            (
+                "prompt",
+                prompt.iter().cloned().collect(),
+                PROMPT_PLACEHOLDERS,
+            ),
+            ("branch", vec![branch.clone()], PATH_PLACEHOLDERS),
         ];
-        let bad = checks.iter().find_map(|(k, v, allowed)| {
-            v.and_then(|v| unknown_placeholder(v, allowed))
+        let bad = checks.iter().find_map(|(k, items, allowed)| {
+            items
+                .iter()
+                .find_map(|v| unknown_placeholder(v, allowed))
                 .map(|p| (*k, p))
         });
         if let Some((key, p)) = bad {
             warnings.push(format!("{at}.{key}: unknown placeholder {{{p}}}; ignored"));
             continue;
         }
+        for (key, value) in [("command", &command), ("cleanup", &cleanup)] {
+            if matches!(value, Some(CommandSpec::Shell(_))) {
+                warnings.push(format!(
+                    "tasks.modes.{name}: string {key} is deprecated, use {}",
+                    if key == "command" {
+                        "harness + prompt or an argv list"
+                    } else {
+                        "an argv list"
+                    }
+                ));
+            }
+        }
         out.push(TaskMode {
             name,
             worktree,
+            harness,
+            model,
+            prompt,
             command,
             branch,
             cleanup,
@@ -760,11 +972,38 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     if let Some(value) = root.get("spaces") {
         resolve_spaces(value, &mut s);
     }
+    if let Some(value) = root.get("spaceTemplates") {
+        s.space_templates = parse_space_templates(value, &mut s.warnings);
+    }
     if let Some(value) = root.get("tasks") {
         resolve_tasks(value, &mut s);
     }
     if let Some(value) = root.get("harnesses") {
         s.harnesses = crate::harness::resolve(value, &mut s.warnings);
+    }
+
+    if let Some(ui) = root.get("ui") {
+        if let Some(ui) = ui.as_object() {
+            match ui.get("fontFamily") {
+                None | Some(Value::Null) => {}
+                Some(Value::String(f)) if !f.trim().is_empty() => {
+                    s.ui_font_family = Some(f.trim().to_owned());
+                }
+                Some(other) => s
+                    .warnings
+                    .push(format!("ui.fontFamily {other} must be a non-empty string")),
+            }
+            if let Some(v) = ui.get("fontSize") {
+                match v.as_f64().filter(|n| valid_ui_size(*n)) {
+                    Some(n) => s.ui_font_size = n,
+                    None => s.warnings.push(format!(
+                        "ui.fontSize {v} must be a number from {MIN_UI_FONT_SIZE} to {MAX_UI_FONT_SIZE}"
+                    )),
+                }
+            }
+        } else {
+            s.warnings.push("ui must be an object".into());
+        }
     }
 
     let mut use_ghostty = false;
@@ -1215,6 +1454,20 @@ pub fn remove_spaces_layout_text(text: &str) -> Result<String, String> {
     remove_path_text(text, &["spaces", "layout"])
 }
 
+/// Returns `text` with `spaceTemplates` replaced by `templates` after validating it like the
+/// settings loader does (any warning rejects the write); other keys and comments stay.
+pub fn set_space_templates_text(text: &str, templates: &Value) -> Result<String, String> {
+    let mut warnings = Vec::new();
+    let parsed = parse_space_templates(templates, &mut warnings);
+    if warnings.is_empty() && parsed.len() != templates.as_array().map_or(0, Vec::len) {
+        warnings.push("a template was not accepted".into());
+    }
+    if !warnings.is_empty() {
+        return Err(format!("spaceTemplates: {}", warnings.join("; ")));
+    }
+    set_key_text(text, "spaceTemplates", &templates.to_string())
+}
+
 /// Returns `text` with `trustedProjects` replaced by `projects`, touching nothing else (comments
 /// inside the old `trustedProjects` object go with it).
 pub fn set_trusted_projects_text(
@@ -1357,6 +1610,75 @@ pub fn save_notification(home: &Path, kind: &str, on: bool) -> Result<(), String
     save_with(home, |text| set_notification_text(text, kind, on))
 }
 
+/// Returns `text` with `terminal.fontFamily` set; an empty family removes the key.
+pub fn set_terminal_font_family_text(text: &str, family: &str) -> Result<String, String> {
+    set_font_family_text(text, "terminal", family)
+}
+
+/// Returns `text` with `terminal.fontSize` set (`MIN_FONT_SIZE`..`MAX_FONT_SIZE`).
+pub fn set_terminal_font_size_text(text: &str, size: f64) -> Result<String, String> {
+    if !valid_size(size) {
+        return Err(format!(
+            "terminal.fontSize {size} must be a number from {MIN_FONT_SIZE} to {MAX_FONT_SIZE}"
+        ));
+    }
+    set_path_text(text, &["terminal", "fontSize"], &size.to_string())
+}
+
+/// Returns `text` without `terminal.fontSize`: the size is the platform (or Ghostty) default again.
+pub fn clear_terminal_font_size_text(text: &str) -> Result<String, String> {
+    remove_path_text(text, &["terminal", "fontSize"])
+}
+
+/// Returns `text` with `ui.fontFamily` set; an empty family removes the key.
+pub fn set_ui_font_family_text(text: &str, family: &str) -> Result<String, String> {
+    set_font_family_text(text, "ui", family)
+}
+
+/// Returns `text` with `ui.fontSize` set (10 to 20).
+pub fn set_ui_font_size_text(text: &str, size: f64) -> Result<String, String> {
+    if !valid_ui_size(size) {
+        return Err(format!(
+            "ui.fontSize {size} must be a number from {MIN_UI_FONT_SIZE} to {MAX_UI_FONT_SIZE}"
+        ));
+    }
+    set_path_text(text, &["ui", "fontSize"], &size.to_string())
+}
+
+fn set_font_family_text(text: &str, section: &str, family: &str) -> Result<String, String> {
+    let family = family.trim();
+    if family.is_empty() {
+        return remove_path_text(text, &[section, "fontFamily"]);
+    }
+    let value = serde_json::to_string(family).map_err(|e| e.to_string())?;
+    set_path_text(text, &[section, "fontFamily"], &value)
+}
+
+/// Writes `terminal.fontFamily` below `home`, like `save_theme`.
+pub fn save_terminal_font_family(home: &Path, family: &str) -> Result<(), String> {
+    save_with(home, |t| set_terminal_font_family_text(t, family))
+}
+
+/// Writes `terminal.fontSize` below `home`, like `save_theme`.
+pub fn save_terminal_font_size(home: &Path, size: f64) -> Result<(), String> {
+    save_with(home, |t| set_terminal_font_size_text(t, size))
+}
+
+/// Removes `terminal.fontSize` below `home`, like `save_theme`.
+pub fn clear_terminal_font_size(home: &Path) -> Result<(), String> {
+    save_with(home, clear_terminal_font_size_text)
+}
+
+/// Writes `ui.fontFamily` below `home`, like `save_theme`.
+pub fn save_ui_font_family(home: &Path, family: &str) -> Result<(), String> {
+    save_with(home, |t| set_ui_font_family_text(t, family))
+}
+
+/// Writes `ui.fontSize` below `home`, like `save_theme`.
+pub fn save_ui_font_size(home: &Path, size: f64) -> Result<(), String> {
+    save_with(home, |t| set_ui_font_size_text(t, size))
+}
+
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
 pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> {
     save_with(home, |text| set_explorer_show_hidden_text(text, show))
@@ -1365,6 +1687,11 @@ pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> 
 /// Writes `spaces.layout` below `home`, like `save_theme`.
 pub fn save_spaces_layout(home: &Path, layout: &Value) -> Result<(), String> {
     save_with(home, |text| set_spaces_layout_text(text, layout))
+}
+
+/// Writes `spaceTemplates` below `home`, like `save_theme`.
+pub fn save_space_templates(home: &Path, templates: &Value) -> Result<(), String> {
+    save_with(home, |text| set_space_templates_text(text, templates))
 }
 
 /// Removes `spaces.layout` below `home`; a missing file stays missing.
@@ -1415,6 +1742,7 @@ pub fn watch(home: &Path, interval: Duration, emit: impl Fn(&Settings)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tasks::CommandSpec;
 
     fn none() -> Option<String> {
         None
@@ -1422,6 +1750,67 @@ mod tests {
 
     fn rows(json: &str) -> Settings {
         resolve(Some(json), none)
+    }
+
+    #[test]
+    fn space_templates_parse_and_invalid_entries_warn_and_are_skipped() {
+        let s = rows(
+            r#"{"spaceTemplates":[
+            {"name":"a","match":{"dir":"~/src/a"},"agent":"claude","model":"opus",
+             "layout":{"panes":[{"name":"main"}]}},
+            {"name":"a","match":{"dir":"/x"},"agent":"claude"},
+            {"match":{"dir":"/x"},"agent":"claude"},
+            {"name":"rel","match":{"dir":"src/a"},"agent":"claude"},
+            {"name":"noagent","match":{"dir":"/x"}},
+            {"name":"nodir","agent":"claude"},
+            {"name":"badmodel","match":{"dir":"/x"},"agent":"claude","model":3},
+            {"name":"badlayout","match":{"dir":"/x"},"agent":"claude","layout":{"panes":[]}},
+            "text"]}"#,
+        );
+        assert_eq!(s.space_templates.len(), 1);
+        let t = &s.space_templates[0];
+        assert_eq!((t.name.as_str(), t.dir.as_deref()), ("a", Some("~/src/a")));
+        assert_eq!(t.model.as_deref(), Some("opus"));
+        assert_eq!(t.layout.as_ref().unwrap().panes[0].name, "main");
+        assert_eq!(s.warnings.len(), 8, "{:?}", s.warnings);
+        assert!(s.warnings[0].contains("duplicate"));
+        assert_eq!(rows("{\"spaceTemplates\":1}").space_templates.len(), 0);
+        assert!(resolve(None, none).space_templates.is_empty());
+    }
+
+    #[test]
+    fn space_template_remote_match_parses_and_validates() {
+        use crate::remote::Remote;
+        let s = rows(
+            r#"{"spaceTemplates":[
+            {"name":"gh","match":{"remote":{"provider":"github","owner":"GravionLabs"}},"agent":"claude"},
+            {"name":"az","match":{"dir":"~/w","remote":{"provider":"azure-devops","organization":"acme","project":"FLEX Business"}},"agent":"claude"},
+            {"name":"noowner","match":{"remote":{"provider":"github"}},"agent":"claude"},
+            {"name":"noproject","match":{"remote":{"provider":"azure-devops","organization":"o"}},"agent":"claude"},
+            {"name":"prov","match":{"remote":{"provider":"gitlab","owner":"o"}},"agent":"claude"},
+            {"name":"notobj","match":{"remote":"github"},"agent":"claude"},
+            {"name":"empty","match":{},"agent":"claude"}]}"#,
+        );
+        assert_eq!(s.space_templates.len(), 2, "{:?}", s.warnings);
+        let (gh, az) = (&s.space_templates[0], &s.space_templates[1]);
+        assert_eq!(gh.dir, None);
+        assert_eq!(
+            gh.remote,
+            Some(Remote::GitHub {
+                owner: "GravionLabs".into()
+            })
+        );
+        assert_eq!(az.dir.as_deref(), Some("~/w"));
+        assert_eq!(
+            az.remote,
+            Some(Remote::AzureDevOps {
+                organization: "acme".into(),
+                project: "FLEX Business".into()
+            })
+        );
+        assert_eq!(s.warnings.len(), 5, "{:?}", s.warnings);
+        assert!(s.warnings[0].contains("owner"));
+        assert!(s.warnings[4].contains("needs dir or remote"));
     }
 
     #[test]
@@ -1453,7 +1842,10 @@ mod tests {
         let m = &s.tasks.modes[0];
         assert_eq!(m.name, "agent");
         assert!(m.worktree);
-        assert_eq!(m.command, "claude {prompt}");
+        assert_eq!(
+            (&m.harness, &m.model, &m.prompt, &m.command),
+            (&None, &None, &None, &None)
+        );
         assert_eq!(m.branch, "{type}/{nr}-{slug}");
         assert_eq!(m.cleanup, None);
         assert_eq!(s.tasks.worktree_dir, "../{repo}-{nr}");
@@ -1465,8 +1857,8 @@ mod tests {
         let s = resolve(
             Some(
                 r#"{"tasks":{"modes":[
-                {"name":"a","command":"x","cleanup":"Remove-PbiWorktrees.ps1 -Pr {pr} -Issue {nr}"},
-                {"name":"b","command":"run {pr}"}]}}"#,
+                {"name":"a","command":["x"],"cleanup":["Remove-PbiWorktrees.ps1","-Pr","{pr}","-Issue","{nr}"]},
+                {"name":"b","command":["run","{pr}"]}]}}"#,
             ),
             || None,
         );
@@ -1474,8 +1866,12 @@ mod tests {
         assert!(s.warnings[0].contains("command: unknown placeholder {pr}"));
         assert_eq!(s.tasks.modes.len(), 1);
         assert_eq!(
-            s.tasks.modes[0].cleanup.as_deref(),
-            Some("Remove-PbiWorktrees.ps1 -Pr {pr} -Issue {nr}")
+            s.tasks.modes[0].cleanup,
+            Some(CommandSpec::Argv(
+                ["Remove-PbiWorktrees.ps1", "-Pr", "{pr}", "-Issue", "{nr}"]
+                    .map(String::from)
+                    .to_vec()
+            ))
         );
     }
 
@@ -1484,18 +1880,30 @@ mod tests {
         let s = resolve(
             Some(
                 r#"{"tasks":{"worktreeDir":"../wt/{nr}","modes":[
-                {"name":"agent","command":"claude {prompt}"},
-                {"name":"quick","worktree":false,"command":"vim {url}","branch":"x/{nr}","cleanup":"echo {branch}"}]}}"#,
+                {"name":"agent","harness":"copilot","model":"auto","prompt":"Fix #{nr}"},
+                {"name":"quick","worktree":false,"command":["vim","{url}"],"branch":"x/{nr}","cleanup":["echo","{branch}"]}]}}"#,
             ),
             || None,
         );
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let a = &s.tasks.modes[0];
+        assert_eq!(a.harness.as_deref(), Some("copilot"));
+        assert_eq!(a.model.as_deref(), Some("auto"));
+        assert_eq!(a.prompt.as_deref(), Some("Fix #{nr}"));
+        assert_eq!(a.command, None);
         assert_eq!(s.tasks.worktree_dir, "../wt/{nr}");
         assert_eq!(s.tasks.modes.len(), 2);
         let q = &s.tasks.modes[1];
         assert!(!q.worktree);
         assert_eq!(q.branch, "x/{nr}");
-        assert_eq!(q.cleanup.as_deref(), Some("echo {branch}"));
+        assert_eq!(
+            q.command,
+            Some(CommandSpec::Argv(vec!["vim".into(), "{url}".into()]))
+        );
+        assert_eq!(
+            q.cleanup,
+            Some(CommandSpec::Argv(vec!["echo".into(), "{branch}".into()]))
+        );
         assert_eq!(s.tasks.modes[0].branch, "{type}/{nr}-{slug}");
     }
 
@@ -1504,30 +1912,65 @@ mod tests {
         let s = resolve(
             Some(
                 r#"{"theme":"dark","tasks":{"modes":[
-                {"name":"a","command":"run"},
-                {"name":"a","command":"again"},
-                {"name":"nocmd"},
-                {"name":"bad","command":"run {nope}"},
-                {"command":"x"},
-                {"name":"b","command":"ok","branch":"{prompt}"},
-                {"name":"c","command":"ok","worktree":"yes"}]}}"#,
+                {"name":"a","command":["run"]},
+                {"name":"a","command":["again"]},
+                {"name":"bad","command":["run","{nope}"]},
+                {"command":["x"]},
+                {"name":"b","command":["ok"],"branch":"{prompt}"},
+                {"name":"mixed","command":["ok"],"harness":"claude"},
+                {"name":"empty","command":[]},
+                {"name":"badprompt","prompt":"{prompt}"},
+                {"name":"c","command":["ok"],"worktree":"yes"}]}}"#,
             ),
             || None,
         );
         assert_eq!(s.theme, "dark");
         let names: Vec<_> = s.tasks.modes.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["a", "c"]);
-        assert_eq!(s.tasks.modes[0].command, "run");
-        assert_eq!(s.warnings.len(), 6, "{:?}", s.warnings);
+        assert_eq!(
+            s.tasks.modes[0].command,
+            Some(CommandSpec::Argv(vec!["run".into()]))
+        );
+        assert_eq!(s.warnings.len(), 8, "{:?}", s.warnings);
+        assert!(s.warnings.iter().any(|w| w.contains("cannot be combined")));
+        assert!(
+            s.warnings
+                .iter()
+                .any(|w| w.contains("tasks.modes[badprompt].prompt"))
+        );
         assert!(s.warnings.iter().any(|w| w.contains("duplicate")));
         assert!(s.warnings.iter().any(|w| w.contains("{nope}")));
         assert!(s.warnings.iter().any(|w| w.contains("{prompt}")));
     }
 
     #[test]
+    fn a_string_command_and_cleanup_still_load_with_a_deprecation_warning_naming_the_mode() {
+        let s = resolve(
+            Some(
+                r#"{"tasks":{"modes":[
+                {"name":"old","command":"claude {prompt}","cleanup":"git branch -D {branch}"},
+                {"name":"new","command":["claude","{prompt}"]}]}}"#,
+            ),
+            || None,
+        );
+        assert_eq!(
+            s.warnings,
+            [
+                "tasks.modes.old: string command is deprecated, use harness + prompt or an argv list",
+                "tasks.modes.old: string cleanup is deprecated, use an argv list"
+            ]
+        );
+        assert_eq!(
+            s.tasks.modes[0].command,
+            Some(CommandSpec::Shell("claude {prompt}".into()))
+        );
+        assert_eq!(s.tasks.modes.len(), 2);
+    }
+
+    #[test]
     fn tasks_without_a_valid_mode_keep_the_default() {
         let s = resolve(
-            Some(r#"{"tasks":{"worktreeDir":"../{bad}","modes":[{"name":"x"}]}}"#),
+            Some(r#"{"tasks":{"worktreeDir":"../{bad}","modes":[{"command":["x"]}]}}"#),
             || None,
         );
         assert_eq!(s.tasks, crate::tasks::TaskModes::default());
@@ -1659,6 +2102,74 @@ mod tests {
     }
 
     #[test]
+    fn font_setters_keep_comments_and_other_keys() {
+        let text = "{\n  // mine\n  \"theme\": \"dark\",\n  \"terminal\": { \"scrollback\": 5 }\n}";
+        let out = set_terminal_font_size_text(text, 15.0).unwrap();
+        assert!(out.contains("// mine") && out.contains("\"scrollback\": 5"));
+        let out = set_terminal_font_family_text(&out, "Fira Code").unwrap();
+        let out = set_ui_font_family_text(&out, "Inter, sans-serif").unwrap();
+        let out = set_ui_font_size_text(&out, 14.0).unwrap();
+        assert!(out.contains("// mine"));
+        let s = resolve(Some(&out.replace("// mine", "")), || None);
+        assert_eq!(s.font_family.as_deref(), Some("Fira Code"));
+        assert_eq!(s.font_size, 15.0);
+        assert_eq!(s.ui_font_family.as_deref(), Some("Inter, sans-serif"));
+        assert_eq!(s.ui_font_size, 14.0);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+    }
+
+    #[test]
+    fn empty_font_family_removes_the_key() {
+        let text =
+            r#"{"terminal":{"fontFamily":"Fira Code","fontSize":15},"ui":{"fontFamily":"Inter"}}"#;
+        let out = set_terminal_font_family_text(text, "  ").unwrap();
+        let out = set_ui_font_family_text(&out, "").unwrap();
+        let s = resolve(Some(&out), || None);
+        assert_eq!((s.font_family, s.font_size), (None, 15.0));
+        assert_eq!(s.ui_font_family, None);
+        assert!(!out.contains("fontFamily"));
+    }
+
+    #[test]
+    fn clearing_the_terminal_font_size_removes_only_that_key() {
+        let text = r#"{"terminal":{"fontFamily":"Fira Code","fontSize":15},"ui":{"fontSize":14}}"#;
+        let out = clear_terminal_font_size_text(text).unwrap();
+        assert!(!out.contains("\"fontSize\":15"), "{out}");
+        let s = resolve(Some(&out), || None);
+        assert_eq!(s.font_family.as_deref(), Some("Fira Code"));
+        assert_eq!(s.ui_font_size, 14.0);
+        // Absent key: nothing to remove, still valid.
+        assert!(clear_terminal_font_size_text("{}").is_ok());
+    }
+
+    #[test]
+    fn font_sizes_out_of_range_are_rejected() {
+        assert!(set_terminal_font_size_text("{}", 5.0).is_err());
+        assert!(set_terminal_font_size_text("{}", 73.0).is_err());
+        assert!(set_terminal_font_size_text("{}", f64::NAN).is_err());
+        assert!(set_ui_font_size_text("{}", 9.0).is_err());
+        assert!(set_ui_font_size_text("{}", 21.0).is_err());
+        assert!(set_ui_font_size_text("{}", 10.0).is_ok());
+        assert!(set_ui_font_size_text("{}", 20.0).is_ok());
+    }
+
+    #[test]
+    fn ui_settings_validate_with_warnings() {
+        let d = Settings::default();
+        assert_eq!((d.ui_font_family.clone(), d.ui_font_size), (None, 13.0));
+        let s = resolve(Some(r#"{"ui":{"fontFamily":3,"fontSize":99}}"#), || None);
+        assert_eq!((s.ui_font_family, s.ui_font_size), (None, 13.0));
+        assert_eq!(s.warnings.len(), 2, "{:?}", s.warnings);
+        let s = resolve(
+            Some(r#"{"ui":{"fontFamily":null,"fontSize":12.5}}"#),
+            || None,
+        );
+        assert_eq!((s.ui_font_family, s.ui_font_size), (None, 12.5));
+        assert!(s.warnings.is_empty());
+        assert_eq!(resolve(Some(r#"{"ui":3}"#), || None).warnings.len(), 1);
+    }
+
+    #[test]
     fn set_notification_rejects_an_unknown_kind() {
         assert!(set_notification_text("{}", "sound", true).is_err());
     }
@@ -1708,6 +2219,15 @@ mod tests {
             ])
         );
         assert_eq!(s.sidebar_rows.workspace, None);
+    }
+
+    #[test]
+    fn sidebar_rows_accept_every_builtin_token_including_notification() {
+        let s =
+            rows(r#"{"sidebar":{"rows":{"agent":[["state_icon","name"],["notification","pr"]]}}}"#);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let tokens = s.sidebar_rows.agent.expect("row kept");
+        assert_eq!(tokens[1][0].token, "notification");
     }
 
     #[test]
@@ -1940,6 +2460,59 @@ mod tests {
         remove_spaces_layout(&home).unwrap();
         assert!(load(&home).spaces_layout.is_none());
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn save_space_templates_writes_only_that_key_and_keeps_the_rest() {
+        let home = std::env::temp_dir().join(format!("poimen-tpls-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+        std::fs::write(
+            config_path(&home),
+            "{\n  \"theme\": \"dark\",\n  \"spaceTemplates\": []\n}\n",
+        )
+        .unwrap();
+        let templates = serde_json::json!([
+            {"name": "work", "match": {"dir": "~/src", "remote": {"provider": "github", "owner": "acme"}},
+             "agent": "claude", "model": "opus",
+             "layout": {"panes": [{"name": "main", "command": "ls"}]}},
+            {"name": "az", "match": {"remote": {"provider": "azure-devops", "organization": "o", "project": "p"}},
+             "agent": "copilot"}
+        ]);
+        save_space_templates(&home, &templates).unwrap();
+        let text = std::fs::read_to_string(config_path(&home)).unwrap();
+        assert!(text.contains("\"theme\": \"dark\""));
+        let s = load(&home);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert_eq!(s.theme, "dark");
+        assert_eq!(s.space_templates.len(), 2);
+        assert_eq!(s.space_templates[0].model.as_deref(), Some("opus"));
+        save_space_templates(&home, &serde_json::json!([])).unwrap();
+        assert!(load(&home).space_templates.is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn save_space_templates_creates_the_file_and_rejects_invalid_input() {
+        let ok = serde_json::json!([{"name": "a", "match": {"dir": "~/a"}, "agent": "claude"}]);
+        assert!(
+            set_space_templates_text("{}", &ok)
+                .unwrap()
+                .contains("\"spaceTemplates\"")
+        );
+        for bad in [
+            serde_json::json!([{"name": "a", "match": {}, "agent": "claude"}]),
+            serde_json::json!([{"name": "a", "match": {"dir": "rel"}, "agent": "claude"}]),
+            serde_json::json!([{"name": "a", "match": {"dir": "~/a"}}]),
+            serde_json::json!([
+                {"name": "a", "match": {"dir": "~/a"}, "agent": "claude"},
+                {"name": "a", "match": {"dir": "~/b"}, "agent": "claude"}
+            ]),
+            serde_json::json!({"name": "a"}),
+        ] {
+            let err = set_space_templates_text("{}", &bad).unwrap_err();
+            assert!(err.starts_with("spaceTemplates: "), "{err}");
+        }
     }
 
     #[test]
@@ -2358,7 +2931,7 @@ mod tests {
     #[test]
     fn serializes_camel_case() {
         let v = serde_json::to_value(Settings::default()).unwrap();
-        assert_eq!(v["fontSize"], 13.0);
+        assert_eq!(v["fontSize"], DEFAULT_FONT_SIZE);
         assert!(v["fontFamily"].is_null());
         assert_eq!(v["autoControl"], true);
         assert_eq!(v["shortcuts"]["toggleSidebar"], "CmdOrCtrl+B");

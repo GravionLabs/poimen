@@ -162,6 +162,64 @@
                   </div>
                 }
               </section>
+              <section aria-label="Fonts">
+                <h2>Fonts</h2>
+                <div class="fields">
+                  <label class="field grow" [class.hit]="hit('Terminal font family')">
+                    Terminal font family
+                    <input
+                      type="text"
+                      list="mono-fonts"
+                      [placeholder]="defaultTerminalFont"
+                      [value]="settings().fontFamily ?? ''"
+                      (change)="setFont('terminal', $event)"
+                    />
+                  </label>
+                  <label class="field ratio" [class.hit]="hit('Terminal font size')">
+                    Terminal font size
+                    <input
+                      type="number"
+                      [attr.min]="terminalSizeRange[0]"
+                      [attr.max]="terminalSizeRange[1]"
+                      [placeholder]="defaultTerminalSize"
+                      [value]="settings().fontSize"
+                      (change)="setFontSize('terminal', $event)"
+                    />
+                  </label>
+                </div>
+                <div class="fields">
+                  <label class="field grow" [class.hit]="hit('UI font family')">
+                    UI font family
+                    <input
+                      type="text"
+                      list="ui-fonts"
+                      placeholder="Default"
+                      [value]="settings().uiFontFamily ?? ''"
+                      (change)="setFont('ui', $event)"
+                    />
+                  </label>
+                  <label class="field ratio" [class.hit]="hit('UI font size')">
+                    UI font size
+                    <input
+                      type="number"
+                      [attr.min]="uiSizeRange[0]"
+                      [attr.max]="uiSizeRange[1]"
+                      [value]="settings().uiFontSize"
+                      (change)="setFontSize('ui', $event)"
+                    />
+                  </label>
+                </div>
+                <datalist id="mono-fonts">
+                  @for (font of monoFonts; track font) {
+                    <option [value]="font"></option>
+                  }
+                </datalist>
+                <datalist id="ui-fonts">
+                  @for (font of uiFonts; track font) {
+                    <option [value]="font"></option>
+                  }
+                </datalist>
+              </section>
             </section>
           }
           @case ("notifications") {
@@ -337,6 +395,9 @@
               </ul>
               <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
             </section>
+          }
+          @case ("spaces") {
+            <app-space-templates-editor />
           }
           @case ("space-layout") {
             <app-space-layout-editor />

@@ -9,11 +9,32 @@ export type TranscriptBlock =
   | { type: "tool_use"; id: string; name: string; input: string }
   | { type: "tool_result"; tool_use_id: string; text: string; is_error: boolean };
 
+/** Token counts of one assistant message (`message.usage`). */
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_creation: number;
+}
+
 export interface TranscriptEntry {
   uuid: string;
   role: "user" | "assistant";
   timestamp: string | null;
   blocks: TranscriptBlock[];
+  /** API message id; lines of one message share it and its usage. */
+  message_id?: string | null;
+  model?: string | null;
+  /** `null`/absent when the transcript has no usage for the message (unknown, not zero). */
+  usage?: TokenUsage | null;
+}
+
+/** Usage of one assistant message of the main transcript. */
+export interface UsageSample {
+  id: string;
+  timestamp: string | null;
+  model: string | null;
+  usage: TokenUsage;
 }
 
 export interface SubagentInfo {
@@ -40,12 +61,16 @@ export interface MainCall {
   /** Timestamp of the final result; `null` while there is none. */
   ended: string | null;
   is_error: boolean;
+  /** Context fill of the message that made the call; `null` when unknown. */
+  context?: number | null;
 }
 
 export interface MainSnapshot {
   calls: MainCall[];
   /** Tool calls that are neither skills nor agents. */
   tools: number;
+  /** One sample per assistant message of the main transcript; empty without usage data. */
+  usage?: UsageSample[];
 }
 
 export type SubagentUpdate =
@@ -87,6 +112,20 @@ function parseBlock(raw: unknown): TranscriptBlock | null {
   }
 }
 
+/** The string, else `null`. */
+function strOrNull(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+/** Four non-negative counts, else `null` (unknown). */
+export function parseUsage(raw: unknown): TokenUsage | null {
+  if (!isObject(raw)) return null;
+  const counts = [raw["input"], raw["output"], raw["cache_read"], raw["cache_creation"]];
+  if (!counts.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0)) return null;
+  const [input, output, cache_read, cache_creation] = counts as number[];
+  return { input, output, cache_read, cache_creation };
+}
+
 function parseEntry(raw: unknown): TranscriptEntry | null {
   if (!isObject(raw) || (raw["role"] !== "user" && raw["role"] !== "assistant")) return null;
   const blocks = Array.isArray(raw["blocks"]) ? raw["blocks"] : [];
@@ -95,12 +134,14 @@ function parseEntry(raw: unknown): TranscriptEntry | null {
     role: raw["role"],
     timestamp: typeof raw["timestamp"] === "string" ? raw["timestamp"] : null,
     blocks: blocks.map(parseBlock).filter((b): b is TranscriptBlock => b !== null),
+    message_id: typeof raw["message_id"] === "string" ? raw["message_id"] : null,
+    model: typeof raw["model"] === "string" ? raw["model"] : null,
+    usage: parseUsage(raw["usage"]),
   };
 }
 
 function parseInfo(raw: unknown): SubagentInfo | null {
   if (!isObject(raw) || typeof raw["agent_id"] !== "string" || !raw["agent_id"]) return null;
-  const time = (v: unknown) => (typeof v === "string" ? v : null);
   return {
     agent_id: raw["agent_id"],
     agent_type: str(raw["agent_type"]),
@@ -109,8 +150,8 @@ function parseInfo(raw: unknown): SubagentInfo | null {
     spawn_depth: typeof raw["spawn_depth"] === "number" ? raw["spawn_depth"] : 0,
     worktree_branch: typeof raw["worktree_branch"] === "string" ? raw["worktree_branch"] : null,
     status: raw["status"] === "done" ? "done" : "running",
-    started: time(raw["started"]),
-    last: time(raw["last"]),
+    started: strOrNull(raw["started"]),
+    last: strOrNull(raw["last"]),
   };
 }
 
@@ -123,7 +164,6 @@ export function parseSubagentEvent(raw: unknown): SubagentEvent | null {
     return { session: raw["session"], update: { kind: "list", agents } };
   }
   if (update["kind"] === "main" && Array.isArray(update["calls"])) {
-    const time = (v: unknown) => (typeof v === "string" ? v : null);
     const calls = update["calls"].flatMap((raw): MainCall[] =>
       isObject(raw) && typeof raw["tool_use_id"] === "string" && raw["tool_use_id"]
         ? [
@@ -132,15 +172,31 @@ export function parseSubagentEvent(raw: unknown): SubagentEvent | null {
               name: str(raw["name"]),
               target: str(raw["target"]),
               detail: str(raw["detail"]),
-              started: time(raw["started"]),
-              ended: time(raw["ended"]),
+              started: strOrNull(raw["started"]),
+              ended: strOrNull(raw["ended"]),
               is_error: raw["is_error"] === true,
+              context: typeof raw["context"] === "number" ? raw["context"] : null,
             },
           ]
         : [],
     );
     const tools = typeof update["tools"] === "number" ? update["tools"] : 0;
-    return { session: raw["session"], update: { kind: "main", calls, tools } };
+    const usage = (Array.isArray(update["usage"]) ? update["usage"] : []).flatMap(
+      (raw): UsageSample[] => {
+        const counts = isObject(raw) ? parseUsage(raw["usage"]) : null;
+        return isObject(raw) && counts
+          ? [
+              {
+                id: str(raw["id"]),
+                timestamp: strOrNull(raw["timestamp"]),
+                model: strOrNull(raw["model"]),
+                usage: counts,
+              },
+            ]
+          : [];
+      },
+    );
+    return { session: raw["session"], update: { kind: "main", calls, tools, usage } };
   }
   if (update["kind"] === "entries" && typeof update["agent_id"] === "string") {
     const list = Array.isArray(update["entries"]) ? update["entries"] : [];
@@ -159,6 +215,15 @@ export function subagentDuration(info: SubagentInfo, now: number): number | null
   if (Number.isNaN(start)) return null;
   const end = info.status === "done" && info.last ? Date.parse(info.last) : now;
   return Number.isNaN(end) ? null : Math.max(0, end - start);
+}
+
+/** Compact token count: `842`, `12.3k`, `123k`, `1.2M`. */
+export function formatTokens(n: number): string {
+  const compact = (value: number, unit: string) =>
+    `${value < 100 ? value.toFixed(1).replace(/\.0$/, "") : Math.round(value)}${unit}`;
+  if (n < 1000) return String(Math.round(n));
+  if (n < 999_950) return compact(n / 1000, "k");
+  return compact(n / 1_000_000, "M");
 }
 
 /** `850 ms`, `12 s`, `3 min 05 s`, `1 h 02 min`. */
@@ -275,7 +340,7 @@ export class Subagents {
   private readonly _entries = signal<ReadonlyMap<string, readonly TranscriptEntry[]>>(new Map());
   private readonly _picked = signal<string | null>(null);
   private readonly _supported = signal(false);
-  private readonly _main = signal<MainSnapshot>({ calls: [], tools: 0 });
+  private readonly _main = signal<MainSnapshot>({ calls: [], tools: 0, usage: [] });
   readonly agents = this._agents.asReadonly();
   /** Skill and agent calls of the main transcript. */
   readonly main = this._main.asReadonly();
@@ -320,7 +385,7 @@ export class Subagents {
     this.session = null;
     this._agents.set([]);
     this._entries.set(new Map());
-    this._main.set({ calls: [], tools: 0 });
+    this._main.set({ calls: [], tools: 0, usage: [] });
     this._supported.set(false);
     this._paneId.set(session === null ? null : paneId);
     this.listening ??= this.bridge.listen<unknown>("subagents", (raw) => {
@@ -351,7 +416,7 @@ export class Subagents {
     if (update.kind === "list") {
       this._agents.set(update.agents);
     } else if (update.kind === "main") {
-      this._main.set({ calls: update.calls, tools: update.tools });
+      this._main.set({ calls: update.calls, tools: update.tools, usage: update.usage });
     } else {
       this._entries.update((map) => {
         const known = map.get(update.agent_id) ?? [];

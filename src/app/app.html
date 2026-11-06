@@ -82,6 +82,7 @@
   (control)="setControl($event)"
   [size]="termSize()"
   [appVersion]="store.appVersion()"
+  [usage]="usage.report()"
   [update]="updater.state()"
   (checkUpdate)="updater.check()"
   (installUpdate)="updater.install()"
@@ -99,10 +100,12 @@
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
 <app-space-dialog (closed)="onSpaceClosed($event)" />
 <app-trust-dialog />
+<app-result-dialog />
+<app-agent-picker />
 <app-hooks-dialog />
 <app-task-dialog />
 <app-shortcuts-dialog />
-<app-command-palette (commandChosen)="run($event)" />
+<app-command-palette (commandChosen)="run($event)" (entryChosen)="runEntry($event)" />
 
 <ng-template #nodeTpl let-node>
   @if (node.kind === "split") {

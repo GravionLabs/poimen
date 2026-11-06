@@ -1,10 +1,12 @@
 //! The project file `.poimen/config.json` at the repository root: `layout`, `setup`, `teardown`,
 //! `commands[]` and `presets[]` (schema `docs/project-config.schema.json`). Parsing is tolerant:
-//! an invalid entry is dropped with a warning naming file and key, the rest loads. Nothing here
-//! runs a command.
+//! an invalid entry is dropped with a warning naming file and key, the rest loads. Parsing runs
+//! nothing; the only runner is [`run_teardown`] (child process, captured output). Callers must
+//! pass `trust::gate` first.
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -86,6 +88,247 @@ pub fn start_tab(
 pub fn setup_of(project: Option<(&str, &str)>) -> Option<String> {
     let (path, text) = project?;
     parse(path, text, platform()).config.setup
+}
+
+/// Longest a teardown may run.
+pub const TEARDOWN_TIMEOUT: Duration = Duration::from_secs(300);
+/// Most output (stdout and stderr together) that is kept.
+pub const OUTPUT_CAP: usize = 1024 * 1024;
+
+/// How a command ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunResult {
+    /// Exit code; `None` when killed (timeout or signal).
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    /// Captured stdout and stderr, at most [`OUTPUT_CAP`] bytes.
+    pub output: String,
+    /// Output beyond the cap was dropped.
+    pub truncated: bool,
+}
+
+impl RunResult {
+    pub fn success(&self) -> bool {
+        !self.timed_out && self.exit_code == Some(0)
+    }
+
+    /// One line plus the output, for a failed run.
+    pub fn failure_text(&self) -> String {
+        let head = if self.timed_out {
+            "the teardown command timed out".to_owned()
+        } else {
+            match self.exit_code {
+                Some(c) => format!("the teardown command failed (exit {c})"),
+                None => "the teardown command was killed".to_owned(),
+            }
+        };
+        if self.output.trim().is_empty() {
+            head
+        } else {
+            format!("{head}\n{}", self.output.trim_end())
+        }
+    }
+}
+
+/// Starts a process and collects its result; faked in tests.
+pub trait ProcessRunner {
+    fn run(
+        &self,
+        argv: &[String],
+        cwd: &Path,
+        timeout: Duration,
+        cap: usize,
+    ) -> Result<RunResult, String>;
+}
+
+/// The argv that runs `command` through the user's shell: `$SHELL -lc` on Linux and macOS
+/// (`/bin/sh` without `$SHELL`); on Windows `pwsh -NoProfile -Command`, else `powershell.exe`.
+pub fn shell_argv(
+    platform: &str,
+    shell: Option<&str>,
+    has_pwsh: bool,
+    command: &str,
+) -> Vec<String> {
+    let v = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+    let mut argv = if platform == "windows" {
+        v(&[
+            if has_pwsh { "pwsh" } else { "powershell.exe" },
+            "-NoProfile",
+            "-Command",
+        ])
+    } else {
+        v(&[shell.filter(|s| !s.is_empty()).unwrap_or("/bin/sh"), "-lc"])
+    };
+    argv.push(command.to_owned());
+    argv
+}
+
+/// The real [`ProcessRunner`]: stdin closed, the login-shell `PATH`, stdout and stderr read on
+/// their own threads into one capped buffer, the child killed after `timeout`.
+pub struct SystemRunner;
+
+impl ProcessRunner for SystemRunner {
+    fn run(
+        &self,
+        argv: &[String],
+        cwd: &Path,
+        timeout: Duration,
+        cap: usize,
+    ) -> Result<RunResult, String> {
+        use std::io::Read;
+        use std::process::Stdio;
+        use std::sync::{Arc, Mutex};
+        use std::time::Instant;
+
+        let (program, args) = argv.split_first().ok_or("no command to run")?;
+        let mut child = crate::gui_path::command(program)
+            .args(args)
+            .current_dir(cwd)
+            .env("PATH", crate::gui_path::child_path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("{program} could not be started: {e}"))?;
+        let buffer = Arc::new(Mutex::new((Vec::<u8>::new(), false)));
+        let readers: Vec<_> = [
+            child
+                .stdout
+                .take()
+                .map(|s| Box::new(s) as Box<dyn Read + Send>),
+            child
+                .stderr
+                .take()
+                .map(|s| Box::new(s) as Box<dyn Read + Send>),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|mut stream| {
+            let buffer = Arc::clone(&buffer);
+            std::thread::spawn(move || {
+                let mut chunk = [0u8; 8192];
+                while let Ok(n) = stream.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    let mut b = buffer.lock().unwrap();
+                    let room = cap.saturating_sub(b.0.len());
+                    b.0.extend_from_slice(&chunk[..n.min(room)]);
+                    if n > room {
+                        b.1 = true;
+                    }
+                }
+            })
+        })
+        .collect();
+        let start = Instant::now();
+        let mut timed_out = false;
+        let status = loop {
+            match child.try_wait().map_err(|e| e.to_string())? {
+                Some(status) => break status,
+                None if start.elapsed() >= timeout => {
+                    timed_out = true;
+                    let _ = child.kill();
+                    break child.wait().map_err(|e| e.to_string())?;
+                }
+                None => std::thread::sleep(Duration::from_millis(10)),
+            }
+        };
+        // A killed shell can leave grandchildren holding the pipes; do not wait for them.
+        if !timed_out {
+            for r in readers {
+                let _ = r.join();
+            }
+        }
+        let b = buffer.lock().unwrap();
+        Ok(RunResult {
+            exit_code: status.code(),
+            timed_out,
+            output: String::from_utf8_lossy(&b.0).into_owned(),
+            truncated: b.1,
+        })
+    }
+}
+
+/// Runs the `teardown` `command` in `worktree` through the user's shell. The caller has passed
+/// `trust::gate`.
+pub fn run_teardown(
+    runner: &dyn ProcessRunner,
+    command: &str,
+    worktree: &Path,
+) -> Result<RunResult, String> {
+    let has_pwsh =
+        crate::gui_path::resolve_program("pwsh", &crate::gui_path::child_path()).is_some();
+    let argv = shell_argv(
+        platform(),
+        std::env::var("SHELL").ok().as_deref(),
+        has_pwsh,
+        command,
+    );
+    runner.run(&argv, worktree, TEARDOWN_TIMEOUT, OUTPUT_CAP)
+}
+
+/// Whether and how the teardown of a repository may run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TeardownPlan {
+    /// The project file has no teardown for this platform.
+    None,
+    /// It has one, but the project file is not trusted: nothing runs.
+    Untrusted,
+    Run(String),
+}
+
+/// Decides through `trust::gate` (never asks here: no answer is passed) and reads the command
+/// from the same `sources`.
+pub fn teardown_plan(
+    sources: &crate::trust::Sources,
+    trusted: &std::collections::BTreeMap<String, String>,
+) -> TeardownPlan {
+    let (project, _) = sources.refs();
+    let Some(command) = teardown_of(project) else {
+        return TeardownPlan::None;
+    };
+    match crate::trust::gate(sources, trusted, None) {
+        crate::trust::Gate::Run { .. } => TeardownPlan::Run(command),
+        _ => TeardownPlan::Untrusted,
+    }
+}
+
+/// What `project_teardown` (the palette entry) reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeardownReport {
+    pub plan: &'static str,
+    pub result: Option<RunResult>,
+}
+
+/// Runs the teardown of `plan` in `worktree`; `plan` is `none`, `untrusted` or `ran`.
+pub fn teardown_now(
+    runner: &dyn ProcessRunner,
+    plan: &TeardownPlan,
+    worktree: &Path,
+) -> Result<TeardownReport, String> {
+    Ok(match plan {
+        TeardownPlan::None => TeardownReport {
+            plan: "none",
+            result: None,
+        },
+        TeardownPlan::Untrusted => TeardownReport {
+            plan: "untrusted",
+            result: None,
+        },
+        TeardownPlan::Run(command) => TeardownReport {
+            plan: "ran",
+            result: Some(run_teardown(runner, command, worktree)?),
+        },
+    })
+}
+
+/// The `teardown` command of the project file for the current platform; `None` without one.
+pub fn teardown_of(project: Option<(&str, &str)>) -> Option<String> {
+    let (path, text) = project?;
+    parse(path, text, platform()).config.teardown
 }
 
 /// The platform key used in per-platform commands.
@@ -254,6 +497,137 @@ pub fn load(repo_root: &str) -> Loaded {
     }
 }
 
+/// A palette entry of the project file, as the frontend lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CommandInfo {
+    pub name: String,
+    pub target: Target,
+}
+
+/// What the palette offers for a repository: names only, nothing runs. `locked` while the project
+/// file is not trusted (running an entry then asks first).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct Entries {
+    pub commands: Vec<CommandInfo>,
+    pub presets: Vec<String>,
+    pub locked: bool,
+}
+
+/// The `commands[]` and `presets[]` of the project file in `sources`, and whether `trust::gate`
+/// would ask (never asks here: no answer is passed).
+pub fn entries(
+    sources: &crate::trust::Sources,
+    trusted: &std::collections::BTreeMap<String, String>,
+) -> Entries {
+    let Some((path, text)) = &sources.project else {
+        return Entries::default();
+    };
+    let config = parse(path, text, platform()).config;
+    Entries {
+        commands: config
+            .commands
+            .iter()
+            .map(|c| CommandInfo {
+                name: c.name.clone(),
+                target: c.target,
+            })
+            .collect(),
+        presets: config.presets.iter().map(|p| p.name.clone()).collect(),
+        locked: matches!(
+            crate::trust::gate(sources, trusted, None),
+            crate::trust::Gate::Ask(_)
+        ),
+    }
+}
+
+/// The entry the user picked in the palette.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Entry {
+    Command { name: String },
+    Preset { name: String },
+}
+
+/// What running an entry did.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum EntryOutcome {
+    /// A terminal tab or a preset tab was created.
+    Done,
+    /// An `agent` command: the caller sends `command` as a prompt to the space's agent.
+    Agent { command: String },
+    /// Not trusted yet; nothing ran. The answer comes back as the `decision` of the next call.
+    Ask { request: crate::trust::TrustRequest },
+    /// The user chose "Run without project commands": nothing ran.
+    Declined,
+    /// The file no longer lists the entry.
+    Missing,
+}
+
+/// Runs a palette entry of the project file in `sources` through `trust::gate`. A `terminal`
+/// command opens a tab named after it in `dir` and types the command; a preset opens a tab built
+/// with `layout::apply`; an `agent` command is handed back. `persist(hash)` stores a fresh trust.
+#[allow(clippy::too_many_arguments)]
+pub fn run_entry(
+    backend: &dyn crate::backend::Backend,
+    sources: &crate::trust::Sources,
+    trusted: &std::collections::BTreeMap<String, String>,
+    decision: Option<&crate::trust::Decision>,
+    persist: &dyn Fn(&str) -> Result<(), String>,
+    workspace_id: &str,
+    dir: &str,
+    entry: &Entry,
+) -> Result<EntryOutcome, String> {
+    let Some((path, text)) = &sources.project else {
+        return Ok(EntryOutcome::Missing);
+    };
+    let config = parse(path, text, platform()).config;
+    enum Found<'a> {
+        Command(&'a ProjectCommand),
+        Preset(&'a Preset),
+    }
+    let found = match entry {
+        Entry::Command { name } => config
+            .commands
+            .iter()
+            .find(|c| &c.name == name)
+            .map(Found::Command),
+        Entry::Preset { name } => config
+            .presets
+            .iter()
+            .find(|p| &p.name == name)
+            .map(Found::Preset),
+    };
+    let Some(found) = found else {
+        return Ok(EntryOutcome::Missing);
+    };
+    match crate::trust::gate(sources, trusted, decision) {
+        crate::trust::Gate::Ask(request) => return Ok(EntryOutcome::Ask { request }),
+        crate::trust::Gate::Strip => return Ok(EntryOutcome::Declined),
+        crate::trust::Gate::Run { store } => {
+            if let Some(hash) = store {
+                persist(&hash)?;
+            }
+        }
+    }
+    match found {
+        Found::Command(c) if c.target == Target::Agent => Ok(EntryOutcome::Agent {
+            command: c.command.clone(),
+        }),
+        Found::Command(c) => {
+            start_tab(backend, workspace_id, dir, &c.name, &c.command)?;
+            Ok(EntryOutcome::Done)
+        }
+        Found::Preset(p) => {
+            let root = backend
+                .create_terminal(workspace_id, Some(dir))?
+                .ok_or("herdr did not report the new tab")?;
+            crate::layout::apply(backend, &p.layout, dir, &root)?;
+            Ok(EntryOutcome::Done)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,5 +736,377 @@ mod tests {
         std::fs::write(dir.join(PROJECT_FILE), r#"{"setup":"make"}"#).unwrap();
         assert_eq!(load(&root).config.setup.as_deref(), Some("make"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn shell_argv_per_platform() {
+        let a = |p, sh, pwsh| shell_argv(p, sh, pwsh, "make down");
+        assert_eq!(
+            a("linux", Some("/usr/bin/zsh"), false),
+            ["/usr/bin/zsh", "-lc", "make down"]
+        );
+        assert_eq!(a("macos", None, false), ["/bin/sh", "-lc", "make down"]);
+        assert_eq!(
+            a("windows", None, true),
+            ["pwsh", "-NoProfile", "-Command", "make down"]
+        );
+        assert_eq!(
+            a("windows", None, false),
+            ["powershell.exe", "-NoProfile", "-Command", "make down"]
+        );
+    }
+
+    #[test]
+    fn teardown_of_picks_the_platform_command() {
+        let text = r#"{"teardown": {"default": "d", "macos": "m", "linux": "l", "windows": "w"}}"#;
+        let expected = match platform() {
+            "macos" => "m",
+            "windows" => "w",
+            _ => "l",
+        };
+        assert_eq!(teardown_of(Some(("f", text))).as_deref(), Some(expected));
+        assert_eq!(teardown_of(Some(("f", "{}"))), None);
+        assert_eq!(teardown_of(None), None);
+    }
+
+    #[test]
+    fn failure_text_names_the_cause_and_keeps_the_output() {
+        let r = |exit_code, timed_out, output: &str| RunResult {
+            exit_code,
+            timed_out,
+            output: output.into(),
+            truncated: false,
+        };
+        assert!(r(Some(0), false, "").success());
+        assert_eq!(
+            r(Some(2), false, "boom\n").failure_text(),
+            "the teardown command failed (exit 2)\nboom"
+        );
+        assert_eq!(
+            r(None, true, "").failure_text(),
+            "the teardown command timed out"
+        );
+        assert!(!r(None, true, "").success());
+    }
+
+    #[test]
+    fn teardown_plan_follows_the_trust_gate() {
+        use crate::trust::{Sources, sha256_hex};
+        let text = r#"{"teardown": "make down"}"#;
+        let sources = Sources {
+            root: "/r".into(),
+            project: Some(("/r/.poimen/config.json".into(), text.into())),
+            legacy: None,
+        };
+        let none = std::collections::BTreeMap::new();
+        let trusted = std::collections::BTreeMap::from([("/r".to_owned(), sha256_hex(text))]);
+        let stale = std::collections::BTreeMap::from([("/r".to_owned(), sha256_hex("{}"))]);
+        assert_eq!(teardown_plan(&sources, &none), TeardownPlan::Untrusted);
+        assert_eq!(teardown_plan(&sources, &stale), TeardownPlan::Untrusted);
+        assert_eq!(
+            teardown_plan(&sources, &trusted),
+            TeardownPlan::Run("make down".into())
+        );
+        let empty = Sources {
+            root: "/r".into(),
+            ..Default::default()
+        };
+        assert_eq!(teardown_plan(&empty, &none), TeardownPlan::None);
+    }
+
+    struct Fake(std::cell::RefCell<Vec<(Vec<String>, std::path::PathBuf)>>);
+    impl ProcessRunner for Fake {
+        fn run(
+            &self,
+            argv: &[String],
+            cwd: &Path,
+            t: Duration,
+            cap: usize,
+        ) -> Result<RunResult, String> {
+            assert_eq!((t, cap), (TEARDOWN_TIMEOUT, OUTPUT_CAP));
+            self.0.borrow_mut().push((argv.to_vec(), cwd.to_path_buf()));
+            Ok(RunResult {
+                exit_code: Some(0),
+                timed_out: false,
+                output: "ok".into(),
+                truncated: false,
+            })
+        }
+    }
+
+    #[test]
+    fn teardown_now_runs_only_a_trusted_plan_with_the_limits() {
+        let fake = Fake(Default::default());
+        let wt = Path::new("/work/app-7");
+        let r = teardown_now(&fake, &TeardownPlan::Untrusted, wt).unwrap();
+        assert_eq!((r.plan, r.result), ("untrusted", None));
+        let r = teardown_now(&fake, &TeardownPlan::None, wt).unwrap();
+        assert_eq!(r.plan, "none");
+        assert!(fake.0.borrow().is_empty());
+        let r = teardown_now(&fake, &TeardownPlan::Run("make down".into()), wt).unwrap();
+        assert_eq!(r.plan, "ran");
+        let calls = fake.0.borrow();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, wt);
+        assert_eq!(calls[0].0.last().map(String::as_str), Some("make down"));
+    }
+
+    #[cfg(unix)]
+    mod process {
+        use super::super::*;
+
+        fn sh(script: &str, timeout_ms: u64, cap: usize) -> RunResult {
+            let argv = shell_argv("linux", Some("/bin/sh"), false, script);
+            SystemRunner
+                .run(
+                    &argv,
+                    Path::new("/tmp"),
+                    Duration::from_millis(timeout_ms),
+                    cap,
+                )
+                .unwrap()
+        }
+
+        #[test]
+        fn captures_stdout_stderr_and_the_exit_code() {
+            let r = sh("echo out; echo err >&2; exit 3", 10_000, 1024);
+            assert_eq!(r.exit_code, Some(3));
+            assert!(!r.timed_out && !r.success());
+            assert!(r.output.contains("out") && r.output.contains("err"));
+        }
+
+        #[test]
+        fn runs_in_the_given_directory() {
+            let r = sh("pwd", 10_000, 1024);
+            assert!(r.success());
+            assert!(r.output.trim().ends_with("tmp"));
+        }
+
+        #[test]
+        fn a_command_over_the_timeout_is_killed() {
+            let r = sh("sleep 30", 200, 1024);
+            assert!(r.timed_out && !r.success());
+            assert_eq!(r.exit_code, None);
+        }
+
+        #[test]
+        fn output_is_capped() {
+            let r = sh("yes x | head -c 5000", 10_000, 100);
+            assert!(r.success());
+            assert_eq!(r.output.len(), 100);
+            assert!(r.truncated);
+        }
+
+        #[test]
+        fn a_missing_program_is_an_error() {
+            let err = SystemRunner
+                .run(
+                    &["/no/such/shell".into()],
+                    Path::new("/tmp"),
+                    Duration::from_secs(1),
+                    10,
+                )
+                .unwrap_err();
+            assert!(err.contains("could not be started"));
+        }
+    }
+
+    mod palette {
+        use super::super::*;
+        use crate::backend_fake::FakeBackend;
+        use crate::trust::{Decision, Sources, sha256_hex};
+        use std::collections::BTreeMap;
+
+        const ROOT: &str = "/work/app";
+        const FILE: &str = r#"{
+            "commands": [
+                {"name": "test", "command": "pnpm test", "target": "terminal"},
+                {"name": "review", "command": "/review", "target": "agent"}],
+            "presets": [{"name": "duo", "panes": [
+                {"name": "a", "command": "vim"},
+                {"name": "b", "split": {"direction": "right"}}]}]
+        }"#;
+
+        fn sources(text: Option<&str>) -> Sources {
+            Sources {
+                root: ROOT.into(),
+                project: text.map(|t| (format!("{ROOT}/{PROJECT_FILE}"), t.to_owned())),
+                legacy: None,
+            }
+        }
+
+        fn trusted() -> BTreeMap<String, String> {
+            BTreeMap::from([(ROOT.to_owned(), sha256_hex(FILE))])
+        }
+
+        fn run(
+            fake: &FakeBackend,
+            trusted: &BTreeMap<String, String>,
+            decision: Option<&Decision>,
+            entry: &Entry,
+        ) -> Result<EntryOutcome, String> {
+            let stored = std::cell::RefCell::new(Vec::new());
+            let out = run_entry(
+                fake,
+                &sources(Some(FILE)),
+                trusted,
+                decision,
+                &|h| {
+                    stored.borrow_mut().push(h.to_owned());
+                    Ok(())
+                },
+                "w1",
+                ROOT,
+                entry,
+            );
+            if decision.is_some() {
+                assert_eq!(stored.borrow().len(), 1);
+            }
+            out
+        }
+
+        fn command(name: &str) -> Entry {
+            Entry::Command { name: name.into() }
+        }
+
+        #[test]
+        fn entries_list_names_and_the_lock() {
+            let e = entries(&sources(Some(FILE)), &BTreeMap::new());
+            assert_eq!(
+                e.commands
+                    .iter()
+                    .map(|c| (c.name.as_str(), c.target))
+                    .collect::<Vec<_>>(),
+                [("test", Target::Terminal), ("review", Target::Agent)]
+            );
+            assert_eq!(e.presets, ["duo"]);
+            assert!(e.locked);
+            assert!(!entries(&sources(Some(FILE)), &trusted()).locked);
+            assert_eq!(entries(&sources(None), &trusted()), Entries::default());
+        }
+
+        #[test]
+        fn a_changed_file_locks_again() {
+            let stale = BTreeMap::from([(ROOT.to_owned(), sha256_hex("old"))]);
+            assert!(entries(&sources(Some(FILE)), &stale).locked);
+        }
+
+        #[test]
+        fn untrusted_asks_and_runs_nothing() {
+            let fake = FakeBackend::default();
+            let out = run(&fake, &BTreeMap::new(), None, &command("test")).unwrap();
+            let EntryOutcome::Ask { request } = out else {
+                panic!("{out:?}")
+            };
+            assert_eq!(request.hash, sha256_hex(FILE));
+            assert!(fake.calls().is_empty());
+        }
+
+        #[test]
+        fn a_terminal_command_opens_a_named_tab_and_types_it() {
+            let fake = FakeBackend::default();
+            assert_eq!(
+                run(&fake, &trusted(), None, &command("test")),
+                Ok(EntryOutcome::Done)
+            );
+            let calls = fake.calls();
+            assert_eq!(calls[0], "create_terminal w1 /work/app");
+            assert!(calls[1].ends_with(" test") && calls[1].starts_with("rename "));
+            assert!(calls[2].ends_with(" pnpm test") && calls[2].starts_with("input "));
+        }
+
+        #[test]
+        fn an_agent_command_is_handed_back_not_run() {
+            let fake = FakeBackend::default();
+            assert_eq!(
+                run(&fake, &trusted(), None, &command("review")),
+                Ok(EntryOutcome::Agent {
+                    command: "/review".into()
+                })
+            );
+            assert!(fake.calls().is_empty());
+        }
+
+        #[test]
+        fn a_preset_builds_a_new_tab_from_its_panes() {
+            let fake = FakeBackend::default();
+            let preset = Entry::Preset { name: "duo".into() };
+            assert_eq!(
+                run(&fake, &trusted(), None, &preset),
+                Ok(EntryOutcome::Done)
+            );
+            let calls = fake.calls();
+            assert_eq!(calls[0], "create_terminal w1 /work/app");
+            assert!(
+                calls
+                    .iter()
+                    .any(|c| c.starts_with("split ") && c.contains("right"))
+            );
+            assert!(calls.iter().any(|c| c.ends_with(" vim")));
+            assert_eq!(calls.iter().filter(|c| c.starts_with("rename ")).count(), 2);
+        }
+
+        #[test]
+        fn trusting_stores_the_hash_and_runs() {
+            let fake = FakeBackend::default();
+            let d = Decision::Trust {
+                hash: sha256_hex(FILE),
+            };
+            assert_eq!(
+                run(&fake, &BTreeMap::new(), Some(&d), &command("test")),
+                Ok(EntryOutcome::Done)
+            );
+            assert!(!fake.calls().is_empty());
+        }
+
+        #[test]
+        fn without_declines_and_a_stale_hash_asks_again() {
+            let fake = FakeBackend::default();
+            let stored = |_: &str| -> Result<(), String> { panic!("must not store") };
+            let none = BTreeMap::new();
+            let go = |d: &Decision| {
+                run_entry(
+                    &fake,
+                    &sources(Some(FILE)),
+                    &none,
+                    Some(d),
+                    &stored,
+                    "w1",
+                    ROOT,
+                    &command("test"),
+                )
+            };
+            assert_eq!(go(&Decision::Without), Ok(EntryOutcome::Declined));
+            let stale = Decision::Trust { hash: "old".into() };
+            assert!(matches!(go(&stale), Ok(EntryOutcome::Ask { .. })));
+            assert!(fake.calls().is_empty());
+        }
+
+        #[test]
+        fn an_unknown_entry_or_file_is_missing() {
+            let fake = FakeBackend::default();
+            assert_eq!(
+                run(&fake, &trusted(), None, &command("nope")),
+                Ok(EntryOutcome::Missing)
+            );
+            let out = run_entry(
+                &fake,
+                &sources(None),
+                &trusted(),
+                None,
+                &|_| Ok(()),
+                "w1",
+                ROOT,
+                &command("test"),
+            );
+            assert_eq!(out, Ok(EntryOutcome::Missing));
+        }
+
+        #[test]
+        fn a_failing_backend_call_is_an_error() {
+            let fake = FakeBackend::default();
+            fake.fail_on("create_terminal");
+            assert!(run(&fake, &trusted(), None, &command("test")).is_err());
+        }
     }
 }

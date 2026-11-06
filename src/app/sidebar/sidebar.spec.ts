@@ -53,6 +53,7 @@ describe("sidebarMenuItems", () => {
   it("offers a new terminal on a workspace", () => {
     expect(sidebarMenuItems("workspace").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "new-terminal",
+      "rename-space",
       "close-space",
     ]);
   });
@@ -65,6 +66,7 @@ describe("sidebarMenuItems", () => {
       "show-changes",
       "start-task",
       "cleanup-tasks",
+      "rename-space",
       "close-space",
     ]);
     expect(actions(false, "workspace")).not.toContain("start-task");
@@ -112,7 +114,11 @@ describe("sidebarMenuItems", () => {
   it("offers new terminal and close space on a workspace row", () => {
     const groups = sidebarMenuItems("workspace");
     expect(groups).toHaveLength(1);
-    expect(groups[0].items.map((i) => i.action)).toEqual(["new-terminal", "close-space"]);
+    expect(groups[0].items.map((i) => i.action)).toEqual([
+      "new-terminal",
+      "rename-space",
+      "close-space",
+    ]);
   });
 });
 

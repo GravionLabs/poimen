@@ -17,6 +17,8 @@ import {
 } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import {
+  defaultTerminalFontFamily,
+  defaultTerminalFontSize,
   parseHarnesses,
   SettingsStore,
   type ColorSchemeSetting,
@@ -35,7 +37,16 @@ import {
   matches,
   SETTINGS_GROUPS,
 } from "./settings-categories";
+import {
+  COMMON_MONO_FONTS,
+  COMMON_UI_FONTS,
+  MAX_TERMINAL_FONT_SIZE,
+  MAX_UI_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  MIN_UI_FONT_SIZE,
+} from "../core/ui-font";
 import { SpaceLayoutEditor } from "./space-layout-editor";
+import { SpaceTemplatesEditor } from "./space-templates-editor";
 
 export type SchemeMode = "single" | "pair";
 
@@ -134,7 +145,7 @@ export function withRoot(
 /** The settings view (an editor tab): appearance and the color scheme picker with live preview. */
 @Component({
   selector: "app-settings-view",
-  imports: [SpaceLayoutEditor],
+  imports: [SpaceLayoutEditor, SpaceTemplatesEditor],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -348,6 +359,40 @@ export class SettingsView {
 
   protected setShowHidden(event: Event): void {
     void this.store.setExplorerShowHidden((event.target as HTMLInputElement).checked);
+  }
+
+  protected readonly monoFonts = COMMON_MONO_FONTS;
+  protected readonly uiFonts = COMMON_UI_FONTS;
+  protected readonly uiSizeRange = [MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE] as const;
+  /** The effective default terminal font, shown as placeholder and reset target. */
+  protected readonly defaultTerminalFont = defaultTerminalFontFamily(
+    getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
+  );
+  protected readonly defaultTerminalSize = defaultTerminalFontSize();
+  protected readonly terminalSizeRange = [MIN_TERMINAL_FONT_SIZE, MAX_TERMINAL_FONT_SIZE] as const;
+
+  protected setFont(which: "terminal" | "ui", event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    void (which === "terminal"
+      ? this.store.setTerminalFontFamily(value)
+      : this.store.setUiFontFamily(value));
+  }
+
+  protected setFontSize(which: "terminal" | "ui", event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const empty = input.value.trim() === "";
+    const size = empty ? Number.NaN : Number(input.value);
+    // An empty terminal size removes the key: the platform default applies again.
+    const write =
+      which === "terminal"
+        ? empty
+          ? this.store.clearTerminalFontSize()
+          : this.store.setTerminalFontSize(size)
+        : this.store.setUiFontSize(size);
+    void write.then((ok) => {
+      if (!ok)
+        input.value = String(this.settings()[which === "terminal" ? "fontSize" : "uiFontSize"]);
+    });
   }
 
   protected setNotification(kind: "blocked" | "done", event: Event): void {

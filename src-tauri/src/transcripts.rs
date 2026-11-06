@@ -13,7 +13,7 @@
 //! `tool_result` for its `toolUseId` that is not the "launched in the background" acknowledgement.
 //! The watcher is event driven (`notify`); files are tailed from the last read offset.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -83,6 +83,74 @@ pub enum Block {
     },
 }
 
+/// Token counts of one assistant message (`message.usage`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
+}
+
+impl Usage {
+    /// Context fill of the message: everything the model read (input and both cache counts).
+    pub fn context(&self) -> u64 {
+        self.input
+            .saturating_add(self.cache_read)
+            .saturating_add(self.cache_creation)
+    }
+}
+
+/// Reads `message.usage`. `None` (unknown, never an error) when it is missing, not an object,
+/// holds no count, or a count is not a non-negative integer.
+pub fn parse_usage(message: &Value) -> Option<Usage> {
+    let usage = message.get("usage")?.as_object()?;
+    let mut known = false;
+    let mut count = |key: &str| -> Option<u64> {
+        match usage.get(key) {
+            None | Some(Value::Null) => Some(0),
+            Some(v) => {
+                known = true;
+                v.as_u64()
+            }
+        }
+    };
+    let parsed = Usage {
+        input: count("input_tokens")?,
+        output: count("output_tokens")?,
+        cache_read: count("cache_read_input_tokens")?,
+        cache_creation: count("cache_creation_input_tokens")?,
+    };
+    known.then_some(parsed)
+}
+
+/// Usage of one assistant message of the main transcript (flow graph).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UsageSample {
+    /// The API message id: a message written in several lines counts once.
+    pub id: String,
+    pub timestamp: Option<String>,
+    pub model: Option<String>,
+    pub usage: Usage,
+}
+
+/// The usage sample of one transcript line, if it is an assistant message that has usage.
+pub fn parse_usage_sample(line: &str) -> Option<UsageSample> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    if value.get("type").and_then(Value::as_str) != Some("assistant") {
+        return None;
+    }
+    let message = value.get("message")?;
+    let usage = parse_usage(message)?;
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::to_owned);
+    Some(UsageSample {
+        id: text(message, "id").or_else(|| text(&value, "uuid"))?,
+        timestamp: text(&value, "timestamp"),
+        model: text(message, "model"),
+        usage,
+    })
+}
+
 /// A user or assistant message of a transcript.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Entry {
@@ -91,6 +159,11 @@ pub struct Entry {
     pub role: String,
     pub timestamp: Option<String>,
     pub blocks: Vec<Block>,
+    /// API message id; several lines of one message share it (and its usage).
+    pub message_id: Option<String>,
+    pub model: Option<String>,
+    /// `None` when the transcript has no (or unreadable) usage for the message.
+    pub usage: Option<Usage>,
 }
 
 /// One transcript line: its timestamp (any entry type has one) and the message, if it is one.
@@ -161,7 +234,8 @@ pub fn parse_line(line: &str) -> Option<Line> {
         {
             return None;
         }
-        let content = object.get("message")?.get("content")?;
+        let message = object.get("message")?;
+        let content = message.get("content")?;
         let blocks: Vec<Block> = match content {
             Value::String(text) => vec![Block::Text {
                 text: truncate(text, TEXT_LIMIT),
@@ -178,6 +252,12 @@ pub fn parse_line(line: &str) -> Option<Line> {
             role: role.to_owned(),
             timestamp: timestamp.clone(),
             blocks,
+            message_id: message.get("id").and_then(Value::as_str).map(str::to_owned),
+            model: message
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            usage: parse_usage(message),
         })
     })();
     Some(Line { timestamp, entry })
@@ -228,6 +308,8 @@ pub struct MainCall {
     /// Timestamp of the final result; `None` while the call has none.
     pub ended: Option<String>,
     pub is_error: bool,
+    /// Context fill of the message that made the call; `None` when unknown.
+    pub context: Option<u64>,
 }
 
 /// Skill and agent calls of one main-transcript line, and how many other tool calls it holds.
@@ -244,6 +326,10 @@ pub fn parse_main_calls(line: &str) -> (Vec<MainCall>, Vec<String>) {
         .get("timestamp")
         .and_then(Value::as_str)
         .map(str::to_owned);
+    let context = value
+        .get("message")
+        .and_then(parse_usage)
+        .map(|u| u.context());
     let blocks = value
         .get("message")
         .and_then(|m| m.get("content"))
@@ -277,6 +363,7 @@ pub fn parse_main_calls(line: &str) -> (Vec<MainCall>, Vec<String>) {
             started: started.clone(),
             ended: None,
             is_error: false,
+            context,
         });
     }
     (calls, plain)
@@ -396,7 +483,13 @@ pub enum Update {
         entries: Vec<Entry>,
     },
     /// The main agent's skill and agent calls and its count of other tool calls (flow graph).
-    Main { calls: Vec<MainCall>, tools: u32 },
+    /// `usage` holds one sample per assistant message of the main transcript (empty when it has
+    /// none).
+    Main {
+        calls: Vec<MainCall>,
+        tools: u32,
+        usage: Vec<UsageSample>,
+    },
 }
 
 struct Tracked {
@@ -415,6 +508,9 @@ pub struct Tracker {
     calls: Vec<MainCall>,
     plain: HashSet<String>,
     sent_main: (Vec<MainCall>, u32),
+    /// One sample per message id, in order of first appearance; a later line replaces its sample.
+    usage: Vec<UsageSample>,
+    usage_index: HashMap<String, usize>,
 }
 
 impl Tracker {
@@ -433,12 +529,27 @@ impl Tracker {
             calls: Vec::new(),
             plain: HashSet::new(),
             sent_main: (Vec::new(), 0),
+            usage: Vec::new(),
+            usage_index: HashMap::new(),
         })
     }
 
     /// Reads what the files gained; the updates are empty when nothing changed.
     pub fn refresh(&mut self) -> Vec<Update> {
+        let mut usage_changed = false;
         for line in self.parent.read_new() {
+            if line.contains("\"usage\"")
+                && let Some(sample) = parse_usage_sample(&line)
+            {
+                match self.usage_index.get(&sample.id) {
+                    Some(&i) => self.usage[i] = sample,
+                    None => {
+                        self.usage_index.insert(sample.id.clone(), self.usage.len());
+                        self.usage.push(sample);
+                    }
+                }
+                usage_changed = true;
+            }
             if line.contains("\"tool_use\"") {
                 let (calls, plain) = parse_main_calls(&line);
                 for call in calls {
@@ -523,11 +634,12 @@ impl Tracker {
             updates.insert(0, Update::List { agents });
         }
         let tools = u32::try_from(self.plain.len()).unwrap_or(u32::MAX);
-        if (&self.calls, tools) != (&self.sent_main.0, self.sent_main.1) {
+        if usage_changed || (&self.calls, tools) != (&self.sent_main.0, self.sent_main.1) {
             self.sent_main = (self.calls.clone(), tools);
             updates.push(Update::Main {
                 calls: self.calls.clone(),
                 tools,
+                usage: self.usage.clone(),
             });
         }
         updates
@@ -966,7 +1078,7 @@ mod tests {
         tracker.refresh();
         append(&project.join("S.jsonl"), &format!("{MAIN_CALLS}\n"));
         let updates = tracker.refresh();
-        let [Update::Main { calls, tools }] = &updates[..] else {
+        let [Update::Main { calls, tools, .. }] = &updates[..] else {
             panic!("one main update: {updates:?}");
         };
         assert_eq!((calls.len(), *tools), (2, 1));
@@ -1014,5 +1126,103 @@ mod tests {
         let update = rx.recv_timeout(Duration::from_secs(10)).expect("an update");
         assert!(matches!(update, Update::List { .. }));
         drop(handle);
+    }
+
+    fn assistant(id: &str, ts: &str, usage: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","uuid":"u-{id}-{ts}","timestamp":"2026-11-02T04:00:{ts}.000Z","message":{{"id":"{id}","model":"claude-opus-4-7","content":[{{"type":"text","text":"x"}}]{usage}}}}}"#
+        )
+    }
+
+    #[test]
+    fn usage_reads_the_four_counts_and_the_model() {
+        let line = assistant(
+            "msg_1",
+            "01",
+            r#","usage":{"input_tokens":3,"output_tokens":120,"cache_read_input_tokens":40000,"cache_creation_input_tokens":500,"service_tier":"standard"}"#,
+        );
+        let entry = parse_line(&line).unwrap().entry.unwrap();
+        let usage = entry.usage.unwrap();
+        assert_eq!(
+            (
+                usage.input,
+                usage.output,
+                usage.cache_read,
+                usage.cache_creation
+            ),
+            (3, 120, 40000, 500)
+        );
+        assert_eq!(usage.context(), 40503);
+        assert_eq!(entry.model.as_deref(), Some("claude-opus-4-7"));
+        assert_eq!(entry.message_id.as_deref(), Some("msg_1"));
+    }
+
+    #[test]
+    fn missing_usage_is_unknown_not_an_error() {
+        let entry = parse_line(&assistant("msg_1", "01", ""))
+            .unwrap()
+            .entry
+            .unwrap();
+        assert_eq!(entry.usage, None);
+        assert!(parse_usage_sample(&assistant("msg_1", "01", "")).is_none());
+    }
+
+    #[test]
+    fn malformed_usage_is_unknown_not_an_error() {
+        for usage in [
+            r#","usage":"many""#,
+            r#","usage":null"#,
+            r#","usage":{}"#,
+            r#","usage":{"input_tokens":"3"}"#,
+            r#","usage":{"input_tokens":-1,"output_tokens":2}"#,
+            r#","usage":{"input_tokens":1.5}"#,
+        ] {
+            let line = assistant("msg_1", "01", usage);
+            let parsed = parse_line(&line).expect("the line itself still parses");
+            assert_eq!(parsed.entry.expect("entry").usage, None, "{usage}");
+            assert!(parse_usage_sample(&line).is_none(), "{usage}");
+        }
+    }
+
+    #[test]
+    fn partial_usage_counts_absent_fields_as_zero() {
+        let line = assistant("m", "01", r#","usage":{"output_tokens":7}"#);
+        let sample = parse_usage_sample(&line).unwrap();
+        assert_eq!((sample.usage.input, sample.usage.output), (0, 7));
+    }
+
+    #[test]
+    fn main_call_carries_the_context_fill_of_its_message() {
+        let line = MAIN_CALLS.replace(
+            r#""content":["#,
+            r#""usage":{"input_tokens":2,"output_tokens":9,"cache_read_input_tokens":1000,"cache_creation_input_tokens":30},"content":["#,
+        );
+        let (calls, _) = parse_main_calls(&line);
+        assert_eq!(calls[0].context, Some(1032));
+        assert_eq!(parse_main_calls(MAIN_CALLS).0[0].context, None);
+    }
+
+    #[test]
+    fn tracker_samples_usage_once_per_message_and_keeps_the_latest_line() {
+        let (project, _) = session_fixture("usage");
+        let mut tracker = Tracker::new(&project, "S").unwrap();
+        tracker.refresh();
+        let u = |out: u32| format!(r#","usage":{{"input_tokens":1,"output_tokens":{out}}}"#);
+        append(
+            &project.join("S.jsonl"),
+            &format!(
+                "{}\n{}\n{}\n",
+                assistant("msg_1", "01", &u(5)),
+                assistant("msg_1", "02", &u(50)),
+                assistant("msg_2", "03", "")
+            ),
+        );
+        let updates = tracker.refresh();
+        let Some(Update::Main { usage, .. }) = updates.last() else {
+            panic!("no main update: {updates:?}");
+        };
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].usage.output, 50);
+        assert_eq!(usage[0].model.as_deref(), Some("claude-opus-4-7"));
     }
 }

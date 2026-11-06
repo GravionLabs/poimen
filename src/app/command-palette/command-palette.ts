@@ -14,6 +14,7 @@ import {
   type PoimenCommand,
 } from "../core/command-palette";
 import { EditorTabs } from "../core/editor-tabs";
+import type { ProjectEntry } from "../core/project-entries";
 import { palettePosition, PALETTE_MAX_HEIGHT } from "./palette-position";
 import { titleParts } from "./title-parts";
 
@@ -30,6 +31,8 @@ export class CommandPalette {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** A poimen command was chosen; the host runs it. */
   readonly commandChosen = output<PoimenCommand["id"]>();
+  /** A command or preset of the project file was chosen. */
+  readonly entryChosen = output<ProjectEntry>();
   private readonly field = viewChild<ElementRef<HTMLInputElement>>("field");
 
   /** Top-left corner of the popup, centred on the editor area. */
@@ -100,6 +103,7 @@ export class CommandPalette {
   protected run(item: PaletteItem): void {
     this.palette.recordRun(item);
     this.palette.close();
-    this.commandChosen.emit(item.command);
+    if (item.entry) this.entryChosen.emit(item.entry);
+    else this.commandChosen.emit(item.command);
   }
 }

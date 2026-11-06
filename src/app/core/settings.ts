@@ -1,7 +1,15 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
+import { parseSpaceTemplates, templateConfig, type SpaceTemplate } from "./space-templates";
 import { TauriBridge } from "./tauri";
+import {
+  MAX_TERMINAL_FONT_SIZE,
+  MAX_UI_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  MIN_UI_FONT_SIZE,
+  sizeError,
+} from "./ui-font";
 import {
   DEFAULT_SIDEBAR_ROWS,
   isRowToken,
@@ -31,9 +39,14 @@ export interface GhosttyColors {
 export interface TaskMode {
   name: string;
   worktree: boolean;
-  command: string;
+  /** Agent mode: the harness (`null`: the first of the registry), model and prompt template. */
+  harness: string | null;
+  model: string | null;
+  prompt: string | null;
+  /** An argv list, or a deprecated shell string; `null` for an agent mode. */
+  command: string[] | string | null;
   branch: string;
-  cleanup: string | null;
+  cleanup: string[] | string | null;
 }
 
 export interface TaskModes {
@@ -46,7 +59,10 @@ export const DEFAULT_TASKS: TaskModes = {
     {
       name: "agent",
       worktree: true,
-      command: "claude {prompt}",
+      harness: null,
+      model: null,
+      prompt: null,
+      command: null,
       branch: "{type}/{nr}-{slug}",
       cleanup: null,
     },
@@ -85,6 +101,12 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
   });
 }
 
+function commandSpec(v: unknown): string[] | string | null {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as string[];
+  return null;
+}
+
 /** The resolved task modes; the default when the shape is wrong. */
 export function parseTaskModes(raw: unknown): TaskModes {
   if (typeof raw !== "object" || raw === null) return DEFAULT_TASKS;
@@ -94,13 +116,16 @@ export function parseTaskModes(raw: unknown): TaskModes {
   for (const m of r["modes"]) {
     if (typeof m !== "object" || m === null) continue;
     const o = m as Record<string, unknown>;
-    if (typeof o["name"] !== "string" || typeof o["command"] !== "string") continue;
+    if (typeof o["name"] !== "string") continue;
     modes.push({
       name: o["name"],
       worktree: o["worktree"] !== false,
-      command: o["command"],
+      harness: typeof o["harness"] === "string" ? o["harness"] : null,
+      model: typeof o["model"] === "string" ? o["model"] : null,
+      prompt: typeof o["prompt"] === "string" ? o["prompt"] : null,
+      command: commandSpec(o["command"]),
       branch: typeof o["branch"] === "string" ? o["branch"] : DEFAULT_TASKS.modes[0].branch,
-      cleanup: typeof o["cleanup"] === "string" ? o["cleanup"] : null,
+      cleanup: commandSpec(o["cleanup"]),
     });
   }
   return modes.length > 0 ? { modes, worktreeDir: r["worktreeDir"] } : DEFAULT_TASKS;
@@ -114,6 +139,10 @@ export interface Settings {
   /** `null` keeps the app's default monospace stack. */
   fontFamily: string | null;
   fontSize: number;
+  /** App UI font family (`ui.fontFamily`); `null` keeps the default `--font-ui`. */
+  uiFontFamily: string | null;
+  /** App UI font size in px (`ui.fontSize`). */
+  uiFontSize: number;
   /** Terminal colors taken from Ghostty; `null` keeps the theme colors. */
   colors: GhosttyColors | null;
   /** Open panes for input when no other client controls them (`terminal.autoControl`). */
@@ -140,6 +169,8 @@ export interface Settings {
   notifyOnDone: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
+  /** `spaceTemplates`: directory or remote matched templates with agent and layout. */
+  spaceTemplates: SpaceTemplate[];
   /** `trustedProjects`: repository root to the hash of the project file the user trusted. */
   trustedProjects: Record<string, string>;
   /** `tasks`: the task modes and the worktree directory template. */
@@ -157,11 +188,34 @@ export function nextTheme(theme: ThemeSetting): ThemeSetting {
 /** The terminal backend poimen talks to: poimen-server (default) or herdr. */
 export type BackendKind = "herdr" | "poimen";
 
+/** Whether the app runs on Windows (the webview reports `Win32`). */
+export function isWindows(): boolean {
+  return typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
+}
+
+/** Default `terminal.fontSize`: 14 on Windows, 13 elsewhere (mirrors `settings.rs`). */
+export function defaultTerminalFontSize(windows: boolean = isWindows()): number {
+  return windows ? 14 : 13;
+}
+
+const WINDOWS_MONO = '"Cascadia Mono", "Cascadia Code", Consolas';
+
+/**
+ * The terminal font stack when `terminal.fontFamily` is not set: on Windows the system
+ * monospace fonts come first, then `--font-mono` (`mono`) or `Menlo, monospace`.
+ */
+export function defaultTerminalFontFamily(mono: string, windows: boolean = isWindows()): string {
+  const base = mono || "Menlo, monospace";
+  return windows ? `${WINDOWS_MONO}, ${base}` : base;
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   colorSchema: null,
   fontFamily: null,
-  fontSize: 13,
+  fontSize: defaultTerminalFontSize(),
+  uiFontFamily: null,
+  uiFontSize: 13,
   colors: null,
   autoControl: true,
   shortcuts: DEFAULT_SHORTCUTS,
@@ -175,6 +229,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyOnBlocked: true,
   notifyOnDone: true,
   spacesLayout: null,
+  spaceTemplates: [],
   trustedProjects: {},
   tasks: DEFAULT_TASKS,
   home: null,
@@ -246,6 +301,11 @@ export function parseSettings(raw: unknown): Settings {
       typeof r["fontSize"] === "number" && Number.isFinite(r["fontSize"])
         ? r["fontSize"]
         : DEFAULT_SETTINGS.fontSize,
+    uiFontFamily: typeof r["uiFontFamily"] === "string" ? r["uiFontFamily"] : null,
+    uiFontSize:
+      typeof r["uiFontSize"] === "number" && Number.isFinite(r["uiFontSize"])
+        ? r["uiFontSize"]
+        : DEFAULT_SETTINGS.uiFontSize,
     colors:
       colors && typeof colors === "object"
         ? {
@@ -276,6 +336,7 @@ export function parseSettings(raw: unknown): Settings {
     notifyOnBlocked: r["notifyOnBlocked"] !== false,
     notifyOnDone: r["notifyOnDone"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
+    spaceTemplates: parseSpaceTemplates(r["spaceTemplates"]),
     trustedProjects: parseTrusted(r["trustedProjects"]),
     tasks: parseTaskModes(r["tasks"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
@@ -365,6 +426,61 @@ export class SettingsStore {
     await this.write(patch, `the ${kind} notification option`, "set_notification", { kind, on });
   }
 
+  /** Writes `terminal.fontFamily` (empty removes it: the default stack) and applies it at once. */
+  async setTerminalFontFamily(family: string): Promise<boolean> {
+    const trimmed = family.trim();
+    return this.write(
+      { fontFamily: trimmed || null },
+      "the terminal font",
+      "set_terminal_font_family",
+      { family: trimmed },
+    );
+  }
+
+  /** Writes `terminal.fontSize`; an out-of-range size is not written and sets the write error. */
+  async setTerminalFontSize(size: number): Promise<boolean> {
+    const bad = sizeError(
+      "The terminal font size",
+      size,
+      MIN_TERMINAL_FONT_SIZE,
+      MAX_TERMINAL_FONT_SIZE,
+    );
+    if (bad) return this.reject(bad);
+    return this.write({ fontSize: size }, "the terminal font size", "set_terminal_font_size", {
+      size,
+    });
+  }
+
+  /** Removes `terminal.fontSize` (the platform default applies again) and applies it at once. */
+  async clearTerminalFontSize(): Promise<boolean> {
+    return this.write(
+      { fontSize: defaultTerminalFontSize() },
+      "the terminal font size",
+      "clear_terminal_font_size",
+      {},
+    );
+  }
+
+  /** Writes `ui.fontFamily` (empty removes it: the default `--font-ui`) and applies it at once. */
+  async setUiFontFamily(family: string): Promise<boolean> {
+    const trimmed = family.trim();
+    return this.write({ uiFontFamily: trimmed || null }, "the UI font", "set_ui_font_family", {
+      family: trimmed,
+    });
+  }
+
+  /** Writes `ui.fontSize`; an out-of-range size is not written and sets the write error. */
+  async setUiFontSize(size: number): Promise<boolean> {
+    const bad = sizeError("The UI font size", size, MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE);
+    if (bad) return this.reject(bad);
+    return this.write({ uiFontSize: size }, "the UI font size", "set_ui_font_size", { size });
+  }
+
+  private reject(message: string): false {
+    this._writeError.set(message);
+    return false;
+  }
+
   /** Writes `herdr.autoStart` of config.json and applies it at once. */
   async setHerdrAutoStart(herdrAutoStart: boolean): Promise<void> {
     await this.write({ herdrAutoStart }, "the herdr auto start option", "set_herdr_auto_start", {
@@ -391,6 +507,13 @@ export class SettingsStore {
     } catch {
       return null;
     }
+  }
+
+  /** Writes `spaceTemplates` (validated again by the backend); `false` when the write failed. */
+  setSpaceTemplates(spaceTemplates: SpaceTemplate[]): Promise<boolean> {
+    return this.write({ spaceTemplates }, "the space templates", "set_space_templates", {
+      templates: spaceTemplates.map(templateConfig),
+    });
   }
 
   /** Drops the trust of the project file of `root` (`trustedProjects`) and applies it at once. */

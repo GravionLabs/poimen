@@ -1,0 +1,30 @@
+@if (state.content(); as c) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Close"
+    (click)="state.close()"
+  ></button>
+  <div
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="c.title"
+    (keydown.escape)="state.close()"
+  >
+    <h2>{{ c.title }}</h2>
+    <p class="summary">{{ c.summary }}</p>
+    @if (c.text) {
+      <pre class="output" aria-label="Output">{{ c.text }}</pre>
+    }
+    <div class="buttons">
+      <button type="button" (click)="state.close()">Close</button>
+      @if (c.action; as action) {
+        <button type="button" class="confirm" (click)="state.runAction()">
+          {{ action.label }}
+        </button>
+      }
+    </div>
+  </div>
+}

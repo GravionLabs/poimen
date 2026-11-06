@@ -298,3 +298,71 @@ describe("SpaceActions close", () => {
     expect(tauri.calls("space_close")).toEqual([]);
   });
 });
+
+describe("SpaceActions rename", () => {
+  let actions: SpaceActions;
+
+  beforeEach(async () => {
+    tauri.reset();
+    tauri.answer("snapshot", snap);
+    const injector = Injector.create({
+      providers: [
+        TauriBridge,
+        HerdrStore,
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        SpaceActions,
+      ],
+    });
+    await injector.get(HerdrStore).refresh();
+    tauri.answer("space_rename", () => undefined);
+    actions = injector.get(SpaceActions);
+  });
+
+  it("opens the dialog prefilled with the current label", () => {
+    actions.askRename("w2");
+    expect(actions.renaming()).toEqual({ workspaceId: "w2", current: "Space 2" });
+    actions.cancelRename();
+    expect(actions.renaming()).toBeNull();
+  });
+
+  it("ignores an unknown space", () => {
+    actions.askRename("nope");
+    expect(actions.renaming()).toBeNull();
+  });
+
+  it("renames with the trimmed name, closes the dialog and re-reads the snapshot", async () => {
+    actions.askRename("w2");
+    const before = tauri.calls("snapshot").length;
+    expect(await actions.confirmRename("  Renamed ")).toBe(true);
+    expect(tauri.calls("space_rename")).toEqual([{ workspaceId: "w2", label: "Renamed" }]);
+    expect(tauri.calls("snapshot")).toHaveLength(before + 1);
+    expect(actions.renaming()).toBeNull();
+    expect(actions.renameError()).toBeNull();
+  });
+
+  it("rejects a blank name without calling herdr and keeps the dialog open", async () => {
+    actions.askRename("w2");
+    expect(await actions.confirmRename("   ")).toBe(false);
+    expect(tauri.calls("space_rename")).toEqual([]);
+    expect(actions.renameError()).toBe("The name of a space cannot be empty.");
+    expect(actions.renaming()).not.toBeNull();
+  });
+
+  it("does not call herdr when the label is unchanged", async () => {
+    actions.askRename("w2");
+    expect(await actions.confirmRename("Space 2")).toBe(true);
+    expect(tauri.calls("space_rename")).toEqual([]);
+    expect(actions.renaming()).toBeNull();
+  });
+
+  it("shows herdr's error in the dialog and keeps it open", async () => {
+    tauri.answer("space_rename", () => {
+      throw "workspace not found";
+    });
+    actions.askRename("w2");
+    expect(await actions.confirmRename("Renamed")).toBe(false);
+    expect(actions.renameError()).toContain("workspace not found");
+    expect(actions.renaming()).toEqual({ workspaceId: "w2", current: "Space 2" });
+  });
+});

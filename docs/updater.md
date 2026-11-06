@@ -33,12 +33,30 @@ signing, which the installers do not have yet (#45).
 - `src-tauri/tauri.bundle.conf.json` turns on `createUpdaterArtifacts`. Only `release.yml` passes it
   (`--config`), so local builds and `tauri dev` need no key.
 
-**Keep a backup of the private key and its password.** If they are lost, installed apps can never
-update again and users must install a new version by hand.
+The key pair was replaced on 2026-11-06 because the earlier private key was lost. The new private
+key and its password are backed up in the owner's password manager. Installs made with the earlier
+key cannot verify updates signed with the new one and must be reinstalled by hand once.
 
 To make a new key: `pnpm tauri signer generate -w <file>`, then replace the public key in
 `tauri.conf.json` and both secrets. Apps with the old key cannot verify updates signed with the
 new one.
+
+## Pre-releases
+
+`release.yml` dispatched on `release/next` with `prerelease: true` publishes a GitHub **pre-release**
+`v<x.y.z>-rc.<n>` with installers (no `.msi`) for the manual acceptance. Its `latest.json` is attached to
+that pre-release only.
+
+- Stable installs never see it: the endpoint `releases/latest/download/latest.json` resolves through
+  GitHub's "latest release", which is the most recent published release that is neither a pre-release
+  nor a draft. A pre-release is never "latest", so the endpoint keeps serving the last stable `latest.json`.
+- An installed pre-release updates to the final release: the stable `v<x.y.z>` is a higher SemVer than
+  `<x.y.z>-rc.<n>` (a pre-release part sorts below the release), and the endpoint serves the stable
+  `latest.json` once the release is published. A pre-release install is not offered a newer pre-release;
+  install it by hand.
+- This follows from GitHub's documented semantics and is not yet observed live. Outstanding: check once on
+  the first pre-release that a stable install reports no update, and that the pre-release install updates to
+  the final release.
 
 ## Limits
 

@@ -1,6 +1,14 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, SettingsStore, nextTheme, parseSettings } from "./settings";
+import {
+  DEFAULT_SETTINGS,
+  SettingsStore,
+  nextTheme,
+  defaultTerminalFontFamily,
+  defaultTerminalFontSize,
+  parseSettings,
+  parseTaskModes,
+} from "./settings";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -14,6 +22,58 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./tauri.mock")).tauri.listen,
 }));
 
+describe("UI font settings", () => {
+  beforeEach(() => {
+    tauri.reset();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  it("defaults to the default stack and 13px", () => {
+    expect(DEFAULT_SETTINGS.uiFontFamily).toBeNull();
+    expect(DEFAULT_SETTINGS.uiFontSize).toBe(13);
+    const s = parseSettings({ uiFontFamily: 3, uiFontSize: "big" });
+    expect([s.uiFontFamily, s.uiFontSize]).toEqual([null, 13]);
+  });
+
+  it("writes the four font settings through their commands", async () => {
+    const store = create();
+    expect(await store.setTerminalFontFamily(" Fira Code ")).toBe(true);
+    expect(await store.setTerminalFontSize(16)).toBe(true);
+    expect(await store.setUiFontFamily("Inter")).toBe(true);
+    expect(await store.setUiFontSize(14)).toBe(true);
+    expect(tauri.calls("set_terminal_font_family")).toEqual([{ family: "Fira Code" }]);
+    expect(tauri.calls("set_terminal_font_size")).toEqual([{ size: 16 }]);
+    expect(tauri.calls("set_ui_font_family")).toEqual([{ family: "Inter" }]);
+    expect(tauri.calls("set_ui_font_size")).toEqual([{ size: 14 }]);
+    const s = store.settings();
+    expect([s.fontFamily, s.fontSize, s.uiFontFamily, s.uiFontSize]).toEqual([
+      "Fira Code",
+      16,
+      "Inter",
+      14,
+    ]);
+  });
+
+  it("an empty family goes back to the default", async () => {
+    const store = create();
+    await store.setUiFontFamily("Inter");
+    await store.setUiFontFamily("  ");
+    expect(store.settings().uiFontFamily).toBeNull();
+    expect(tauri.calls("set_ui_font_family").at(-1)).toEqual({ family: "" });
+  });
+
+  it("does not write a size out of range and says why", async () => {
+    const store = create();
+    expect(await store.setUiFontSize(9)).toBe(false);
+    expect(await store.setUiFontSize(Number.NaN)).toBe(false);
+    expect(await store.setTerminalFontSize(73)).toBe(false);
+    expect(tauri.calls("set_ui_font_size")).toEqual([]);
+    expect(tauri.calls("set_terminal_font_size")).toEqual([]);
+    expect(store.writeError()).toBe("The terminal font size must be a number from 6 to 72");
+    expect(store.settings().uiFontSize).toBe(13);
+  });
+});
+
 describe("parseSettings", () => {
   it("reads the wire shape", () => {
     expect(
@@ -22,6 +82,8 @@ describe("parseSettings", () => {
         colorSchema: " dracula ",
         fontFamily: "Hack",
         fontSize: 15,
+        uiFontFamily: "Inter",
+        uiFontSize: 14,
         colors: {
           background: "#000000",
           foreground: null,
@@ -32,6 +94,15 @@ describe("parseSettings", () => {
         autoControl: false,
         notifyOnBlocked: false,
         spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+        spaceTemplates: [
+          { name: "w", dir: "~/src", remote: null, agent: "claude", model: "opus", layout: null },
+          {
+            name: "az",
+            remote: { provider: "azure-devops", organization: "o", project: "p" },
+            agent: "copilot",
+          },
+          { name: 3 },
+        ],
         home: "/Users/x",
         warnings: ["w"],
       }),
@@ -40,6 +111,8 @@ describe("parseSettings", () => {
       colorSchema: "dracula",
       fontFamily: "Hack",
       fontSize: 15,
+      uiFontFamily: "Inter",
+      uiFontSize: 14,
       colors: {
         background: "#000000",
         foreground: null,
@@ -60,6 +133,17 @@ describe("parseSettings", () => {
       notifyOnBlocked: false,
       notifyOnDone: true,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+      spaceTemplates: [
+        { name: "w", dir: "~/src", remote: null, agent: "claude", model: "opus", layout: null },
+        {
+          name: "az",
+          dir: null,
+          remote: { provider: "azure-devops", organization: "o", project: "p" },
+          agent: "copilot",
+          model: null,
+          layout: null,
+        },
+      ],
       trustedProjects: {},
       tasks: DEFAULT_SETTINGS.tasks,
       home: "/Users/x",
@@ -100,7 +184,18 @@ describe("parseSettings", () => {
     }).tasks;
     expect(t).toEqual({
       worktreeDir: "../w",
-      modes: [{ name: "q", worktree: false, command: "vim", branch: "b", cleanup: "c" }],
+      modes: [
+        {
+          name: "q",
+          worktree: false,
+          harness: null,
+          model: null,
+          prompt: null,
+          command: "vim",
+          branch: "b",
+          cleanup: "c",
+        },
+      ],
     });
     expect(parseSettings({ tasks: { modes: [], worktreeDir: "x" } }).tasks).toEqual(
       DEFAULT_SETTINGS.tasks,
@@ -225,5 +320,50 @@ describe("notifications", () => {
     const s = parseSettings({ notifyOnBlocked: false, notifyOnDone: "no" });
     expect(s.notifyOnBlocked).toBe(false);
     expect(s.notifyOnDone).toBe(true);
+  });
+});
+
+describe("parseTaskModes", () => {
+  it("keeps harness modes, argv commands and deprecated string commands", () => {
+    const got = parseTaskModes({
+      worktreeDir: "../{repo}-{nr}",
+      modes: [
+        { name: "agent", harness: "copilot", model: "auto", prompt: "Fix #{nr}" },
+        {
+          name: "loop",
+          command: ["pwsh", "run.ps1", "{nr}"],
+          cleanup: ["git", "branch", "-D", "{branch}"],
+        },
+        { name: "old", command: "claude {prompt}" },
+      ],
+    });
+    expect(got.modes.map((m) => [m.harness, m.model, m.prompt, m.command])).toEqual([
+      ["copilot", "auto", "Fix #{nr}", null],
+      [null, null, null, ["pwsh", "run.ps1", "{nr}"]],
+      [null, null, null, "claude {prompt}"],
+    ]);
+    expect(got.modes[1].cleanup).toEqual(["git", "branch", "-D", "{branch}"]);
+  });
+});
+
+describe("platform terminal font defaults", () => {
+  it("uses 14 on Windows and 13 elsewhere", () => {
+    expect(defaultTerminalFontSize(true)).toBe(14);
+    expect(defaultTerminalFontSize(false)).toBe(13);
+  });
+
+  it("puts the Windows monospace fonts before the base stack only on Windows", () => {
+    expect(defaultTerminalFontFamily("", true)).toBe(
+      '"Cascadia Mono", "Cascadia Code", Consolas, Menlo, monospace',
+    );
+    expect(defaultTerminalFontFamily("JetBrains Mono, monospace", true)).toBe(
+      '"Cascadia Mono", "Cascadia Code", Consolas, JetBrains Mono, monospace',
+    );
+    expect(defaultTerminalFontFamily("", false)).toBe("Menlo, monospace");
+  });
+
+  it("a configured size wins over the platform default", () => {
+    expect(parseSettings({ fontSize: 16 }).fontSize).toBe(16);
+    expect(parseSettings({ fontFamily: "Hack" }).fontFamily).toBe("Hack");
   });
 });

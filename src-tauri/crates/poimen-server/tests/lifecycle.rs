@@ -115,7 +115,7 @@ fn ping_reports_the_protocol_version() {
     let env = Env::new("ping");
     let client = start(&env.config());
     let ping = client.ping().unwrap();
-    assert_eq!(ping.protocol, 2);
+    assert_eq!(ping.protocol, 3);
     assert_eq!(ping.pid, std::process::id());
 }
 
@@ -434,7 +434,9 @@ fn agent_reports_update_the_terminal_emit_an_event_and_stale_ones_are_dropped() 
             terminal_id: term.id.clone(),
             status: AgentStatus::Working,
             agent: Some("claude".into()),
-            session_id: Some("s1".into())
+            session_id: Some("s1".into()),
+            message: None,
+            message_at: None
         }
     );
     assert_eq!(agent().unwrap().status, AgentStatus::Working);
@@ -458,6 +460,47 @@ fn agent_reports_update_the_terminal_emit_an_event_and_stale_ones_are_dropped() 
         }
     ));
     assert!(agent().is_none());
+}
+
+#[test]
+fn the_notification_text_is_kept_until_the_agent_works_again() {
+    let env = Env::new("agent-message");
+    let client = start(&env.config());
+    let space = client.create_space("api", &env.work()).unwrap();
+    let term = client.create_terminal(&sh(&space.id)).unwrap();
+    let rx = events(&client);
+    let send = |seq: u64, status: AgentStatus, message: Option<&str>| {
+        let mut r = report(&term.id, seq, status, None);
+        r["message"] = serde_json::json!(message);
+        client.request("terminal.report_agent", r).unwrap();
+    };
+    let agent = || {
+        client.list_terminals(None).unwrap()[0]
+            .agent
+            .clone()
+            .unwrap()
+    };
+
+    send(1, AgentStatus::Blocked, Some("Allow Bash?\n\u{1b}[0m"));
+    let event = wait_for_event(&rx, |e| matches!(e, Event::AgentStatusChanged { .. }));
+    let Event::AgentStatusChanged {
+        message,
+        message_at,
+        ..
+    } = event
+    else {
+        unreachable!()
+    };
+    assert_eq!(message.as_deref(), Some("Allow Bash? [0m"));
+    assert!(message_at.is_some());
+    assert_eq!(agent().message.as_deref(), Some("Allow Bash? [0m"));
+
+    // A report without text keeps it; `working` clears it.
+    send(2, AgentStatus::Done, None);
+    assert_eq!(agent().message.as_deref(), Some("Allow Bash? [0m"));
+    send(3, AgentStatus::Working, None);
+    let cleared = agent();
+    assert_eq!((cleared.message, cleared.message_at), (None, None));
 }
 
 #[test]

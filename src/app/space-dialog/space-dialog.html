@@ -47,6 +47,15 @@
         (input)="typeLabel($event)"
       />
     </label>
+    @if (path().trim()) {
+      <p class="hint template" data-testid="template-hint">
+        @if (actions.template(); as t) {
+          Template: {{ t.name }} · {{ agent(t.agent) }}
+        } @else {
+          Template: default
+        }
+      </p>
+    }
     <p class="hint">An existing space for the directory is focused instead.</p>
     @if (actions.error(); as message) {
       <p class="error" role="alert">{{ message }}</p>
@@ -81,6 +90,43 @@
       <button type="button" class="confirm" (click)="confirmClose()">Close space</button>
     </div>
   </div>
+}
+@if (actions.renaming(); as r) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Cancel"
+    (click)="actions.cancelRename()"
+  ></button>
+  <form
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Rename space"
+    (submit)="$event.preventDefault(); rename($any($event.target))"
+    (keydown.escape)="actions.cancelRename()"
+  >
+    <h2>Rename space</h2>
+    <label>
+      Name
+      <input
+        class="field"
+        name="name"
+        type="text"
+        autocomplete="off"
+        [value]="r.current"
+        (input)="actions.clearRenameError()"
+      />
+    </label>
+    @if (actions.renameError(); as message) {
+      <p class="error" role="alert">{{ message }}</p>
+    }
+    <div class="buttons">
+      <button type="button" class="cancel" (click)="actions.cancelRename()">Cancel</button>
+      <button type="submit" class="confirm">Rename</button>
+    </div>
+  </form>
 }
 @if (actions.closeError(); as message) {
   <p class="error close-error" role="alert">

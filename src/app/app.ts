@@ -11,6 +11,7 @@ import {
 } from "@angular/core";
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
+import { applyUiFont } from "./core/ui-font";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import {
   flowSession,
@@ -34,6 +35,7 @@ import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { Updater } from "./core/updater";
+import { Usage } from "./core/usage";
 import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
@@ -68,9 +70,13 @@ import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import { TaskDialog } from "./task-dialog/task-dialog";
 import { HooksDialog } from "./hooks-dialog/hooks-dialog";
+import { ResultDialog } from "./result-dialog/result-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
 import { TaskStarter } from "./core/task-start";
+import { ProjectTeardown } from "./core/project-teardown";
+import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
+import { AgentPicker as AgentPickerView } from "./agent-picker/agent-picker";
 import { TaskCleanup } from "./core/task-cleanup";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
@@ -106,6 +112,8 @@ const ZOOM_STEP = 1;
     SpaceDialog,
     HooksDialog,
     TrustDialog,
+    ResultDialog,
+    AgentPickerView,
     TaskDialog,
     PaletteView,
     ShortcutsDialog,
@@ -117,6 +125,7 @@ const ZOOM_STEP = 1;
 export class App {
   protected readonly store = inject(HerdrStore);
   protected readonly updater = inject(Updater);
+  protected readonly usage = inject(Usage);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
@@ -132,6 +141,8 @@ export class App {
   private readonly subagents = inject(Subagents);
   private readonly tasks = inject(TaskStarter);
   private readonly cleanup = inject(TaskCleanup);
+  private readonly teardown = inject(ProjectTeardown);
+  private readonly projectEntries = inject(ProjectEntries);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -227,6 +238,11 @@ export class App {
   );
 
   constructor() {
+    effect(() => {
+      const id = this.activePaneId();
+      const pane = id ? this.pane(id) : undefined;
+      this.projectEntries.setDir(pane ? paneDir(pane) : undefined);
+    });
     // Instantiated for its effect: the dock badge follows `Attention.count`.
     inject(DockBadge);
     const title = inject(Title);
@@ -272,6 +288,10 @@ export class App {
     });
     destroyRef.onDestroy(() => tokens.disconnect());
     effect(() => this.terminalColors.update(this.prefs.settings().colors));
+    effect(() => {
+      const { uiFontFamily, uiFontSize } = this.prefs.settings();
+      applyUiFont(document.documentElement, uiFontFamily, uiFontSize);
+    });
     destroyRef.onDestroy(this.followSystemTheme());
     // The output panel follows the active tab's agent (Claude Code, Copilot CLI); nothing is watched while it is hidden.
     effect(() => {
@@ -369,6 +389,16 @@ export class App {
       this.cleanupInActiveRepo();
       return;
     }
+    if (id === "projectTeardown") {
+      this.teardownInActiveSpace();
+      return;
+    }
+    if (id === "renameSpace") {
+      const paneId = this.activePaneId();
+      const spaceId = paneId ? this.pane(paneId)?.space_id : undefined;
+      if (spaceId) this.spaceActions.askRename(spaceId);
+      return;
+    }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
       this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);
@@ -451,6 +481,24 @@ export class App {
     else this.spaceActions.notify("Clean up merged tasks: the active pane is not in a repository");
   }
 
+  /** A command or preset of the project file, run in the space of the active pane. */
+  protected runEntry(entry: ProjectEntry): void {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    const dir = pane ? paneDir(pane) : undefined;
+    if (pane && dir) void this.projectEntries.run(entry, pane.space_id, dir);
+    else this.spaceActions.notify(`Project: ${entry.name}: there is no focused space`);
+  }
+
+  /** The palette entry: run the project's teardown in the directory of the active pane. */
+  private teardownInActiveSpace(): void {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    const dir = pane ? paneDir(pane) : undefined;
+    if (dir) void this.teardown.run(dir);
+    else this.spaceActions.notify("Project: Run teardown: the active pane has no directory");
+  }
+
   /** The space of the active pane: a cleanup never removes it. */
   private focusedSpace(): string | null {
     const id = this.activePaneId();
@@ -473,6 +521,7 @@ export class App {
   protected onSidebarMenu(event: SidebarMenuAction): void {
     if (event.action === "new-terminal") this.paneActions.askNew(event.id);
     else if (event.action === "close-space") this.closeSpace(event.id);
+    else if (event.action === "rename-space") this.spaceActions.askRename(event.id);
     else if (event.action === "show-changes") {
       const dir = spaceRepoDir(this.store.spaces(), event.id);
       if (dir) this.editor.openChanges(dir);

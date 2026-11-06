@@ -20,16 +20,19 @@ mod live;
 mod poimen_backend;
 mod poimen_server;
 mod project;
+mod remote;
 mod schemes;
 mod settings;
 mod spaces;
 mod stream;
 mod task_start;
 mod tasks;
+mod templates;
 mod terminal_colors;
 mod transcripts;
 mod trust;
 mod updater;
+mod usage;
 mod watch;
 mod worktree;
 
@@ -155,6 +158,23 @@ async fn space_close(
             let _ = b.focus_space(&id);
         }
         Ok(())
+    })
+    .await
+}
+
+/// Renames a space. A blank label is rejected here too; the UI checks first.
+#[tauri::command]
+async fn space_rename(
+    backend: State<'_, Shared>,
+    workspace_id: String,
+    label: String,
+) -> Result<(), String> {
+    let label = label.trim().to_owned();
+    if label.is_empty() {
+        return Err("The name of a space cannot be empty.".into());
+    }
+    on_backend(backend.inner(), move |b| {
+        b.rename_space(&workspace_id, &label)
     })
     .await
 }
@@ -328,6 +348,57 @@ async fn terminal_create(
     .await
 }
 
+/// The space template that applies to `dir`; `origin` is read only when a template matches by
+/// remote.
+fn template_for<'a>(
+    dir: &str,
+    user: &'a settings::Settings,
+    home: Option<&std::path::Path>,
+) -> Option<&'a templates::Template> {
+    let remote = user
+        .space_templates
+        .iter()
+        .any(|t| t.remote.is_some())
+        .then(|| git::origin_url(dir).and_then(|u| remote::parse(&u)))
+        .flatten();
+    templates::resolve(dir, remote.as_ref(), &user.space_templates, home)
+}
+
+/// The template a new space for a directory would use, for the new-space dialog.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+struct TemplateHint {
+    name: String,
+    agent: String,
+}
+
+fn resolve_space_template_with(home: Option<&std::path::Path>, cwd: &str) -> Option<TemplateHint> {
+    let dir = spaces::resolve_dir(cwd, home).ok()?;
+    let user = settings::load(home?);
+    template_for(&dir, &user, home).map(|t| TemplateHint {
+        name: t.name.clone(),
+        agent: t.agent.clone(),
+    })
+}
+
+/// The space template that applies to `cwd` (read-only; the rules of `create_space`), or `None`
+/// for the default.
+#[tauri::command]
+async fn resolve_space_template(cwd: String) -> Option<TemplateHint> {
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_space_template_with(home_dir().as_deref(), &cwd)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Writes only `spaceTemplates` after validating it; the settings watcher emits the change.
+#[tauri::command]
+fn set_space_templates(templates: serde_json::Value) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_space_templates(&home, &templates)
+}
+
 /// Creates a space for a directory and focuses it; when a space for the directory exists (a pane
 /// exactly in it, else one labelled with its name whose panes report no other directory) that one
 /// is focused.
@@ -409,8 +480,23 @@ fn create_space_with(
     let created = backend.create_space(&dir, &label)?;
     let workspace_id = created.space_id.clone();
     backend.focus_space(&workspace_id)?;
-    let user_layout = user.and_then(|s| s.spaces_layout);
-    let mut warnings = build_layout(
+    let template = user
+        .as_ref()
+        .and_then(|s| template_for(&dir, s, home).map(|t| (t, &s.harnesses)));
+    let mut template_warnings = Vec::new();
+    let agent_command = template.and_then(|(t, harnesses)| {
+        let path = gui_path::child_path();
+        templates::agent_command(t, harnesses, |p| {
+            gui_path::resolve_program(p, &path).is_some()
+        })
+        .map_err(|w| template_warnings.push(w))
+        .ok()
+    });
+    let user_layout = template
+        .and_then(|(t, _)| t.layout.clone())
+        .or_else(|| user.as_ref().and_then(|s| s.spaces_layout.clone()));
+    let mut warnings = template_warnings;
+    warnings.extend(build_layout(
         backend,
         &dir,
         created.root_terminal.as_deref(),
@@ -418,7 +504,8 @@ fn create_space_with(
         user_layout.as_ref(),
         allow,
         root_command,
-    );
+        agent_command.as_deref(),
+    ));
     let (setup_started, warning) = run_setup(backend, &workspace_id, &dir, &sources, allow);
     warnings.extend(warning);
     Ok(spaces::SpaceOutcome {
@@ -436,6 +523,7 @@ fn create_space_with(
 /// of a layout that comes from a project file are not typed; the panes are still created and named.
 /// Problems come back as warnings; the space then keeps the panes created so far (at least its
 /// single root pane).
+#[allow(clippy::too_many_arguments)]
 fn build_layout(
     backend: &dyn Backend,
     dir: &str,
@@ -444,6 +532,7 @@ fn build_layout(
     user_layout: Option<&layout::Layout>,
     allow_project_commands: bool,
     root_command: Option<&str>,
+    agent_command: Option<&str>,
 ) -> Vec<String> {
     let (project, legacy) = sources.refs();
     let (layout, mut warnings, from_project) =
@@ -456,9 +545,18 @@ fn build_layout(
     } else {
         layout
     };
-    let layout = match root_command {
-        Some(command) => layout.with_root_command(command),
-        None => layout,
+    // A task's command wins; then the template's agent, which fills a root pane without a command
+    // of its own (the built-in default's `claude` is not one).
+    let explicit = from_project || user_layout.is_some();
+    let root_free = layout
+        .panes
+        .iter()
+        .find(|p| p.split.is_none())
+        .is_none_or(|p| p.command.is_none() || !explicit);
+    let layout = match (root_command, agent_command) {
+        (Some(command), _) => layout.with_root_command(command),
+        (None, Some(agent)) if root_free => layout.with_root_command(agent),
+        _ => layout,
     };
     let Some(root_pane) = root_pane else {
         return vec!["the backend did not report the root pane; no layout applied".into()];
@@ -492,6 +590,16 @@ fn run_setup(
     }
 }
 
+/// The usage report of tamias for the status bar (`null` without tamias or data); later reads
+/// arrive as `usage` events.
+#[tauri::command]
+async fn get_usage() -> Option<tamias_core::report::Report> {
+    tauri::async_runtime::spawn_blocking(|| usage::read(&usage::SystemRunner))
+        .await
+        .ok()
+        .flatten()
+}
+
 /// Revokes the trust of the project file of `root`; the settings watcher emits the change.
 #[tauri::command]
 fn revoke_project(root: String) -> Result<(), String> {
@@ -508,6 +616,52 @@ async fn project_config(dir: String) -> Result<project::Loaded, String> {
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// The `commands[]` and `presets[]` of the project file of the repository of `dir`, for the
+/// palette (names only), and whether the file still needs the user's trust.
+#[tauri::command]
+async fn project_entries(dir: String) -> project::Entries {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        let sources = trust::Sources::read(&root);
+        project::entries(&sources, &get_settings().trusted_projects)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Runs a palette entry of the project file in the space `workspace_id` (a user action). Goes
+/// through `trust::gate` with the one read of the file; an untrusted file answers `ask`.
+#[tauri::command]
+async fn project_run(
+    backend: State<'_, Shared>,
+    workspace_id: String,
+    dir: String,
+    entry: project::Entry,
+    decision: Option<trust::Decision>,
+) -> Result<project::EntryOutcome, String> {
+    on_backend(backend.inner(), move |b| {
+        let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
+        let sources = trust::Sources::read(&root);
+        let home = home_dir();
+        let trusted = get_settings().trusted_projects;
+        let persist = |hash: &str| -> Result<(), String> {
+            let home = home.as_deref().ok_or("the home directory is not known")?;
+            settings::trust_project(home, &sources.root, hash)
+        };
+        project::run_entry(
+            b,
+            &sources,
+            &trusted,
+            decision.as_ref(),
+            &persist,
+            &workspace_id,
+            &dir,
+            &entry,
+        )
+    })
+    .await
 }
 
 /// Directories matching a typed path, for the completion of path fields.
@@ -709,7 +863,7 @@ async fn task_plan(
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        task_start::plan(&resolved.modes, &repo, &issue, &mode)
+        task_start::plan(&resolved.modes, &settings.harnesses, &repo, &issue, &mode)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -723,6 +877,7 @@ async fn task_cleanup(
     backend: State<'_, Shared>,
     dir: String,
     focused_space: Option<String>,
+    skip_teardown: Option<bool>,
 ) -> Result<worktree::CleanupReport, String> {
     let backend = backend.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -743,13 +898,50 @@ async fn task_cleanup(
                 worktree::CleanupMode::Builtin,
                 worktree::CleanupMode::Command,
             );
+        // The project's teardown runs in each worktree first, only for a trusted project file.
+        let command = match project::teardown_plan(&sources, &settings.trusted_projects) {
+            project::TeardownPlan::Run(command) => Some(command),
+            project::TeardownPlan::Untrusted if skip_teardown != Some(true) => {
+                return Ok(worktree::CleanupReport {
+                    teardown_untrusted: true,
+                    ..Default::default()
+                });
+            }
+            _ => None,
+        };
+        let teardown = command.map(|command| {
+            move |worktree: &std::path::Path| -> Result<(), String> {
+                let result = project::run_teardown(&project::SystemRunner, &command, worktree)?;
+                if result.success() {
+                    Ok(())
+                } else {
+                    Err(result.failure_text())
+                }
+            }
+        });
         worktree::cleanup(
             &root,
             &merged,
             &mode,
             backend.as_ref(),
             focused_space.as_deref(),
+            teardown.as_ref().map(|t| t as &worktree::Teardown<'_>),
         )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs the `teardown` of the project file of the repository of `dir` in `dir` (the worktree of
+/// the focused space), when the project file is trusted. A user action (palette entry).
+#[tauri::command]
+async fn project_teardown(dir: String) -> Result<project::TeardownReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = worktree::main_worktree(std::path::Path::new(&dir))?;
+        let sources = trust::Sources::read(&root.to_string_lossy());
+        let plan = project::teardown_plan(&sources, &get_settings().trusted_projects);
+        let top = worktree::toplevel(std::path::Path::new(&dir))?;
+        project::teardown_now(&project::SystemRunner, &plan, &top)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -841,6 +1033,41 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
 fn set_notification(kind: String, on: bool) -> Result<(), String> {
     let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_notification(&home, &kind, on)
+}
+
+/// Writes only `terminal.fontFamily`; the settings watcher emits the change.
+#[tauri::command]
+fn set_terminal_font_family(family: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_terminal_font_family(&home, &family)
+}
+
+/// Writes only `terminal.fontSize`; the settings watcher emits the change.
+#[tauri::command]
+fn set_terminal_font_size(size: f64) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_terminal_font_size(&home, size)
+}
+
+/// Removes only `terminal.fontSize` (back to the default); the settings watcher emits the change.
+#[tauri::command]
+fn clear_terminal_font_size() -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::clear_terminal_font_size(&home)
+}
+
+/// Writes only `ui.fontFamily`; the settings watcher emits the change.
+#[tauri::command]
+fn set_ui_font_family(family: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_ui_font_family(&home, &family)
+}
+
+/// Writes only `ui.fontSize`; the settings watcher emits the change.
+#[tauri::command]
+fn set_ui_font_size(size: f64) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_ui_font_size(&home, size)
 }
 
 /// Writes only `herdr.autoStart`; the settings watcher emits the change.
@@ -1311,6 +1538,14 @@ pub fn run() {
                     });
                 });
             }
+            {
+                let handle = handle.clone();
+                std::thread::spawn(move || {
+                    usage::watch(usage::POLL_INTERVAL, |report| {
+                        let _ = handle.emit("usage", report);
+                    });
+                });
+            }
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
                 std::thread::spawn(move || {
@@ -1343,6 +1578,11 @@ pub fn run() {
             hooks_install,
             set_herdr_auto_start,
             set_notification,
+            set_terminal_font_family,
+            set_terminal_font_size,
+            clear_terminal_font_size,
+            set_ui_font_family,
+            set_ui_font_size,
             pane_split,
             pane_close,
             space_close,
@@ -1350,6 +1590,7 @@ pub fn run() {
             agent_rename,
             agent_prompt,
             pane_rename,
+            space_rename,
             terminal_create,
             github_pulls,
             branch_pulls,
@@ -1363,6 +1604,7 @@ pub fn run() {
             app_version,
             updater::update_check,
             updater::update_install,
+            get_usage,
             get_settings,
             get_harnesses,
             get_task_modes,
@@ -1379,6 +1621,7 @@ pub fn run() {
             task_plan,
             task_tab,
             task_cleanup,
+            project_teardown,
             get_color_schemes,
             set_theme,
             set_color_schema,
@@ -1386,10 +1629,14 @@ pub fn run() {
             set_explorer_roots,
             set_explorer_show_hidden,
             set_spaces_layout,
+            set_space_templates,
+            resolve_space_template,
             revoke_project,
             remove_spaces_layout,
             default_spaces_layout,
             project_config,
+            project_entries,
+            project_run,
             repo_info,
             subagents_watch,
             subagents_unwatch,
@@ -1493,6 +1740,7 @@ mod build_layout_tests {
             user,
             allow,
             None,
+            None,
         );
         assert!(warnings.is_empty(), "{warnings:?}");
         fake.calls()
@@ -1512,6 +1760,7 @@ mod build_layout_tests {
             &sources(PROJECT_TEXT),
             None,
             false,
+            None,
             None,
         );
         assert_eq!(
@@ -1549,6 +1798,7 @@ mod build_layout_tests {
             &sources(PROJECT_TEXT),
             None,
             true,
+            None,
             None,
         );
         assert_eq!(warnings.len(), 1);
@@ -1685,6 +1935,126 @@ mod build_layout_tests {
         assert!(calls.contains(&"rename w9:root agent".to_owned()));
         assert!(calls.contains(&"input w9:root claude 'x'".to_owned()));
         assert!(!calls.iter().any(|c| c == "input w9:root claude"));
+    }
+
+    fn home_with_templates(config: &str) -> (PathBuf, String) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let home = std::env::temp_dir().join(format!("poimen-tpl-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
+        std::fs::write(home.join(".config/poimen/config.json"), config).unwrap();
+        let dir = home.join("src/app");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.to_string_lossy().into_owned();
+        (home, dir)
+    }
+
+    #[test]
+    fn resolve_space_template_names_the_template_or_nothing() {
+        let (home, dir) = home_with_templates(
+            r#"{"spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"claude"}]}"#,
+        );
+        assert_eq!(
+            resolve_space_template_with(Some(&home), &dir),
+            Some(TemplateHint {
+                name: "app".into(),
+                agent: "claude".into()
+            })
+        );
+        let outside = home.to_string_lossy().into_owned();
+        assert_eq!(resolve_space_template_with(Some(&home), &outside), None);
+        assert_eq!(
+            resolve_space_template_with(Some(&home), "/no/such/dir"),
+            None
+        );
+        assert_eq!(resolve_space_template_with(None, &dir), None);
+    }
+
+    #[test]
+    fn create_space_starts_the_template_agent_in_the_root_pane_and_uses_its_layout() {
+        let (home, dir) = home_with_templates(
+            r#"{"harnesses":{"sh1":{"command":["sh"],"modelArgs":["-m","{model}"]}},
+            "spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"sh1","model":"x",
+              "layout":{"panes":[{"name":"main"},
+                {"name":"b","split":{"from":"main","direction":"down","ratio":0.5}}]}}]}"#,
+        );
+        let fake = FakeBackend::default();
+        let out = create_space_with(&fake, Some(&home), &dir, None, None, None).unwrap();
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+        let calls = fake.calls();
+        assert!(calls.contains(&"rename w9:root main".to_owned()));
+        assert!(
+            calls.contains(&"input w9:root sh -m x".to_owned()),
+            "{calls:?}"
+        );
+        assert_eq!(calls.iter().filter(|c| c.starts_with("split ")).count(), 1);
+    }
+
+    #[test]
+    fn a_task_command_beats_the_template_agent() {
+        let (home, dir) = home_with_templates(
+            r#"{"harnesses":{"sh1":{"command":["sh"]}},
+            "spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"sh1"}]}"#,
+        );
+        let fake = FakeBackend::default();
+        create_space_with(&fake, Some(&home), &dir, None, None, Some("task")).unwrap();
+        let calls = fake.calls();
+        assert!(calls.contains(&"input w9:root task".to_owned()));
+        assert!(!calls.iter().any(|c| c == "input w9:root sh"));
+    }
+
+    #[test]
+    fn an_unknown_or_missing_agent_warns_with_the_template_name() {
+        for agent in ["nope", "nosuchprogram-xyz"] {
+            let (home, dir) = home_with_templates(&format!(
+                r#"{{"harnesses":{{"gone":{{"command":["nosuchprogram-xyz"]}}}},
+                "spaceTemplates":[{{"name":"app","match":{{"dir":"~/src"}},"agent":"{}"}}]}}"#,
+                if agent == "nope" { "nope" } else { "gone" }
+            ));
+            let fake = FakeBackend::default();
+            let out = create_space_with(&fake, Some(&home), &dir, None, None, None).unwrap();
+            assert!(out.created);
+            assert_eq!(out.warnings.len(), 1, "{:?}", out.warnings);
+            assert!(out.warnings[0].contains("\"app\""));
+            assert!(
+                !fake
+                    .calls()
+                    .iter()
+                    .any(|c| c.starts_with("input w9:root") && c != "input w9:root claude")
+            );
+        }
+    }
+
+    #[test]
+    fn build_layout_fills_a_free_root_pane_but_not_an_explicit_command() {
+        let free = layout::parse_layout(r#"{"panes":[{"name":"a"}]}"#).unwrap();
+        let own = layout::parse_layout(r#"{"panes":[{"name":"a","command":"vim"}]}"#).unwrap();
+        let no_files = trust::Sources {
+            root: "/w".into(),
+            project: None,
+            legacy: None,
+        };
+        let typed = |user: Option<&layout::Layout>| {
+            let fake = FakeBackend::default();
+            build_layout(
+                &fake,
+                "/w",
+                Some("w1:root"),
+                &no_files,
+                user,
+                true,
+                None,
+                Some("agent"),
+            );
+            fake.calls()
+                .into_iter()
+                .filter(|c| c.starts_with("input "))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(typed(Some(&free)), ["input w1:root agent"]);
+        assert_eq!(typed(Some(&own)), ["input w1:root vim"]);
+        // The built-in default's `claude` is replaced by the template agent.
+        assert_eq!(typed(None), ["input w1:root agent"]);
     }
 
     #[test]

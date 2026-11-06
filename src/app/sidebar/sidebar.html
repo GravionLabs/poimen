@@ -84,9 +84,37 @@
                   <span class="dot status-{{ seg.status }}"></span>
                 }
                 @case ("name") {
-                  <span class="space-name" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
-                    seg.text
-                  }}</span>
+                  @if (editing() === d.workspace.space_id) {
+                    <input
+                      #edit
+                      appSpaceEditFocus
+                      class="space-edit"
+                      type="text"
+                      aria-label="Space name"
+                      autocomplete="off"
+                      [value]="d.workspace.label"
+                      (click)="$event.stopPropagation()"
+                      (dblclick)="$event.stopPropagation()"
+                      (keydown)="$event.stopPropagation()"
+                      (keydown.enter)="finishEdit(d.workspace.space_id, edit, true)"
+                      (keydown.escape)="finishEdit(d.workspace.space_id, edit, false)"
+                      (input)="spaceActions.clearRenameError()"
+                      (blur)="
+                        finishEdit(d.workspace.space_id, edit, edit.value !== d.workspace.label)
+                      "
+                    />
+                    @if (spaceActions.renameError(); as message) {
+                      <span class="space-edit-error" role="alert">{{ message }}</span>
+                    }
+                  } @else {
+                    <span
+                      class="space-name"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      (dblclick)="startEdit(d.workspace.space_id, $event)"
+                      >{{ seg.text }}</span
+                    >
+                  }
                 }
                 @case ("state") {
                   <span
@@ -111,9 +139,13 @@
                       {{ (seg.sep ? "· " : "") + seg.text }}
                     </button>
                   } @else {
-                    <span class="space-meta" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
-                      (seg.sep ? "· " : "") + seg.text
-                    }}</span>
+                    <span
+                      class="space-meta"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      [title]="seg.tip ?? ''"
+                      >{{ (seg.sep ? "· " : "") + seg.text }}</span
+                    >
                   }
                 }
               }
@@ -210,9 +242,13 @@
                       {{ (seg.sep ? "· " : "") + seg.text }}
                     </button>
                   } @else {
-                    <span class="text" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
-                      (seg.sep ? "· " : "") + seg.text
-                    }}</span>
+                    <span
+                      class="text"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      [title]="seg.tip ?? ''"
+                      >{{ (seg.sep ? "· " : "") + seg.text }}</span
+                    >
                   }
                 }
               }

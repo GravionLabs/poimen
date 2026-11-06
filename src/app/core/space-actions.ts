@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { agentKind, pathSegments, type Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
+import type { TemplateHint } from "./space-templates";
 import { TauriBridge } from "./tauri";
 import { UiState } from "./ui-state";
 
@@ -42,6 +43,8 @@ export interface TrustPending {
   command: string | null;
   /** Runs once the space exists, also after the trust answer (a task tab in the space). */
   after?: (outcome: SpaceOutcome) => Promise<void>;
+  /** Set when no space is created: "trust" calls it with the answer instead of `create_space`. */
+  resume?: (decision: TrustDecision) => Promise<void>;
   request: TrustRequest;
 }
 
@@ -57,6 +60,13 @@ export interface SpaceClosing {
   panes: number;
   /** What the close ends: open panes and running agents. */
   warning: string;
+}
+
+/** A space waiting for its new name. */
+export interface SpaceRenaming {
+  workspaceId: string;
+  /** The label when the dialog opened. */
+  current: string;
 }
 
 /** The space to focus after `workspaceId` closed: the next one, else the previous; `null` if none. */
@@ -94,6 +104,12 @@ export class SpaceActions {
   private readonly _warning = signal<string | null>(null);
   private readonly _closing = signal<SpaceClosing | null>(null);
   private readonly _closeError = signal<string | null>(null);
+  private readonly _renaming = signal<SpaceRenaming | null>(null);
+  private readonly _renameError = signal<string | null>(null);
+  /** The space of the open rename dialog; `null` when none. */
+  readonly renaming = this._renaming.asReadonly();
+  /** Why the last rename failed (blank name or herdr's error); the old label stays. */
+  readonly renameError = this._renameError.asReadonly();
   private readonly _closingIds = signal<ReadonlySet<string>>(new Set());
   /** Spaces whose close was confirmed and is not finished: shown as "Closing…", actions disabled. */
   readonly closingIds = this._closingIds.asReadonly();
@@ -113,6 +129,11 @@ export class SpaceActions {
   /** Directories matching the typed path. */
   readonly dirs = this._dirs.asReadonly();
 
+  /** Asks for the trust of `request` (a palette entry); "trust" calls `resume`, the rest nothing. */
+  askTrust(request: TrustRequest, resume: (decision: TrustDecision) => Promise<void>): void {
+    this._trust.set({ cwd: request.root, label: "", command: null, request, resume });
+  }
+
   /** Shows `message` in the status bar like a layout warning (a failed step of a task). */
   notify(message: string): void {
     this._warning.set(message);
@@ -126,6 +147,7 @@ export class SpaceActions {
   }
 
   ask(): void {
+    this._template.set(null);
     this._error.set(null);
     this._dirs.set([]);
     this._open.set(true);
@@ -134,6 +156,32 @@ export class SpaceActions {
   cancel(): void {
     this._open.set(false);
     this._error.set(null);
+  }
+
+  private readonly _template = signal<TemplateHint | null>(null);
+  /** The space template that applies to the directory typed in the dialog; `null`: the default. */
+  readonly template = this._template.asReadonly();
+  private templateSeq = 0;
+
+  /** Looks up the template for the typed or picked directory (the newest lookup wins). */
+  async lookupTemplate(dir: string): Promise<void> {
+    const seq = ++this.templateSeq;
+    const cwd = dir.trim();
+    let hint: TemplateHint | null = null;
+    if (cwd) {
+      try {
+        const raw = await this.bridge.invoke<Partial<TemplateHint> | null>(
+          "resolve_space_template",
+          { cwd },
+        );
+        if (raw && typeof raw.name === "string" && typeof raw.agent === "string") {
+          hint = { name: raw.name, agent: raw.agent };
+        }
+      } catch {
+        hint = null;
+      }
+    }
+    if (seq === this.templateSeq) this._template.set(hint);
   }
 
   /** Looks up directories for the typed path (completion). */
@@ -209,10 +257,63 @@ export class SpaceActions {
     const pending = this._trust();
     if (!pending) return undefined;
     this._trust.set(null);
+    if (pending.resume) {
+      if (answer === "trust") await pending.resume({ kind: "trust", hash: pending.request.hash });
+      return undefined;
+    }
     if (answer === "cancel") return undefined;
     const decision: TrustDecision =
       answer === "trust" ? { kind: "trust", hash: pending.request.hash } : { kind: "without" };
     return this.create(pending.cwd, pending.label, decision, pending.command, pending.after);
+  }
+
+  /** Opens the rename dialog for a space, prefilled with its label. */
+  askRename(workspaceId: string): void {
+    const space = this.store.snapshot().spaces.find((s) => s.space_id === workspaceId);
+    if (!space) return;
+    this._renameError.set(null);
+    this._renaming.set({ workspaceId, current: space.label });
+  }
+
+  cancelRename(): void {
+    this._renaming.set(null);
+    this._renameError.set(null);
+  }
+
+  clearRenameError(): void {
+    this._renameError.set(null);
+  }
+
+  /** Renames the space of the open dialog; on failure the dialog stays open with the error. */
+  async confirmRename(name: string): Promise<boolean> {
+    const dialog = this._renaming();
+    if (!dialog) return false;
+    const ok = await this.rename(dialog.workspaceId, name);
+    if (ok) this._renaming.set(null);
+    return ok;
+  }
+
+  /**
+   * Renames a space (`workspace.rename`): a blank name is rejected without calling herdr, an
+   * unchanged one is a no-op success. Resolves to whether the space now has that label.
+   */
+  async rename(workspaceId: string, name: string): Promise<boolean> {
+    const label = name.trim();
+    this._renameError.set(null);
+    if (!label) {
+      this._renameError.set("The name of a space cannot be empty.");
+      return false;
+    }
+    const space = this.store.snapshot().spaces.find((s) => s.space_id === workspaceId);
+    if (space?.label === label) return true;
+    try {
+      await this.bridge.invoke("space_rename", { workspaceId, label });
+    } catch (err) {
+      this._renameError.set(String(err));
+      return false;
+    }
+    await this.store.refresh();
+    return true;
   }
 
   /**

@@ -112,6 +112,73 @@ describe("SpaceDialog", () => {
     expect(root.querySelector<HTMLInputElement>(".path")!.value).toBe("/picked/dir");
   });
 
+  describe("template hint", () => {
+    const hint = (root: HTMLElement) =>
+      root.querySelector("[data-testid=template-hint]")?.textContent?.replace(/\s+/g, " ").trim();
+
+    it("shows nothing until a directory is typed", async () => {
+      const { actions, root, settle } = await setup();
+      bridge.invoke.mockResolvedValue(null);
+      actions.ask();
+      await settle();
+      expect(hint(root)).toBeUndefined();
+    });
+
+    it("names the template and its agent for the typed directory", async () => {
+      const { actions, root, settle, type } = await setup();
+      bridge.invoke.mockImplementation(async (command: string) =>
+        command === "resolve_space_template" ? { name: "GravionLabs", agent: "claude" } : [],
+      );
+      actions.ask();
+      await settle();
+      await type(".path", "/work/app");
+      expect(bridge.invoke).toHaveBeenCalledWith("resolve_space_template", { cwd: "/work/app" });
+      expect(hint(root)).toBe("Template: GravionLabs · Claude");
+    });
+
+    it("says default when no template applies", async () => {
+      const { actions, root, settle, type } = await setup();
+      bridge.invoke.mockResolvedValue(null);
+      actions.ask();
+      await settle();
+      await type(".path", "/elsewhere");
+      expect(hint(root)).toBe("Template: default");
+    });
+
+    it("says default when the lookup fails", async () => {
+      const { actions, root, settle, type } = await setup();
+      bridge.invoke.mockImplementation(async (command: string) => {
+        if (command === "resolve_space_template") throw "boom";
+        return [];
+      });
+      actions.ask();
+      await settle();
+      await type(".path", "/work/app");
+      expect(hint(root)).toBe("Template: default");
+    });
+
+    it("looks up the picked directory, and only the newest answer counts", async () => {
+      const { actions, root, settle } = await setup();
+      let release: (v: unknown) => void = () => undefined;
+      bridge.invoke.mockImplementation(async (command: string, args: { cwd?: string }) => {
+        if (command !== "resolve_space_template") return [];
+        if (args.cwd === "/slow") return new Promise((r) => (release = r));
+        return { name: "Picked", agent: "copilot" };
+      });
+      bridge.pickDirectory.mockResolvedValue("/picked");
+      actions.ask();
+      await settle();
+      const slow = actions.lookupTemplate("/slow");
+      root.querySelector<HTMLButtonElement>(".browse")!.click();
+      await vi.waitFor(() => expect(bridge.pickDirectory).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve));
+      release({ name: "Old", agent: "claude" });
+      await slow;
+      await settle();
+      expect(hint(root)).toBe("Template: Picked · Copilot");
+    });
+  });
+
   it("shows the error in the dialog and keeps it open", async () => {
     const { actions, root, settle, type } = await setup();
     bridge.invoke.mockImplementation(async (command: string) => {

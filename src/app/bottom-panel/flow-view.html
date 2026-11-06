@@ -34,6 +34,7 @@
         [fConnectOnNode]="false"
         [attr.role]="item.node.agentId ? 'button' : null"
         [attr.tabindex]="item.node.agentId ? 0 : null"
+        [attr.title]="tooltip(item.node)"
         [attr.aria-label]="item.node.title + ', ' + item.node.kind + ', ' + item.node.status"
         (click)="open(item.node)"
         (keydown)="onKey($event, item.node)"
@@ -64,6 +65,7 @@
             <span>{{ item.node.tools }} tool calls</span>
           }
         </div>
+        <app-flow-node-tokens [node]="item.node" />
         <span
           fConnector
           fConnectorType="source"

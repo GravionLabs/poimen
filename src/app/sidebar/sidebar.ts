@@ -2,6 +2,8 @@ import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
+  Directive,
+  ElementRef,
   Injector,
   afterNextRender,
   computed,
@@ -203,6 +205,7 @@ export interface SidebarMenuAction {
     | "rename"
     | "close"
     | "close-space"
+    | "rename-space"
     | "start-task"
     | "cleanup-tasks"
     | "show-changes";
@@ -243,6 +246,7 @@ export function sidebarMenuItems(
                   { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
                 ]
               : []),
+            { action: "rename-space", label: "Rename space..." },
             { action: "close-space", label: "Close space" },
           ]
         : [
@@ -295,9 +299,29 @@ export function isDoubleClick(
 }
 
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
+/** Focuses and selects the inline rename input once it is in the DOM. */
+@Directive({ selector: "input[appSpaceEditFocus]" })
+export class SpaceEditFocus {
+  constructor() {
+    const el = inject<ElementRef<HTMLInputElement>>(ElementRef).nativeElement;
+    afterNextRender(() => {
+      el.focus();
+      el.select();
+    });
+  }
+}
+
 @Component({
   selector: "app-sidebar",
-  imports: [HxMessage, HxTree, HxTreeNodeTemplate, HxInput, NgTemplateOutlet, SplitPane],
+  imports: [
+    SpaceEditFocus,
+    HxMessage,
+    HxTree,
+    HxTreeNodeTemplate,
+    HxInput,
+    NgTemplateOutlet,
+    SplitPane,
+  ],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -392,6 +416,32 @@ export class Sidebar {
   /** The close icon of a workspace row: the close flow of the context menu, no selection or toggle. */
   protected isClosing(workspaceId: string): boolean {
     return this.spaceActions.closingIds().has(workspaceId);
+  }
+
+  /** The space whose label is being edited in place; `null` when none. */
+  protected readonly editing = signal<string | null>(null);
+
+  protected startEdit(workspaceId: string, event: Event): void {
+    event.stopPropagation();
+    if (this.isClosing(workspaceId)) return;
+    this.spaceActions.clearRenameError();
+    this.editing.set(workspaceId);
+  }
+
+  /** Enter or blur confirms, Escape cancels; a failed rename keeps editing, the old label stays. */
+  protected async finishEdit(
+    workspaceId: string,
+    input: HTMLInputElement,
+    commit: boolean,
+  ): Promise<void> {
+    if (this.editing() !== workspaceId) return;
+    if (!commit) {
+      this.editing.set(null);
+      this.spaceActions.clearRenameError();
+      return;
+    }
+    if (await this.spaceActions.rename(workspaceId, input.value)) this.editing.set(null);
+    else input.focus();
   }
 
   protected closeSpace(workspaceId: string, event: Event): void {

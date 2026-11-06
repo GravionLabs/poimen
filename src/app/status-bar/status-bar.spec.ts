@@ -4,6 +4,7 @@ import { Component } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
+import { figures, usageTitle, type UsageReport } from "../core/usage";
 import { connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
 
 beforeAll(() => {
@@ -67,7 +68,12 @@ describe("modeLabel", () => {
 });
 
 describe("mode button", () => {
-  const render = (mode: "control" | "observe", blocked: string | null, panelOpen = true) => {
+  const render = (
+    mode: "control" | "observe",
+    blocked: string | null,
+    panelOpen = true,
+    usage: UsageReport | null = null,
+  ) => {
     const emitted: boolean[] = [];
     let shown = 0;
     let opened = 0;
@@ -105,6 +111,9 @@ describe("mode button", () => {
       herdrLabel = () => "";
       warning = () => "";
       backend = () => "herdr";
+      usage = () => usage;
+      usageFigures = figures;
+      usageText = usageTitle;
     }
     TestBed.resetTestingModule();
     const fixture = TestBed.createComponent(Host);
@@ -174,6 +183,49 @@ describe("mode button", () => {
     expect(root.querySelectorAll(".bar > .item").length).toBeGreaterThan(4);
     // CSS draws the bar (.item + .item::before), so a screen reader never meets it.
     expect(root.textContent).not.toContain("|");
+  });
+
+  it("shows the usage next to the connection, colored, with the tooltip", () => {
+    const report: UsageReport = {
+      schema_version: 1,
+      generated_at: "2026-11-03T10:05:00Z",
+      providers: [
+        {
+          provider: "claude",
+          status: "ok",
+          windows: [
+            {
+              window: "five_hour",
+              unit: "percent",
+              used: 12,
+              limit: 100,
+              resets_at: "2026-11-03T13:30:00Z",
+            },
+            {
+              window: "seven_day",
+              unit: "percent",
+              used: 85,
+              limit: 100,
+              resets_at: "2026-11-07T12:00:00Z",
+            },
+          ],
+        },
+      ],
+    };
+    const { root } = render("control", null, true, report);
+    const item = root.querySelector<HTMLElement>(".bar > .item.usage")!;
+    expect(item.textContent?.replace(/\s+/g, " ").trim()).toBe("5h 12%·7d 85%");
+    expect(item.querySelector(".figure.green")?.textContent).toBe("5h 12%");
+    expect(item.querySelector(".figure.red")?.textContent).toBe("7d 85%");
+    expect(item.title).toContain("5h resets");
+    const items = Array.from(root.querySelectorAll(".bar > .item"));
+    expect(items[0].classList.contains("conn")).toBe(true);
+    expect(items[1]).toBe(item);
+  });
+
+  it("hides the usage item without a report", () => {
+    const { root } = render("control", null);
+    expect(root.querySelector(".usage")).toBeNull();
   });
 
   it("hides the panel button while the panel is open", () => {

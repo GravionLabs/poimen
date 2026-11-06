@@ -37,7 +37,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2RDUxQjM1NkZDQzIyOUMKUldTY0lzeHZOUnZWTmc0bk96MEppaEhuMTNOa3dkS2dGVEVkUDUyM1QxOFlrR01FQnE0R0NiVFYK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwNTk1ODlGMDY1NjcwQkYKUldTL2NGWUduMWhaMElhL0tTK00wQnBhZ3ZDdHJjbUhYcmt0ZlBKSnc5WEtHc1o3cHV1a0F1dWwK",
       "endpoints": [
         "https://github.com/GravionLabs/poimen/releases/latest/download/latest.json"
       ]

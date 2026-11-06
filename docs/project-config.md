@@ -3,8 +3,8 @@
 `.poimen/config.json` at the repository root describes how poimen treats the project. Schema:
 [project-config.schema.json](project-config.schema.json). Parsing is tolerant: an invalid entry is
 dropped with a warning naming the file and the key, and the rest loads. Layout pane commands and
-`setup` run when a space is created (after you trusted the repository, see Trust); `teardown`,
-`commands[]` and `presets[]` are only parsed and validated so far.
+`setup` run when a space is created (after you trusted the repository, see Trust); `teardown` runs before a
+worktree cleanup and from the palette; `commands[]` and `presets[]` are palette entries (below).
 
 ```json
 {
@@ -35,14 +35,24 @@ dropped with a warning naming the file and the key, and the rest loads. Layout p
   (in the space directory). It does not run when an existing space is focused or when the
   repository is not trusted. If it cannot be started, the space stays and a warning names the
   reason. The agent pane starts in parallel; it does not wait for the setup.
-- `teardown`: a command.
+- `teardown`: a command. It runs in the worktree through your shell (`$SHELL -lc`; on Windows `pwsh`, else `powershell.exe`, with `-NoProfile -Command`) before "Clean up merged tasks" removes a worktree, and from the palette entry "Project: Run teardown" (in the directory of the focused space). Timeout 5 minutes, output capped at 1 MB. A failing or timed-out teardown stops the removal of that worktree and shows its output; it does not run when a space closes. In an untrusted project it does not run; the cleanup then asks whether to remove without it.
 - `tasks`: task modes of this repository, same schema as `tasks` in the user `config.json`
   (`modes[]`, `worktreeDir`). They merge by `name` over the user's modes (a project mode replaces
   the user's mode of the same name, new ones are added) and `worktreeDir` overrides. They count as
   commands for the trust question; for an untrusted repository only the user's modes are offered,
-  with a note. `get_task_modes(dir)` returns the merged result.
-- `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`).
-- `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`.
+  with a note. `get_task_modes(dir)` returns the merged result. A mode is an agent (`harness`,
+  `model`, `prompt`) or a command as an argv array (`["pwsh", "run.ps1", "{nr}"]`, each element
+  expanded on its own, no shell); `cleanup` is an argv array. A string `command` or `cleanup` still
+  works for one release with a deprecation warning.
+- `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`). Each is a palette
+  entry `Project: <name>`: `terminal` opens a tab named after it in the directory of the focused
+  space and types the command; `agent` sends it as a prompt to the space's agent (a picker when
+  there are several).
+- `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`. Each is a palette entry
+  `Preset: <name>` that builds a new tab in the focused space from its panes.
+
+The entries are read for the focused space and again when the palette opens. While the project
+file is not trusted they show a lock; running one opens the trust dialog (see Trust).
 
 ## Commands
 

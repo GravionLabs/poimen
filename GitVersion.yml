@@ -4,6 +4,15 @@ next-version: 0.1.0
 # The bump comes from Conventional Commits (versioning/determine-version of GravionLabs/ci): fix = patch, feat = minor,
 # type! or BREAKING CHANGE = major. release/next has no fixed increment. next-version seeds the first release only;
 # GitVersion ignores it once a higher v* tag exists.
+# Pre-release tags (v0.10.0-rc.3, release.yml with prerelease: true) are not version sources: the prefix regex
+# does not match a tag with a pre-release part, so GitVersion ignores them and the next stable version is the same
+# with and without pre-releases.
+tag-prefix: "(?![vV]?[0-9.]+-)[vV]?"
+
+# release/next builds the pre-release for the manual acceptance as <next stable>-rc.<commits since the last stable
+# tag>; the number differs per commit, so every commit gets its own tag.
 branches:
   release:
     regex: ^release/next$
+    label: rc
+    mode: ContinuousDelivery

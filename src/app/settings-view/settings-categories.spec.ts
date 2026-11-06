@@ -14,7 +14,7 @@ describe("settings categories", () => {
     );
     expect(tree).toEqual({
       "Appearance & Behavior": ["Appearance", "Notifications"],
-      Workspace: ["Explorer", "New space layout", "Trusted projects"],
+      Workspace: ["Explorer", "Spaces", "New space layout", "Trusted projects"],
       Backend: ["Server", "Agents"],
     });
   });
@@ -24,7 +24,7 @@ describe("settings categories", () => {
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");
-    expect(allPages()).toHaveLength(7);
+    expect(allPages()).toHaveLength(8);
   });
 
   it("resolves the retired color-scheme page to appearance", () => {
@@ -41,6 +41,15 @@ describe("settings categories", () => {
     expect(filterGroups("dark schemes").flatMap((g) => g.pages.map((p) => p.id))).toEqual([
       "appearance",
     ]);
+  });
+
+  it("finds the spaces page by template, space and agent", () => {
+    for (const query of ["template", "space", "agent"]) {
+      expect(
+        filterGroups(query).flatMap((g) => g.pages.map((p) => p.id)),
+        query,
+      ).toContain("spaces");
+    }
   });
 
   it("matches ignoring case and surrounding blanks; an empty query matches nothing", () => {

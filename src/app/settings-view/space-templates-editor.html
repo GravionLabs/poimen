@@ -1,0 +1,244 @@
+<section aria-labelledby="templates-h">
+  <h2 id="templates-h">Space templates</h2>
+  <p class="hint">
+    A template gives a new space an agent and, optionally, a pane layout. It applies to the
+    directories under its directory, to the repositories of its remote, or to both. The best match
+    wins: directory and remote, then remote, then the longest directory.
+  </p>
+  @for (w of warnings(); track $index) {
+    <p class="error" role="alert">{{ w }}</p>
+  }
+  @if (writeError(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+  @if (templates().length === 0) {
+    <p class="hint">No templates yet: every new space uses the default.</p>
+  } @else {
+    <ul class="rows" aria-label="Space templates">
+      @for (t of templates(); track t.name; let i = $index) {
+        <li class="row-item">
+          <strong>{{ t.name }}</strong>
+          <span class="path" [title]="matchLabel(t)">{{ matchLabel(t) }}</span>
+          <span class="agent">{{ t.agent }}{{ t.model ? " · " + t.model : "" }}</span>
+          <span class="actions">
+            <button
+              type="button"
+              class="btn"
+              [attr.aria-label]="'Edit ' + t.name"
+              (click)="edit(i)"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Remove ' + t.name"
+              title="Remove"
+              (click)="remove(i)"
+            >
+              ×
+            </button>
+          </span>
+        </li>
+      }
+    </ul>
+  }
+  @if (editing(); as e) {
+    <form
+      class="template-form"
+      aria-label="Edit space template"
+      (submit)="$event.preventDefault(); save()"
+    >
+      <div class="fields">
+        <label class="field grow">
+          <span>Name</span>
+          <input
+            type="text"
+            name="name"
+            autocomplete="off"
+            [value]="e.draft.name"
+            [attr.aria-invalid]="errors().name ? true : null"
+            (input)="setName($event)"
+          />
+        </label>
+      </div>
+      @if (errors().name; as m) {
+        <p class="field-error">{{ m }}</p>
+      }
+      <div class="fields">
+        <label class="field grow">
+          <span>Directory</span>
+          <input
+            type="text"
+            name="dir"
+            placeholder="~/src/app"
+            autocomplete="off"
+            [value]="e.draft.dir ?? ''"
+            [attr.aria-invalid]="errors().dir ? true : null"
+            (input)="setDir($event)"
+          />
+        </label>
+        <button type="button" class="btn browse" (click)="browse()">Browse…</button>
+      </div>
+      @if (errors().dir; as m) {
+        <p class="field-error">{{ m }}</p>
+      }
+      <div class="fields">
+        <label class="field">
+          <span>Remote</span>
+          <select name="provider" (change)="setProvider($event)">
+            <option value="" [selected]="!e.draft.remote">Any</option>
+            <option value="github" [selected]="e.draft.remote?.provider === 'github'">
+              GitHub
+            </option>
+            <option value="azure-devops" [selected]="e.draft.remote?.provider === 'azure-devops'">
+              Azure DevOps
+            </option>
+          </select>
+        </label>
+        @if (e.draft.remote; as r) {
+          @if (r.provider === "github") {
+            <label class="field">
+              <span>Owner</span>
+              <input
+                type="text"
+                name="owner"
+                autocomplete="off"
+                [value]="r.owner"
+                (input)="setRemoteField('owner', $event)"
+              />
+            </label>
+          } @else {
+            <label class="field">
+              <span>Organization</span>
+              <input
+                type="text"
+                name="organization"
+                autocomplete="off"
+                [value]="r.organization"
+                (input)="setRemoteField('organization', $event)"
+              />
+            </label>
+            <label class="field">
+              <span>Project</span>
+              <input
+                type="text"
+                name="project"
+                autocomplete="off"
+                [value]="r.project"
+                (input)="setRemoteField('project', $event)"
+              />
+            </label>
+          }
+        }
+      </div>
+      @if (errors().remote; as m) {
+        <p class="field-error">{{ m }}</p>
+      }
+      @if (errors().match; as m) {
+        <p class="field-error">{{ m }}</p>
+      }
+      <div class="fields">
+        <label class="field">
+          <span>Agent</span>
+          <select name="agent" (change)="setAgent($event)">
+            @for (h of harnesses(); track h.id) {
+              <option [value]="h.id" [selected]="h.id === e.draft.agent">
+                {{ h.id }}{{ h.available ? "" : " (not found)" }}
+              </option>
+            }
+            @if (!agentKnown()) {
+              <option [value]="e.draft.agent" selected disabled>
+                {{ e.draft.agent || "Choose…" }}
+              </option>
+            }
+          </select>
+        </label>
+        <label class="field">
+          <span>Model</span>
+          <select name="model" (change)="setModel($event)">
+            <option value="" [selected]="!e.draft.model">Default</option>
+            @for (m of models(); track m) {
+              <option [value]="m" [selected]="m === e.draft.model">{{ m }}</option>
+            }
+          </select>
+        </label>
+      </div>
+      @if (errors().agent; as m) {
+        <p class="field-error">{{ m }}</p>
+      }
+      <div class="fields">
+        <label class="field">
+          <span>Layout</span>
+          <select name="layout" (change)="setSource($event)">
+            <option value="none" [selected]="source() === 'none'">
+              None (spaces.layout or the built-in default)
+            </option>
+            <option value="default" [selected]="source() === 'default'">Built-in default</option>
+            @if (settings().spacesLayout) {
+              <option value="user" [selected]="source() === 'user'">New space layout</option>
+            }
+            @for (p of presetNames(); track p) {
+              <option [value]="'preset:' + p" [selected]="source() === 'preset:' + p">
+                Project preset: {{ p }}
+              </option>
+            }
+            @if (source() === "custom") {
+              <option value="custom" selected disabled>Custom</option>
+            }
+          </select>
+        </label>
+      </div>
+      @if (e.draft.layout; as layout) {
+        <ol class="rows panes" aria-label="Panes of the template">
+          @for (pane of layout.panes; track $index; let i = $index) {
+            <li class="pane-row">
+              <div class="pane-fields">
+                <label class="field">
+                  <span>Pane name</span>
+                  <input type="text" [value]="pane.name" (input)="setPaneName(i, $event)" />
+                </label>
+                <label class="field grow">
+                  <span>Pane command</span>
+                  <input
+                    type="text"
+                    placeholder="shell"
+                    [value]="pane.command ?? ''"
+                    (input)="setPaneCommand(i, $event)"
+                  />
+                </label>
+                <span class="actions">
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    [attr.aria-label]="'Remove pane ' + pane.name"
+                    title="Remove"
+                    [disabled]="layout.panes.length === 1"
+                    (click)="removePane(i)"
+                  >
+                    ×
+                  </button>
+                </span>
+              </div>
+            </li>
+          }
+        </ol>
+        <div class="toolbar-row">
+          <button type="button" class="btn" (click)="addPane()">Add pane</button>
+        </div>
+        @if (errors().layout; as m) {
+          <p class="field-error">{{ m }}</p>
+        }
+      }
+      <div class="toolbar-row">
+        <span class="spacer"></span>
+        <button type="button" class="btn" (click)="cancel()">Cancel</button>
+        <button type="submit" class="btn primary" [disabled]="!valid()">Save</button>
+      </div>
+    </form>
+  } @else {
+    <div class="toolbar-row">
+      <button type="button" class="btn" (click)="add()">Add template</button>
+    </div>
+  }
+</section>

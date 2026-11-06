@@ -33,6 +33,10 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
           "Light/dark pair",
           "Dark schemes",
           "Light schemes",
+          "Terminal font family",
+          "Terminal font size",
+          "UI font family",
+          "UI font size",
         ],
       },
       {
@@ -50,6 +54,21 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         id: "explorer",
         title: "Explorer",
         labels: ["Explorer folders", "Add folder", "Show hidden folders"],
+      },
+      {
+        id: "spaces",
+        title: "Spaces",
+        labels: [
+          "Space templates",
+          "Template",
+          "Add template",
+          "Name",
+          "Directory",
+          "Remote",
+          "Agent",
+          "Model",
+          "Layout",
+        ],
       },
       {
         id: "space-layout",

@@ -28,6 +28,9 @@ export interface Terminal {
   /** The agent's own session (Claude Code, Copilot CLI: the transcript's session id in `value`). */
   agent_session?: { value?: string };
   agent_status: AgentStatus;
+  /** Latest notification text of the agent (poimen backend only), with its time in epoch ms. */
+  agent_message?: string;
+  agent_message_at?: number;
   cwd?: string;
   /** Directory of the foreground process; follows `cd` and is more precise than `cwd`. */
   foreground_cwd?: string;
@@ -99,7 +102,13 @@ export function toSnapshot(wire: WireSnapshot): Snapshot {
 /** Payload of the `herdr` Tauri event: a herdr event or a poimen connection event. */
 export interface HerdrEvent {
   kind: string;
-  data: { pane_id?: string; agent_status?: AgentStatus; reason?: string } | null;
+  data: {
+    pane_id?: string;
+    agent_status?: AgentStatus;
+    agent_message?: string;
+    agent_message_at?: number;
+    reason?: string;
+  } | null;
 }
 
 /** How a terminal view attaches: as one of many observers or as the single controller. */
@@ -216,13 +225,36 @@ export function nextWaiting(panes: Terminal[], activeId: string | null): Termina
   return after ?? waiting[0];
 }
 
-/** Applies a pane.agent_status_changed event without a full refresh. */
-export function applyStatus(snapshot: Snapshot, paneId: string, status: AgentStatus): Snapshot {
+/**
+ * Applies a pane.agent_status_changed event without a full refresh. A notification text replaces
+ * the kept one; without one the text stays, except when the agent turns `working` or ends
+ * (`unknown`).
+ */
+export function applyStatus(
+  snapshot: Snapshot,
+  paneId: string,
+  status: AgentStatus,
+  message?: { text: string; at: number },
+): Snapshot {
   return {
     ...snapshot,
-    terminals: snapshot.terminals.map((pane) =>
-      pane.terminal_id === paneId ? { ...pane, agent_status: status } : pane,
-    ),
+    terminals: snapshot.terminals.map((pane) => {
+      if (pane.terminal_id !== paneId) return pane;
+      if (message) {
+        return {
+          ...pane,
+          agent_status: status,
+          agent_message: message.text,
+          agent_message_at: message.at,
+        };
+      }
+      const next = { ...pane, agent_status: status };
+      if (status === "working" || status === "unknown") {
+        delete next.agent_message;
+        delete next.agent_message_at;
+      }
+      return next;
+    }),
   };
 }
 

@@ -5,7 +5,7 @@ description = "Desktop GUI for herdr: coordinate AI coding agent sessions"
 authors = ["Jerome Kaufmann"]
 license = "MIT"
 repository = "https://github.com/GravionLabs/poimen"
-rust-version = "1.94"
+rust-version = "1.98"
 publish = false
 edition = "2024"
 default-run = "poimen"
@@ -16,7 +16,7 @@ default-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crate
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.98"
 license = "MIT"
 repository = "https://github.com/GravionLabs/poimen"
 
@@ -41,6 +41,8 @@ notify = "8"
 sha2 = "0.10"
 tauri-plugin-notification = "2"
 poimen-client = { path = "crates/poimen-client" }
+# First release with `month_usage` (GravionLabs/tamias#119).
+tamias-core = { git = "https://github.com/GravionLabs/tamias", tag = "v0.3.0" }
 
 [lints.rust]
 unsafe_code = "forbid"

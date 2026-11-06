@@ -1,0 +1,58 @@
+.backdrop {
+  all: unset;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 35%);
+}
+
+.dialog {
+  position: fixed;
+  z-index: 61;
+  top: 20vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(360px, 90vw);
+  padding: 16px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 8px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 30%);
+  font-size: 13px;
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.buttons {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+button {
+  padding: 4px 12px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+li button {
+  width: 100%;
+  text-align: left;
+}

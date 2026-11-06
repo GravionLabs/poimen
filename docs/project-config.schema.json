@@ -18,13 +18,28 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "command"],
+            "required": ["name"],
+            "description": "An agent (harness, model, prompt) or a command (argv array); command excludes harness, model and prompt.",
             "properties": {
               "name": { "type": "string" },
-              "command": { "type": "string" },
+              "harness": { "type": "string", "description": "Id of an agent harness; default the first one." },
+              "model": { "type": "string" },
+              "prompt": { "type": "string", "description": "Template; default: Work on GitHub issue #{nr}: {title} ({url})." },
+              "command": {
+                "description": "Argv array, each element expanded on its own (no shell). A string is deprecated and expanded with shell quoting.",
+                "oneOf": [
+                  { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                  { "type": "string", "deprecated": true }
+                ]
+              },
               "worktree": { "type": "boolean", "default": true },
               "branch": { "type": "string", "default": "{type}/{nr}-{slug}" },
-              "cleanup": { "type": "string" }
+              "cleanup": {
+                "oneOf": [
+                  { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                  { "type": "string", "deprecated": true }
+                ]
+              }
             }
           }
         }

@@ -6,6 +6,8 @@ import {
   inject,
   signal,
   untracked,
+  ElementRef,
+  HostListener,
 } from "@angular/core";
 import { HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
@@ -45,6 +47,39 @@ export function explorerNodes(
   return roots.map((r) => build(r, r));
 }
 
+/**
+ * Keeps the nodes whose label contains `query` (case-insensitive) and their ancestors; the
+ * ancestors of a match are expanded and what does not match is dropped. An empty query keeps all.
+ */
+export function filterNodes(nodes: readonly HxTreeNode[], query: string): HxTreeNode[] {
+  const q = query.trim().toLowerCase();
+  if (q === "") return [...nodes];
+  const keep = (node: HxTreeNode): HxTreeNode | null => {
+    const kids = (node.children ?? []).map(keep).filter((c): c is HxTreeNode => c !== null);
+    if (kids.length > 0) return { ...node, expanded: true, leaf: false, children: kids };
+    if (node.label.toLowerCase().includes(q))
+      return { ...node, expanded: false, leaf: true, children: [] };
+    return null;
+  };
+  return nodes.map(keep).filter((n): n is HxTreeNode => n !== null);
+}
+
+/** Splits `label` into parts around the case-insensitive matches of `query`. */
+export function labelParts(label: string, query: string): { text: string; hit: boolean }[] {
+  const q = query.trim().toLowerCase();
+  if (q === "") return [{ text: label, hit: false }];
+  const parts: { text: string; hit: boolean }[] = [];
+  const lower = label.toLowerCase();
+  let at = 0;
+  for (let i = lower.indexOf(q); i >= 0; i = lower.indexOf(q, at)) {
+    if (i > at) parts.push({ text: label.slice(at, i), hit: false });
+    parts.push({ text: label.slice(i, i + q.length), hit: true });
+    at = i + q.length;
+  }
+  if (at < label.length) parts.push({ text: label.slice(at), hit: false });
+  return parts;
+}
+
 /** Directories (trailing slashes ignored) that are the working directory of a pane of some space. */
 export function spaceDirs(
   panes: readonly { cwd?: string; foreground_cwd?: string }[],
@@ -78,9 +113,41 @@ export class Explorer {
   private readonly roots = computed(() => this.settings.settings().explorerRoots);
   private readonly hidden = computed(() => this.settings.settings().explorerShowHidden);
 
+  /** The filter text; narrows the loaded directories by name without touching `expandedDirs`. */
+  protected readonly query = signal("");
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
   protected readonly nodes = computed(() =>
-    explorerNodes(this.roots(), this.children(), this.ui.expandedDirs()),
+    filterNodes(explorerNodes(this.roots(), this.children(), this.ui.expandedDirs()), this.query()),
   );
+
+  protected parts(label: string): { text: string; hit: boolean }[] {
+    return labelParts(label, this.query());
+  }
+
+  protected setQuery(event: Event): void {
+    this.query.set((event.target as HTMLInputElement).value);
+  }
+
+  /** Cmd/Ctrl+F in the explorer moves to the filter field. */
+  @HostListener("keydown", ["$event"])
+  protected onViewKey(event: KeyboardEvent): void {
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "f") {
+      const filter = this.host.nativeElement.querySelector<HTMLInputElement>("input.filter");
+      event.preventDefault();
+      filter?.focus();
+      filter?.select();
+    }
+  }
+
+  /** Escape in the filter field clears it. */
+  protected filterKey(event: KeyboardEvent): void {
+    if (event.key === "Escape" && this.query() !== "") {
+      event.stopPropagation();
+      this.query.set("");
+      (event.target as HTMLInputElement).value = "";
+    }
+  }
 
   /** Directories that already have a space. */
   protected readonly withSpace = computed(() => spaceDirs(this.store.snapshot().terminals));

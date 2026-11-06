@@ -13,6 +13,31 @@
   letter-spacing: 0.04em;
 }
 
+.filter {
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  height: 26px;
+  margin: 0 4px 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--h-text-color);
+  font: inherit;
+  font-size: 12px;
+}
+
+.filter:focus-visible {
+  outline: 1px solid var(--h-primary-color);
+  outline-offset: -1px;
+}
+
+.hit {
+  background: color-mix(in srgb, var(--h-text-color) 22%, transparent);
+  color: inherit;
+  border-radius: 3px;
+}
+
 .dirs {
   padding: 0 4px;
   --h-tree-gap: 0;
@@ -63,4 +88,10 @@
 
 .has-space {
   font-size: 8px;
+}
+
+.empty {
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--h-text-muted-color);
 }
