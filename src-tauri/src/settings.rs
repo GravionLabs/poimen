@@ -606,7 +606,28 @@ fn spec(
     }
 }
 
-/// Parses `spaceTemplates[]`: `name` (unique), `match.dir`, `agent`, optional `model` and `layout`.
+/// `match.remote`: `{ provider: "github", owner }` or
+/// `{ provider: "azure-devops", organization, project }`.
+fn parse_remote_match(value: &Value) -> Result<crate::remote::Remote, String> {
+    use crate::remote::Remote;
+    let obj = value.as_object().ok_or("must be an object")?;
+    let field = |k: &str| match obj.get(k) {
+        Some(Value::String(s)) if !s.trim().is_empty() => Ok(s.trim().to_owned()),
+        _ => Err(format!("{k} must be a non-empty string")),
+    };
+    match obj.get("provider").and_then(Value::as_str) {
+        Some("github") => Ok(Remote::GitHub {
+            owner: field("owner")?,
+        }),
+        Some("azure-devops") => Ok(Remote::AzureDevOps {
+            organization: field("organization")?,
+            project: field("project")?,
+        }),
+        _ => Err("provider must be \"github\" or \"azure-devops\"".into()),
+    }
+}
+
+/// Parses `spaceTemplates[]`: `name` (unique), `match.dir` and/or `match.remote`, `agent`, optional `model` and `layout`.
 /// Invalid entries warn and are skipped. The agent is checked against `harnesses` at use.
 pub fn parse_space_templates(
     value: &Value,
@@ -636,16 +657,37 @@ pub fn parse_space_templates(
             warnings.push(format!("{at}: duplicate name; the first one wins"));
             continue;
         }
-        let Some(dir) = text(obj.get("match").and_then(|m| m.get("dir"))) else {
-            warnings.push(format!(
-                "{at}.match.dir must be a non-empty string; ignored"
-            ));
-            continue;
+        let m = obj.get("match").and_then(Value::as_object);
+        let dir = match m.and_then(|m| m.get("dir")) {
+            None => None,
+            Some(v) => match text(Some(v)) {
+                Some(d) if crate::templates::is_valid_dir(&d) => Some(d),
+                Some(_) => {
+                    warnings.push(format!(
+                        "{at}.match.dir must be absolute or start with ~; ignored"
+                    ));
+                    continue;
+                }
+                None => {
+                    warnings.push(format!(
+                        "{at}.match.dir must be a non-empty string; ignored"
+                    ));
+                    continue;
+                }
+            },
         };
-        if !crate::templates::is_valid_dir(&dir) {
-            warnings.push(format!(
-                "{at}.match.dir must be absolute or start with ~; ignored"
-            ));
+        let remote = match m.and_then(|m| m.get("remote")) {
+            None => None,
+            Some(v) => match parse_remote_match(v) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    warnings.push(format!("{at}.match.remote: {e}; ignored"));
+                    continue;
+                }
+            },
+        };
+        if dir.is_none() && remote.is_none() {
+            warnings.push(format!("{at}.match needs dir or remote; ignored"));
             continue;
         }
         let Some(agent) = text(obj.get("agent")) else {
@@ -675,6 +717,7 @@ pub fn parse_space_templates(
         out.push(crate::templates::Template {
             name,
             dir,
+            remote,
             agent,
             model,
             layout,
@@ -1696,13 +1739,48 @@ mod tests {
         );
         assert_eq!(s.space_templates.len(), 1);
         let t = &s.space_templates[0];
-        assert_eq!((t.name.as_str(), t.dir.as_str()), ("a", "~/src/a"));
+        assert_eq!((t.name.as_str(), t.dir.as_deref()), ("a", Some("~/src/a")));
         assert_eq!(t.model.as_deref(), Some("opus"));
         assert_eq!(t.layout.as_ref().unwrap().panes[0].name, "main");
         assert_eq!(s.warnings.len(), 8, "{:?}", s.warnings);
         assert!(s.warnings[0].contains("duplicate"));
         assert_eq!(rows("{\"spaceTemplates\":1}").space_templates.len(), 0);
         assert!(resolve(None, none).space_templates.is_empty());
+    }
+
+    #[test]
+    fn space_template_remote_match_parses_and_validates() {
+        use crate::remote::Remote;
+        let s = rows(
+            r#"{"spaceTemplates":[
+            {"name":"gh","match":{"remote":{"provider":"github","owner":"GravionLabs"}},"agent":"claude"},
+            {"name":"az","match":{"dir":"~/w","remote":{"provider":"azure-devops","organization":"acme","project":"FLEX Business"}},"agent":"claude"},
+            {"name":"noowner","match":{"remote":{"provider":"github"}},"agent":"claude"},
+            {"name":"noproject","match":{"remote":{"provider":"azure-devops","organization":"o"}},"agent":"claude"},
+            {"name":"prov","match":{"remote":{"provider":"gitlab","owner":"o"}},"agent":"claude"},
+            {"name":"notobj","match":{"remote":"github"},"agent":"claude"},
+            {"name":"empty","match":{},"agent":"claude"}]}"#,
+        );
+        assert_eq!(s.space_templates.len(), 2, "{:?}", s.warnings);
+        let (gh, az) = (&s.space_templates[0], &s.space_templates[1]);
+        assert_eq!(gh.dir, None);
+        assert_eq!(
+            gh.remote,
+            Some(Remote::GitHub {
+                owner: "GravionLabs".into()
+            })
+        );
+        assert_eq!(az.dir.as_deref(), Some("~/w"));
+        assert_eq!(
+            az.remote,
+            Some(Remote::AzureDevOps {
+                organization: "acme".into(),
+                project: "FLEX Business".into()
+            })
+        );
+        assert_eq!(s.warnings.len(), 5, "{:?}", s.warnings);
+        assert!(s.warnings[0].contains("owner"));
+        assert!(s.warnings[4].contains("needs dir or remote"));
     }
 
     #[test]

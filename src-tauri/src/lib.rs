@@ -20,6 +20,7 @@ mod live;
 mod poimen_backend;
 mod poimen_server;
 mod project;
+mod remote;
 mod schemes;
 mod settings;
 mod spaces;
@@ -429,7 +430,15 @@ fn create_space_with(
     let workspace_id = created.space_id.clone();
     backend.focus_space(&workspace_id)?;
     let template = user.as_ref().and_then(|s| {
-        templates::resolve(&dir, None, &s.space_templates, home).map(|t| (t, &s.harnesses))
+        // `origin` is read only when a template matches by remote.
+        let remote = s
+            .space_templates
+            .iter()
+            .any(|t| t.remote.is_some())
+            .then(|| git::origin_url(&dir).and_then(|u| remote::parse(&u)))
+            .flatten();
+        templates::resolve(&dir, remote.as_ref(), &s.space_templates, home)
+            .map(|t| (t, &s.harnesses))
     });
     let mut template_warnings = Vec::new();
     let agent_command = template.and_then(|(t, harnesses)| {
