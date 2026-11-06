@@ -258,3 +258,29 @@ describe("settings view state", () => {
     ).toBeUndefined();
   });
 });
+
+describe("hooks offer state", () => {
+  it("is open until declined, then remembered", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    expect(state.hooksOfferDismissed()).toBe(false);
+    state.dismissHooksOffer();
+    expect(parseLayout(storage.data.get(UI_STATE_KEY)!).hooksOfferDismissed).toBe(true);
+    expect(stateOn(storage).hooksOfferDismissed()).toBe(true);
+  });
+
+  it("remembers the agents whose hooks were seen installed", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    state.setHooksSeen(["claude", "copilot"], []);
+    state.setHooksSeen([], ["copilot"]);
+    expect(stateOn(storage).hooksSeen()).toEqual(["claude"]);
+    expect(parseLayout(JSON.stringify({ hooksSeen: ["a", 1, "a"] })).hooksSeen).toEqual(["a"]);
+  });
+
+  it("ignores a malformed stored value", () => {
+    expect(
+      parseLayout(JSON.stringify({ hooksOfferDismissed: "yes" })).hooksOfferDismissed,
+    ).toBeUndefined();
+  });
+});

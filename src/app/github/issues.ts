@@ -288,7 +288,7 @@ export class GithubIssues {
 
   private dirs(): string[] {
     const found = new Set<string>();
-    for (const pane of this.store.snapshot().panes) {
+    for (const pane of this.store.snapshot().terminals) {
       const dir = paneDir(pane);
       if (dir) found.add(dir);
     }

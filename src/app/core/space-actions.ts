@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from "@angular/core";
 import { agentKind, pathSegments, type Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import { TauriBridge } from "./tauri";
+import { UiState } from "./ui-state";
 
 /** Answer of the `create_space` command. */
 export interface SpaceOutcome {
@@ -37,6 +38,10 @@ export type TrustDecision = { kind: "trust"; hash: string } | { kind: "without" 
 export interface TrustPending {
   cwd: string;
   label: string;
+  /** The command a task runs in the root pane of the new space. */
+  command: string | null;
+  /** Runs once the space exists, also after the trust answer (a task tab in the space). */
+  after?: (outcome: SpaceOutcome) => Promise<void>;
   request: TrustRequest;
 }
 
@@ -56,9 +61,7 @@ export interface SpaceClosing {
 
 /** The space to focus after `workspaceId` closed: the next one, else the previous; `null` if none. */
 export function neighbourSpace(snapshot: Snapshot, workspaceId: string): string | null {
-  const ids = [...snapshot.workspaces]
-    .sort((a, b) => a.number - b.number)
-    .map((w) => w.workspace_id);
+  const ids = [...snapshot.spaces].sort((a, b) => a.number - b.number).map((w) => w.space_id);
   const i = ids.indexOf(workspaceId);
   if (i < 0) return null;
   return ids[i + 1] ?? ids[i - 1] ?? null;
@@ -66,7 +69,7 @@ export function neighbourSpace(snapshot: Snapshot, workspaceId: string): string 
 
 /** What closing the space ends, for the confirmation. */
 export function closeSpaceWarning(snapshot: Snapshot, workspaceId: string): string {
-  const panes = snapshot.panes.filter((p) => p.workspace_id === workspaceId);
+  const panes = snapshot.terminals.filter((p) => p.space_id === workspaceId);
   const agents = panes.filter((p) => agentKind(p)).length;
   const noun = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   return agents > 0
@@ -82,6 +85,7 @@ export function closeSpaceWarning(snapshot: Snapshot, workspaceId: string): stri
 export class SpaceActions {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(HerdrStore);
+  private readonly ui = inject(UiState);
 
   private readonly _open = signal(false);
   private readonly _error = signal<string | null>(null);
@@ -90,6 +94,9 @@ export class SpaceActions {
   private readonly _warning = signal<string | null>(null);
   private readonly _closing = signal<SpaceClosing | null>(null);
   private readonly _closeError = signal<string | null>(null);
+  private readonly _closingIds = signal<ReadonlySet<string>>(new Set());
+  /** Spaces whose close was confirmed and is not finished: shown as "Closing…", actions disabled. */
+  readonly closingIds = this._closingIds.asReadonly();
   /** The space waiting for a close confirmation; `null` when none. */
   readonly closing = this._closing.asReadonly();
   private readonly _trust = signal<TrustPending | null>(null);
@@ -105,6 +112,18 @@ export class SpaceActions {
   readonly busy = this._busy.asReadonly();
   /** Directories matching the typed path. */
   readonly dirs = this._dirs.asReadonly();
+
+  /** Shows `message` in the status bar like a layout warning (a failed step of a task). */
+  notify(message: string): void {
+    this._warning.set(message);
+  }
+
+  /** An existing space was focused instead of a new one: select it and say so. */
+  private announceExisting(id: string): void {
+    this.ui.setSplitWorkspace(id);
+    const label = this.store.snapshot().spaces.find((s) => s.space_id === id)?.label ?? id;
+    this._warning.set(`Opened the existing space "${label}".`);
+  }
 
   ask(): void {
     this._error.set(null);
@@ -141,6 +160,8 @@ export class SpaceActions {
     cwd: string,
     label: string,
     decision: TrustDecision | null = null,
+    command: string | null = null,
+    after?: (outcome: SpaceOutcome) => Promise<void>,
   ): Promise<SpaceOutcome | undefined> {
     this._error.set(null);
     this._busy.set(true);
@@ -149,11 +170,18 @@ export class SpaceActions {
         cwd: cwd.trim(),
         label: label.trim() || null,
         decision,
+        command,
       });
       this._open.set(false);
       if (outcome.trust) {
         // Nothing exists yet: ask, then call again with the answer.
-        this._trust.set({ cwd: cwd.trim(), label: label.trim(), request: outcome.trust });
+        this._trust.set({
+          cwd: cwd.trim(),
+          label: label.trim(),
+          command,
+          after,
+          request: outcome.trust,
+        });
         return undefined;
       }
       this._trust.set(null);
@@ -161,6 +189,8 @@ export class SpaceActions {
       this._warning.set(warnings.length > 0 ? warnings.join("; ") : null);
       for (const w of warnings) console.warn(`poimen space layout: ${w}`);
       await this.store.refresh();
+      if (!outcome.created) this.announceExisting(outcome.workspace_id);
+      if (after) await after(outcome);
       return outcome;
     } catch (err) {
       this._error.set(String(err));
@@ -182,7 +212,7 @@ export class SpaceActions {
     if (answer === "cancel") return undefined;
     const decision: TrustDecision =
       answer === "trust" ? { kind: "trust", hash: pending.request.hash } : { kind: "without" };
-    return this.create(pending.cwd, pending.label, decision);
+    return this.create(pending.cwd, pending.label, decision, pending.command, pending.after);
   }
 
   /**
@@ -192,10 +222,10 @@ export class SpaceActions {
    */
   async requestClose(workspaceId: string): Promise<string[] | undefined> {
     const snapshot = this.store.snapshot();
-    const space = snapshot.workspaces.find((w) => w.workspace_id === workspaceId);
+    const space = snapshot.spaces.find((w) => w.space_id === workspaceId);
     if (!space) return undefined;
     this._closeError.set(null);
-    const panes = snapshot.panes.filter((p) => p.workspace_id === workspaceId);
+    const panes = snapshot.terminals.filter((p) => p.space_id === workspaceId);
     if (panes.length === 0) return this.close(workspaceId);
     this._closing.set({
       workspaceId,
@@ -223,10 +253,12 @@ export class SpaceActions {
   }
 
   private async close(workspaceId: string): Promise<string[] | undefined> {
+    if (this._closingIds().has(workspaceId)) return undefined;
     const snapshot = this.store.snapshot();
-    const paneIds = snapshot.panes
-      .filter((p) => p.workspace_id === workspaceId)
-      .map((p) => p.pane_id);
+    const paneIds = snapshot.terminals
+      .filter((p) => p.space_id === workspaceId)
+      .map((p) => p.terminal_id);
+    this.markClosing(workspaceId, true);
     try {
       await this.bridge.invoke("space_close", {
         workspaceId,
@@ -234,9 +266,24 @@ export class SpaceActions {
       });
     } catch (err) {
       this._closeError.set(String(err));
+      this.markClosing(workspaceId, false);
       return undefined;
     }
-    await this.store.refresh();
+    try {
+      // A fresh snapshot: without the space, the busy state ends.
+      await this.store.refresh();
+    } finally {
+      this.markClosing(workspaceId, false);
+    }
     return paneIds;
+  }
+
+  private markClosing(workspaceId: string, on: boolean): void {
+    this._closingIds.update((ids) => {
+      const next = new Set(ids);
+      if (on) next.add(workspaceId);
+      else next.delete(workspaceId);
+      return next;
+    });
   }
 }

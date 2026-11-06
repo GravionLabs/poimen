@@ -22,11 +22,18 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
     id: "appearance-behavior",
     title: "Appearance & Behavior",
     pages: [
-      { id: "appearance", title: "Appearance", labels: ["Light", "Dark", "System"] },
       {
-        id: "color-scheme",
-        title: "Color scheme",
-        labels: ["Single scheme", "Light/dark pair", "Dark schemes", "Light schemes"],
+        id: "appearance",
+        title: "Appearance",
+        labels: [
+          "Light",
+          "Dark",
+          "System",
+          "Single scheme",
+          "Light/dark pair",
+          "Dark schemes",
+          "Light schemes",
+        ],
       },
       {
         id: "notifications",
@@ -58,8 +65,8 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
     pages: [
       {
         id: "herdr",
-        title: "herdr",
-        labels: ["Start the herdr server when it is not running"],
+        title: "Server",
+        labels: ["Start the backend server when it is not running", "Agent hooks", "Install hooks"],
       },
       { id: "agents", title: "Agents", labels: ["Harnesses", "Models"] },
     ],
@@ -68,17 +75,21 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
 
 export const DEFAULT_SETTINGS_PAGE = SETTINGS_GROUPS[0].pages[0].id;
 
+/** Retired page ids, mapped to the page that now holds their settings (persisted selections, deep links). */
+const RETIRED_PAGES: ReadonlyMap<string, string> = new Map([["color-scheme", "appearance"]]);
+
 export function allPages(groups: readonly SettingsGroup[] = SETTINGS_GROUPS): SettingsPage[] {
   return groups.flatMap((g) => g.pages);
 }
 
-/** The page with `id` and its group, or `null`. */
+/** The page with `id` (a retired id resolves to its replacement) and its group, or `null`. */
 export function findPage(
   id: string | null,
   groups: readonly SettingsGroup[] = SETTINGS_GROUPS,
 ): { group: SettingsGroup; page: SettingsPage } | null {
+  const target = id === null ? null : (RETIRED_PAGES.get(id) ?? id);
   for (const group of groups) {
-    const page = group.pages.find((p) => p.id === id);
+    const page = group.pages.find((p) => p.id === target);
     if (page) return { group, page };
   }
   return null;

@@ -5,7 +5,7 @@ import {
   paneDir,
   rowName,
   workspaceDirs,
-  type Pane,
+  type Terminal,
   type SplitDirection,
 } from "./herdr";
 import { HerdrStore } from "./herdr-store";
@@ -36,7 +36,7 @@ export class PaneActions {
 
   /** Asks where to start a new terminal in `workspaceId` (default: the first workspace). */
   askNew(workspaceId?: string): void {
-    const id = workspaceId ?? this.store.snapshot().workspaces[0]?.workspace_id;
+    const id = workspaceId ?? this.store.snapshot().spaces[0]?.space_id;
     if (!id) return;
     const dirs = workspaceDirs(this.store.snapshot(), id);
     this._error.set(null);
@@ -90,7 +90,7 @@ export class PaneActions {
   }
 
   /** Creates a terminal in the workspace of the open dialog; resolves to the new pane. */
-  async confirmNew(cwd: string): Promise<Pane | undefined> {
+  async confirmNew(cwd: string): Promise<Terminal | undefined> {
     const dialog = this._dialog();
     if (dialog?.kind !== "new") return undefined;
     this._dialog.set(null);
@@ -103,7 +103,7 @@ export class PaneActions {
   }
 
   /** Splits `paneId`; the new shell starts in the pane's directory. Resolves to the new pane. */
-  async split(paneId: string, direction: SplitDirection): Promise<Pane | undefined> {
+  async split(paneId: string, direction: SplitDirection): Promise<Terminal | undefined> {
     const pane = this.store.pane(paneId);
     return this.create(() =>
       this.bridge.invoke<string | null>("pane_split", {
@@ -169,7 +169,7 @@ export class PaneActions {
     return true;
   }
 
-  private async create(call: () => Promise<string | null>): Promise<Pane | undefined> {
+  private async create(call: () => Promise<string | null>): Promise<Terminal | undefined> {
     this._error.set(null);
     try {
       const id = await call();

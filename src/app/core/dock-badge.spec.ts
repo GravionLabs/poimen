@@ -1,5 +1,8 @@
-import { Injector } from "@angular/core";
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+import { TestBed, getTestBed } from "@angular/core/testing";
+import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { Attention } from "./attention";
 import { DockBadge } from "./dock-badge";
 import { TauriBridge } from "./tauri";
 
@@ -7,13 +10,19 @@ function setup(fail = false) {
   const setBadgeCount = vi.fn<(count: number | undefined) => Promise<void>>(() =>
     fail ? Promise.reject(new Error("unsupported")) : Promise.resolve(),
   );
-  const injector = Injector.create({
-    providers: [{ provide: TauriBridge, useValue: { setBadgeCount } }, DockBadge],
+  TestBed.configureTestingModule({
+    providers: [{ provide: TauriBridge, useValue: { setBadgeCount } }],
   });
-  return { badge: injector.get(DockBadge), setBadgeCount };
+  return { badge: TestBed.inject(DockBadge), setBadgeCount };
 }
 
+beforeAll(() => {
+  getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
+});
+
 describe("DockBadge", () => {
+  afterEach(() => TestBed.resetTestingModule());
+
   it("shows the waiting count and follows changes", () => {
     const { badge, setBadgeCount } = setup();
     badge.set(2);
@@ -26,6 +35,14 @@ describe("DockBadge", () => {
     badge.set(1);
     badge.set(0);
     expect(setBadgeCount.mock.calls.map(([c]) => c)).toEqual([1, undefined]);
+  });
+
+  it("hides the badge when the count falls to zero after growing", () => {
+    const { badge, setBadgeCount } = setup();
+    badge.set(3);
+    badge.set(1);
+    badge.set(0);
+    expect(setBadgeCount.mock.calls.map(([c]) => c)).toEqual([3, 1, undefined]);
   });
 
   it("does not call again for an unchanged count", () => {
@@ -43,5 +60,20 @@ describe("DockBadge", () => {
     await Promise.resolve();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("follows the Attention count: blocked ring plus unread done, cleared once viewed", () => {
+    const { setBadgeCount } = setup();
+    const attention = TestBed.inject(Attention);
+    const st = (o: Record<string, "working" | "blocked" | "done">) => new Map(Object.entries(o));
+    attention.observe(st({ a: "working", b: "working" }), new Set());
+    attention.observe(st({ a: "blocked", b: "done" }), new Set());
+    TestBed.tick();
+    expect(attention.count()).toBe(2);
+    expect(setBadgeCount.mock.calls.at(-1)?.[0]).toBe(2);
+    attention.observe(st({ a: "blocked", b: "done" }), new Set(["a", "b"]));
+    TestBed.tick();
+    expect(attention.count()).toBe(0);
+    expect(setBadgeCount.mock.calls.at(-1)?.[0]).toBeUndefined();
   });
 });

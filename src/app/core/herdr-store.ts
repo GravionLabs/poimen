@@ -8,11 +8,14 @@ import {
   waitingCount,
   type HerdrEvent,
   type HerdrInfo,
-  type Pane,
+  type Terminal,
   type RepoInfo,
   type Snapshot,
+  type WireSnapshot,
+  toSnapshot,
   type BranchPull,
 } from "./herdr";
+import type { BackendKind } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 
 /** Delay that collapses a burst of herdr events into one re-read. */
@@ -34,7 +37,7 @@ export interface BackendStatus {
 /** Whether the window has focus; false outside a browser. */
 const windowFocused = (): boolean => typeof document !== "undefined" && document.hasFocus();
 
-const EMPTY: Snapshot = { workspaces: [], tabs: [], panes: [] };
+const EMPTY: Snapshot = { spaces: [], tabs: [], terminals: [] };
 
 /**
  * The herdr state as poimen shows it. herdr owns the state: the snapshot is re-read from herdr,
@@ -55,18 +58,23 @@ export class HerdrStore {
   private readonly _info = signal<HerdrInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
   private readonly _backend = signal<BackendStatus | null>(null);
+  private readonly _backendKind = signal<BackendKind>("poimen");
 
   readonly snapshot = this._snapshot.asReadonly();
   /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
   readonly loaded = this._loaded.asReadonly();
   /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
   readonly info = this._info.asReadonly();
+  /** The backend of this run (`backend` setting at start); herdr until the app has said otherwise. */
+  readonly backendKind = this._backendKind.asReadonly();
   /** The last result of starting herdr; `null` before the first one. */
   readonly backend = this._backend.asReadonly();
   /** Why herdr could not be started; `null` when it ran, started or auto start is off. */
   readonly startFailure = computed(() => {
     const b = this._backend();
-    return b?.state === "failed" ? (b.reason ?? "herdr could not be started") : null;
+    return b?.state === "failed"
+      ? (b.reason ?? `${this.backendKind()} could not be started`)
+      : null;
   });
   /**
    * The one message for a disconnected herdr (start failed, reconnecting, unreachable, auto start
@@ -75,12 +83,13 @@ export class HerdrStore {
   readonly disconnected = computed<string | null>(() => {
     const conn = this.connection();
     if (conn.state === "connected") return null;
+    const name = this._backendKind();
     const failure = this.startFailure();
-    if (failure !== null) return `herdr was not started: ${failure}`;
+    if (failure !== null) return `${name} was not started: ${failure}`;
     const reason = conn.reason ? `: ${conn.reason}` : "";
-    if (conn.state === "reconnecting") return `herdr connection lost, reconnecting${reason}`;
+    if (conn.state === "reconnecting") return `${name} connection lost, reconnecting${reason}`;
     const off = this._backend()?.state === "disabled" ? " (auto start is off)" : "";
-    return `herdr not reachable${off}${reason}`;
+    return `${name} not reachable${off}${reason}`;
   });
   /** The version of this poimen build. */
   readonly appVersion = this._appVersion.asReadonly();
@@ -97,12 +106,16 @@ export class HerdrStore {
   readonly pulls = this._pulls.asReadonly();
   readonly tree = computed(() => buildTree(this._snapshot()));
   readonly spaces = computed(() => buildSpaces(this._snapshot(), this._repos(), this._pulls()));
-  readonly waiting = computed(() => waitingCount(this._snapshot().panes));
-  readonly panes = computed(() => new Map(this._snapshot().panes.map((p) => [p.pane_id, p])));
+  readonly waiting = computed(() => waitingCount(this._snapshot().terminals));
+  readonly panes = computed(
+    () => new Map(this._snapshot().terminals.map((p) => [p.terminal_id, p])),
+  );
 
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing = false;
   private refreshAgain = false;
+  /** Callers waiting for the queued re-read. */
+  private refreshWaiters: (() => void)[] = [];
   private unlisten: Promise<Unlisten> | undefined;
   private reposKey: string | undefined;
   private reposStale = false;
@@ -121,6 +134,7 @@ export class HerdrStore {
     this.unlisten = this.bridge.listen<HerdrEvent>("herdr", (event) => this.handle(event));
     await this.unlisten;
     void this.readAppVersion();
+    await this.readBackendKind();
     const started = this.ensureBackend(false);
     await this.refresh();
     await started;
@@ -145,23 +159,26 @@ export class HerdrStore {
   }
 
   /** The next blocked pane after `activeId`, wrapping around. */
-  nextWaiting(activeId: string | null): Pane | undefined {
-    return nextWaiting(this._snapshot().panes, activeId);
+  nextWaiting(activeId: string | null): Terminal | undefined {
+    return nextWaiting(this._snapshot().terminals, activeId);
   }
 
-  pane(paneId: string): Pane | undefined {
+  pane(paneId: string): Terminal | undefined {
     return this.panes().get(paneId);
   }
 
-  /** Re-reads the snapshot. A call during a running re-read queues exactly one more. */
+  /**
+   * Re-reads the snapshot. A call during a running re-read queues exactly one more and resolves
+   * once that one finished, so the caller sees a snapshot read after the call.
+   */
   async refresh(): Promise<void> {
     if (this.refreshing) {
       this.refreshAgain = true;
-      return;
+      return new Promise<void>((resolve) => this.refreshWaiters.push(resolve));
     }
     this.refreshing = true;
     try {
-      const snapshot = await this.bridge.invoke<Snapshot>("snapshot");
+      const snapshot = toSnapshot(await this.bridge.invoke<WireSnapshot>("snapshot"));
       this._snapshot.set(snapshot);
       this._loaded.set(true);
       if (!this._watchLost()) this._connectionError.set(null);
@@ -175,7 +192,9 @@ export class HerdrStore {
       this.refreshing = false;
       if (this.refreshAgain) {
         this.refreshAgain = false;
-        void this.refresh();
+        const waiters = this.refreshWaiters;
+        this.refreshWaiters = [];
+        void this.refresh().finally(() => waiters.forEach((resolve) => resolve()));
       }
     }
   }
@@ -185,6 +204,16 @@ export class HerdrStore {
       this._appVersion.set((await this.bridge.invoke<string | undefined>("app_version")) ?? null);
     } catch {
       // stays unknown
+    }
+  }
+
+  /** Which backend this run talks to; a failure keeps poimen. */
+  private async readBackendKind(): Promise<void> {
+    try {
+      const kind = await this.bridge.invoke<string | undefined>("backend_kind");
+      this._backendKind.set(kind === "herdr" ? "herdr" : "poimen");
+    } catch {
+      // stays poimen
     }
   }
 
@@ -201,7 +230,7 @@ export class HerdrStore {
 
   /** Looks up branch and worktree of the pane directories. A failure only leaves them blank. */
   private async readRepos(snapshot: Snapshot): Promise<void> {
-    const dirs = [...new Set(snapshot.panes.map(paneDir).filter((d): d is string => !!d))];
+    const dirs = [...new Set(snapshot.terminals.map(paneDir).filter((d): d is string => !!d))];
     const key = dirs.join("\n");
     // Git runs when the pane set (its directories) changed or a trigger asked for it.
     if (!this.reposStale && key === this.reposKey) return;

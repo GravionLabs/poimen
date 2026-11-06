@@ -32,15 +32,29 @@ export function flowPane(id: string): string | null {
   return id.startsWith(FLOW_TAB_PREFIX) ? id.slice(FLOW_TAB_PREFIX.length) : null;
 }
 
+/** Prefix of a changes tab id; the rest is the directory (space or worktree) whose diff it shows. */
+const CHANGES_TAB_PREFIX = "changes:";
+
+/** The id of the changes tab of `dir` (at most one per directory). */
+export function changesTab(dir: string): string {
+  return CHANGES_TAB_PREFIX + dir;
+}
+
+/** The directory a changes tab belongs to; `null` for any other tab. */
+export function changesDir(id: string): string | null {
+  return id.startsWith(CHANGES_TAB_PREFIX) ? id.slice(CHANGES_TAB_PREFIX.length) : null;
+}
+
 /**
- * What a tab shows: a herdr pane (live terminal), the settings view, GitHub or the flow of a
- * pane's agent run.
+ * What a tab shows: a herdr pane (live terminal), the settings view, GitHub, the flow of a
+ * pane's agent run or the changes of a directory.
  */
-export type TabKind = "pane" | "settings" | "github" | "flow";
+export type TabKind = "pane" | "settings" | "github" | "flow" | "changes";
 
 export function tabKind(id: string): TabKind {
   if (id === SETTINGS_TAB) return "settings";
   if (id === GITHUB_TAB) return "github";
+  if (changesDir(id) !== null) return "changes";
   return flowPane(id) !== null ? "flow" : "pane";
 }
 
@@ -255,6 +269,11 @@ export class EditorTabs {
   /** Opens the flow tab of `paneId` (at most one per pane) as a pinned tab, or activates it. */
   openFlow(paneId: string): void {
     this.openPinned(flowTab(paneId));
+  }
+
+  /** Opens the changes tab of `dir` (at most one per directory) as a pinned tab, or activates it. */
+  openChanges(dir: string): void {
+    this.openPinned(changesTab(dir));
   }
 
   /** Appends a pinned tab to the focused group, or activates it when it is open anywhere. */

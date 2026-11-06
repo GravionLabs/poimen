@@ -58,24 +58,27 @@ pub const SETUP_LABEL: &str = "setup";
 /// Runs `command` visibly in a new tab of the workspace, labelled `setup`, in `cwd`: the tab is
 /// created, named, and the command typed with Enter. The caller decides whether it may run (trust).
 pub fn start_setup(
-    request: &impl Fn(&str, Value) -> Result<Value, String>,
+    backend: &dyn crate::backend::Backend,
     workspace_id: &str,
     cwd: &str,
     command: &str,
 ) -> Result<(), String> {
-    let result = request(
-        "tab.create",
-        crate::herdr::tab_create_params(workspace_id, Some(cwd)),
-    )?;
-    let pane = crate::herdr::created_pane_id(&result).ok_or("herdr did not report the new tab")?;
-    request(
-        "pane.rename",
-        crate::herdr::pane_rename_params(&pane, Some(SETUP_LABEL)),
-    )?;
-    request(
-        "pane.send_input",
-        crate::herdr::send_input_params(&pane, command),
-    )?;
+    start_tab(backend, workspace_id, cwd, SETUP_LABEL, command)
+}
+
+/// Opens a tab named `name` in a space, in `cwd`, and types `command` into it.
+pub fn start_tab(
+    backend: &dyn crate::backend::Backend,
+    workspace_id: &str,
+    cwd: &str,
+    name: &str,
+    command: &str,
+) -> Result<(), String> {
+    let pane = backend
+        .create_terminal(workspace_id, Some(cwd))?
+        .ok_or("herdr did not report the new tab")?;
+    backend.rename_terminal(&pane, Some(name))?;
+    backend.send_input(&pane, command)?;
     Ok(())
 }
 

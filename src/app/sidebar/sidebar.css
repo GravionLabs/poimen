@@ -277,6 +277,21 @@
   opacity: 0;
 }
 
+.space.closing {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.closing-label {
+  flex: none;
+  margin-left: auto;
+  font-style: italic;
+}
+
+.space.closing .close {
+  display: none;
+}
+
 .close + .chevron {
   margin-left: 0;
 }

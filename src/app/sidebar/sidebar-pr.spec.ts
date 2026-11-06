@@ -25,10 +25,10 @@ const pull = (over: Partial<BranchPull> = {}): BranchPull => ({
 });
 
 const space = (pr: BranchPull): SpaceNode => ({
-  workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
+  workspace: { space_id: "w1", label: "One", number: 1, agent_status: "idle" },
   rows: [
     {
-      pane: { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "idle" },
+      pane: { terminal_id: "w1:p1", tab_id: "w1:t1", space_id: "w1", agent_status: "idle" },
       tab: "t",
       name: "shell",
       worktree: false,
@@ -76,7 +76,7 @@ async function setup(pr: BranchPull) {
   });
   const fixture = TestBed.createComponent(Sidebar);
   const selected: string[] = [];
-  fixture.componentInstance.selected.subscribe((p) => selected.push(p.pane_id));
+  fixture.componentInstance.selected.subscribe((p) => selected.push(p.terminal_id));
   for (let i = 0; i < 3; i++) {
     fixture.detectChanges();
     await fixture.whenStable();

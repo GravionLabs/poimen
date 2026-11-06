@@ -10,17 +10,12 @@ use std::process::{Child, ChildStdin, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Value, json};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    /// Read-only; any number of observers per terminal.
-    Observe,
-    /// Writable; one controller per terminal.
-    Control,
-}
+use crate::backend::{CloseCode, StreamRecord};
+
+pub use crate::backend::Mode;
 
 /// One stdout record of a terminal session stream.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -36,6 +31,7 @@ pub enum Record {
     },
     Closed {
         reason: String,
+        exit_code: Option<i32>,
     },
 }
 
@@ -51,6 +47,9 @@ pub fn parse_record(line: &str) -> Option<Record> {
         }),
         "terminal.closed" => Some(Record::Closed {
             reason: value["reason"].as_str().unwrap_or("closed").to_owned(),
+            exit_code: value["exit_code"]
+                .as_i64()
+                .and_then(|code| i32::try_from(code).ok()),
         }),
         _ => None,
     }
@@ -170,6 +169,91 @@ pub fn resolve_bin_from_env() -> PathBuf {
     )
 }
 
+/// Whether a close reason says another client holds the controller. herdr's wording for a held
+/// terminal is "... already has an attached client; retry with --takeover" (found in the herdr
+/// binary; the control path itself is not exercised). Anything else (pane gone, crash, spawn
+/// failure) is a plain error. This text match lives here, next to the wire format, and nowhere
+/// else: everything above it sees `CloseCode::ControllerHeld`.
+pub fn is_controller_held(reason: &str) -> bool {
+    let reason = reason.to_ascii_lowercase();
+    [
+        "already has an attached client",
+        "retry with --takeover",
+        "controlled by another client",
+        "controller taken over",
+    ]
+    .iter()
+    .any(|text| reason.contains(text))
+}
+
+/// Maps the frames of one herdr stream onto the backend-neutral records: a full frame is a
+/// `Reset`, other frames are `Output` (after a `Resized` when the size changed), the first frame
+/// of a control stream also says the controller is attached, and `Closed` carries the structured
+/// code. herdr streams finished screens, so these streams are not `emulated`.
+pub struct FrameMapper {
+    mode: Mode,
+    size: Option<(u16, u16)>,
+    attached: bool,
+}
+
+impl FrameMapper {
+    pub fn new(mode: Mode) -> Self {
+        Self {
+            mode,
+            size: None,
+            attached: false,
+        }
+    }
+
+    pub fn map(&mut self, record: Record) -> Vec<StreamRecord> {
+        match record {
+            Record::Frame {
+                full,
+                width,
+                height,
+                bytes,
+                ..
+            } => {
+                let mut out = Vec::new();
+                if full {
+                    out.push(StreamRecord::Reset {
+                        cols: width,
+                        rows: height,
+                        bytes,
+                    });
+                } else {
+                    if self.size.is_some_and(|size| size != (width, height)) {
+                        out.push(StreamRecord::Resized {
+                            cols: width,
+                            rows: height,
+                        });
+                    }
+                    out.push(StreamRecord::Output { bytes });
+                }
+                self.size = Some((width, height));
+                if self.mode == Mode::Control && !self.attached {
+                    self.attached = true;
+                    out.push(StreamRecord::Controller { attached: true });
+                }
+                out
+            }
+            Record::Closed { reason, exit_code } => {
+                let mut out = Vec::new();
+                if std::mem::take(&mut self.attached) {
+                    out.push(StreamRecord::Controller { attached: false });
+                }
+                let code = is_controller_held(&reason).then_some(CloseCode::ControllerHeld);
+                out.push(StreamRecord::Closed {
+                    reason,
+                    exit_code,
+                    code,
+                });
+                out
+            }
+        }
+    }
+}
+
 struct Session {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -241,7 +325,13 @@ impl Sessions {
                     "" => "stream ended".to_owned(),
                     text => text.to_owned(),
                 };
-                on_record(id, Record::Closed { reason });
+                on_record(
+                    id,
+                    Record::Closed {
+                        reason,
+                        exit_code: None,
+                    },
+                );
             }
         });
 
@@ -337,7 +427,8 @@ mod tests {
         assert_eq!(
             parse_record(r#"{"type":"terminal.closed","reason":"detached"}"#),
             Some(Record::Closed {
-                reason: "detached".into()
+                reason: "detached".into(),
+                exit_code: None
             })
         );
     }
@@ -380,6 +471,147 @@ mod tests {
         assert_eq!(
             parse(release_command()),
             json!({ "type": "terminal.release" })
+        );
+    }
+
+    fn frame(full: bool, width: u16, height: u16) -> Record {
+        Record::Frame {
+            seq: 1,
+            full,
+            width,
+            height,
+            bytes: "AA==".into(),
+        }
+    }
+
+    #[test]
+    fn a_full_frame_resets_and_later_frames_are_output() {
+        let mut mapper = FrameMapper::new(Mode::Observe);
+        assert_eq!(
+            mapper.map(frame(true, 80, 24)),
+            [StreamRecord::Reset {
+                cols: 80,
+                rows: 24,
+                bytes: "AA==".into()
+            }]
+        );
+        assert_eq!(
+            mapper.map(frame(false, 80, 24)),
+            [StreamRecord::Output {
+                bytes: "AA==".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_changed_size_is_announced_before_the_output() {
+        let mut mapper = FrameMapper::new(Mode::Observe);
+        mapper.map(frame(true, 80, 24));
+        assert_eq!(
+            mapper.map(frame(false, 100, 30)),
+            [
+                StreamRecord::Resized {
+                    cols: 100,
+                    rows: 30
+                },
+                StreamRecord::Output {
+                    bytes: "AA==".into()
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn only_a_control_stream_reports_the_controller() {
+        let mut observer = FrameMapper::new(Mode::Observe);
+        assert_eq!(observer.map(frame(true, 80, 24)).len(), 1);
+        let mut controller = FrameMapper::new(Mode::Control);
+        let first = controller.map(frame(true, 80, 24));
+        assert_eq!(
+            first.last(),
+            Some(&StreamRecord::Controller { attached: true })
+        );
+        // Reported once.
+        assert_eq!(controller.map(frame(false, 80, 24)).len(), 1);
+        let closed = controller.map(Record::Closed {
+            reason: "detached".into(),
+            exit_code: None,
+        });
+        assert_eq!(
+            closed,
+            [
+                StreamRecord::Controller { attached: false },
+                StreamRecord::Closed {
+                    reason: "detached".into(),
+                    exit_code: None,
+                    code: None
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_held_controller_is_a_code_not_text() {
+        let held = FrameMapper::new(Mode::Control).map(Record::Closed {
+            reason: "terminal already has an attached client; retry with --takeover".into(),
+            exit_code: None,
+        });
+        assert_eq!(
+            held,
+            [StreamRecord::Closed {
+                reason: "terminal already has an attached client; retry with --takeover".into(),
+                exit_code: None,
+                code: Some(CloseCode::ControllerHeld)
+            }]
+        );
+        let crashed = FrameMapper::new(Mode::Control).map(Record::Closed {
+            reason: "pane not found".into(),
+            exit_code: Some(1),
+        });
+        assert_eq!(
+            crashed,
+            [StreamRecord::Closed {
+                reason: "pane not found".into(),
+                exit_code: Some(1),
+                code: None
+            }]
+        );
+        assert!(is_controller_held("Controlled by another client"));
+        assert!(!is_controller_held("spawn failed"));
+    }
+
+    #[test]
+    fn neutral_records_serialize_with_snake_case_tags() {
+        let json = serde_json::to_value(StreamRecord::Closed {
+            reason: "x".into(),
+            exit_code: None,
+            code: Some(CloseCode::ControllerHeld),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            json!({ "type": "closed", "reason": "x", "code": "controller_held" })
+        );
+        let json = serde_json::to_value(StreamRecord::Reset {
+            cols: 2,
+            rows: 1,
+            bytes: "AA==".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            json!({ "type": "reset", "cols": 2, "rows": 1, "bytes": "AA==" })
+        );
+    }
+
+    #[test]
+    fn parses_the_exit_code_of_a_closed_record() {
+        assert_eq!(
+            parse_record(r#"{"type":"terminal.closed","reason":"exited","exit_code":3}"#),
+            Some(Record::Closed {
+                reason: "exited".into(),
+                exit_code: Some(3)
+            })
         );
     }
 

@@ -15,10 +15,10 @@ import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import {
   filterSpaces,
   type AgentStatus,
-  type Pane,
+  type Terminal,
   type PaneRow,
   type SpaceNode,
-  type Workspace,
+  type Space,
 } from "../core/herdr";
 import { Attention, workspaceUnread } from "../core/attention";
 import { HerdrStore } from "../core/herdr-store";
@@ -43,7 +43,7 @@ import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 export type SpaceData =
   | {
       kind: "workspace";
-      workspace: Workspace;
+      workspace: Space;
       status: AgentStatus;
       lines: Line[];
       /** Split layout only: the workspace whose terminals are listed. */
@@ -75,7 +75,7 @@ export function spaceNodes(
     const ctx = spaceContext(space);
     const status = aggregateStatus(space);
     return {
-      key: WORKSPACE_PREFIX + space.workspace.workspace_id,
+      key: WORKSPACE_PREFIX + space.workspace.space_id,
       label: space.workspace.label,
       expanded: true,
       data: {
@@ -85,7 +85,7 @@ export function spaceNodes(
         lines: renderRow("workspace", rows.workspace, space, ctx),
       },
       children: space.rows.map((row) => ({
-        key: row.pane.pane_id,
+        key: row.pane.terminal_id,
         label: row.name,
         leaf: true,
         data: {
@@ -119,12 +119,12 @@ export function splitSections(
   rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
 ): SplitSections {
   const selected =
-    spaces.find((s) => s.workspace.workspace_id === selectedId) ?? spaces[0] ?? undefined;
+    spaces.find((s) => s.workspace.space_id === selectedId) ?? spaces[0] ?? undefined;
   const spaceList = spaces.map<HxTreeNode<SpaceData>>((space) => {
     const ctx = spaceContext(space);
     const isSelected = space === selected;
     return {
-      key: WORKSPACE_PREFIX + space.workspace.workspace_id,
+      key: WORKSPACE_PREFIX + space.workspace.space_id,
       label: space.workspace.label,
       // helix applies `expanded` once per key, so every workspace starts open; only the selected
       // one has children, the others are leaves until they are selected.
@@ -141,7 +141,7 @@ export function splitSections(
         ? space.rows
             .filter((row) => !row.agent)
             .map((row) => ({
-              key: row.pane.pane_id,
+              key: row.pane.terminal_id,
               label: row.name,
               leaf: true,
               data: {
@@ -158,7 +158,7 @@ export function splitSections(
     return space.rows
       .filter((row) => row.agent)
       .map<HxTreeNode<SpaceData>>((row) => ({
-        key: row.pane.pane_id,
+        key: row.pane.terminal_id,
         label: row.name,
         leaf: true,
         data: {
@@ -180,7 +180,15 @@ export function splitSections(
         },
       }));
   });
-  return { spaces: spaceList, agents, selectedId: selected?.workspace.workspace_id ?? null };
+  return { spaces: spaceList, agents, selectedId: selected?.workspace.space_id ?? null };
+}
+
+/** The directory of the first pane of space `id` when it is a repository, else `undefined`. */
+export function spaceRepoDir(spaces: readonly SpaceNode[], id: string): string | undefined {
+  const row = spaces
+    .find((n) => n.workspace.space_id === id)
+    ?.rows.find((r) => r.dir !== undefined && r.branch !== undefined);
+  return row?.dir;
 }
 
 /** A row's context menu: `kind` says what was clicked, `action` what was picked. */
@@ -194,7 +202,10 @@ export interface SidebarMenuAction {
     | "start-agent"
     | "rename"
     | "close"
-    | "close-space";
+    | "close-space"
+    | "start-task"
+    | "cleanup-tasks"
+    | "show-changes";
 }
 
 /** One entry of a context menu. */
@@ -213,7 +224,11 @@ export interface SidebarMenuGroup {
 /**
  * Groups of the context menu of a workspace row or a pane row: the built-in actions.
  */
-export function sidebarMenuItems(kind: SidebarMenuAction["kind"]): SidebarMenuGroup[] {
+export function sidebarMenuItems(
+  kind: SidebarMenuAction["kind"],
+  /** The space is in a repository: it offers to start a task. */
+  repo = false,
+): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
     label: null,
@@ -221,6 +236,13 @@ export function sidebarMenuItems(kind: SidebarMenuAction["kind"]): SidebarMenuGr
       kind === "workspace"
         ? [
             { action: "new-terminal", label: "New terminal..." },
+            ...(repo
+              ? [
+                  { action: "show-changes" as const, label: "Show changes" },
+                  { action: "start-task" as const, label: "Start task from issue…" },
+                  { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
+                ]
+              : []),
             { action: "close-space", label: "Close space" },
           ]
         : [
@@ -286,9 +308,9 @@ export class Sidebar {
   readonly openIds = input<ReadonlySet<string>>(new Set());
   /** Id of the pane whose tab is active in the editor. */
   readonly activeId = input<string | null>(null);
-  readonly selected = output<Pane>();
+  readonly selected = output<Terminal>();
   /** A second click on the same row within {@link DOUBLE_CLICK_MS}: pin the tab. */
-  readonly pinned = output<Pane>();
+  readonly pinned = output<Terminal>();
   /** An entry of a row's context menu was picked. */
   readonly menuAction = output<SidebarMenuAction>();
   private last: { key: string; at: number } | null = null;
@@ -298,13 +320,15 @@ export class Sidebar {
     x: number;
     y: number;
   } | null>(null);
-  protected menuItems(kind: SidebarMenuAction["kind"]) {
-    return sidebarMenuItems(kind);
+  protected menuItems(kind: SidebarMenuAction["kind"], id: string) {
+    const repo = kind === "workspace" && spaceRepoDir(this.store.spaces(), id) !== undefined;
+    return sidebarMenuItems(kind, repo);
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
     event.preventDefault();
     event.stopPropagation();
+    if (kind === "workspace" && this.isClosing(id)) return;
     this.menuAt.set({ kind, id, x: event.clientX, y: event.clientY });
   }
 
@@ -353,7 +377,7 @@ export class Sidebar {
 
   /** Unread panes of a workspace (its row shows the sum). */
   protected unreadOf(workspaceId: string): number {
-    const space = this.store.spaces().find((s) => s.workspace.workspace_id === workspaceId);
+    const space = this.store.spaces().find((s) => s.workspace.space_id === workspaceId);
     return space ? workspaceUnread(space, this.attn.unread()) : 0;
   }
   protected readonly query = signal("");
@@ -366,6 +390,10 @@ export class Sidebar {
   }
 
   /** The close icon of a workspace row: the close flow of the context menu, no selection or toggle. */
+  protected isClosing(workspaceId: string): boolean {
+    return this.spaceActions.closingIds().has(workspaceId);
+  }
+
   protected closeSpace(workspaceId: string, event: Event): void {
     event.stopPropagation();
     this.menuAction.emit({ kind: "workspace", id: workspaceId, action: "close-space" });
@@ -378,7 +406,7 @@ export class Sidebar {
   }
 
   protected marks(row: PaneRow) {
-    return paneMarks(row.pane.pane_id, this.openIds(), this.activeId());
+    return paneMarks(row.pane.terminal_id, this.openIds(), this.activeId());
   }
 
   private readonly settings = inject(SettingsStore);
@@ -421,7 +449,7 @@ export class Sidebar {
     const row = this.store
       .spaces()
       .flatMap((s) => s.rows)
-      .find((r) => r.pane.pane_id === key);
+      .find((r) => r.pane.terminal_id === key);
     this.hold(key);
     if (!row) return;
     const now = Date.now();
@@ -446,7 +474,7 @@ export class Sidebar {
   }
 
   protected rowTitle(row: PaneRow): string {
-    return [row.pane.pane_id, row.dir, row.branch].filter(Boolean).join(" · ");
+    return [row.pane.terminal_id, row.dir, row.branch].filter(Boolean).join(" · ");
   }
 
   protected glyph(row: PaneRow): string {

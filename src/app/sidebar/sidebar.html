@@ -71,7 +71,9 @@
     <span
       class="space"
       [class.chosen]="d.selected"
-      (contextmenu)="openMenu($event, 'workspace', d.workspace.workspace_id)"
+      [class.closing]="isClosing(d.workspace.space_id)"
+      [attr.aria-busy]="isClosing(d.workspace.space_id) || null"
+      (contextmenu)="openMenu($event, 'workspace', d.workspace.space_id)"
     >
       <span class="main space-main">
         @for (line of d.lines; track $index) {
@@ -119,15 +121,19 @@
           </span>
         }
       </span>
-      @if (unreadOf(d.workspace.workspace_id); as n) {
+      @if (isClosing(d.workspace.space_id)) {
+        <span class="closing-label" role="status">Closing…</span>
+      }
+      @if (unreadOf(d.workspace.space_id); as n) {
         <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
       }
       <button
         type="button"
         class="close"
+        [disabled]="isClosing(d.workspace.space_id)"
         [attr.aria-label]="'Close space ' + d.workspace.label"
         [title]="'Close space ' + d.workspace.label"
-        (click)="closeSpace(d.workspace.workspace_id, $event)"
+        (click)="closeSpace(d.workspace.space_id, $event)"
         (keydown)="$event.stopPropagation()"
       >
         <svg
@@ -158,9 +164,9 @@
       class="row"
       [class.open]="m.open"
       [class.active]="m.active"
-      [class.attention]="rings(d.row.pane.pane_id)"
+      [class.attention]="rings(d.row.pane.terminal_id)"
       [title]="rowTitle(d.row)"
-      (contextmenu)="openMenu($event, 'pane', d.row.pane.pane_id)"
+      (contextmenu)="openMenu($event, 'pane', d.row.pane.terminal_id)"
     >
       <span
         class="icon"
@@ -214,7 +220,7 @@
           </span>
         }
       </span>
-      @if (isUnread(d.row.pane.pane_id)) {
+      @if (isUnread(d.row.pane.terminal_id)) {
         <span class="badge dot-badge" role="img" aria-label="Unread"></span>
       }
     </span>
@@ -224,7 +230,7 @@
   <hx-tree
     #tree
     class="spaces"
-    ariaLabel="herdr spaces"
+    ariaLabel="Spaces"
     emptyMessage="No matching panes"
     selectionMode="single"
     [value]="nodes()"
@@ -311,7 +317,7 @@
     [style.top.px]="at.y"
     (keydown)="onMenuKey($event, menu)"
   >
-    @for (group of menuItems(at.kind); track group.id; let first = $first) {
+    @for (group of menuItems(at.kind, at.id); track group.id; let first = $first) {
       @if (!first) {
         <div class="menu-separator" role="separator"></div>
       }

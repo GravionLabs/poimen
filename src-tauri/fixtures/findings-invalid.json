@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "sha": "0123456789abcdef",
+  "source": "deliver",
+  "findings": [
+    { "file": "a.ts", "line": 0, "severity": "note", "title": "t", "why": "w" }
+  ]
+}

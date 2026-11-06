@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
-import { NgTemplateOutlet } from "@angular/common";
 import { Component } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
+import { TabBar } from "./tab-bar";
 
 beforeAll(() => {
   try {
@@ -24,20 +24,20 @@ describe("TabBar attention and unread marks", () => {
   it("rings a blocked tab and badges an unread one", () => {
     @Component({
       selector: "app-host",
-      imports: [NgTemplateOutlet],
-      template: readFileSync("src/app/ui/helix-candidates/tab-bar/tab-bar.html", "utf8"),
+      imports: [TabBar],
+      template: `<app-tab-bar [tabs]="tabs" activeId="c" />`,
     })
     class Host {
-      tabs = () => tabs;
-      activeId = () => "c";
-      tabContent = () => undefined;
-      dragging = () => null;
-      dropAt = () => null;
-      foreignAt = () => null;
-      menuAt = () => null;
-      menu = () => [];
+      tabs = tabs;
     }
     TestBed.resetTestingModule();
+    TestBed.overrideComponent(TabBar, {
+      set: {
+        templateUrl: undefined,
+        styleUrl: undefined,
+        template: readFileSync("src/app/ui/helix-candidates/tab-bar/tab-bar.html", "utf8"),
+      },
+    });
     const fixture = TestBed.createComponent(Host);
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;

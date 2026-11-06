@@ -1,0 +1,990 @@
+//! Read-only changes of a worktree for the Changes view: the changed files against the base
+//! branch (or `HEAD`) and, per file, the old and new content for the merge view. Only `git`
+//! reads (argv, no shell, no fetch); works on every backend.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
+
+use crate::git::{base_ref, run_bytes};
+
+/// Largest file content sent to the merge view.
+pub const MAX_CONTENT: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    /// Working tree (uncommitted included) against `git merge-base HEAD <base>`.
+    Base,
+    /// Working tree against `HEAD`.
+    Uncommitted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Untracked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChangedFile {
+    pub path: String,
+    /// The path before a rename.
+    pub old_path: Option<String>,
+    pub status: Status,
+    pub additions: u32,
+    pub deletions: u32,
+    pub binary: bool,
+    /// The index holds a change for the file (`git diff --cached`).
+    pub staged: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChangeList {
+    /// The base ref used (`HEAD` when the repository has no `origin` base).
+    pub base: String,
+    pub scope: Scope,
+    /// The commit the old content comes from.
+    pub from: String,
+    pub files: Vec<ChangedFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum FileContent {
+    Text { old: String, new: String },
+    Binary,
+    TooLarge,
+}
+
+/// The ref the scope compares against and the revision the old content is read from.
+fn resolve(dir: &str, scope: Scope) -> (String, String) {
+    if scope == Scope::Uncommitted {
+        return ("HEAD".into(), "HEAD".into());
+    }
+    let Some(base) = base_ref(dir) else {
+        return ("HEAD".into(), "HEAD".into());
+    };
+    // Without a merge base the comparison is against `HEAD`, and `base` says so.
+    match run_bytes(dir, &["merge-base", "HEAD", &base])
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).trim().to_owned())
+        .filter(|s| !s.is_empty())
+    {
+        Some(from) => (base, from),
+        None => ("HEAD".into(), "HEAD".into()),
+    }
+}
+
+fn text(b: &[u8]) -> String {
+    String::from_utf8_lossy(b).into_owned()
+}
+
+type NameStatus = (Status, String, Option<String>);
+
+/// Parses `git diff --name-status -z -M`: (status, path, old path) per entry.
+pub fn parse_name_status(out: &[u8]) -> Vec<NameStatus> {
+    let mut tokens = out.split(|b| *b == 0).filter(|t| !t.is_empty());
+    let mut list = Vec::new();
+    while let Some(code) = tokens.next() {
+        match code[0] {
+            b'R' | b'C' => {
+                let (Some(old), Some(new)) = (tokens.next(), tokens.next()) else {
+                    break;
+                };
+                if code[0] == b'R' {
+                    list.push((Status::Renamed, text(new), Some(text(old))));
+                } else {
+                    list.push((Status::Added, text(new), None));
+                }
+            }
+            c => {
+                let Some(path) = tokens.next() else { break };
+                let status = match c {
+                    b'A' => Status::Added,
+                    b'D' => Status::Deleted,
+                    _ => Status::Modified,
+                };
+                list.push((status, text(path), None));
+            }
+        }
+    }
+    list
+}
+
+/// Parses `git diff --numstat -z -M` into (additions, deletions, binary) by new path.
+pub fn parse_numstat(out: &[u8]) -> HashMap<String, (u32, u32, bool)> {
+    let mut tokens = out.split(|b| *b == 0).filter(|t| !t.is_empty());
+    let mut map = HashMap::new();
+    while let Some(head) = tokens.next() {
+        let head = text(head);
+        let mut parts = head.splitn(3, '\t');
+        let (Some(a), Some(d), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+        let path = if path.is_empty() {
+            // Rename or copy: the old and the new path follow as separate entries.
+            let _old = tokens.next();
+            let Some(new) = tokens.next() else { break };
+            text(new)
+        } else {
+            path.to_owned()
+        };
+        let binary = a == "-" && d == "-";
+        map.insert(
+            path,
+            (a.parse().unwrap_or(0), d.parse().unwrap_or(0), binary),
+        );
+    }
+    map
+}
+
+/// A file of the working tree, read without following symlinks (a link yields its target
+/// path) and only up to `MAX_CONTENT` bytes: `Err(())` means too large, `Ok(None)` unreadable.
+fn read_worktree_file(root: &str, path: &str) -> Result<Option<Vec<u8>>, ()> {
+    let full = Path::new(root).join(path);
+    let Ok(meta) = std::fs::symlink_metadata(&full) else {
+        return Ok(None);
+    };
+    if meta.file_type().is_symlink() {
+        return Ok(std::fs::read_link(&full)
+            .ok()
+            .map(|t| t.into_os_string().into_encoded_bytes()));
+    }
+    if !meta.is_file() {
+        return Ok(None);
+    }
+    if meta.len() > MAX_CONTENT as u64 {
+        return Err(());
+    }
+    Ok(std::fs::read(&full).ok())
+}
+
+fn count_lines(b: &[u8]) -> u32 {
+    let newlines = b.iter().filter(|c| **c == b'\n').count();
+    let partial = usize::from(b.last().is_some_and(|c| *c != b'\n'));
+    u32::try_from(newlines + partial).unwrap_or(u32::MAX)
+}
+
+fn list_in(dir: &str, scope: Scope) -> Result<ChangeList, String> {
+    let (base, from) = resolve(dir, scope);
+    let name_status = run_bytes(dir, &["diff", "--name-status", "-z", "-M", &from, "--"])?;
+    let numstat = parse_numstat(&run_bytes(
+        dir,
+        &["diff", "--numstat", "-z", "-M", &from, "--"],
+    )?);
+    let mut files: Vec<ChangedFile> = parse_name_status(&name_status)
+        .into_iter()
+        .map(|(status, path, old_path)| {
+            let (additions, deletions, binary) = numstat.get(&path).copied().unwrap_or_default();
+            ChangedFile {
+                path,
+                old_path,
+                status,
+                additions,
+                deletions,
+                binary,
+                staged: false,
+            }
+        })
+        .collect();
+    let untracked = run_bytes(dir, &["ls-files", "--others", "--exclude-standard", "-z"])?;
+    for path in untracked.split(|b| *b == 0).filter(|t| !t.is_empty()) {
+        let path = text(path);
+        let content = read_worktree_file(dir, &path)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let binary = content.contains(&0);
+        files.push(ChangedFile {
+            additions: if binary { 0 } else { count_lines(&content) },
+            path,
+            old_path: None,
+            status: Status::Untracked,
+            deletions: 0,
+            binary,
+            staged: false,
+        });
+    }
+    let cached = run_bytes(dir, &["diff", "--cached", "--name-only", "-z"]).unwrap_or_default();
+    let staged: std::collections::HashSet<String> = cached
+        .split(|b| *b == 0)
+        .filter(|t| !t.is_empty())
+        .map(text)
+        .collect();
+    for f in &mut files {
+        f.staged = staged.contains(&f.path);
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(ChangeList {
+        base,
+        scope,
+        from,
+        files,
+    })
+}
+
+fn file_in(dir: &str, scope: Scope, path: &str) -> Result<FileContent, String> {
+    let list = list_in(dir, scope)?;
+    let file = list
+        .files
+        .iter()
+        .find(|f| f.path == path)
+        .ok_or_else(|| format!("{path} is not a changed file"))?;
+    if file.binary {
+        return Ok(FileContent::Binary);
+    }
+    let old = match file.status {
+        Status::Added | Status::Untracked => Vec::new(),
+        _ => {
+            let old = file.old_path.as_deref().unwrap_or(&file.path);
+            run_bytes(dir, &["show", &format!("{}:{old}", list.from)])?
+        }
+    };
+    let new = if file.status == Status::Deleted {
+        Vec::new()
+    } else {
+        match read_worktree_file(dir, &file.path) {
+            Ok(Some(b)) => b,
+            Ok(None) => return Err(format!("{} could not be read", file.path)),
+            Err(()) => return Ok(FileContent::TooLarge),
+        }
+    };
+    if old.len() > MAX_CONTENT || new.len() > MAX_CONTENT {
+        return Ok(FileContent::TooLarge);
+    }
+    if old.contains(&0) || new.contains(&0) {
+        return Ok(FileContent::Binary);
+    }
+    match (String::from_utf8(old), String::from_utf8(new)) {
+        (Ok(old), Ok(new)) => Ok(FileContent::Text { old, new }),
+        _ => Ok(FileContent::Binary),
+    }
+}
+
+/// `dir` as in `create_space` (an existing absolute directory) and inside a git repository;
+/// returns the repository's top level, the base of every path and git call here (git prints
+/// root-relative paths for `diff` and cwd-relative ones for `ls-files`).
+pub(crate) fn validate(dir: &str, home: Option<&Path>) -> Result<String, String> {
+    let dir = crate::spaces::resolve_dir(dir, home)?;
+    crate::git::toplevel(&dir).ok_or_else(|| format!("{dir} is not in a git repository"))
+}
+
+pub fn list(dir: &str, scope: Scope, home: Option<&Path>) -> Result<ChangeList, String> {
+    list_in(&validate(dir, home)?, scope)
+}
+
+pub fn file(
+    dir: &str,
+    scope: Scope,
+    path: &str,
+    home: Option<&Path>,
+) -> Result<FileContent, String> {
+    file_in(&validate(dir, home)?, scope, path)
+}
+
+/// Largest comments file the app writes.
+const MAX_COMMENTS: usize = 1024 * 1024;
+const EXCLUDE_LINE: &str = ".agents/state/";
+
+/// A directory component that is a real directory (created when missing), never a symlink.
+fn plain_dir(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_dir() => Ok(()),
+        Ok(_) => Err(format!("{} is not a plain directory", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(path).map_err(|e| format!("{}: {e}", path.display()))
+        }
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Adds `.agents/state/` to the repository's `info/exclude` (once).
+fn exclude_state(top: &str) -> Result<(), String> {
+    let out = run_bytes(top, &["rev-parse", "--git-path", "info/exclude"])?;
+    let rel = text(&out).trim().to_string();
+    if rel.is_empty() {
+        return Err("git reported no info/exclude path".into());
+    }
+    let path = Path::new(top).join(rel);
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    if current.lines().any(|l| l.trim() == EXCLUDE_LINE) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut next = current;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str(EXCLUDE_LINE);
+    next.push('\n');
+    std::fs::write(&path, next).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Writes `content` to a new `comments-<unix seconds>.md` in `<top>/.agents/state/` and returns
+/// its absolute path. Refuses symlinked `.agents` / `state` directories and never overwrites.
+fn write_comments_in(top: &str, content: &str) -> Result<String, String> {
+    if content.len() > MAX_COMMENTS {
+        return Err("the comments are too large".into());
+    }
+    let agents = Path::new(top).join(".agents");
+    plain_dir(&agents)?;
+    let state = agents.join("state");
+    plain_dir(&state)?;
+    exclude_state(top)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    for n in 0..100 {
+        let name = if n == 0 {
+            format!("comments-{stamp}.md")
+        } else {
+            format!("comments-{stamp}-{n}.md")
+        };
+        let file = state.join(&name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file)
+        {
+            Ok(mut f) => {
+                use std::io::Write;
+                f.write_all(content.as_bytes())
+                    .map_err(|e| format!("{}: {e}", file.display()))?;
+                return Ok(file.to_string_lossy().into_owned());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("{}: {e}", file.display())),
+        }
+    }
+    Err("could not find a free comments file name".into())
+}
+
+pub fn write_comments(dir: &str, content: &str, home: Option<&Path>) -> Result<String, String> {
+    write_comments_in(&validate(dir, home)?, content)
+}
+
+/// Largest findings file the app reads.
+const MAX_FINDINGS: u64 = 1024 * 1024;
+const FINDINGS_PATH: [&str; 3] = [".agents", "state", "findings.json"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Blocking,
+    Note,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Rule {
+    #[serde(rename = "adr-missing")]
+    AdrMissing,
+    #[serde(rename = "spec-drift")]
+    SpecDrift,
+}
+
+/// One finding of `.agents/state/findings.json` (`docs/findings.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Finding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, rename = "endLine", skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+    pub severity: Severity,
+    pub title: String,
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<Rule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Findings {
+    pub version: u32,
+    pub sha: String,
+    pub source: String,
+    pub findings: Vec<Finding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum FindingsResult {
+    /// No findings file.
+    None,
+    Ok {
+        /// `HEAD` of the worktree now.
+        head: String,
+        /// The findings were made for another commit than `head`.
+        stale: bool,
+        findings: Findings,
+    },
+    /// The file exists but is not valid; the diff still works.
+    Invalid { error: String },
+}
+
+/// Parses and validates the text of a findings file (the rules of `docs/findings.schema.json`).
+pub fn parse_findings(src: &str) -> Result<Findings, String> {
+    let f: Findings = serde_json::from_str(src).map_err(|e| e.to_string())?;
+    if f.version != 1 {
+        return Err(format!("unsupported version {} (expected 1)", f.version));
+    }
+    let hex = f.sha.bytes().all(|b| b.is_ascii_hexdigit());
+    if !hex || !(7..=64).contains(&f.sha.len()) {
+        return Err("sha must be 7 to 64 hexadecimal characters".into());
+    }
+    for (i, x) in f.findings.iter().enumerate() {
+        let at = format!("findings[{i}]");
+        if x.title.trim().is_empty() || x.why.trim().is_empty() {
+            return Err(format!("{at}: title and why must not be empty"));
+        }
+        if x.file.as_deref().is_some_and(|p| p.trim().is_empty()) {
+            return Err(format!("{at}: file must not be empty"));
+        }
+        if x.line.is_some() && x.file.is_none() {
+            return Err(format!("{at}: line needs a file"));
+        }
+        if x.line == Some(0) {
+            return Err(format!("{at}: line must be at least 1"));
+        }
+        match (x.line, x.end_line) {
+            (None, Some(_)) => return Err(format!("{at}: endLine needs a line")),
+            (Some(l), Some(e)) if e < l => {
+                return Err(format!("{at}: endLine must not be before line"));
+            }
+            _ => {}
+        }
+    }
+    Ok(f)
+}
+
+/// A commit id and `head` name the same commit (either may be abbreviated).
+pub fn same_commit(sha: &str, head: &str) -> bool {
+    let (a, b) = (sha.to_ascii_lowercase(), head.to_ascii_lowercase());
+    !a.is_empty() && !b.is_empty() && (a.starts_with(&b) || b.starts_with(&a))
+}
+
+/// A path component that must be a real directory, never a symlink.
+fn real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir())
+}
+
+fn findings_in(top: &str) -> Result<FindingsResult, String> {
+    let mut path = Path::new(top).to_path_buf();
+    for part in &FINDINGS_PATH[..2] {
+        path.push(part);
+        if !real_dir(&path) {
+            return Ok(FindingsResult::None);
+        }
+    }
+    path.push(FINDINGS_PATH[2]);
+    let meta = match std::fs::symlink_metadata(&path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(FindingsResult::None),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let invalid = |error: String| Ok(FindingsResult::Invalid { error });
+    if !meta.file_type().is_file() {
+        return invalid("findings.json is not a regular file".into());
+    }
+    if meta.len() > MAX_FINDINGS {
+        return invalid("findings.json is too large (limit 1 MiB)".into());
+    }
+    let src = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => return invalid(format!("findings.json could not be read: {e}")),
+    };
+    match parse_findings(&src) {
+        Ok(findings) => {
+            let head = run_bytes(top, &["rev-parse", "HEAD"])
+                .map(|b| text(&b).trim().to_owned())
+                .unwrap_or_default();
+            let stale = !same_commit(&findings.sha, &head);
+            Ok(FindingsResult::Ok {
+                head,
+                stale,
+                findings,
+            })
+        }
+        Err(error) => invalid(error),
+    }
+}
+
+/// The review findings of the worktree (`<worktree>/.agents/state/findings.json`).
+pub fn findings(dir: &str, home: Option<&Path>) -> Result<FindingsResult, String> {
+    findings_in(&validate(dir, home)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static N: AtomicU32 = AtomicU32::new(0);
+
+    fn run(dir: &Path, args: &[&str]) {
+        let out = crate::gui_path::command("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// A bare `origin` with `main` (and `release/next` when asked) and a clone `app` on a
+    /// feature branch.
+    struct Fixture {
+        base: PathBuf,
+        app: PathBuf,
+    }
+
+    impl Fixture {
+        fn new(release_next: bool) -> Self {
+            let base = std::env::temp_dir().join(format!(
+                "poimen-changes-{}-{}",
+                std::process::id(),
+                N.fetch_add(1, Ordering::SeqCst)
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            std::fs::create_dir_all(base.join("seed")).unwrap();
+            let base = base.canonicalize().unwrap();
+            let seed = base.join("seed");
+            let origin = base.join("origin.git");
+            run(&base, &["init", "--bare", "-b", "main", "origin.git"]);
+            run(&seed, &["init", "-b", "main"]);
+            std::fs::write(seed.join("keep.txt"), "one\ntwo\nthree\n").unwrap();
+            std::fs::write(seed.join("old.txt"), "rename me\nline 2\nline 3\nline 4\n").unwrap();
+            std::fs::write(seed.join("gone.txt"), "bye\n").unwrap();
+            run(&seed, &["add", "."]);
+            run(&seed, &["commit", "-m", "init"]);
+            run(
+                &seed,
+                &["remote", "add", "origin", origin.to_str().unwrap()],
+            );
+            run(&seed, &["push", "origin", "main"]);
+            if release_next {
+                run(&seed, &["checkout", "-b", "release/next"]);
+                std::fs::write(seed.join("next.txt"), "next\n").unwrap();
+                run(&seed, &["add", "."]);
+                run(&seed, &["commit", "-m", "next"]);
+                run(&seed, &["push", "origin", "release/next"]);
+            }
+            run(&base, &["clone", origin.to_str().unwrap(), "app"]);
+            let app = base.join("app");
+            run(&app, &["checkout", "-b", "feat/x"]);
+            Self { base, app }
+        }
+
+        fn dir(&self) -> String {
+            self.app.to_string_lossy().into_owned()
+        }
+
+        fn files(&self, scope: Scope) -> HashMap<String, ChangedFile> {
+            list_in(&self.dir(), scope)
+                .unwrap()
+                .files
+                .into_iter()
+                .map(|f| (f.path.clone(), f))
+                .collect()
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.base);
+        }
+    }
+
+    #[test]
+    fn committed_and_uncommitted_changes_against_the_base() {
+        let f = Fixture::new(true);
+        // The feature branch starts at origin/main, behind release/next.
+        std::fs::write(f.app.join("keep.txt"), "one\nTWO\nthree\nfour\n").unwrap();
+        run(&f.app, &["commit", "-am", "edit"]);
+        std::fs::write(f.app.join("keep.txt"), "one\nTWO\nthree\nfour\nfive\n").unwrap();
+        std::fs::write(f.app.join("new.txt"), "n\n").unwrap();
+        run(&f.app, &["add", "new.txt"]);
+
+        let list = list_in(&f.dir(), Scope::Base).unwrap();
+        assert_eq!(list.base, "origin/release/next");
+        let by: HashMap<_, _> = list.files.iter().map(|f| (f.path.as_str(), f)).collect();
+        // next.txt lives on the base only and is not a change of this branch.
+        assert_eq!(by.len(), 2, "{by:?}");
+        assert_eq!(by["keep.txt"].status, Status::Modified);
+        assert_eq!((by["keep.txt"].additions, by["keep.txt"].deletions), (3, 1));
+        assert_eq!(by["new.txt"].status, Status::Added);
+    }
+
+    #[test]
+    fn uncommitted_scope_ignores_commits() {
+        let f = Fixture::new(true);
+        std::fs::write(f.app.join("keep.txt"), "changed\n").unwrap();
+        run(&f.app, &["commit", "-am", "edit"]);
+        std::fs::write(f.app.join("old.txt"), "dirty\n").unwrap();
+        let files = f.files(Scope::Uncommitted);
+        assert_eq!(files.keys().collect::<Vec<_>>(), ["old.txt"]);
+        let list = list_in(&f.dir(), Scope::Uncommitted).unwrap();
+        assert_eq!((list.base.as_str(), list.from.as_str()), ("HEAD", "HEAD"));
+    }
+
+    #[test]
+    fn rename_delete_and_untracked() {
+        let f = Fixture::new(true);
+        run(&f.app, &["mv", "old.txt", "renamed.txt"]);
+        std::fs::remove_file(f.app.join("gone.txt")).unwrap();
+        std::fs::write(f.app.join("loose.txt"), "a\nb").unwrap();
+        let files = f.files(Scope::Base);
+        let r = &files["renamed.txt"];
+        assert_eq!(r.status, Status::Renamed);
+        assert_eq!(r.old_path.as_deref(), Some("old.txt"));
+        assert_eq!(files["gone.txt"].status, Status::Deleted);
+        assert_eq!(files["gone.txt"].deletions, 1);
+        let u = &files["loose.txt"];
+        assert_eq!(
+            (u.status, u.additions, u.binary),
+            (Status::Untracked, 2, false)
+        );
+
+        let same = "rename me\nline 2\nline 3\nline 4\n".to_owned();
+        assert_eq!(
+            file_in(&f.dir(), Scope::Base, "renamed.txt").unwrap(),
+            FileContent::Text {
+                old: same.clone(),
+                new: same
+            }
+        );
+        assert_eq!(
+            file_in(&f.dir(), Scope::Base, "gone.txt").unwrap(),
+            FileContent::Text {
+                old: "bye\n".into(),
+                new: String::new()
+            }
+        );
+        assert_eq!(
+            file_in(&f.dir(), Scope::Base, "loose.txt").unwrap(),
+            FileContent::Text {
+                old: String::new(),
+                new: "a\nb".into()
+            }
+        );
+    }
+
+    #[test]
+    fn binary_and_large_files_come_back_without_content() {
+        let f = Fixture::new(true);
+        std::fs::write(f.app.join("img.bin"), [0u8, 1, 2, 3]).unwrap();
+        std::fs::write(f.app.join("big.txt"), vec![b'x'; MAX_CONTENT + 1]).unwrap();
+        run(&f.app, &["add", "img.bin"]);
+        let files = f.files(Scope::Base);
+        assert!(files["img.bin"].binary);
+        assert_eq!(files["img.bin"].status, Status::Added);
+        assert!(!files["big.txt"].binary);
+        assert_eq!(
+            file_in(&f.dir(), Scope::Base, "img.bin").unwrap(),
+            FileContent::Binary
+        );
+        assert_eq!(
+            file_in(&f.dir(), Scope::Base, "big.txt").unwrap(),
+            FileContent::TooLarge
+        );
+        assert!(file_in(&f.dir(), Scope::Base, "nope.txt").is_err());
+    }
+
+    #[test]
+    fn base_falls_back_to_the_default_branch_of_origin() {
+        let f = Fixture::new(false);
+        assert_eq!(list_in(&f.dir(), Scope::Base).unwrap().base, "origin/main");
+    }
+
+    #[test]
+    fn base_falls_back_to_head_without_origin() {
+        let f = Fixture::new(false);
+        run(&f.app, &["remote", "remove", "origin"]);
+        std::fs::write(f.app.join("keep.txt"), "z\n").unwrap();
+        let list = list_in(&f.dir(), Scope::Base).unwrap();
+        assert_eq!(list.base, "HEAD");
+        assert_eq!(list.files.len(), 1);
+    }
+
+    #[test]
+    fn subdirectory_dir_uses_the_repository_root_for_paths() {
+        let f = Fixture::new(true);
+        std::fs::create_dir_all(f.app.join("sub")).unwrap();
+        std::fs::write(f.app.join("sub/in.txt"), "i\n").unwrap();
+        run(&f.app, &["add", "sub/in.txt"]);
+        std::fs::write(f.app.join("keep.txt"), "one\nTWO\nthree\n").unwrap();
+        std::fs::write(f.app.join("outside.txt"), "o\n").unwrap();
+        std::fs::write(f.app.join("sub/loose.txt"), "l\n").unwrap();
+        let sub = f.app.join("sub").to_string_lossy().into_owned();
+        let list = list(&sub, Scope::Base, None).unwrap();
+        let paths: Vec<_> = list.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["keep.txt", "outside.txt", "sub/in.txt", "sub/loose.txt"]
+        );
+        for p in ["keep.txt", "outside.txt", "sub/loose.txt"] {
+            assert!(matches!(
+                file(&sub, Scope::Base, p, None).unwrap(),
+                FileContent::Text { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn no_merge_base_reports_head_as_base() {
+        let f = Fixture::new(false);
+        run(&f.app, &["checkout", "--orphan", "lone"]);
+        run(&f.app, &["commit", "-m", "unrelated", "--allow-empty"]);
+        let list = list_in(&f.dir(), Scope::Base).unwrap();
+        assert_eq!((list.base.as_str(), list.from.as_str()), ("HEAD", "HEAD"));
+    }
+
+    #[test]
+    #[cfg(unix)] // symlinks need privileges on Windows
+    fn symlinks_are_not_followed() {
+        let f = Fixture::new(true);
+        let secret = f.base.join("secret.txt");
+        std::fs::write(&secret, "secret\n").unwrap();
+        std::os::unix::fs::symlink(&secret, f.app.join("link")).unwrap();
+        assert_eq!(
+            file_in(&f.dir(), Scope::Base, "link").unwrap(),
+            FileContent::Text {
+                old: String::new(),
+                new: secret.to_string_lossy().into_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unusable_directories() {
+        assert!(list("relative/dir", Scope::Base, None).is_err());
+        assert!(list("/definitely/not/here", Scope::Base, None).is_err());
+    }
+
+    #[test]
+    fn comments_file_lands_in_agents_state_and_is_excluded_once() {
+        let fx = Fixture::new(false);
+        let first = write_comments_in(&fx.dir(), "# one\n").unwrap();
+        let second = write_comments_in(&fx.dir(), "# two\n").unwrap();
+        assert_ne!(first, second);
+        assert!(first.starts_with(&format!("{}/.agents/state/comments-", fx.dir())));
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "# one\n");
+        let exclude = std::fs::read_to_string(fx.app.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude.matches(".agents/state/").count(), 1);
+        let status = crate::git::run_bytes(&fx.dir(), &["status", "--porcelain"]).unwrap();
+        assert!(!text(&status).contains(".agents"));
+    }
+
+    #[test]
+    #[cfg(unix)] // symlinks need privileges on Windows
+    fn comments_file_refuses_symlinked_directories() {
+        let fx = Fixture::new(false);
+        let outside = fx.base.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, fx.app.join(".agents")).unwrap();
+        assert!(write_comments_in(&fx.dir(), "x").is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+
+        std::fs::remove_file(fx.app.join(".agents")).unwrap();
+        std::fs::create_dir_all(fx.app.join(".agents")).unwrap();
+        std::os::unix::fs::symlink(&outside, fx.app.join(".agents/state")).unwrap();
+        assert!(write_comments_in(&fx.dir(), "x").is_err());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn comments_file_rejects_oversized_content_and_non_repositories() {
+        let fx = Fixture::new(false);
+        assert!(write_comments_in(&fx.dir(), &"x".repeat(MAX_COMMENTS + 1)).is_err());
+        let plain = fx.base.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(write_comments(&plain.to_string_lossy(), "x", None).is_err());
+    }
+
+    #[test]
+    fn comments_file_works_in_a_linked_worktree() {
+        let fx = Fixture::new(false);
+        let wt = fx.base.join("wt");
+        run(
+            &fx.app,
+            &["worktree", "add", wt.to_str().unwrap(), "-b", "feat/y"],
+        );
+        let path = write_comments_in(&wt.to_string_lossy(), "hi").unwrap();
+        assert!(path.starts_with(&format!("{}/.agents/state/", wt.display())));
+        let status =
+            crate::git::run_bytes(&wt.to_string_lossy(), &["status", "--porcelain"]).unwrap();
+        assert!(!text(&status).contains(".agents"));
+    }
+
+    #[test]
+    fn parses_name_status_and_numstat() {
+        let ns = b"M\0a.txt\0R087\0old.txt\0new.txt\0D\0d.txt\0A\0n.txt\0";
+        assert_eq!(
+            parse_name_status(ns),
+            vec![
+                (Status::Modified, "a.txt".into(), None),
+                (Status::Renamed, "new.txt".into(), Some("old.txt".into())),
+                (Status::Deleted, "d.txt".into(), None),
+                (Status::Added, "n.txt".into(), None),
+            ]
+        );
+        let num = b"3\t1\ta.txt\0-\t-\timg.bin\x000\t0\t\0old.txt\0new.txt\0";
+        let m = parse_numstat(num);
+        assert_eq!(m["a.txt"], (3, 1, false));
+        assert_eq!(m["img.bin"], (0, 0, true));
+        assert_eq!(m["new.txt"], (0, 0, false));
+    }
+
+    #[test]
+    fn counts_lines_without_a_final_newline() {
+        let f = Fixture::new(true);
+        // "three\n" -> "three" (`\ No newline at end of file`): one line removed, one added.
+        std::fs::write(f.app.join("keep.txt"), "one\ntwo\nthree").unwrap();
+        let files = f.files(Scope::Base);
+        assert_eq!(
+            (files["keep.txt"].additions, files["keep.txt"].deletions),
+            (1, 1)
+        );
+        assert_eq!(count_lines(b"a\nb"), 2);
+        assert_eq!(count_lines(b"a\nb\n"), 2);
+        assert_eq!(count_lines(b""), 0);
+    }
+
+    const FINDINGS: &str = include_str!("../fixtures/findings.json");
+    const FINDINGS_INVALID: &str = include_str!("../fixtures/findings-invalid.json");
+    const FIXTURE_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    #[test]
+    fn parses_the_findings_fixture() {
+        let f = parse_findings(FINDINGS).unwrap();
+        assert_eq!(f.source, "deliver");
+        assert_eq!(f.findings.len(), 4);
+        assert_eq!(f.findings[0].end_line, Some(5));
+        assert_eq!(f.findings[0].severity, Severity::Blocking);
+        assert_eq!(f.findings[0].rule, Some(Rule::SpecDrift));
+        assert_eq!(f.findings[3].file, None);
+    }
+
+    #[test]
+    fn rejects_invalid_findings() {
+        let err = parse_findings(FINDINGS_INVALID).unwrap_err();
+        assert!(
+            err.contains("findings[0]: line must be at least 1"),
+            "{err}"
+        );
+        assert!(parse_findings("{").is_err());
+        let version = FINDINGS.replace("\"version\": 1", "\"version\": 2");
+        assert!(parse_findings(&version).unwrap_err().contains("version"));
+        let severity = FINDINGS.replace("\"note\"", "\"info\"");
+        assert!(parse_findings(&severity).unwrap_err().contains("info"));
+        let sha = FINDINGS.replace(FIXTURE_SHA, "xyz");
+        assert!(parse_findings(&sha).unwrap_err().contains("sha"));
+        let extra = FINDINGS.replace("\"findings\"", "\"extra\": 1, \"findings\"");
+        assert!(parse_findings(&extra).is_err());
+        let range = FINDINGS.replace("\"endLine\": 5", "\"endLine\": 2");
+        assert!(parse_findings(&range).unwrap_err().contains("endLine"));
+        let empty = FINDINGS.replace("Unchecked input", " ");
+        assert!(parse_findings(&empty).unwrap_err().contains("title"));
+        let orphan = FINDINGS.replace("\"file\": \"docs/other.md\",", "");
+        assert!(
+            parse_findings(&orphan)
+                .unwrap_err()
+                .contains("line needs a file")
+        );
+    }
+
+    #[test]
+    fn a_review_result_without_findings_is_accepted() {
+        let src = r#"{"version":1,"sha":"abc1234","source":"x","findings":[]}"#;
+        assert!(parse_findings(src).unwrap().findings.is_empty());
+    }
+
+    #[test]
+    fn stale_detection_compares_abbreviated_ids() {
+        assert!(same_commit("abc1234", "abc1234def5678"));
+        assert!(same_commit("ABC1234DEF", "abc1234"));
+        assert!(!same_commit("abc1234", "fff0000"));
+        assert!(!same_commit("abc1234", ""));
+    }
+
+    #[test]
+    fn findings_file_is_read_from_the_worktree() {
+        let f = Fixture::new(false);
+        assert_eq!(findings_in(&f.dir()).unwrap(), FindingsResult::None);
+        let state = f.app.join(".agents/state");
+        std::fs::create_dir_all(&state).unwrap();
+        let head = text(&run_bytes(&f.dir(), &["rev-parse", "HEAD"]).unwrap())
+            .trim()
+            .to_owned();
+        std::fs::write(
+            state.join("findings.json"),
+            FINDINGS.replace(FIXTURE_SHA, &head),
+        )
+        .unwrap();
+        match findings_in(&f.dir()).unwrap() {
+            FindingsResult::Ok { stale, head: h, .. } => {
+                assert!(!stale);
+                assert_eq!(h, head);
+            }
+            other => panic!("{other:?}"),
+        }
+        std::fs::write(state.join("findings.json"), FINDINGS).unwrap();
+        assert!(matches!(
+            findings_in(&f.dir()).unwrap(),
+            FindingsResult::Ok { stale: true, .. }
+        ));
+        std::fs::write(state.join("findings.json"), FINDINGS_INVALID).unwrap();
+        assert!(matches!(
+            findings_in(&f.dir()).unwrap(),
+            FindingsResult::Invalid { .. }
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)] // symlinks need privileges on Windows
+    fn findings_file_refuses_symlinks_and_large_files() {
+        let f = Fixture::new(false);
+        let state = f.app.join(".agents/state");
+        std::fs::create_dir_all(&state).unwrap();
+        let outside = f.base.join("outside.json");
+        std::fs::write(&outside, FINDINGS).unwrap();
+        std::os::unix::fs::symlink(&outside, state.join("findings.json")).unwrap();
+        assert!(matches!(
+            findings_in(&f.dir()).unwrap(),
+            FindingsResult::Invalid { .. }
+        ));
+        std::fs::remove_file(state.join("findings.json")).unwrap();
+        std::fs::write(
+            state.join("findings.json"),
+            vec![b' '; MAX_FINDINGS as usize + 1],
+        )
+        .unwrap();
+        assert!(matches!(
+            findings_in(&f.dir()).unwrap(),
+            FindingsResult::Invalid { .. }
+        ));
+        // A symlinked `state` directory is not followed.
+        std::fs::remove_dir_all(&state).unwrap();
+        let elsewhere = f.base.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("findings.json"), FINDINGS).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &state).unwrap();
+        assert_eq!(findings_in(&f.dir()).unwrap(), FindingsResult::None);
+        assert!(findings("/nonexistent/dir", None).is_err());
+    }
+}

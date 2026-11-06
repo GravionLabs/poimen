@@ -21,6 +21,28 @@ describe("Attention", () => {
     expect(a.attention().size).toBe(0);
   });
 
+  it("treats each finished turn of the poimen backend (idle, working, done, working, done) as done", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "idle" }), none);
+    expect(a.observe(st({ p1: "working" }), none)).toEqual([]);
+    expect(a.observe(st({ p1: "done" }), none)).toEqual([{ paneId: "p1", status: "done" }]);
+    expect([...a.unread()]).toEqual(["p1"]);
+    a.observe(st({ p1: "done" }), new Set(["p1"]));
+    expect(a.unread().size).toBe(0);
+    a.observe(st({ p1: "working" }), none);
+    a.observe(st({ p1: "done" }), none);
+    expect([...a.unread()]).toEqual(["p1"]);
+    expect(a.count()).toBe(1);
+    expect(a.lastChanges()).toEqual([{ paneId: "p1", status: "done" }]);
+  });
+
+  it("does not mark an agent that only goes working to idle (what the poimen backend reported before #406)", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), none);
+    expect(a.observe(st({ p1: "idle" }), none)).toEqual([]);
+    expect(a.unread().size).toBe(0);
+  });
+
   it("does not mark panes that were already done when the real snapshot arrives", () => {
     const a = new Attention();
     a.observe(st({}), none);
@@ -61,7 +83,7 @@ describe("Attention", () => {
   });
 
   it("sums unread panes per workspace", () => {
-    const row = (id: string) => ({ pane: { pane_id: id } }) as SpaceNode["rows"][number];
+    const row = (id: string) => ({ pane: { terminal_id: id } }) as SpaceNode["rows"][number];
     const space = { workspace: {}, rows: [row("a"), row("b"), row("c")] } as SpaceNode;
     expect(workspaceUnread(space, new Set(["a", "c", "z"]))).toBe(2);
     expect(workspaceUnread(space, none)).toBe(0);
@@ -80,5 +102,18 @@ describe("Attention changes", () => {
     expect(a.observe(st({ p1: "blocked", p2: "done" }), new Set(["p1"]))).toEqual([
       { paneId: "p1", status: "blocked" },
     ]);
+  });
+
+  it("keeps the latest changes for observers, replaced only by a snapshot that has some", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), none);
+    a.observe(st({ p1: "done" }), none);
+    const first = a.lastChanges();
+    expect(first).toEqual([{ paneId: "p1", status: "done" }]);
+    a.observe(st({ p1: "done" }), none);
+    expect(a.lastChanges()).toBe(first);
+    a.observe(st({ p1: "working" }), none);
+    a.observe(st({ p1: "done" }), none);
+    expect(a.lastChanges()).not.toBe(first);
   });
 });

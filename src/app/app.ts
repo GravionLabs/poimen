@@ -12,16 +12,25 @@ import {
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { HxTheme } from "@gravionlabs/helix-ui";
-import { flowSession, rowName, supportsFlow, tabHeader, type Mode, type Pane } from "./core/herdr";
+import {
+  flowSession,
+  paneDir,
+  rowName,
+  supportsFlow,
+  tabHeader,
+  type Mode,
+  type Terminal,
+} from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
-import { Attention } from "./core/attention";
+import { Attention, type StatusChange } from "./core/attention";
 import { DockBadge } from "./core/dock-badge";
-import { Notifier } from "./core/notifier";
+import { Notifier, type NotifyContext } from "./core/notifier";
 import { NotificationCenter } from "./core/notification-center";
 import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
+import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { Updater } from "./core/updater";
@@ -32,6 +41,7 @@ import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 import {
   EditorTabs,
+  changesDir,
   flowPane,
   flowTab,
   tabKind,
@@ -44,6 +54,7 @@ import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
+import { ChangesView } from "./changes/changes-view";
 import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
@@ -55,8 +66,12 @@ import { CommandPalette as PaletteView } from "./command-palette/command-palette
 import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
 import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
+import { TaskDialog } from "./task-dialog/task-dialog";
+import { HooksDialog } from "./hooks-dialog/hooks-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
-import type { SidebarMenuAction } from "./sidebar/sidebar";
+import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
+import { TaskStarter } from "./core/task-start";
+import { TaskCleanup } from "./core/task-cleanup";
 import { StatusBar } from "./status-bar/status-bar";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
 import {
@@ -85,10 +100,13 @@ const ZOOM_STEP = 1;
     Toolbar,
     BottomPanel,
     FlowTab,
+    ChangesView,
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
+    HooksDialog,
     TrustDialog,
+    TaskDialog,
     PaletteView,
     ShortcutsDialog,
   ],
@@ -103,6 +121,7 @@ export class App {
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
   private readonly userSchemes = inject(UserSchemes);
+  private readonly terminalColors = inject(TerminalColorSync);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
   private readonly paneActions = inject(PaneActions);
@@ -111,6 +130,8 @@ export class App {
   private readonly palette = inject(CommandPalette);
   protected readonly shortcutsOverview = inject(ShortcutsOverview);
   private readonly subagents = inject(Subagents);
+  private readonly tasks = inject(TaskStarter);
+  private readonly cleanup = inject(TaskCleanup);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -131,9 +152,8 @@ export class App {
   private readonly attention = inject(Attention);
   private readonly notifier = inject(Notifier);
   private readonly center = inject(NotificationCenter);
-  private readonly dockBadge = inject(DockBadge);
   /** Last known state of each open pane, kept when herdr drops the pane. */
-  private readonly known = new Map<string, Pane>();
+  private readonly known = new Map<string, Terminal>();
   protected readonly groupItems = computed(() => {
     const snap = this.store.snapshot();
     this.store.panes();
@@ -154,6 +174,15 @@ export class App {
               title: "GitHub pull requests",
             };
           }
+          const changesOf = changesDir(tab.paneId);
+          if (changesOf !== null) {
+            const name = changesOf.split("/").filter(Boolean).pop() ?? changesOf;
+            return {
+              id: tab.paneId,
+              label: `Changes: ${name}`,
+              title: `Changes of ${changesOf}`,
+            };
+          }
           const flowOf = flowPane(tab.paneId);
           const paneId = flowOf ?? tab.paneId;
           const pane = this.pane(paneId);
@@ -161,7 +190,7 @@ export class App {
             ? snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label
             : undefined;
           const workspace = pane
-            ? snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label
+            ? snap.spaces.find((w) => w.space_id === pane.space_id)?.label
             : undefined;
           const header = tabHeader(workspace, pane ? rowName(pane, tabLabel) : paneId);
           if (flowOf !== null) {
@@ -198,6 +227,8 @@ export class App {
   );
 
   constructor() {
+    // Instantiated for its effect: the dock badge follows `Attention.count`.
+    inject(DockBadge);
     const title = inject(Title);
     // Marks follow herdr's statuses; the active tab of each group counts as viewed.
     effect(() => {
@@ -207,25 +238,17 @@ export class App {
       untracked(() => {
         const changes = this.attention.observe(statuses, viewed);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
-        const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
-        this.notifier.notify(changes, {
-          // Read live: a delayed done notification checks again when it is due.
-          seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
-          status: (id) => this.store.panes().get(id)?.agent_status,
-          onBlocked: notifyOnBlocked,
-          onDone: notifyOnDone,
-          label: (id) => this.tabTitle(id),
-          now: Date.now(),
-        });
+        this.notifyChanges(changes);
       });
     });
     effect(() => {
       const waiting = this.store.waiting();
       title.setTitle(waiting > 0 ? `poimen (${waiting} waiting)` : "poimen");
-      untracked(() => this.dockBadge.set(waiting));
     });
 
     const destroyRef = inject(DestroyRef);
+    // Coming back to the window sees the active tabs again: withdraw their notifications.
+    destroyRef.onDestroy(this.notifier.watchFocus(window, () => this.notifyContext()));
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     // A click on a system notification opens the tab of the pane it was about.
@@ -238,6 +261,17 @@ export class App {
       if (this.schemes.sync(pickSchemeName(colorSchema, setting, systemDark))) return;
       this.theme.setDark(setting === "system" ? systemDark : setting === "dark");
     });
+    // poimen-server answers color queries while no app is attached, with the colors shown here.
+    // The tokens land on <html> after the effect above, so they are read when they change.
+    const tokens = new MutationObserver(() =>
+      this.terminalColors.update(this.prefs.settings().colors),
+    );
+    tokens.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme", "style"],
+    });
+    destroyRef.onDestroy(() => tokens.disconnect());
+    effect(() => this.terminalColors.update(this.prefs.settings().colors));
     destroyRef.onDestroy(this.followSystemTheme());
     // The output panel follows the active tab's agent (Claude Code, Copilot CLI); nothing is watched while it is hidden.
     effect(() => {
@@ -259,7 +293,7 @@ export class App {
       const id = active === null ? null : tabPaneId(active);
       const pane = id && this.ui.panelOpen() ? this.pane(id) : undefined;
       const session = flowSession(pane);
-      return pane && session ? { paneId: pane.pane_id, session } : null;
+      return pane && session ? { paneId: pane.terminal_id, session } : null;
     },
     { equal: (a, b) => a?.paneId === b?.paneId && a?.session === b?.session },
   );
@@ -323,9 +357,21 @@ export class App {
       this.editor.openGithub();
       return;
     }
+    if (id === "showChanges") {
+      this.showChangesOfActiveSpace();
+      return;
+    }
+    if (id === "startTask") {
+      this.startTaskInActiveRepo();
+      return;
+    }
+    if (id === "cleanupTasks") {
+      this.cleanupInActiveRepo();
+      return;
+    }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
-      this.closeSpace(paneId ? this.pane(paneId)?.workspace_id : undefined);
+      this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);
       return;
     }
     const action = id as ShortcutAction;
@@ -377,16 +423,66 @@ export class App {
         this.editor.cycle(-1);
         break;
       case "newTerminal":
-        this.paneActions.askNew(active ? this.pane(active)?.workspace_id : undefined);
+        this.paneActions.askNew(active ? this.pane(active)?.space_id : undefined);
         break;
     }
+  }
+
+  /** The palette entry: the Changes tab of the directory of the focused space's active pane. */
+  private showChangesOfActiveSpace(): void {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    const dir = pane ? paneDir(pane) : undefined;
+    if (dir) this.editor.openChanges(this.activeRepo() ?? dir);
+    else this.spaceActions.notify("Show Changes: there is no focused space");
+  }
+
+  /** The palette entry: the picker for the repository of the active pane. */
+  private startTaskInActiveRepo(): void {
+    const repo = this.activeRepo();
+    if (repo) void this.tasks.start(repo);
+    else this.spaceActions.notify("Start task: the active pane is not in a repository");
+  }
+
+  /** The palette entry: clean up the merged tasks of the repository of the active pane. */
+  private cleanupInActiveRepo(): void {
+    const repo = this.activeRepo();
+    if (repo) void this.cleanup.run(repo, this.focusedSpace());
+    else this.spaceActions.notify("Clean up merged tasks: the active pane is not in a repository");
+  }
+
+  /** The space of the active pane: a cleanup never removes it. */
+  private focusedSpace(): string | null {
+    const id = this.activePaneId();
+    return (id ? this.pane(id)?.space_id : undefined) ?? null;
+  }
+
+  /** The repository of the active pane (a pane in a subdirectory: the deepest known one above). */
+  private activeRepo(): string | undefined {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    const dir = pane ? paneDir(pane) : undefined;
+    return dir
+      ? [...this.store.repos().keys()]
+          .filter((r) => dir === r || dir.startsWith(r.endsWith("/") ? r : `${r}/`))
+          .sort((a, b) => b.length - a.length)[0]
+      : undefined;
   }
 
   /** Context menu of a sidebar row: new terminal in a workspace, split or close a pane. */
   protected onSidebarMenu(event: SidebarMenuAction): void {
     if (event.action === "new-terminal") this.paneActions.askNew(event.id);
     else if (event.action === "close-space") this.closeSpace(event.id);
-    else this.paneAction(event.id, event.action);
+    else if (event.action === "show-changes") {
+      const dir = spaceRepoDir(this.store.spaces(), event.id);
+      if (dir) this.editor.openChanges(dir);
+    } else if (event.action === "start-task") {
+      const dir = spaceRepoDir(this.store.spaces(), event.id);
+      if (dir) void this.tasks.start(dir);
+    } else if (event.action === "cleanup-tasks") {
+      const dir = spaceRepoDir(this.store.spaces(), event.id);
+      if (dir) void this.cleanup.run(dir, this.focusedSpace());
+    } else this.paneAction(event.id, event.action);
   }
 
   /** Closes a space (asks first when it has panes); `undefined` is a no-op (no active space). */
@@ -445,7 +541,7 @@ export class App {
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
       { action: "pane-rename", label: "Rename pane..." },
-      { action: "pane-close", label: "Close herdr pane..." },
+      { action: "pane-close", label: "Close pane..." },
     ];
   }
 
@@ -458,7 +554,7 @@ export class App {
       this.paneAction(id, action.slice("pane-".length));
   }
 
-  protected groupPane(group: EditorGroup): Pane | undefined {
+  protected groupPane(group: EditorGroup): Terminal | undefined {
     return group.activeId && tabKind(group.activeId) === "pane"
       ? this.pane(group.activeId)
       : undefined;
@@ -504,9 +600,9 @@ export class App {
     if (pane) this.open(pane);
   }
 
-  protected open(pane: Pane, pin = false): void {
-    this.known.set(pane.pane_id, pane);
-    this.editor.open(pane.pane_id, pin);
+  protected open(pane: Terminal, pin = false): void {
+    this.known.set(pane.terminal_id, pane);
+    this.editor.open(pane.terminal_id, pin);
   }
 
   /** The active tab's pane id; `null` for no tab or the settings tab. */
@@ -534,6 +630,15 @@ export class App {
     this.ui.selectPanelTab("output");
   }
 
+  /** The directory of the group's active tab when that is a changes tab. */
+  protected changesOf(group: EditorGroup): string | null {
+    return group.activeId === null ? null : changesDir(group.activeId);
+  }
+
+  protected isChanges(id: string): boolean {
+    return tabKind(id) === "changes";
+  }
+
   protected isGithub(id: string | null): boolean {
     return id !== null && tabKind(id) === "github";
   }
@@ -542,7 +647,7 @@ export class App {
     this.editor.openSettings();
   }
 
-  protected tabPane(id: string): Pane | undefined {
+  protected tabPane(id: string): Terminal | undefined {
     return this.pane(id);
   }
 
@@ -563,17 +668,35 @@ export class App {
     if (next) this.open(next);
   }
 
-  /** Workspace and name of a pane, as its tab shows them. */
+  /** Sends notifications for `changes` and withdraws those of panes the user sees now. */
+  private notifyChanges(changes: readonly StatusChange[]): void {
+    this.notifier.notify(changes, this.notifyContext());
+  }
+
+  private notifyContext(): NotifyContext {
+    const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
+    return {
+      // Read live: a delayed done notification checks again when it is due.
+      seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
+      status: (id) => this.store.panes().get(id)?.agent_status,
+      onBlocked: notifyOnBlocked,
+      onDone: notifyOnDone,
+      label: (id) => this.tabTitle(id),
+      now: Date.now(),
+    };
+  }
+
+  /** Space and name of a pane, as its tab shows them. */
   private tabTitle(id: string): string {
     const snap = this.store.snapshot();
     const pane = this.pane(id);
     if (!pane) return id;
     const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
-    const workspace = snap.workspaces.find((w) => w.workspace_id === pane.workspace_id)?.label;
+    const workspace = snap.spaces.find((w) => w.space_id === pane.space_id)?.label;
     return tabHeader(workspace, rowName(pane, tabLabel)).title;
   }
 
-  private pane(id: string): Pane | undefined {
+  private pane(id: string): Terminal | undefined {
     return this.store.panes().get(id) ?? this.known.get(id);
   }
 

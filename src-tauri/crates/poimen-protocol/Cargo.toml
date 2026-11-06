@@ -1,0 +1,20 @@
+[package]
+name = "poimen-protocol"
+version = "0.1.0"
+description = "Wire types of the poimen-server socket API (client-neutral)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

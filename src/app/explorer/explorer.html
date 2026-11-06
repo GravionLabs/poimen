@@ -38,5 +38,25 @@
     >
       Create space here
     </button>
+    @if (menuRepo()) {
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="showChanges(at.path)"
+        (keydown.escape)="closeMenu()"
+      >
+        Show changes
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="startTask(at.path)"
+        (keydown.escape)="closeMenu()"
+      >
+        Start task from issue…
+      </button>
+    }
   </div>
 }

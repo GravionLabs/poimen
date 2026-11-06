@@ -124,6 +124,14 @@ jobs:
         with:
           ref: ${{ needs.release.outputs.version && format('v{0}', needs.release.outputs.version) || github.sha }}
 
+      # poimen-server ships next to the app (bundle.externalBin in tauri.bundle.conf.json, which needs the
+      # target-suffixed file at build time); the app looks beside its own executable first.
+      - name: Build the poimen-server sidecar
+        shell: bash
+        run: |
+          rustup target add "${{ matrix.target }}"
+          scripts/prepare-sidecar.sh "${{ matrix.target }}"
+
       - uses: GravionLabs/ci/tauri/installers@v1
         with:
           checkout: "false"

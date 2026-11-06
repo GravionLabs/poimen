@@ -1,4 +1,4 @@
-import { Injectable, signal } from "@angular/core";
+import { Injectable, computed, signal } from "@angular/core";
 import type { AgentStatus, SpaceNode } from "./herdr";
 
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
@@ -22,6 +22,10 @@ export class Attention {
   readonly attention = signal<ReadonlySet<string>>(new Set());
   /** Panes that finished while no tab showed them. */
   readonly unread = signal<ReadonlySet<string>>(new Set());
+  /** Panes with a mark (ringing or unread): what the dock badge counts. */
+  readonly count = computed(() => new Set([...this.attention(), ...this.unread()]).size);
+  /** The panes that turned blocked or done in the latest snapshot that had any (a new array each time). */
+  readonly lastChanges = signal<readonly StatusChange[]>([]);
 
   /**
    * Folds a snapshot of pane statuses in; `viewed` are the panes whose tab is on screen. Returns
@@ -51,6 +55,7 @@ export class Attention {
       }
     }
     this.previous = new Map(statuses);
+    if (changes.length) this.lastChanges.set(changes);
     if (!same(attention, this.attention())) this.attention.set(attention);
     if (!same(unread, this.unread())) this.unread.set(unread);
     return changes;
@@ -59,5 +64,5 @@ export class Attention {
 
 /** Unread panes of a workspace: what its row shows as the sum of its panes. */
 export function workspaceUnread(space: SpaceNode, unread: ReadonlySet<string>): number {
-  return space.rows.filter((row) => unread.has(row.pane.pane_id)).length;
+  return space.rows.filter((row) => unread.has(row.pane.terminal_id)).length;
 }

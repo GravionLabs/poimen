@@ -63,7 +63,7 @@
           <p class="hint">
             A click previews a pane in a tab, a double click pins it. A pane opens for input unless
             another client controls it; the switch in the status bar makes it read-only. Closing a
-            tab only closes the view; the herdr pane keeps running.
+            tab only closes the view; the pane keeps running.
           </p>
         </div>
       }
@@ -86,6 +86,7 @@
   (checkUpdate)="updater.check()"
   (installUpdate)="updater.install()"
   [info]="store.info()"
+  [backend]="store.backendKind()"
   [notice]="spaceActions.warning()"
   (jump)="jumpToWaiting()"
   [panelOpen]="ui.panelOpen()"
@@ -98,6 +99,8 @@
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
 <app-space-dialog (closed)="onSpaceClosed($event)" />
 <app-trust-dialog />
+<app-hooks-dialog />
+<app-task-dialog />
 <app-shortcuts-dialog />
 <app-command-palette (commandChosen)="run($event)" />
 
@@ -139,6 +142,8 @@
           <ng-template #tabContent let-tab>
             @if (isGithub(tab.id)) {
               <span class="mode ro" title="GitHub">GH</span>
+            } @else if (isChanges(tab.id)) {
+              <span class="mode ro" title="Changes">CH</span>
             } @else if (isFlow(tab.id)) {
               <span class="mode ro" title="Agent flow">FL</span>
             } @else if (isSettings(tab.id)) {
@@ -173,13 +178,18 @@
             <app-flow-tab [paneId]="flowPaneId" (openAgent)="openAgentOutput($event)" />
           }
         }
-        @for (p of [groupPane(g)]; track p?.pane_id) {
+        @for (changesDirOfGroup of [changesOf(g)]; track changesDirOfGroup) {
+          @if (changesDirOfGroup) {
+            <app-changes-view [dir]="changesDirOfGroup" />
+          }
+        }
+        @for (p of [groupPane(g)]; track p?.terminal_id) {
           @if (p) {
             <app-terminal-view
               [pane]="p"
-              [wanted]="wanted(p.pane_id)"
-              (modeChange)="editor.report(p.pane_id, $event.mode, $event.blocked)"
-              (sized)="onSized(p.pane_id, $event)"
+              [wanted]="wanted(p.terminal_id)"
+              (modeChange)="editor.report(p.terminal_id, $event.mode, $event.blocked)"
+              (sized)="onSized(p.terminal_id, $event)"
             />
           }
         }

@@ -1,13 +1,19 @@
-import { Injectable, inject } from "@angular/core";
+import { Injectable, effect, inject } from "@angular/core";
+import { Attention } from "./attention";
 import { TauriBridge } from "./tauri";
 
-/** The dock badge: how many agents wait for the user. 0 clears it. */
+/** The dock badge: how many panes carry an attention or unread mark (the in-app source of truth). 0 clears it. */
 @Injectable({ providedIn: "root" })
 export class DockBadge {
   private readonly bridge = inject(TauriBridge);
+  private readonly attention = inject(Attention);
   private last: number | undefined;
 
-  /** Shows `waiting` (blocked agents) on the dock icon; platforms without badges only warn. */
+  constructor() {
+    effect(() => this.set(this.attention.count()));
+  }
+
+  /** Shows `waiting` (marked panes) on the dock icon; platforms without badges only warn. */
   set(waiting: number): void {
     const count = Math.max(0, Math.floor(waiting));
     if (count === this.last) return;

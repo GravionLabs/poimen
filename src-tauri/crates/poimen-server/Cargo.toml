@@ -1,0 +1,30 @@
+[package]
+name = "poimen-server"
+version = "0.1.0"
+description = "Headless daemon that owns the PTYs of poimen"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "poimen_server"
+
+[[bin]]
+name = "poimen-server"
+path = "src/main.rs"
+
+[dependencies]
+alacritty_terminal = "0.26.0"
+poimen-client = { path = "../poimen-client" }
+poimen-protocol = { path = "../poimen-protocol" }
+portable-pty = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

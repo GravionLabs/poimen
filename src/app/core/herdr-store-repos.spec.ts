@@ -1,6 +1,6 @@
 import { Injector } from "@angular/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Pane, Snapshot } from "./herdr";
+import type { Terminal, Snapshot } from "./herdr";
 import { HerdrStore, REPOS_REFRESH_MS } from "./herdr-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -12,18 +12,18 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./tauri.mock")).tauri.listen,
 }));
 
-const pane = (pane_id: string, over: Partial<Pane> = {}): Pane => ({
-  pane_id,
+const pane = (terminal_id: string, over: Partial<Terminal> = {}): Terminal => ({
+  terminal_id,
   tab_id: "w1:t1",
-  workspace_id: "w1",
+  space_id: "w1",
   agent_status: "idle",
   ...over,
 });
 
-const snapshot = (...panes: Pane[]): Snapshot => ({
-  workspaces: [{ workspace_id: "w1", label: "One", number: 1, agent_status: "idle" }],
-  tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "main", number: 1, agent_status: "idle" }],
-  panes,
+const snapshot = (...terminals: Terminal[]): Snapshot => ({
+  spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+  tabs: [{ tab_id: "w1:t1", space_id: "w1", label: "main", number: 1, agent_status: "idle" }],
+  terminals,
 });
 
 describe("HerdrStore repos", () => {
@@ -94,6 +94,56 @@ describe("HerdrStore repos", () => {
 
     await vi.advanceTimersByTimeAsync(REPOS_REFRESH_MS);
     expect(tauri.calls("repo_info")).toHaveLength(4);
+  });
+
+  it.each(["done", "idle"] as const)(
+    "re-reads the repos when a pane turns %s while the window is focused",
+    async (agent_status) => {
+      tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+      tauri.answer("repo_info", () => ({}));
+      await store.start();
+      expect(tauri.calls("repo_info")).toHaveLength(1);
+
+      tauri.emit("herdr", {
+        kind: "pane.agent_status_changed",
+        data: { pane_id: "w1:p1", agent_status },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(tauri.calls("repo_info")).toHaveLength(2);
+    },
+  );
+
+  it.each(["done", "idle"] as const)(
+    "does not re-read the repos when a pane turns %s while the window is not focused",
+    async (agent_status) => {
+      tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+      tauri.answer("repo_info", () => ({}));
+      await store.start();
+      focused = false;
+
+      tauri.emit("herdr", {
+        kind: "pane.agent_status_changed",
+        data: { pane_id: "w1:p1", agent_status },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(tauri.calls("repo_info")).toHaveLength(1);
+    },
+  );
+
+  it("does not re-read the repos when a pane turns working", async () => {
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
+    tauri.answer("repo_info", () => ({}));
+    await store.start();
+
+    tauri.emit("herdr", {
+      kind: "pane.agent_status_changed",
+      data: { pane_id: "w1:p1", agent_status: "working" },
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(tauri.calls("repo_info")).toHaveLength(1);
   });
 
   it("does not run git on the timer while the window is not focused", async () => {

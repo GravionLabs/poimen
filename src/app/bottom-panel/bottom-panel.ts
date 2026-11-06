@@ -10,6 +10,7 @@ import {
 } from "@angular/core";
 import { FlowView } from "./flow-view";
 import { EditorTabs } from "../core/editor-tabs";
+import { TaskLog } from "../core/task-log";
 import { PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT, UiState } from "../core/ui-state";
 import {
   Subagents,
@@ -24,6 +25,7 @@ import {
 export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
   output: "Output",
   flow: "Flow",
+  log: "Log",
 };
 
 /** Bottom panel below the editor area: a tab strip, the subagent dropdown and the Output tab. */
@@ -38,6 +40,7 @@ export class BottomPanel {
   protected readonly ui = inject(UiState);
   protected readonly subagents = inject(Subagents);
   protected readonly editor = inject(EditorTabs);
+  protected readonly taskLog = inject(TaskLog);
   protected readonly minHeight = PANEL_MIN_HEIGHT;
   protected readonly maxHeight = PANEL_MAX_HEIGHT;
   protected readonly tabs = Object.entries(PANEL_TAB_LABELS);

@@ -4,22 +4,22 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { Pane, SpaceNode } from "../core/herdr";
+import type { Terminal, SpaceNode } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar } from "./sidebar";
 
-const pane = (id: string, status: Pane["agent_status"] = "idle"): Pane => ({
-  pane_id: id,
+const pane = (id: string, status: Terminal["agent_status"] = "idle"): Terminal => ({
+  terminal_id: id,
   tab_id: "w1:t1",
-  workspace_id: "w1",
+  space_id: "w1",
   agent_status: status,
 });
 
 const spaces: SpaceNode[] = [
   {
-    workspace: { workspace_id: "w1", label: "One", number: 1, agent_status: "idle" },
+    workspace: { space_id: "w1", label: "One", number: 1, agent_status: "idle" },
     rows: [
       { pane: pane("w1:p1"), tab: "a", name: "claude", worktree: false },
       { pane: pane("w1:p2", "working"), tab: "b", name: "shell", worktree: false },
@@ -57,8 +57,8 @@ async function setup(message: string | null = null) {
   const fixture = TestBed.createComponent(Sidebar);
   const selected: string[] = [];
   const pinned: string[] = [];
-  fixture.componentInstance.selected.subscribe((p) => selected.push(p.pane_id));
-  fixture.componentInstance.pinned.subscribe((p) => pinned.push(p.pane_id));
+  fixture.componentInstance.selected.subscribe((p) => selected.push(p.terminal_id));
+  fixture.componentInstance.pinned.subscribe((p) => pinned.push(p.terminal_id));
   fixture.detectChanges();
   await fixture.whenStable();
   const root = fixture.nativeElement as HTMLElement;

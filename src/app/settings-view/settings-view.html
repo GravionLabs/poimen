@@ -90,79 +90,78 @@
                   appearance.
                 </p>
               }
-            </section>
-          }
-          @case ("color-scheme") {
-            <section aria-label="Color scheme">
-              <div class="radios" role="radiogroup" aria-label="Scheme mode">
-                <button
-                  type="button"
-                  role="radio"
-                  class="choice"
-                  [attr.aria-checked]="mode() === 'single'"
-                  [class.on]="mode() === 'single'"
-                  [class.hit]="hit('Single scheme')"
-                  (click)="setMode('single')"
-                >
-                  Single scheme
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  class="choice"
-                  [attr.aria-checked]="mode() === 'pair'"
-                  [class.on]="mode() === 'pair'"
-                  [class.hit]="hit('Light/dark pair')"
-                  (click)="setMode('pair')"
-                >
-                  Light/dark pair
-                </button>
-              </div>
-              <p class="hint">
-                Hover or focus a scheme to preview it; click or press Enter to save it.
-              </p>
-
-              @for (side of sides; track side) {
-                <h3
-                  [id]="'list-' + side"
-                  [class.hit]="hit(side === 'dark' ? 'Dark schemes' : 'Light schemes')"
-                >
-                  {{ side === "dark" ? "Dark" : "Light"
-                  }}{{ mode() === "pair" ? " scheme" : " schemes" }}
-                </h3>
-                <div
-                  class="list"
-                  role="listbox"
-                  [attr.aria-labelledby]="'list-' + side"
-                  (mouseleave)="leave($event)"
-                  (focusout)="blur($event)"
-                >
-                  @for (scheme of groups()[side]; track scheme.name; let i = $index) {
-                    <div
-                      class="option"
-                      role="option"
-                      [attr.data-name]="scheme.name"
-                      [attr.aria-selected]="selected(side) === scheme.name"
-                      [class.on]="selected(side) === scheme.name"
-                      [attr.tabindex]="tabStop(side, scheme.name, i) ? 0 : -1"
-                      (mouseenter)="preview(scheme.name)"
-                      (focus)="preview(scheme.name)"
-                      (click)="save(side, scheme.name)"
-                      (keydown)="key($event, side, scheme.name, i)"
-                    >
-                      <span class="label">{{ scheme.label }}</span>
-                      <span class="swatches" aria-hidden="true">
-                        <span class="sw big" [style.background]="scheme.background"></span>
-                        <span class="sw big" [style.background]="scheme.foreground"></span>
-                        @for (color of scheme.ansi; track $index) {
-                          <span class="sw" [style.background]="color"></span>
-                        }
-                        <span class="sw big" [style.background]="scheme.ansi[5]"></span>
-                      </span>
-                    </div>
-                  }
+              <section aria-label="Color scheme">
+                <h2>Color scheme</h2>
+                <div class="radios" role="radiogroup" aria-label="Scheme mode">
+                  <button
+                    type="button"
+                    role="radio"
+                    class="choice"
+                    [attr.aria-checked]="mode() === 'single'"
+                    [class.on]="mode() === 'single'"
+                    [class.hit]="hit('Single scheme')"
+                    (click)="setMode('single')"
+                  >
+                    Single scheme
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    class="choice"
+                    [attr.aria-checked]="mode() === 'pair'"
+                    [class.on]="mode() === 'pair'"
+                    [class.hit]="hit('Light/dark pair')"
+                    (click)="setMode('pair')"
+                  >
+                    Light/dark pair
+                  </button>
                 </div>
-              }
+                <p class="hint">
+                  Hover or focus a scheme to preview it; click or press Enter to save it.
+                </p>
+
+                @for (side of sides; track side) {
+                  <h3
+                    [id]="'list-' + side"
+                    [class.hit]="hit(side === 'dark' ? 'Dark schemes' : 'Light schemes')"
+                  >
+                    {{ side === "dark" ? "Dark" : "Light"
+                    }}{{ mode() === "pair" ? " scheme" : " schemes" }}
+                  </h3>
+                  <div
+                    class="list"
+                    role="listbox"
+                    [attr.aria-labelledby]="'list-' + side"
+                    (mouseleave)="leave($event)"
+                    (focusout)="blur($event)"
+                  >
+                    @for (scheme of groups()[side]; track scheme.name; let i = $index) {
+                      <div
+                        class="option"
+                        role="option"
+                        [attr.data-name]="scheme.name"
+                        [attr.aria-selected]="selected(side) === scheme.name"
+                        [class.on]="selected(side) === scheme.name"
+                        [attr.tabindex]="tabStop(side, scheme.name, i) ? 0 : -1"
+                        (mouseenter)="preview(scheme.name)"
+                        (focus)="preview(scheme.name)"
+                        (click)="save(side, scheme.name)"
+                        (keydown)="key($event, side, scheme.name, i)"
+                      >
+                        <span class="label">{{ scheme.label }}</span>
+                        <span class="swatches" aria-hidden="true">
+                          <span class="sw big" [style.background]="scheme.background"></span>
+                          <span class="sw big" [style.background]="scheme.foreground"></span>
+                          @for (color of scheme.ansi; track $index) {
+                            <span class="sw" [style.background]="color"></span>
+                          }
+                          <span class="sw big" [style.background]="scheme.ansi[5]"></span>
+                        </span>
+                      </div>
+                    }
+                  </div>
+                }
+              </section>
             </section>
           }
           @case ("notifications") {
@@ -286,18 +285,40 @@
             </section>
           }
           @case ("herdr") {
-            <section aria-label="herdr">
+            <section aria-label="Server">
               <label
                 class="check"
-                [class.hit]="hit('Start the herdr server when it is not running')"
+                [class.hit]="hit('Start the backend server when it is not running')"
               >
                 <input
                   type="checkbox"
                   [checked]="settings().herdrAutoStart"
                   (change)="setAutoStart($event)"
                 />
-                Start the herdr server when it is not running
+                Start the backend server when it is not running
               </label>
+              <h3 [class.hit]="hit('Agent hooks')">Agent hooks</h3>
+              <ul class="harnesses">
+                @for (h of hooks.statuses(); track h.agent) {
+                  <li>
+                    <strong>{{ agentName(h.agent) }}</strong>
+                    <span>{{ h.state }}</span>
+                    @if (h.state !== "installed") {
+                      <button
+                        type="button"
+                        [class.hit]="hit('Install hooks')"
+                        [disabled]="hooks.busy()"
+                        (click)="hooks.installAgent(h.agent)"
+                      >
+                        Install hooks
+                      </button>
+                    }
+                  </li>
+                }
+              </ul>
+              @if (hooks.error()) {
+                <p class="hint" role="alert">{{ hooks.error() }}</p>
+              }
             </section>
           }
           @case ("agents") {

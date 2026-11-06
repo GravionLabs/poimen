@@ -13,9 +13,9 @@ describe("settings categories", () => {
       filterGroups("").map((g) => [g.title, g.pages.map((p) => p.title)]),
     );
     expect(tree).toEqual({
-      "Appearance & Behavior": ["Appearance", "Color scheme", "Notifications"],
+      "Appearance & Behavior": ["Appearance", "Notifications"],
       Workspace: ["Explorer", "New space layout", "Trusted projects"],
-      Backend: ["herdr", "Agents"],
+      Backend: ["Server", "Agents"],
     });
   });
 
@@ -24,7 +24,23 @@ describe("settings categories", () => {
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");
-    expect(allPages()).toHaveLength(8);
+    expect(allPages()).toHaveLength(7);
+  });
+
+  it("resolves the retired color-scheme page to appearance", () => {
+    expect(findPage("color-scheme")?.page.id).toBe("appearance");
+    expect(findPage("color-scheme")?.group.id).toBe("appearance-behavior");
+    expect(findPage("color-scheme")).toEqual(findPage("appearance"));
+    expect(findPage("color-scheme", [])).toBeNull();
+  });
+
+  it("finds the scheme settings on the appearance page", () => {
+    expect(filterGroups("single scheme").flatMap((g) => g.pages.map((p) => p.id))).toEqual([
+      "appearance",
+    ]);
+    expect(filterGroups("dark schemes").flatMap((g) => g.pages.map((p) => p.id))).toEqual([
+      "appearance",
+    ]);
   });
 
   it("matches ignoring case and surrounding blanks; an empty query matches nothing", () => {

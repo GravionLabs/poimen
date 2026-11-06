@@ -13,6 +13,7 @@
             "deletions": 12,
             "createdAt": "2026-11-01T09:30:00Z",
             "headRefName": "feat/231-github-pulls-view",
+            "isCrossRepository": false,
             "baseRefName": "release/next",
             "reviewDecision": "REVIEW_REQUIRED",
             "reviewRequests": {
@@ -56,6 +57,7 @@
             "deletions": 0,
             "createdAt": "2026-10-20T08:00:00Z",
             "headRefName": "wip",
+            "isCrossRepository": true,
             "baseRefName": "main",
             "reviewDecision": null,
             "reviewRequests": { "nodes": [] },
@@ -71,6 +73,7 @@
             "deletions": 1,
             "createdAt": "2026-10-30T12:00:00Z",
             "headRefName": "fix/x",
+            "isCrossRepository": false,
             "baseRefName": "main",
             "reviewDecision": "APPROVED",
             "reviewRequests": { "nodes": [] },

@@ -38,6 +38,9 @@ export class Notifier {
   private readonly pending = new Map<string, ReturnType<typeof setTimeout>>();
   /** Panes that got a done notification the user has not seen since. */
   private readonly doneSent = new Set<string>();
+  /** Notifications sent per pane that may still be in the tray, with the status they announced. */
+  private readonly shown = new Map<string, { id: number; status: StatusChange["status"] }[]>();
+  private nextId = 1;
 
   /** Calls `open` with the pane of every clicked notification; call before notifying. */
   listen(open: (paneId: string) => void): Promise<Unlisten> {
@@ -52,6 +55,7 @@ export class Notifier {
 
   /** Shows a notification per change that settings allow and the user cannot already see. */
   notify(changes: readonly StatusChange[], ctx: NotifyContext): void {
+    this.withdrawSeen(ctx);
     for (const id of this.doneSent) if (ctx.seen(id)) this.doneSent.delete(id);
     for (const { paneId, status } of changes) {
       if (!(status === "blocked" ? ctx.onBlocked : ctx.onDone)) continue;
@@ -59,6 +63,39 @@ export class Notifier {
       if (status === "blocked") this.send(paneId, status, ctx);
       else this.scheduleDone(paneId, ctx);
     }
+  }
+
+  /**
+   * Removes the notifications that no longer match the in-app marks, so the tray (and the count
+   * GNOME, KDE and Ubuntu Dock draw on the icon from it) follows them: those of a pane the user
+   * sees, of a pane whose status left the one announced and of a pane that is gone. Only Linux
+   * and the BSDs can close a shown notification; elsewhere the call does nothing.
+   */
+  private withdrawSeen(ctx: NotifyContext): void {
+    const ids: number[] = [];
+    for (const [paneId, list] of this.shown) {
+      const seen = ctx.seen(paneId);
+      const current = ctx.status(paneId);
+      const keep = seen ? [] : list.filter((n) => n.status === current);
+      ids.push(...list.filter((n) => !keep.includes(n)).map((n) => n.id));
+      if (keep.length) this.shown.set(paneId, keep);
+      else this.shown.delete(paneId);
+    }
+    for (const id of this.doneSent) if (ctx.status(id) === undefined) this.doneSent.delete(id);
+    if (!ids.length) return;
+    void this.bridge
+      .removeNotifications(ids)
+      .catch((error: unknown) => console.warn("poimen: could not withdraw notifications", error));
+  }
+
+  /**
+   * Rechecks (and withdraws) whenever `target` fires `focus`: coming back to the window makes
+   * the active tabs seen again. Returns the function that stops listening.
+   */
+  watchFocus(target: EventTarget, ctx: () => NotifyContext): () => void {
+    const onFocus = () => this.notify([], ctx());
+    target.addEventListener("focus", onFocus);
+    return () => target.removeEventListener("focus", onFocus);
   }
 
   private scheduleDone(paneId: string, ctx: NotifyContext): void {
@@ -74,8 +111,10 @@ export class Notifier {
 
   private send(paneId: string, status: StatusChange["status"], ctx: NotifyContext): void {
     const body = notificationMessage(ctx.label(paneId), status);
+    const id = this.nextId++;
+    this.shown.set(paneId, [...(this.shown.get(paneId) ?? []), { id, status }]);
     void this.bridge
-      .notify("poimen", body, { paneId })
+      .notify("poimen", body, { paneId }, id)
       .catch((error: unknown) => console.warn("poimen: notification failed", error));
   }
 }

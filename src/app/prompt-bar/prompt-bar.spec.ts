@@ -5,13 +5,13 @@ import { getTestBed, TestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentPrompts, type PromptOutcome } from "../core/agent-prompt";
-import type { Pane } from "../core/herdr";
+import type { Terminal } from "../core/herdr";
 import { PromptBar } from "./prompt-bar";
 
-const pane: Pane = {
-  pane_id: "w1:p2",
+const pane: Terminal = {
+  terminal_id: "w1:p2",
   tab_id: "w1:t1",
-  workspace_id: "w1",
+  space_id: "w1",
   agent: "claude",
   agent_status: "idle",
   cwd: "/work/app",

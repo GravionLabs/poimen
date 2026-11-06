@@ -6,14 +6,14 @@ import {
   paneDir,
   shortPath,
   statusText,
-  type Pane,
+  type Terminal,
   type Snapshot,
 } from "./herdr";
 
-const pane = (over: Partial<Pane>): Pane => ({
-  pane_id: "w1:p1",
+const pane = (over: Partial<Terminal>): Terminal => ({
+  terminal_id: "w1:p1",
   tab_id: "w1:t1",
-  workspace_id: "w1",
+  space_id: "w1",
   agent_status: "unknown",
   ...over,
 });
@@ -49,8 +49,8 @@ describe("pane details", () => {
 
   it("parses a pinned real `herdr pane list` pane", () => {
     const real = JSON.parse(
-      `{"agent":"claude","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"x"},"agent_status":"working","cwd":"/Users/u/poimen","focused":false,"foreground_cwd":"/Users/u/poimen","pane_id":"w3:p2","revision":10,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":62},"tab_id":"w3:t2","terminal_id":"term_1","terminal_title":"◐ Deliver milestone 0.1.0","terminal_title_stripped":"Deliver milestone 0.1.0","tokens":{"deliver":"#20","deliver_step":"select: next"},"workspace_id":"w3"}`,
-    ) as Pane;
+      `{"agent":"claude","agent_session":{"agent":"claude","kind":"id","source":"herdr:claude","value":"x"},"agent_status":"working","cwd":"/Users/u/poimen","focused":false,"foreground_cwd":"/Users/u/poimen","terminal_id":"w3:p2","revision":10,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":62},"tab_id":"w3:t2","terminal_id":"term_1","terminal_title":"◐ Deliver milestone 0.1.0","terminal_title_stripped":"Deliver milestone 0.1.0","tokens":{"deliver":"#20","deliver_step":"select: next"},"space_id":"w3"}`,
+    ) as Terminal;
     expect(agentKind(real)).toBe("claude");
     expect(statusText(real)).toBe("working · select: next");
   });
@@ -68,23 +68,28 @@ describe("buildSpaces and filterSpaces", () => {
     ["/src/ci", { branch: null, worktree: false }],
   ]);
   const snapshot: Snapshot = {
-    workspaces: [
-      { workspace_id: "w2", label: "Empty", number: 2, agent_status: "idle" },
-      { workspace_id: "w1", label: "First", number: 1, agent_status: "idle" },
+    spaces: [
+      { space_id: "w2", label: "Empty", number: 2, agent_status: "idle" },
+      { space_id: "w1", label: "First", number: 1, agent_status: "idle" },
     ],
     tabs: [
-      { tab_id: "w1:t1", workspace_id: "w1", label: "agent", number: 1, agent_status: "idle" },
-      { tab_id: "w1:t2", workspace_id: "w1", label: "terminal", number: 2, agent_status: "idle" },
+      { tab_id: "w1:t1", space_id: "w1", label: "agent", number: 1, agent_status: "idle" },
+      { tab_id: "w1:t2", space_id: "w1", label: "terminal", number: 2, agent_status: "idle" },
     ],
-    panes: [
-      pane({ pane_id: "w1:p1", tab_id: "w1:t1", agent: "claude", foreground_cwd: "/src/poimen" }),
-      pane({ pane_id: "w1:p2", tab_id: "w1:t2", cwd: "/src/ci" }),
+    terminals: [
+      pane({
+        terminal_id: "w1:p1",
+        tab_id: "w1:t1",
+        agent: "claude",
+        foreground_cwd: "/src/poimen",
+      }),
+      pane({ terminal_id: "w1:p2", tab_id: "w1:t2", cwd: "/src/ci" }),
     ],
   };
   const spaces = buildSpaces(snapshot, repos);
 
   it("builds rows with tab, agent, branch and directory", () => {
-    expect(spaces.map((s) => s.workspace.workspace_id)).toEqual(["w1", "w2"]);
+    expect(spaces.map((s) => s.workspace.space_id)).toEqual(["w1", "w2"]);
     expect(spaces[0].rows[0]).toMatchObject({
       tab: "agent",
       agent: "claude",
@@ -106,7 +111,9 @@ describe("buildSpaces and filterSpaces", () => {
   });
 
   it("filters by agent, branch and name, case-insensitively, and drops empty workspaces", () => {
-    expect(filterSpaces(spaces, "CLAUDE")[0].rows.map((r) => r.pane.pane_id)).toEqual(["w1:p1"]);
+    expect(filterSpaces(spaces, "CLAUDE")[0].rows.map((r) => r.pane.terminal_id)).toEqual([
+      "w1:p1",
+    ]);
     expect(filterSpaces(spaces, "feat/20")).toHaveLength(1);
     expect(filterSpaces(spaces, "claude feat")).toHaveLength(1);
     expect(filterSpaces(spaces, "claude nomatch")).toEqual([]);

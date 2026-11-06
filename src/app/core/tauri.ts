@@ -1,5 +1,5 @@
 import { Injectable } from "@angular/core";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -8,6 +8,7 @@ import {
   onAction,
   registerActionTypes,
   requestPermission,
+  removeActive,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -31,25 +32,48 @@ export class TauriBridge {
     return invoke<T>(command, args);
   }
 
+  /**
+   * A channel for a command to push messages through (`onMessage` runs for each, in order). JSON
+   * messages arrive as values; raw bytes as an `ArrayBuffer`.
+   */
+  channel<T>(onMessage: (message: T) => void): Channel<T> {
+    const channel = new Channel<T>();
+    channel.onmessage = onMessage;
+    return channel;
+  }
+
   /** Opens `url` in the default browser through the opener plugin (callers check the scheme). */
   openUrl(url: string): Promise<void> {
     return openUrl(url);
   }
 
   /** Shows a system notification, asking for permission once; `false` when it is not allowed. */
-  async notify(title: string, body: string, extra?: Record<string, unknown>): Promise<boolean> {
+  async notify(
+    title: string,
+    body: string,
+    extra?: Record<string, unknown>,
+    id?: number,
+  ): Promise<boolean> {
     const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
     if (!granted) return false;
     try {
       await registerActionTypes([
         { id: NOTIFICATION_ACTION_TYPE, actions: [{ id: OPEN_ACTION, title: "Open" }] },
       ]);
-      sendNotification({ title, body, extra, actionTypeId: NOTIFICATION_ACTION_TYPE });
+      sendNotification({ id, title, body, extra, actionTypeId: NOTIFICATION_ACTION_TYPE });
     } catch (error) {
       console.warn("poimen: could not show the notification", error);
       return false;
     }
     return true;
+  }
+
+  /**
+   * Closes shown notifications by id. Works on Linux and the BSDs only (the plugin cannot close
+   * a shown notification through notify-rust on macOS and Windows, where it does nothing).
+   */
+  removeNotifications(ids: number[]): Promise<void> {
+    return removeActive(ids.map((id) => ({ id })));
   }
 
   /**

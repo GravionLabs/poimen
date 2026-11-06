@@ -1,6 +1,6 @@
 import { Injector } from "@angular/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Pane, Snapshot } from "./herdr";
+import type { Terminal, Snapshot } from "./herdr";
 import { HerdrStore, REFRESH_DEBOUNCE_MS } from "./herdr-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -12,18 +12,18 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./tauri.mock")).tauri.listen,
 }));
 
-const pane = (pane_id: string, over: Partial<Pane> = {}): Pane => ({
-  pane_id,
+const pane = (terminal_id: string, over: Partial<Terminal> = {}): Terminal => ({
+  terminal_id,
   tab_id: "w1:t1",
-  workspace_id: "w1",
+  space_id: "w1",
   agent_status: "idle",
   ...over,
 });
 
-const snapshot = (...panes: Pane[]): Snapshot => ({
-  workspaces: [{ workspace_id: "w1", label: "One", number: 1, agent_status: "idle" }],
-  tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "main", number: 1, agent_status: "idle" }],
-  panes,
+const snapshot = (...terminals: Terminal[]): Snapshot => ({
+  spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+  tabs: [{ tab_id: "w1:t1", space_id: "w1", label: "main", number: 1, agent_status: "idle" }],
+  terminals,
 });
 
 /** A promise the test settles by hand, to hold a `snapshot` call open. */
@@ -51,16 +51,31 @@ describe("HerdrStore", () => {
   });
 
   it("starts empty", () => {
-    expect(store.snapshot()).toEqual({ workspaces: [], tabs: [], panes: [] });
+    expect(store.snapshot()).toEqual({ spaces: [], tabs: [], terminals: [] });
     expect(store.tree()).toEqual([]);
     expect(store.connectionError()).toBeNull();
+  });
+
+  it("names the backend of this run, poimen until the app says herdr", async () => {
+    expect(store.backendKind()).toBe("poimen");
+    tauri.answer("backend_kind", () => "herdr");
+    await store.start();
+    expect(store.backendKind()).toBe("herdr");
+  });
+
+  it("keeps poimen when the backend kind cannot be read", async () => {
+    tauri.answer("backend_kind", () => {
+      throw new Error("no such command");
+    });
+    await store.start();
+    expect(store.backendKind()).toBe("poimen");
   });
 
   it("loads the first snapshot on start and listens once", async () => {
     await store.start();
     await store.start();
 
-    expect(store.snapshot().panes.map((p) => p.pane_id)).toEqual(["w1:p1"]);
+    expect(store.snapshot().terminals.map((p) => p.terminal_id)).toEqual(["w1:p1"]);
     expect(store.pane("w1:p1")?.agent_status).toBe("idle");
     expect(store.pane("w1:p9")).toBeUndefined();
     expect(tauri.listen).toHaveBeenCalledTimes(1);
@@ -102,6 +117,20 @@ describe("HerdrStore", () => {
     expect(tauri.calls("snapshot")).toHaveLength(1);
   });
 
+  it("resolves a call during a running re-read only after the queued re-read finished", async () => {
+    const first = deferred<Snapshot>();
+    tauri.answer("snapshot", () => first.promise);
+    void store.refresh();
+    tauri.answer("snapshot", () => snapshot(pane("w1:p1"), pane("w1:p2")));
+    let resolved = false;
+    const waiting = store.refresh().then(() => (resolved = true));
+    first.resolve(snapshot(pane("w1:p1")));
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    await waiting;
+    expect(store.snapshot().terminals).toHaveLength(2);
+  });
+
   it("queues exactly one more re-read for calls during a running one", async () => {
     const first = deferred<Snapshot>();
     tauri.answer("snapshot", () => first.promise);
@@ -117,7 +146,7 @@ describe("HerdrStore", () => {
     await vi.runAllTimersAsync();
 
     expect(tauri.calls("snapshot")).toHaveLength(2);
-    expect(store.snapshot().panes).toHaveLength(2);
+    expect(store.snapshot().terminals).toHaveLength(2);
   });
 
   it("applies an agent status change at once and re-reads afterwards", async () => {
@@ -174,7 +203,7 @@ describe("HerdrStore", () => {
 
     expect(store.connectionError()).toBe("connection refused");
     expect(store.connection()).toEqual({ state: "unreachable", reason: "connection refused" });
-    expect(store.snapshot().panes.map((p) => p.pane_id)).toEqual(["w1:p1"]);
+    expect(store.snapshot().terminals.map((p) => p.terminal_id)).toEqual(["w1:p1"]);
   });
 
   it("stops listening and drops a pending re-read when destroyed", async () => {
@@ -226,7 +255,7 @@ describe("HerdrStore", () => {
     expect(store.disconnected()).toBeNull();
 
     tauri.emit("herdr", { kind: "poimen.disconnected", data: { reason: "socket gone" } });
-    expect(store.disconnected()).toBe("herdr connection lost, reconnecting: socket gone");
+    expect(store.disconnected()).toBe("poimen connection lost, reconnecting: socket gone");
 
     tauri.emit("herdr", { kind: "poimen.connected", data: null });
     expect(store.disconnected()).toBeNull();
@@ -235,7 +264,7 @@ describe("HerdrStore", () => {
       throw "connection refused";
     });
     await store.refresh();
-    expect(store.disconnected()).toBe("herdr not reachable: connection refused");
+    expect(store.disconnected()).toBe("poimen not reachable: connection refused");
   });
 
   it("names a switched-off auto start and prefers a failed start", async () => {
@@ -245,12 +274,12 @@ describe("HerdrStore", () => {
     });
     await store.start();
     expect(store.disconnected()).toBe(
-      "herdr not reachable (auto start is off): connection refused",
+      "poimen not reachable (auto start is off): connection refused",
     );
 
     tauri.answer("ensure_backend", () => ({ state: "failed", reason: "no herdr" }));
     await store.ensureBackend();
-    expect(store.disconnected()).toBe("herdr was not started: no herdr");
+    expect(store.disconnected()).toBe("poimen was not started: no herdr");
   });
 
   it("is null once herdr connects after a failed start", async () => {
@@ -259,12 +288,30 @@ describe("HerdrStore", () => {
       throw "connection refused";
     });
     await store.start();
-    expect(store.disconnected()).toBe("herdr was not started: timeout");
+    expect(store.disconnected()).toBe("poimen was not started: timeout");
 
     tauri.answer("snapshot", () => snapshot(pane("w1:p1")));
     tauri.emit("herdr", { kind: "poimen.connected", data: null });
     await store.refresh();
     expect(store.connection().state).toBe("connected");
     expect(store.disconnected()).toBeNull();
+  });
+
+  it("names herdr in the disconnected messages when herdr is the backend", async () => {
+    tauri.answer("backend_kind", () => "herdr");
+    tauri.answer("ensure_backend", () => ({ state: "failed", reason: "no herdr" }));
+    tauri.answer("snapshot", () => {
+      throw "connection refused";
+    });
+    await store.start();
+    expect(store.disconnected()).toBe("herdr was not started: no herdr");
+
+    tauri.answer("ensure_backend", () => ({ state: "failed", reason: null }));
+    await store.ensureBackend();
+    expect(store.startFailure()).toBe("herdr could not be started");
+
+    tauri.answer("ensure_backend", () => ({ state: "running", reason: null }));
+    await store.ensureBackend();
+    expect(store.disconnected()).toBe("herdr not reachable: connection refused");
   });
 });

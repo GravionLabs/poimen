@@ -8,10 +8,17 @@ import { TauriBridge } from "./tauri";
 function setup() {
   const sent: string[] = [];
   const extras: unknown[] = [];
+  const ids: (number | undefined)[] = [];
+  const removed: number[][] = [];
   const calls = { focus: 0 };
   let clickHandler: (extra: Record<string, unknown>) => void = () => undefined;
   const bridge = {
-    notify: (_title: string, body: string, extra?: Record<string, unknown>) => {
+    removeNotifications: (list: number[]) => {
+      removed.push(list);
+      return Promise.resolve();
+    },
+    notify: (_title: string, body: string, extra?: Record<string, unknown>, id?: number) => {
+      ids.push(id);
       sent.push(body);
       extras.push(extra);
       return Promise.resolve(true);
@@ -43,6 +50,8 @@ function setup() {
     notifier: injector.get(Notifier),
     sent,
     extras,
+    ids,
+    removed,
     calls,
     click: (extra: Record<string, unknown>) => clickHandler(extra),
     ctx,
@@ -140,6 +149,35 @@ describe("Notifier", () => {
     expect(sent).toEqual(["tab p1 is done", "tab p1 is done"]);
   });
 
+  it("follows the poimen backend sequence working, done, working, done", () => {
+    const { notifier, sent, ctx, status, seen } = setup();
+    const done = [{ paneId: "p1", status: "done" as const }];
+    status.set("p1", "done");
+    notifier.notify(done, ctx());
+    expect(sent).toEqual([]);
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done"]);
+
+    // Works again and finishes again without the user looking: no repeat.
+    status.set("p1", "working");
+    notifier.notify([], ctx());
+    status.set("p1", "done");
+    notifier.notify(done, ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done"]);
+
+    // Seen in between: the next done notifies again.
+    seen.add("p1");
+    notifier.notify([], ctx());
+    seen.delete("p1");
+    status.set("p1", "working");
+    notifier.notify([], ctx());
+    status.set("p1", "done");
+    notifier.notify(done, ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    expect(sent).toEqual(["tab p1 is done", "tab p1 is done"]);
+  });
+
   it("keeps sending blocked every time, without delay", () => {
     const { notifier, sent, ctx } = setup();
     const blocked = [{ paneId: "p1", status: "blocked" as const }];
@@ -196,5 +234,82 @@ describe("Notifier", () => {
     click({ paneId: 7 });
     expect(opened).toEqual([]);
     expect(calls.focus).toBe(0);
+  });
+
+  it("withdraws the notifications of a pane once the user sees it", () => {
+    const { notifier, ids, removed, ctx, seen, status } = setup();
+    status.set("p1", "blocked");
+    status.set("p2", "blocked");
+    notifier.notify(
+      [
+        { paneId: "p1", status: "blocked" },
+        { paneId: "p2", status: "blocked" },
+      ],
+      ctx(),
+    );
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    seen.add("p1");
+    notifier.notify([], ctx());
+    expect(removed).toEqual([[ids[0]]]);
+    notifier.notify([], ctx());
+    expect(removed).toHaveLength(1);
+  });
+
+  it("withdraws a done notification too and nothing for unseen panes", () => {
+    const { notifier, ids, removed, ctx, seen } = setup();
+    notifier.notify([{ paneId: "p1", status: "done" }], ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    notifier.notify([], ctx());
+    expect(removed).toEqual([]);
+    seen.add("p1");
+    notifier.notify([], ctx());
+    expect(removed).toEqual([[ids[0]]]);
+  });
+
+  it("withdraws a blocked notification when the agent resumes unseen", () => {
+    const { notifier, ids, removed, ctx, status } = setup();
+    status.set("p1", "blocked");
+    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx());
+    notifier.notify([], ctx());
+    expect(removed).toEqual([]);
+    status.set("p1", "working");
+    notifier.notify([], ctx());
+    expect(removed).toEqual([[ids[0]]]);
+  });
+
+  it("withdraws a done notification when the pane leaves done", () => {
+    const { notifier, ids, removed, ctx, status } = setup();
+    status.set("p1", "done");
+    notifier.notify([{ paneId: "p1", status: "done" }], ctx());
+    vi.advanceTimersByTime(DONE_DELAY_MS);
+    status.set("p1", "working");
+    notifier.notify([], ctx());
+    expect(removed).toEqual([[ids[0]]]);
+  });
+
+  it("withdraws and forgets the notifications of a closed pane", () => {
+    const { notifier, ids, removed, ctx } = setup();
+    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx({ status: () => "blocked" }));
+    notifier.notify([], ctx({ status: () => undefined }));
+    expect(removed).toEqual([[ids[0]]]);
+    notifier.notify([], ctx({ status: () => undefined }));
+    expect(removed).toHaveLength(1);
+  });
+
+  it("rechecks on window focus and stops after the returned function is called", () => {
+    const { notifier, ids, removed, ctx, seen, status } = setup();
+    status.set("p1", "blocked");
+    notifier.notify([{ paneId: "p1", status: "blocked" }], ctx());
+    const win = new EventTarget();
+    const stop = notifier.watchFocus(win, () => ctx());
+    seen.add("p1");
+    win.dispatchEvent(new Event("focus"));
+    expect(removed).toEqual([[ids[0]]]);
+    stop();
+    notifier.notify([{ paneId: "p2", status: "blocked" }], ctx());
+    seen.add("p2");
+    win.dispatchEvent(new Event("focus"));
+    expect(removed).toHaveLength(1);
   });
 });

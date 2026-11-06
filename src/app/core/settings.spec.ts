@@ -54,6 +54,8 @@ describe("parseSettings", () => {
       sidebarLayout: "tree",
       explorerRoots: ["~"],
       explorerShowHidden: false,
+      backend: "poimen",
+      scrollback: 10000,
       herdrAutoStart: true,
       notifyOnBlocked: false,
       notifyOnDone: true,
@@ -63,6 +65,21 @@ describe("parseSettings", () => {
       home: "/Users/x",
       warnings: ["w"],
     });
+  });
+
+  it("reads the backend and falls back to poimen for anything else", () => {
+    expect(parseSettings({ backend: "poimen" }).backend).toBe("poimen");
+    expect(parseSettings({ backend: "herdr" }).backend).toBe("herdr");
+    expect(parseSettings({ backend: "tmux" }).backend).toBe("poimen");
+    expect(parseSettings({}).backend).toBe("poimen");
+  });
+
+  it("reads the scrollback and keeps 10000 for a value that is not a whole number from 0", () => {
+    expect(parseSettings({ scrollback: 500 }).scrollback).toBe(500);
+    expect(parseSettings({ scrollback: 0 }).scrollback).toBe(0);
+    for (const bad of [-1, 1.5, "100", null]) {
+      expect(parseSettings({ scrollback: bad }).scrollback).toBe(10000);
+    }
   });
 
   it("parses trusted projects and skips entries that are not strings", () => {

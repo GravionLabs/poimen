@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gravionlabs.github.io/poimen/findings.schema.json",
+  "title": "poimen review findings",
+  "description": "Review findings shown as comments in the Changes tab (.agents/state/findings.json).",
+  "type": "object",
+  "required": ["version", "sha", "source", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "sha": {
+      "description": "The reviewed commit (full or abbreviated, at least 7 characters).",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{7,64}$"
+    },
+    "source": {
+      "description": "Free text naming who made the review, for example deliver.",
+      "type": "string"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "title", "why"],
+        "additionalProperties": false,
+        "dependentRequired": { "line": ["file"], "endLine": ["line"] },
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "line": { "type": "integer", "minimum": 1 },
+          "endLine": { "type": "integer", "minimum": 1 },
+          "severity": { "enum": ["blocking", "note"] },
+          "title": { "type": "string", "minLength": 1 },
+          "why": { "type": "string", "minLength": 1 },
+          "rule": { "enum": ["adr-missing", "spec-drift"] }
+        }
+      }
+    }
+  }
+}
