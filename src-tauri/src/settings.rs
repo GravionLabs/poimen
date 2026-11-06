@@ -60,6 +60,7 @@ pub const ROW_TOKENS: &[&str] = &[
     "dirty",
     "sync",
     "pr",
+    "notification",
     "dir",
     "tab",
 ];
@@ -2218,6 +2219,15 @@ mod tests {
             ])
         );
         assert_eq!(s.sidebar_rows.workspace, None);
+    }
+
+    #[test]
+    fn sidebar_rows_accept_every_builtin_token_including_notification() {
+        let s =
+            rows(r#"{"sidebar":{"rows":{"agent":[["state_icon","name"],["notification","pr"]]}}}"#);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let tokens = s.sidebar_rows.agent.expect("row kept");
+        assert_eq!(tokens[1][0].token, "notification");
     }
 
     #[test]
