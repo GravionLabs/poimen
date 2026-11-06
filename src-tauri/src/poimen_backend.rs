@@ -283,6 +283,13 @@ impl Backend for PoimenBackend {
         self.client.close_space(space_id).map_err(text)
     }
 
+    fn rename_space(&self, space_id: &str, label: &str) -> Result<(), String> {
+        self.client
+            .rename_space(space_id, label)
+            .map(drop)
+            .map_err(text)
+    }
+
     fn create_terminal(&self, space_id: &str, cwd: Option<&str>) -> Result<Option<String>, String> {
         Ok(Some(self.new_terminal(space_id, cwd)?.id))
     }

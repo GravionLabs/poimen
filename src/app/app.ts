@@ -393,6 +393,12 @@ export class App {
       this.teardownInActiveSpace();
       return;
     }
+    if (id === "renameSpace") {
+      const paneId = this.activePaneId();
+      const spaceId = paneId ? this.pane(paneId)?.space_id : undefined;
+      if (spaceId) this.spaceActions.askRename(spaceId);
+      return;
+    }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
       this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);
@@ -515,6 +521,7 @@ export class App {
   protected onSidebarMenu(event: SidebarMenuAction): void {
     if (event.action === "new-terminal") this.paneActions.askNew(event.id);
     else if (event.action === "close-space") this.closeSpace(event.id);
+    else if (event.action === "rename-space") this.spaceActions.askRename(event.id);
     else if (event.action === "show-changes") {
       const dir = spaceRepoDir(this.store.spaces(), event.id);
       if (dir) this.editor.openChanges(dir);
