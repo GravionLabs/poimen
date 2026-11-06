@@ -7,7 +7,7 @@ next-version: 0.1.0
 # Pre-release tags (v0.10.0-rc.3, release.yml with prerelease: true) are not version sources: the prefix regex
 # does not match a tag with a pre-release part, so GitVersion ignores them and the next stable version is the same
 # with and without pre-releases.
-tag-prefix: '(?![vV]?[0-9.]+-)[vV]?'
+tag-prefix: "(?![vV]?[0-9.]+-)[vV]?"
 
 # release/next builds the pre-release for the manual acceptance as <next stable>-rc.<commits since the last stable
 # tag>; the number differs per commit, so every commit gets its own tag.
