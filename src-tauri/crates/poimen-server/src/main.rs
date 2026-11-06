@@ -64,16 +64,18 @@ fn integration(args: &[String]) -> ExitCode {
     };
     let copilot = agent == "copilot";
     let result = match action.as_str() {
-        "install" => std::env::current_exe()
-            .map_err(|e| e.to_string())
-            .and_then(|exe| {
-                if copilot {
-                    copilot::install(&path, &exe)
-                } else {
-                    claude::install(&path, &exe)
-                }
-            })
-            .map(|()| format!("installed in {}", path.display())),
+        "install" => claude::hook_exe(
+            std::env::var_os(poimen_protocol::ENV_HOOK_EXE),
+            std::env::current_exe,
+        )
+        .and_then(|exe| {
+            if copilot {
+                copilot::install(&path, &exe)
+            } else {
+                claude::install(&path, &exe)
+            }
+        })
+        .map(|()| format!("installed in {}", path.display())),
         "uninstall" => if copilot {
             copilot::uninstall(&path)
         } else {

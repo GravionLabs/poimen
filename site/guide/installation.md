@@ -55,7 +55,7 @@ Known limitations (Windows support is new; a hands-on check of a released build 
 
 Pick one:
 
-- **AppImage:** `chmod +x poimen_*_amd64.AppImage && ./poimen_*_amd64.AppImage`
+- **AppImage:** `chmod +x poimen_*_amd64.AppImage && ./poimen_*_amd64.AppImage`. The AppImage's mount moves on every run, so poimen starts a copy of the terminal server from `~/.local/share/poimen-server/bin/<version>/` (`$XDG_DATA_HOME` when set), and the agent hooks call the link `~/.local/share/poimen-server/bin/poimen-server`, which stays valid across restarts and updates.
 - **Debian, Ubuntu:** `sudo apt install ./poimen_*_amd64.deb`
 - **Fedora, openSUSE:** `sudo rpm -i poimen-*.x86_64.rpm` (or `sudo dnf install ./poimen-*.x86_64.rpm`)
 

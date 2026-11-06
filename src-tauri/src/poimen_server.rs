@@ -2,8 +2,10 @@
 //! the PTYs and outlives the app. The wire protocol lives in `crates/poimen-protocol`, the client
 //! in `crates/poimen-client`; this module only decides whether to start a server and does so
 //! detached, like `backend.rs` does for herdr. On Windows it starts a per-version copy under
-//! `%LOCALAPPDATA%\poimen-server\bin` (see [`stage`]), breaking away from the app's job.
+//! `%LOCALAPPDATA%\poimen-server\bin` (see [`stage`]), breaking away from the app's job; inside
+//! a Linux AppImage one under `$XDG_DATA_HOME/poimen-server/bin` (see [`stage_root`]).
 
+use std::ffi::OsString;
 use std::fmt;
 use std::io;
 #[cfg(unix)]
@@ -136,24 +138,69 @@ pub fn spawn_breaking_away<T>(mut spawn: impl FnMut(u32) -> io::Result<T>) -> io
     }
 }
 
-/// Copies the bundled server to `<bin_root>/<version>/poimen-server.exe` and returns that path
-/// (Windows): the running copy then locks only itself, so an update can replace the installed
-/// one. An up-to-date copy (same size and modification time) is reused; copies of other versions
-/// are removed when they are not running (a running exe cannot be deleted on Windows).
+/// Where the app keeps per-version copies of the server it starts (see [`stage`]), read from
+/// `env` on `os` (`std::env::consts::OS`). Windows: `%LOCALAPPDATA%\poimen-server\bin`. Linux
+/// only inside an AppImage (`APPIMAGE` or `APPDIR` set), whose mount ends with the app and moves
+/// on every run: `$XDG_DATA_HOME/poimen-server/bin`, else `$HOME/.local/share/poimen-server/bin`.
+/// Elsewhere (other Linux packages, macOS) `None`: the installed binary is started as it is.
+pub fn stage_root(env: impl Fn(&str) -> Option<OsString>, os: &str) -> Option<PathBuf> {
+    let set = |name: &str| env(name).filter(|v| !v.is_empty());
+    let absolute = |name: &str| set(name).map(PathBuf::from).filter(|p| p.is_absolute());
+    match os {
+        "windows" => poimen_client::protocol::windows_dir_from(env("LOCALAPPDATA"))
+            .map(|dir| dir.join("bin")),
+        "linux" if set("APPIMAGE").is_some() || set("APPDIR").is_some() => {
+            let data = absolute("XDG_DATA_HOME")
+                .or_else(|| absolute("HOME").map(|home| home.join(".local").join("share")))?;
+            Some(data.join(PROGRAM).join("bin"))
+        }
+        _ => None,
+    }
+}
+
+/// Creates `dir` and its missing parents; on Unix those are private (0700), like the socket
+/// directory.
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(dir)
+}
+
+/// Copies the bundled server to `<bin_root>/<version>/<its file name>` and returns that path.
+/// Windows: the running copy then locks only itself, so an update can replace the installed one.
+/// AppImage: the copy outlives the mount it came from. The copy is executable (0755 on Unix). An
+/// up-to-date copy (same size and modification time) is reused; copies of other versions are
+/// removed when they are not running (a running exe cannot be deleted on Windows; on Unix a
+/// running copy keeps working after its file is removed).
 pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathBuf> {
     let source = std::fs::metadata(bundled)?;
     let dir = bin_root.join(version);
-    let target = dir.join(beside_name(true));
+    let name = bundled
+        .file_name()
+        .map_or_else(|| beside_name(cfg!(windows)).into(), OsString::from);
+    let target = dir.join(&name);
     let same = |m: &std::fs::Metadata| {
         m.len() == source.len() && m.modified().ok() == source.modified().ok()
     };
     if !std::fs::metadata(&target).is_ok_and(|m| same(&m)) {
-        std::fs::create_dir_all(&dir)?;
-        let tmp = dir.join(format!("{}.{}.tmp", beside_name(true), std::process::id()));
+        create_private_dir(&dir)?;
+        let mut tmp_name = name.clone();
+        tmp_name.push(format!(".{}.tmp", std::process::id()));
+        let tmp = dir.join(tmp_name);
         std::fs::copy(bundled, &tmp)?;
-        let copied = std::fs::File::options()
-            .write(true)
-            .open(&tmp)
+        // The copy takes the source's mode (0555 in a read-only mount): make it writable for
+        // `set_modified` and executable for everyone, as an installed binary.
+        #[cfg(unix)]
+        let writable = {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+        };
+        #[cfg(not(unix))]
+        let writable = Ok(());
+        let copied = writable
+            .and_then(|()| std::fs::File::options().write(true).open(&tmp))
             .and_then(|f| source.modified().and_then(|t| f.set_modified(t)))
             .and_then(|()| std::fs::rename(&tmp, &target).or_else(|e| reuse_staged(e, &target)));
         let _ = std::fs::remove_file(&tmp);
@@ -167,6 +214,51 @@ pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathB
         }
     }
     Ok(target)
+}
+
+/// `<bin_root>/poimen-server`, a symlink to the staged copy (relative, so the directory can
+/// move): the path the hooks call, which stays valid when a later version is staged (Unix).
+#[cfg(unix)]
+pub fn stable_link(bin_root: &Path, staged: &Path) -> io::Result<PathBuf> {
+    let link = bin_root.join(PROGRAM);
+    let target = staged.strip_prefix(bin_root).unwrap_or(staged);
+    if std::fs::read_link(&link).is_ok_and(|current| current == target) {
+        return Ok(link);
+    }
+    let tmp = bin_root.join(format!(".{PROGRAM}.{}.link", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    std::os::unix::fs::symlink(target, &tmp)?;
+    std::fs::rename(&tmp, &link).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    Ok(link)
+}
+
+/// A staged server: the copy to run and, on Unix, the stable path the hooks call.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Staged {
+    pub program: PathBuf,
+    pub hook_exe: Option<PathBuf>,
+}
+
+/// Stages `program` under `bin_root` ([`stage`]) and, on Unix, points the [`stable_link`] at it
+/// (the versioned copy itself when the link cannot be made). `None` when the copy fails.
+pub fn prepare(program: &Path, bin_root: &Path, version: &str) -> Option<Staged> {
+    let staged = stage(program, bin_root, version).ok()?;
+    #[cfg(unix)]
+    let hook_exe = Some(stable_link(bin_root, &staged).unwrap_or_else(|_| staged.clone()));
+    #[cfg(not(unix))]
+    let hook_exe = None;
+    Some(Staged {
+        program: staged,
+        hook_exe,
+    })
+}
+
+/// [`prepare`] under the [`stage_root`] of this process, if it has one.
+pub fn prepare_here(program: &Path) -> Option<Staged> {
+    stage_root(|name| std::env::var_os(name), std::env::consts::OS)
+        .and_then(|root| prepare(program, &root, env!("CARGO_PKG_VERSION")))
 }
 
 /// A failed rename onto an existing staged copy (Windows: another poimen staged it and its server
@@ -230,12 +322,8 @@ impl Runner for SystemRunner {
 
     fn spawn(&self, program: &Path) -> io::Result<()> {
         // Own process group, no terminal, no pipes, never waited on: the server outlives poimen.
-        let staged = cfg!(windows)
-            .then(|| std::env::var_os("LOCALAPPDATA"))
-            .flatten()
-            .and_then(|dir| poimen_client::protocol::windows_dir_from(Some(dir)))
-            .and_then(|dir| stage(program, &dir.join("bin"), env!("CARGO_PKG_VERSION")).ok());
-        let program = staged.as_deref().unwrap_or(program);
+        let staged = prepare_here(program);
+        let program = staged.as_ref().map_or(program, |s| s.program.as_path());
         let command = |flags: u32| {
             let mut command = gui_path::command(program);
             if !cfg!(windows) {
@@ -414,6 +502,136 @@ mod tests {
         std::fs::write(&bundled, "build-two").unwrap();
         stage(&bundled, &bin, "0.8.0").unwrap();
         assert_eq!(std::fs::read_to_string(&staged).unwrap(), "build-two");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn env_of(vars: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {
+        let vars: Vec<(String, String)> = vars
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        move |name| {
+            vars.iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| OsString::from(v))
+        }
+    }
+
+    #[test]
+    fn an_appimage_stages_under_the_data_dir() {
+        let appimage = [
+            ("APPIMAGE", "/home/jo/poimen.AppImage"),
+            ("APPDIR", "/tmp/.mount_poimenAb12"),
+            ("HOME", "/home/jo"),
+        ];
+        assert_eq!(
+            stage_root(env_of(&appimage), "linux"),
+            Some(PathBuf::from("/home/jo/.local/share/poimen-server/bin"))
+        );
+        let with_xdg = [
+            ("APPDIR", "/tmp/.mount_poimenAb12"),
+            ("XDG_DATA_HOME", "/data"),
+            ("HOME", "/home/jo"),
+        ];
+        assert_eq!(
+            stage_root(env_of(&with_xdg), "linux"),
+            Some(PathBuf::from("/data/poimen-server/bin"))
+        );
+        // A relative XDG_DATA_HOME is ignored (XDG base directory spec).
+        let relative = [
+            ("APPIMAGE", "/a"),
+            ("XDG_DATA_HOME", "data"),
+            ("HOME", "/h"),
+        ];
+        assert_eq!(
+            stage_root(env_of(&relative), "linux"),
+            Some(PathBuf::from("/h/.local/share/poimen-server/bin"))
+        );
+        assert_eq!(stage_root(env_of(&[("APPIMAGE", "/a")]), "linux"), None);
+    }
+
+    #[test]
+    fn other_linux_packages_and_macos_do_not_stage() {
+        let plain = [("HOME", "/home/jo"), ("XDG_DATA_HOME", "/data")];
+        assert_eq!(stage_root(env_of(&plain), "linux"), None);
+        let empty = [("APPIMAGE", ""), ("APPDIR", ""), ("HOME", "/home/jo")];
+        assert_eq!(stage_root(env_of(&empty), "linux"), None);
+        let appimage = [("APPIMAGE", "/a"), ("HOME", "/Users/jo")];
+        assert_eq!(stage_root(env_of(&appimage), "macos"), None);
+    }
+
+    #[test]
+    fn windows_stages_under_local_app_data() {
+        let env = [("LOCALAPPDATA", r"C:\Users\jo\AppData\Local")];
+        assert_eq!(
+            stage_root(env_of(&env), "windows"),
+            Some(
+                PathBuf::from(r"C:\Users\jo\AppData\Local")
+                    .join("poimen-server")
+                    .join("bin")
+            )
+        );
+        assert_eq!(stage_root(env_of(&[]), "windows"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_unix_copy_is_executable_in_a_private_dir_behind_a_stable_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let dir = temp_dir("unix");
+        // As in a squashfs mount: readable and executable, not writable.
+        let bundled = dir.join("poimen-server");
+        std::fs::write(&bundled, "v1").unwrap();
+        std::fs::set_permissions(&bundled, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let bin = dir.join("data").join("poimen-server").join("bin");
+
+        let staged = prepare(&bundled, &bin, "0.9.0").unwrap();
+        let copy = bin.join("0.9.0").join("poimen-server");
+        let link = bin.join("poimen-server");
+        assert_eq!(
+            staged,
+            Staged {
+                program: copy.clone(),
+                hook_exe: Some(link.clone())
+            }
+        );
+        assert_eq!(mode(&copy), 0o755);
+        assert_eq!(mode(&bin.join("0.9.0")), 0o700);
+        assert_eq!(mode(&dir.join("data").join("poimen-server")), 0o700);
+        assert_eq!(
+            std::fs::read_link(&link).unwrap(),
+            Path::new("0.9.0/poimen-server")
+        );
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "v1");
+
+        // The next version moves the link; the hooks keep their path.
+        std::fs::set_permissions(&bundled, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&bundled, "v2").unwrap();
+        let next = prepare(&bundled, &bin, "0.10.0").unwrap();
+        assert_eq!(next.hook_exe, Some(link.clone()));
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "v2");
+        assert!(!bin.join("0.9.0").exists());
+        let names: Vec<_> = std::fs::read_dir(&bin)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(
+            names.len(),
+            2,
+            "the version and the link, no temp file: {names:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_without_a_bundle_stages_nothing() {
+        let dir = temp_dir("prepare-missing");
+        assert_eq!(
+            prepare(&dir.join("poimen-server"), &dir.join("bin"), "0.9.0"),
+            None
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

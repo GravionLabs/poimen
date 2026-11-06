@@ -181,7 +181,8 @@ pub fn uninstall(path: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
-/// The events of [`EVENTS`] that our hook file registers.
+/// The events of [`EVENTS`] that our hook file registers with a binary that is present (see
+/// [`crate::claude::binary_present`]).
 pub fn status(path: &Path) -> Result<Vec<&'static str>, String> {
     let file = read_ours(path)?;
     Ok(EVENTS
@@ -192,9 +193,9 @@ pub fn status(path: &Path) -> Result<Vec<&'static str>, String> {
                 .is_some_and(|entries| {
                     entries.iter().any(|h| {
                         ["bash", "powershell"].iter().any(|shell| {
-                            h.get(*shell)
-                                .and_then(Value::as_str)
-                                .is_some_and(|c| c.contains(MARKER))
+                            h.get(*shell).and_then(Value::as_str).is_some_and(|c| {
+                                c.contains(MARKER) && crate::claude::binary_present(c)
+                            })
                         })
                     })
                 })
@@ -320,7 +321,10 @@ mod tests {
     #[test]
     fn install_writes_one_entry_per_event_and_is_idempotent() {
         let path = temp("install");
+        let exe = path.with_file_name("poimen-server");
+        std::fs::write(&exe, "").unwrap();
         install(&path, Path::new("/opt/poimen-server")).unwrap();
+        assert!(status(&path).unwrap().is_empty(), "no binary at /opt");
         let first = std::fs::read_to_string(&path).unwrap();
         let file: Value = serde_json::from_str(&first).unwrap();
         assert_eq!(file["version"], 1);
@@ -334,7 +338,10 @@ mod tests {
             file,
             hook_file(Path::new("/opt/poimen-server"), cfg!(windows))
         );
+        install(&path, &exe).unwrap();
         assert_eq!(status(&path).unwrap(), EVENTS.to_vec());
+        std::fs::remove_file(&exe).unwrap();
+        assert!(status(&path).unwrap().is_empty(), "a binary that is gone");
         install(&path, Path::new("/opt/poimen-server")).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), first);
         install(&path, Path::new("/b/it's/poimen-server")).unwrap();
@@ -366,10 +373,16 @@ mod tests {
     #[test]
     fn status_finds_our_marker_in_a_powershell_only_entry() {
         let path = temp("ps-only");
+        let exe = path.with_file_name("poimen-server.exe");
+        std::fs::write(&exe, "").unwrap();
         let file = json!({"version": 1, "hooks": {"agentStop": [{"type": "command",
-            "powershell": "& 'C:\\x.exe' hook copilot agentStop # poimen-agent-hook"}]}});
+            "powershell": crate::claude::powershell_command(&exe, "copilot agentStop")}]}});
         std::fs::write(&path, file.to_string()).unwrap();
         assert_eq!(status(&path).unwrap(), vec!["agentStop"]);
+        let gone = json!({"version": 1, "hooks": {"agentStop": [{"type": "command",
+            "powershell": "& 'C:\\gone.exe' hook copilot agentStop # poimen-agent-hook"}]}});
+        std::fs::write(&path, gone.to_string()).unwrap();
+        assert!(status(&path).unwrap().is_empty());
         cleanup(&path);
     }
 

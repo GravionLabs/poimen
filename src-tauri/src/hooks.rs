@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::gui_path;
-use crate::poimen_server::{Runner, SystemRunner};
+use crate::poimen_server::{self, Runner, SystemRunner};
 
 /// The agents `poimen-server integration` knows.
 pub const AGENTS: [&str; 2] = ["claude", "copilot"];
@@ -69,7 +69,9 @@ pub fn install(exec: &impl Exec, agent: &str) -> Result<(), String> {
     exec.run(&["integration", "install", agent]).map(|_| ())
 }
 
-/// The bundled `poimen-server` (next to the app, else on the login-shell `PATH`).
+/// The bundled `poimen-server` (next to the app, else on the login-shell `PATH`). Inside a Linux
+/// AppImage it runs the staged copy (as `poimen_server::SystemRunner` starts it) and has the
+/// hooks call its stable link, not the mount of this run.
 pub struct SystemExec;
 
 impl Exec for SystemExec {
@@ -77,7 +79,19 @@ impl Exec for SystemExec {
         let program: PathBuf = SystemRunner::new()
             .resolve()
             .ok_or("`poimen-server` was not found next to poimen or on PATH")?;
-        let mut command = gui_path::command(program);
+        let staged = (!cfg!(windows))
+            .then(|| poimen_server::prepare_here(&program))
+            .flatten();
+        let mut command = match &staged {
+            Some(staged) => {
+                let mut command = gui_path::command(&staged.program);
+                if let Some(exe) = &staged.hook_exe {
+                    command.env(poimen_client::protocol::ENV_HOOK_EXE, exe);
+                }
+                command
+            }
+            None => gui_path::command(program),
+        };
         command.args(args);
         // A GUI app on Windows already has the user's PATH (as in `backend.rs`).
         if !cfg!(windows) {

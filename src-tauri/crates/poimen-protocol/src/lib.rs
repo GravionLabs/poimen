@@ -17,6 +17,10 @@ pub const PROTOCOL_VERSION: u32 = 2;
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
 /// Environment variable set in every terminal: its own id.
 pub const ENV_TERMINAL_ID: &str = "POIMEN_TERMINAL_ID";
+/// Environment variable of `poimen-server integration install`: the absolute path the hooks
+/// call instead of the running binary. The app sets it when it runs a copy whose path is not
+/// stable (inside an AppImage), pointing at the stable link of its staged copy.
+pub const ENV_HOOK_EXE: &str = "POIMEN_HOOK_EXE";
 
 /// The directory under `%LOCALAPPDATA%` that holds the socket marker, `server.lock`,
 /// `server.json` and the started server copies on Windows (not the install directory).
