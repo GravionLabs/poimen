@@ -395,6 +395,9 @@
               <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
             </section>
           }
+          @case ("spaces") {
+            <app-space-templates-editor />
+          }
           @case ("space-layout") {
             <app-space-layout-editor />
           }

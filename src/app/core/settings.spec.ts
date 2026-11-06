@@ -92,6 +92,15 @@ describe("parseSettings", () => {
         autoControl: false,
         notifyOnBlocked: false,
         spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+        spaceTemplates: [
+          { name: "w", dir: "~/src", remote: null, agent: "claude", model: "opus", layout: null },
+          {
+            name: "az",
+            remote: { provider: "azure-devops", organization: "o", project: "p" },
+            agent: "copilot",
+          },
+          { name: 3 },
+        ],
         home: "/Users/x",
         warnings: ["w"],
       }),
@@ -122,6 +131,17 @@ describe("parseSettings", () => {
       notifyOnBlocked: false,
       notifyOnDone: true,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+      spaceTemplates: [
+        { name: "w", dir: "~/src", remote: null, agent: "claude", model: "opus", layout: null },
+        {
+          name: "az",
+          dir: null,
+          remote: { provider: "azure-devops", organization: "o", project: "p" },
+          agent: "copilot",
+          model: null,
+          layout: null,
+        },
+      ],
       trustedProjects: {},
       tasks: DEFAULT_SETTINGS.tasks,
       home: "/Users/x",

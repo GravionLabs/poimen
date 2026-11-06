@@ -56,6 +56,21 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         labels: ["Explorer folders", "Add folder", "Show hidden folders"],
       },
       {
+        id: "spaces",
+        title: "Spaces",
+        labels: [
+          "Space templates",
+          "Template",
+          "Add template",
+          "Name",
+          "Directory",
+          "Remote",
+          "Agent",
+          "Model",
+          "Layout",
+        ],
+      },
+      {
         id: "space-layout",
         title: "New space layout",
         labels: ["Panes of a new space", "Name", "Command", "Split from", "Direction", "Keeps"],

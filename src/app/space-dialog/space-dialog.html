@@ -47,6 +47,15 @@
         (input)="typeLabel($event)"
       />
     </label>
+    @if (path().trim()) {
+      <p class="hint template" data-testid="template-hint">
+        @if (actions.template(); as t) {
+          Template: {{ t.name }} · {{ agent(t.agent) }}
+        } @else {
+          Template: default
+        }
+      </p>
+    }
     <p class="hint">An existing space for the directory is focused instead.</p>
     @if (actions.error(); as message) {
       <p class="error" role="alert">{{ message }}</p>
