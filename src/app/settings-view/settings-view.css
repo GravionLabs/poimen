@@ -422,3 +422,10 @@ h3 {
   color: var(--h-primary-color);
   font-weight: 600;
 }
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 8px 0;
+}

@@ -35,6 +35,14 @@ import {
   matches,
   SETTINGS_GROUPS,
 } from "./settings-categories";
+import {
+  COMMON_MONO_FONTS,
+  COMMON_UI_FONTS,
+  MAX_TERMINAL_FONT_SIZE,
+  MAX_UI_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  MIN_UI_FONT_SIZE,
+} from "../core/ui-font";
 import { SpaceLayoutEditor } from "./space-layout-editor";
 
 export type SchemeMode = "single" | "pair";
@@ -348,6 +356,29 @@ export class SettingsView {
 
   protected setShowHidden(event: Event): void {
     void this.store.setExplorerShowHidden((event.target as HTMLInputElement).checked);
+  }
+
+  protected readonly monoFonts = COMMON_MONO_FONTS;
+  protected readonly uiFonts = COMMON_UI_FONTS;
+  protected readonly uiSizeRange = [MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE] as const;
+  protected readonly terminalSizeRange = [MIN_TERMINAL_FONT_SIZE, MAX_TERMINAL_FONT_SIZE] as const;
+
+  protected setFont(which: "terminal" | "ui", event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    void (which === "terminal"
+      ? this.store.setTerminalFontFamily(value)
+      : this.store.setUiFontFamily(value));
+  }
+
+  protected setFontSize(which: "terminal" | "ui", event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const size = input.value.trim() === "" ? Number.NaN : Number(input.value);
+    const write =
+      which === "terminal" ? this.store.setTerminalFontSize(size) : this.store.setUiFontSize(size);
+    void write.then((ok) => {
+      if (!ok)
+        input.value = String(this.settings()[which === "terminal" ? "fontSize" : "uiFontSize"]);
+    });
   }
 
   protected setNotification(kind: "blocked" | "done", event: Event): void {

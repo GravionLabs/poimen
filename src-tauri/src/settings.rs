@@ -14,6 +14,9 @@ use serde_json::Value;
 pub const DEFAULT_FONT_SIZE: f64 = 13.0;
 const MIN_FONT_SIZE: f64 = 6.0;
 const MAX_FONT_SIZE: f64 = 72.0;
+pub const DEFAULT_UI_FONT_SIZE: f64 = 13.0;
+const MIN_UI_FONT_SIZE: f64 = 10.0;
+const MAX_UI_FONT_SIZE: f64 = 20.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,6 +163,10 @@ pub struct Settings {
     /// `None` keeps the app's default monospace stack.
     pub font_family: Option<String>,
     pub font_size: f64,
+    /// App UI font family (`ui.fontFamily`); `None` keeps the default `--font-ui`.
+    pub ui_font_family: Option<String>,
+    /// App UI font size in px (`ui.fontSize`).
+    pub ui_font_size: f64,
     /// Terminal colors taken from Ghostty; `None` keeps the theme colors.
     pub colors: Option<Colors>,
     /// Open panes for input when no other client controls them (`terminal.autoControl`).
@@ -354,6 +361,8 @@ impl Default for Settings {
             color_schema: None,
             font_family: None,
             font_size: DEFAULT_FONT_SIZE,
+            ui_font_family: None,
+            ui_font_size: DEFAULT_UI_FONT_SIZE,
             colors: None,
             auto_control: true,
             shortcuts: default_shortcuts(),
@@ -391,6 +400,10 @@ pub struct Ghostty {
 
 fn valid_size(size: f64) -> bool {
     size.is_finite() && (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&size)
+}
+
+fn valid_ui_size(size: f64) -> bool {
+    size.is_finite() && (MIN_UI_FONT_SIZE..=MAX_UI_FONT_SIZE).contains(&size)
 }
 
 fn hex_color(value: &str) -> Option<String> {
@@ -840,6 +853,30 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("harnesses") {
         s.harnesses = crate::harness::resolve(value, &mut s.warnings);
+    }
+
+    if let Some(ui) = root.get("ui") {
+        if let Some(ui) = ui.as_object() {
+            match ui.get("fontFamily") {
+                None | Some(Value::Null) => {}
+                Some(Value::String(f)) if !f.trim().is_empty() => {
+                    s.ui_font_family = Some(f.trim().to_owned());
+                }
+                Some(other) => s
+                    .warnings
+                    .push(format!("ui.fontFamily {other} must be a non-empty string")),
+            }
+            if let Some(v) = ui.get("fontSize") {
+                match v.as_f64().filter(|n| valid_ui_size(*n)) {
+                    Some(n) => s.ui_font_size = n,
+                    None => s.warnings.push(format!(
+                        "ui.fontSize {v} must be a number from {MIN_UI_FONT_SIZE} to {MAX_UI_FONT_SIZE}"
+                    )),
+                }
+            }
+        } else {
+            s.warnings.push("ui must be an object".into());
+        }
     }
 
     let mut use_ghostty = false;
@@ -1432,6 +1469,65 @@ pub fn save_notification(home: &Path, kind: &str, on: bool) -> Result<(), String
     save_with(home, |text| set_notification_text(text, kind, on))
 }
 
+/// Returns `text` with `terminal.fontFamily` set; an empty family removes the key.
+pub fn set_terminal_font_family_text(text: &str, family: &str) -> Result<String, String> {
+    set_font_family_text(text, "terminal", family)
+}
+
+/// Returns `text` with `terminal.fontSize` set (`MIN_FONT_SIZE`..`MAX_FONT_SIZE`).
+pub fn set_terminal_font_size_text(text: &str, size: f64) -> Result<String, String> {
+    if !valid_size(size) {
+        return Err(format!(
+            "terminal.fontSize {size} must be a number from {MIN_FONT_SIZE} to {MAX_FONT_SIZE}"
+        ));
+    }
+    set_path_text(text, &["terminal", "fontSize"], &size.to_string())
+}
+
+/// Returns `text` with `ui.fontFamily` set; an empty family removes the key.
+pub fn set_ui_font_family_text(text: &str, family: &str) -> Result<String, String> {
+    set_font_family_text(text, "ui", family)
+}
+
+/// Returns `text` with `ui.fontSize` set (10 to 20).
+pub fn set_ui_font_size_text(text: &str, size: f64) -> Result<String, String> {
+    if !valid_ui_size(size) {
+        return Err(format!(
+            "ui.fontSize {size} must be a number from {MIN_UI_FONT_SIZE} to {MAX_UI_FONT_SIZE}"
+        ));
+    }
+    set_path_text(text, &["ui", "fontSize"], &size.to_string())
+}
+
+fn set_font_family_text(text: &str, section: &str, family: &str) -> Result<String, String> {
+    let family = family.trim();
+    if family.is_empty() {
+        return remove_path_text(text, &[section, "fontFamily"]);
+    }
+    let value = serde_json::to_string(family).map_err(|e| e.to_string())?;
+    set_path_text(text, &[section, "fontFamily"], &value)
+}
+
+/// Writes `terminal.fontFamily` below `home`, like `save_theme`.
+pub fn save_terminal_font_family(home: &Path, family: &str) -> Result<(), String> {
+    save_with(home, |t| set_terminal_font_family_text(t, family))
+}
+
+/// Writes `terminal.fontSize` below `home`, like `save_theme`.
+pub fn save_terminal_font_size(home: &Path, size: f64) -> Result<(), String> {
+    save_with(home, |t| set_terminal_font_size_text(t, size))
+}
+
+/// Writes `ui.fontFamily` below `home`, like `save_theme`.
+pub fn save_ui_font_family(home: &Path, family: &str) -> Result<(), String> {
+    save_with(home, |t| set_ui_font_family_text(t, family))
+}
+
+/// Writes `ui.fontSize` below `home`, like `save_theme`.
+pub fn save_ui_font_size(home: &Path, size: f64) -> Result<(), String> {
+    save_with(home, |t| set_ui_font_size_text(t, size))
+}
+
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
 pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> {
     save_with(home, |text| set_explorer_show_hidden_text(text, show))
@@ -1786,6 +1882,62 @@ mod tests {
         assert!(!r.notify_on_blocked && !r.notify_on_done);
         let back = set_notification_text(&both, "done", true).unwrap();
         assert!(resolve(Some(&back), || None).notify_on_done);
+    }
+
+    #[test]
+    fn font_setters_keep_comments_and_other_keys() {
+        let text = "{\n  // mine\n  \"theme\": \"dark\",\n  \"terminal\": { \"scrollback\": 5 }\n}";
+        let out = set_terminal_font_size_text(text, 15.0).unwrap();
+        assert!(out.contains("// mine") && out.contains("\"scrollback\": 5"));
+        let out = set_terminal_font_family_text(&out, "Fira Code").unwrap();
+        let out = set_ui_font_family_text(&out, "Inter, sans-serif").unwrap();
+        let out = set_ui_font_size_text(&out, 14.0).unwrap();
+        assert!(out.contains("// mine"));
+        let s = resolve(Some(&out.replace("// mine", "")), || None);
+        assert_eq!(s.font_family.as_deref(), Some("Fira Code"));
+        assert_eq!(s.font_size, 15.0);
+        assert_eq!(s.ui_font_family.as_deref(), Some("Inter, sans-serif"));
+        assert_eq!(s.ui_font_size, 14.0);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+    }
+
+    #[test]
+    fn empty_font_family_removes_the_key() {
+        let text =
+            r#"{"terminal":{"fontFamily":"Fira Code","fontSize":15},"ui":{"fontFamily":"Inter"}}"#;
+        let out = set_terminal_font_family_text(text, "  ").unwrap();
+        let out = set_ui_font_family_text(&out, "").unwrap();
+        let s = resolve(Some(&out), || None);
+        assert_eq!((s.font_family, s.font_size), (None, 15.0));
+        assert_eq!(s.ui_font_family, None);
+        assert!(!out.contains("fontFamily"));
+    }
+
+    #[test]
+    fn font_sizes_out_of_range_are_rejected() {
+        assert!(set_terminal_font_size_text("{}", 5.0).is_err());
+        assert!(set_terminal_font_size_text("{}", 73.0).is_err());
+        assert!(set_terminal_font_size_text("{}", f64::NAN).is_err());
+        assert!(set_ui_font_size_text("{}", 9.0).is_err());
+        assert!(set_ui_font_size_text("{}", 21.0).is_err());
+        assert!(set_ui_font_size_text("{}", 10.0).is_ok());
+        assert!(set_ui_font_size_text("{}", 20.0).is_ok());
+    }
+
+    #[test]
+    fn ui_settings_validate_with_warnings() {
+        let d = Settings::default();
+        assert_eq!((d.ui_font_family.clone(), d.ui_font_size), (None, 13.0));
+        let s = resolve(Some(r#"{"ui":{"fontFamily":3,"fontSize":99}}"#), || None);
+        assert_eq!((s.ui_font_family, s.ui_font_size), (None, 13.0));
+        assert_eq!(s.warnings.len(), 2, "{:?}", s.warnings);
+        let s = resolve(
+            Some(r#"{"ui":{"fontFamily":null,"fontSize":12.5}}"#),
+            || None,
+        );
+        assert_eq!((s.ui_font_family, s.ui_font_size), (None, 12.5));
+        assert!(s.warnings.is_empty());
+        assert_eq!(resolve(Some(r#"{"ui":3}"#), || None).warnings.len(), 1);
     }
 
     #[test]

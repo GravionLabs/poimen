@@ -11,6 +11,7 @@ import {
 } from "@angular/core";
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
+import { applyUiFont } from "./core/ui-font";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import {
   flowSession,
@@ -287,6 +288,10 @@ export class App {
     });
     destroyRef.onDestroy(() => tokens.disconnect());
     effect(() => this.terminalColors.update(this.prefs.settings().colors));
+    effect(() => {
+      const { uiFontFamily, uiFontSize } = this.prefs.settings();
+      applyUiFont(document.documentElement, uiFontFamily, uiFontSize);
+    });
     destroyRef.onDestroy(this.followSystemTheme());
     // The output panel follows the active tab's agent (Claude Code, Copilot CLI); nothing is watched while it is hidden.
     effect(() => {

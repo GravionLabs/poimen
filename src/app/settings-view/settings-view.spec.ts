@@ -374,6 +374,58 @@ describe("SettingsView explorer section", () => {
   });
 });
 
+describe("SettingsView fonts", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
+
+  const field = (host: HTMLElement, label: string) =>
+    [...host.querySelectorAll<HTMLLabelElement>("section[aria-label='Fonts'] label.field")]
+      .find((l) => l.textContent?.trim().startsWith(label))!
+      .querySelector("input")!;
+
+  it("writes the four values", async () => {
+    const { host } = setup();
+    const entries: [string, string, string, Record<string, unknown>][] = [
+      ["Terminal font family", "Fira Code", "set_terminal_font_family", { family: "Fira Code" }],
+      ["Terminal font size", "15", "set_terminal_font_size", { size: 15 }],
+      ["UI font family", "Inter", "set_ui_font_family", { family: "Inter" }],
+      ["UI font size", "14", "set_ui_font_size", { size: 14 }],
+    ];
+    for (const [label, value, command, args] of entries) {
+      const input = field(host, label);
+      input.value = value;
+      input.dispatchEvent(new Event("change"));
+      await vi.waitFor(() => expect(tauri.calls(command)).toEqual([args]));
+    }
+  });
+
+  it("shows the validation message and writes nothing for a bad size", async () => {
+    const { fixture, host } = setup();
+    const input = field(host, "UI font size");
+    input.value = "40";
+    input.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(host.querySelector(".error")?.textContent).toContain("from 10 to 20");
+    });
+    expect(tauri.calls("set_ui_font_size")).toEqual([]);
+    expect(input.value).toBe("13");
+  });
+
+  it("suggests common families and is found by the search labels", () => {
+    const { host } = setup();
+    expect(host.querySelectorAll("datalist#mono-fonts option").length).toBeGreaterThan(3);
+    const labels = allPages().find((p) => p.id === "appearance")!.labels;
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        "Terminal font family",
+        "Terminal font size",
+        "UI font family",
+        "UI font size",
+      ]),
+    );
+  });
+});
+
 describe("SettingsView agents section", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
 

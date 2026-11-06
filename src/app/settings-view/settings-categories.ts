@@ -33,6 +33,10 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
           "Light/dark pair",
           "Dark schemes",
           "Light schemes",
+          "Terminal font family",
+          "Terminal font size",
+          "UI font family",
+          "UI font size",
         ],
       },
       {

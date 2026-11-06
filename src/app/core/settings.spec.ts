@@ -20,6 +20,58 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./tauri.mock")).tauri.listen,
 }));
 
+describe("UI font settings", () => {
+  beforeEach(() => {
+    tauri.reset();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  it("defaults to the default stack and 13px", () => {
+    expect(DEFAULT_SETTINGS.uiFontFamily).toBeNull();
+    expect(DEFAULT_SETTINGS.uiFontSize).toBe(13);
+    const s = parseSettings({ uiFontFamily: 3, uiFontSize: "big" });
+    expect([s.uiFontFamily, s.uiFontSize]).toEqual([null, 13]);
+  });
+
+  it("writes the four font settings through their commands", async () => {
+    const store = create();
+    expect(await store.setTerminalFontFamily(" Fira Code ")).toBe(true);
+    expect(await store.setTerminalFontSize(16)).toBe(true);
+    expect(await store.setUiFontFamily("Inter")).toBe(true);
+    expect(await store.setUiFontSize(14)).toBe(true);
+    expect(tauri.calls("set_terminal_font_family")).toEqual([{ family: "Fira Code" }]);
+    expect(tauri.calls("set_terminal_font_size")).toEqual([{ size: 16 }]);
+    expect(tauri.calls("set_ui_font_family")).toEqual([{ family: "Inter" }]);
+    expect(tauri.calls("set_ui_font_size")).toEqual([{ size: 14 }]);
+    const s = store.settings();
+    expect([s.fontFamily, s.fontSize, s.uiFontFamily, s.uiFontSize]).toEqual([
+      "Fira Code",
+      16,
+      "Inter",
+      14,
+    ]);
+  });
+
+  it("an empty family goes back to the default", async () => {
+    const store = create();
+    await store.setUiFontFamily("Inter");
+    await store.setUiFontFamily("  ");
+    expect(store.settings().uiFontFamily).toBeNull();
+    expect(tauri.calls("set_ui_font_family").at(-1)).toEqual({ family: "" });
+  });
+
+  it("does not write a size out of range and says why", async () => {
+    const store = create();
+    expect(await store.setUiFontSize(9)).toBe(false);
+    expect(await store.setUiFontSize(Number.NaN)).toBe(false);
+    expect(await store.setTerminalFontSize(73)).toBe(false);
+    expect(tauri.calls("set_ui_font_size")).toEqual([]);
+    expect(tauri.calls("set_terminal_font_size")).toEqual([]);
+    expect(store.writeError()).toBe("The terminal font size must be a number from 6 to 72");
+    expect(store.settings().uiFontSize).toBe(13);
+  });
+});
+
 describe("parseSettings", () => {
   it("reads the wire shape", () => {
     expect(
@@ -28,6 +80,8 @@ describe("parseSettings", () => {
         colorSchema: " dracula ",
         fontFamily: "Hack",
         fontSize: 15,
+        uiFontFamily: "Inter",
+        uiFontSize: 14,
         colors: {
           background: "#000000",
           foreground: null,
@@ -46,6 +100,8 @@ describe("parseSettings", () => {
       colorSchema: "dracula",
       fontFamily: "Hack",
       fontSize: 15,
+      uiFontFamily: "Inter",
+      uiFontSize: 14,
       colors: {
         background: "#000000",
         foreground: null,

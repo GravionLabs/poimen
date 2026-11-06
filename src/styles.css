@@ -80,7 +80,7 @@ body {
 body {
   background: var(--app-ground);
   color: var(--h-text-color);
-  font: 13px/1.4 var(--font-ui);
+  font: var(--font-size-ui, 13px) / 1.4 var(--font-ui);
   overflow: hidden;
 }
 
