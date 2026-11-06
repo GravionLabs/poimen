@@ -217,6 +217,13 @@ pub fn run_bytes(dir: &str, args: &[&str]) -> Result<Vec<u8>, String> {
     }
 }
 
+/// The URL of the remote `origin`; `None` outside a repository or without that remote.
+pub fn origin_url(dir: &str) -> Option<String> {
+    let out = run_bytes(dir, &["config", "--get", "remote.origin.url"]).ok()?;
+    let url = String::from_utf8_lossy(&out).trim().to_owned();
+    (!url.is_empty()).then_some(url)
+}
+
 /// The ref work is based on, without fetching: `origin/release/next` if it exists, else the
 /// default branch of `origin` (`refs/remotes/origin/HEAD`); `None` when there is neither.
 pub fn base_ref(dir: &str) -> Option<String> {

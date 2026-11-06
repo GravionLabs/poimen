@@ -1,10 +1,11 @@
 //! Space templates (`spaceTemplates[]` in the user config): a directory prefix mapped to an agent
 //! (a harness id, optional model) and an optional layout for a new space. Matching is pure; the
-//! agent line goes through the harness registry. The remote match of a later PBI plugs into
-//! `resolve` through its `remote` parameter.
+//! agent line goes through the harness registry. A template matches by directory, by the remote of
+//! `origin` (GitHub owner or Azure DevOps project, see `remote.rs`) or by both.
 
 use crate::harness::{self, Harness};
 use crate::layout::Layout;
+use crate::remote::Remote;
 use crate::tasks::Cmd;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -12,7 +13,9 @@ use crate::tasks::Cmd;
 pub struct Template {
     pub name: String,
     /// `match.dir` as written: absolute, or relative to the home directory with a leading `~`.
-    pub dir: String,
+    pub dir: Option<String>,
+    /// `match.remote`: the GitHub owner or Azure DevOps organization and project of `origin`.
+    pub remote: Option<Remote>,
     /// A harness id from `harnesses`.
     pub agent: String,
     pub model: Option<String>,
@@ -57,12 +60,13 @@ fn contains(prefix: &str, dir: &str) -> bool {
             .is_some_and(|rest| rest.starts_with('/'))
 }
 
-/// The template whose `match.dir` is the longest path-segment prefix of `dir`. `remote` (the
-/// `origin` URL) is accepted for the remote match of a later PBI and not used yet. Case-insensitive
-/// on Windows and macOS.
+/// The best template for `dir` and the parsed `origin` of its repository (`None` without a
+/// repository or an `origin`; such a directory matches by `dir` only). A template with both fields
+/// needs both to match. Precedence: both > `remote` only > `dir` only, then the longest `dir`
+/// (path-segment prefix). Case-insensitive paths on Windows and macOS.
 pub fn resolve<'a>(
     dir: &str,
-    remote: Option<&str>,
+    remote: Option<&Remote>,
     templates: &'a [Template],
     home: Option<&std::path::Path>,
 ) -> Option<&'a Template> {
@@ -77,7 +81,7 @@ pub fn resolve<'a>(
 
 fn resolve_with<'a>(
     dir: &str,
-    _remote: Option<&str>,
+    remote: Option<&Remote>,
     templates: &'a [Template],
     home: Option<&std::path::Path>,
     case_insensitive: bool,
@@ -85,9 +89,24 @@ fn resolve_with<'a>(
     let dir = normalize(dir, home, case_insensitive);
     templates
         .iter()
-        .map(|t| (normalize(&t.dir, home, case_insensitive), t))
-        .filter(|(p, _)| contains(p, &dir))
-        .max_by_key(|(p, _)| p.len())
+        .filter_map(|t| {
+            let dir_len = match &t.dir {
+                Some(d) => {
+                    let p = normalize(d, home, case_insensitive);
+                    contains(&p, &dir).then_some(p.len())?
+                }
+                None => 0,
+            };
+            if let Some(want) = &t.remote
+                && !remote.is_some_and(|r| want.same(r))
+            {
+                return None;
+            }
+            // both (3) > remote only (2) > dir only (1)
+            let tier = u8::from(t.dir.is_some()) + 2 * u8::from(t.remote.is_some());
+            Some(((tier, dir_len), t))
+        })
+        .max_by_key(|(k, _)| *k)
         .map(|(_, t)| t)
 }
 
@@ -122,11 +141,31 @@ mod tests {
     fn t(name: &str, dir: &str) -> Template {
         Template {
             name: name.into(),
-            dir: dir.into(),
+            dir: Some(dir.into()),
+            remote: None,
             agent: "claude".into(),
             model: None,
             layout: None,
         }
+    }
+
+    fn r(name: &str, dir: Option<&str>, remote: Remote) -> Template {
+        Template {
+            dir: dir.map(Into::into),
+            remote: Some(remote),
+            ..t(name, "/unused")
+        }
+    }
+
+    fn gh(owner: &str) -> Remote {
+        Remote::GitHub {
+            owner: owner.into(),
+        }
+    }
+
+    fn pick_remote<'a>(dir: &str, remote: Option<Remote>, ts: &'a [Template]) -> Option<&'a str> {
+        resolve_with(dir, remote.as_ref(), ts, Some(Path::new("/home/jk")), false)
+            .map(|t| t.name.as_str())
     }
 
     fn pick<'a>(dir: &str, ts: &'a [Template], ci: bool) -> Option<&'a str> {
@@ -167,6 +206,76 @@ mod tests {
         assert_eq!(pick("c:/src/a/x", &ts, true), Some("w"));
         assert_eq!(pick("C:\\Src\\ab", &ts, true), Some("root"));
         assert_eq!(pick("D:\\Src\\a", &ts, true), None);
+    }
+
+    #[test]
+    fn a_remote_only_template_matches_any_directory_of_that_remote() {
+        let ts = [r("work", None, gh("GravionLabs"))];
+        assert_eq!(
+            pick_remote("/x", Some(gh("gravionlabs")), &ts),
+            Some("work")
+        );
+        assert_eq!(pick_remote("/x", Some(gh("other")), &ts), None);
+    }
+
+    #[test]
+    fn a_directory_without_origin_matches_only_by_dir() {
+        let ts = [
+            r("remote", None, gh("a")),
+            r("both", Some("~/src"), gh("a")),
+            t("dir", "~/src"),
+        ];
+        assert_eq!(pick_remote("/home/jk/src/x", None, &ts), Some("dir"));
+        assert_eq!(pick_remote("/elsewhere", None, &ts), None);
+    }
+
+    #[test]
+    fn with_both_fields_both_must_match() {
+        let ts = [r("both", Some("~/src"), gh("a"))];
+        assert_eq!(
+            pick_remote("/home/jk/src/x", Some(gh("a")), &ts),
+            Some("both")
+        );
+        assert_eq!(pick_remote("/home/jk/src/x", Some(gh("b")), &ts), None);
+        assert_eq!(pick_remote("/home/jk/other", Some(gh("a")), &ts), None);
+    }
+
+    #[test]
+    fn precedence_is_both_then_remote_only_then_dir_only() {
+        let ts = [
+            t("dir", "~/src/deep/er"),
+            r("remote", None, gh("a")),
+            r("both", Some("~/src"), gh("a")),
+        ];
+        // a shorter dir with a matching remote beats a longer dir alone
+        assert_eq!(
+            pick_remote("/home/jk/src/deep/er/x", Some(gh("a")), &ts),
+            Some("both")
+        );
+        // outside the dir of `both`, the remote-only template applies
+        assert_eq!(pick_remote("/tmp/x", Some(gh("a")), &ts), Some("remote"));
+        // remote only beats a dir only, however long
+        let ts = [t("dir", "~/src/deep"), r("remote", None, gh("a"))];
+        assert_eq!(
+            pick_remote("/home/jk/src/deep/x", Some(gh("a")), &ts),
+            Some("remote")
+        );
+        assert_eq!(
+            pick_remote("/home/jk/src/deep/x", Some(gh("z")), &ts),
+            Some("dir")
+        );
+    }
+
+    #[test]
+    fn among_templates_with_both_fields_the_longest_dir_wins() {
+        let ts = [
+            r("short", Some("~/src"), gh("a")),
+            r("long", Some("~/src/app"), gh("a")),
+        ];
+        assert_eq!(
+            pick_remote("/home/jk/src/app/x", Some(gh("a")), &ts),
+            Some("long")
+        );
     }
 
     #[test]
