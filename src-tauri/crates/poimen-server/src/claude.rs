@@ -35,6 +35,8 @@ pub(crate) const WINDOWS_HOOK_TIMEOUT_SECS: u64 = 5;
 pub struct Report {
     pub status: AgentStatus,
     pub session_id: Option<String>,
+    /// Notification text (`message` of a permission `Notification`), cleaned and truncated.
+    pub message: Option<String>,
 }
 
 /// Maps a hook payload to a report: `SessionStart` idle, `Stop` done (the turn finished), `UserPromptSubmit`/`PostToolUse`
@@ -60,7 +62,19 @@ pub fn map_hook(payload: &Value) -> Option<Report> {
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_owned);
-    Some(Report { status, session_id })
+    let message = (status == AgentStatus::Blocked)
+        .then(|| {
+            payload
+                .get("message")
+                .and_then(Value::as_str)
+                .and_then(poimen_protocol::clean_message)
+        })
+        .flatten();
+    Some(Report {
+        status,
+        session_id,
+        message,
+    })
 }
 
 /// The report request for a payload in the terminal `terminal_id`.
@@ -72,6 +86,7 @@ pub fn request_for(terminal_id: &str, seq: u64, payload: &Value) -> Option<Termi
         status: report.status,
         agent: Some("claude".into()),
         session_id: report.session_id,
+        message: report.message,
     })
 }
 
@@ -413,6 +428,29 @@ mod tests {
         p["notification_type"] = json!("idle_prompt");
         assert_eq!(status_of(&p), None);
         assert_eq!(status_of(&event("Notification")), None);
+    }
+
+    #[test]
+    fn a_permission_notification_carries_its_text_other_events_do_not() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../fixtures/claude-notification.json")).unwrap();
+        let r = map_hook(&fixture).unwrap();
+        assert_eq!(
+            r.message.as_deref(),
+            Some("Claude needs your permission to use Bash")
+        );
+        let mut long = fixture.clone();
+        long["message"] = json!(format!("a\u{1b}[1m\n{}", "x".repeat(500)));
+        let text = map_hook(&long).unwrap().message.unwrap();
+        assert_eq!(text.chars().count(), 300);
+        assert!(text.starts_with("a [1m x"));
+        long["message"] = json!("  ");
+        assert_eq!(map_hook(&long).unwrap().message, None);
+        let mut stop = event("Stop");
+        stop["message"] = json!("ignored");
+        assert_eq!(map_hook(&stop).unwrap().message, None);
+        let request = request_for("t1", 5, &fixture).unwrap();
+        assert_eq!(request.message, r.message);
     }
 
     #[test]

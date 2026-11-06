@@ -150,6 +150,10 @@ fn wire_pane(terminal: &Terminal, space_id: &str) -> Value {
         if let Some(session) = &info.session_id {
             pane["agent_session"] = json!({"value": session});
         }
+        if let Some(message) = &info.message {
+            pane["agent_message"] = json!(message);
+            pane["agent_message_at"] = json!(info.message_at);
+        }
     }
     pane
 }
@@ -530,12 +534,19 @@ fn backend_event(event: &Event) -> BackendEvent {
     if let Event::AgentStatusChanged {
         terminal_id,
         status,
+        message,
+        message_at,
         ..
     } = event
     {
+        let mut data = json!({"pane_id": terminal_id, "agent_status": status_name(*status)});
+        if let Some(message) = message {
+            data["agent_message"] = json!(message);
+            data["agent_message_at"] = json!(message_at);
+        }
         return BackendEvent {
             kind: "pane.agent_status_changed".into(),
-            data: json!({"pane_id": terminal_id, "agent_status": status_name(*status)}),
+            data,
         };
     }
     let mut value = serde_json::to_value(event).unwrap_or(Value::Null);
@@ -767,12 +778,16 @@ mod tests {
             status: AgentStatus::Working,
             agent: Some("claude".into()),
             session_id: None,
+            message: None,
+            message_at: None,
         });
         let mut blocked = terminal("t2", "s1", "b");
         blocked.agent = Some(AgentInfo {
             status: AgentStatus::Blocked,
             agent: None,
             session_id: None,
+            message: None,
+            message_at: None,
         });
         let snapshot = map_snapshot(
             &[space("s1", "api"), space("s2", "web")],
@@ -798,6 +813,8 @@ mod tests {
                 status,
                 agent: Some("claude".into()),
                 session_id: None,
+                message: None,
+                message_at: None,
             })
         };
         let event = changed(AgentStatus::Blocked);
@@ -807,6 +824,35 @@ mod tests {
             json!({"pane_id": "t1", "agent_status": "blocked"})
         );
         assert_eq!(changed(AgentStatus::Gone).data["agent_status"], "unknown");
+    }
+
+    #[test]
+    fn the_notification_text_reaches_the_pane_and_its_event() {
+        let event = backend_event(&Event::AgentStatusChanged {
+            terminal_id: "t1".into(),
+            status: AgentStatus::Blocked,
+            agent: None,
+            session_id: None,
+            message: Some("Allow Bash?".into()),
+            message_at: Some(1700),
+        });
+        assert_eq!(
+            event.data,
+            json!({"pane_id": "t1", "agent_status": "blocked",
+                "agent_message": "Allow Bash?", "agent_message_at": 1700})
+        );
+        let mut t = terminal("t1", "s1", "a");
+        t.agent = Some(AgentInfo {
+            status: AgentStatus::Blocked,
+            agent: None,
+            session_id: None,
+            message: Some("Allow Bash?".into()),
+            message_at: Some(1700),
+        });
+        let snapshot = map_snapshot(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        assert_eq!(snapshot.panes[0]["agent_message"], "Allow Bash?");
+        assert_eq!(snapshot.panes[0]["agent_message_at"], 1700);
+        assert!(snapshot.panes[1].get("agent_message").is_none());
     }
 
     #[test]
@@ -1100,6 +1146,8 @@ mod tests {
             status: AgentStatus::Idle,
             agent: Some("copilot".into()),
             session_id: Some("s-9".into()),
+            message: None,
+            message_at: None,
         });
         let plain = terminal("t2", "s1", "zsh");
         let panes = map_snapshot(&[space("s1", "api")], &[with, plain]).panes;

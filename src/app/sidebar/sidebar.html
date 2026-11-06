@@ -111,9 +111,13 @@
                       {{ (seg.sep ? "· " : "") + seg.text }}
                     </button>
                   } @else {
-                    <span class="space-meta" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
-                      (seg.sep ? "· " : "") + seg.text
-                    }}</span>
+                    <span
+                      class="space-meta"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      [title]="seg.tip ?? ''"
+                      >{{ (seg.sep ? "· " : "") + seg.text }}</span
+                    >
                   }
                 }
               }
@@ -210,9 +214,13 @@
                       {{ (seg.sep ? "· " : "") + seg.text }}
                     </button>
                   } @else {
-                    <span class="text" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
-                      (seg.sep ? "· " : "") + seg.text
-                    }}</span>
+                    <span
+                      class="text"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      [title]="seg.tip ?? ''"
+                      >{{ (seg.sep ? "· " : "") + seg.text }}</span
+                    >
                   }
                 }
               }

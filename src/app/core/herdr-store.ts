@@ -300,7 +300,17 @@ export class HerdrStore {
       case "pane.agent_status_changed":
         if (event.data?.pane_id && event.data.agent_status) {
           this._snapshot.update((s) =>
-            applyStatus(s, event.data!.pane_id!, event.data!.agent_status!),
+            applyStatus(
+              s,
+              event.data!.pane_id!,
+              event.data!.agent_status!,
+              event.data!.agent_message
+                ? {
+                    text: event.data!.agent_message,
+                    at: event.data!.agent_message_at ?? Date.now(),
+                  }
+                : undefined,
+            ),
           );
           const status = event.data.agent_status;
           // An agent that finished may have changed the working tree; skip it in the background.
