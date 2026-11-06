@@ -1,8 +1,9 @@
 name: CI
 
-# Checks of the frontend (src/) and the Tauri crate (src-tauri/). On pull requests the `changes` job decides from
-# the diff whether app files or this workflow changed; the `ci` job always runs last and is the single check to
-# require on a branch (green when the checks passed or were skipped for lack of app changes).
+# Checks of the frontend (src/), the server crates and the Tauri crate (src-tauri/). On pull requests the `changes`
+# job decides from the diff which areas changed (frontend, rust, or this workflow = both); jobs of an untouched area
+# are skipped. The `ci` job always runs last and is the single check to require on a branch (green when the checks
+# passed or were skipped for lack of changes in their area).
 # Pushes to main run these checks through release.yml (workflow_call), so they run once per release.
 on:
   workflow_dispatch:
@@ -24,6 +25,9 @@ jobs:
     name: changes (app files)
     runs-on: ubuntu-24.04
     outputs:
+      frontend: ${{ steps.diff.outputs.frontend }}
+      rust: ${{ steps.diff.outputs.rust }}
+      # The app crate embeds the built frontend (frontendDist), so it is checked when either area changed.
       app: ${{ steps.diff.outputs.app }}
     steps:
       - uses: actions/checkout@v4
@@ -35,21 +39,24 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then
-            echo "app=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' frontend=true rust=true app=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          pattern='^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|angular\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|vitest\.[^/]*|\.prettier[^/]*|rust-toolchain\.toml|src/.*|src-tauri/.*|\.github/workflows/ci\.yml)$'
+          frontend='^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|angular\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|vitest\.[^/]*|\.prettier[^/]*|src/.*|\.github/workflows/ci\.yml)$'
+          rust='^(rust-toolchain\.toml|src-tauri/.*|\.github/workflows/ci\.yml)$'
           git diff --name-only "$BASE_SHA" HEAD > changed.txt
           cat changed.txt
-          if grep -Eq "$pattern" changed.txt; then
-            echo "app=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "app=false" >> "$GITHUB_OUTPUT"
-          fi
+          f=false
+          r=false
+          grep -Eq "$frontend" changed.txt && f=true
+          grep -Eq "$rust" changed.txt && r=true
+          a=false
+          if [ "$f" = true ] || [ "$r" = true ]; then a=true; fi
+          printf '%s\n' "frontend=$f" "rust=$r" "app=$a" >> "$GITHUB_OUTPUT"
 
   frontend:
     needs: changes
-    if: needs.changes.outputs.app == 'true'
+    if: needs.changes.outputs.frontend == 'true'
     name: frontend (check, lint, format, test, build)
     runs-on: ubuntu-24.04
     steps:
@@ -66,10 +73,31 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  # The server crates and the formatting of the whole workspace: no Tauri libraries, no frontend build.
+  rust-server:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    name: rust-server (fmt, clippy, test)
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+      # cargo fmt --check covers the whole workspace (the app crate too); clippy -D warnings and test (--locked) run
+      # for the server crates only, with the toolchain of rust-toolchain.toml.
+      - uses: GravionLabs/ci/rust/ci@v1
+        with:
+          working-directory: src-tauri
+          packages: "poimen-protocol poimen-client poimen-server"
+
+  # The app crate needs the Tauri Linux libraries and the built frontend (the Tauri macros embed frontendDist), so it
+  # runs when src-tauri/ or the frontend changed.
   rust:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    name: rust (fmt, clippy, test)
+    name: rust (app crate, clippy, test)
     runs-on: ubuntu-24.04
     env:
       CARGO_INCREMENTAL: 0
@@ -85,11 +113,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # cargo fmt --check, clippy -D warnings and test (--locked) with the toolchain of rust-toolchain.toml and the
-      # Linux libraries Tauri needs. The live tests are #[ignore]d and need a herdr server; they never run here.
+      # fmt is checked in `rust-server`. The live tests are #[ignore]d and need a herdr server; they never run here.
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri
+          packages: "poimen"
+          run-fmt: "false"
           tauri-linux-deps: "true"
 
   # The poimen backend on Windows: the server crates are tested on windows-latest (named pipes, ConPTY, cmd.exe),
@@ -113,7 +142,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # fmt is platform-independent and checked in `rust`.
+      # fmt is platform-independent and checked in `rust-server`.
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri
@@ -124,12 +153,12 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy -p poimen --locked -- -D warnings
 
-  # The one check to require: green when frontend, rust and windows passed or were skipped because no app files changed;
-  # red when any of them (or `changes`) failed or was cancelled.
+  # The one check to require: green when frontend, rust-server, rust and windows passed or were skipped because their
+  # area did not change; red when any of them (or `changes`) failed or was cancelled.
   ci:
     name: ci
     if: always()
-    needs: [changes, frontend, rust, windows]
+    needs: [changes, frontend, rust-server, rust, windows]
     runs-on: ubuntu-24.04
     steps:
       - env:
