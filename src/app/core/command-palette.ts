@@ -1,6 +1,7 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
+import { ProjectEntries, type ProjectEntry } from "./project-entries";
 import type { ShortcutAction } from "./shortcuts";
 import { UiState } from "./ui-state";
 
@@ -14,7 +15,8 @@ export interface PoimenCommand {
     | "closeSpace"
     | "startTask"
     | "cleanupTasks"
-    | "projectTeardown";
+    | "projectTeardown"
+    | "projectEntry";
   title: string;
 }
 
@@ -49,6 +51,10 @@ export interface PaletteItem {
   title: string;
   shortcut: string;
   command: PoimenCommand["id"];
+  /** A command or preset of the project file (`command` is `projectEntry`). */
+  entry?: ProjectEntry;
+  /** The project file is not trusted: running the entry asks first. */
+  locked?: boolean;
 }
 
 /** A line of the list: a group heading (not selectable) or a selectable entry. */
@@ -67,6 +73,7 @@ export type PaletteRow =
 /** The group headings of the list without a query. */
 export const POIMEN_GROUP = "Poimen";
 export const RECENT_GROUP = "Recent";
+export const PROJECT_GROUP = "Project";
 
 /**
  * The command palette: the poimen commands, fuzzy filtered.
@@ -75,6 +82,7 @@ export const RECENT_GROUP = "Recent";
 export class CommandPalette {
   private readonly keymap = inject(Keymap);
   private readonly ui = inject(UiState);
+  private readonly project = inject(ProjectEntries);
 
   private readonly _open = signal(false);
   private readonly _query = signal("");
@@ -94,12 +102,30 @@ export class CommandPalette {
         c.id === "closeSpace" ||
         c.id === "startTask" ||
         c.id === "cleanupTasks" ||
-        c.id === "projectTeardown"
+        c.id === "projectTeardown" ||
+        c.id === "projectEntry"
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
     })),
+    ...this.projectItems(),
   ]);
+
+  private projectItems(): PaletteItem[] {
+    const { commands, presets, locked } = this.project.entries();
+    const item = (entry: ProjectEntry, title: string): PaletteItem => ({
+      key: `project:${entry.kind}:${entry.name}`,
+      title,
+      shortcut: "",
+      command: "projectEntry",
+      entry,
+      locked,
+    });
+    return [
+      ...commands.map((c) => item({ kind: "command", name: c.name }, `Project: ${c.name}`)),
+      ...presets.map((name) => item({ kind: "preset", name }, `Preset: ${name}`)),
+    ];
+  }
 
   private readonly ranked = computed(() => fuzzyRank(this.all(), this._query(), (i) => i.title));
 
@@ -125,9 +151,11 @@ export class CommandPalette {
       const item = items.find((i) => i.key === key);
       return item ? [item] : [];
     });
+    const rest = items.filter((i) => !recent.includes(i));
     const groups: [string, PaletteItem[]][] = [
       [RECENT_GROUP, recent],
-      [POIMEN_GROUP, items.filter((i) => !recent.includes(i))],
+      [POIMEN_GROUP, rest.filter((i) => !i.entry)],
+      [PROJECT_GROUP, rest.filter((i) => i.entry)],
     ];
     for (const [label, members] of groups) {
       if (members.length === 0) continue;
@@ -147,6 +175,7 @@ export class CommandPalette {
 
   /** Opens the palette with an empty query. */
   open(): void {
+    void this.project.reload();
     this._query.set("");
     this._selected.set(0);
     this._open.set(true);

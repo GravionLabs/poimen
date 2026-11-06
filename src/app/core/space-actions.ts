@@ -42,6 +42,8 @@ export interface TrustPending {
   command: string | null;
   /** Runs once the space exists, also after the trust answer (a task tab in the space). */
   after?: (outcome: SpaceOutcome) => Promise<void>;
+  /** Set when no space is created: "trust" calls it with the answer instead of `create_space`. */
+  resume?: (decision: TrustDecision) => Promise<void>;
   request: TrustRequest;
 }
 
@@ -112,6 +114,11 @@ export class SpaceActions {
   readonly busy = this._busy.asReadonly();
   /** Directories matching the typed path. */
   readonly dirs = this._dirs.asReadonly();
+
+  /** Asks for the trust of `request` (a palette entry); "trust" calls `resume`, the rest nothing. */
+  askTrust(request: TrustRequest, resume: (decision: TrustDecision) => Promise<void>): void {
+    this._trust.set({ cwd: request.root, label: "", command: null, request, resume });
+  }
 
   /** Shows `message` in the status bar like a layout warning (a failed step of a task). */
   notify(message: string): void {
@@ -209,6 +216,10 @@ export class SpaceActions {
     const pending = this._trust();
     if (!pending) return undefined;
     this._trust.set(null);
+    if (pending.resume) {
+      if (answer === "trust") await pending.resume({ kind: "trust", hash: pending.request.hash });
+      return undefined;
+    }
     if (answer === "cancel") return undefined;
     const decision: TrustDecision =
       answer === "trust" ? { kind: "trust", hash: pending.request.hash } : { kind: "without" };
