@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "run": "20261105-2201-e5f6",
+  "harness": "claude",
+  "model": "sonnet",
+  "repository": "GravionLabs/skills",
+  "milestone": {
+    "key": "M3",
+    "title": "M3 Roadmap and release",
+    "url": "https://github.com/GravionLabs/skills/milestone/3"
+  },
+  "closed": 9,
+  "total": 9,
+  "current": null,
+  "delivered": [
+    {
+      "pbi": 320,
+      "url": "https://github.com/GravionLabs/skills/issues/320",
+      "prUrl": "https://github.com/GravionLabs/skills/pull/330"
+    },
+    {
+      "pbi": 321,
+      "url": "https://github.com/GravionLabs/skills/issues/321",
+      "prUrl": "https://github.com/GravionLabs/skills/pull/331"
+    }
+  ],
+  "blocked": [],
+  "paused": [],
+  "needsYou": [
+    {
+      "number": 303,
+      "url": "https://github.com/GravionLabs/skills/pull/303",
+      "reason": "merge the release PR into main"
+    }
+  ],
+  "release": {
+    "reviewRound": 2,
+    "prUrl": "https://github.com/GravionLabs/skills/pull/302"
+  },
+  "startedAt": "2026-11-05T22:01:12Z",
+  "updatedAt": "2026-11-05T23:17:48Z",
+  "result": "done"
+}

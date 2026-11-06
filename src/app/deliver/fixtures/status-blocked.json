@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "run": "20261106-1330-c3d4",
+  "harness": "copilot",
+  "model": "gpt-5.1",
+  "repository": "GravionLabs/skills",
+  "milestone": {
+    "key": "M4",
+    "title": "M4 Deliver loop",
+    "url": "https://github.com/GravionLabs/skills/milestone/4"
+  },
+  "closed": 5,
+  "total": 9,
+  "current": null,
+  "delivered": [
+    {
+      "pbi": 325,
+      "url": "https://github.com/GravionLabs/skills/issues/325",
+      "prUrl": "https://github.com/GravionLabs/skills/pull/340"
+    }
+  ],
+  "blocked": [
+    {
+      "number": 335,
+      "url": "https://github.com/GravionLabs/skills/issues/335",
+      "reason": "CI red on the PR: check lint:ps failed"
+    }
+  ],
+  "paused": [
+    {
+      "number": 336,
+      "url": "https://github.com/GravionLabs/skills/issues/336",
+      "reason": "review round 2 left blocking findings"
+    }
+  ],
+  "needsYou": [
+    {
+      "number": 336,
+      "url": "https://github.com/GravionLabs/skills/issues/336",
+      "reason": "decide whether the schema field names are final"
+    }
+  ],
+  "release": { "reviewRound": null, "prUrl": null },
+  "startedAt": "2026-11-06T13:30:51Z",
+  "updatedAt": "2026-11-06T14:02:10Z",
+  "result": "blocked"
+}

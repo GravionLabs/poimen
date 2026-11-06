@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, input, output, signal } from "@angu
 import { figures, usageTitle, type UsageReport } from "../core/usage";
 import { errorTitle, type UpdateState } from "../core/updater";
 import type { BackendKind } from "../core/settings";
+import type { BarSummary } from "../deliver/deliver-status";
 import type { ConnectionState } from "../core/herdr-store";
 import {
   appVersionLabel,
@@ -82,6 +83,11 @@ export class StatusBar {
   readonly showPanel = output<void>();
   /** The user flips the mode button: `true` asks for input. */
   readonly control = output<boolean>();
+
+  /** Compact summary of the running deliver loops; `null` hides the item. */
+  readonly deliver = input<BarSummary | null>(null);
+  /** The deliver item was clicked. */
+  readonly showDeliver = output<void>();
 
   /** Usage report of tamias; `null` hides the usage item. */
   readonly usage = input<UsageReport | null>(null);

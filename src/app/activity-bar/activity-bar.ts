@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, input, output } from "@angular/core";
 
 /** The icons the activity bar can draw; SVG keeps them the same size in every font. */
-export type ActivityIcon = "spaces" | "folder" | "bell" | "github";
+export type ActivityIcon = "spaces" | "folder" | "bell" | "github" | "deliver";
 
 export interface ActivityView {
   id: string;
@@ -9,7 +9,7 @@ export interface ActivityView {
   /** Which inline SVG icon the button shows. */
   icon: ActivityIcon;
   /** Opens an editor tab instead of switching the sidebar view. */
-  tab?: "github";
+  tab?: "github" | "deliver";
 }
 
 /** The views the activity bar offers. */
@@ -18,6 +18,7 @@ export const ACTIVITY_VIEWS: readonly ActivityView[] = [
   { id: "explorer", label: "Explorer", icon: "folder" },
   { id: "notifications", label: "Notifications", icon: "bell" },
   { id: "github", label: "GitHub", icon: "github", tab: "github" },
+  { id: "deliver", label: "Deliver", icon: "deliver", tab: "deliver" },
 ];
 
 /** Narrow icon rail at the far left; clicking a view selects it. */

@@ -83,6 +83,8 @@
   [size]="termSize()"
   [appVersion]="store.appVersion()"
   [usage]="usage.report()"
+  [deliver]="deliver.summary()"
+  (showDeliver)="editor.openDeliver()"
   [update]="updater.state()"
   (checkUpdate)="updater.check()"
   (installUpdate)="updater.install()"
@@ -145,6 +147,8 @@
           <ng-template #tabContent let-tab>
             @if (isGithub(tab.id)) {
               <span class="mode ro" title="GitHub">GH</span>
+            } @else if (isDeliver(tab.id)) {
+              <span class="mode ro" title="Deliver">DL</span>
             } @else if (isChanges(tab.id)) {
               <span class="mode ro" title="Changes">CH</span>
             } @else if (isFlow(tab.id)) {
@@ -175,6 +179,9 @@
         }
         @if (isGithub(g.activeId)) {
           <app-github-view />
+        }
+        @if (isDeliver(g.activeId)) {
+          <app-deliver-view (paneChosen)="openPaneById($event)" />
         }
         @for (flowPaneId of [flowOf(g)]; track flowPaneId) {
           @if (flowPaneId) {
