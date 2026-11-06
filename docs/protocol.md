@@ -26,7 +26,7 @@ Error codes: `parse_error`, `invalid_request`, `unknown_method`, `invalid_params
 
 Space: `{"id": "s1", "name": "api", "cwd": "/home/me/api"}`.
 
-Terminal: `{"id": "t2", "space_id": "s1", "name": "zsh", "cwd": "...", "cols": 80, "rows": 24, "status": "running" | "exited", "exit_code": 0}` (`exit_code` only when exited) `agent` (`{"status": "idle" | "working" | "blocked" | "done", "agent": "claude", "session_id": "..."}`; `agent` and `session_id` optional) is present while hooks report an agent in the terminal, and cleared when it ends or the process exits.
+Terminal: `{"id": "t2", "space_id": "s1", "name": "zsh", "cwd": "...", "cols": 80, "rows": 24, "status": "running" | "exited", "exit_code": 0, "program": "/bin/zsh"}` (`exit_code` only when exited; `program` is the program the terminal runs, absent from older servers) `agent` (`{"status": "idle" | "working" | "blocked" | "done", "agent": "claude", "session_id": "..."}`; `agent` and `session_id` optional) is present while hooks report an agent in the terminal, and cleared when it ends or the process exits.
 
 The server stores no layout: groups, splits and tabs are the client's business. Terminal ids are unique per server run; ids of spaces survive restarts.
 
@@ -84,7 +84,7 @@ Copilot CLI: `poimen-server integration install|uninstall|status copilot [--sett
 
 On Windows the hooks run through PowerShell: Claude Code entries get `"shell": "powershell"` and the command `& '<path of poimen-server.exe>' hook claude # poimen-agent-hook` (single quotes doubled), the Copilot file gets a `powershell` command next to `bash`, and the hook timeout is 5 s instead of 2 (the PowerShell start). A Claude Code without the `shell` field runs the command in Git Bash, where it fails as a non-blocking hook error. `integration status` finds the marker in either form.
 
-Starting an agent and prompting it need no request of their own (`poimen_client::agent`): `start_agent` checks that the terminal has no agent, types the command line (words single-quoted for the shell) with Enter through `terminal.input` and resolves when the terminal's `agent` appears, i.e. when the `SessionStart` report arrives (30 s, then a timeout error that points to the hooks). `prompt_agent` types the text with Enter, unless the agent is `working` or `blocked` (nothing is typed), and waits up to 10 s for it to report `working` or `blocked`. The `Backend` methods `agent_start`, `agent_prompt` and `agent_rename` of the poimen backend use them; the agent name is the name of its terminal (`terminal.rename`).
+Starting an agent and prompting it need no request of their own (`poimen_client::agent`): `start_agent` checks that the terminal has no agent, types the command line (words single-quoted for the terminal's shell, chosen by the `program` of the terminal: POSIX quoting writes an apostrophe as `'\''`, pwsh and powershell double it as `''`; for cmd.exe, which cannot quote arguments safely, nothing is typed and the call fails with a message that says so) with Enter through `terminal.input` and resolves when the terminal's `agent` appears, i.e. when the `SessionStart` report arrives (30 s, then a timeout error that points to the hooks). `prompt_agent` types the text with Enter, unless the agent is `working` or `blocked` (nothing is typed), and waits up to 10 s for it to report `working` or `blocked`. The `Backend` methods `agent_start`, `agent_prompt` and `agent_rename` of the poimen backend use them; the agent name is the name of its terminal (`terminal.rename`).
 
 ## Events
 

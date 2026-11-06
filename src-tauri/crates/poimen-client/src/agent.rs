@@ -26,6 +26,8 @@ pub enum AgentError {
     AlreadyRunning,
     /// The terminal's process ended before the agent reported.
     Exited,
+    /// The terminal runs cmd.exe, whose quoting cannot carry arbitrary arguments.
+    UnsupportedShell,
     /// No `SessionStart` report within the time.
     Timeout(Duration),
 }
@@ -37,6 +39,11 @@ impl fmt::Display for AgentError {
             AgentError::NotFound(id) => write!(f, "terminal {id} not found"),
             AgentError::AlreadyRunning => write!(f, "the terminal already has an agent"),
             AgentError::Exited => write!(f, "the terminal ended before the agent started"),
+            AgentError::UnsupportedShell => write!(
+                f,
+                "cannot start an agent in cmd.exe: it cannot quote arguments safely; \
+                 install PowerShell (pwsh) so terminals use it"
+            ),
             AgentError::Timeout(limit) => write!(
                 f,
                 "the agent did not report within {} s; are the poimen hooks installed \
@@ -70,23 +77,58 @@ pub enum PromptResult {
     NoAgent,
 }
 
-/// The command line that starts `program` with `args` in a shell: every word single-quoted when
-/// it holds anything but plain characters, so a prompt with spaces stays one argument. Empty
-/// arguments are dropped.
-pub fn command_line(program: &str, args: &[String]) -> String {
-    std::iter::once(program)
-        .chain(args.iter().map(String::as_str))
-        .map(str::trim)
-        .filter(|w| !w.is_empty())
-        .map(quote)
-        .collect::<Vec<_>>()
-        .join(" ")
+/// The kind of shell a terminal runs, which decides how words are quoted for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellKind {
+    /// sh, bash, zsh, fish and the like: single quotes, an apostrophe as `'\''`.
+    Posix,
+    /// pwsh and powershell: single quotes, an apostrophe doubled.
+    PowerShell,
+    /// cmd.exe: no usable quoting, so no command line is built.
+    Cmd,
 }
 
-fn quote(word: &str) -> String {
+impl ShellKind {
+    /// The kind of the program at `path` (either path separator, `.exe` ignored, any case). Any
+    /// program that is not PowerShell or cmd is taken as POSIX.
+    pub fn of(path: &str) -> Self {
+        let name = path
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(path)
+            .to_ascii_lowercase();
+        match name.strip_suffix(".exe").unwrap_or(&name) {
+            "pwsh" | "powershell" => ShellKind::PowerShell,
+            "cmd" => ShellKind::Cmd,
+            _ => ShellKind::Posix,
+        }
+    }
+}
+
+/// The command line that starts `program` with `args` in a shell of `kind`: every word
+/// single-quoted when it holds anything but plain characters, so a prompt with spaces stays one
+/// argument. Empty arguments are dropped. `None` for cmd.exe, which has no such quoting.
+pub fn command_line(program: &str, args: &[String], kind: ShellKind) -> Option<String> {
+    if kind == ShellKind::Cmd {
+        return None;
+    }
+    Some(
+        std::iter::once(program)
+            .chain(args.iter().map(String::as_str))
+            .map(str::trim)
+            .filter(|w| !w.is_empty())
+            .map(|w| quote(w, kind))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn quote(word: &str, kind: ShellKind) -> String {
     let plain = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
     if word.chars().all(plain) {
         word.to_owned()
+    } else if kind == ShellKind::PowerShell {
+        format!("'{}'", word.replace('\'', "''"))
     } else {
         format!("'{}'", word.replace('\'', r"'\''"))
     }
@@ -110,10 +152,16 @@ impl Client {
         args: &[String],
         timeout: Duration,
     ) -> Result<AgentInfo, AgentError> {
-        if self.find_terminal(terminal_id)?.agent.is_some() {
+        let terminal = self.find_terminal(terminal_id)?;
+        if terminal.agent.is_some() {
             return Err(AgentError::AlreadyRunning);
         }
-        self.input(terminal_id, &format!("{}\r", command_line(program, args)))?;
+        let kind = terminal
+            .program
+            .as_deref()
+            .map_or(ShellKind::Posix, ShellKind::of);
+        let line = command_line(program, args, kind).ok_or(AgentError::UnsupportedShell)?;
+        self.input(terminal_id, &format!("{line}\r"))?;
         let deadline = Instant::now() + timeout;
         loop {
             let terminal = self.find_terminal(terminal_id)?;
@@ -166,20 +214,71 @@ mod tests {
         items.iter().map(|s| (*s).to_owned()).collect()
     }
 
+    fn line(kind: ShellKind, args: &[&str]) -> Option<String> {
+        command_line("claude", &words(args), kind)
+    }
+
     #[test]
-    fn plain_words_stay_bare_and_others_are_single_quoted() {
+    fn plain_words_stay_bare_in_every_quoting_shell() {
+        for kind in [ShellKind::Posix, ShellKind::PowerShell] {
+            assert_eq!(
+                line(kind, &["--model", "opus-4.5"]).unwrap(),
+                "claude --model opus-4.5"
+            );
+        }
+    }
+
+    #[test]
+    fn posix_quotes_an_apostrophe_with_the_escape_sequence() {
         assert_eq!(
-            command_line("claude", &words(&["--model", "opus-4.5"])),
-            "claude --model opus-4.5"
+            line(ShellKind::Posix, &["fix it's \"bug\" $(x)\nnow"]).unwrap(),
+            "claude 'fix it'\\''s \"bug\" $(x)\nnow'"
         );
         assert_eq!(
-            command_line("claude", &words(&["fix it's \"bug\" $(x)\nnow"])),
-            "claude 'fix it'\\''s \"bug\" $(x)\nnow'"
+            line(ShellKind::Posix, &["don't stop"]).unwrap(),
+            "claude 'don'\\''t stop'"
+        );
+    }
+
+    #[test]
+    fn powershell_doubles_an_apostrophe() {
+        assert_eq!(
+            line(ShellKind::PowerShell, &["don't stop"]).unwrap(),
+            "claude 'don''t stop'"
+        );
+        assert_eq!(
+            line(ShellKind::PowerShell, &["two words", "$x"]).unwrap(),
+            "claude 'two words' '$x'"
         );
     }
 
     #[test]
     fn empty_arguments_are_dropped() {
-        assert_eq!(command_line(" codex ", &words(&["", "  "])), "codex");
+        for kind in [ShellKind::Posix, ShellKind::PowerShell] {
+            assert_eq!(
+                command_line(" codex ", &words(&["", "  "]), kind).unwrap(),
+                "codex"
+            );
+        }
+    }
+
+    #[test]
+    fn cmd_gets_no_command_line() {
+        assert_eq!(line(ShellKind::Cmd, &["a b"]), None);
+        assert_eq!(line(ShellKind::Cmd, &[]), None);
+    }
+
+    #[test]
+    fn the_shell_kind_follows_the_program_name() {
+        assert_eq!(ShellKind::of("/bin/zsh"), ShellKind::Posix);
+        assert_eq!(
+            ShellKind::of(r"C:\Program Files\PowerShell\7\pwsh.exe"),
+            ShellKind::PowerShell
+        );
+        assert_eq!(ShellKind::of("POWERSHELL.EXE"), ShellKind::PowerShell);
+        assert_eq!(
+            ShellKind::of(r"C:\Windows\System32\cmd.exe"),
+            ShellKind::Cmd
+        );
     }
 }

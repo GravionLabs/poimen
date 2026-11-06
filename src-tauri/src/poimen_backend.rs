@@ -572,6 +572,7 @@ mod tests {
             rows: 24,
             status: TerminalStatus::Running,
             exit_code: None,
+            program: None,
             agent: None,
         }
     }
