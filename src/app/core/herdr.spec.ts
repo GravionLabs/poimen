@@ -161,19 +161,19 @@ describe("tabHeader", () => {
 describe("version labels", () => {
   const info = { version: "0.9.5", protocol: 22, supported: 22 };
   it("names the versions", () => {
-    expect(herdrVersionLabel(info)).toBe("herdr 0.9.5");
-    expect(appVersionLabel("0.2.0")).toBe("poimen 0.2.0");
+    expect(herdrVersionLabel(info)).toBe("backend herdr 0.9.5");
+    expect(appVersionLabel("0.2.0")).toBe("frontend poimen 0.2.0");
   });
   it("shows ? when unknown", () => {
-    expect(herdrVersionLabel({ version: "0.1", supported: 22 })).toBe("herdr 0.1");
-    expect(herdrVersionLabel(null)).toBe("herdr ?");
-    expect(herdrVersionLabel(undefined)).toBe("herdr ?");
-    expect(herdrVersionLabel({ ...info, version: "0.9.0" }, "poimen")).toBe("poimen 0.9.0");
-    expect(herdrVersionLabel(null, "poimen")).toBe("poimen ?");
+    expect(herdrVersionLabel({ version: "0.1", supported: 22 })).toBe("backend herdr 0.1");
+    expect(herdrVersionLabel(null)).toBe("backend herdr ?");
+    expect(herdrVersionLabel(undefined)).toBe("backend herdr ?");
+    expect(herdrVersionLabel({ ...info, version: "0.9.0" }, "poimen")).toBe("backend poimen 0.9.0");
+    expect(herdrVersionLabel(null, "poimen")).toBe("backend poimen ?");
     expect(protocolWarning({ ...info, protocol: 1, supported: 2 }, "poimen")).toBe(
       "poimen protocol 1, poimen supports 2",
     );
-    expect(appVersionLabel(null)).toBe("poimen ?");
+    expect(appVersionLabel(null)).toBe("frontend poimen ?");
   });
   it("warns only on a protocol mismatch", () => {
     expect(protocolWarning(info)).toBe("");

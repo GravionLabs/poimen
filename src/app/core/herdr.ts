@@ -406,14 +406,14 @@ export interface HerdrInfo {
   supported: number;
 }
 
-/** `herdr <version>`, or `herdr ?` when herdr is unreachable or too old to report it; `backend` names another server. */
+/** `backend herdr <version>`, or `backend herdr ?` when unreachable or too old to report it; `backend` names another server. */
 export function herdrVersionLabel(info: HerdrInfo | null | undefined, backend = "herdr"): string {
-  return info?.version ? `${backend} ${info.version}` : `${backend} ?`;
+  return info?.version ? `backend ${backend} ${info.version}` : `backend ${backend} ?`;
 }
 
-/** `poimen <version>`, or `poimen ?` until the build version is known. */
+/** `frontend poimen <version>`, or `frontend poimen ?` until the build version is known. */
 export function appVersionLabel(version: string | null | undefined): string {
-  return version ? `poimen ${version}` : "poimen ?";
+  return version ? `frontend poimen ${version}` : "frontend poimen ?";
 }
 
 /** The tooltip warning for a herdr protocol other than the supported one; empty when it matches or is unknown. */
