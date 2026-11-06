@@ -1,0 +1,129 @@
+:host {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+}
+.page {
+  padding: 16px 24px 32px;
+  max-width: 900px;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h1 {
+  font-size: 18px;
+  margin: 0;
+}
+h2 {
+  font-size: 14px;
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+h3 {
+  font-size: 12px;
+  margin: 12px 0 4px;
+  color: var(--h-text-muted-color);
+  font-weight: 600;
+}
+.hint {
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+  font-weight: normal;
+}
+.problem {
+  color: var(--h-danger-color, #d33);
+}
+.mono {
+  font-family: monospace;
+  font-size: 12px;
+}
+.card {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+}
+.card.state-blocked,
+.card.state-stale {
+  border-color: var(--h-warning-color, #d9a400);
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.state {
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+}
+.state-blocked .state,
+.state-stale .state {
+  color: var(--h-warning-color, #d9a400);
+}
+.bar {
+  height: 8px;
+  margin-top: 8px;
+  border-radius: 4px;
+  background: var(--h-content-border-color);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  background: var(--h-primary-color, #3b82f6);
+}
+.state-done .fill {
+  background: var(--h-success-color, #2da44e);
+}
+.progress {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+}
+.current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.step {
+  font-weight: 600;
+  font-size: 12px;
+}
+ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.release {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.link {
+  all: unset;
+  cursor: pointer;
+  color: var(--h-link-color, var(--h-primary-color, #3b82f6));
+}
+.link:hover,
+.link:focus-visible {
+  text-decoration: underline;
+}
+footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+}

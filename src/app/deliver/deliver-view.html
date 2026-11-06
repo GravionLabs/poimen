@@ -1,0 +1,156 @@
+<div class="page">
+  <header>
+    <h1>Deliver</h1>
+    <span class="hint">Live state of the deliver loops of the open spaces</span>
+  </header>
+  @if (deliver.cards().length === 0) {
+    <p class="hint" data-testid="empty">
+      No deliver loop found. A loop writes <code>.agents/deliver-loop/status.json</code> in its
+      repository; it appears here as soon as the file exists.
+    </p>
+  }
+  @for (card of deliver.cards(); track card.root) {
+    @if (card.state.kind === "unsupported") {
+      <section class="card" data-testid="card">
+        <h2 class="mono">{{ card.root }}</h2>
+        <p class="hint" data-testid="unsupported">
+          This status file uses schema version {{ $any(card.state).version }}, which this version of
+          poimen does not know (it reads version {{ supported }}). Update poimen to see this run.
+        </p>
+      </section>
+    } @else if (card.state.kind === "invalid") {
+      <section class="card" data-testid="card">
+        <h2 class="mono">{{ card.root }}</h2>
+        <p class="problem" role="alert" data-testid="invalid">
+          The status file cannot be shown: {{ $any(card.state).error }}
+        </p>
+      </section>
+    } @else {
+      @let s = $any(card.state).status;
+      @let state = runState(s);
+      <section class="card state-{{ state.replace(' ', '-') }}" data-testid="card">
+        <div class="card-head">
+          <h2>
+            <button type="button" class="link" (click)="deliver.openUrl(s.milestone.url)">
+              {{ s.milestone.title }}
+            </button>
+            <span class="repo mono">{{ s.repository }}</span>
+          </h2>
+          <span class="state" data-testid="state">{{ stateText(s) }}</span>
+        </div>
+        <div
+          class="bar"
+          role="progressbar"
+          aria-label="Milestone progress"
+          [attr.aria-valuenow]="s.closed"
+          aria-valuemin="0"
+          [attr.aria-valuemax]="s.total"
+        >
+          <div class="fill" [style.width.%]="percent(s)"></div>
+        </div>
+        <p class="progress" data-testid="progress">{{ s.closed }}/{{ s.total }} closed</p>
+
+        @if (s.current; as c) {
+          <div class="current" data-testid="current">
+            <button type="button" class="link" (click)="deliver.openUrl(c.url)">
+              #{{ c.number }} {{ c.title }}
+            </button>
+            <span class="step" data-testid="step">step {{ c.step.n }}/{{ c.step.total }}</span>
+            <span class="hint">{{ c.step.text }}</span>
+            @if (c.prUrl) {
+              <button type="button" class="link" (click)="deliver.openUrl(c.prUrl)">
+                Pull request
+              </button>
+            }
+          </div>
+        }
+
+        @if (s.needsYou.length > 0) {
+          <h3>Needs you</h3>
+          <ul data-testid="needs-you">
+            @for (i of s.needsYou; track i.number) {
+              <li>
+                <button type="button" class="link" (click)="deliver.openUrl(i.url)">
+                  #{{ i.number }}
+                </button>
+                {{ i.reason }}
+              </li>
+            }
+          </ul>
+        }
+        @if (s.blocked.length > 0) {
+          <h3>Blocked</h3>
+          <ul data-testid="blocked">
+            @for (i of s.blocked; track i.number) {
+              <li>
+                <button type="button" class="link" (click)="deliver.openUrl(i.url)">
+                  #{{ i.number }}
+                </button>
+                {{ i.reason }}
+              </li>
+            }
+          </ul>
+        }
+        @if (s.paused.length > 0) {
+          <h3>Paused</h3>
+          <ul data-testid="paused">
+            @for (i of s.paused; track i.number) {
+              <li>
+                <button type="button" class="link" (click)="deliver.openUrl(i.url)">
+                  #{{ i.number }}
+                </button>
+                {{ i.reason }}
+              </li>
+            }
+          </ul>
+        }
+        @if (s.delivered.length > 0) {
+          <h3>Delivered</h3>
+          <ul data-testid="delivered">
+            @for (d of s.delivered; track d.pbi) {
+              <li>
+                <button type="button" class="link" (click)="deliver.openUrl(d.url)">
+                  #{{ d.pbi }}
+                </button>
+                &rarr;
+                <button type="button" class="link" (click)="deliver.openUrl(d.prUrl)">
+                  {{ prLabel(d.prUrl) }}
+                </button>
+              </li>
+            }
+          </ul>
+        }
+        @if (s.release.prUrl || s.release.reviewRound) {
+          <p class="release" data-testid="release">
+            Release
+            @if (s.release.reviewRound) {
+              <span class="hint">review round {{ s.release.reviewRound }}</span>
+            }
+            @if (s.release.prUrl; as url) {
+              <button type="button" class="link" (click)="deliver.openUrl(url)">
+                {{ prLabel(url) }}
+              </button>
+            }
+          </p>
+        }
+
+        <footer>
+          <span class="hint mono">{{ s.harness }} {{ s.model }} &middot; {{ card.root }}</span>
+          <span class="actions">
+            <button type="button" (click)="deliver.openUrl(s.milestone.url)">Open milestone</button>
+            @if (deliver.paneOf(card); as pane) {
+              <button type="button" data-testid="focus" (click)="paneChosen.emit(pane)">
+                Focus terminal
+              </button>
+            }
+            @if (state !== "running") {
+              <button type="button" data-testid="start" (click)="deliver.startLoop(s, card.root)">
+                Start loop
+              </button>
+            }
+          </span>
+        </footer>
+      </section>
+    }
+  }
+</div>

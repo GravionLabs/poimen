@@ -128,6 +128,11 @@ button.item.any {
   font-weight: 600;
 }
 
+button.item.deliver.warn {
+  color: #d29922;
+  font-weight: 600;
+}
+
 button.item.mode-button,
 button.item.panel-button {
   height: 18px;

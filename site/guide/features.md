@@ -44,6 +44,10 @@ Below the pull requests, the Issues section shows the open issues of each reposi
 
 The Milestones section lists the open milestones of each repository ordered by version, marks the current one (the lowest `M<n>`, or legacy `x.y.z`, with open issues) and shows due date, open and closed counts and a progress bar. Select a milestone to filter the issues tree to it.
 
+## Deliver loops
+
+The Deliver item of the activity bar opens a live view of the running deliver loops of your open spaces. Each loop writes its state to `.agents/deliver-loop/status.json` in its repository and poimen watches the file (no GitHub polling), so a card updates within a second: the milestone with a progress bar, the current PBI with its step (n of 7), the delivered PBIs with their pull requests, blocked and paused items with the reason, what needs you, and the release pull request. A run without an update for an hour is marked stale. The status bar shows `▶ M5 7/19` per running loop and turns into a warning when a run is blocked or needs you, and a notification tells you when a run is blocked, needs a decision, opens the release pull request or ends. From a card you can open the milestone, issues and pull requests in the browser, jump to the loop's terminal and start the loop for the milestone (the task mode `deliver-loop`). It works the same on the poimen and the herdr backend.
+
 ## Color schemes
 
 - Light, dark or system. Bundled schemes, the scheme of your herdr config (`"herdr"`), and your own WezTerm color schemes in `~/.config/poimen/themes/`, watched without a restart. The window chrome is derived from the scheme.

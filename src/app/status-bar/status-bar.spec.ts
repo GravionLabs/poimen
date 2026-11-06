@@ -5,6 +5,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { figures, usageTitle, type UsageReport } from "../core/usage";
+import type { BarSummary } from "../deliver/deliver-status";
 import { connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
 
 beforeAll(() => {
@@ -73,8 +74,10 @@ describe("mode button", () => {
     blocked: string | null,
     panelOpen = true,
     usage: UsageReport | null = null,
+    deliver: BarSummary | null = null,
   ) => {
     const emitted: boolean[] = [];
+    let deliverClicks = 0;
     let shown = 0;
     let opened = 0;
     @Component({
@@ -112,6 +115,8 @@ describe("mode button", () => {
       warning = () => "";
       backend = () => "herdr";
       usage = () => usage;
+      deliver = () => deliver;
+      showDeliver = { emit: () => deliverClicks++ };
       usageFigures = figures;
       usageText = usageTitle;
     }
@@ -127,8 +132,32 @@ describe("mode button", () => {
       root: fixture.nativeElement as HTMLElement,
       shown: () => shown,
       opened: () => opened,
+      deliverClicks: () => deliverClicks,
     };
   };
+
+  it("shows the running deliver loops and opens the panel on a click", () => {
+    const { root, deliverClicks } = render("control", null, true, null, {
+      text: "▶ M5 7/19",
+      title: "o/n M5 7/19",
+      warning: false,
+    });
+    const item = root.querySelector<HTMLButtonElement>("button.deliver")!;
+    expect(item.textContent?.trim()).toBe("▶ M5 7/19");
+    expect(item.classList.contains("warn")).toBe(false);
+    item.click();
+    expect(deliverClicks()).toBe(1);
+  });
+
+  it("marks the deliver item as a warning and hides it without a run", () => {
+    const warned = render("control", null, true, null, {
+      text: "⚠ M5 7/19",
+      title: "",
+      warning: true,
+    });
+    expect(warned.root.querySelector("button.deliver")!.classList.contains("warn")).toBe(true);
+    expect(render("control", null).root.querySelector("button.deliver")).toBeNull();
+  });
 
   it("offers to show the closed output panel, with its shortcut", () => {
     const { root, shown } = render("control", null, false);
