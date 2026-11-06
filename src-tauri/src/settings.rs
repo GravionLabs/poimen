@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use serde_json::Value;
 
-pub const DEFAULT_FONT_SIZE: f64 = 13.0;
+pub const DEFAULT_FONT_SIZE: f64 = if cfg!(windows) { 14.0 } else { 13.0 };
 const MIN_FONT_SIZE: f64 = 6.0;
 const MAX_FONT_SIZE: f64 = 72.0;
 pub const DEFAULT_UI_FONT_SIZE: f64 = 13.0;
@@ -1624,6 +1624,11 @@ pub fn set_terminal_font_size_text(text: &str, size: f64) -> Result<String, Stri
     set_path_text(text, &["terminal", "fontSize"], &size.to_string())
 }
 
+/// Returns `text` without `terminal.fontSize`: the size is the platform (or Ghostty) default again.
+pub fn clear_terminal_font_size_text(text: &str) -> Result<String, String> {
+    remove_path_text(text, &["terminal", "fontSize"])
+}
+
 /// Returns `text` with `ui.fontFamily` set; an empty family removes the key.
 pub fn set_ui_font_family_text(text: &str, family: &str) -> Result<String, String> {
     set_font_family_text(text, "ui", family)
@@ -1656,6 +1661,11 @@ pub fn save_terminal_font_family(home: &Path, family: &str) -> Result<(), String
 /// Writes `terminal.fontSize` below `home`, like `save_theme`.
 pub fn save_terminal_font_size(home: &Path, size: f64) -> Result<(), String> {
     save_with(home, |t| set_terminal_font_size_text(t, size))
+}
+
+/// Removes `terminal.fontSize` below `home`, like `save_theme`.
+pub fn clear_terminal_font_size(home: &Path) -> Result<(), String> {
+    save_with(home, clear_terminal_font_size_text)
 }
 
 /// Writes `ui.fontFamily` below `home`, like `save_theme`.
@@ -2117,6 +2127,18 @@ mod tests {
         assert_eq!((s.font_family, s.font_size), (None, 15.0));
         assert_eq!(s.ui_font_family, None);
         assert!(!out.contains("fontFamily"));
+    }
+
+    #[test]
+    fn clearing_the_terminal_font_size_removes_only_that_key() {
+        let text = r#"{"terminal":{"fontFamily":"Fira Code","fontSize":15},"ui":{"fontSize":14}}"#;
+        let out = clear_terminal_font_size_text(text).unwrap();
+        assert!(!out.contains("\"fontSize\":15"), "{out}");
+        let s = resolve(Some(&out), || None);
+        assert_eq!(s.font_family.as_deref(), Some("Fira Code"));
+        assert_eq!(s.ui_font_size, 14.0);
+        // Absent key: nothing to remove, still valid.
+        assert!(clear_terminal_font_size_text("{}").is_ok());
     }
 
     #[test]
@@ -2899,7 +2921,7 @@ mod tests {
     #[test]
     fn serializes_camel_case() {
         let v = serde_json::to_value(Settings::default()).unwrap();
-        assert_eq!(v["fontSize"], 13.0);
+        assert_eq!(v["fontSize"], DEFAULT_FONT_SIZE);
         assert!(v["fontFamily"].is_null());
         assert_eq!(v["autoControl"], true);
         assert_eq!(v["shortcuts"]["toggleSidebar"], "CmdOrCtrl+B");

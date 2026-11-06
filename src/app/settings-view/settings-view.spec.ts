@@ -406,6 +406,15 @@ describe("SettingsView fonts", () => {
     }
   });
 
+  it("removes the key when the terminal font size is cleared", async () => {
+    const { host } = setup();
+    const input = field(host, "Terminal font size");
+    input.value = "";
+    input.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(tauri.calls("clear_terminal_font_size")).toEqual([{}]));
+    expect(tauri.calls("set_terminal_font_size")).toEqual([]);
+  });
+
   it("shows the validation message and writes nothing for a bad size", async () => {
     const { fixture, host } = setup();
     const input = field(host, "UI font size");

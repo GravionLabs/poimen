@@ -20,7 +20,8 @@ const fake = vi.hoisted(() => ({
   observers: [] as (() => void)[],
   addons: [] as unknown[],
   openUrl: undefined as unknown,
-  term: undefined as { selection: string; pasted: string[] } | undefined,
+  term: undefined as
+    { selection: string; pasted: string[]; options: Record<string, unknown> } | undefined,
   keyHandler: undefined as ((event: KeyboardEvent) => boolean) | undefined,
   wheelHandler: undefined as ((event: WheelEvent) => boolean) | undefined,
 }));
@@ -394,6 +395,32 @@ describe("TerminalView font change", () => {
     fixture.detectChanges();
     expect(sized).toHaveLength(1);
     expect(session.resize).not.toHaveBeenCalled();
+  });
+});
+
+describe("TerminalView default font stack", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("starts with the Windows monospace fonts on Windows", async () => {
+    vi.stubGlobal("navigator", { ...navigator, platform: "Win32" });
+    await setup("control");
+    const family = String(fake.term?.options["fontFamily"]);
+    expect(family.startsWith('"Cascadia Mono", "Cascadia Code", Consolas, ')).toBe(true);
+    expect(family.endsWith("Menlo, monospace")).toBe(true);
+  });
+
+  it("keeps Menlo, monospace on macOS", async () => {
+    vi.stubGlobal("navigator", { ...navigator, platform: "MacIntel" });
+    await setup("control");
+    expect(fake.term?.options["fontFamily"]).toBe("Menlo, monospace");
+  });
+
+  it("a configured family wins on Windows", async () => {
+    vi.stubGlobal("navigator", { ...navigator, platform: "Win32" });
+    const { fixture, settings } = await setup("control");
+    settings.set({ ...DEFAULT_SETTINGS, fontFamily: "Hack" });
+    fixture.detectChanges();
+    expect(fake.term?.options["fontFamily"]).toBe("Hack");
   });
 });
 
