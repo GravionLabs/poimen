@@ -9,7 +9,14 @@ import { SpaceActions } from "../core/space-actions";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UI_STATE_KEY, UI_STORAGE } from "../core/ui-state";
-import { Explorer, explorerNodes, spaceDirs, type DirEntry } from "./explorer";
+import {
+  Explorer,
+  explorerNodes,
+  filterNodes,
+  labelParts,
+  spaceDirs,
+  type DirEntry,
+} from "./explorer";
 
 const dir = (path: string): DirEntry => ({ path, name: path.split("/").pop()! });
 
@@ -33,6 +40,47 @@ describe("explorerNodes", () => {
   it("makes a loaded empty folder a leaf", () => {
     const [root] = explorerNodes(["/r"], new Map([["/r", []]]), new Set());
     expect(root.leaf).toBe(true);
+  });
+});
+
+describe("filterNodes", () => {
+  const nodes = explorerNodes(
+    ["/r"],
+    new Map([
+      ["/r", [dir("/r/Alpha"), dir("/r/beta")]],
+      ["/r/Alpha", [dir("/r/Alpha/deep")]],
+    ]),
+    new Set(),
+  );
+
+  it("keeps everything for an empty query", () => {
+    expect(filterNodes(nodes, "  ")).toEqual(nodes);
+  });
+
+  it("matches case-insensitively and keeps and expands the ancestors", () => {
+    const [root] = filterNodes(nodes, "DEE");
+    expect(root).toMatchObject({ key: "/r", expanded: true });
+    expect(root.children!.map((c) => c.key)).toEqual(["/r/Alpha"]);
+    expect(root.children![0]).toMatchObject({ expanded: true });
+    expect(root.children![0].children!.map((c) => c.key)).toEqual(["/r/Alpha/deep"]);
+  });
+
+  it("hides what does not match and returns nothing without a match", () => {
+    const [root] = filterNodes(nodes, "bet");
+    expect(root.children!.map((c) => c.label)).toEqual(["beta"]);
+    expect(filterNodes(nodes, "zzz")).toEqual([]);
+  });
+});
+
+describe("labelParts", () => {
+  it("splits around every case-insensitive match", () => {
+    expect(labelParts("Foo-foo", "fo")).toEqual([
+      { text: "Fo", hit: true },
+      { text: "o-", hit: false },
+      { text: "fo", hit: true },
+      { text: "o", hit: false },
+    ]);
+    expect(labelParts("abc", "")).toEqual([{ text: "abc", hit: false }]);
   });
 });
 
@@ -111,7 +159,13 @@ async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: strin
     [...root.querySelectorAll('[role="treeitem"]')].find(
       (e) => e.querySelector(".hx-tree-node-label")?.textContent?.trim() === label,
     )!;
-  return { calls, data, labels, toggle, create, item, root, settle };
+  const type = async (value: string) => {
+    const input = root.querySelector<HTMLInputElement>("input.filter")!;
+    input.value = value;
+    input.dispatchEvent(new Event("input"));
+    await settle();
+  };
+  return { calls, data, labels, toggle, create, item, root, settle, type };
 }
 
 describe("Explorer with the real hx-tree", () => {
@@ -174,6 +228,59 @@ describe("Explorer with the real hx-tree", () => {
   it("creates (or focuses) a space on double-click", async () => {
     const { toggle, item, create } = await setup();
     await toggle("/r");
+    item("a")
+      .querySelector(".dir")!
+      .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    expect(create).toHaveBeenCalledWith("/r/a", "");
+  });
+});
+
+describe("Explorer filter", () => {
+  it("filters by name, keeps the ancestors expanded and highlights the match", async () => {
+    const { labels, toggle, type, item, data } = await setup({ expandedDirs: ["/r"] });
+    await toggle("a");
+    await type("DEE");
+    expect(labels()).toEqual(["/r", "a", "deep"]);
+    expect(item("deep").querySelector(".hit")?.textContent).toBe("dee");
+    expect(JSON.parse(data.get(UI_STATE_KEY)!).expandedDirs).toEqual(["/r", "/r/a"]);
+  });
+
+  it("shows a message without a match and restores the expansion when cleared", async () => {
+    const { labels, root, type } = await setup({ expandedDirs: ["/r"] });
+    await type("zzz");
+    expect(labels()).toEqual([]);
+    expect(root.textContent).toContain("No matching folders");
+    await type("");
+    expect(labels()).toEqual(["/r", "a", "locked"]);
+  });
+
+  it("does not expand a collapsed folder permanently", async () => {
+    const { labels, type, data } = await setup({ expandedDirs: ["/r", "/r/a"] });
+    await type("deep");
+    expect(labels()).toEqual(["/r", "a", "deep"]);
+    await type("");
+    expect(labels()).toEqual(["/r", "a", "deep", "locked"]);
+    expect(JSON.parse(data.get(UI_STATE_KEY)!).expandedDirs).toEqual(["/r", "/r/a"]);
+  });
+
+  it("clears the filter on Escape and focuses it on Ctrl+F", async () => {
+    const { labels, root, type, settle } = await setup({ expandedDirs: ["/r"] });
+    const input = root.querySelector<HTMLInputElement>("input.filter")!;
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }));
+    await type("lock");
+    expect(labels()).toEqual(["/r", "locked"]);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle();
+    expect(input.value).toBe("");
+    expect(labels()).toEqual(["/r", "a", "locked"]);
+  });
+
+  it("keeps the double-click and the space marker on filtered rows", async () => {
+    const { toggle, type, item, create } = await setup(undefined, ["/r"], ["/r/a"]);
+    await toggle("/r");
+    await type("a");
+    expect(item("a").querySelector(".has-space")).not.toBeNull();
     item("a")
       .querySelector(".dir")!
       .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
