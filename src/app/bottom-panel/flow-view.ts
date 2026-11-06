@@ -16,7 +16,14 @@ import {
 } from "@foblex/flow";
 import { flowAgentName } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
-import { buildFlowGraph, flowDuration, type FlowNode } from "../core/flow-graph";
+import {
+  buildFlowGraph,
+  flowContextLine,
+  flowDuration,
+  flowTokenLine,
+  flowTooltip,
+  type FlowNode,
+} from "../core/flow-graph";
 import { FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH, layoutFlow } from "../core/flow-layout";
 import { Subagents, formatDuration } from "../core/transcripts";
 import { Icon } from "../ui/icon/icon";
@@ -66,6 +73,10 @@ export class FlowView {
       position: positions.get(node.id) ?? { x: 0, y: 0 },
     }));
   });
+
+  protected tokenLine = flowTokenLine;
+  protected contextLine = flowContextLine;
+  protected tooltip = flowTooltip;
 
   protected duration(node: FlowNode): string {
     const ms = flowDuration(node, this.now());

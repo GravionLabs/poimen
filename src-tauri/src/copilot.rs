@@ -183,6 +183,8 @@ impl Tracker {
             updates.push(Update::Main {
                 calls: self.calls.clone(),
                 tools,
+                // The Copilot log has no usage data: the token row stays hidden.
+                usage: Vec::new(),
             });
         }
         updates
@@ -250,6 +252,9 @@ impl Tracker {
             role: role.to_owned(),
             timestamp: timestamp.clone(),
             blocks,
+            message_id: None,
+            model: None,
+            usage: None,
         };
         let message = match kind {
             "user.message" => {
@@ -344,6 +349,7 @@ impl Tracker {
                     started: timestamp,
                     ended: None,
                     is_error: false,
+                    context: None,
                 });
             }
             "tool.execution_complete" => {
@@ -433,7 +439,7 @@ mod tests {
         updates
             .iter()
             .find_map(|u| match u {
-                Update::Main { calls, tools } => Some((calls.as_slice(), *tools)),
+                Update::Main { calls, tools, .. } => Some((calls.as_slice(), *tools)),
                 _ => None,
             })
             .expect("a main update")

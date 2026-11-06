@@ -34,6 +34,7 @@
         [fConnectOnNode]="false"
         [attr.role]="item.node.agentId ? 'button' : null"
         [attr.tabindex]="item.node.agentId ? 0 : null"
+        [attr.title]="tooltip(item.node)"
         [attr.aria-label]="item.node.title + ', ' + item.node.kind + ', ' + item.node.status"
         (click)="open(item.node)"
         (keydown)="onKey($event, item.node)"
@@ -64,6 +65,14 @@
             <span>{{ item.node.tools }} tool calls</span>
           }
         </div>
+        @if (tokenLine(item.node); as tokens) {
+          <div class="meta tokens">
+            <span>{{ tokens }}</span>
+            @if (contextLine(item.node); as context) {
+              <span>{{ context }}</span>
+            }
+          </div>
+        }
         <span
           fConnector
           fConnectorType="source"
