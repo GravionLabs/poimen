@@ -1,5 +1,14 @@
 <div class="head">
   <div class="brand">Explorer</div>
+  <input
+    type="search"
+    class="filter"
+    placeholder="Filter folders"
+    aria-label="Filter folders"
+    [value]="query()"
+    (input)="setQuery($event)"
+    (keydown)="filterKey($event)"
+  />
 </div>
 <hx-tree
   class="dirs"
@@ -12,13 +21,20 @@
 >
   <ng-template hxTreeNode let-node>
     <span class="dir" (contextmenu)="openMenu($event, node.key)" (dblclick)="createSpace(node.key)">
-      <span class="hx-tree-node-label">{{ node.label }}</span>
+      <span class="hx-tree-node-label">
+        @for (part of parts(node.label); track $index) {
+          <span [class.hit]="part.hit">{{ part.text }}</span>
+        }
+      </span>
       @if (withSpace().has(node.key)) {
         <span class="has-space" title="Has a space" aria-label="Has a space">●</span>
       }
     </span>
   </ng-template>
 </hx-tree>
+@if (query().trim() && nodes().length === 0) {
+  <div class="empty" role="status">No matching folders</div>
+}
 @if (menuAt(); as at) {
   <button
     type="button"
