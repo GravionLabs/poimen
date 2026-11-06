@@ -1,6 +1,6 @@
 [package]
 name = "poimen"
-version = "0.9.0"
+version = "0.10.0"
 description = "Desktop GUI for herdr: coordinate AI coding agent sessions"
 authors = ["Jerome Kaufmann"]
 license = "MIT"

@@ -5,7 +5,119 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.10.0] — 2026-11-06
+
+### Bug Fixes
+- **server**: Private socket directory, ship the server as a sidecar (#151)
+- **tasks**: Run the tab of a tab-mode task after the trust answer (#191)
+- **tasks**: Check for uncommitted changes before a cleanup command (#192)
+- **github**: Match a pull request's head branch only when it is not in a fork (#236)
+- **changes**: Use the repository root for paths, report real base, bound file reads (#242)
+- **changes**: Push explicitly to the same-named branch, literal pathspecs (#247)
+- **github**: Balance braces in branch pull request query (#354) (#388)
+- **spaces**: Give feedback when creating a space opens an existing one (#355) (#389)
+- **spaces**: Show closing state and avoid disconnect flash (#356) (#390)
+- **settings**: Stack notification checkboxes (#360) (#391)
+- **notify**: Taskbar icon notification count keeps growing (#371) (#393)
+- **notify**: Withdraw seen notifications from the tray (#371)
+- **notify**: Derive dock badge and tray withdrawal from Attention (#371)
+- **tabs**: Overflowing tabs cannot be reached with the mouse (#376) (#394)
+- **tabs**: Scroll buttons and all-tabs menu for overflowing tabs (#376)
+- **tab-bar**: Keep manual scroll on status updates, cover drag and drop while scrolled
+- **tab-bar**: Reveal the tab on every user activation, not only on activeId change
+- **build**: Pnpm tauri dev cannot determine which binary to run (#392) (#395)
+- **build**: Set default-run so pnpm tauri dev starts the app (#392)
+- **build**: Drop stray default-run from workspace.package (#392)
+- **spaces**: A space in a parent directory swallows new spaces of its repositories (#397) (#398)
+- **spaces**: Match a space only by a pane in the chosen directory (#397)
+- **backend**: Report the agent and its session of a terminal (#401) (#402)
+- **agents**: The poimen backend never reports done (#406) (#413)
+- **agents**: Report done when a turn ends on the poimen backend (#406)
+- **ui**: Name the active backend in user-facing text (#407) (#414)
+- **client**: Allow socket timeouts after the peer shut down on macOS
+- **backend**: Remove the unused ensure_poimen_server command (#409) (#418)
+- **agents**: Offer only hook-reporting agent kinds on the poimen backend (#420)
+- **spaces**: A task space without terminals is not found on the poimen backend (#411) (#421)
+- **spaces**: Find a task space without terminals on the poimen backend
+- **spaces**: Skip a labelled space in another directory in find_space
+- **app**: Compile changes.rs on Windows
+- **app**: Find the bundled poimen-server.exe beside the app
+- **app**: Start poimen-server on Unix when the socket directory is loose
+- **backend**: Stage poimen-server out of the AppImage mount (#424)
+- **agents**: Agent arguments are quoted for the terminal's shell (#426) (#434)
+- **agents**: Quote agent arguments for the terminal's shell (#426)
+- **agents**: Quote PowerShell metacharacters in agent arguments (#426)
+- **backend**: Offer the hooks again when they go missing (#427) (#435)
+- **docs**: README describes both backends and all platforms (#428) (#436)
+- **docs**: README describes both backends and all platforms (#428)
+- **docs**: Make shared README passages backend-neutral (#428)
+- **backend**: Hooks status does not stage the server (#429) (#437)
+
+
+### Documentation
+- **roadmap**: Add ROADMAP.md with the plan for M10 to M13 (#351)
+- Describe pr_worktree in AGENTS.md (#236)
+- **roadmap**: Update ROADMAP.md for M10 to M14 (#373) (#374)
+- **roadmap**: Update ROADMAP.md for M10 to M13 (#373)
+- **roadmap**: Split M10, new M11, shift M11 to M13 to M12 to M14 (#373)
+- **roadmap**: Sizes of the M10 bugs, decision on #355 (#373)
+- **spaces**: Update create_space comment to the exact-directory rule (#397)
+- Correct stale statements about the poimen backend (#408) (#415)
+- **protocol**: Unix socket and named pipe transport
+- Windows support in README, download and installation guide
+
+
+### Features
+- **server**: Poimen-server with PTY sessions and socket API (#151) (#363)
+- **server**: Poimen-server with PTY sessions and socket API (#151)
+- **server**: Headless terminal state and attach snapshot (#152) (#364)
+- **backend**: Poimen backend in the app (#153) (#365)
+- **backend**: Poimen backend in the app (#153)
+- **agents**: Agent status from Claude Code hooks (#154) (#366)
+- **agents**: Agent status from GitHub Copilot CLI hooks (#155) (#367)
+- **agents**: Start an agent and send a prompt on the poimen backend (#156) (#368)
+- **server**: Answer terminal queries while no app is attached (#369)
+- **tasks**: Issue picker dialog (#189) (#372)
+- **tasks**: Create the worktree for an issue (#375)
+- **tasks**: Start a task in a new space (#191) (#377)
+- **tasks**: Start a task in a new space
+- **tasks**: Clean up merged task worktrees (#192) (#378)
+- **tasks**: Clean up merged task worktrees
+- **tasks**: Start a task from an issue link in a terminal (#193) (#379)
+- **github**: Worktree for a pull request (#236) (#380)
+- **github**: Worktree for a pull request (#236)
+- **changes**: Diff of a worktree against its base (#242) (#381)
+- **changes**: Diff of a worktree against its base
+- **changes**: Changes tab with file list and CodeMirror merge view (#243) (#382)
+- **changes**: Syntax highlighting in the diff (#244) (#383)
+- **changes**: Line comments sent to the agent as one prompt (#245) (#384)
+- **changes**: Show review findings as comments in the diff (#246) (#385)
+- **changes**: Stage, commit and push from the Changes tab (#247) (#386)
+- **changes**: Stage, commit and push from the Changes tab (#247)
+- **settings**: Color scheme on the Appearance page (#350) (#399)
+- **icon**: Terminal panel around the crook in the app icon (#403) (#404)
+- **backend**: Poimen as the default backend (#173) (#405)
+- **server**: Local sockets via interprocess (named pipes on Windows) (#412) (#419)
+- **client**: Connect through a transport over interprocess local sockets
+- **server**: Run the poimen backend on Windows (#416) (#422)
+- **protocol,server**: Windows socket and state paths
+- **server**: Windows default shell
+- **server**: Terminal.detach for clients without socket shutdown
+- **app**: Start poimen-server detached on Windows
+- **server**: Claude Code and Copilot hooks on Windows
+
+
+### Refactoring
+- **backend**: Backend trait over the herdr client (#150) (#362)
+- **backend**: Backend-neutral space and terminal types in the frontend (#153)
+- **server**: Listen through the transport
+
+
 ## [0.9.0] — 2026-11-04
+
+### Documentation
+- Update CHANGELOG.md for v0.9.0 [skip ci]
+
 
 ### Features
 - **status-bar**: Help and update link on the far right, items separated by | (#326)
