@@ -671,6 +671,7 @@ fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
         Some(c) => c,
         None => vec![pty::default_shell()],
     };
+    let program = command[0].clone();
     let id = shared.new_id("t");
     let (cols, rows) = (p.cols.unwrap_or(80).max(1), p.rows.unwrap_or(24).max(1));
     let name = p
@@ -726,6 +727,7 @@ fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
         rows,
         status: TerminalStatus::Running,
         exit_code: None,
+        program: Some(program),
         agent: None,
     };
     inner.terminals.push(TerminalEntry {

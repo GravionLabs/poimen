@@ -288,6 +288,10 @@ pub struct Terminal {
     /// Set once `status` is `exited`; `None` when the process was killed by a signal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<u32>,
+    /// The program the terminal runs (the shell, for a default terminal); lets a client quote
+    /// what it types for that shell. Absent from servers that do not report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
     /// The agent in the terminal, as its hooks last reported it; absent when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
