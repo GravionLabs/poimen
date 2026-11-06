@@ -38,8 +38,26 @@ const ISSUES = [
 ];
 const MODES = {
   modes: [
-    { name: "agent", worktree: true, command: "claude", branch: "b", cleanup: null },
-    { name: "plain", worktree: false, command: "sh", branch: "b", cleanup: null },
+    {
+      name: "agent",
+      worktree: true,
+      harness: null,
+      model: null,
+      prompt: null,
+      command: null,
+      branch: "b",
+      cleanup: null,
+    },
+    {
+      name: "plain",
+      worktree: false,
+      harness: null,
+      model: null,
+      prompt: null,
+      command: ["sh"],
+      branch: "b",
+      cleanup: null,
+    },
   ],
   worktreeDir: "..",
 };

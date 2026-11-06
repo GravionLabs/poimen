@@ -551,13 +551,52 @@ pub struct TaskOverride {
     pub worktree_dir: Option<String>,
 }
 
+/// A command of a task mode: an argv array (non-empty strings, first one the program) or, still
+/// accepted for one release, a string. `Ok(None)` when absent; `Err` (after a warning) when invalid,
+/// which skips the mode.
+fn spec(
+    m: &serde_json::Map<String, Value>,
+    key: &str,
+    at: &str,
+    warnings: &mut Vec<String>,
+) -> Result<Option<crate::tasks::CommandSpec>, ()> {
+    use crate::tasks::CommandSpec;
+    match m.get(key) {
+        None => Ok(None),
+        Some(Value::String(v)) if !v.trim().is_empty() => Ok(Some(CommandSpec::Shell(v.clone()))),
+        Some(Value::Array(items)) => {
+            let argv: Option<Vec<String>> = items
+                .iter()
+                .map(|i| i.as_str().map(str::to_owned))
+                .collect();
+            match argv {
+                Some(a) if a.first().is_some_and(|p| !p.trim().is_empty()) => {
+                    Ok(Some(CommandSpec::Argv(a)))
+                }
+                _ => {
+                    warnings.push(format!(
+                        "{at}.{key} must be a non-empty array of strings; ignored"
+                    ));
+                    Err(())
+                }
+            }
+        }
+        Some(_) => {
+            warnings.push(format!(
+                "{at}.{key} must be an array of strings or a non-empty string; ignored"
+            ));
+            Err(())
+        }
+    }
+}
+
 /// Parses a `tasks` object (`modes[]`, `worktreeDir`) of the user config or of a project file.
 /// Invalid entries warn and are skipped. `fallback` ends the warning for a `modes` list without any
 /// valid mode ("using the default agent mode", "using your modes").
 pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) -> TaskOverride {
     use crate::tasks::{
-        CLEANUP_PLACEHOLDERS, COMMAND_PLACEHOLDERS, DEFAULT_BRANCH, PATH_PLACEHOLDERS, TaskMode,
-        unknown_placeholder,
+        CLEANUP_PLACEHOLDERS, COMMAND_PLACEHOLDERS, CommandSpec, DEFAULT_BRANCH, PATH_PLACEHOLDERS,
+        PROMPT_PLACEHOLDERS, TaskMode, unknown_placeholder,
     };
     let mut result = TaskOverride::default();
     let Some(obj) = value.as_object() else {
@@ -611,12 +650,19 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
             warnings.push(format!("{at}: duplicate name; the first one wins"));
             continue;
         }
-        let Some(command) = text("command", &at, warnings) else {
-            if !m.contains_key("command") {
-                warnings.push(format!("{at}.command is missing; ignored"));
-            }
-            continue;
+        let command = match spec(m, "command", &at, warnings) {
+            Ok(c) => c,
+            Err(()) => continue,
         };
+        let harness = text("harness", &at, warnings);
+        let model = text("model", &at, warnings);
+        let prompt = text("prompt", &at, warnings);
+        if command.is_some() && (harness.is_some() || model.is_some() || prompt.is_some()) {
+            warnings.push(format!(
+                "{at}: command cannot be combined with harness, model or prompt; ignored"
+            ));
+            continue;
+        }
         let worktree = match m.get("worktree") {
             None => true,
             Some(Value::Bool(b)) => *b,
@@ -626,23 +672,52 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
             }
         };
         let branch = text("branch", &at, warnings).unwrap_or_else(|| DEFAULT_BRANCH.into());
-        let cleanup = text("cleanup", &at, warnings);
+        let cleanup = spec(m, "cleanup", &at, warnings).unwrap_or(None);
+        let templates = |spec: &Option<CommandSpec>| -> Vec<String> {
+            match spec {
+                None => Vec::new(),
+                Some(CommandSpec::Shell(line)) => vec![line.clone()],
+                Some(CommandSpec::Argv(argv)) => argv.clone(),
+            }
+        };
         let checks = [
-            ("command", Some(&command), COMMAND_PLACEHOLDERS),
-            ("cleanup", cleanup.as_ref(), CLEANUP_PLACEHOLDERS),
-            ("branch", Some(&branch), PATH_PLACEHOLDERS),
+            ("command", templates(&command), COMMAND_PLACEHOLDERS),
+            ("cleanup", templates(&cleanup), CLEANUP_PLACEHOLDERS),
+            (
+                "prompt",
+                prompt.iter().cloned().collect(),
+                PROMPT_PLACEHOLDERS,
+            ),
+            ("branch", vec![branch.clone()], PATH_PLACEHOLDERS),
         ];
-        let bad = checks.iter().find_map(|(k, v, allowed)| {
-            v.and_then(|v| unknown_placeholder(v, allowed))
+        let bad = checks.iter().find_map(|(k, items, allowed)| {
+            items
+                .iter()
+                .find_map(|v| unknown_placeholder(v, allowed))
                 .map(|p| (*k, p))
         });
         if let Some((key, p)) = bad {
             warnings.push(format!("{at}.{key}: unknown placeholder {{{p}}}; ignored"));
             continue;
         }
+        for (key, value) in [("command", &command), ("cleanup", &cleanup)] {
+            if matches!(value, Some(CommandSpec::Shell(_))) {
+                warnings.push(format!(
+                    "tasks.modes.{name}: string {key} is deprecated, use {}",
+                    if key == "command" {
+                        "harness + prompt or an argv list"
+                    } else {
+                        "an argv list"
+                    }
+                ));
+            }
+        }
         out.push(TaskMode {
             name,
             worktree,
+            harness,
+            model,
+            prompt,
             command,
             branch,
             cleanup,
@@ -1415,6 +1490,7 @@ pub fn watch(home: &Path, interval: Duration, emit: impl Fn(&Settings)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tasks::CommandSpec;
 
     fn none() -> Option<String> {
         None
@@ -1453,7 +1529,10 @@ mod tests {
         let m = &s.tasks.modes[0];
         assert_eq!(m.name, "agent");
         assert!(m.worktree);
-        assert_eq!(m.command, "claude {prompt}");
+        assert_eq!(
+            (&m.harness, &m.model, &m.prompt, &m.command),
+            (&None, &None, &None, &None)
+        );
         assert_eq!(m.branch, "{type}/{nr}-{slug}");
         assert_eq!(m.cleanup, None);
         assert_eq!(s.tasks.worktree_dir, "../{repo}-{nr}");
@@ -1465,8 +1544,8 @@ mod tests {
         let s = resolve(
             Some(
                 r#"{"tasks":{"modes":[
-                {"name":"a","command":"x","cleanup":"Remove-PbiWorktrees.ps1 -Pr {pr} -Issue {nr}"},
-                {"name":"b","command":"run {pr}"}]}}"#,
+                {"name":"a","command":["x"],"cleanup":["Remove-PbiWorktrees.ps1","-Pr","{pr}","-Issue","{nr}"]},
+                {"name":"b","command":["run","{pr}"]}]}}"#,
             ),
             || None,
         );
@@ -1474,8 +1553,12 @@ mod tests {
         assert!(s.warnings[0].contains("command: unknown placeholder {pr}"));
         assert_eq!(s.tasks.modes.len(), 1);
         assert_eq!(
-            s.tasks.modes[0].cleanup.as_deref(),
-            Some("Remove-PbiWorktrees.ps1 -Pr {pr} -Issue {nr}")
+            s.tasks.modes[0].cleanup,
+            Some(CommandSpec::Argv(
+                ["Remove-PbiWorktrees.ps1", "-Pr", "{pr}", "-Issue", "{nr}"]
+                    .map(String::from)
+                    .to_vec()
+            ))
         );
     }
 
@@ -1484,18 +1567,30 @@ mod tests {
         let s = resolve(
             Some(
                 r#"{"tasks":{"worktreeDir":"../wt/{nr}","modes":[
-                {"name":"agent","command":"claude {prompt}"},
-                {"name":"quick","worktree":false,"command":"vim {url}","branch":"x/{nr}","cleanup":"echo {branch}"}]}}"#,
+                {"name":"agent","harness":"copilot","model":"auto","prompt":"Fix #{nr}"},
+                {"name":"quick","worktree":false,"command":["vim","{url}"],"branch":"x/{nr}","cleanup":["echo","{branch}"]}]}}"#,
             ),
             || None,
         );
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let a = &s.tasks.modes[0];
+        assert_eq!(a.harness.as_deref(), Some("copilot"));
+        assert_eq!(a.model.as_deref(), Some("auto"));
+        assert_eq!(a.prompt.as_deref(), Some("Fix #{nr}"));
+        assert_eq!(a.command, None);
         assert_eq!(s.tasks.worktree_dir, "../wt/{nr}");
         assert_eq!(s.tasks.modes.len(), 2);
         let q = &s.tasks.modes[1];
         assert!(!q.worktree);
         assert_eq!(q.branch, "x/{nr}");
-        assert_eq!(q.cleanup.as_deref(), Some("echo {branch}"));
+        assert_eq!(
+            q.command,
+            Some(CommandSpec::Argv(vec!["vim".into(), "{url}".into()]))
+        );
+        assert_eq!(
+            q.cleanup,
+            Some(CommandSpec::Argv(vec!["echo".into(), "{branch}".into()]))
+        );
         assert_eq!(s.tasks.modes[0].branch, "{type}/{nr}-{slug}");
     }
 
@@ -1504,30 +1599,65 @@ mod tests {
         let s = resolve(
             Some(
                 r#"{"theme":"dark","tasks":{"modes":[
-                {"name":"a","command":"run"},
-                {"name":"a","command":"again"},
-                {"name":"nocmd"},
-                {"name":"bad","command":"run {nope}"},
-                {"command":"x"},
-                {"name":"b","command":"ok","branch":"{prompt}"},
-                {"name":"c","command":"ok","worktree":"yes"}]}}"#,
+                {"name":"a","command":["run"]},
+                {"name":"a","command":["again"]},
+                {"name":"bad","command":["run","{nope}"]},
+                {"command":["x"]},
+                {"name":"b","command":["ok"],"branch":"{prompt}"},
+                {"name":"mixed","command":["ok"],"harness":"claude"},
+                {"name":"empty","command":[]},
+                {"name":"badprompt","prompt":"{prompt}"},
+                {"name":"c","command":["ok"],"worktree":"yes"}]}}"#,
             ),
             || None,
         );
         assert_eq!(s.theme, "dark");
         let names: Vec<_> = s.tasks.modes.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["a", "c"]);
-        assert_eq!(s.tasks.modes[0].command, "run");
-        assert_eq!(s.warnings.len(), 6, "{:?}", s.warnings);
+        assert_eq!(
+            s.tasks.modes[0].command,
+            Some(CommandSpec::Argv(vec!["run".into()]))
+        );
+        assert_eq!(s.warnings.len(), 8, "{:?}", s.warnings);
+        assert!(s.warnings.iter().any(|w| w.contains("cannot be combined")));
+        assert!(
+            s.warnings
+                .iter()
+                .any(|w| w.contains("tasks.modes[badprompt].prompt"))
+        );
         assert!(s.warnings.iter().any(|w| w.contains("duplicate")));
         assert!(s.warnings.iter().any(|w| w.contains("{nope}")));
         assert!(s.warnings.iter().any(|w| w.contains("{prompt}")));
     }
 
     #[test]
+    fn a_string_command_and_cleanup_still_load_with_a_deprecation_warning_naming_the_mode() {
+        let s = resolve(
+            Some(
+                r#"{"tasks":{"modes":[
+                {"name":"old","command":"claude {prompt}","cleanup":"git branch -D {branch}"},
+                {"name":"new","command":["claude","{prompt}"]}]}}"#,
+            ),
+            || None,
+        );
+        assert_eq!(
+            s.warnings,
+            [
+                "tasks.modes.old: string command is deprecated, use harness + prompt or an argv list",
+                "tasks.modes.old: string cleanup is deprecated, use an argv list"
+            ]
+        );
+        assert_eq!(
+            s.tasks.modes[0].command,
+            Some(CommandSpec::Shell("claude {prompt}".into()))
+        );
+        assert_eq!(s.tasks.modes.len(), 2);
+    }
+
+    #[test]
     fn tasks_without_a_valid_mode_keep_the_default() {
         let s = resolve(
-            Some(r#"{"tasks":{"worktreeDir":"../{bad}","modes":[{"name":"x"}]}}"#),
+            Some(r#"{"tasks":{"worktreeDir":"../{bad}","modes":[{"command":["x"]}]}}"#),
             || None,
         );
         assert_eq!(s.tasks, crate::tasks::TaskModes::default());
