@@ -723,6 +723,7 @@ async fn task_cleanup(
     backend: State<'_, Shared>,
     dir: String,
     focused_space: Option<String>,
+    skip_teardown: Option<bool>,
 ) -> Result<worktree::CleanupReport, String> {
     let backend = backend.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -743,13 +744,50 @@ async fn task_cleanup(
                 worktree::CleanupMode::Builtin,
                 worktree::CleanupMode::Command,
             );
+        // The project's teardown runs in each worktree first, only for a trusted project file.
+        let command = match project::teardown_plan(&sources, &settings.trusted_projects) {
+            project::TeardownPlan::Run(command) => Some(command),
+            project::TeardownPlan::Untrusted if skip_teardown != Some(true) => {
+                return Ok(worktree::CleanupReport {
+                    teardown_untrusted: true,
+                    ..Default::default()
+                });
+            }
+            _ => None,
+        };
+        let teardown = command.map(|command| {
+            move |worktree: &std::path::Path| -> Result<(), String> {
+                let result = project::run_teardown(&project::SystemRunner, &command, worktree)?;
+                if result.success() {
+                    Ok(())
+                } else {
+                    Err(result.failure_text())
+                }
+            }
+        });
         worktree::cleanup(
             &root,
             &merged,
             &mode,
             backend.as_ref(),
             focused_space.as_deref(),
+            teardown.as_ref().map(|t| t as &worktree::Teardown<'_>),
         )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs the `teardown` of the project file of the repository of `dir` in `dir` (the worktree of
+/// the focused space), when the project file is trusted. A user action (palette entry).
+#[tauri::command]
+async fn project_teardown(dir: String) -> Result<project::TeardownReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = worktree::main_worktree(std::path::Path::new(&dir))?;
+        let sources = trust::Sources::read(&root.to_string_lossy());
+        let plan = project::teardown_plan(&sources, &get_settings().trusted_projects);
+        let top = worktree::toplevel(std::path::Path::new(&dir))?;
+        project::teardown_now(&project::SystemRunner, &plan, &top)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1379,6 +1417,7 @@ pub fn run() {
             task_plan,
             task_tab,
             task_cleanup,
+            project_teardown,
             get_color_schemes,
             set_theme,
             set_color_schema,

@@ -1,5 +1,6 @@
 import { Injectable, inject } from "@angular/core";
 import { HerdrStore } from "./herdr-store";
+import { ResultDialog } from "./result-dialog";
 import { SpaceActions } from "./space-actions";
 import { TaskLog } from "./task-log";
 import { TauriBridge } from "./tauri";
@@ -27,6 +28,8 @@ export interface CleanupLeft {
 export interface CleanupReport {
   removed: CleanupRemoved[];
   left: CleanupLeft[];
+  /** The project has a teardown but is not trusted: nothing was removed. */
+  teardownUntrusted?: boolean;
 }
 
 /** The result notification: `<n> removed, <m> left`. */
@@ -59,18 +62,40 @@ export class TaskCleanup {
   private readonly store = inject(HerdrStore);
   private readonly log = inject(TaskLog);
   private readonly ui = inject(UiState);
+  private readonly dialog = inject(ResultDialog);
 
   /** Cleans up the repository at `dir`; `focusedSpace` is never touched. Resolves to the report. */
-  async run(dir: string, focusedSpace: string | null): Promise<CleanupReport | null> {
+  async run(
+    dir: string,
+    focusedSpace: string | null,
+    skipTeardown = false,
+  ): Promise<CleanupReport | null> {
     let report: CleanupReport;
     try {
-      report = await this.bridge.invoke<CleanupReport>("task_cleanup", { dir, focusedSpace });
+      report = await this.bridge.invoke<CleanupReport>("task_cleanup", {
+        dir,
+        focusedSpace,
+        skipTeardown,
+      });
     } catch (err) {
       const reason = err && typeof err === "object" && "message" in err ? err.message : err;
       const text = `Clean up merged tasks failed: ${String(reason)}`;
       this.log.add([{ text }]);
       this.spaces.notify(text);
       return null;
+    }
+    if (report.teardownUntrusted) {
+      this.dialog.show({
+        title: "Clean up merged tasks",
+        summary:
+          "The project file has a teardown command but is not trusted, so it cannot run. Nothing was removed. Remove the merged worktrees without running the teardown?",
+        text: "",
+        action: {
+          label: "Remove without teardown",
+          run: () => void this.run(dir, focusedSpace, true),
+        },
+      });
+      return report;
     }
     await this.store.refresh();
     this.log.add(cleanupLog(report));
