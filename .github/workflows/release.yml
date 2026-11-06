@@ -178,7 +178,11 @@ jobs:
           - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
           - { os: macos-latest, target: aarch64-apple-darwin } # Apple Silicon; no macOS x64 build
           # A pre-release version (0.10.0-rc.3) is no numeric WiX version, so it bundles only the NSIS -setup.exe.
-          - { os: windows-latest, target: x86_64-pc-windows-msvc, prerelease-args: "--bundles nsis" }
+          - {
+              os: windows-latest,
+              target: x86_64-pc-windows-msvc,
+              prerelease-args: "--bundles nsis",
+            }
     steps:
       # The tag carries the manifests with the released version. A dispatch builds the branch it ran on.
       - uses: actions/checkout@v4

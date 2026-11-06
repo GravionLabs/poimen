@@ -155,6 +155,10 @@ fn wire_pane(terminal: &Terminal, space_id: &str) -> Value {
             pane["agent_message_at"] = json!(info.message_at);
         }
     }
+    if !terminal.tokens.is_empty() {
+        // The same `tokens` map herdr's `pane.list` has, so `$<name>` row tokens work unchanged.
+        pane["tokens"] = json!(terminal.tokens);
+    }
     pane
 }
 
@@ -592,6 +596,7 @@ mod tests {
             exit_code: None,
             program: None,
             agent: None,
+            tokens: Default::default(),
         }
     }
 
@@ -863,6 +868,24 @@ mod tests {
     }
 
     #[test]
+    fn tokens_reach_the_pane_as_herdr_tokens_and_their_event_passes_through() {
+        let mut t = terminal("t1", "s1", "a");
+        t.tokens = [("deliver_step".to_owned(), "build".to_owned())].into();
+        let snapshot = map_snapshot(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        assert_eq!(
+            snapshot.panes[0]["tokens"],
+            json!({"deliver_step": "build"})
+        );
+        assert!(snapshot.panes[1].get("tokens").is_none());
+        let event = backend_event(&Event::TerminalTokensChanged {
+            terminal_id: "t1".into(),
+            tokens: Default::default(),
+        });
+        assert_eq!(event.kind, "terminal.tokens_changed");
+        assert_eq!(event.data["terminal_id"], "t1");
+    }
+
+    #[test]
     fn a_wire_event_becomes_a_backend_event() {
         let event = backend_event(&Event::SpaceClosed {
             space_id: "s1".into(),
@@ -952,7 +975,7 @@ mod tests {
                 "terminal.list" => Ok(json!({"terminals": [term_json("t1", "s1")]})),
                 "terminal.rename" => Ok(json!({"terminal": term_json("t1", "s1")})),
                 "terminal.input" | "terminal.close" | "space.close" => Ok(json!({})),
-                "ping" => Ok(json!({"version": "0.9.0", "protocol": 2, "pid": 1})),
+                "ping" => Ok(json!({"version": "0.9.0", "protocol": PROTOCOL_VERSION, "pid": 1})),
                 "terminal.attach" if conflict => Err(("conflict", "controlled")),
                 "terminal.attach" => Ok(
                     json!({"terminal_id": params["terminal_id"], "seq": 0, "cols": 100, "rows": 30, "mode": params["mode"], "snapshot": "c25hcA=="}),
@@ -1019,7 +1042,7 @@ mod tests {
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
-            ("0.9.0", Some(2), 2)
+            ("0.9.0", Some(3), 3)
         );
     }
 

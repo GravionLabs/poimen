@@ -9,6 +9,7 @@ pub mod claude;
 pub mod copilot;
 mod emulator;
 mod pty;
+pub mod report;
 mod store;
 mod stream;
 
@@ -20,16 +21,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::vte::ansi::Rgb;
 use emulator::Colors;
 use poimen_protocol::{
     self as proto, AgentInfo, AgentStatus, AttachMode, DetachReason, ErrorCode, Event,
     PROTOCOL_VERSION, PingResult, Request, Response, SetColors, Space, SpaceClose, SpaceCreate,
-    SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalDetach,
-    TerminalInput, TerminalList, TerminalRename, TerminalReportAgent, TerminalResize,
-    TerminalStatus,
+    SpaceRename, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose, TerminalCreate,
+    TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalReportAgent,
+    TerminalReportTokens, TerminalResize, TerminalStatus,
 };
 use serde_json::{Value, json};
 
@@ -39,6 +40,9 @@ use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
 
 /// How long a write to a client may block before the connection is given up. Only the writer
 /// thread of that client waits; the PTY and the other clients never do.
+/// How often the tokens with a TTL are checked.
+const TOKEN_SWEEP: Duration = Duration::from_millis(500);
+
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 use poimen_client::transport::{self, Conn, Entry, Listener};
@@ -105,6 +109,30 @@ struct TerminalEntry {
     stream: Arc<TermStream>,
     /// `seq` of the last accepted agent report; older or equal reports are dropped.
     agent_seq: Option<u64>,
+    /// Who set which token and until when; `info.tokens` is the visible name-to-value view.
+    tokens: Vec<TokenEntry>,
+}
+
+struct TokenEntry {
+    name: String,
+    source: String,
+    expires: Option<Instant>,
+}
+
+impl TerminalEntry {
+    /// Drops the tokens whose time is up; true when any went.
+    fn expire_tokens(&mut self, now: Instant) -> bool {
+        let before = self.tokens.len();
+        let info = &mut self.info;
+        self.tokens.retain(|t| {
+            let alive = t.expires.is_none_or(|at| at > now);
+            if !alive {
+                info.tokens.remove(&t.name);
+            }
+            alive
+        });
+        self.tokens.len() != before
+    }
 }
 
 #[derive(Default)]
@@ -144,6 +172,20 @@ impl Shared {
         }
     }
 
+    /// Expires the tokens whose TTL is up and tells the subscribers.
+    pub(crate) fn expire_tokens(&self) {
+        let now = Instant::now();
+        let mut inner = lock(&self.inner);
+        for entry in &mut inner.terminals {
+            if entry.expire_tokens(now) {
+                self.publish(Event::TerminalTokensChanged {
+                    terminal_id: entry.info.id.clone(),
+                    tokens: entry.info.tokens.clone(),
+                });
+            }
+        }
+    }
+
     /// Marks a terminal exited when its process ends (unless it was closed meanwhile).
     pub(crate) fn terminal_exited(&self, terminal_id: &str, exit_code: Option<u32>) {
         let mut inner = lock(&self.inner);
@@ -161,6 +203,14 @@ impl Shared {
         entry.info.exit_code = exit_code;
         entry.pty = None;
         entry.info.agent = None;
+        if !entry.info.tokens.is_empty() {
+            entry.info.tokens.clear();
+            entry.tokens.clear();
+            self.publish(Event::TerminalTokensChanged {
+                terminal_id: terminal_id.to_string(),
+                tokens: Default::default(),
+            });
+        }
         entry.stream.exited(exit_code);
         self.publish(Event::TerminalExited {
             terminal_id: terminal_id.to_string(),
@@ -246,6 +296,13 @@ impl Server {
 
     /// Accepts connections forever, one thread each.
     pub fn serve(self) {
+        let shared = Arc::clone(&self.shared);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(TOKEN_SWEEP);
+                shared.expire_tokens();
+            }
+        });
         for stream in self.listener.incoming() {
             match stream {
                 Ok(stream) => {
@@ -518,6 +575,8 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.close" => terminal_close(shared, parsed(request)?),
         "server.set_colors" => server_set_colors(shared, parsed(request)?),
         "terminal.report_agent" => terminal_report_agent(shared, parsed(request)?),
+        "terminal.report_tokens" => terminal_report_tokens(shared, parsed(request)?),
+        "terminal.clear_tokens" => terminal_clear_tokens(shared, parsed(request)?),
         "terminal.input" => terminal_input(shared, parsed(request)?, ctx),
         "terminal.resize" => terminal_resize(shared, parsed(request)?, ctx),
         other => Err((ErrorCode::UnknownMethod, format!("unknown method {other}"))),
@@ -599,6 +658,7 @@ fn space_close(shared: &Shared, p: SpaceClose) -> ApiResult {
 }
 
 fn terminal_list(shared: &Shared, p: TerminalList) -> ApiResult {
+    shared.expire_tokens();
     let inner = lock(&shared.inner);
     let terminals: Vec<&Terminal> = inner
         .terminals
@@ -729,12 +789,14 @@ fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
         exit_code: None,
         program: Some(program),
         agent: None,
+        tokens: Default::default(),
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
         pty: Some(spawned),
         stream,
         agent_seq: None,
+        tokens: Vec::new(),
     });
     shared.publish(Event::TerminalCreated {
         terminal: info.clone(),
@@ -810,6 +872,89 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         });
     }
     Ok(json!({ "accepted": true }))
+}
+
+fn invalid(message: impl Into<String>) -> (ErrorCode, String) {
+    (ErrorCode::InvalidParams, message.into())
+}
+
+fn tokens_changed(shared: &Shared, entry: &TerminalEntry) {
+    shared.publish(Event::TerminalTokensChanged {
+        terminal_id: entry.info.id.clone(),
+        tokens: entry.info.tokens.clone(),
+    });
+}
+
+/// Sets and removes the tokens of one source (herdr's `pane report-metadata` semantics: names of
+/// [`proto::valid_token_name`], at most [`proto::MAX_TOKENS_PER_REPORT`] per report, a TTL per
+/// report). The event is published only when the visible tokens changed.
+fn terminal_report_tokens(shared: &Shared, p: TerminalReportTokens) -> ApiResult {
+    if p.source.trim().is_empty() {
+        return Err(invalid("source must not be empty"));
+    }
+    if p.tokens.len() > proto::MAX_TOKENS_PER_REPORT {
+        return Err(invalid(format!(
+            "at most {} tokens per report",
+            proto::MAX_TOKENS_PER_REPORT
+        )));
+    }
+    if let Some(name) = p.tokens.keys().find(|n| !proto::valid_token_name(n)) {
+        return Err(invalid(format!(
+            "invalid token name {name:?}: 1 to {} ASCII letters, digits, _ or -",
+            proto::MAX_TOKEN_NAME
+        )));
+    }
+    if p.ttl_s == Some(0) {
+        return Err(invalid("ttl_s must be above 0"));
+    }
+    let now = Instant::now();
+    let expires = p.ttl_s.map(|s| now + Duration::from_secs(s));
+    let mut inner = lock(&shared.inner);
+    let entry = terminal_mut(&mut inner, &p.terminal_id)?;
+    if entry.info.status == TerminalStatus::Exited {
+        return Ok(json!({ "accepted": true }));
+    }
+    let before = entry.info.tokens.clone();
+    entry.expire_tokens(now);
+    for (name, value) in p.tokens {
+        entry.tokens.retain(|t| t.name != name);
+        match value {
+            Some(value) => {
+                entry.info.tokens.insert(name.clone(), value);
+                entry.tokens.push(TokenEntry {
+                    name,
+                    source: p.source.clone(),
+                    expires,
+                });
+            }
+            None => {
+                entry.info.tokens.remove(&name);
+            }
+        }
+    }
+    if entry.info.tokens != before {
+        tokens_changed(shared, entry);
+    }
+    Ok(json!({ "accepted": true }))
+}
+
+/// Removes every token the source set on the terminal.
+fn terminal_clear_tokens(shared: &Shared, p: TerminalClearTokens) -> ApiResult {
+    let mut inner = lock(&shared.inner);
+    let entry = terminal_mut(&mut inner, &p.terminal_id)?;
+    let info = &mut entry.info;
+    let before = entry.tokens.len();
+    entry.tokens.retain(|t| {
+        let keep = t.source != p.source;
+        if !keep {
+            info.tokens.remove(&t.name);
+        }
+        keep
+    });
+    if entry.tokens.len() != before {
+        tokens_changed(shared, entry);
+    }
+    Ok(json!({ "cleared": before - entry.tokens.len() }))
 }
 
 fn terminal_close(shared: &Shared, p: TerminalClose) -> ApiResult {
