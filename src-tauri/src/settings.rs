@@ -195,6 +195,8 @@ pub struct Settings {
     pub notify_on_done: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
+    /// The space templates (`spaceTemplates`); invalid entries are skipped with a warning.
+    pub space_templates: Vec<crate::templates::Template>,
     /// Repository root to the SHA-256 of the project file the user trusted (`trustedProjects`).
     pub trusted_projects: BTreeMap<String, String>,
     /// The task modes (`tasks`); the default is one `agent` mode.
@@ -376,6 +378,7 @@ impl Default for Settings {
             notify_on_blocked: true,
             notify_on_done: true,
             spaces_layout: None,
+            space_templates: Vec::new(),
             trusted_projects: BTreeMap::new(),
             tasks: crate::tasks::TaskModes::default(),
             harnesses: crate::harness::default_harnesses(),
@@ -601,6 +604,83 @@ fn spec(
             Err(())
         }
     }
+}
+
+/// Parses `spaceTemplates[]`: `name` (unique), `match.dir`, `agent`, optional `model` and `layout`.
+/// Invalid entries warn and are skipped. The agent is checked against `harnesses` at use.
+pub fn parse_space_templates(
+    value: &Value,
+    warnings: &mut Vec<String>,
+) -> Vec<crate::templates::Template> {
+    let Some(list) = value.as_array() else {
+        warnings.push("spaceTemplates must be an array".into());
+        return Vec::new();
+    };
+    let mut out: Vec<crate::templates::Template> = Vec::new();
+    for (i, entry) in list.iter().enumerate() {
+        let at = format!("spaceTemplates[{i}]");
+        let Some(obj) = entry.as_object() else {
+            warnings.push(format!("{at} must be an object; ignored"));
+            continue;
+        };
+        let text = |v: Option<&Value>| match v {
+            Some(Value::String(s)) if !s.trim().is_empty() => Some(s.trim().to_owned()),
+            _ => None,
+        };
+        let Some(name) = text(obj.get("name")) else {
+            warnings.push(format!("{at}.name must be a non-empty string; ignored"));
+            continue;
+        };
+        let at = format!("spaceTemplates[{name}]");
+        if out.iter().any(|t| t.name == name) {
+            warnings.push(format!("{at}: duplicate name; the first one wins"));
+            continue;
+        }
+        let Some(dir) = text(obj.get("match").and_then(|m| m.get("dir"))) else {
+            warnings.push(format!(
+                "{at}.match.dir must be a non-empty string; ignored"
+            ));
+            continue;
+        };
+        if !crate::templates::is_valid_dir(&dir) {
+            warnings.push(format!(
+                "{at}.match.dir must be absolute or start with ~; ignored"
+            ));
+            continue;
+        }
+        let Some(agent) = text(obj.get("agent")) else {
+            warnings.push(format!("{at}.agent must be a non-empty string; ignored"));
+            continue;
+        };
+        let model = match obj.get("model") {
+            None => None,
+            Some(v) => match text(Some(v)) {
+                Some(m) => Some(m),
+                None => {
+                    warnings.push(format!("{at}.model must be a non-empty string; ignored"));
+                    continue;
+                }
+            },
+        };
+        let layout = match obj.get("layout") {
+            None => None,
+            Some(l) => match crate::layout::parse_layout_value(l) {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    warnings.push(format!("{at}.layout: {e}; ignored"));
+                    continue;
+                }
+            },
+        };
+        out.push(crate::templates::Template {
+            name,
+            dir,
+            agent,
+            model,
+            layout,
+        });
+    }
+    out
 }
 
 /// Parses a `tasks` object (`modes[]`, `worktreeDir`) of the user config or of a project file.
@@ -847,6 +927,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("spaces") {
         resolve_spaces(value, &mut s);
+    }
+    if let Some(value) = root.get("spaceTemplates") {
+        s.space_templates = parse_space_templates(value, &mut s.warnings);
     }
     if let Some(value) = root.get("tasks") {
         resolve_tasks(value, &mut s);
@@ -1594,6 +1677,32 @@ mod tests {
 
     fn rows(json: &str) -> Settings {
         resolve(Some(json), none)
+    }
+
+    #[test]
+    fn space_templates_parse_and_invalid_entries_warn_and_are_skipped() {
+        let s = rows(
+            r#"{"spaceTemplates":[
+            {"name":"a","match":{"dir":"~/src/a"},"agent":"claude","model":"opus",
+             "layout":{"panes":[{"name":"main"}]}},
+            {"name":"a","match":{"dir":"/x"},"agent":"claude"},
+            {"match":{"dir":"/x"},"agent":"claude"},
+            {"name":"rel","match":{"dir":"src/a"},"agent":"claude"},
+            {"name":"noagent","match":{"dir":"/x"}},
+            {"name":"nodir","agent":"claude"},
+            {"name":"badmodel","match":{"dir":"/x"},"agent":"claude","model":3},
+            {"name":"badlayout","match":{"dir":"/x"},"agent":"claude","layout":{"panes":[]}},
+            "text"]}"#,
+        );
+        assert_eq!(s.space_templates.len(), 1);
+        let t = &s.space_templates[0];
+        assert_eq!((t.name.as_str(), t.dir.as_str()), ("a", "~/src/a"));
+        assert_eq!(t.model.as_deref(), Some("opus"));
+        assert_eq!(t.layout.as_ref().unwrap().panes[0].name, "main");
+        assert_eq!(s.warnings.len(), 8, "{:?}", s.warnings);
+        assert!(s.warnings[0].contains("duplicate"));
+        assert_eq!(rows("{\"spaceTemplates\":1}").space_templates.len(), 0);
+        assert!(resolve(None, none).space_templates.is_empty());
     }
 
     #[test]

@@ -26,6 +26,7 @@ mod spaces;
 mod stream;
 mod task_start;
 mod tasks;
+mod templates;
 mod terminal_colors;
 mod transcripts;
 mod trust;
@@ -427,8 +428,23 @@ fn create_space_with(
     let created = backend.create_space(&dir, &label)?;
     let workspace_id = created.space_id.clone();
     backend.focus_space(&workspace_id)?;
-    let user_layout = user.and_then(|s| s.spaces_layout);
-    let mut warnings = build_layout(
+    let template = user.as_ref().and_then(|s| {
+        templates::resolve(&dir, None, &s.space_templates, home).map(|t| (t, &s.harnesses))
+    });
+    let mut template_warnings = Vec::new();
+    let agent_command = template.and_then(|(t, harnesses)| {
+        let path = gui_path::child_path();
+        templates::agent_command(t, harnesses, |p| {
+            gui_path::resolve_program(p, &path).is_some()
+        })
+        .map_err(|w| template_warnings.push(w))
+        .ok()
+    });
+    let user_layout = template
+        .and_then(|(t, _)| t.layout.clone())
+        .or_else(|| user.as_ref().and_then(|s| s.spaces_layout.clone()));
+    let mut warnings = template_warnings;
+    warnings.extend(build_layout(
         backend,
         &dir,
         created.root_terminal.as_deref(),
@@ -436,7 +452,8 @@ fn create_space_with(
         user_layout.as_ref(),
         allow,
         root_command,
-    );
+        agent_command.as_deref(),
+    ));
     let (setup_started, warning) = run_setup(backend, &workspace_id, &dir, &sources, allow);
     warnings.extend(warning);
     Ok(spaces::SpaceOutcome {
@@ -454,6 +471,7 @@ fn create_space_with(
 /// of a layout that comes from a project file are not typed; the panes are still created and named.
 /// Problems come back as warnings; the space then keeps the panes created so far (at least its
 /// single root pane).
+#[allow(clippy::too_many_arguments)]
 fn build_layout(
     backend: &dyn Backend,
     dir: &str,
@@ -462,6 +480,7 @@ fn build_layout(
     user_layout: Option<&layout::Layout>,
     allow_project_commands: bool,
     root_command: Option<&str>,
+    agent_command: Option<&str>,
 ) -> Vec<String> {
     let (project, legacy) = sources.refs();
     let (layout, mut warnings, from_project) =
@@ -474,9 +493,18 @@ fn build_layout(
     } else {
         layout
     };
-    let layout = match root_command {
-        Some(command) => layout.with_root_command(command),
-        None => layout,
+    // A task's command wins; then the template's agent, which fills a root pane without a command
+    // of its own (the built-in default's `claude` is not one).
+    let explicit = from_project || user_layout.is_some();
+    let root_free = layout
+        .panes
+        .iter()
+        .find(|p| p.split.is_none())
+        .is_none_or(|p| p.command.is_none() || !explicit);
+    let layout = match (root_command, agent_command) {
+        (Some(command), _) => layout.with_root_command(command),
+        (None, Some(agent)) if root_free => layout.with_root_command(agent),
+        _ => layout,
     };
     let Some(root_pane) = root_pane else {
         return vec!["the backend did not report the root pane; no layout applied".into()];
@@ -1650,6 +1678,7 @@ mod build_layout_tests {
             user,
             allow,
             None,
+            None,
         );
         assert!(warnings.is_empty(), "{warnings:?}");
         fake.calls()
@@ -1669,6 +1698,7 @@ mod build_layout_tests {
             &sources(PROJECT_TEXT),
             None,
             false,
+            None,
             None,
         );
         assert_eq!(
@@ -1706,6 +1736,7 @@ mod build_layout_tests {
             &sources(PROJECT_TEXT),
             None,
             true,
+            None,
             None,
         );
         assert_eq!(warnings.len(), 1);
@@ -1842,6 +1873,105 @@ mod build_layout_tests {
         assert!(calls.contains(&"rename w9:root agent".to_owned()));
         assert!(calls.contains(&"input w9:root claude 'x'".to_owned()));
         assert!(!calls.iter().any(|c| c == "input w9:root claude"));
+    }
+
+    fn home_with_templates(config: &str) -> (PathBuf, String) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let home = std::env::temp_dir().join(format!("poimen-tpl-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
+        std::fs::write(home.join(".config/poimen/config.json"), config).unwrap();
+        let dir = home.join("src/app");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.to_string_lossy().into_owned();
+        (home, dir)
+    }
+
+    #[test]
+    fn create_space_starts_the_template_agent_in_the_root_pane_and_uses_its_layout() {
+        let (home, dir) = home_with_templates(
+            r#"{"harnesses":{"sh1":{"command":["sh"],"modelArgs":["-m","{model}"]}},
+            "spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"sh1","model":"x",
+              "layout":{"panes":[{"name":"main"},
+                {"name":"b","split":{"from":"main","direction":"down","ratio":0.5}}]}}]}"#,
+        );
+        let fake = FakeBackend::default();
+        let out = create_space_with(&fake, Some(&home), &dir, None, None, None).unwrap();
+        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+        let calls = fake.calls();
+        assert!(calls.contains(&"rename w9:root main".to_owned()));
+        assert!(
+            calls.contains(&"input w9:root sh -m x".to_owned()),
+            "{calls:?}"
+        );
+        assert_eq!(calls.iter().filter(|c| c.starts_with("split ")).count(), 1);
+    }
+
+    #[test]
+    fn a_task_command_beats_the_template_agent() {
+        let (home, dir) = home_with_templates(
+            r#"{"harnesses":{"sh1":{"command":["sh"]}},
+            "spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"sh1"}]}"#,
+        );
+        let fake = FakeBackend::default();
+        create_space_with(&fake, Some(&home), &dir, None, None, Some("task")).unwrap();
+        let calls = fake.calls();
+        assert!(calls.contains(&"input w9:root task".to_owned()));
+        assert!(!calls.iter().any(|c| c == "input w9:root sh"));
+    }
+
+    #[test]
+    fn an_unknown_or_missing_agent_warns_with_the_template_name() {
+        for agent in ["nope", "nosuchprogram-xyz"] {
+            let (home, dir) = home_with_templates(&format!(
+                r#"{{"harnesses":{{"gone":{{"command":["nosuchprogram-xyz"]}}}},
+                "spaceTemplates":[{{"name":"app","match":{{"dir":"~/src"}},"agent":"{}"}}]}}"#,
+                if agent == "nope" { "nope" } else { "gone" }
+            ));
+            let fake = FakeBackend::default();
+            let out = create_space_with(&fake, Some(&home), &dir, None, None, None).unwrap();
+            assert!(out.created);
+            assert_eq!(out.warnings.len(), 1, "{:?}", out.warnings);
+            assert!(out.warnings[0].contains("\"app\""));
+            assert!(
+                !fake
+                    .calls()
+                    .iter()
+                    .any(|c| c.starts_with("input w9:root") && c != "input w9:root claude")
+            );
+        }
+    }
+
+    #[test]
+    fn build_layout_fills_a_free_root_pane_but_not_an_explicit_command() {
+        let free = layout::parse_layout(r#"{"panes":[{"name":"a"}]}"#).unwrap();
+        let own = layout::parse_layout(r#"{"panes":[{"name":"a","command":"vim"}]}"#).unwrap();
+        let no_files = trust::Sources {
+            root: "/w".into(),
+            project: None,
+            legacy: None,
+        };
+        let typed = |user: Option<&layout::Layout>| {
+            let fake = FakeBackend::default();
+            build_layout(
+                &fake,
+                "/w",
+                Some("w1:root"),
+                &no_files,
+                user,
+                true,
+                None,
+                Some("agent"),
+            );
+            fake.calls()
+                .into_iter()
+                .filter(|c| c.starts_with("input "))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(typed(Some(&free)), ["input w1:root agent"]);
+        assert_eq!(typed(Some(&own)), ["input w1:root vim"]);
+        // The built-in default's `claude` is replaced by the template agent.
+        assert_eq!(typed(None), ["input w1:root agent"]);
     }
 
     #[test]
