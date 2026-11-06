@@ -2,6 +2,8 @@ import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
+  Directive,
+  ElementRef,
   Injector,
   afterNextRender,
   computed,
@@ -297,9 +299,29 @@ export function isDoubleClick(
 }
 
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
+/** Focuses and selects the inline rename input once it is in the DOM. */
+@Directive({ selector: "input[appSpaceEditFocus]" })
+export class SpaceEditFocus {
+  constructor() {
+    const el = inject<ElementRef<HTMLInputElement>>(ElementRef).nativeElement;
+    afterNextRender(() => {
+      el.focus();
+      el.select();
+    });
+  }
+}
+
 @Component({
   selector: "app-sidebar",
-  imports: [HxMessage, HxTree, HxTreeNodeTemplate, HxInput, NgTemplateOutlet, SplitPane],
+  imports: [
+    SpaceEditFocus,
+    HxMessage,
+    HxTree,
+    HxTreeNodeTemplate,
+    HxInput,
+    NgTemplateOutlet,
+    SplitPane,
+  ],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -419,6 +441,7 @@ export class Sidebar {
       return;
     }
     if (await this.spaceActions.rename(workspaceId, input.value)) this.editing.set(null);
+    else input.focus();
   }
 
   protected closeSpace(workspaceId: string, event: Event): void {

@@ -205,6 +205,25 @@ describe("Sidebar with the real hx-tree", () => {
       expect(s.root.querySelector(".space-edit")).toBeNull();
     });
 
+    it("focuses and selects the input when the edit starts", async () => {
+      const s = await setup();
+      const input = await dbl(s);
+      expect(document.activeElement).toBe(input);
+      expect(input.selectionStart).toBe(0);
+      expect(input.selectionEnd).toBe(input.value.length);
+    });
+
+    it("focuses the input again after a failed commit", async () => {
+      const s = await setup();
+      vi.spyOn(s.spaceActions, "rename").mockResolvedValue(false);
+      const input = await dbl(s);
+      input.value = "";
+      input.blur();
+      await s.settle();
+      expect(s.root.querySelector(".space-edit")).toBe(input);
+      expect(document.activeElement).toBe(input);
+    });
+
     it("cancels with Escape without renaming", async () => {
       const s = await setup();
       const rename = vi.spyOn(s.spaceActions, "rename").mockResolvedValue(true);
