@@ -28,7 +28,7 @@ Everything here is in the application today; the [README](https://github.com/Gra
 
 - Statuses (working, idle, blocked, done) come from the backend (hooks on `poimen-server`, events on herdr). On the poimen backend an agent that finishes a turn (`Stop` / `agentStop`) reports done, and done stays until the next prompt; a new session reports idle.
 - A pane that turns blocked while not viewed rings on its tab and sidebar row; one that turns done counts as unread; workspace rows sum their panes. Viewing the tab clears both.
-- Optional macOS notifications for blocked and done, and a dock badge with the number of waiting agents. A notification center view lists recent status changes.
+- Optional system notifications (macOS and Linux) for blocked and done, and a dock badge with the number of waiting agents. A notification center view lists recent status changes.
 - `CmdOrCtrl+Shift+A` jumps to the next waiting agent.
 
 ## Subagents and the Flow tab
