@@ -5,6 +5,45 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.11.0] — 2026-11-06
+
+### Bug Fixes
+- **spaces**: Focus the inline rename input (#370)
+- Replace the updater signing key (#459) (#460)
+- **agents**: Copilot token usage and a testable token row
+- **terminal**: Reset the font size by removing the key (#456)
+- **settings**: Accept the notification row token (#473) (#474)
+
+
+### Documentation
+- Manual acceptance checklist per OS and package (#461)
+- **site**: Screenshot of the Flow tab (#264) (#470)
+
+
+### Features
+- **sidebar**: Latest agent notification text per space (#251) (#440)
+- **project**: Teardown before worktree cleanup and on demand (#257) (#442)
+- **project**: Custom commands and presets in the command palette (#258) (#447)
+- **status-bar**: Claude usage 5h, 7d, 1d and 1m from tamias (#359) (#449)
+- **settings**: Terminal and UI font family and size on the Appearance page (#361) (#451)
+- **spaces**: Rename a space (#370) (#452)
+- **spaces**: Rename a space
+- **server**: Tokens per terminal via terminal.report_tokens and a report CLI (#438) (#463)
+- **server**: Tokens per terminal via terminal.report_tokens and a report CLI (#438)
+- **spaces**: Space templates per directory with agent and layout (#464)
+- **spaces**: Match space templates by GitHub owner or Azure DevOps project (#445) (#465)
+- **settings**: Spaces page to edit space templates (#446) (#466)
+- **explorer**: Filter the directories by name (#467)
+- **agents**: Token usage per node in the flow view (#454) (#468)
+- **agents**: Token usage per node in the flow view
+- **terminal**: Larger default terminal font on Windows (#456) (#469)
+- **terminal**: Larger default terminal font on Windows (#456)
+
+
+### Refactoring
+- **tasks**: Task modes start agents through the harness registry (#349) (#448)
+
+
 ## [0.10.0] — 2026-11-06
 
 ### Bug Fixes
@@ -65,6 +104,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Correct stale statements about the poimen backend (#408) (#415)
 - **protocol**: Unix socket and named pipe transport
 - Windows support in README, download and installation guide
+- Update CHANGELOG.md for v0.10.0 [skip ci]
 
 
 ### Features
