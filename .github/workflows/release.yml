@@ -6,8 +6,15 @@
 #   the release PR. Then the installers (Linux x64, macOS arm64, Windows x64) are built from the tag and attached to
 #   the release. They are not code-signed yet (#45).
 #
-# workflow_dispatch (on a branch): builds the same installer matrix with the throw-away version 0.0.<run number>
-# (MSI needs a numeric one) and creates no tag, release or commit. Pull requests never build installers.
+# workflow_dispatch on release/next with prerelease: true: the pre-release for the manual acceptance
+# (docs/manual-acceptance.md). determine-version gives <next stable>-rc.<n>, gh-release tags v<version> on release/next
+# and creates a GitHub pre-release (no changelog commit, no issue closing, no commit to main or release/next), and the
+# installers are attached (no MSI: WiX needs a numeric version). The latest.json of a pre-release is never served
+# from releases/latest, so stable installs do not update to it (docs/updater.md).
+#
+# workflow_dispatch otherwise (on a branch): builds the same installer matrix with the throw-away version
+# 0.0.<run number> (MSI needs a numeric one) and creates no tag, release or commit. Pull requests never build
+# installers.
 #
 # The installers use the building block of GravionLabs/ci that tauri-app.yml is made of (tauri/installers@v1), not
 # the reusable workflow itself: tauri-app.yml determines the version, drafts and publishes the release and writes the
@@ -26,6 +33,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Pre-release from release/next for the manual acceptance (tag v<version>-rc.<n>, GitHub pre-release, installers without MSI)"
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -103,11 +115,59 @@ jobs:
           TAG: v${{ steps.version.outputs.semver }}
         run: echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)" >> "$GITHUB_OUTPUT"
 
+  # Pre-release of release/next: tag and GitHub pre-release only. No manifest or changelog commit, no issue closing;
+  # the installers set the version in their own checkout. The default token pushes the tag (no branch is written).
+  prerelease:
+    name: Pre-release
+    needs: test
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease && github.ref == 'refs/heads/release/next' }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.semver }}
+      release-id: ${{ steps.release-id.outputs.id }}
+    permissions:
+      contents: write # tag, GitHub pre-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # required by GitVersion
+
+      - name: Determine version
+        id: version
+        uses: GravionLabs/ci/versioning/determine-version@v1
+        with:
+          gitversion-config-file: GitVersion.yml
+
+      - name: Check the pre-release version
+        env:
+          VERSION: ${{ steps.version.outputs.semver }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]] || { echo "unexpected pre-release version: $VERSION" >&2; exit 1; }
+
+      # gh-release marks the release as a pre-release because the version has a pre-release part. Without
+      # update-changelog nothing is committed; the git-cliff notes only list the unreleased changes.
+      - name: Create GitHub pre-release
+        uses: GravionLabs/ci/versioning/gh-release@v1
+        with:
+          version: ${{ steps.version.outputs.semver }}
+          changelog-file: CHANGELOG.md
+          cliff-config: cliff.toml
+          update-changelog: "false"
+          close-issues: "false"
+
+      - name: Find the release id
+        id: release-id
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.semver }}
+        run: echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)" >> "$GITHUB_OUTPUT"
+
   installers:
     name: Installers ${{ matrix.target }}
-    needs: [test, release]
-    # release is skipped on workflow_dispatch; on a push it must have succeeded.
-    if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) }}
+    needs: [test, release, prerelease]
+    # release and prerelease are skipped on a plain workflow_dispatch; when one runs it must have succeeded.
+    if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) && contains(fromJSON('["success","skipped"]'), needs.prerelease.result) }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write # upload the assets to the release
@@ -117,12 +177,13 @@ jobs:
         include:
           - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
           - { os: macos-latest, target: aarch64-apple-darwin } # Apple Silicon; no macOS x64 build
-          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          # A pre-release version (0.10.0-rc.3) is no numeric WiX version, so it bundles only the NSIS -setup.exe.
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, prerelease-args: "--bundles nsis" }
     steps:
       # The tag carries the manifests with the released version. A dispatch builds the branch it ran on.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release.outputs.version && format('v{0}', needs.release.outputs.version) || github.sha }}
+          ref: ${{ (needs.release.outputs.version || needs.prerelease.outputs.version) && format('v{0}', needs.release.outputs.version || needs.prerelease.outputs.version) || github.sha }}
 
       # poimen-server ships next to the app (bundle.externalBin in tauri.bundle.conf.json, which needs the
       # target-suffixed file at build time); the app looks beside its own executable first.
@@ -135,13 +196,13 @@ jobs:
       - uses: GravionLabs/ci/tauri/installers@v1
         with:
           checkout: "false"
-          version: ${{ needs.release.outputs.version || format('0.0.{0}', github.run_number) }}
+          version: ${{ needs.release.outputs.version || needs.prerelease.outputs.version || format('0.0.{0}', github.run_number) }}
           target: ${{ matrix.target }}
           # Empty on workflow_dispatch: build only, upload nothing.
-          release-id: ${{ needs.release.outputs.release-id }}
+          release-id: ${{ needs.release.outputs.release-id || needs.prerelease.outputs.release-id }}
           cargo-toml: src-tauri/Cargo.toml
           # Signed update packages and latest.json (docs/updater.md); createUpdaterArtifacts lives in the
           # release-only bundle config, so local builds need no key.
-          args: --config src-tauri/tauri.bundle.conf.json
+          args: --config src-tauri/tauri.bundle.conf.json ${{ needs.prerelease.outputs.version && matrix.prerelease-args || '' }}
           signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           signing-private-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
