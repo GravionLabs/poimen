@@ -123,6 +123,23 @@ pub(crate) fn now_nanos() -> u64 {
 
 // --- settings.json ------------------------------------------------------------------------------
 
+/// The binary the hooks of `integration install` call: `given` ([`poimen_protocol::ENV_HOOK_EXE`])
+/// when set, which must then be an absolute path to a file, else the running binary.
+pub fn hook_exe(
+    given: Option<std::ffi::OsString>,
+    current: impl FnOnce() -> std::io::Result<PathBuf>,
+) -> Result<PathBuf, String> {
+    match given.filter(|g| !g.is_empty()).map(PathBuf::from) {
+        Some(exe) if exe.is_absolute() && exe.is_file() => Ok(exe),
+        Some(exe) => Err(format!(
+            "{} is not an absolute path to a file: {}",
+            poimen_protocol::ENV_HOOK_EXE,
+            exe.display()
+        )),
+        None => current().map_err(|e| e.to_string()),
+    }
+}
+
 /// The shell command of the hook for the binary at `exe`.
 pub fn hook_command(exe: &Path) -> String {
     let quoted = exe.display().to_string().replace('\'', r"'\''");
@@ -136,6 +153,43 @@ pub fn powershell_command(exe: &Path, args: &str) -> String {
         "& {} hook {args} {MARKER}",
         powershell_quote(&exe.display().to_string())
     )
+}
+
+/// The binary a hook command of ours runs: the quoted path of [`hook_command`] (`'\''` for a
+/// quote) or of [`powershell_command`] (doubled quotes). `None` for any other command.
+pub fn hook_target(command: &str) -> Option<PathBuf> {
+    let is_quote = |c: char| matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}');
+    let mut path = String::new();
+    if let Some(rest) = command.strip_prefix("& ") {
+        let mut chars = rest.chars().peekable();
+        if !chars.next().is_some_and(is_quote) {
+            return None;
+        }
+        while let Some(c) = chars.next() {
+            if !is_quote(c) {
+                path.push(c);
+            } else if chars.peek() == Some(&c) {
+                chars.next();
+                path.push(c);
+            } else {
+                return Some(PathBuf::from(path));
+            }
+        }
+        None
+    } else {
+        let mut rest = command.strip_prefix('\'')?;
+        loop {
+            let end = rest.find('\'')?;
+            path.push_str(&rest[..end]);
+            match rest[end..].strip_prefix(r"'\''") {
+                Some(more) => {
+                    path.push('\'');
+                    rest = more;
+                }
+                None => return Some(PathBuf::from(path)),
+            }
+        }
+    }
 }
 
 /// A PowerShell single-quoted string: every single quote, including the typographic ones
@@ -178,6 +232,22 @@ fn is_ours(hook: &Value) -> bool {
     hook.get("command")
         .and_then(Value::as_str)
         .is_some_and(|c| c.contains(MARKER))
+}
+
+/// Whether a command of ours still has its binary: an entry whose binary is gone (moved, or the
+/// mount of an AppImage run that ended) does not count as installed. A command whose path cannot
+/// be read back counts.
+pub(crate) fn binary_present(command: &str) -> bool {
+    hook_target(command).is_none_or(|exe| exe.is_file())
+}
+
+/// One of ours whose binary is there.
+fn is_live(hook: &Value) -> bool {
+    is_ours(hook)
+        && hook
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(binary_present)
 }
 
 fn read_settings(path: &Path) -> Result<Map<String, Value>, String> {
@@ -279,7 +349,7 @@ pub fn uninstall(settings_path: &Path) -> Result<bool, String> {
     Ok(removed)
 }
 
-/// The events of [`EVENTS`] that have our hook in `settings_path`.
+/// The events of [`EVENTS`] that have our hook, with its binary present, in `settings_path`.
 pub fn status(settings_path: &Path) -> Result<Vec<&'static str>, String> {
     let settings = read_settings(settings_path)?;
     Ok(EVENTS
@@ -293,7 +363,7 @@ pub fn status(settings_path: &Path) -> Result<Vec<&'static str>, String> {
                     groups.iter().any(|g| {
                         g.get("hooks")
                             .and_then(Value::as_array)
-                            .is_some_and(|h| h.iter().any(is_ours))
+                            .is_some_and(|h| h.iter().any(is_live))
                     })
                 })
         })
@@ -426,7 +496,8 @@ mod tests {
     fn install_adds_our_hooks_and_keeps_everything_else() {
         let path = temp("install");
         std::fs::write(&path, herdr_settings().to_string()).unwrap();
-        install(&path, Path::new("/opt/poimen-server")).unwrap();
+        let exe = fake_exe(&path);
+        install(&path, &exe).unwrap();
         let s = read(&path);
         assert_eq!(s["model"], "opus");
         assert_eq!(s["permissions"], herdr_settings()["permissions"]);
@@ -438,12 +509,73 @@ mod tests {
         assert_eq!(start.len(), 2);
         assert_eq!(start[0], herdr_settings()["hooks"]["SessionStart"][0]);
         // The entry of this platform (`hook_entry` is checked literally for both).
-        assert_eq!(
-            start[1]["hooks"][0],
-            hook_entry(Path::new("/opt/poimen-server"), cfg!(windows))
-        );
+        assert_eq!(start[1]["hooks"][0], hook_entry(&exe, cfg!(windows)));
         assert_eq!(status(&path).unwrap(), EVENTS.to_vec());
         cleanup(&path);
+    }
+
+    /// A file standing in for the server binary next to `settings` (status checks it exists).
+    fn fake_exe(settings: &Path) -> PathBuf {
+        let exe = settings.with_file_name("poimen-server");
+        std::fs::write(&exe, "").unwrap();
+        exe
+    }
+
+    #[test]
+    fn entries_whose_binary_is_gone_are_not_installed() {
+        // An AppImage mount of an earlier run: the marker is there, the binary is not.
+        let path = temp("gone");
+        let exe = path.with_file_name("mount").join("poimen-server");
+        install(&path, &exe).unwrap();
+        assert!(status(&path).unwrap().is_empty());
+        // Installing again with a binary that exists replaces the stale entries.
+        let exe = fake_exe(&path);
+        install(&path, &exe).unwrap();
+        assert_eq!(status(&path).unwrap(), EVENTS.to_vec());
+        std::fs::remove_file(&exe).unwrap();
+        assert!(status(&path).unwrap().is_empty());
+        cleanup(&path);
+    }
+
+    #[test]
+    fn the_hook_binary_is_the_given_one_else_the_running_one() {
+        let path = temp("hook-exe");
+        let exe = fake_exe(&path);
+        let running = || Ok(PathBuf::from("/tmp/.mount_poimenX/usr/bin/poimen-server"));
+        assert_eq!(hook_exe(Some(exe.clone().into()), running), Ok(exe.clone()));
+        assert_eq!(
+            hook_exe(None, running),
+            Ok(PathBuf::from("/tmp/.mount_poimenX/usr/bin/poimen-server"))
+        );
+        assert_eq!(
+            hook_exe(Some("".into()), running),
+            Ok(PathBuf::from("/tmp/.mount_poimenX/usr/bin/poimen-server"))
+        );
+        assert!(hook_exe(Some("poimen-server".into()), running).is_err());
+        assert!(hook_exe(Some(path.with_file_name("missing").into()), running).is_err());
+        let failing = || Err(std::io::Error::other("no exe"));
+        assert_eq!(hook_exe(None, failing), Err("no exe".into()));
+        cleanup(&path);
+    }
+
+    #[test]
+    fn the_binary_of_a_hook_command_is_read_back() {
+        let unix = Path::new("/b/it's/poimen-server");
+        assert_eq!(hook_target(&hook_command(unix)), Some(unix.to_path_buf()));
+        let win = Path::new(r"C:\Users\Jo O'Neil\poimen-server.exe");
+        assert_eq!(
+            hook_target(&powershell_command(win, "claude")),
+            Some(win.to_path_buf())
+        );
+        assert_eq!(
+            hook_target("& 'C:\\a\u{2019}\u{2019}b.exe' hook claude"),
+            Some(PathBuf::from("C:\\a\u{2019}b.exe"))
+        );
+        assert_eq!(
+            hook_target("poimen-server hook claude # poimen-agent-hook"),
+            None
+        );
+        assert_eq!(hook_target("'/unterminated hook claude"), None);
     }
 
     #[test]
