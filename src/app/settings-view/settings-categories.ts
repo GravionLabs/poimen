@@ -66,7 +66,7 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       {
         id: "herdr",
         title: "Server",
-        labels: ["Start the backend server when it is not running"],
+        labels: ["Start the backend server when it is not running", "Agent hooks", "Install hooks"],
       },
       { id: "agents", title: "Agents", labels: ["Harnesses", "Models"] },
     ],

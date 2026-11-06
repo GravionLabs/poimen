@@ -8,6 +8,7 @@ import { bundled } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import { DEFAULT_SETTINGS, parseHarnesses, SettingsStore } from "../core/settings";
 import { tauri } from "../core/tauri.mock";
+import { HooksOffer } from "../core/hooks-offer";
 import { TauriBridge } from "../core/tauri";
 import { UiState, UI_STORAGE, UI_STATE_KEY, type UiStorage } from "../core/ui-state";
 import {
@@ -534,6 +535,27 @@ describe("SettingsView categories", () => {
     const saved = JSON.parse(mem.data.get(UI_STATE_KEY)!);
     expect(saved.settingsPage).toBe("herdr");
     expect(saved.settingsCollapsed).toEqual(["workspace"]);
+  });
+
+  it("shows the hooks state per agent on the Server page with an install button", async () => {
+    const { fixture, host } = setup(undefined, undefined, "herdr");
+    tauri.answer("hooks_status", () => [
+      { agent: "claude", state: "missing" },
+      { agent: "copilot", state: "installed" },
+    ]);
+    await TestBed.inject(HooksOffer).refresh();
+    fixture.detectChanges();
+    const rows = [...host.querySelectorAll("ul.harnesses li")].map((li) =>
+      li.textContent!.replace(/\s+/g, " ").trim(),
+    );
+    expect(rows).toEqual(["Claude Codemissing Install hooks", "GitHub Copilot CLIinstalled"]);
+    const buttons = [...host.querySelectorAll("button")].filter(
+      (b) => b.textContent!.trim() === "Install hooks",
+    );
+    expect(buttons).toHaveLength(1);
+    buttons[0].click();
+    await fixture.whenStable();
+    expect(tauri.calls("hooks_install")).toEqual([{ agent: "claude" }]);
   });
 
   it("restores the collapsed groups from the stored state", () => {

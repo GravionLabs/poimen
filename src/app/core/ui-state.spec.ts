@@ -269,6 +269,15 @@ describe("hooks offer state", () => {
     expect(stateOn(storage).hooksOfferDismissed()).toBe(true);
   });
 
+  it("remembers the agents whose hooks were seen installed", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    state.setHooksSeen(["claude", "copilot"], []);
+    state.setHooksSeen([], ["copilot"]);
+    expect(stateOn(storage).hooksSeen()).toEqual(["claude"]);
+    expect(parseLayout(JSON.stringify({ hooksSeen: ["a", 1, "a"] })).hooksSeen).toEqual(["a"]);
+  });
+
   it("ignores a malformed stored value", () => {
     expect(
       parseLayout(JSON.stringify({ hooksOfferDismissed: "yes" })).hooksOfferDismissed,

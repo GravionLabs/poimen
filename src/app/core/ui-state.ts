@@ -127,6 +127,8 @@ export interface LayoutState {
   settingsCollapsed?: string[];
   /** The user answered "Not now" to the offer to install the agent hooks of the poimen backend. */
   hooksOfferDismissed?: boolean;
+  /** Agents whose hooks were seen installed; a dismissed offer returns when one goes missing. */
+  hooksSeen?: string[];
 }
 
 export function clampPanelHeight(height: number): number {
@@ -185,6 +187,7 @@ export function parseLayout(raw: string | null): LayoutState {
       settingsPage,
       settingsCollapsed,
       hooksOfferDismissed,
+      hooksSeen,
     } = data as Record<string, unknown>;
     const comments = parseLineComments(lineComments);
     if (Object.keys(comments).length) state.lineComments = comments;
@@ -205,6 +208,10 @@ export function parseLayout(raw: string | null): LayoutState {
     }
     if (typeof settingsPage === "string" && settingsPage) state.settingsPage = settingsPage;
     if (hooksOfferDismissed === true) state.hooksOfferDismissed = true;
+    if (Array.isArray(hooksSeen)) {
+      const seen = hooksSeen.filter((d): d is string => typeof d === "string" && d !== "");
+      if (seen.length) state.hooksSeen = [...new Set(seen)];
+    }
     if (Array.isArray(settingsCollapsed)) {
       const ids = settingsCollapsed.filter((d): d is string => typeof d === "string" && d !== "");
       if (ids.length) state.settingsCollapsed = [...new Set(ids)];
@@ -289,6 +296,8 @@ export class UiState {
   );
   /** Whether the hooks offer was declined; it is not shown again. */
   readonly hooksOfferDismissed = signal(this.initial.hooksOfferDismissed === true);
+  /** Agents whose hooks were seen installed (persisted). */
+  readonly hooksSeen = signal<readonly string[]>(this.initial.hooksSeen ?? []);
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -330,6 +339,15 @@ export class UiState {
 
   dismissHooksOffer(): void {
     this.hooksOfferDismissed.set(true);
+    this.save();
+  }
+
+  /** Records which agents have hooks installed (`installed`) and which do not (`gone`). */
+  setHooksSeen(installed: readonly string[], gone: readonly string[]): void {
+    const next = [...new Set([...this.hooksSeen().filter((a) => !gone.includes(a)), ...installed])];
+    const cur = this.hooksSeen();
+    if (next.length === cur.length && next.every((a) => cur.includes(a))) return;
+    this.hooksSeen.set(next);
     this.save();
   }
 
@@ -456,6 +474,7 @@ export class UiState {
       settingsPage: this.settingsPage() ?? undefined,
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
       hooksOfferDismissed: this.hooksOfferDismissed() ? true : undefined,
+      hooksSeen: this.hooksSeen().length ? [...this.hooksSeen()] : undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

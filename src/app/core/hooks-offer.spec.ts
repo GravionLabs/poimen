@@ -109,11 +109,40 @@ describe("HooksOffer", () => {
     expect(first.offer.visible()).toBe(false);
     expect(parseLayout(first.data.get(UI_STATE_KEY)!).hooksOfferDismissed).toBe(true);
 
-    bridge.invoke.mockClear();
     const again = setup({ stored: first.data.get(UI_STATE_KEY) });
     await again.start();
-    expect(bridge.invoke).not.toHaveBeenCalled();
     expect(again.offer.visible()).toBe(false);
+  });
+
+  it("offers again after Not now when installed hooks go missing", async () => {
+    bridge.invoke.mockResolvedValue([{ agent: "claude", state: "installed" }]);
+    const first = setup();
+    await first.start();
+    await first.offer.refresh();
+    first.offer.dismiss();
+
+    bridge.invoke.mockResolvedValue([{ agent: "claude", state: "missing" }]);
+    const again = setup({ stored: first.data.get(UI_STATE_KEY) });
+    await again.start();
+    await again.offer.refresh();
+    expect(again.offer.missing()).toEqual(["claude"]);
+
+    again.offer.dismiss();
+    await again.offer.refresh();
+    expect(again.offer.visible()).toBe(false);
+  });
+
+  it("installs one agent from the settings page and refreshes the states", async () => {
+    bridge.invoke.mockResolvedValue(missing);
+    const { offer, start } = setup();
+    await start();
+    offer.dismiss();
+    bridge.invoke.mockImplementation(async (cmd: string) =>
+      cmd === "hooks_status" ? [{ agent: "claude", state: "installed" }] : undefined,
+    );
+    await offer.installAgent("claude");
+    expect(bridge.invoke).toHaveBeenCalledWith("hooks_install", { agent: "claude" });
+    expect(offer.statuses()).toEqual([{ agent: "claude", state: "installed" }]);
   });
 
   it("installs the offered agents and closes", async () => {
