@@ -223,6 +223,21 @@
   flex: none;
 }
 
+.space-edit {
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.space-edit-error {
+  color: var(--h-danger-color, #e5484d);
+  font-size: 11px;
+}
+
 .state {
   flex: none;
   font-size: 11px;

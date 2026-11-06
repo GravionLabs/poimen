@@ -160,6 +160,23 @@ async fn space_close(
     .await
 }
 
+/// Renames a space. A blank label is rejected here too; the UI checks first.
+#[tauri::command]
+async fn space_rename(
+    backend: State<'_, Shared>,
+    workspace_id: String,
+    label: String,
+) -> Result<(), String> {
+    let label = label.trim().to_owned();
+    if label.is_empty() {
+        return Err("The name of a space cannot be empty.".into());
+    }
+    on_backend(backend.inner(), move |b| {
+        b.rename_space(&workspace_id, &label)
+    })
+    .await
+}
+
 /// Starts a supported agent in an existing pane at a shell prompt; can take a while.
 #[tauri::command]
 async fn agent_start(
@@ -1485,6 +1502,7 @@ pub fn run() {
             agent_rename,
             agent_prompt,
             pane_rename,
+            space_rename,
             terminal_create,
             github_pulls,
             branch_pulls,

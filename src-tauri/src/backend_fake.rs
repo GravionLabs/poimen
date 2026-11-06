@@ -105,6 +105,11 @@ impl Backend for FakeBackend {
         self.record(format!("close_space {space_id}")).map(drop)
     }
 
+    fn rename_space(&self, space_id: &str, label: &str) -> Result<(), String> {
+        self.record(format!("rename_space {space_id} {label}"))
+            .map(drop)
+    }
+
     fn create_terminal(&self, space_id: &str, cwd: Option<&str>) -> Result<Option<String>, String> {
         let n = self.record(format!("create_terminal {space_id} {}", cwd.unwrap_or("-")))?;
         Ok(Some(format!("{space_id}:t{n}")))

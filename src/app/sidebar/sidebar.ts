@@ -203,6 +203,7 @@ export interface SidebarMenuAction {
     | "rename"
     | "close"
     | "close-space"
+    | "rename-space"
     | "start-task"
     | "cleanup-tasks"
     | "show-changes";
@@ -243,6 +244,7 @@ export function sidebarMenuItems(
                   { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
                 ]
               : []),
+            { action: "rename-space", label: "Rename space..." },
             { action: "close-space", label: "Close space" },
           ]
         : [
@@ -392,6 +394,31 @@ export class Sidebar {
   /** The close icon of a workspace row: the close flow of the context menu, no selection or toggle. */
   protected isClosing(workspaceId: string): boolean {
     return this.spaceActions.closingIds().has(workspaceId);
+  }
+
+  /** The space whose label is being edited in place; `null` when none. */
+  protected readonly editing = signal<string | null>(null);
+
+  protected startEdit(workspaceId: string, event: Event): void {
+    event.stopPropagation();
+    if (this.isClosing(workspaceId)) return;
+    this.spaceActions.clearRenameError();
+    this.editing.set(workspaceId);
+  }
+
+  /** Enter or blur confirms, Escape cancels; a failed rename keeps editing, the old label stays. */
+  protected async finishEdit(
+    workspaceId: string,
+    input: HTMLInputElement,
+    commit: boolean,
+  ): Promise<void> {
+    if (this.editing() !== workspaceId) return;
+    if (!commit) {
+      this.editing.set(null);
+      this.spaceActions.clearRenameError();
+      return;
+    }
+    if (await this.spaceActions.rename(workspaceId, input.value)) this.editing.set(null);
   }
 
   protected closeSpace(workspaceId: string, event: Event): void {

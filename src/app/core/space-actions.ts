@@ -61,6 +61,13 @@ export interface SpaceClosing {
   warning: string;
 }
 
+/** A space waiting for its new name. */
+export interface SpaceRenaming {
+  workspaceId: string;
+  /** The label when the dialog opened. */
+  current: string;
+}
+
 /** The space to focus after `workspaceId` closed: the next one, else the previous; `null` if none. */
 export function neighbourSpace(snapshot: Snapshot, workspaceId: string): string | null {
   const ids = [...snapshot.spaces].sort((a, b) => a.number - b.number).map((w) => w.space_id);
@@ -96,6 +103,12 @@ export class SpaceActions {
   private readonly _warning = signal<string | null>(null);
   private readonly _closing = signal<SpaceClosing | null>(null);
   private readonly _closeError = signal<string | null>(null);
+  private readonly _renaming = signal<SpaceRenaming | null>(null);
+  private readonly _renameError = signal<string | null>(null);
+  /** The space of the open rename dialog; `null` when none. */
+  readonly renaming = this._renaming.asReadonly();
+  /** Why the last rename failed (blank name or herdr's error); the old label stays. */
+  readonly renameError = this._renameError.asReadonly();
   private readonly _closingIds = signal<ReadonlySet<string>>(new Set());
   /** Spaces whose close was confirmed and is not finished: shown as "Closing…", actions disabled. */
   readonly closingIds = this._closingIds.asReadonly();
@@ -224,6 +237,55 @@ export class SpaceActions {
     const decision: TrustDecision =
       answer === "trust" ? { kind: "trust", hash: pending.request.hash } : { kind: "without" };
     return this.create(pending.cwd, pending.label, decision, pending.command, pending.after);
+  }
+
+  /** Opens the rename dialog for a space, prefilled with its label. */
+  askRename(workspaceId: string): void {
+    const space = this.store.snapshot().spaces.find((s) => s.space_id === workspaceId);
+    if (!space) return;
+    this._renameError.set(null);
+    this._renaming.set({ workspaceId, current: space.label });
+  }
+
+  cancelRename(): void {
+    this._renaming.set(null);
+    this._renameError.set(null);
+  }
+
+  clearRenameError(): void {
+    this._renameError.set(null);
+  }
+
+  /** Renames the space of the open dialog; on failure the dialog stays open with the error. */
+  async confirmRename(name: string): Promise<boolean> {
+    const dialog = this._renaming();
+    if (!dialog) return false;
+    const ok = await this.rename(dialog.workspaceId, name);
+    if (ok) this._renaming.set(null);
+    return ok;
+  }
+
+  /**
+   * Renames a space (`workspace.rename`): a blank name is rejected without calling herdr, an
+   * unchanged one is a no-op success. Resolves to whether the space now has that label.
+   */
+  async rename(workspaceId: string, name: string): Promise<boolean> {
+    const label = name.trim();
+    this._renameError.set(null);
+    if (!label) {
+      this._renameError.set("The name of a space cannot be empty.");
+      return false;
+    }
+    const space = this.store.snapshot().spaces.find((s) => s.space_id === workspaceId);
+    if (space?.label === label) return true;
+    try {
+      await this.bridge.invoke("space_rename", { workspaceId, label });
+    } catch (err) {
+      this._renameError.set(String(err));
+      return false;
+    }
+    await this.store.refresh();
+    return true;
   }
 
   /**

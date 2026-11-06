@@ -13,6 +13,7 @@ export interface PoimenCommand {
     | "openGithub"
     | "showChanges"
     | "closeSpace"
+    | "renameSpace"
     | "startTask"
     | "cleanupTasks"
     | "projectTeardown"
@@ -22,6 +23,7 @@ export interface PoimenCommand {
 
 export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "newTerminal", title: "New Terminal..." },
+  { id: "renameSpace", title: "Rename Space..." },
   { id: "closeSpace", title: "Close Space" },
   { id: "closeTab", title: "Close Tab" },
   { id: "closeAll", title: "Close All Tabs" },
@@ -100,6 +102,7 @@ export class CommandPalette {
         c.id === "openGithub" ||
         c.id === "showChanges" ||
         c.id === "closeSpace" ||
+        c.id === "renameSpace" ||
         c.id === "startTask" ||
         c.id === "cleanupTasks" ||
         c.id === "projectTeardown" ||

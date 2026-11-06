@@ -203,6 +203,8 @@ pub trait Backend: Send + Sync {
     fn create_space(&self, cwd: &str, label: &str) -> Result<NewSpace, String>;
     fn focus_space(&self, space_id: &str) -> Result<(), String>;
     fn close_space(&self, space_id: &str) -> Result<(), String>;
+    /// Renames a space; the label must not be blank.
+    fn rename_space(&self, space_id: &str, label: &str) -> Result<(), String>;
     /// A new terminal in a space (a new tab); returns its id.
     fn create_terminal(&self, space_id: &str, cwd: Option<&str>) -> Result<Option<String>, String>;
     /// A split is a new terminal next to `target`; `ratio` is the share the target keeps.
@@ -475,6 +477,11 @@ impl<R: Runner + Send + Sync> Backend for HerdrBackend<R> {
 
     fn close_space(&self, space_id: &str) -> Result<(), String> {
         self.call("workspace.close", herdr::workspace_close_params(space_id))
+            .map(drop)
+    }
+
+    fn rename_space(&self, space_id: &str, label: &str) -> Result<(), String> {
+        self.call("workspace.rename", spaces::rename_params(space_id, label))
             .map(drop)
     }
 

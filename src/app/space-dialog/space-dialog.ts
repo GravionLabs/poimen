@@ -45,6 +45,10 @@ export class SpaceDialog {
     if (paneIds) this.closed.emit(paneIds);
   }
 
+  protected async rename(form: HTMLFormElement): Promise<void> {
+    await this.actions.confirmRename(String(new FormData(form).get("name") ?? ""));
+  }
+
   protected cancel(): void {
     this.reset();
     this.actions.cancel();

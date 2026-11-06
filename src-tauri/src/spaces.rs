@@ -124,6 +124,11 @@ pub fn focus_params(workspace_id: &str) -> Value {
     json!({ "workspace_id": workspace_id })
 }
 
+/// Params of `workspace.rename`.
+pub fn rename_params(workspace_id: &str, label: &str) -> Value {
+    json!({ "workspace_id": workspace_id, "label": label })
+}
+
 /// The workspace id of a `workspace.create` result.
 pub fn created_workspace_id(result: &Value) -> Option<String> {
     result["workspace"]["workspace_id"]
@@ -243,6 +248,14 @@ mod tests {
 
     fn ws(id: &str, label: &str) -> Value {
         json!({ "workspace_id": id, "label": label })
+    }
+
+    #[test]
+    fn rename_params_name_the_workspace_and_label() {
+        assert_eq!(
+            rename_params("w1", "api"),
+            json!({ "workspace_id": "w1", "label": "api" })
+        );
     }
 
     fn pane(ws: &str, cwd: &str) -> Value {

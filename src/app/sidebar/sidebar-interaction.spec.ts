@@ -8,6 +8,7 @@ import type { Terminal, SpaceNode } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
+import { SpaceActions } from "../core/space-actions";
 import { Sidebar } from "./sidebar";
 
 const pane = (id: string, status: Terminal["agent_status"] = "idle"): Terminal => ({
@@ -83,7 +84,19 @@ async function setup(message: string | null = null) {
     target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
     await settle();
   };
-  return { fixture, ensureBackend, click, selected, pinned, root, settle, workspace, key };
+  const spaceActions = TestBed.inject(SpaceActions);
+  return {
+    fixture,
+    spaceActions,
+    ensureBackend,
+    click,
+    selected,
+    pinned,
+    root,
+    settle,
+    workspace,
+    key,
+  };
 }
 
 describe("Sidebar with the real hx-tree", () => {
@@ -170,6 +183,59 @@ describe("Sidebar with the real hx-tree", () => {
     expect(actions).toEqual([{ kind: "workspace", id: "w1", action: "close-space" }]);
     expect(selected).toEqual([]);
     expect(workspace().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  describe("inline rename", () => {
+    const dbl = async (s: Awaited<ReturnType<typeof setup>>) => {
+      const name = s.root.querySelector<HTMLElement>(".space-name")!;
+      name.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await s.settle();
+      return s.root.querySelector<HTMLInputElement>(".space-edit")!;
+    };
+
+    it("starts an edit prefilled with the label on a double click and confirms with Enter", async () => {
+      const s = await setup();
+      const rename = vi.spyOn(s.spaceActions, "rename").mockResolvedValue(true);
+      const input = await dbl(s);
+      expect(input.value).toBe("One");
+      input.value = "Uno";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await s.settle();
+      expect(rename).toHaveBeenCalledWith("w1", "Uno");
+      expect(s.root.querySelector(".space-edit")).toBeNull();
+    });
+
+    it("cancels with Escape without renaming", async () => {
+      const s = await setup();
+      const rename = vi.spyOn(s.spaceActions, "rename").mockResolvedValue(true);
+      const input = await dbl(s);
+      input.value = "Uno";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await s.settle();
+      expect(rename).not.toHaveBeenCalled();
+      expect(s.root.querySelector(".space-edit")).toBeNull();
+      expect(s.root.querySelector(".space-name")?.textContent).toContain("One");
+    });
+
+    it("cancels on blur without a change", async () => {
+      const s = await setup();
+      const rename = vi.spyOn(s.spaceActions, "rename").mockResolvedValue(true);
+      const input = await dbl(s);
+      input.dispatchEvent(new FocusEvent("blur"));
+      await s.settle();
+      expect(rename).not.toHaveBeenCalled();
+      expect(s.root.querySelector(".space-edit")).toBeNull();
+    });
+
+    it("keeps the edit open when the rename fails", async () => {
+      const s = await setup();
+      vi.spyOn(s.spaceActions, "rename").mockResolvedValue(false);
+      const input = await dbl(s);
+      input.value = "";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await s.settle();
+      expect(s.root.querySelector(".space-edit")).not.toBeNull();
+    });
   });
 
   it("keeps the close icon calm until hover, focus or the active space", () => {
