@@ -1049,6 +1049,13 @@ fn set_terminal_font_size(size: f64) -> Result<(), String> {
     settings::save_terminal_font_size(&home, size)
 }
 
+/// Removes only `terminal.fontSize` (back to the default); the settings watcher emits the change.
+#[tauri::command]
+fn clear_terminal_font_size() -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::clear_terminal_font_size(&home)
+}
+
 /// Writes only `ui.fontFamily`; the settings watcher emits the change.
 #[tauri::command]
 fn set_ui_font_family(family: String) -> Result<(), String> {
@@ -1573,6 +1580,7 @@ pub fn run() {
             set_notification,
             set_terminal_font_family,
             set_terminal_font_size,
+            clear_terminal_font_size,
             set_ui_font_family,
             set_ui_font_size,
             pane_split,

@@ -451,6 +451,16 @@ export class SettingsStore {
     });
   }
 
+  /** Removes `terminal.fontSize` (the platform default applies again) and applies it at once. */
+  async clearTerminalFontSize(): Promise<boolean> {
+    return this.write(
+      { fontSize: defaultTerminalFontSize() },
+      "the terminal font size",
+      "clear_terminal_font_size",
+      {},
+    );
+  }
+
   /** Writes `ui.fontFamily` (empty removes it: the default `--font-ui`) and applies it at once. */
   async setUiFontFamily(family: string): Promise<boolean> {
     const trimmed = family.trim();

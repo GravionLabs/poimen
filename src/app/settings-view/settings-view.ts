@@ -381,14 +381,14 @@ export class SettingsView {
   protected setFontSize(which: "terminal" | "ui", event: Event): void {
     const input = event.target as HTMLInputElement;
     const empty = input.value.trim() === "";
-    // An empty terminal size goes back to the platform default.
-    const size = empty
-      ? which === "terminal"
-        ? defaultTerminalFontSize()
-        : Number.NaN
-      : Number(input.value);
+    const size = empty ? Number.NaN : Number(input.value);
+    // An empty terminal size removes the key: the platform default applies again.
     const write =
-      which === "terminal" ? this.store.setTerminalFontSize(size) : this.store.setUiFontSize(size);
+      which === "terminal"
+        ? empty
+          ? this.store.clearTerminalFontSize()
+          : this.store.setTerminalFontSize(size)
+        : this.store.setUiFontSize(size);
     void write.then((ok) => {
       if (!ok)
         input.value = String(this.settings()[which === "terminal" ? "fontSize" : "uiFontSize"]);
