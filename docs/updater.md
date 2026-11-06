@@ -33,8 +33,9 @@ signing, which the installers do not have yet (#45).
 - `src-tauri/tauri.bundle.conf.json` turns on `createUpdaterArtifacts`. Only `release.yml` passes it
   (`--config`), so local builds and `tauri dev` need no key.
 
-**Keep a backup of the private key and its password.** If they are lost, installed apps can never
-update again and users must install a new version by hand.
+The key pair was replaced on 2026-11-06 because the earlier private key was lost. The new private
+key and its password are backed up in the owner's password manager. Installs made with the earlier
+key cannot verify updates signed with the new one and must be reinstalled by hand once.
 
 To make a new key: `pnpm tauri signer generate -w <file>`, then replace the public key in
 `tauri.conf.json` and both secrets. Apps with the old key cannot verify updates signed with the
