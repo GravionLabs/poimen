@@ -1,6 +1,6 @@
 [package]
 name = "poimen-client"
-version = "0.1.0"
+version.workspace = true
 description = "Client of the poimen-server socket API: connect, requests, event stream"
 edition.workspace = true
 rust-version.workspace = true
