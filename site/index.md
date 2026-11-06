@@ -62,7 +62,7 @@ Statuses come from the backend (agent hooks on `poimen-server`). A pane that tur
 
 The Output panel (`Cmd/Ctrl+J`) reads the session transcripts of Claude Code and GitHub Copilot CLI, read-only, and lists what the subagents of the active agent are doing. The **Flow** tab draws the run as a graph, laid out automatically: the main agent, every skill call and every subagent, nested under the one that called them, with status per node.
 
-<Screenshot src="flow.svg" alt="Placeholder for a screenshot of the Flow tab" caption="The Flow tab of a run with parallel subagents (screenshot pending, see #264)." />
+<Screenshot src="flow-dark.png" alt="The Flow tab in the bottom panel: a graph with the main agent node (Claude Code, done) connected to a github-issue skill node (done)" caption="The Flow tab draws a run as a graph: the main agent and the skills and subagents it calls, with status per node." />
 
 ### Color schemes
 
