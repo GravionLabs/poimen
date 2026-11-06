@@ -112,6 +112,11 @@ function parseBlock(raw: unknown): TranscriptBlock | null {
   }
 }
 
+/** The string, else `null`. */
+function strOrNull(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
 /** Four non-negative counts, else `null` (unknown). */
 export function parseUsage(raw: unknown): TokenUsage | null {
   if (!isObject(raw)) return null;
@@ -137,7 +142,6 @@ function parseEntry(raw: unknown): TranscriptEntry | null {
 
 function parseInfo(raw: unknown): SubagentInfo | null {
   if (!isObject(raw) || typeof raw["agent_id"] !== "string" || !raw["agent_id"]) return null;
-  const time = (v: unknown) => (typeof v === "string" ? v : null);
   return {
     agent_id: raw["agent_id"],
     agent_type: str(raw["agent_type"]),
@@ -146,8 +150,8 @@ function parseInfo(raw: unknown): SubagentInfo | null {
     spawn_depth: typeof raw["spawn_depth"] === "number" ? raw["spawn_depth"] : 0,
     worktree_branch: typeof raw["worktree_branch"] === "string" ? raw["worktree_branch"] : null,
     status: raw["status"] === "done" ? "done" : "running",
-    started: time(raw["started"]),
-    last: time(raw["last"]),
+    started: strOrNull(raw["started"]),
+    last: strOrNull(raw["last"]),
   };
 }
 
@@ -160,7 +164,6 @@ export function parseSubagentEvent(raw: unknown): SubagentEvent | null {
     return { session: raw["session"], update: { kind: "list", agents } };
   }
   if (update["kind"] === "main" && Array.isArray(update["calls"])) {
-    const time = (v: unknown) => (typeof v === "string" ? v : null);
     const calls = update["calls"].flatMap((raw): MainCall[] =>
       isObject(raw) && typeof raw["tool_use_id"] === "string" && raw["tool_use_id"]
         ? [
@@ -169,8 +172,8 @@ export function parseSubagentEvent(raw: unknown): SubagentEvent | null {
               name: str(raw["name"]),
               target: str(raw["target"]),
               detail: str(raw["detail"]),
-              started: time(raw["started"]),
-              ended: time(raw["ended"]),
+              started: strOrNull(raw["started"]),
+              ended: strOrNull(raw["ended"]),
               is_error: raw["is_error"] === true,
               context: typeof raw["context"] === "number" ? raw["context"] : null,
             },
@@ -185,8 +188,8 @@ export function parseSubagentEvent(raw: unknown): SubagentEvent | null {
           ? [
               {
                 id: str(raw["id"]),
-                timestamp: time(raw["timestamp"]),
-                model: time(raw["model"]),
+                timestamp: strOrNull(raw["timestamp"]),
+                model: strOrNull(raw["model"]),
                 usage: counts,
               },
             ]

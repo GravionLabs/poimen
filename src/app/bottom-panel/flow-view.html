@@ -65,14 +65,7 @@
             <span>{{ item.node.tools }} tool calls</span>
           }
         </div>
-        @if (tokenLine(item.node); as tokens) {
-          <div class="meta tokens">
-            <span>{{ tokens }}</span>
-            @if (contextLine(item.node); as context) {
-              <span>{{ context }}</span>
-            }
-          </div>
-        }
+        <app-flow-node-tokens [node]="item.node" />
         <span
           fConnector
           fConnectorType="source"
