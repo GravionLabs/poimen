@@ -277,6 +277,54 @@ describe("Subagents", () => {
     expect(s.supported()).toBe(false);
   });
 
+  it("follows the new session after /clear and resets the old one", async () => {
+    tauri.answer("subagents_watch", () => true);
+    const s = create();
+    await s.follow("w1:p1", "old");
+    send("old", { kind: "list", agents: [info()] });
+    expect(s.agents()).toHaveLength(1);
+    await s.follow("w1:p1", "new");
+    expect(s.agents()).toEqual([]);
+    expect(tauri.calls("subagents_watch")).toHaveLength(2);
+    send("old", { kind: "list", agents: [info()] });
+    expect(s.agents()).toEqual([]);
+    send("new", { kind: "list", agents: [info({ agent_id: "b1" })] });
+    expect(s.selectedId()).toBe("b1");
+  });
+
+  it("retries the watch until the transcript of a new session exists", async () => {
+    vi.useFakeTimers();
+    try {
+      let found = false;
+      tauri.answer("subagents_watch", () => found);
+      const s = create();
+      await s.follow("w1:p1", "new");
+      expect(s.supported()).toBe(false);
+      found = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(tauri.calls("subagents_watch")).toHaveLength(2);
+      expect(s.supported()).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(tauri.calls("subagents_watch")).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops retrying when another session is followed", async () => {
+    vi.useFakeTimers();
+    try {
+      tauri.answer("subagents_watch", () => false);
+      const s = create();
+      await s.follow("w1:p1", "a");
+      await s.follow(null, null);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(tauri.calls("subagents_watch")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("is unsupported when the backend fails", async () => {
     tauri.answer("subagents_watch", () => {
       throw new Error("boom");
