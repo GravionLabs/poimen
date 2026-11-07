@@ -483,3 +483,22 @@ export const HOOK_AGENT_KINDS = ["claude", "copilot"] as const;
 export function agentKinds(backend: BackendKind): readonly string[] {
   return backend === "poimen" ? HOOK_AGENT_KINDS : AGENT_KINDS;
 }
+
+/** The agents named in the empty states of the Output panel and the Flow tab. */
+export const TRANSCRIPT_AGENTS_LABEL = "Claude Code and GitHub Copilot CLI";
+
+/**
+ * Empty-state text of the Output panel and the Flow tab for `pane`; `subject` names the view
+ * (`Subagent output`, `The flow`). It tells apart a pane without a known agent, a known agent
+ * that has not reported its session yet, and a session whose transcript is not found yet.
+ */
+export function transcriptEmptyText(pane: Terminal | undefined, subject: string): string {
+  if (!pane) {
+    return `${subject} is available for ${TRANSCRIPT_AGENTS_LABEL} agents. Select a pane that runs one.`;
+  }
+  if (!supportsFlow(pane)) {
+    return `${subject} is available for ${TRANSCRIPT_AGENTS_LABEL} agents. This pane does not run one.`;
+  }
+  if (flowSession(pane) === null) return "Waiting for the agent to report its session.";
+  return "Waiting for the agent's transcript to appear.";
+}
