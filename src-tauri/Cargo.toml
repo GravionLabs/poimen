@@ -62,3 +62,8 @@ strip = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+
+# portable-pty 0.9 creates the ConPTY without PSEUDOCONSOLE_PASSTHROUGH_MODE (#455); see
+# vendor/portable-pty/POIMEN.md for the only differences.
+[patch.crates-io]
+portable-pty = { path = "vendor/portable-pty" }
