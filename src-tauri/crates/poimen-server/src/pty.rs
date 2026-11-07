@@ -221,6 +221,18 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
+    /// #455: on Windows the ConPTY is created with pass-through (conhost must not re-encode VT
+    /// mouse input), falling back to the flags of upstream portable-pty when the OS rejects it.
+    #[test]
+    fn conpty_tries_passthrough_then_falls_back() {
+        use portable_pty::conpty_flags::{PASSTHROUGH_MODE, UPSTREAM, attempts};
+        let a = attempts();
+        assert_eq!(a[0] & PASSTHROUGH_MODE, 0x8);
+        assert_eq!(a[0], 0xF);
+        assert_eq!(a[1], UPSTREAM);
+        assert_eq!(a[1] & PASSTHROUGH_MODE, 0);
+    }
+
     /// Records every `write` call of the PTY input.
     #[derive(Clone, Default)]
     struct Calls(Arc<Mutex<Vec<Vec<u8>>>>);
