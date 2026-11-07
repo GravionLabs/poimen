@@ -328,6 +328,11 @@ let followers = 0;
  * instance follows the pane of the output panel; a flow tab provides its own instance for its pane.
  * Every instance has its own backend watch (by key) and stops it when it is destroyed.
  */
+/** Retries of a watch that found no transcript yet: delay grows by the step up to the cap. */
+const WATCH_RETRIES = 60;
+const WATCH_RETRY_MS = 1000;
+const WATCH_RETRY_MAX_MS = 10_000;
+
 @Injectable({ providedIn: "root" })
 export class Subagents {
   private readonly bridge = inject(TauriBridge);
@@ -398,12 +403,37 @@ export class Subagents {
       return;
     }
     this.session = session;
+    await this.watch(paneId, session, generation, 0);
+  }
+
+  /**
+   * Starts the backend watch. A new session (after `/clear`) has no transcript file until its
+   * first prompt, so a miss is retried with a growing delay while this is still the followed
+   * session; a failure is not.
+   */
+  private async watch(
+    paneId: string,
+    session: string,
+    generation: number,
+    attempt: number,
+  ): Promise<void> {
     try {
       const watching = await this.bridge.invoke<boolean>("subagents_watch", {
         key: this.key,
         paneId,
       });
-      if (generation === this.generation) this._supported.set(watching === true);
+      if (generation !== this.generation) return;
+      this._supported.set(watching === true);
+      if (watching !== true && attempt < WATCH_RETRIES) {
+        setTimeout(
+          () => {
+            if (generation === this.generation) {
+              void this.watch(paneId, session, generation, attempt + 1);
+            }
+          },
+          Math.min(WATCH_RETRY_MS * (attempt + 1), WATCH_RETRY_MAX_MS),
+        );
+      }
     } catch {
       if (generation === this.generation) this._supported.set(false);
     }
