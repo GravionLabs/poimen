@@ -722,7 +722,7 @@ describe("TerminalView mouse input", () => {
   it("does not forward the wheel to an emulated stream", async () => {
     const { send, session } = await setup("control", pane, true);
     await send(0, attached);
-    fake.wheelHandler?.({ deltaY: -60 } as WheelEvent);
+    expect(fake.wheelHandler?.({ deltaY: -60 } as WheelEvent)).toBe(true);
     expect(session.scroll).not.toHaveBeenCalled();
   });
 

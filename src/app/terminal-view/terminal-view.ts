@@ -268,13 +268,10 @@ export class TerminalView implements OnDestroy {
       if (this.mode() === "control") this.session?.input(data);
     });
     term.attachCustomWheelEventHandler((event) => {
-      // Emulated streams carry PTY bytes: xterm.js itself scrolls and reports the wheel.
-      if (
-        this.mode() === "control" &&
-        this.session?.open &&
-        !this.session.emulated &&
-        event.deltaY !== 0
-      ) {
+      // Emulated streams carry PTY bytes: xterm.js itself scrolls and reports the wheel, so its
+      // default handling must run (returning false would skip it).
+      if (this.session?.emulated) return true;
+      if (this.mode() === "control" && this.session?.open && event.deltaY !== 0) {
         const lines = Math.max(1, Math.min(10, Math.round(Math.abs(event.deltaY) / 30)));
         this.session.scroll(event.deltaY < 0, lines);
       }
