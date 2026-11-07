@@ -13,6 +13,7 @@ import {
   rowName,
   supportsFlow,
   tabHeader,
+  transcriptEmptyText,
   toSnapshot,
   waitingCount,
   agentKinds,
@@ -292,5 +293,42 @@ describe("toSnapshot", () => {
       tabs: [],
       terminals: [],
     });
+  });
+});
+
+describe("transcript empty states", () => {
+  const named = "Claude Code and GitHub Copilot CLI";
+
+  it("names both harnesses for a pane that runs no known agent", () => {
+    expect(transcriptEmptyText(pane({ agent: "codex" }), "The flow")).toBe(
+      `The flow is available for ${named} agents. This pane does not run one.`,
+    );
+    expect(transcriptEmptyText(pane({}), "Subagent output")).toBe(
+      `Subagent output is available for ${named} agents. This pane does not run one.`,
+    );
+  });
+
+  it("asks to select a pane when there is no pane", () => {
+    expect(transcriptEmptyText(undefined, "Subagent output")).toBe(
+      `Subagent output is available for ${named} agents. Select a pane that runs one.`,
+    );
+  });
+
+  it("waits for the session of a known agent", () => {
+    expect(transcriptEmptyText(pane({ agent: "claude" }), "The flow")).toBe(
+      "Waiting for the agent to report its session.",
+    );
+    expect(
+      transcriptEmptyText(pane({ agent: "copilot", agent_session: { value: "" } }), "The flow"),
+    ).toBe("Waiting for the agent to report its session.");
+  });
+
+  it("waits for the transcript once the session is known", () => {
+    expect(
+      transcriptEmptyText(
+        pane({ agent: "claude", agent_session: { value: "0b7e-c0" } }),
+        "The flow",
+      ),
+    ).toBe("Waiting for the agent's transcript to appear.");
   });
 });

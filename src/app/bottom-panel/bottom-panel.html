@@ -69,9 +69,7 @@
 @if (ui.panelTab() === "output") {
   <div class="body" #box (scroll)="onScroll()">
     @if (!subagents.supported()) {
-      <p class="empty">
-        Subagent output is available for Claude Code agents. Select a pane that runs one.
-      </p>
+      <p class="empty">{{ outputEmpty() }}</p>
     } @else if (!subagents.agents().length) {
       <p class="empty">This agent has not started a subagent yet.</p>
     } @else {
@@ -119,9 +117,7 @@
 }
 @if (ui.panelTab() === "flow") {
   @if (!subagents.supported()) {
-    <p class="empty body">
-      The flow is available for Claude Code agents. Select a pane that runs one.
-    </p>
+    <p class="empty body">{{ flowEmpty() }}</p>
   } @else {
     @defer {
       <app-flow-view [now]="now()" (openAgent)="openInOutput($event)" />
