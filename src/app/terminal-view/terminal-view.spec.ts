@@ -1100,6 +1100,32 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
     expect(scrollbackOf().scrollback).toBe(0);
   });
 
+  it("tells xterm.js it runs over ConPTY on Windows, for an emulated stream only", async () => {
+    vi.stubGlobal("navigator", { platform: "Win32" });
+    try {
+      await setup("observe", pane, true);
+      const options = () => (fake.term as unknown as { options: { windowsPty?: unknown } }).options;
+      expect(options().windowsPty).toEqual({ backend: "conpty", buildNumber: 21376 });
+      TestBed.resetTestingModule();
+      await setup("observe", pane, false);
+      expect(options().windowsPty).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("leaves windowsPty unset off Windows", async () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    try {
+      await setup("observe", pane, true);
+      expect(
+        (fake.term as unknown as { options: { windowsPty?: unknown } }).options.windowsPty,
+      ).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("sends typed input and terminal answers from the controller only", async () => {
     const observer = await setup("observe", pane, true);
     await observer.send(0, reset());

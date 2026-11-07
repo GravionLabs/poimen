@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(gh auth status)",
+      "Bash(gh api:*)",
+      "Bash(gh issue:*)",
+      "Bash(gh pr:*)",
+      "Bash(pwsh .claude/skills/deliver/scripts/:*)",
+      "Bash(pnpm check:*)"
+    ]
+  }
+}

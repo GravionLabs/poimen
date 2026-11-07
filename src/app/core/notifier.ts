@@ -43,10 +43,19 @@ export class Notifier {
   private nextId = 1;
 
   /** Calls `open` with the pane of every clicked notification; call before notifying. */
-  listen(open: (paneId: string) => void): Promise<Unlisten> {
+  listen(
+    open: (paneId: string) => void,
+    /** Called for a notification that is about a deliver loop, with its repository root. */
+    openDeliver?: (root: string) => void,
+  ): Promise<Unlisten> {
     return this.bridge.onNotificationClick((extra) => {
-      if (typeof extra["paneId"] !== "string") return;
-      open(extra["paneId"]);
+      if (typeof extra["deliverRoot"] === "string" && openDeliver) {
+        openDeliver(extra["deliverRoot"]);
+      } else if (typeof extra["paneId"] === "string") {
+        open(extra["paneId"]);
+      } else {
+        return;
+      }
       void this.bridge
         .focusWindow()
         .catch((error: unknown) => console.warn("poimen: could not focus the window", error));

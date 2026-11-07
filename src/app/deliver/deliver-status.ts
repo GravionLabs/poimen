@@ -1,0 +1,349 @@
+/**
+ * The live state of a deliver loop: `.agents/deliver-loop/status.json`, schema
+ * `deliver-loop-status.schema.json` of GravionLabs/skills (`schemaVersion: 1`). Everything here is
+ * pure; the Tauri side is `deliver.ts`.
+ */
+
+/** The schema version this build understands. */
+export const SUPPORTED_SCHEMA = 1;
+
+/** A file whose `updatedAt` is older than this while `result` is `running` is stale (rule 4). */
+export const STALE_MS = 60 * 60 * 1000;
+
+export type LoopResult = "running" | "done" | "max reached" | "blocked" | "no progress";
+
+const RESULTS: readonly LoopResult[] = ["running", "done", "max reached", "blocked", "no progress"];
+
+/** A blocked or paused item, or something the user must decide. */
+export interface LoopItem {
+  number: number;
+  url: string;
+  reason: string;
+}
+
+export interface LoopCurrent {
+  number: number;
+  title: string;
+  url: string;
+  step: { n: number; total: number; text: string };
+  prUrl: string | null;
+}
+
+export interface LoopDelivered {
+  pbi: number;
+  url: string;
+  prUrl: string;
+}
+
+/** The parts of `status.json` the panel shows (unknown fields are ignored). */
+export interface DeliverStatus {
+  run: string;
+  harness: string;
+  model: string;
+  repository: string;
+  milestone: { key: string; title: string; url: string };
+  closed: number;
+  total: number;
+  current: LoopCurrent | null;
+  delivered: LoopDelivered[];
+  blocked: LoopItem[];
+  paused: LoopItem[];
+  needsYou: LoopItem[];
+  release: { reviewRound: number | null; prUrl: string | null };
+  startedAt: string;
+  updatedAt: string;
+  result: LoopResult;
+}
+
+/** What the `deliver` event carries for one repository (`Read` of `deliver.rs`). */
+export type DeliverRead =
+  | { kind: "missing" }
+  | { kind: "ok"; status: unknown }
+  | { kind: "unsupported"; schemaVersion?: unknown }
+  | { kind: "invalid"; error: string };
+
+/** The state of one repository's card. */
+export type CardState =
+  | { kind: "ok"; status: DeliverStatus }
+  | { kind: "unsupported"; version: string }
+  | { kind: "invalid"; error: string };
+
+/** One card of the panel: a repository (toplevel) that has a status file. */
+export interface DeliverCard {
+  root: string;
+  state: CardState;
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+const isString = (v: unknown): v is string => typeof v === "string";
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+const isNullableString = (v: unknown): v is string | null => v === null || isString(v);
+
+function items(value: unknown): LoopItem[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: LoopItem[] = [];
+  for (const v of value) {
+    if (!isObject(v) || !isCount(v["number"]) || !isString(v["url"]) || !isString(v["reason"]))
+      return null;
+    out.push({ number: v["number"], url: v["url"], reason: v["reason"] });
+  }
+  return out;
+}
+
+function current(value: unknown): LoopCurrent | null | undefined {
+  if (value === null) return null;
+  if (!isObject(value)) return undefined;
+  const step = value["step"];
+  if (
+    !isCount(value["number"]) ||
+    !isString(value["title"]) ||
+    !isString(value["url"]) ||
+    !isObject(step) ||
+    !isCount(step["n"]) ||
+    !isCount(step["total"]) ||
+    !isString(step["text"]) ||
+    !isNullableString(value["prUrl"])
+  )
+    return undefined;
+  return {
+    number: value["number"],
+    title: value["title"],
+    url: value["url"],
+    step: { n: step["n"], total: step["total"], text: step["text"] },
+    prUrl: value["prUrl"],
+  };
+}
+
+function delivered(value: unknown): LoopDelivered[] | null {
+  if (!Array.isArray(value)) return null;
+  const out: LoopDelivered[] = [];
+  for (const v of value) {
+    if (!isObject(v) || !isCount(v["pbi"]) || !isString(v["url"]) || !isString(v["prUrl"]))
+      return null;
+    out.push({ pbi: v["pbi"], url: v["url"], prUrl: v["prUrl"] });
+  }
+  return out;
+}
+
+/** Validates the fields the panel uses; unknown fields are ignored, a wrong known field fails. */
+export function parseStatus(value: unknown): DeliverStatus | string {
+  if (!isObject(value)) return "the status is not an object";
+  const milestone = value["milestone"];
+  const release = value["release"];
+  const cur = current(value["current"]);
+  const done = delivered(value["delivered"]);
+  const blocked = items(value["blocked"]);
+  const paused = items(value["paused"]);
+  const needsYou = items(value["needsYou"]);
+  const result = value["result"];
+  if (!isString(value["run"])) return "run is missing";
+  if (!isObject(milestone) || !isString(milestone["key"]) || !isString(milestone["title"]))
+    return "milestone is invalid";
+  if (!isString(milestone["url"])) return "milestone is invalid";
+  if (!isString(value["repository"])) return "repository is missing";
+  if (!isCount(value["closed"]) || !isCount(value["total"])) return "closed or total is invalid";
+  if (cur === undefined) return "current is invalid";
+  if (!done) return "delivered is invalid";
+  if (!blocked || !paused || !needsYou) return "blocked, paused or needsYou is invalid";
+  if (
+    !isObject(release) ||
+    !(release["reviewRound"] === null || isCount(release["reviewRound"])) ||
+    !isNullableString(release["prUrl"])
+  )
+    return "release is invalid";
+  if (!isString(value["startedAt"]) || !isString(value["updatedAt"]))
+    return "startedAt or updatedAt is missing";
+  if (Number.isNaN(Date.parse(value["updatedAt"]))) return "updatedAt is not a date";
+  if (!isString(result) || !RESULTS.includes(result as LoopResult)) return "result is unknown";
+  return {
+    run: value["run"],
+    harness: isString(value["harness"]) ? value["harness"] : "",
+    model: isString(value["model"]) ? value["model"] : "",
+    repository: value["repository"],
+    milestone: { key: milestone["key"], title: milestone["title"], url: milestone["url"] },
+    closed: value["closed"],
+    total: value["total"],
+    current: cur,
+    delivered: done,
+    blocked,
+    paused,
+    needsYou,
+    release: { reviewRound: release["reviewRound"] as number | null, prUrl: release["prUrl"] },
+    startedAt: value["startedAt"],
+    updatedAt: value["updatedAt"],
+    result: result as LoopResult,
+  };
+}
+
+/** The card of a `deliver` event; `null` for a repository without a status file. */
+export function cardOf(root: string, read: DeliverRead): DeliverCard | null {
+  switch (read.kind) {
+    case "missing":
+      return null;
+    case "invalid":
+      return { root, state: { kind: "invalid", error: read.error } };
+    case "unsupported":
+      return {
+        root,
+        state: {
+          kind: "unsupported",
+          version:
+            read.schemaVersion === undefined || read.schemaVersion === null
+              ? "none"
+              : String(read.schemaVersion),
+        },
+      };
+    case "ok": {
+      const status = parseStatus(read.status);
+      return typeof status === "string"
+        ? { root, state: { kind: "invalid", error: status } }
+        : { root, state: { kind: "ok", status } };
+    }
+  }
+}
+
+/** `running` older than {@link STALE_MS} is `stale`; else the result as written. */
+export type RunState = LoopResult | "stale";
+
+export function runState(status: DeliverStatus, now: number): RunState {
+  if (status.result !== "running") return status.result;
+  return now - Date.parse(status.updatedAt) > STALE_MS ? "stale" : "running";
+}
+
+/** "just now", "12 min ago", "3 h ago", "2 d ago". */
+export function ageText(iso: string, now: number): string {
+  const ms = now - Date.parse(iso);
+  if (Number.isNaN(ms)) return "";
+  const min = Math.floor(Math.max(ms, 0) / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
+}
+
+/** The line under the title: "running, updated 3 min ago", "finished 12 min ago", ... */
+export function stateText(status: DeliverStatus, now: number): string {
+  const age = ageText(status.updatedAt, now);
+  switch (runState(status, now)) {
+    case "running":
+      return `running, updated ${age}`;
+    case "stale":
+      return `stale: no update for ${age.replace(" ago", "")}, the loop may have stopped`;
+    case "done":
+      return `finished ${age}`;
+    case "max reached":
+      return `stopped at the item limit ${age}`;
+    case "blocked":
+      return `blocked ${age}`;
+    case "no progress":
+      return `stopped without progress ${age}`;
+  }
+}
+
+/** Progress of the milestone in percent, 0 to 100. */
+export function percent(status: Pick<DeliverStatus, "closed" | "total">): number {
+  if (status.total <= 0) return 0;
+  return Math.min(100, Math.round((status.closed / status.total) * 100));
+}
+
+/** Whether the run asks for the user: blocked, paused or needs-you items, or a blocked result. */
+export function needsAttention(status: DeliverStatus): boolean {
+  return (
+    status.result === "blocked" ||
+    status.blocked.length > 0 ||
+    status.paused.length > 0 ||
+    status.needsYou.length > 0
+  );
+}
+
+/** The compact status bar item. */
+export interface BarSummary {
+  text: string;
+  title: string;
+  warning: boolean;
+}
+
+/**
+ * `▶ M5 7/19` per running loop, `▶ n runs` for several; `null` without a running loop. A fresh
+ * loop that ended `blocked` still shows (as a warning) until it is stale, so a stop is not missed.
+ */
+export function barSummary(cards: readonly DeliverCard[], now: number): BarSummary | null {
+  const active: DeliverStatus[] = [];
+  for (const card of cards) {
+    if (card.state.kind !== "ok") continue;
+    const state = runState(card.state.status, now);
+    if (
+      state === "running" ||
+      (state === "blocked" && now - Date.parse(card.state.status.updatedAt) < STALE_MS)
+    )
+      active.push(card.state.status);
+  }
+  if (active.length === 0) return null;
+  const label = (s: DeliverStatus) => `${s.milestone.key} ${s.closed}/${s.total}`;
+  const warning = active.some(needsAttention);
+  const title = active
+    .map(
+      (s) =>
+        `${s.repository} ${label(s)}${s.current ? `: #${s.current.number} ${s.current.step.text}` : ""}${
+          needsAttention(s) ? " (needs you)" : ""
+        }`,
+    )
+    .join("\n");
+  const text =
+    active.length === 1
+      ? `${warning ? "⚠" : "▶"} ${label(active[0])}`
+      : `${warning ? "⚠" : "▶"} ${active.length} runs`;
+  return { text, title, warning };
+}
+
+export type DeliverEventKind = "blocked" | "needs-you" | "release" | "ended";
+
+export interface DeliverEvent {
+  kind: DeliverEventKind;
+  title: string;
+  body: string;
+}
+
+/**
+ * What changed between two reads of the same repository that deserves a notification: a run
+ * became blocked, needs a decision, opened the release pull request or ended. Nothing without a
+ * previous state (the first read is not news).
+ */
+export function transitions(prev: DeliverStatus | undefined, next: DeliverStatus): DeliverEvent[] {
+  if (!prev || prev.run !== next.run) return [];
+  const title = `Deliver ${next.milestone.key}`;
+  const out: DeliverEvent[] = [];
+  const known = new Set(prev.blocked.map((i) => i.number));
+  const newlyBlocked = next.blocked.filter((i) => !known.has(i.number));
+  if (newlyBlocked.length > 0) {
+    out.push({
+      kind: "blocked",
+      title,
+      body: `#${newlyBlocked[0].number} is blocked: ${newlyBlocked[0].reason}`,
+    });
+  } else if (next.result === "blocked" && prev.result !== "blocked") {
+    out.push({ kind: "blocked", title, body: "The run is blocked" });
+  }
+  const asked = new Set(prev.needsYou.map((i) => i.number));
+  const newlyAsked = next.needsYou.filter((i) => !asked.has(i.number));
+  if (newlyAsked.length > 0) {
+    out.push({
+      kind: "needs-you",
+      title,
+      body: `#${newlyAsked[0].number} needs you: ${newlyAsked[0].reason}`,
+    });
+  }
+  if (next.release.prUrl && next.release.prUrl !== prev.release.prUrl) {
+    out.push({ kind: "release", title, body: "The release pull request is open" });
+  }
+  if (prev.result === "running" && next.result !== "running" && next.result !== "blocked") {
+    out.push({
+      kind: "ended",
+      title,
+      body: next.result === "done" ? "The run is done" : `The run ended: ${next.result}`,
+    });
+  }
+  return out;
+}

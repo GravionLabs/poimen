@@ -21,7 +21,7 @@
 # changelog on its own (this workflow keeps the manifest commit, git-cliff notes and issue closing of gh-release)
 # and assumes a Cargo workspace at the repository root (poimen's crate is src-tauri/).
 #
-# The release job writes the released version into package.json, src-tauri/Cargo.toml (and Cargo.lock) and
+# The release job writes the released version into package.json, src-tauri/Cargo.toml ([workspace.package], inherited by the app and the poimen-* crates; and Cargo.lock) and
 # src-tauri/tauri.conf.json before the changelog commit, so a build of the tag reports the released version.
 #
 # GH_PAT: classic PAT with scope `repo` of a repository admin. The `main` ruleset requires a pull request and the
@@ -85,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version: $VERSION" >&2; exit 1; }
-          sed -i -E '0,/^version = "[^"]*"/s//version = "'"$VERSION"'"/' src-tauri/Cargo.toml
-          sed -i -E '/^name = "poimen"$/{n;s/^version = "[^"]*"/version = "'"$VERSION"'"/}' src-tauri/Cargo.lock
+          sed -i -E '/^\[workspace\.package\]/,/^\[/{s/^version = "[^"]*"/version = "'"$VERSION"'"/;}' src-tauri/Cargo.toml
+          sed -i -E '/^name = "poimen(-client|-protocol|-server)?"$/{n;s/^version = "[^"]*"/version = "'"$VERSION"'"/;}' src-tauri/Cargo.lock
           sed -i -E '0,/"version": "[^"]*"/s//"version": "'"$VERSION"'"/' package.json src-tauri/tauri.conf.json
           git diff --quiet || {
             git config user.name "github-actions[bot]"

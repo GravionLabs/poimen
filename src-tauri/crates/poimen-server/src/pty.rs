@@ -219,6 +219,45 @@ pub(crate) fn spawn(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    /// #455: on Windows the ConPTY is created with pass-through (conhost must not re-encode VT
+    /// mouse input), falling back to the flags of upstream portable-pty when the OS rejects it.
+    #[test]
+    fn conpty_tries_passthrough_then_falls_back() {
+        use portable_pty::conpty_flags::{PASSTHROUGH_MODE, UPSTREAM, attempts};
+        let a = attempts();
+        assert_eq!(a[0] & PASSTHROUGH_MODE, 0x8);
+        assert_eq!(a[0], 0xF);
+        assert_eq!(a[1], UPSTREAM);
+        assert_eq!(a[1] & PASSTHROUGH_MODE, 0);
+    }
+
+    /// Records every `write` call of the PTY input.
+    #[derive(Clone, Default)]
+    struct Calls(Arc<Mutex<Vec<Vec<u8>>>>);
+
+    impl Write for Calls {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().push(buf.to_vec());
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_mouse_report_reaches_the_pty_in_one_write_and_unchanged() {
+        let calls = Calls::default();
+        let writer = PtyWriter::new(Box::new(calls.clone()));
+        writer.write(b"\x1b[<0;12;5M").unwrap();
+        writer.write(b"\x1b[<0;12;5m").unwrap();
+        assert_eq!(
+            *calls.0.lock().unwrap(),
+            vec![b"\x1b[<0;12;5M".to_vec(), b"\x1b[<0;12;5m".to_vec()]
+        );
+    }
 
     #[test]
     fn program_name_is_the_file_name() {
