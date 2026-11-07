@@ -194,6 +194,17 @@ export function isWindows(): boolean {
 }
 
 /** Default `terminal.fontSize`: 14 on Windows, 13 elsewhere (mirrors `settings.rs`). */
+/**
+ * xterm.js option for a PTY that is ConPTY (Windows): it tells xterm.js the output was already
+ * reflowed by ConPTY. `buildNumber` is the first build with ConPTY's reflow handling; undefined
+ * elsewhere, where the option must stay unset.
+ */
+export function windowsPtyOption(
+  windows: boolean = isWindows(),
+): { backend: "conpty"; buildNumber: number } | undefined {
+  return windows ? { backend: "conpty", buildNumber: 21376 } : undefined;
+}
+
 export function defaultTerminalFontSize(windows: boolean = isWindows()): number {
   return windows ? 14 : 13;
 }

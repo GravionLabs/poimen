@@ -219,6 +219,33 @@ pub(crate) fn spawn(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    /// Records every `write` call of the PTY input.
+    #[derive(Clone, Default)]
+    struct Calls(Arc<Mutex<Vec<Vec<u8>>>>);
+
+    impl Write for Calls {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().push(buf.to_vec());
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_mouse_report_reaches_the_pty_in_one_write_and_unchanged() {
+        let calls = Calls::default();
+        let writer = PtyWriter::new(Box::new(calls.clone()));
+        writer.write(b"\x1b[<0;12;5M").unwrap();
+        writer.write(b"\x1b[<0;12;5m").unwrap();
+        assert_eq!(
+            *calls.0.lock().unwrap(),
+            vec![b"\x1b[<0;12;5M".to_vec(), b"\x1b[<0;12;5m".to_vec()]
+        );
+    }
 
     #[test]
     fn program_name_is_the_file_name() {
