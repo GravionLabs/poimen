@@ -6,13 +6,12 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use poimen_client::Client;
 use poimen_protocol::{AgentStatus, ENV_TERMINAL_ID, TerminalReportAgent};
 use serde_json::{Map, Value, json};
+
+use crate::hook::{HookEnv, Outcome};
 
 /// Marks the command of our entries in `settings.json`; install and uninstall find them by it.
 const MARKER: &str = "# poimen-agent-hook";
@@ -90,39 +89,11 @@ pub fn request_for(terminal_id: &str, seq: u64, payload: &Value) -> Option<Termi
     })
 }
 
-/// Runs the hook: reads the payload from `stdin` and reports it. Returns quietly in every
-/// failure case, and gives up after a short time so Claude Code is never held up. `terminal_id`
-/// is `$POIMEN_TERMINAL_ID`; unset (not a poimen terminal) means nothing happens.
-pub fn run_hook(stdin: impl Read + Send + 'static, terminal_id: Option<String>, socket: PathBuf) {
-    run_hook_with(stdin, terminal_id, socket, request_for);
-}
-
-/// [`run_hook`] for any agent: `build` turns the payload into the report request.
-pub fn run_hook_with(
-    mut stdin: impl Read + Send + 'static,
-    terminal_id: Option<String>,
-    socket: PathBuf,
-    build: impl FnOnce(&str, u64, &Value) -> Option<TerminalReportAgent> + Send + 'static,
-) {
-    let Some(terminal_id) = terminal_id.filter(|t| !t.is_empty()) else {
-        return;
-    };
-    let (done, wait) = mpsc::channel();
-    thread::spawn(move || {
-        let mut raw = Vec::new();
-        let _ = (&mut stdin).take(1 << 20).read_to_end(&mut raw);
-        if let Some(request) = serde_json::from_slice::<Value>(&raw)
-            .ok()
-            .and_then(|payload| build(&terminal_id, now_nanos(), &payload))
-        {
-            let _ = Client::new(socket).request(
-                "terminal.report_agent",
-                serde_json::to_value(request).unwrap_or(Value::Null),
-            );
-        }
-        let _ = done.send(());
-    });
-    let _ = wait.recv_timeout(Duration::from_millis(1500));
+/// Runs the hook: reads the payload from `stdin` and reports it (see [`crate::hook::run`]). It
+/// never fails and gives up after a short time so Claude Code is never held up; a report that
+/// does not get through is a line in the hook log. Outside a poimen terminal nothing happens.
+pub fn run_hook(stdin: impl Read + Send + 'static, env: &HookEnv) -> Outcome {
+    crate::hook::run(stdin, env, "hook claude", request_for)
 }
 
 /// `$POIMEN_TERMINAL_ID`, when set.
@@ -482,25 +453,45 @@ mod tests {
         assert!(request_for("t4", 9, &event("PreToolUse")).is_none());
     }
 
-    fn nowhere() -> PathBuf {
-        PathBuf::from("/nonexistent/poimen/s.sock")
+    fn env(terminal_id: Option<&str>, in_poimen: bool) -> HookEnv {
+        HookEnv {
+            terminal_id: terminal_id.map(str::to_owned),
+            in_poimen,
+            socket: PathBuf::from("/nonexistent/poimen/s.sock"),
+            log: None,
+        }
     }
 
     #[test]
     fn the_hook_does_nothing_outside_a_poimen_terminal() {
         // No terminal id: returns at once without reading stdin or touching the socket.
-        run_hook(std::io::empty(), None, nowhere());
-        run_hook(std::io::empty(), Some(String::new()), nowhere());
+        assert_eq!(
+            run_hook(std::io::empty(), &env(None, false)),
+            Outcome::Outside
+        );
+        assert_eq!(
+            run_hook(std::io::empty(), &env(Some(""), false)),
+            Outcome::Outside
+        );
     }
 
     #[test]
     fn the_hook_survives_garbage_and_a_missing_server() {
+        let failed = |o: Outcome| matches!(o, Outcome::Failed(_));
         let payload = br#"{"hook_event_name":"Stop","session_id":"x"}"#.to_vec();
-        run_hook(std::io::Cursor::new(payload), Some("t1".into()), nowhere());
-        run_hook(
+        let in_terminal = env(Some("t1"), true);
+        assert!(failed(run_hook(
+            std::io::Cursor::new(payload),
+            &in_terminal
+        )));
+        assert!(failed(run_hook(
             std::io::Cursor::new(b"not json".to_vec()),
-            Some("t1".into()),
-            nowhere(),
+            &in_terminal,
+        )));
+        let tool = br#"{"hook_event_name":"PreToolUse","session_id":"x"}"#.to_vec();
+        assert_eq!(
+            run_hook(std::io::Cursor::new(tool), &in_terminal),
+            Outcome::Ignored
         );
     }
 
