@@ -8,6 +8,7 @@
 pub mod claude;
 pub mod copilot;
 mod emulator;
+pub mod hook;
 mod pty;
 pub mod report;
 mod store;

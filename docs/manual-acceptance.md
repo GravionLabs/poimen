@@ -207,10 +207,13 @@ The open M10 checks (W-S-9 to W-S-14) run once, here. The `.msi` section repeats
 
 ### W-S-13 Copilot CLI loads the hooks on Windows
 
-- **Steps:** check that `%USERPROFILE%\.copilot\hooks` holds the poimen hook. Run a prompt in Copilot
-  CLI and watch the status.
-- **Expected:** Copilot CLI loads the hook and the status changes in poimen.
-- **Source:** #416 (open check, PR #422), #155.
+- **Steps:** check that `%USERPROFILE%\.copilot\hooks` holds the poimen hook. Open three spaces from
+  a layout (panes `agent`, `tests`, `shell`), start Copilot CLI in the `agent` pane of each, run a
+  prompt in each and watch the status. Repeat with Claude Code.
+- **Expected:** Copilot CLI loads the hook and the status changes in poimen, in every space.
+  `%LOCALAPPDATA%\poimen-server\hooks.log` has no new line; if it has one, its reason goes into
+  the issue.
+- **Source:** #416 (open check, PR #422), #155, #485.
 
 ### W-S-14 ConPTY cursor and IME
 
