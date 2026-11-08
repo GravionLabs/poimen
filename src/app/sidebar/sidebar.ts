@@ -476,7 +476,10 @@ export class Sidebar {
   /** A row of another space, or of the dragged tab itself, is no target: no marker, no drop. */
   protected tabDragOver(event: DragEvent, pane: Terminal): void {
     const source = this.tabDrag();
-    if (source === null || source.space !== pane.space_id || source.tab === pane.tab_id) return;
+    if (source === null || source.space !== pane.space_id || source.tab === pane.tab_id) {
+      this.tabMark.set(null);
+      return;
+    }
     event.preventDefault();
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
     this.tabMark.set({ pane: pane.terminal_id, after: event.clientY > box.top + box.height / 2 });

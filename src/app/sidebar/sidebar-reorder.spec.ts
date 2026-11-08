@@ -161,6 +161,15 @@ describe("Sidebar tab drag and drop", () => {
     expect(reorderTabs).not.toHaveBeenCalled();
   });
 
+  it("clears the marker when the drag moves over a refused row", async () => {
+    const { root, fire } = await setup();
+    await fire(tabRow(root, "w1", 1), "dragstart");
+    await fire(tabRow(root, "w1", 2), "dragover", 5);
+    expect(tabRow(root, "w1", 2).classList).toContain("drop-after");
+    await fire(tabRow(root, "w2", 1), "dragover", 5);
+    expect(tabRow(root, "w1", 2).classList).not.toContain("drop-after");
+  });
+
   it("does not start a drag while a filter is active", async () => {
     const { root, fire, reorderTabs, settle } = await setup();
     const input = root.querySelector<HTMLInputElement>("input.filter")!;
