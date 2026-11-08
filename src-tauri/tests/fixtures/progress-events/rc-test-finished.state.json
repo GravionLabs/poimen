@@ -1,0 +1,37 @@
+{
+  "run": "20261107-100000-rc-t",
+  "harness": "claude",
+  "model": "sonnet",
+  "repository": "GravionLabs/skills",
+  "milestone": {
+    "key": "M5",
+    "title": "M5 Events",
+    "url": "https://github.com/GravionLabs/skills/milestone/5"
+  },
+  "closed": 9,
+  "total": 9,
+  "current": null,
+  "delivered": [
+    {
+      "pbi": 400,
+      "url": "https://github.com/GravionLabs/skills/issues/400",
+      "prUrl": "https://github.com/GravionLabs/skills/issues/400"
+    }
+  ],
+  "blocked": [],
+  "paused": [],
+  "needsYou": [],
+  "release": {
+    "reviewRound": null,
+    "prUrl": "https://github.com/GravionLabs/skills/pull/391",
+    "rcUrl": "https://github.com/GravionLabs/skills/releases/tag/v3.2.0-rc.1",
+    "rcVersion": "3.2.0-rc.1",
+    "testIssue": {
+      "number": 400,
+      "url": "https://github.com/GravionLabs/skills/issues/400"
+    }
+  },
+  "startedAt": "2026-11-07T10:00:00.000Z",
+  "updatedAt": "2026-11-07T11:30:05.000Z",
+  "result": "running"
+}

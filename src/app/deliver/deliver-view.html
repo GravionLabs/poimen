@@ -1,16 +1,26 @@
 <div class="page">
   <header>
     <h1>Deliver</h1>
-    <span class="hint">Live state of the deliver loops of the open spaces</span>
+    <span class="hint">Live state of the deliver runs of the open spaces</span>
   </header>
   @if (deliver.cards().length === 0) {
     <p class="hint" data-testid="empty">
-      No deliver loop found. A loop writes <code>.agents/deliver-loop/status.json</code> in its
-      repository; it appears here as soon as the file exists.
+      No deliver run found. A run reports its progress to
+      <code>.agents/events/&lt;run&gt;.jsonl</code> in the git directory of its repository (a loop
+      or an interactive <code>/deliver</code> session); it appears here as soon as the file exists.
     </p>
   }
-  @for (card of deliver.cards(); track card.root) {
-    @if (card.state.kind === "unsupported") {
+  @for (card of deliver.cards(); track cardKey(card)) {
+    @if (card.state.kind === "events-version") {
+      <section class="card" data-testid="card">
+        <h2 class="mono">{{ card.root }}</h2>
+        <p class="hint" data-testid="events-version">
+          Some progress events use version {{ $any(card.state).version }}, which this version of
+          poimen does not know (it reads version {{ eventsVersion }}). Update poimen to see those
+          runs.
+        </p>
+      </section>
+    } @else if (card.state.kind === "unsupported") {
       <section class="card" data-testid="card">
         <h2 class="mono">{{ card.root }}</h2>
         <p class="hint" data-testid="unsupported">
@@ -28,27 +38,40 @@
     } @else {
       @let s = $any(card.state).status;
       @let state = runState(s);
-      <section class="card state-{{ state.replace(' ', '-') }}" data-testid="card">
+      <section
+        class="card state-{{ state.replace(' ', '-') }} tone-{{ s.tone }}"
+        data-testid="card"
+        [attr.data-tone]="s.tone"
+      >
         <div class="card-head">
           <h2>
-            <button type="button" class="link" (click)="deliver.openUrl(s.milestone.url)">
-              {{ s.milestone.title }}
-            </button>
+            @if (s.milestone; as m) {
+              <button type="button" class="link" (click)="deliver.openUrl(m.url)">
+                {{ m.title }}
+              </button>
+            } @else {
+              <span>Interactive deliver</span>
+            }
             <span class="repo mono">{{ s.repository }}</span>
+            @if (s.source) {
+              <span class="badge" data-testid="source">{{ s.source }}</span>
+            }
           </h2>
           <span class="state" data-testid="state">{{ stateText(s) }}</span>
         </div>
-        <div
-          class="bar"
-          role="progressbar"
-          aria-label="Milestone progress"
-          [attr.aria-valuenow]="s.closed"
-          aria-valuemin="0"
-          [attr.aria-valuemax]="s.total"
-        >
-          <div class="fill" [style.width.%]="percent(s)"></div>
-        </div>
-        <p class="progress" data-testid="progress">{{ s.closed }}/{{ s.total }} closed</p>
+        @if (s.milestone) {
+          <div
+            class="bar"
+            role="progressbar"
+            aria-label="Milestone progress"
+            [attr.aria-valuenow]="s.closed"
+            aria-valuemin="0"
+            [attr.aria-valuemax]="s.total"
+          >
+            <div class="fill" [style.width.%]="percent(s)"></div>
+          </div>
+          <p class="progress" data-testid="progress">{{ s.closed }}/{{ s.total }} closed</p>
+        }
 
         @if (s.current; as c) {
           <div class="current" data-testid="current">
@@ -120,7 +143,7 @@
             }
           </ul>
         }
-        @if (s.release.prUrl || s.release.reviewRound) {
+        @if (s.release.prUrl || s.release.reviewRound || s.release.rcVersion) {
           <p class="release" data-testid="release">
             Release
             @if (s.release.reviewRound) {
@@ -131,19 +154,31 @@
                 {{ prLabel(url) }}
               </button>
             }
+            @if (s.release.rcVersion; as version) {
+              <span class="hint">RC</span>
+              @if (s.release.rcUrl; as url) {
+                <button type="button" class="link" data-testid="rc" (click)="deliver.openUrl(url)">
+                  {{ version }}
+                </button>
+              } @else {
+                <span data-testid="rc">{{ version }}</span>
+              }
+            }
           </p>
         }
 
         <footer>
           <span class="hint mono">{{ s.harness }} {{ s.model }} &middot; {{ card.root }}</span>
           <span class="actions">
-            <button type="button" (click)="deliver.openUrl(s.milestone.url)">Open milestone</button>
+            @if (s.milestone; as m) {
+              <button type="button" (click)="deliver.openUrl(m.url)">Open milestone</button>
+            }
             @if (deliver.paneOf(card); as pane) {
               <button type="button" data-testid="focus" (click)="paneChosen.emit(pane)">
                 Focus terminal
               </button>
             }
-            @if (state !== "running") {
+            @if (state !== "running" && s.milestone) {
               <button type="button" data-testid="start" (click)="deliver.startLoop(s, card.root)">
                 Start loop
               </button>

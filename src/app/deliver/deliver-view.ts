@@ -1,7 +1,9 @@
 import { ChangeDetectionStrategy, Component, inject, output } from "@angular/core";
 import { Deliver } from "./deliver";
 import {
+  SUPPORTED_EVENTS,
   SUPPORTED_SCHEMA,
+  cardKey,
   percent,
   runState,
   stateText,
@@ -14,7 +16,7 @@ export function prLabel(url: string): string {
   return nr ? `PR #${nr}` : url;
 }
 
-/** The Deliver panel as an editor tab: one card per repository with a deliver loop status file. */
+/** The Deliver panel as an editor tab: one card per deliver run (loop or interactive session). */
 @Component({
   selector: "app-deliver-view",
   templateUrl: "./deliver-view.html",
@@ -24,6 +26,8 @@ export function prLabel(url: string): string {
 export class DeliverView {
   protected readonly deliver = inject(Deliver);
   protected readonly supported = SUPPORTED_SCHEMA;
+  protected readonly eventsVersion = SUPPORTED_EVENTS;
+  protected readonly cardKey = cardKey;
   protected readonly percent = percent;
   protected readonly prLabel = prLabel;
   /** The terminal of a loop was asked for. */

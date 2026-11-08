@@ -1,5 +1,7 @@
 /**
- * The live state of a deliver loop: `.agents/deliver-loop/status.json`, schema
+ * The live state of deliver runs. Primary source: the run state folded from the progress events of
+ * a run by the backend (`progress_events.rs`, schema `deliver-run-state.schema.json` plus `source`
+ * and `tone`); fallback during the migration: `.agents/deliver-loop/status.json`, schema
  * `deliver-loop-status.schema.json` of GravionLabs/skills (`schemaVersion: 1`). Everything here is
  * pure; the Tauri side is `deliver.ts`.
  */
@@ -7,12 +9,31 @@
 /** The schema version this build understands. */
 export const SUPPORTED_SCHEMA = 1;
 
+/** The version of the progress events this build reads (`v`, as `SUPPORTED_V` of the backend). */
+export const SUPPORTED_EVENTS = 1;
+
 /** A file whose `updatedAt` is older than this while `result` is `running` is stale (rule 4). */
 export const STALE_MS = 60 * 60 * 1000;
 
-export type LoopResult = "running" | "done" | "max reached" | "blocked" | "no progress";
+export type LoopResult =
+  "running" | "done" | "max reached" | "blocked" | "no progress" | "abandoned";
 
-const RESULTS: readonly LoopResult[] = ["running", "done", "max reached", "blocked", "no progress"];
+const RESULTS: readonly LoopResult[] = [
+  "running",
+  "done",
+  "max reached",
+  "blocked",
+  "no progress",
+  "abandoned",
+];
+
+/** How the emitter rated a run; the displays map it to their palette, never the text. */
+export type Tone = "neutral" | "info" | "success" | "warning" | "danger";
+
+const TONES: readonly Tone[] = ["neutral", "info", "success", "warning", "danger"];
+
+/** Who runs it: a `loop` of the deliver loop, or an interactive `session`. */
+export type RunSource = "loop" | "session";
 
 /** A blocked or paused item, or something the user must decide. */
 export interface LoopItem {
@@ -35,13 +56,25 @@ export interface LoopDelivered {
   prUrl: string;
 }
 
-/** The parts of `status.json` the panel shows (unknown fields are ignored). */
+/** The release candidate and release pull request of a run (`release.updated`). */
+export interface LoopRelease {
+  reviewRound: number | null;
+  prUrl: string | null;
+  rcUrl: string | null;
+  rcVersion: string | null;
+  testIssue: { number: number; url: string } | null;
+}
+
+/** The parts of a run state the panel shows (unknown fields are ignored). */
 export interface DeliverStatus {
   run: string;
   harness: string;
   model: string;
   repository: string;
-  milestone: { key: string; title: string; url: string };
+  /** `null` for a run without a milestone (an interactive session). */
+  milestone: { key: string; title: string; url: string } | null;
+  source: RunSource | null;
+  tone: Tone;
   closed: number;
   total: number;
   current: LoopCurrent | null;
@@ -49,7 +82,7 @@ export interface DeliverStatus {
   blocked: LoopItem[];
   paused: LoopItem[];
   needsYou: LoopItem[];
-  release: { reviewRound: number | null; prUrl: string | null };
+  release: LoopRelease;
   startedAt: string;
   updatedAt: string;
   result: LoopResult;
@@ -60,17 +93,20 @@ export type DeliverRead =
   | { kind: "missing" }
   | { kind: "ok"; status: unknown }
   | { kind: "unsupported"; schemaVersion?: unknown }
-  | { kind: "invalid"; error: string };
+  | { kind: "invalid"; error: string }
+  | { kind: "events"; runs: unknown[]; unknownVersion?: number | null };
 
-/** The state of one repository's card. */
+/** The state of one card. */
 export type CardState =
   | { kind: "ok"; status: DeliverStatus }
   | { kind: "unsupported"; version: string }
+  | { kind: "events-version"; version: string }
   | { kind: "invalid"; error: string };
 
-/** One card of the panel: a repository (toplevel) that has a status file. */
+/** One card of the panel: a run of a repository (`run` is empty for a hint or an error). */
 export interface DeliverCard {
   root: string;
+  run: string;
   state: CardState;
 }
 
@@ -79,6 +115,43 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 const isString = (v: unknown): v is string => typeof v === "string";
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
 const isNullableString = (v: unknown): v is string | null => v === null || isString(v);
+
+const isTone = (v: unknown): v is Tone => TONES.includes(v as Tone);
+
+function release(value: unknown): LoopRelease | undefined {
+  if (!isObject(value)) return undefined;
+  const nullable = (v: unknown) => (v === undefined ? null : v);
+  const [round, pr, rc, version, test] = [
+    value["reviewRound"],
+    value["prUrl"],
+    value["rcUrl"],
+    value["rcVersion"],
+    value["testIssue"],
+  ].map(nullable);
+  if (
+    !(round === null || isCount(round)) ||
+    !isNullableString(pr) ||
+    !isNullableString(rc) ||
+    !isNullableString(version)
+  )
+    return undefined;
+  let testIssue: LoopRelease["testIssue"] = null;
+  if (test !== null) {
+    if (!isObject(test) || !isCount(test["number"]) || !isString(test["url"])) return undefined;
+    testIssue = { number: test["number"], url: test["url"] };
+  }
+  return { reviewRound: round, prUrl: pr, rcUrl: rc, rcVersion: version, testIssue };
+}
+
+/**
+ * The tone of a file without one (status.json): a blocked result is danger, a running run that
+ * asks for the user warning, a finished run success.
+ */
+function legacyTone(result: LoopResult, asks: boolean): Tone {
+  if (result === "blocked") return "danger";
+  if (asks && result === "running") return "warning";
+  return result === "done" ? "success" : "neutral";
+}
 
 function items(value: unknown): LoopItem[] | null {
   if (!Array.isArray(value)) return null;
@@ -130,7 +203,7 @@ function delivered(value: unknown): LoopDelivered[] | null {
 export function parseStatus(value: unknown): DeliverStatus | string {
   if (!isObject(value)) return "the status is not an object";
   const milestone = value["milestone"];
-  const release = value["release"];
+  const rel = release(value["release"]);
   const cur = current(value["current"]);
   const done = delivered(value["delivered"]);
   const blocked = items(value["blocked"]);
@@ -138,30 +211,42 @@ export function parseStatus(value: unknown): DeliverStatus | string {
   const needsYou = items(value["needsYou"]);
   const result = value["result"];
   if (!isString(value["run"])) return "run is missing";
-  if (!isObject(milestone) || !isString(milestone["key"]) || !isString(milestone["title"]))
+  if (
+    milestone !== null &&
+    (!isObject(milestone) ||
+      !isString(milestone["key"]) ||
+      !isString(milestone["title"]) ||
+      !isString(milestone["url"]))
+  )
     return "milestone is invalid";
-  if (!isString(milestone["url"])) return "milestone is invalid";
-  if (!isString(value["repository"])) return "repository is missing";
+  if (value["repository"] !== null && !isString(value["repository"]))
+    return "repository is missing";
   if (!isCount(value["closed"]) || !isCount(value["total"])) return "closed or total is invalid";
   if (cur === undefined) return "current is invalid";
   if (!done) return "delivered is invalid";
   if (!blocked || !paused || !needsYou) return "blocked, paused or needsYou is invalid";
-  if (
-    !isObject(release) ||
-    !(release["reviewRound"] === null || isCount(release["reviewRound"])) ||
-    !isNullableString(release["prUrl"])
-  )
-    return "release is invalid";
+  if (!rel) return "release is invalid";
   if (!isString(value["startedAt"]) || !isString(value["updatedAt"]))
     return "startedAt or updatedAt is missing";
   if (Number.isNaN(Date.parse(value["updatedAt"]))) return "updatedAt is not a date";
   if (!isString(result) || !RESULTS.includes(result as LoopResult)) return "result is unknown";
+  const source = value["source"];
   return {
     run: value["run"],
     harness: isString(value["harness"]) ? value["harness"] : "",
     model: isString(value["model"]) ? value["model"] : "",
-    repository: value["repository"],
-    milestone: { key: milestone["key"], title: milestone["title"], url: milestone["url"] },
+    repository: (value["repository"] as string | null) ?? "",
+    milestone: isObject(milestone)
+      ? {
+          key: milestone["key"] as string,
+          title: milestone["title"] as string,
+          url: milestone["url"] as string,
+        }
+      : null,
+    source: source === "loop" || source === "session" ? source : null,
+    tone: isTone(value["tone"])
+      ? value["tone"]
+      : legacyTone(result as LoopResult, blocked.length + paused.length + needsYou.length > 0),
     closed: value["closed"],
     total: value["total"],
     current: cur,
@@ -169,44 +254,65 @@ export function parseStatus(value: unknown): DeliverStatus | string {
     blocked,
     paused,
     needsYou,
-    release: { reviewRound: release["reviewRound"] as number | null, prUrl: release["prUrl"] },
+    release: rel,
     startedAt: value["startedAt"],
     updatedAt: value["updatedAt"],
     result: result as LoopResult,
   };
 }
 
-/** The card of a `deliver` event; `null` for a repository without a status file. */
-export function cardOf(root: string, read: DeliverRead): DeliverCard | null {
+/** The key of a card: the repository and the run. */
+export const cardKey = (card: Pick<DeliverCard, "root" | "run">): string =>
+  `${card.root}\n${card.run}`;
+
+function statusCard(root: string, value: unknown): DeliverCard {
+  const status = parseStatus(value);
+  return typeof status === "string"
+    ? { root, run: "", state: { kind: "invalid", error: status } }
+    : { root, run: status.run, state: { kind: "ok", status } };
+}
+
+/** The cards of a `deliver` event: none for a repository without runs, one per run of its events. */
+export function cardsOf(root: string, read: DeliverRead): DeliverCard[] {
   switch (read.kind) {
     case "missing":
-      return null;
+      return [];
     case "invalid":
-      return { root, state: { kind: "invalid", error: read.error } };
+      return [{ root, run: "", state: { kind: "invalid", error: read.error } }];
     case "unsupported":
-      return {
-        root,
-        state: {
-          kind: "unsupported",
-          version:
-            read.schemaVersion === undefined || read.schemaVersion === null
-              ? "none"
-              : String(read.schemaVersion),
+      return [
+        {
+          root,
+          run: "",
+          state: {
+            kind: "unsupported",
+            version:
+              read.schemaVersion === undefined || read.schemaVersion === null
+                ? "none"
+                : String(read.schemaVersion),
+          },
         },
-      };
-    case "ok": {
-      const status = parseStatus(read.status);
-      return typeof status === "string"
-        ? { root, state: { kind: "invalid", error: status } }
-        : { root, state: { kind: "ok", status } };
+      ];
+    case "ok":
+      return [statusCard(root, read.status)];
+    case "events": {
+      const cards = read.runs.map((run) => statusCard(root, run));
+      if (read.unknownVersion !== undefined && read.unknownVersion !== null)
+        cards.push({
+          root,
+          run: "",
+          state: { kind: "events-version", version: String(read.unknownVersion) },
+        });
+      return cards;
     }
   }
 }
 
 /** `running` older than {@link STALE_MS} is `stale`; else the result as written. */
-export type RunState = LoopResult | "stale";
+export type RunState = Exclude<LoopResult, "abandoned"> | "stale";
 
 export function runState(status: DeliverStatus, now: number): RunState {
+  if (status.result === "abandoned") return "stale";
   if (status.result !== "running") return status.result;
   return now - Date.parse(status.updatedAt) > STALE_MS ? "stale" : "running";
 }
@@ -230,7 +336,7 @@ export function stateText(status: DeliverStatus, now: number): string {
     case "running":
       return `running, updated ${age}`;
     case "stale":
-      return `stale: no update for ${age.replace(" ago", "")}, the loop may have stopped`;
+      return `stale: no update for ${age.replace(" ago", "")}, the run may have stopped`;
     case "done":
       return `finished ${age}`;
     case "max reached":
@@ -248,14 +354,9 @@ export function percent(status: Pick<DeliverStatus, "closed" | "total">): number
   return Math.min(100, Math.round((status.closed / status.total) * 100));
 }
 
-/** Whether the run asks for the user: blocked, paused or needs-you items, or a blocked result. */
+/** Whether the tone of the run asks for a look: warning or danger (never read from text). */
 export function needsAttention(status: DeliverStatus): boolean {
-  return (
-    status.result === "blocked" ||
-    status.blocked.length > 0 ||
-    status.paused.length > 0 ||
-    status.needsYou.length > 0
-  );
+  return status.tone === "warning" || status.tone === "danger";
 }
 
 /** The compact status bar item. */
@@ -266,8 +367,9 @@ export interface BarSummary {
 }
 
 /**
- * `▶ M5 7/19` per running loop, `▶ n runs` for several; `null` without a running loop. A fresh
- * loop that ended `blocked` still shows (as a warning) until it is stale, so a stop is not missed.
+ * `▶ M5 7/19` per running run, `▶ n runs` for several; `null` without a running run. A fresh run
+ * that ended with a warning or danger tone (blocked, no progress) still shows until it is stale,
+ * so a stop is not missed; the warning mark follows the tone.
  */
 export function barSummary(cards: readonly DeliverCard[], now: number): BarSummary | null {
   const active: DeliverStatus[] = [];
@@ -276,18 +378,21 @@ export function barSummary(cards: readonly DeliverCard[], now: number): BarSumma
     const state = runState(card.state.status, now);
     if (
       state === "running" ||
-      (state === "blocked" && now - Date.parse(card.state.status.updatedAt) < STALE_MS)
+      (state !== "stale" &&
+        needsAttention(card.state.status) &&
+        now - Date.parse(card.state.status.updatedAt) < STALE_MS)
     )
       active.push(card.state.status);
   }
   if (active.length === 0) return null;
-  const label = (s: DeliverStatus) => `${s.milestone.key} ${s.closed}/${s.total}`;
+  const label = (s: DeliverStatus) =>
+    s.milestone ? `${s.milestone.key} ${s.closed}/${s.total}` : "session";
   const warning = active.some(needsAttention);
   const title = active
     .map(
       (s) =>
         `${s.repository} ${label(s)}${s.current ? `: #${s.current.number} ${s.current.step.text}` : ""}${
-          needsAttention(s) ? " (needs you)" : ""
+          s.needsYou.length > 0 ? " (needs you)" : ""
         }`,
     )
     .join("\n");
@@ -313,7 +418,7 @@ export interface DeliverEvent {
  */
 export function transitions(prev: DeliverStatus | undefined, next: DeliverStatus): DeliverEvent[] {
   if (!prev || prev.run !== next.run) return [];
-  const title = `Deliver ${next.milestone.key}`;
+  const title = `Deliver ${next.milestone?.key ?? "session"}`;
   const out: DeliverEvent[] = [];
   const known = new Set(prev.blocked.map((i) => i.number));
   const newlyBlocked = next.blocked.filter((i) => !known.has(i.number));

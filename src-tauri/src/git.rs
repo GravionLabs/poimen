@@ -158,6 +158,26 @@ pub fn toplevel(dir: &str) -> Option<String> {
     (!top.is_empty()).then_some(top)
 }
 
+/// The common git dir (absolute) of the repository containing `dir`, shared by its linked
+/// worktrees; `None` outside a repository.
+pub fn common_dir(dir: &str) -> Option<String> {
+    let out = crate::gui_path::command("git")
+        .args([
+            "-C",
+            dir,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let common = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    (!common.is_empty()).then_some(common)
+}
+
 /// Parses `rev-parse --show-toplevel --git-common-dir` (absolute paths): the toplevel and the
 /// common git dir that identifies the repository across its linked worktrees.
 pub fn parse_roots(output: &str) -> Option<(String, String)> {
