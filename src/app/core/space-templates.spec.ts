@@ -73,7 +73,7 @@ describe("space templates", () => {
     expect(templateErrors(base, [], ids)).toEqual({});
     expect(templateErrors({ ...base, name: " " }, [], ids).name).toContain("required");
     expect(templateErrors(base, ["Work"], ids).name).toContain("Another template");
-    expect(templateErrors({ ...base, dir: null }, [], ids).match).toBeDefined();
+    expect(templateErrors({ ...base, dir: null }, [], ids)).toEqual({});
     expect(templateErrors({ ...base, dir: "rel" }, [], ids).dir).toBeDefined();
     expect(templateErrors({ ...base, agent: "x" }, [], ids).agent).toContain("Unknown harness");
     expect(templateErrors({ ...base, agent: "" }, [], ids).agent).toBeDefined();
@@ -95,6 +95,7 @@ describe("space templates", () => {
     expect(matchLabel({ ...base, remote: { provider: "github", owner: "acme" } })).toBe(
       "~/src + github.com/acme",
     );
+    expect(matchLabel({ ...base, dir: null })).toBe("default (all other directories)");
     expect(emptyTemplate("claude")).toMatchObject({ name: "", dir: null, agent: "claude" });
   });
 });

@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use poimen_server::{Config, Server, StartError, claude, copilot, report};
+use poimen_server::{Config, Server, StartError, claude, copilot, hook, report};
 
 const USAGE: &str =
     "usage: poimen-server integration install|uninstall|status claude|copilot [--settings <path>]";
@@ -20,19 +20,16 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("hook") => {
-            // Never fails and never blocks Claude Code, whatever happens.
+            // Never fails and never blocks the agent, whatever happens; a report that does not
+            // get through is a line in the hook log (`hook.rs`).
+            let env = hook::HookEnv::from_env();
             match args.get(1).map(String::as_str) {
-                Some("claude") => claude::run_hook(
-                    std::io::stdin(),
-                    claude::terminal_id_from_env(),
-                    poimen_protocol::socket_path(),
-                ),
-                Some("copilot") => copilot::run_hook(
-                    std::io::stdin(),
-                    args.get(2).cloned(),
-                    claude::terminal_id_from_env(),
-                    poimen_protocol::socket_path(),
-                ),
+                Some("claude") => {
+                    claude::run_hook(std::io::stdin(), &env);
+                }
+                Some("copilot") => {
+                    copilot::run_hook(std::io::stdin(), args.get(2).cloned(), &env);
+                }
                 _ => {}
             }
             ExitCode::SUCCESS

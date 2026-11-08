@@ -51,6 +51,12 @@ describe("HooksDialog", () => {
     expect(offer.dismiss).toHaveBeenCalled();
   });
 
+  it("says that running agents pick up the hooks only after a restart", () => {
+    expect(setup(["copilot"]).root.querySelector(".restart")?.textContent).toContain(
+      "start it again",
+    );
+  });
+
   it("shows an install error", () => {
     expect(setup(["claude"], "boom").root.querySelector(".error")?.textContent).toContain("boom");
   });

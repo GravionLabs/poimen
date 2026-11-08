@@ -52,6 +52,8 @@ import {
 } from "./core/editor-tabs";
 import { SettingsView } from "./settings-view/settings-view";
 import { GithubView } from "./github/github-view";
+import { Deliver } from "./deliver/deliver";
+import { DeliverView } from "./deliver/deliver-view";
 import { Keymap } from "./core/keymap";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
@@ -100,6 +102,7 @@ const ZOOM_STEP = 1;
     TerminalView,
     SettingsView,
     GithubView,
+    DeliverView,
     TabBar,
     SplitPane,
     StatusBar,
@@ -143,11 +146,17 @@ export class App {
   private readonly cleanup = inject(TaskCleanup);
   private readonly teardown = inject(ProjectTeardown);
   private readonly projectEntries = inject(ProjectEntries);
+  protected readonly deliver = inject(Deliver);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
-    if (ACTIVITY_VIEWS.find((v) => v.id === id)?.tab === "github") {
+    const tab = ACTIVITY_VIEWS.find((v) => v.id === id)?.tab;
+    if (tab === "github") {
       this.editor.openGithub();
+      return;
+    }
+    if (tab === "deliver") {
+      this.editor.openDeliver();
       return;
     }
     this.ui.selectView(
@@ -184,6 +193,9 @@ export class App {
               group: "GitHub",
               title: "GitHub pull requests",
             };
+          }
+          if (tabKind(tab.paneId) === "deliver") {
+            return { id: tab.paneId, label: "Deliver", title: "Deliver loops" };
           }
           const changesOf = changesDir(tab.paneId);
           if (changesOf !== null) {
@@ -268,8 +280,20 @@ export class App {
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     // A click on a system notification opens the tab of the pane it was about.
-    const clicks = this.notifier.listen((paneId) => this.openPaneById(paneId));
+    const clicks = this.notifier.listen(
+      (paneId) => this.openPaneById(paneId),
+      () => this.editor.openDeliver(),
+    );
     destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
+    // The deliver loops of the repositories of the open spaces (status files, watched, no polling).
+    destroyRef.onDestroy(this.deliver.start());
+    effect(() => {
+      const dirs = this.store
+        .snapshot()
+        .terminals.map(paneDir)
+        .filter((d): d is string => !!d);
+      untracked(() => void this.deliver.watch(dirs));
+    });
     effect(() => {
       const { theme: setting, colorSchema } = this.prefs.settings();
       const systemDark = this.systemDark();
@@ -375,6 +399,10 @@ export class App {
     }
     if (id === "openGithub") {
       this.editor.openGithub();
+      return;
+    }
+    if (id === "openDeliver") {
+      this.editor.openDeliver();
       return;
     }
     if (id === "showChanges") {
@@ -686,6 +714,10 @@ export class App {
 
   protected isChanges(id: string): boolean {
     return tabKind(id) === "changes";
+  }
+
+  protected isDeliver(id: string | null): boolean {
+    return id !== null && tabKind(id) === "deliver";
   }
 
   protected isGithub(id: string | null): boolean {

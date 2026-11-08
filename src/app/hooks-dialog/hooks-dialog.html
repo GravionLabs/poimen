@@ -23,6 +23,10 @@
         <li>{{ name(agent) }}</li>
       }
     </ul>
+    <p class="hint restart">
+      An agent that already runs reads its hooks only when it starts: start it again to see its
+      status.
+    </p>
     @if (offer.error(); as error) {
       <p class="error" role="alert">{{ error }}</p>
     }

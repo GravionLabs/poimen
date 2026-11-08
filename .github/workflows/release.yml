@@ -4,13 +4,14 @@
 #   ci.yml (frontend and Rust checks) -> determine-version (GitVersion.yml) -> gh-release: git-cliff writes CHANGELOG.md
 #   and commits it to main ([skip ci]), tags v<version>, creates the GitHub Release and closes the issues delivered by
 #   the release PR. Then the installers (Linux x64, macOS arm64, Windows x64) are built from the tag and attached to
-#   the release. They are not code-signed yet (#45).
+#   the release. They are not code-signed yet (#45); the `checksums` job attaches SHA256SUMS and attests them (#522).
 #
 # workflow_dispatch on release/next with prerelease: true: the pre-release for the manual acceptance
 # (docs/manual-acceptance.md). determine-version gives <next stable>-rc.<n>, gh-release tags v<version> on release/next
 # and creates a GitHub pre-release (no changelog commit, no issue closing, no commit to main or release/next), and the
-# installers are attached (no MSI: WiX needs a numeric version). The latest.json of a pre-release is never served
-# from releases/latest, so stable installs do not update to it (docs/updater.md).
+# installers are attached (no MSI: WiX needs a numeric version; no RPM: an RPM version allows no '-'). The
+# latest.json of a pre-release is never served from releases/latest, so stable installs do not update to it
+# (docs/updater.md).
 #
 # workflow_dispatch otherwise (on a branch): builds the same installer matrix with the throw-away version
 # 0.0.<run number> (MSI needs a numeric one) and creates no tag, release or commit. Pull requests never build
@@ -21,7 +22,7 @@
 # changelog on its own (this workflow keeps the manifest commit, git-cliff notes and issue closing of gh-release)
 # and assumes a Cargo workspace at the repository root (poimen's crate is src-tauri/).
 #
-# The release job writes the released version into package.json, src-tauri/Cargo.toml (and Cargo.lock) and
+# The release job writes the released version into package.json, src-tauri/Cargo.toml ([workspace.package], inherited by the app and the poimen-* crates; and Cargo.lock) and
 # src-tauri/tauri.conf.json before the changelog commit, so a build of the tag reports the released version.
 #
 # GH_PAT: classic PAT with scope `repo` of a repository admin. The `main` ruleset requires a pull request and the
@@ -35,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       prerelease:
-        description: "Pre-release from release/next for the manual acceptance (tag v<version>-rc.<n>, GitHub pre-release, installers without MSI)"
+        description: "Pre-release from release/next for the manual acceptance (tag v<version>-rc.<n>, GitHub pre-release, installers without MSI and RPM)"
         type: boolean
         default: false
 
@@ -85,8 +86,8 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version: $VERSION" >&2; exit 1; }
-          sed -i -E '0,/^version = "[^"]*"/s//version = "'"$VERSION"'"/' src-tauri/Cargo.toml
-          sed -i -E '/^name = "poimen"$/{n;s/^version = "[^"]*"/version = "'"$VERSION"'"/}' src-tauri/Cargo.lock
+          sed -i -E '/^\[workspace\.package\]/,/^\[/{s/^version = "[^"]*"/version = "'"$VERSION"'"/;}' src-tauri/Cargo.toml
+          sed -i -E '/^name = "poimen(-client|-protocol|-server)?"$/{n;s/^version = "[^"]*"/version = "'"$VERSION"'"/;}' src-tauri/Cargo.lock
           sed -i -E '0,/"version": "[^"]*"/s//"version": "'"$VERSION"'"/' package.json src-tauri/tauri.conf.json
           git diff --quiet || {
             git config user.name "github-actions[bot]"
@@ -175,7 +176,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
+          # rpm rejects a version with '-' (0.10.0-rc.3), so a pre-release bundles only the .deb and the .AppImage.
+          - {
+              os: ubuntu-24.04,
+              target: x86_64-unknown-linux-gnu,
+              prerelease-args: "--bundles deb,appimage",
+            }
           - { os: macos-latest, target: aarch64-apple-darwin } # Apple Silicon; no macOS x64 build
           # A pre-release version (0.10.0-rc.3) is no numeric WiX version, so it bundles only the NSIS -setup.exe.
           - {
@@ -210,3 +216,45 @@ jobs:
           args: --config src-tauri/tauri.bundle.conf.json ${{ needs.prerelease.outputs.version && matrix.prerelease-args || '' }}
           signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           signing-private-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  # SHA256SUMS over the attached installers and update archives, and a build provenance attestation over the same
+  # files (#522): `gh attestation verify <file> --repo GravionLabs/poimen` shows that a download was built by this
+  # workflow from the tag. The installers stay unsigned, so this is how a user checks a download. Runs only when every
+  # installer was attached (a partial release gets no SHA256SUMS) and never on a plain dispatch (no release).
+  checksums:
+    name: Checksums and provenance
+    needs: [release, prerelease, installers]
+    if: ${{ !cancelled() && needs.installers.result == 'success' && (needs.release.outputs.version || needs.prerelease.outputs.version) != '' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # download the assets, upload SHA256SUMS
+      id-token: write # Sigstore signing of the attestation
+      attestations: write # store the attestation
+    env:
+      TAG: v${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Test the checksum script
+        run: bash scripts/release-checksums.test.sh
+
+      - name: Download the release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$TAG" --dir dist --repo "$GITHUB_REPOSITORY"
+
+      - name: Write SHA256SUMS
+        run: bash scripts/release-checksums.sh dist
+
+      - name: Attest the build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"

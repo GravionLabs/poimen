@@ -34,6 +34,18 @@
       </span>
     }
   }
+  @if (deliver(); as run) {
+    <button
+      type="button"
+      class="item deliver"
+      [class.warn]="run.warning"
+      [title]="run.title"
+      data-testid="deliver"
+      (click)="showDeliver.emit()"
+    >
+      {{ run.text }}
+    </button>
+  }
   <button
     type="button"
     class="item waiting"

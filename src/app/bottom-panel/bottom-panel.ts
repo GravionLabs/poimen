@@ -3,13 +3,16 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  computed,
   effect,
   inject,
   signal,
   viewChild,
 } from "@angular/core";
 import { FlowView } from "./flow-view";
-import { EditorTabs } from "../core/editor-tabs";
+import { EditorTabs, tabPaneId } from "../core/editor-tabs";
+import { transcriptEmptyText, type Terminal } from "../core/herdr";
+import { HerdrStore } from "../core/herdr-store";
 import { TaskLog } from "../core/task-log";
 import { PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT, UiState } from "../core/ui-state";
 import {
@@ -41,12 +44,24 @@ export class BottomPanel {
   protected readonly subagents = inject(Subagents);
   protected readonly editor = inject(EditorTabs);
   protected readonly taskLog = inject(TaskLog);
+  private readonly store = inject(HerdrStore);
   protected readonly minHeight = PANEL_MIN_HEIGHT;
   protected readonly maxHeight = PANEL_MAX_HEIGHT;
   protected readonly tabs = Object.entries(PANEL_TAB_LABELS);
   protected readonly label = subagentLabel;
   protected readonly summary = toolSummary;
   protected readonly reportIndex = () => reportIndex(this.subagents.items());
+
+  /** The pane of the active tab, the one the Output panel and the Flow tab follow. */
+  private readonly activePane = computed((): Terminal | undefined => {
+    const active = this.editor.activeId();
+    const paneId = active === null ? null : tabPaneId(active);
+    return paneId ? this.store.panes().get(paneId) : undefined;
+  });
+  protected readonly outputEmpty = computed(() =>
+    transcriptEmptyText(this.activePane(), "Subagent output"),
+  );
+  protected readonly flowEmpty = computed(() => transcriptEmptyText(this.activePane(), "The flow"));
 
   /** Clock for the durations of running subagents. */
   protected readonly now = signal(Date.now());

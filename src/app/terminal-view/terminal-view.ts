@@ -28,7 +28,7 @@ import {
   type Terminal,
   type StreamRecord,
 } from "../core/herdr";
-import { SettingsStore, defaultTerminalFontFamily } from "../core/settings";
+import { SettingsStore, defaultTerminalFontFamily, windowsPtyOption } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
@@ -268,13 +268,10 @@ export class TerminalView implements OnDestroy {
       if (this.mode() === "control") this.session?.input(data);
     });
     term.attachCustomWheelEventHandler((event) => {
-      // Emulated streams carry PTY bytes: xterm.js itself scrolls and reports the wheel.
-      if (
-        this.mode() === "control" &&
-        this.session?.open &&
-        !this.session.emulated &&
-        event.deltaY !== 0
-      ) {
+      // Emulated streams carry PTY bytes: xterm.js itself scrolls and reports the wheel, so its
+      // default handling must run (returning false would skip it).
+      if (this.session?.emulated) return true;
+      if (this.mode() === "control" && this.session?.open && event.deltaY !== 0) {
         const lines = Math.max(1, Math.min(10, Math.round(Math.abs(event.deltaY) / 30)));
         this.session.scroll(event.deltaY < 0, lines);
       }
@@ -614,6 +611,8 @@ export class TerminalView implements OnDestroy {
   private applyScrollback(): void {
     if (!this.term) return;
     this.term.options.scrollback = this.streamEmulated ? this.prefs.settings().scrollback : 0;
+    // An emulated stream is a ConPTY on Windows (the poimen server runs on this machine).
+    this.term.options.windowsPty = this.streamEmulated ? windowsPtyOption() : undefined;
   }
 
   private scheduleResize(): void {

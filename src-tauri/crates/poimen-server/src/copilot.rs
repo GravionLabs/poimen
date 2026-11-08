@@ -15,6 +15,7 @@ use poimen_protocol::{AgentStatus, TerminalReportAgent};
 use serde_json::{Map, Value, json};
 
 use crate::claude::Report;
+use crate::hook::{HookEnv, Outcome};
 
 /// Marks the command of our entries; status and uninstall find the file by it.
 const MARKER: &str = "# poimen-agent-hook";
@@ -101,16 +102,19 @@ pub fn request_for(
     })
 }
 
-/// Runs the hook for `event` (see [`crate::claude::run_hook_with`]).
+/// Runs the hook for `event` (see [`crate::hook::run`]).
 pub fn run_hook(
     stdin: impl std::io::Read + Send + 'static,
     event: Option<String>,
-    terminal_id: Option<String>,
-    socket: PathBuf,
-) {
-    crate::claude::run_hook_with(stdin, terminal_id, socket, move |t, seq, p| {
+    env: &HookEnv,
+) -> Outcome {
+    let what = match event.as_deref() {
+        Some(event) => format!("hook copilot {event}"),
+        None => "hook copilot".to_owned(),
+    };
+    crate::hook::run(stdin, env, &what, move |t, seq, p| {
         request_for(event.as_deref(), t, seq, p)
-    });
+    })
 }
 
 // --- hook file ----------------------------------------------------------------------------------
@@ -325,19 +329,34 @@ mod tests {
 
     #[test]
     fn the_hook_survives_garbage_and_a_missing_server() {
-        let nowhere = || PathBuf::from("/nonexistent/poimen/s.sock");
-        run_hook(std::io::empty(), Some("stop".into()), None, nowhere());
-        run_hook(
+        let env = |terminal_id: Option<&str>, in_poimen| HookEnv {
+            terminal_id: terminal_id.map(str::to_owned),
+            in_poimen,
+            socket: PathBuf::from("/nonexistent/poimen/s.sock"),
+            log: None,
+        };
+        let failed = |o: Outcome| matches!(o, Outcome::Failed(_));
+        assert_eq!(
+            run_hook(std::io::empty(), Some("stop".into()), &env(None, false)),
+            Outcome::Outside
+        );
+        assert!(failed(run_hook(
             std::io::Cursor::new(b"not json".to_vec()),
             Some("agentStop".into()),
-            Some("t1".into()),
-            nowhere(),
-        );
-        run_hook(
+            &env(Some("t1"), true),
+        )));
+        assert!(failed(run_hook(
             std::io::Cursor::new(br#"{"sessionId":"x"}"#.to_vec()),
             Some("agentStop".into()),
-            Some("t1".into()),
-            nowhere(),
+            &env(Some("t1"), true),
+        )));
+        assert_eq!(
+            run_hook(
+                std::io::Cursor::new(br#"{"sessionId":"x"}"#.to_vec()),
+                Some("preToolUse".into()),
+                &env(Some("t1"), true),
+            ),
+            Outcome::Ignored
         );
     }
 

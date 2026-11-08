@@ -1,6 +1,6 @@
 [package]
 name = "poimen-protocol"
-version = "0.1.0"
+version.workspace = true
 description = "Wire types of the poimen-server socket API (client-neutral)"
 edition.workspace = true
 rust-version.workspace = true

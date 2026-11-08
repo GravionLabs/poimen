@@ -11,7 +11,7 @@ import {
   untracked,
 } from "@angular/core";
 import { FlowView } from "../bottom-panel/flow-view";
-import { flowSession } from "../core/herdr";
+import { flowSession, transcriptEmptyText } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { Subagents } from "../core/transcripts";
 
@@ -25,10 +25,7 @@ import { Subagents } from "../core/transcripts";
   providers: [Subagents],
   template: `
     @if (!subagents.supported()) {
-      <p class="empty">
-        The flow is available for Claude Code and GitHub Copilot CLI agents. This pane does not run
-        one, or its transcript is not found yet.
-      </p>
+      <p class="empty">{{ emptyText() }}</p>
     } @else {
       @defer {
         <app-flow-view [now]="now()" (openAgent)="openAgent.emit($event)" />
@@ -61,6 +58,9 @@ export class FlowTab {
   readonly paneId = input.required<string>();
   /** A subagent node was clicked: show its transcript. */
   readonly openAgent = output<string>();
+  protected readonly emptyText = computed(() =>
+    transcriptEmptyText(this.store.panes().get(this.paneId()), "The flow"),
+  );
 
   /** Clock for the durations of running nodes. */
   protected readonly now = signal(Date.now());

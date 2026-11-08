@@ -1,6 +1,6 @@
 # ADR 0003: Own terminal backend without herdr
 
-- Status: Proposed
+- Status: Proposed; the TUI and CLI exclusion ("Out of scope") and "the app owns layout" ("Model") superseded in part by [ADR 0006](0006-poimen-console-with-herdr-scope.md)
 - Date: 2026-11-02
 - Issues: #149, Feature #148
 

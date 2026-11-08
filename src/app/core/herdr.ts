@@ -406,14 +406,14 @@ export interface HerdrInfo {
   supported: number;
 }
 
-/** `herdr <version>`, or `herdr ?` when herdr is unreachable or too old to report it; `backend` names another server. */
+/** `backend herdr <version>`, or `backend herdr ?` when unreachable or too old to report it; `backend` names another server. */
 export function herdrVersionLabel(info: HerdrInfo | null | undefined, backend = "herdr"): string {
-  return info?.version ? `${backend} ${info.version}` : `${backend} ?`;
+  return info?.version ? `backend ${backend} ${info.version}` : `backend ${backend} ?`;
 }
 
-/** `poimen <version>`, or `poimen ?` until the build version is known. */
+/** `frontend poimen <version>`, or `frontend poimen ?` until the build version is known. */
 export function appVersionLabel(version: string | null | undefined): string {
-  return version ? `poimen ${version}` : "poimen ?";
+  return version ? `frontend poimen ${version}` : "frontend poimen ?";
 }
 
 /** The tooltip warning for a herdr protocol other than the supported one; empty when it matches or is unknown. */
@@ -482,4 +482,23 @@ export const HOOK_AGENT_KINDS = ["claude", "copilot"] as const;
  * the poimen backend only learns of the ones with hooks. */
 export function agentKinds(backend: BackendKind): readonly string[] {
   return backend === "poimen" ? HOOK_AGENT_KINDS : AGENT_KINDS;
+}
+
+/** The agents named in the empty states of the Output panel and the Flow tab. */
+export const TRANSCRIPT_AGENTS_LABEL = "Claude Code and GitHub Copilot CLI";
+
+/**
+ * Empty-state text of the Output panel and the Flow tab for `pane`; `subject` names the view
+ * (`Subagent output`, `The flow`). It tells apart a pane without a known agent, a known agent
+ * that has not reported its session yet, and a session whose transcript is not found yet.
+ */
+export function transcriptEmptyText(pane: Terminal | undefined, subject: string): string {
+  if (!pane) {
+    return `${subject} is available for ${TRANSCRIPT_AGENTS_LABEL} agents. Select a pane that runs one.`;
+  }
+  if (!supportsFlow(pane)) {
+    return `${subject} is available for ${TRANSCRIPT_AGENTS_LABEL} agents. This pane does not run one.`;
+  }
+  if (flowSession(pane) === null) return "Waiting for the agent to report its session.";
+  return "Waiting for the agent's transcript to appear.";
 }
