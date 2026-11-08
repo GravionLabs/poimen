@@ -1,0 +1,5 @@
+{"v":1,"seq":1,"ts":"2026-11-08T10:00:01.000Z","run":"r8","type":"run.started","tone":"neutral","profiles":["deliver@1","newprofile@3"],"host":{"herdr.pane":"w1:p2"}}
+{"v":1,"seq":2,"ts":"2026-11-08T10:00:02.000Z","run":"r8","type":"task.started","tone":"neutral","task":"t1","subject":{"kind":"github.issue","id":"GravionLabs/demo#1","title":"Reducer","url":"https://github.com/GravionLabs/demo/issues/1"},"deliver":{"phase":"x"}}
+{"v":1,"seq":3,"ts":"2026-11-08T10:00:03.000Z","run":"r8","type":"deliver.release.updated","tone":"neutral","deliver":{"round":2}}
+{"v":1,"seq":4,"ts":"2026-11-08T10:00:04.000Z","run":"r8","type":"mystery.event","tone":"warning","task":"t1","whatever":true}
+{"v":1,"seq":5,"ts":"2026-11-08T10:00:05.000Z","run":"r8","type":"step.started","tone":"neutral","task":"t1","step":{"name":"implement"},"extra":1}

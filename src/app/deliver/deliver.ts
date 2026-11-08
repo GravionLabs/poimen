@@ -14,6 +14,7 @@ import {
   type DeliverEvent,
   type DeliverRead,
   type DeliverStatus,
+  type Subject,
 } from "./deliver-status";
 
 /** The task mode `Start loop` runs; `{nr}` is the milestone number, `{title}` its title. */
@@ -48,9 +49,13 @@ export function loopPane(
   return pick?.terminal_id;
 }
 
-/** The number in a milestone key (`M5` or `M5.1`), 0 when there is none. */
-export function milestoneNumber(key: string): number {
-  return Number(/^M(\d+)/.exec(key)?.[1] ?? 0);
+/**
+ * The number of a milestone subject: from `M5` / `M5.1` in its id or title (the deliver loop's
+ * naming), else the `#<number>` at the end of its id (`owner/repo#number`); 0 when there is none.
+ */
+export function milestoneNumber(subject: Pick<Subject, "id" | "title">): number {
+  const named = /^M(\d+)/.exec(subject.id) ?? /^M(\d+)/.exec(subject.title);
+  return Number(named?.[1] ?? /#(\d+)$/.exec(subject.id)?.[1] ?? 0);
 }
 
 /**
@@ -148,10 +153,17 @@ export class Deliver {
     if (url && isGithubUrl(url)) await this.bridge.openUrl(url);
   }
 
-  /** The terminal that runs the loop of a card, if one is open. */
+  /**
+   * The terminal of a run: the one named by `host["poimen.terminal"]` when it is open, else an
+   * agent pane of the run's harness inside the repository.
+   */
   paneOf(card: DeliverCard): string | undefined {
-    const harness = card.state.kind === "ok" ? card.state.status.harness : "";
-    return loopPane(this.store.snapshot().terminals, card.root, harness);
+    if (card.state.kind !== "ok") return undefined;
+    const { host, harness } = card.state.status;
+    const terminals = this.store.snapshot().terminals;
+    const named = host["poimen.terminal"];
+    if (named && terminals.some((t) => t.terminal_id === named)) return named;
+    return loopPane(terminals, card.root, harness ?? "");
   }
 
   /**
@@ -159,11 +171,11 @@ export class Deliver {
    * worktree: a tab in the space of the repository), with the milestone number as `{nr}`.
    */
   startLoop(status: DeliverStatus, root: string): Promise<boolean> {
-    const milestone = status.milestone;
-    // An interactive session has no milestone to run a loop for.
-    if (!milestone) return Promise.resolve(false);
+    const milestone = status.subject;
+    // Only a run on a milestone has a loop to start.
+    if (milestone?.kind !== "github.milestone") return Promise.resolve(false);
     return this.tasks.run(root, {
-      number: milestoneNumber(milestone.key),
+      number: milestoneNumber(milestone),
       title: milestone.title,
       url: milestone.url,
       mode: DELIVER_MODE,

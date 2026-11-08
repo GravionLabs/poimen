@@ -1,6 +1,7 @@
 import {
   cardKey,
   ageText,
+  runTitle,
   type DeliverCard,
   type DeliverStatus,
   type Tone,
@@ -29,8 +30,8 @@ export function runsOfSpace(cards: readonly DeliverCard[], dir: string | undefin
 }
 
 /**
- * The run to show: the one whose `host.poimenTerminal` is the active terminal, else the one
- * the user picked, else the latest run (by `updatedAt`) of the space's repository.
+ * The run to show: the one whose `host["poimen.terminal"]` is the active terminal, else the one
+ * the user picked, else the latest run (by `updated`) of the space's repository.
  */
 export function selectRun(
   runs: readonly RunChoice[],
@@ -38,22 +39,19 @@ export function selectRun(
   picked: string | null,
 ): RunChoice | undefined {
   const byTerminal = terminalId
-    ? runs.find((r) => r.status.poimenTerminal === terminalId)
+    ? runs.find((r) => r.status.host["poimen.terminal"] === terminalId)
     : undefined;
   if (picked) {
     const chosen = runs.find((r) => r.key === picked);
     if (chosen) return chosen;
   }
   if (byTerminal) return byTerminal;
-  return [...runs].sort(
-    (a, b) => Date.parse(b.status.updatedAt) - Date.parse(a.status.updatedAt),
-  )[0];
+  return [...runs].sort((a, b) => Date.parse(b.status.updated) - Date.parse(a.status.updated))[0];
 }
 
 /** Label of a run in the picker. */
 export function runLabel(run: RunChoice, now: number): string {
-  const what = run.status.milestone?.title ?? run.status.run;
-  return `${what} (${run.status.result}, ${ageText(run.status.updatedAt, now)})`;
+  return `${runTitle(run.status)} (${run.status.status}, ${ageText(run.status.updated, now)})`;
 }
 
 /** Style of a row, from the tone alone: a CSS class and an icon. */

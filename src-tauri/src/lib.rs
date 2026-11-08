@@ -1,4 +1,5 @@
 mod agent_actions;
+mod agent_events;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
@@ -22,7 +23,6 @@ mod layout;
 mod live;
 mod poimen_backend;
 mod poimen_server;
-mod progress_events;
 mod project;
 mod project_edit;
 mod remote;

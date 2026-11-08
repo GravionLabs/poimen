@@ -1,0 +1,7 @@
+{"v":1,"seq":1,"ts":"2026-11-08T10:00:01.000Z","run":"r10","type":"run.started","tone":"neutral","profiles":[],"host":{"herdr.pane":"w1:p2"},"subject":{"kind":"github.milestone","id":"GravionLabs/demo#5","title":"M5 Events","url":"https://github.com/GravionLabs/demo/milestone/5"}}
+{"v":1,"seq":2,"ts":"2026-11-08T10:00:02.000Z","run":"r10","type":"progress","tone":"neutral","done":0,"total":2,"label":"issues"}
+{"v":1,"seq":3,"ts":"2026-11-08T10:00:03.000Z","run":"r10","type":"task.started","tone":"neutral","task":"t1","subject":{"kind":"github.issue","id":"GravionLabs/demo#1","title":"First","url":"https://github.com/GravionLabs/demo/issues/1"}}
+{"v":1,"seq":4,"ts":"2026-11-08T10:00:04.000Z","run":"r10","type":"task.started","tone":"neutral","task":"t2","subject":{"kind":"github.issue","id":"GravionLabs/demo#2","title":"Second","url":"https://github.com/GravionLabs/demo/issues/2"}}
+{"v":1,"seq":5,"ts":"2026-11-08T10:00:05.000Z","run":"r10","type":"progress","tone":"neutral","task":"t2","done":1,"total":4,"label":"steps"}
+{"v":1,"seq":6,"ts":"2026-11-08T10:00:06.000Z","run":"r10","type":"task.finished","tone":"success","task":"t1","outcome":"succeeded"}
+{"v":1,"seq":7,"ts":"2026-11-08T10:00:07.000Z","run":"r10","type":"progress","tone":"neutral","done":1,"total":2,"label":"issues"}

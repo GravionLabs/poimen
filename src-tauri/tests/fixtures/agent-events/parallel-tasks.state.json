@@ -1,0 +1,59 @@
+{
+  "v": 1,
+  "run": "r2",
+  "status": "running",
+  "tasks": [
+    {
+      "task": "g",
+      "subject": {
+        "kind": "github.epic",
+        "id": "GravionLabs/demo#10",
+        "title": "Epic"
+      }
+    },
+    {
+      "task": "t2",
+      "parent": "g",
+      "subject": {
+        "kind": "github.issue",
+        "id": "GravionLabs/demo#12",
+        "title": "Second",
+        "url": "https://github.com/GravionLabs/demo/issues/12"
+      },
+      "step": {
+        "name": "test",
+        "n": 2,
+        "total": 3
+      },
+      "progress": {
+        "done": 1,
+        "total": 3,
+        "label": "steps"
+      }
+    }
+  ],
+  "finished": {
+    "succeeded": [],
+    "failed": [
+      {
+        "task": "t1",
+        "parent": "g",
+        "subject": {
+          "kind": "github.issue",
+          "id": "GravionLabs/demo#11",
+          "title": "First",
+          "url": "https://github.com/GravionLabs/demo/issues/11"
+        },
+        "reason": "review rejected"
+      }
+    ],
+    "cancelled": [],
+    "skipped": []
+  },
+  "attentions": [],
+  "needsYou": false,
+  "links": [],
+  "gaps": [],
+  "lastSeq": 9,
+  "updated": "2026-11-08T10:00:09.000Z"
+}
