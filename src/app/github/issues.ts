@@ -159,11 +159,24 @@ export function flattenTree(
   return rows;
 }
 
-/** Labels shown as a bracketed marker on the row. */
-export const MARKER_LABELS = ["needs-refinement", "needs-decision"] as const;
+/** The labels shown as chips: all but the level labels, which the level badge stands for. */
+export function labelChips(issue: Pick<Issue, "labels">): string[] {
+  return issue.labels.filter((l) => !LEVELS.includes(l.toLowerCase() as Level));
+}
 
-export function markers(issue: Issue): string[] {
-  return MARKER_LABELS.filter((m) => issue.labels.some((l) => l.toLowerCase() === m));
+/** The level as a badge; the tone picks the color of the level in the stylesheet. */
+export function levelBadge(level: Level): { label: string; tone: Level } {
+  return { label: level, tone: level };
+}
+
+/** Sub-issue progress of an epic or feature: `done/total` and a percentage. */
+export function issueProgress(
+  level: Level,
+  issue: Pick<Issue, "subTotal" | "subCompleted">,
+): { done: number; total: number; percent: number } | null {
+  if ((level !== "epic" && level !== "feature") || issue.subTotal <= 0) return null;
+  const done = Math.min(issue.subCompleted, issue.subTotal);
+  return { done, total: issue.subTotal, percent: Math.round((done / issue.subTotal) * 100) };
 }
 
 /** One repository ready for the view. */
@@ -243,7 +256,8 @@ export class GithubIssues {
           roots,
           count: flattenTree(roots, () => false).length,
         };
-      });
+      })
+      .filter((t) => t.count > 0 || this.ui.githubShowEmpty());
   });
 
   /** Issues shown after all filters, over the repositories that pass the repository filter. */

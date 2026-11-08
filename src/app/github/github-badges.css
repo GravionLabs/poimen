@@ -1,0 +1,78 @@
+/* Badges, chips, check icons, progress bars and the hover icon button shared by the three lists. */
+.badge,
+.chip {
+  display: inline-block;
+  padding: 0 8px;
+  border: 1px solid var(--badge-tone, var(--h-content-border-color));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--badge-tone, var(--h-text-muted-color)) 15%, transparent);
+  color: var(--h-text-color);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.chip {
+  --badge-tone: var(--h-text-muted-color);
+  border-radius: 4px;
+}
+.badge-success {
+  --badge-tone: var(--h-success-color);
+}
+.badge-danger,
+.badge-level-bug {
+  --badge-tone: var(--h-danger-color);
+}
+.badge-warning,
+.badge-level-feature {
+  --badge-tone: var(--h-warning-color);
+}
+.badge-primary,
+.badge-level-pbi {
+  --badge-tone: var(--h-primary-color);
+}
+.badge-level-epic {
+  --badge-tone: var(--h-highlight-color);
+}
+.badge-neutral,
+.badge-level-other {
+  --badge-tone: var(--h-text-muted-color);
+}
+.checks {
+  display: inline-flex;
+  gap: 8px;
+}
+.check {
+  display: inline-flex;
+  gap: 2px;
+  font-size: 12px;
+}
+.check-passed {
+  color: var(--h-success-color);
+}
+.check-failed {
+  color: var(--h-danger-color);
+}
+.check-pending {
+  color: var(--h-warning-color);
+}
+progress {
+  width: 64px;
+  height: 6px;
+  accent-color: var(--h-primary-color);
+}
+.icon-btn {
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  color: var(--h-text-muted-color);
+  cursor: pointer;
+  opacity: 0;
+}
+:hover > .icon-btn,
+:hover > * > .icon-btn,
+.icon-btn:focus-visible {
+  opacity: 1;
+}
+.icon-btn:hover:not(:disabled) {
+  color: var(--h-text-color);
+}

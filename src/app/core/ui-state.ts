@@ -129,6 +129,8 @@ export interface LayoutState {
   collapsedIssues?: Record<string, number[]>;
   /** The selected sub-page of the GitHub tab (`pulls`, `issues` or `milestones`). */
   githubPage?: string;
+  /** The GitHub tab also lists repositories without matches. */
+  githubShowEmpty?: boolean;
   /** The page selected in the settings view (an id of its category list); may no longer exist. */
   settingsPage?: string;
   /** Ids of the collapsed groups of the settings category tree. */
@@ -193,6 +195,7 @@ export function parseLayout(raw: string | null): LayoutState {
       lineComments,
       collapsedIssues,
       githubPage,
+      githubShowEmpty,
       settingsPage,
       settingsCollapsed,
       hooksOfferDismissed,
@@ -217,6 +220,7 @@ export function parseLayout(raw: string | null): LayoutState {
     }
     if (typeof settingsPage === "string" && settingsPage) state.settingsPage = settingsPage;
     if (isGithubPage(githubPage)) state.githubPage = githubPage;
+    if (githubShowEmpty === true) state.githubShowEmpty = true;
     if (hooksOfferDismissed === true) state.hooksOfferDismissed = true;
     if (Array.isArray(hooksSeen)) {
       const seen = hooksSeen.filter((d): d is string => typeof d === "string" && d !== "");
@@ -294,6 +298,8 @@ export class UiState {
   readonly githubPage = signal<GithubPage>(
     isGithubPage(this.initial.githubPage) ? this.initial.githubPage : "pulls",
   );
+  /** Whether the GitHub tab lists repositories without matches (hidden by default). */
+  readonly githubShowEmpty = signal(this.initial.githubShowEmpty === true);
   /** How the Changes tab shows a diff (side by side by default). */
   readonly changesLayout = signal<"inline" | "split">(
     this.initial.changesLayout === "inline" ? "inline" : "split",
@@ -340,6 +346,11 @@ export class UiState {
 
   selectGithubPage(page: GithubPage): void {
     this.githubPage.set(page);
+    this.save();
+  }
+
+  setGithubShowEmpty(show: boolean): void {
+    this.githubShowEmpty.set(show);
     this.save();
   }
 
@@ -489,6 +500,7 @@ export class UiState {
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,
       githubPage: this.githubPage() === "pulls" ? undefined : this.githubPage(),
+      githubShowEmpty: this.githubShowEmpty() ? true : undefined,
       changesLayout: this.changesLayout() === "inline" ? "inline" : undefined,
       lineComments: Object.keys(this.lineComments()).length ? this.lineComments() : undefined,
       settingsPage: this.settingsPage() ?? undefined,

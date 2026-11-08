@@ -3,6 +3,7 @@ import { HerdrStore } from "../core/herdr-store";
 import { paneDir } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
 import { SpaceActions } from "../core/space-actions";
+import { UiState } from "../core/ui-state";
 import { TauriBridge } from "../core/tauri";
 import { GithubFilter } from "./github-filter";
 
@@ -141,19 +142,62 @@ export function filterPulls(rows: readonly PullRow[], f: PullFilter): PullRow[] 
   });
 }
 
-/** Review state for the table; a draft has none yet. */
-export function reviewText(pull: Pull): string {
-  if (pull.isDraft) return "Draft";
+/** A small colored label; the tone picks a helix-ui color token in the stylesheet. */
+export interface Badge {
+  label: string;
+  tone: "success" | "danger" | "warning" | "primary" | "neutral";
+}
+
+/** Review decision as a badge; none for a draft (it has its own badge) or without a decision. */
+export function reviewBadge(pull: Pick<Pull, "isDraft" | "reviewDecision">): Badge | null {
+  if (pull.isDraft) return null;
   switch (pull.reviewDecision) {
     case "APPROVED":
-      return "Approved";
+      return { label: "Approved", tone: "success" };
     case "CHANGES_REQUESTED":
-      return "Changes requested";
+      return { label: "Changes requested", tone: "danger" };
     case "REVIEW_REQUIRED":
-      return "Review required";
+      return { label: "Review required", tone: "warning" };
     default:
-      return pull.reviewRequests.length ? "Requested" : "None";
+      return null;
   }
+}
+
+/** One check state with its count, shown as an icon and a number. */
+export interface CheckBadge {
+  kind: "passed" | "failed" | "pending";
+  count: number;
+  icon: string;
+  label: string;
+}
+
+/** The non-empty check counts as icons; nothing without checks. */
+export function checkBadges(checks: Checks): CheckBadge[] {
+  if (checks.state === "none") return [];
+  const all: CheckBadge[] = [
+    { kind: "passed", count: checks.passed, icon: "✓", label: "passed" },
+    { kind: "failed", count: checks.failed, icon: "✗", label: "failed" },
+    { kind: "pending", count: checks.pending, icon: "●", label: "pending" },
+  ];
+  return all.filter((c) => c.count > 0);
+}
+
+/** The pull requests of one repository, in the group view. */
+export interface PullGroup {
+  repo: string;
+  root: string;
+  rows: PullRow[];
+}
+
+/** Rows grouped by repository in first-seen order. */
+export function groupPulls(rows: readonly PullRow[]): PullGroup[] {
+  const groups = new Map<string, PullGroup>();
+  for (const r of rows) {
+    const g = groups.get(r.root) ?? { repo: r.repo, root: r.root, rows: [] };
+    g.rows.push(r);
+    groups.set(r.root, g);
+  }
+  return [...groups.values()];
 }
 
 /** Short text for the check counts, empty without checks. */
@@ -200,6 +244,7 @@ export class GithubPulls {
   private readonly store = inject(HerdrStore);
   private readonly settings = inject(SettingsStore);
   private readonly spaces = inject(SpaceActions);
+  private readonly ui = inject(UiState);
 
   private readonly _result = signal<PullsResult | null>(null);
   private readonly _loading = signal(false);
@@ -235,6 +280,20 @@ export class GithubPulls {
       text: this.text(),
     }),
   );
+  /**
+   * Visible rows grouped by repository, in repository order; a readable repository without
+   * matches only shows up as an empty group when "Show empty repositories" is on.
+   */
+  readonly groups = computed<PullGroup[]>(() => {
+    const byRoot = new Map(groupPulls(this.visible()).map((g) => [g.root, g]));
+    if (!this.ui.githubShowEmpty()) return [...byRoot.values()];
+    const wanted = this.filter.repo();
+    return (this._result()?.repos ?? []).flatMap((r) =>
+      r.status === "ok" && (!wanted || r.repo === wanted)
+        ? [byRoot.get(r.root) ?? { repo: r.repo, root: r.root, rows: [] }]
+        : [],
+    );
+  });
   /** The selected pull requests that pass the filters, in table order. */
   readonly selectedPulls = computed(() => {
     const keys = this._selected();
