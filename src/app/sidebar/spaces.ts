@@ -186,7 +186,7 @@ const line = (...tokens: string[]): TokenSpec[] => tokens.map((token) => ({ toke
 
 /** The layout poimen shipped before it became configurable. */
 export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
-  workspace: [line("state_icon", "name", "state_text", "branch", "dirty", "sync", "dir")],
+  workspace: [line("state_icon", "name", "state_text", "branch", "dirty", "sync"), line("dir")],
   agent: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
   terminal: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
 };

@@ -136,6 +136,22 @@ describe("Sidebar with the real hx-tree", () => {
     expect(selected).toEqual(["w1:p1", "w1:p1"]);
   });
 
+  it("keeps the chevron outside the text lines and anchors the row actions to line 1", async () => {
+    const { workspace } = await setup();
+    const space = workspace().querySelector<HTMLElement>(".space")!;
+    const main = space.querySelector(".main")!;
+    const chevron = space.querySelector(".chevron")!;
+    // The actions are siblings of the text block, so line 2 holds only its own segments.
+    expect(chevron.parentElement).toBe(space);
+    expect(main.contains(chevron)).toBe(false);
+    // jsdom has no layout: the placement is the stylesheet's top alignment, not centering.
+    const css = readFileSync("src/app/sidebar/sidebar.css", "utf8");
+    expect(css).toMatch(/\.space \{[^}]*align-items: flex-start;/);
+    expect(css).toMatch(/\.badge \{[^}]*align-self: flex-start;/);
+    expect(css).toMatch(/\.space-name \{[^}]*flex: 0 4 auto;/);
+    expect(css).toMatch(/\.state \{\s*flex: none;/);
+  });
+
   it("starts expanded and collapses and expands again with the chevron, without selecting", async () => {
     const { root, settle, workspace, selected } = await setup();
     expect(workspace().getAttribute("aria-expanded")).toBe("true");
