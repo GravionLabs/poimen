@@ -11,6 +11,9 @@ export interface PoimenCommand {
     | ShortcutAction
     | "openSettings"
     | "openGithub"
+    | "githubPulls"
+    | "githubIssues"
+    | "githubMilestones"
     | "openDeliver"
     | "showChanges"
     | "closeSpace"
@@ -42,6 +45,9 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "showShortcuts", title: "Keyboard Shortcuts" },
   { id: "openSettings", title: "Open Settings" },
   { id: "openGithub", title: "Open GitHub" },
+  { id: "githubPulls", title: "GitHub: Pull requests" },
+  { id: "githubIssues", title: "GitHub: Issues" },
+  { id: "githubMilestones", title: "GitHub: Milestones" },
   { id: "openDeliver", title: "Open Deliver" },
   { id: "showChanges", title: "Show Changes" },
   { id: "startTask", title: "Start task from issue…" },
@@ -102,6 +108,9 @@ export class CommandPalette {
       shortcut:
         c.id === "openSettings" ||
         c.id === "openGithub" ||
+        c.id === "githubPulls" ||
+        c.id === "githubIssues" ||
+        c.id === "githubMilestones" ||
         c.id === "openDeliver" ||
         c.id === "showChanges" ||
         c.id === "closeSpace" ||

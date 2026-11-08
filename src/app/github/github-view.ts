@@ -1,5 +1,9 @@
-import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
+import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
+import { UiState, type GithubPage } from "../core/ui-state";
+import { GithubIssues } from "./issues";
+import { GithubMilestones } from "./milestones";
 import { IssuesSection } from "./issues-section";
+import { GithubFilter } from "./github-filter";
 import { MilestonesSection } from "./milestones-section";
 import {
   GithubPulls,
@@ -22,6 +26,36 @@ import {
 })
 export class GithubView {
   protected readonly pulls = inject(GithubPulls);
+  protected readonly issues = inject(GithubIssues);
+  protected readonly milestones = inject(GithubMilestones);
+  protected readonly filter = inject(GithubFilter);
+  protected readonly ui = inject(UiState);
+  /** The sub-pages of the navigation; an Inbox entry (#344) goes in front. */
+  protected readonly pages = computed<{ id: GithubPage; label: string; count: number | null }[]>(
+    () => [
+      {
+        id: "pulls",
+        label: "Pull requests",
+        count: this.pulls.result() ? this.pulls.visible().length : null,
+      },
+      { id: "issues", label: "Issues", count: this.issues.result() ? this.issues.count() : null },
+      {
+        id: "milestones",
+        label: "Milestones",
+        count: this.milestones.result() ? this.milestones.count() : null,
+      },
+    ],
+  );
+  /** `All repositories` plus every repository any of the three lists knows. */
+  protected readonly repoNames = computed(() =>
+    [
+      ...new Set([
+        ...this.pulls.repoNames(),
+        ...this.issues.repoNames(),
+        ...this.milestones.repoNames(),
+      ]),
+    ].sort(),
+  );
   protected readonly scopes = SCOPES;
   protected readonly errorText = errorText;
   protected readonly checksText = checksText;
@@ -29,21 +63,63 @@ export class GithubView {
   protected readonly isGithubUrl = isGithubUrl;
 
   constructor() {
-    void this.pulls.load(false);
+    this.loadAll(false);
   }
 
   /** The tab regained focus: read again, but never faster than the 30 s cache. */
   @HostListener("window:focus")
   protected onFocus(): void {
-    void this.pulls.load(false);
+    this.loadAll(false);
   }
 
+  /** The counts of the navigation need all three lists. */
+  private loadAll(force: boolean): void {
+    void this.pulls.load(force);
+    void this.issues.load(force);
+    void this.milestones.load(force);
+  }
+
+  /** Reloads the active sub-page. */
   protected refresh(): void {
-    void this.pulls.load();
+    const page = this.ui.githubPage();
+    if (page === "pulls") void this.pulls.load();
+    else if (page === "issues") void this.issues.load();
+    else void this.milestones.load();
+  }
+
+  protected get loading(): boolean {
+    const page = this.ui.githubPage();
+    return page === "pulls"
+      ? this.pulls.loading()
+      : page === "issues"
+        ? this.issues.loading()
+        : this.milestones.loading();
   }
 
   protected setRepo(value: string): void {
-    this.pulls.repoFilter.set(value || null);
+    this.filter.repo.set(value || null);
+  }
+
+  protected selectPage(page: GithubPage): void {
+    this.ui.selectGithubPage(page);
+  }
+
+  /** Up and Down move to the previous or next sub-page and select it; Enter selects the focused one. */
+  protected onNavKey(event: KeyboardEvent, page: GithubPage): void {
+    const ids = this.pages().map((p) => p.id);
+    const at = ids.indexOf(page);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next =
+        ids[Math.min(ids.length - 1, Math.max(0, at + (event.key === "ArrowDown" ? 1 : -1)))];
+      this.selectPage(next);
+      (event.currentTarget as HTMLElement | null)?.parentElement
+        ?.querySelector<HTMLElement>(`[data-page="${next}"]`)
+        ?.focus();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      this.selectPage(page);
+    }
   }
 
   protected age(row: PullRow): string {

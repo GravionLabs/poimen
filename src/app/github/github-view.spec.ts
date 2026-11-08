@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ACTIVITY_VIEWS } from "../activity-bar/activity-bar";
 import { POIMEN_COMMANDS } from "../core/command-palette";
 import { EditorTabs, GITHUB_TAB, tabKind } from "../core/editor-tabs";
-import { UI_STORAGE } from "../core/ui-state";
+import { UI_STORAGE, UiState } from "../core/ui-state";
 import { tauri } from "../core/tauri.mock";
 import { GithubView } from "./github-view";
 import { IssuesSection } from "./issues-section";
@@ -418,5 +418,190 @@ describe("pull request worktrees", () => {
     await fixture.whenStable();
     expect(tauri.calls("pr_worktree")[0]).toEqual({ repoDir: "/src/n", nr: 1, headRef: "b" });
     expect(tauri.calls("create_space")[0]).toMatchObject({ cwd: "/src/n-pr1" });
+  });
+});
+
+describe("GithubView sub-pages", () => {
+  const issueOf = (number: number, milestone: string | null) => ({
+    number,
+    title: `issue ${number}`,
+    url: `https://github.com/o/n/issues/${number}`,
+    state: "OPEN" as const,
+    labels: [],
+    assignees: [],
+    milestone,
+    parent: null,
+    subTotal: 0,
+    subCompleted: 0,
+    prs: [],
+  });
+  const ISSUES = [
+    {
+      root: "/src/n",
+      repo: "o/n",
+      status: "ok",
+      truncated: false,
+      issues: [issueOf(10, "1.2.0"), issueOf(11, null)],
+    },
+    {
+      root: "/src/k",
+      repo: "o/k",
+      status: "ok",
+      truncated: false,
+      issues: [issueOf(20, null)],
+    },
+  ];
+  const ms = (number: number, title: string) => ({
+    number,
+    title,
+    url: `https://github.com/o/n/milestone/${number}`,
+    dueOn: null,
+    open: 1,
+    closed: 0,
+    current: false,
+  });
+  const MILESTONES = [
+    { root: "/src/n", repo: "o/n", status: "ok", milestones: [ms(1, "1.2.0"), ms(2, "1.3.0")] },
+    { root: "/src/k", repo: "o/k", status: "ok", milestones: [ms(3, "2.0.0")] },
+  ];
+  let stored: Record<string, string>;
+
+  beforeEach(() => {
+    tauri.reset();
+    TestBed.resetTestingModule();
+    stored = {};
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: UI_STORAGE,
+          useValue: {
+            getItem: (k: string) => stored[k] ?? null,
+            setItem: (k: string, v: string) => (stored[k] = v),
+          },
+        },
+      ],
+    });
+    tauri.answer("github_issues", () => ISSUES);
+    tauri.answer("github_milestones", () => MILESTONES);
+  });
+  afterEach(() => TestBed.resetTestingModule());
+
+  const nav = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>("nav button")];
+  const press = (b: HTMLElement, key: string) =>
+    b.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+
+  it("shows a count per page and marks the active one with aria-current", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(nav(el).map((b) => b.textContent!.replace(/\s+/g, " ").trim())).toEqual([
+      "Pull requests 1",
+      "Issues 3",
+      "Milestones 3",
+    ]);
+    expect(nav(el).map((b) => b.getAttribute("aria-current"))).toEqual(["page", null, null]);
+  });
+
+  it("renders only the selected page and moves with ArrowDown, ArrowUp and Enter", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector("app-github-issues")).toBeNull();
+    expect(el.querySelector("app-github-milestones")).toBeNull();
+    press(nav(el)[0], "ArrowDown");
+    fixture.detectChanges();
+    expect(nav(el)[1].getAttribute("aria-current")).toBe("page");
+    expect(el.querySelector("app-github-issues")).not.toBeNull();
+    expect(el.querySelector("table")).toBeNull();
+    press(nav(el)[1], "ArrowDown");
+    press(nav(el)[2], "ArrowDown");
+    fixture.detectChanges();
+    expect(nav(el)[2].getAttribute("aria-current")).toBe("page");
+    press(nav(el)[2], "ArrowUp");
+    fixture.detectChanges();
+    expect(nav(el)[1].getAttribute("aria-current")).toBe("page");
+    nav(el)[0].focus();
+    press(nav(el)[0], "Enter");
+    fixture.detectChanges();
+    expect(nav(el)[0].getAttribute("aria-current")).toBe("page");
+    expect(el.querySelector("table")).not.toBeNull();
+  });
+
+  it("keeps the selected page across a reopen", async () => {
+    const first = await render();
+    nav(first.nativeElement)[2].click();
+    first.detectChanges();
+    expect(JSON.parse(stored["poimen.ui"] ?? Object.values(stored)[0]).githubPage).toBe(
+      "milestones",
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: UI_STORAGE,
+          useValue: { getItem: (k: string) => stored[k] ?? null, setItem: () => undefined },
+        },
+      ],
+    });
+    const second = await render();
+    expect(nav(second.nativeElement)[2].getAttribute("aria-current")).toBe("page");
+    expect(second.nativeElement.querySelector("app-github-milestones")).not.toBeNull();
+  });
+
+  it("applies the shared repository filter to pull requests, issues and milestones", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    const select = el.querySelector<HTMLSelectElement>("aside select")!;
+    expect([...select.options].map((o) => o.value)).toEqual(["", "o/k", "o/m", "o/n"]);
+    expect(el.querySelectorAll(".toolbar select")).toHaveLength(0);
+    select.value = "o/k";
+    select.dispatchEvent(new Event("change"));
+    fixture.detectChanges();
+    expect(nav(el).map((b) => b.querySelector(".nav-count")!.textContent)).toEqual(["0", "1", "1"]);
+    nav(el)[1].click();
+    fixture.detectChanges();
+    expect(el.querySelectorAll("app-github-issues h3").length).toBe(1);
+    expect(el.querySelector("app-github-issues h3")!.textContent).toContain("o/k");
+    nav(el)[2].click();
+    fixture.detectChanges();
+    expect(el.querySelector("app-github-milestones h3")!.textContent).toContain("o/k");
+    expect(el.querySelectorAll("app-github-milestones li.item")).toHaveLength(1);
+  });
+
+  it("switches to Issues, filtered by the milestone, when a milestone is clicked", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    nav(el)[2].click();
+    fixture.detectChanges();
+    el.querySelector<HTMLElement>("li[data-title='1.2.0'] button.pick")!.click();
+    fixture.detectChanges();
+    expect(nav(el)[1].getAttribute("aria-current")).toBe("page");
+    expect(TestBed.inject(UiState).githubPage()).toBe("issues");
+    expect(el.querySelector("app-github-issues")!.textContent).toContain("issue 10");
+    expect(el.querySelector("app-github-issues")!.textContent).not.toContain("issue 11");
+  });
+
+  it("has a single Refresh that reloads the active page only", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    nav(el)[1].click();
+    fixture.detectChanges();
+    expect(
+      [...el.querySelectorAll("button")].filter((b) => /Refresh/.test(b.textContent!)),
+    ).toHaveLength(1);
+    const before = {
+      pulls: tauri.calls("github_pulls").length,
+      issues: tauri.calls("github_issues").length,
+      milestones: tauri.calls("github_milestones").length,
+    };
+    [...el.querySelectorAll("button")].find((b) => b.textContent!.trim() === "Refresh")!.click();
+    await fixture.whenStable();
+    expect(tauri.calls("github_issues")).toHaveLength(before.issues + 1);
+    expect(tauri.calls("github_pulls")).toHaveLength(before.pulls);
+    expect(tauri.calls("github_milestones")).toHaveLength(before.milestones);
+  });
+
+  it("offers the sub-pages in the command palette", () => {
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "githubPulls", title: "GitHub: Pull requests" });
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "githubIssues", title: "GitHub: Issues" });
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "githubMilestones", title: "GitHub: Milestones" });
   });
 });

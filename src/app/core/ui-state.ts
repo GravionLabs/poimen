@@ -94,6 +94,12 @@ export function parseLineComments(value: unknown): Record<string, CommentSet> {
   return out;
 }
 
+export type GithubPage = "pulls" | "issues" | "milestones";
+
+export function isGithubPage(value: unknown): value is GithubPage {
+  return value === "pulls" || value === "issues" || value === "milestones";
+}
+
 export interface LayoutState {
   sidebarWidth: number;
   sidebarCollapsed: boolean;
@@ -121,6 +127,8 @@ export interface LayoutState {
   lineComments?: Record<string, CommentSet>;
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
   collapsedIssues?: Record<string, number[]>;
+  /** The selected sub-page of the GitHub tab (`pulls`, `issues` or `milestones`). */
+  githubPage?: string;
   /** The page selected in the settings view (an id of its category list); may no longer exist. */
   settingsPage?: string;
   /** Ids of the collapsed groups of the settings category tree. */
@@ -184,6 +192,7 @@ export function parseLayout(raw: string | null): LayoutState {
       changesLayout,
       lineComments,
       collapsedIssues,
+      githubPage,
       settingsPage,
       settingsCollapsed,
       hooksOfferDismissed,
@@ -207,6 +216,7 @@ export function parseLayout(raw: string | null): LayoutState {
       if (entries.length) state.collapsedIssues = Object.fromEntries(entries);
     }
     if (typeof settingsPage === "string" && settingsPage) state.settingsPage = settingsPage;
+    if (isGithubPage(githubPage)) state.githubPage = githubPage;
     if (hooksOfferDismissed === true) state.hooksOfferDismissed = true;
     if (Array.isArray(hooksSeen)) {
       const seen = hooksSeen.filter((d): d is string => typeof d === "string" && d !== "");
@@ -280,6 +290,10 @@ export class UiState {
   readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
     this.initial.collapsedIssues ?? {},
   );
+  /** The selected sub-page of the GitHub tab. */
+  readonly githubPage = signal<GithubPage>(
+    isGithubPage(this.initial.githubPage) ? this.initial.githubPage : "pulls",
+  );
   /** How the Changes tab shows a diff (side by side by default). */
   readonly changesLayout = signal<"inline" | "split">(
     this.initial.changesLayout === "inline" ? "inline" : "split",
@@ -321,6 +335,11 @@ export class UiState {
     if (set.pending.length || set.sent.length) next[dir] = set;
     else delete next[dir];
     this.lineComments.set(next);
+    this.save();
+  }
+
+  selectGithubPage(page: GithubPage): void {
+    this.githubPage.set(page);
     this.save();
   }
 
@@ -469,6 +488,7 @@ export class UiState {
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,
+      githubPage: this.githubPage() === "pulls" ? undefined : this.githubPage(),
       changesLayout: this.changesLayout() === "inline" ? "inline" : undefined,
       lineComments: Object.keys(this.lineComments()).length ? this.lineComments() : undefined,
       settingsPage: this.settingsPage() ?? undefined,

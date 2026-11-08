@@ -4,6 +4,7 @@ import { paneDir } from "../core/herdr";
 import { SettingsStore } from "../core/settings";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
+import { GithubFilter } from "./github-filter";
 
 /** What a failed `gh` call came to (`GhError` of `github.rs`). */
 export type GhError =
@@ -216,7 +217,7 @@ export class GithubPulls {
   private readonly _worktrees = signal<ReadonlyMap<string, readonly WorktreeInfo[]>>(new Map());
 
   readonly scope = signal<Scope>("review");
-  readonly repoFilter = signal<string | null>(null);
+  private readonly filter = inject(GithubFilter);
   readonly text = signal("");
 
   /** Keys (`owner/name#number`) of the selected pull requests. */
@@ -230,7 +231,7 @@ export class GithubPulls {
     filterPulls(this.rows(), {
       scope: this.scope(),
       viewer: this._result()?.viewer ?? null,
-      repo: this.repoFilter(),
+      repo: this.filter.repo(),
       text: this.text(),
     }),
   );
