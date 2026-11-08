@@ -73,6 +73,14 @@
       [class.chosen]="d.selected"
       [class.closing]="isClosing(d.workspace.space_id)"
       [attr.aria-busy]="isClosing(d.workspace.space_id) || null"
+      [attr.draggable]="canDrag(d.workspace.space_id) ? 'true' : null"
+      [class.dragging]="dragging() === d.workspace.space_id"
+      [class.drop-before]="dropMark()?.id === d.workspace.space_id && !dropMark()!.after"
+      [class.drop-after]="dropMark()?.id === d.workspace.space_id && dropMark()!.after"
+      (dragstart)="dragStart($event, d.workspace.space_id)"
+      (dragover)="dragOver($event, d.workspace.space_id)"
+      (drop)="drop($event, d.workspace.space_id)"
+      (dragend)="dragEnd()"
       (contextmenu)="openMenu($event, 'workspace', d.workspace.space_id)"
     >
       <span class="main space-main">
@@ -222,6 +230,14 @@
       [class.active]="m.active"
       [class.attention]="rings(d.row.pane.terminal_id)"
       [title]="rowTitle(d.row)"
+      [attr.draggable]="canDragTab() ? 'true' : null"
+      [class.dragging]="tabDrag()?.pane === d.row.pane.terminal_id"
+      [class.drop-before]="tabMark()?.pane === d.row.pane.terminal_id && !tabMark()!.after"
+      [class.drop-after]="tabMark()?.pane === d.row.pane.terminal_id && tabMark()!.after"
+      (dragstart)="tabDragStart($event, d.row.pane)"
+      (dragover)="tabDragOver($event, d.row.pane)"
+      (drop)="tabDrop($event, d.row.pane)"
+      (dragend)="tabDragEnd()"
       (contextmenu)="openMenu($event, 'pane', d.row.pane.terminal_id)"
     >
       <span

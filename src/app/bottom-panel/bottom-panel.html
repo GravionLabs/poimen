@@ -137,7 +137,7 @@
   <div class="body" #box aria-label="Run events" (scroll)="onScroll()">
     @if (!run()) {
       <p class="empty">
-        No run in this space yet. A deliver loop or an agent session reports its progress here.
+        No run in this space yet. An agent run (agent-events) reports its progress here.
       </p>
     } @else {
       @for (row of rows(); track $index) {
@@ -148,11 +148,11 @@
         >
           <span class="icon" aria-hidden="true">{{ toneStyle(row.tone).icon }}</span>
           <span class="time">{{ eventTime(row.ts) }}</span>
-          <span class="issue">{{ row.issue === null ? "" : "#" + row.issue }}</span>
+          <span class="issue">{{ row.task ?? "" }}</span>
           <span class="step">{{ row.step ?? row.type }}</span>
-          <span class="result">{{ row.result ?? "" }}</span>
-          @if (row.prUrl; as url) {
-            <a class="pr" [href]="url" (click)="openPr($event, url)">PR</a>
+          <span class="result">{{ row.outcome ?? "" }}</span>
+          @if (row.link; as url) {
+            <a class="pr" [href]="url" (click)="openPr($event, url)">link</a>
           }
         </div>
       }

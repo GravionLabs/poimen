@@ -121,6 +121,10 @@ export interface LayoutState {
   panelTab: string;
   /** Keys of the last command palette entries run, newest first. */
   recentCommands?: string[];
+  /** The user's order of the spaces (`space_id`s); spaces not listed follow by number. */
+  spaceOrder?: string[];
+  /** The user's order of the tabs (`tab_id`s) per `space_id`; tabs not listed follow by number. */
+  tabOrder?: Record<string, string[]>;
   /** How the Changes tab shows a diff: `inline` (unified) or `split` (side by side). */
   changesLayout?: string;
   /** Review comments of the Changes tab per worktree, kept until sent to the agent. */
@@ -193,6 +197,8 @@ export function parseLayout(raw: string | null): LayoutState {
       panelHeight,
       panelTab,
       recentCommands,
+      spaceOrder,
+      tabOrder,
       changesLayout,
       lineComments,
       collapsedIssues,
@@ -261,6 +267,19 @@ export function parseLayout(raw: string | null): LayoutState {
       const keys = recentCommands.filter((k): k is string => typeof k === "string" && k !== "");
       state.recentCommands = [...new Set(keys)].slice(0, RECENT_COMMANDS_LIMIT);
     }
+    if (Array.isArray(spaceOrder)) {
+      const ids = spaceOrder.filter((k): k is string => typeof k === "string" && k !== "");
+      if (ids.length) state.spaceOrder = [...new Set(ids)];
+    }
+    if (tabOrder && typeof tabOrder === "object" && !Array.isArray(tabOrder)) {
+      const clean: Record<string, string[]> = {};
+      for (const [space, list] of Object.entries(tabOrder)) {
+        if (!space || !Array.isArray(list)) continue;
+        const tabs = list.filter((k): k is string => typeof k === "string" && k !== "");
+        if (tabs.length) clean[space] = [...new Set(tabs)];
+      }
+      if (Object.keys(clean).length) state.tabOrder = clean;
+    }
     if (editor !== undefined) state.editor = editor;
   } catch {
     // corrupt state: use defaults
@@ -293,6 +312,12 @@ export class UiState {
   readonly panelHeight = signal(this.initial.panelHeight);
   readonly panelTab = signal(this.initial.panelTab);
   /** Keys of the last command palette entries run, newest first (at most 5). */
+  /** The user's space order (`space_id`s, persisted). */
+  readonly spaceOrder = signal<readonly string[]>(this.initial.spaceOrder ?? []);
+  /** The user's tab order per space (`tab_id`s, persisted). */
+  readonly tabOrder = signal<Readonly<Record<string, readonly string[]>>>(
+    this.initial.tabOrder ?? {},
+  );
   readonly recentCommands = signal<readonly string[]>(this.initial.recentCommands ?? []);
   /** Collapsed nodes of the GitHub issue tree per repository (expanded is the default). */
   readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
@@ -421,6 +446,44 @@ export class UiState {
     this.save();
   }
 
+  /** Stores the order of the spaces. */
+  setSpaceOrder(ids: readonly string[]): void {
+    this.spaceOrder.set([...new Set(ids)]);
+    this.save();
+  }
+
+  /** Stores the tab order of one space. */
+  setTabOrder(spaceId: string, ids: readonly string[]): void {
+    this.tabOrder.set({ ...this.tabOrder(), [spaceId]: [...new Set(ids)] });
+    this.save();
+  }
+
+  /**
+   * Drops closed tabs and closed spaces from the tab orders (`existing`: `tab_id`s per `space_id`);
+   * saves only when something went.
+   */
+  pruneTabOrder(existing: ReadonlyMap<string, readonly string[]>): void {
+    const next: Record<string, readonly string[]> = {};
+    let changed = false;
+    for (const [space, ids] of Object.entries(this.tabOrder())) {
+      const alive = existing.get(space);
+      const keep = alive ? ids.filter((id) => alive.includes(id)) : [];
+      if (keep.length !== ids.length) changed = true;
+      if (keep.length) next[space] = keep;
+    }
+    if (!changed) return;
+    this.tabOrder.set(next);
+    this.save();
+  }
+
+  /** Drops the ids of spaces that no longer exist; saves only when something went. */
+  pruneSpaceOrder(existing: readonly string[]): void {
+    const keep = this.spaceOrder().filter((id) => existing.includes(id));
+    if (keep.length === this.spaceOrder().length) return;
+    this.spaceOrder.set(keep);
+    this.save();
+  }
+
   /** Remembers a run command palette entry as the newest "Recent" one. */
   addRecentCommand(key: string): void {
     if (!key) return;
@@ -508,6 +571,10 @@ export class UiState {
       panelHeight: this.panelHeight(),
       panelTab: this.panelTab(),
       recentCommands: this.recentCommands().length ? [...this.recentCommands()] : undefined,
+      spaceOrder: this.spaceOrder().length ? [...this.spaceOrder()] : undefined,
+      tabOrder: Object.keys(this.tabOrder()).length
+        ? Object.fromEntries(Object.entries(this.tabOrder()).map(([s, t]) => [s, [...t]]))
+        : undefined,
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,

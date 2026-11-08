@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "run": "r5",
+  "status": "finished",
+  "outcome": "failed",
+  "reason": "gave up",
+  "tasks": [
+    {
+      "task": "t1",
+      "subject": {
+        "kind": "github.issue",
+        "id": "GravionLabs/demo#1",
+        "title": "Reducer",
+        "url": "https://github.com/GravionLabs/demo/issues/1"
+      }
+    }
+  ],
+  "finished": {
+    "succeeded": [],
+    "failed": [],
+    "cancelled": [],
+    "skipped": []
+  },
+  "attentions": [],
+  "needsYou": false,
+  "links": [
+    {
+      "rel": "log",
+      "url": "https://example.com/log"
+    }
+  ],
+  "gaps": [],
+  "lastSeq": 4,
+  "updated": "2026-11-08T10:00:04.000Z"
+}

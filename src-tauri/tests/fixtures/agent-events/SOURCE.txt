@@ -1,0 +1,4 @@
+Source: GravionLabs/agent-events, fixtures/state at tag v0.1.0 (commit 70a35c7d6c2f816d1c82b162ea6aa610f39ff77d)
+tag: v0.1.0
+
+The pinned tag is the line "tag:" above and nowhere else. To update: copy fixtures/state/* of the new tag here and change the line.

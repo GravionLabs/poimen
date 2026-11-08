@@ -140,6 +140,31 @@
   letter-spacing: 0.06em;
 }
 
+.space.dragging {
+  opacity: 0.5;
+}
+
+/* Drop marker: a line above or below the target space row. */
+.space.drop-before {
+  box-shadow: 0 -2px 0 0 var(--h-primary-color, currentColor);
+}
+
+.space.drop-after {
+  box-shadow: 0 2px 0 0 var(--h-primary-color, currentColor);
+}
+
+.row.dragging {
+  opacity: 0.5;
+}
+
+.row.drop-before {
+  box-shadow: 0 -2px 0 0 var(--h-primary-color, currentColor);
+}
+
+.row.drop-after {
+  box-shadow: 0 2px 0 0 var(--h-primary-color, currentColor);
+}
+
 .row {
   display: flex;
   gap: 6px;

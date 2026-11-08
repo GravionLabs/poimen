@@ -3,6 +3,7 @@ import {
   applyStatus,
   buildSpaces,
   buildTree,
+  orderSpaces,
   paneDir,
   nextWaiting,
   waitingCount,
@@ -17,6 +18,7 @@ import {
 } from "./herdr";
 import type { BackendKind } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
+import { UiState } from "./ui-state";
 
 /** Delay that collapses a burst of herdr events into one re-read. */
 export const REFRESH_DEBOUNCE_MS = 80;
@@ -57,6 +59,7 @@ const EMPTY: Snapshot = { spaces: [], tabs: [], terminals: [] };
 @Injectable({ providedIn: "root" })
 export class HerdrStore {
   private readonly bridge = inject(TauriBridge);
+  private readonly ui = inject(UiState, { optional: true });
 
   private readonly _snapshot = signal<Snapshot>(EMPTY);
   private readonly _connectionError = signal<string | null>(null);
@@ -114,8 +117,18 @@ export class HerdrStore {
   readonly repos = this._repos.asReadonly();
   /** Pull request of the branch per pane directory (`branch_pulls`). */
   readonly pulls = this._pulls.asReadonly();
-  readonly tree = computed(() => buildTree(this._snapshot()));
-  readonly spaces = computed(() => buildSpaces(this._snapshot(), this._repos(), this._pulls()));
+  /** The user's space order (ids); empty without UI state. Spaces outside it follow by number. */
+  readonly spaceOrder = computed<readonly string[]>(() => this.ui?.spaceOrder() ?? []);
+  /** The spaces in the user's order; every list, shortcut and neighbour lookup reads this. */
+  readonly orderedSpaces = computed(() => orderSpaces(this._snapshot().spaces, this.spaceOrder()));
+  /** The user's tab order per space (ids); tabs outside it follow by number. */
+  readonly tabOrder = computed<Readonly<Record<string, readonly string[]>>>(
+    () => this.ui?.tabOrder() ?? {},
+  );
+  readonly tree = computed(() => buildTree(this._snapshot(), this.spaceOrder(), this.tabOrder()));
+  readonly spaces = computed(() =>
+    buildSpaces(this._snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
+  );
   readonly waiting = computed(() => waitingCount(this._snapshot().terminals));
   readonly panes = computed(
     () => new Map(this._snapshot().terminals.map((p) => [p.terminal_id, p])),
@@ -190,6 +203,15 @@ export class HerdrStore {
     try {
       const snapshot = toSnapshot(await this.bridge.invoke<WireSnapshot>("snapshot"));
       this._snapshot.set(snapshot);
+      // Closed spaces leave the stored order (not on an empty read, which may be transient).
+      if (snapshot.spaces.length) this.ui?.pruneSpaceOrder(snapshot.spaces.map((s) => s.space_id));
+      if (snapshot.spaces.length) {
+        const alive = new Map<string, string[]>();
+        for (const tab of snapshot.tabs) {
+          alive.set(tab.space_id, [...(alive.get(tab.space_id) ?? []), tab.tab_id]);
+        }
+        this.ui?.pruneTabOrder(alive);
+      }
       this._loaded.set(true);
       if (!this._watchLost()) this._connectionError.set(null);
       if (!this._info()) await this.readInfo();

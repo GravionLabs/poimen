@@ -1,0 +1,98 @@
+{
+  "v": 1,
+  "run": "20261108-100000-loop",
+  "status": "running",
+  "subject": {
+    "kind": "github.milestone",
+    "id": "GravionLabs/demo#4",
+    "title": "M4 Deliver loop",
+    "url": "https://github.com/GravionLabs/demo/milestone/4"
+  },
+  "progress": { "done": 3, "total": 9, "label": "issues" },
+  "tasks": [
+    {
+      "task": "t12",
+      "subject": {
+        "kind": "github.issue",
+        "id": "GravionLabs/demo#12",
+        "title": "Second",
+        "url": "https://github.com/GravionLabs/demo/issues/12"
+      },
+      "step": { "name": "implement", "n": 2, "total": 3, "text": "tests green" },
+      "progress": { "done": 1, "total": 3, "label": "steps" }
+    },
+    {
+      "task": "t13",
+      "parent": "t12",
+      "subject": {
+        "kind": "custom.thing",
+        "id": "x",
+        "title": "A thing of a kind poimen does not know"
+      }
+    }
+  ],
+  "finished": {
+    "succeeded": [
+      {
+        "task": "t11",
+        "subject": {
+          "kind": "github.issue",
+          "id": "GravionLabs/demo#11",
+          "title": "First",
+          "url": "https://github.com/GravionLabs/demo/issues/11"
+        },
+        "links": [{ "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/21" }]
+      }
+    ],
+    "failed": [
+      {
+        "task": "t10",
+        "subject": { "kind": "github.issue", "id": "GravionLabs/demo#10", "title": "Zero" },
+        "reason": "review rejected"
+      }
+    ],
+    "cancelled": [],
+    "skipped": []
+  },
+  "attentions": [
+    {
+      "id": "a1",
+      "task": "t12",
+      "reason": "decide whether the field names are final",
+      "needsYou": true,
+      "links": [{ "rel": "log", "url": "https://example.com/log" }]
+    },
+    { "id": "a2", "reason": "run-wide notice", "needsYou": false }
+  ],
+  "needsYou": true,
+  "links": [
+    { "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/21" },
+    { "rel": "log", "url": "https://example.com/log" }
+  ],
+  "gaps": [],
+  "lastSeq": 12,
+  "updated": "2026-11-08T11:58:00.000Z",
+  "tone": "warning",
+  "host": { "poimen.terminal": "t7", "herdr.pane": "w1:p2" },
+  "agent": { "harness": "claude", "model": "sonnet" },
+  "deliver": { "phase": "a profile extension poimen does not read" },
+  "events": [
+    { "seq": 1, "ts": "2026-11-08T10:00:00.000Z", "type": "run.started", "tone": "neutral" },
+    {
+      "seq": 11,
+      "ts": "2026-11-08T11:50:00.000Z",
+      "type": "step.finished",
+      "tone": "success",
+      "task": "t11",
+      "step": "pr",
+      "link": "https://github.com/GravionLabs/demo/pull/21"
+    },
+    {
+      "seq": 12,
+      "ts": "2026-11-08T11:58:00.000Z",
+      "type": "attention",
+      "tone": "warning",
+      "task": "t12"
+    }
+  ]
+}

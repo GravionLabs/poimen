@@ -1,36 +1,27 @@
 {
-  "run": "20261107-100000-runn",
-  "harness": "claude",
-  "model": "sonnet",
-  "repository": "GravionLabs/skills",
-  "milestone": null,
-  "closed": 0,
-  "total": 0,
-  "current": {
-    "number": 370,
-    "title": "[PBI] feat(delivery): ConvertFrom-ProgressEvents reducer",
-    "url": "https://github.com/GravionLabs/skills/issues/370",
-    "step": {
-      "n": 3,
-      "total": 7,
-      "text": "implement: tests green"
-    },
-    "prUrl": null
-  },
-  "delivered": [],
-  "blocked": [],
-  "paused": [],
-  "needsYou": [],
-  "release": {
-    "reviewRound": null,
-    "prUrl": null,
-    "rcUrl": null,
-    "rcVersion": null,
-    "testIssue": null
-  },
-  "startedAt": "2026-11-07T10:00:00.000Z",
-  "updatedAt": "2026-11-07T11:30:00.000Z",
-  "result": "running",
-  "source": "session",
-  "tone": "neutral"
+  "v": 1,
+  "run": "20261108-110000-sess",
+  "status": "running",
+  "tasks": [
+    {
+      "task": "t1",
+      "subject": {
+        "kind": "github.issue",
+        "id": "GravionLabs/demo#370",
+        "title": "Reducer",
+        "url": "https://github.com/GravionLabs/demo/issues/370"
+      },
+      "step": { "name": "review" }
+    }
+  ],
+  "finished": { "succeeded": [], "failed": [], "cancelled": [], "skipped": [] },
+  "attentions": [],
+  "needsYou": false,
+  "links": [],
+  "gaps": [],
+  "lastSeq": 3,
+  "updated": "2026-11-08T11:30:00.000Z",
+  "tone": "neutral",
+  "host": { "poimen.terminal": "t9" },
+  "events": []
 }

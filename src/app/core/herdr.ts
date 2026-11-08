@@ -155,16 +155,68 @@ export interface WorkspaceNode {
 
 const byNumber = <T extends { number: number }>(a: T, b: T) => a.number - b.number;
 
-export function buildTree(snapshot: Snapshot): WorkspaceNode[] {
-  return [...snapshot.spaces].sort(byNumber).map((workspace) => ({
+/**
+ * The spaces in the user's order: ids of `order` first (in that order), then the others in backend
+ * number order (new spaces). Ids of `order` that no longer exist are skipped.
+ */
+export function orderSpaces<T extends { space_id: string; number: number }>(
+  spaces: readonly T[],
+  order: readonly string[] = [],
+): T[] {
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const known = spaces
+    .filter((s) => rank.has(s.space_id))
+    .sort((a, b) => rank.get(a.space_id)! - rank.get(b.space_id)!);
+  const rest = spaces.filter((s) => !rank.has(s.space_id)).sort(byNumber);
+  return [...known, ...rest];
+}
+
+/**
+ * The order after dropping `sourceId` before or after `targetId`, or `null` when nothing changes
+ * (same space, an unknown id, or the space already sits there).
+ */
+export function reorderIds(
+  ids: readonly string[],
+  sourceId: string,
+  targetId: string,
+  after: boolean,
+): string[] | null {
+  if (sourceId === targetId || !ids.includes(sourceId) || !ids.includes(targetId)) return null;
+  const rest = ids.filter((id) => id !== sourceId);
+  rest.splice(rest.indexOf(targetId) + (after ? 1 : 0), 0, sourceId);
+  return rest.every((id, i) => id === ids[i]) ? null : rest;
+}
+
+/** The tabs of one space in the user's order: ids of `order` first, new tabs by number. */
+export function orderTabs<T extends { tab_id: string; number: number }>(
+  tabs: readonly T[],
+  order: readonly string[] = [],
+): T[] {
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const known = tabs
+    .filter((t) => rank.has(t.tab_id))
+    .sort((a, b) => rank.get(a.tab_id)! - rank.get(b.tab_id)!);
+  const rest = tabs.filter((t) => !rank.has(t.tab_id)).sort(byNumber);
+  return [...known, ...rest];
+}
+
+/** Tab order per `space_id` (`tab_id`s), as the user arranged it. */
+export type TabOrder = Readonly<Record<string, readonly string[]>>;
+
+export function buildTree(
+  snapshot: Snapshot,
+  order: readonly string[] = [],
+  tabOrder: TabOrder = {},
+): WorkspaceNode[] {
+  return orderSpaces(snapshot.spaces, order).map((workspace) => ({
     workspace,
-    tabs: snapshot.tabs
-      .filter((tab) => tab.space_id === workspace.space_id)
-      .sort(byNumber)
-      .map((tab) => ({
-        tab,
-        panes: snapshot.terminals.filter((pane) => pane.tab_id === tab.tab_id),
-      })),
+    tabs: orderTabs(
+      snapshot.tabs.filter((tab) => tab.space_id === workspace.space_id),
+      tabOrder[workspace.space_id],
+    ).map((tab) => ({
+      tab,
+      panes: snapshot.terminals.filter((pane) => pane.tab_id === tab.tab_id),
+    })),
   }));
 }
 
@@ -187,13 +239,13 @@ export function paneLabel(pane: Terminal): string {
 }
 
 /**
- * Sidebar name of a pane row. herdr's own sidebar shows an agent pane by its session title and a
- * plain terminal by its label: the pane label, else the tab label (`herdr tab list`, e.g.
+ * Sidebar name of a pane row. The pane label wins when set (a rename); without one, an agent pane
+ * shows its session title, and a plain terminal shows the tab label (`herdr tab list`, e.g.
  * "terminal"). The shell's terminal title (`user@host:~/path`) is never shown. With no label at
  * all, the directory name stands in.
  */
 export function rowName(pane: Terminal, tabLabel?: string): string {
-  if (agentKind(pane)) return paneLabel(pane);
+  if (agentKind(pane)) return pane.label?.trim() || paneLabel(pane);
   return (
     pane.label?.trim() ||
     tabLabel?.trim() ||
@@ -337,8 +389,10 @@ export function buildSpaces(
   snapshot: Snapshot,
   repos: ReadonlyMap<string, RepoInfo>,
   pulls: ReadonlyMap<string, BranchPull> = new Map(),
+  order: readonly string[] = [],
+  tabOrder: TabOrder = {},
 ): SpaceNode[] {
-  return buildTree(snapshot).map(({ workspace, tabs }) => ({
+  return buildTree(snapshot, order, tabOrder).map(({ workspace, tabs }) => ({
     workspace,
     rows: tabs.flatMap(({ tab, panes }) =>
       panes.map((pane): PaneRow => {

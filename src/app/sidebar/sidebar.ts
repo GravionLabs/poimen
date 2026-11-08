@@ -409,6 +409,96 @@ export class Sidebar {
     return space ? workspaceUnread(space, this.attn.unread()) : 0;
   }
   protected readonly query = signal("");
+
+  /** The space being dragged; `null` when no drag runs. */
+  protected readonly dragging = signal<string | null>(null);
+  /** Where the dragged space would land: before or after `id`. */
+  protected readonly dropMark = signal<{ id: string; after: boolean } | null>(null);
+
+  /** Dragging reorders the complete list, so it is off while a filter hides spaces. */
+  protected canDrag(workspaceId: string): boolean {
+    return this.query().trim() === "" && this.editing() !== workspaceId;
+  }
+
+  protected dragStart(event: DragEvent, workspaceId: string): void {
+    if (!this.canDrag(workspaceId)) {
+      event.preventDefault();
+      return;
+    }
+    this.dragging.set(workspaceId);
+    event.dataTransfer?.setData("text/plain", workspaceId);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  }
+
+  protected dragOver(event: DragEvent, workspaceId: string): void {
+    const source = this.dragging();
+    if (source === null || source === workspaceId) return;
+    event.preventDefault();
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.dropMark.set({ id: workspaceId, after: event.clientY > box.top + box.height / 2 });
+  }
+
+  protected drop(event: DragEvent, workspaceId: string): void {
+    event.preventDefault();
+    const source = this.dragging();
+    const mark = this.dropMark();
+    this.dragEnd();
+    if (source === null || mark?.id !== workspaceId) return;
+    this.spaceActions.reorder(source, workspaceId, mark.after);
+  }
+
+  /** Ends a drag; a drop outside the list lands here without a `drop`, so nothing moves. */
+  protected dragEnd(): void {
+    this.dragging.set(null);
+    this.dropMark.set(null);
+  }
+
+  /** The tab row being dragged (its pane, tab and space); `null` when no drag runs. */
+  protected readonly tabDrag = signal<{ pane: string; tab: string; space: string } | null>(null);
+  /** Where the dragged tab would land: before or after the row of `pane`. */
+  protected readonly tabMark = signal<{ pane: string; after: boolean } | null>(null);
+
+  /** Like spaces, tabs are only reordered in the complete list, so not while a filter is active. */
+  protected canDragTab(): boolean {
+    return this.query().trim() === "";
+  }
+
+  protected tabDragStart(event: DragEvent, pane: Terminal): void {
+    if (!this.canDragTab()) {
+      event.preventDefault();
+      return;
+    }
+    this.tabDrag.set({ pane: pane.terminal_id, tab: pane.tab_id, space: pane.space_id });
+    event.dataTransfer?.setData("text/plain", pane.terminal_id);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  }
+
+  /** A row of another space, or of the dragged tab itself, is no target: no marker, no drop. */
+  protected tabDragOver(event: DragEvent, pane: Terminal): void {
+    const source = this.tabDrag();
+    if (source === null || source.space !== pane.space_id || source.tab === pane.tab_id) {
+      this.tabMark.set(null);
+      return;
+    }
+    event.preventDefault();
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.tabMark.set({ pane: pane.terminal_id, after: event.clientY > box.top + box.height / 2 });
+  }
+
+  protected tabDrop(event: DragEvent, pane: Terminal): void {
+    event.preventDefault();
+    const source = this.tabDrag();
+    const mark = this.tabMark();
+    this.tabDragEnd();
+    if (source === null || mark?.pane !== pane.terminal_id || source.space !== pane.space_id)
+      return;
+    this.spaceActions.reorderTabs(source.space, source.tab, pane.tab_id, mark.after);
+  }
+
+  protected tabDragEnd(): void {
+    this.tabDrag.set(null);
+    this.tabMark.set(null);
+  }
   protected readonly selection = signal<string | null>(null);
 
   /** The chevron at the right edge of a workspace row: expands or collapses it (not a selection). */

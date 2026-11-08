@@ -1,0 +1,54 @@
+{
+  "v": 1,
+  "run": "r10",
+  "status": "running",
+  "subject": {
+    "kind": "github.milestone",
+    "id": "GravionLabs/demo#5",
+    "title": "M5 Events",
+    "url": "https://github.com/GravionLabs/demo/milestone/5"
+  },
+  "progress": {
+    "done": 1,
+    "total": 2,
+    "label": "issues"
+  },
+  "tasks": [
+    {
+      "task": "t2",
+      "subject": {
+        "kind": "github.issue",
+        "id": "GravionLabs/demo#2",
+        "title": "Second",
+        "url": "https://github.com/GravionLabs/demo/issues/2"
+      },
+      "progress": {
+        "done": 1,
+        "total": 4,
+        "label": "steps"
+      }
+    }
+  ],
+  "finished": {
+    "succeeded": [
+      {
+        "task": "t1",
+        "subject": {
+          "kind": "github.issue",
+          "id": "GravionLabs/demo#1",
+          "title": "First",
+          "url": "https://github.com/GravionLabs/demo/issues/1"
+        }
+      }
+    ],
+    "failed": [],
+    "cancelled": [],
+    "skipped": []
+  },
+  "attentions": [],
+  "needsYou": false,
+  "links": [],
+  "gaps": [],
+  "lastSeq": 7,
+  "updated": "2026-11-08T10:00:07.000Z"
+}

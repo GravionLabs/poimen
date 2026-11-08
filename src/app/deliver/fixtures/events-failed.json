@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "run": "20261108-090000-fail",
+  "status": "finished",
+  "outcome": "failed",
+  "reason": "CI stayed red",
+  "subject": { "kind": "github.milestone", "id": "GravionLabs/demo#5", "title": "M5 Roadmap" },
+  "progress": { "done": 1, "total": 4 },
+  "tasks": [],
+  "finished": {
+    "succeeded": [],
+    "failed": [
+      {
+        "task": "t1",
+        "subject": { "kind": "github.issue", "id": "GravionLabs/demo#1", "title": "Reducer" },
+        "reason": "CI stayed red"
+      }
+    ],
+    "cancelled": [],
+    "skipped": []
+  },
+  "attentions": [],
+  "needsYou": false,
+  "links": [],
+  "gaps": [],
+  "lastSeq": 5,
+  "updated": "2026-11-08T09:30:00.000Z",
+  "tone": "danger",
+  "host": {},
+  "events": []
+}

@@ -1,112 +1,119 @@
 /**
- * The live state of deliver runs. Primary source: the run state folded from the progress events of
- * a run by the backend (`progress_events.rs`, schema `deliver-run-state.schema.json` plus `source`
- * and `tone`); fallback during the migration: `.agents/deliver-loop/status.json`, schema
- * `deliver-loop-status.schema.json` of GravionLabs/skills (`schemaVersion: 1`). Everything here is
- * pure; the Tauri side is `deliver.ts`.
+ * The live state of agent runs, read from the agent-events core (GravionLabs/agent-events,
+ * `SPEC.md`): the backend folds `<git-common-dir>/.agents/events/*.jsonl` (`agent_events.rs`, run
+ * state of `run-state.schema.json` plus `tone`, `host`, `agent` and `events`). Displays are core
+ * readers: nothing here reads a profile, and a run shows from the core alone. Fallback during the
+ * migration: the legacy `.agents/deliver-loop/status.json` (`schemaVersion: 1`), mapped onto the
+ * same shape by {@link fromLegacy}. Everything here is pure; the Tauri side is `deliver.ts`.
  */
 
-/** The schema version this build understands. */
+/** The legacy status file schema version this build understands. */
 export const SUPPORTED_SCHEMA = 1;
 
-/** The version of the progress events this build reads (`v`, as `SUPPORTED_V` of the backend). */
+/** The version of the events this build reads (`v`, as `SUPPORTED_V` of the backend). */
 export const SUPPORTED_EVENTS = 1;
 
-/** A file whose `updatedAt` is older than this while `result` is `running` is stale (rule 4). */
+/** A run that is `running` and not updated for this long is stale. */
 export const STALE_MS = 60 * 60 * 1000;
 
-export type LoopResult =
-  "running" | "done" | "max reached" | "blocked" | "no progress" | "abandoned";
-
-const RESULTS: readonly LoopResult[] = [
-  "running",
-  "done",
-  "max reached",
-  "blocked",
-  "no progress",
-  "abandoned",
-];
-
-/** How the emitter rated a run; the displays map it to their palette, never the text. */
+/** How the writer rated an event or a run; the displays map it to their palette, never the text. */
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger";
 
 const TONES: readonly Tone[] = ["neutral", "info", "success", "warning", "danger"];
 
-/** Who runs it: a `loop` of the deliver loop, or an interactive `session`. */
-export type RunSource = "loop" | "session";
+export type RunStatus = "running" | "finished" | "abandoned";
+const STATUSES: readonly RunStatus[] = ["running", "finished", "abandoned"];
 
-/** A blocked or paused item, or something the user must decide. */
-export interface LoopItem {
-  number: number;
+export type Outcome = "succeeded" | "failed" | "cancelled" | "skipped";
+const OUTCOMES: readonly Outcome[] = ["succeeded", "failed", "cancelled", "skipped"];
+
+export interface Link {
+  rel: string;
   url: string;
-  reason: string;
+  title: string | null;
 }
 
-export interface LoopCurrent {
-  number: number;
+/** What is worked on: `kind` is free text (`github.issue`, `github.milestone`, ...). */
+export interface Subject {
+  kind: string;
+  id: string;
   title: string;
-  url: string;
-  step: { n: number; total: number; text: string };
-  prUrl: string | null;
+  url: string | null;
 }
 
-export interface LoopDelivered {
-  pbi: number;
-  url: string;
-  /** The pull request; null when the file carries no pull request URL (#538). */
-  prUrl: string | null;
+export interface Step {
+  name: string;
+  n: number | null;
+  total: number | null;
+  text: string | null;
 }
 
-/** Only a `/pull/<n>` URL is a pull request; the producer once wrote the issue URL (#538). */
-export const asPullUrl = (v: string | null): string | null =>
-  v !== null && /\/pull\/\d+\/?$/.test(v) ? v : null;
-
-/** The release candidate and release pull request of a run (`release.updated`). */
-export interface LoopRelease {
-  reviewRound: number | null;
-  prUrl: string | null;
-  rcUrl: string | null;
-  rcVersion: string | null;
-  testIssue: { number: number; url: string } | null;
+export interface Progress {
+  done: number;
+  total: number;
+  label: string | null;
 }
 
-/** One progress event of a run, as the Events tab of the bottom panel lists it. */
+/** A task that was started and not finished. */
+export interface OpenTask {
+  task: string;
+  parent: string | null;
+  subject: Subject;
+  step: Step | null;
+  progress: Progress | null;
+  links: Link[];
+}
+
+export interface FinishedTask {
+  task: string;
+  outcome: Outcome;
+  subject: Subject;
+  reason: string | null;
+  links: Link[];
+}
+
+export interface Attention {
+  id: string;
+  task: string | null;
+  reason: string;
+  needsYou: boolean;
+  links: Link[];
+}
+
+/** One event of a run, as the Events tab of the bottom panel lists it. */
 export interface RunEventRow {
   seq: number | null;
   ts: string | null;
   type: string;
   tone: Tone;
-  issue: number | null;
+  task: string | null;
   step: string | null;
-  result: string | null;
-  prUrl: string | null;
+  outcome: string | null;
+  link: string | null;
 }
 
-/** The parts of a run state the panel shows (unknown fields are ignored). */
+/** A run as the panel shows it: the core run state plus tone and host. */
 export interface DeliverStatus {
   run: string;
-  harness: string;
-  model: string;
-  repository: string;
-  /** `null` for a run without a milestone (an interactive session). */
-  milestone: { key: string; title: string; url: string } | null;
-  source: RunSource | null;
+  status: RunStatus;
+  /** `succeeded`, `failed` or `cancelled` once the run finished. */
+  outcome: string | null;
+  reason: string | null;
+  /** What the run as a whole works on (a milestone, a release). */
+  subject: Subject | null;
+  progress: Progress | null;
+  tasks: OpenTask[];
+  finished: FinishedTask[];
+  attentions: Attention[];
+  needsYou: boolean;
+  links: Link[];
   tone: Tone;
-  /** The poimen terminal the run lives in (`run.started` `host`), `null` when unknown. */
-  poimenTerminal: string | null;
-  /** The events of the run in file order; empty for a status file. */
+  /** `host` of `run.started`: namespaced keys (`poimen.terminal`, `herdr.pane`). */
+  host: Record<string, string>;
+  harness: string | null;
+  model: string | null;
   events: RunEventRow[];
-  closed: number;
-  total: number;
-  current: LoopCurrent | null;
-  delivered: LoopDelivered[];
-  blocked: LoopItem[];
-  paused: LoopItem[];
-  needsYou: LoopItem[];
-  release: LoopRelease;
-  startedAt: string;
-  updatedAt: string;
-  result: LoopResult;
+  updated: string;
 }
 
 /** What the `deliver` event carries for one repository (`Read` of `deliver.rs`). */
@@ -135,103 +142,98 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const isString = (v: unknown): v is string => typeof v === "string";
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
-const isNullableString = (v: unknown): v is string | null => v === null || isString(v);
-
+const str = (v: unknown): string | null => (isString(v) && v !== "" ? v : null);
 const isTone = (v: unknown): v is Tone => TONES.includes(v as Tone);
 
-function release(value: unknown): LoopRelease | undefined {
-  if (!isObject(value)) return undefined;
-  const nullable = (v: unknown) => (v === undefined ? null : v);
-  const [round, pr, rc, version, test] = [
-    value["reviewRound"],
-    value["prUrl"],
-    value["rcUrl"],
-    value["rcVersion"],
-    value["testIssue"],
-  ].map(nullable);
-  if (
-    !(round === null || isCount(round)) ||
-    !isNullableString(pr) ||
-    !isNullableString(rc) ||
-    !isNullableString(version)
-  )
-    return undefined;
-  let testIssue: LoopRelease["testIssue"] = null;
-  if (test !== null) {
-    if (!isObject(test) || !isCount(test["number"]) || !isString(test["url"])) return undefined;
-    testIssue = { number: test["number"], url: test["url"] };
-  }
-  return { reviewRound: round, prUrl: pr, rcUrl: rc, rcVersion: version, testIssue };
+function link(v: unknown): Link | null {
+  if (!isObject(v)) return null;
+  const rel = str(v["rel"]);
+  const url = str(v["url"]);
+  return rel && url ? { rel, url, title: str(v["title"]) } : null;
 }
 
-/**
- * The tone of a file without one (status.json): a blocked result is danger, a running run that
- * asks for the user warning, a finished run success.
- */
-function legacyTone(result: LoopResult, asks: boolean): Tone {
-  if (result === "blocked") return "danger";
-  if (asks && result === "running") return "warning";
-  return result === "done" ? "success" : "neutral";
+const links = (v: unknown): Link[] => (Array.isArray(v) ? v.flatMap((l) => link(l) ?? []) : []);
+
+function subject(v: unknown): Subject | null {
+  if (!isObject(v)) return null;
+  const id = str(v["id"]) ?? "";
+  const title = str(v["title"]) ?? id;
+  if (!title) return null;
+  return { kind: str(v["kind"]) ?? "", id, title, url: str(v["url"]) };
 }
 
-function items(value: unknown): LoopItem[] | null {
-  if (!Array.isArray(value)) return null;
-  const out: LoopItem[] = [];
-  for (const v of value) {
-    if (!isObject(v) || !isCount(v["number"]) || !isString(v["url"]) || !isString(v["reason"]))
-      return null;
-    out.push({ number: v["number"], url: v["url"], reason: v["reason"] });
-  }
-  return out;
-}
-
-function current(value: unknown): LoopCurrent | null | undefined {
-  if (value === null) return null;
-  if (!isObject(value)) return undefined;
-  const step = value["step"];
-  if (
-    !isCount(value["number"]) ||
-    !isString(value["title"]) ||
-    !isString(value["url"]) ||
-    !isObject(step) ||
-    !isCount(step["n"]) ||
-    !isCount(step["total"]) ||
-    !isString(step["text"]) ||
-    !isNullableString(value["prUrl"])
-  )
-    return undefined;
+function step(v: unknown): Step | null {
+  if (!isObject(v)) return null;
+  const name = str(v["name"]);
+  if (!name) return null;
   return {
-    number: value["number"],
-    title: value["title"],
-    url: value["url"],
-    step: { n: step["n"], total: step["total"], text: step["text"] },
-    prUrl: value["prUrl"],
+    name,
+    n: isCount(v["n"]) ? v["n"] : null,
+    total: isCount(v["total"]) ? v["total"] : null,
+    text: str(v["text"]),
   };
 }
 
-function delivered(value: unknown): LoopDelivered[] | null {
-  if (!Array.isArray(value)) return null;
-  const out: LoopDelivered[] = [];
-  for (const v of value) {
-    if (
-      !isObject(v) ||
-      !isCount(v["pbi"]) ||
-      !isString(v["url"]) ||
-      !isNullableString(v["prUrl"] ?? null)
-    )
-      return null;
-    out.push({
-      pbi: v["pbi"],
-      url: v["url"],
-      prUrl: asPullUrl((v["prUrl"] as string | null | undefined) ?? null),
-    });
-  }
-  return out;
+function progress(v: unknown): Progress | null {
+  if (!isObject(v) || !isCount(v["done"]) || !isCount(v["total"])) return null;
+  return { done: v["done"], total: v["total"], label: str(v["label"]) };
 }
 
-const optString = (v: unknown): string | null => (isString(v) ? v : null);
+/** Tolerant: a malformed entry is dropped, the rest of the run still shows. */
+function tasks(v: unknown): OpenTask[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((t) => {
+    if (!isObject(t)) return [];
+    const id = str(t["task"]);
+    const sub = subject(t["subject"]);
+    if (!id || !sub) return [];
+    return [
+      {
+        task: id,
+        parent: str(t["parent"]),
+        subject: sub,
+        step: step(t["step"]),
+        progress: progress(t["progress"]),
+        links: links(t["links"]),
+      },
+    ];
+  });
+}
 
-/** Tolerant: a malformed row is dropped, the rest of the run still shows. */
+function finishedTasks(v: unknown): FinishedTask[] {
+  if (!isObject(v)) return [];
+  return OUTCOMES.flatMap((outcome) => {
+    const list = v[outcome];
+    if (!Array.isArray(list)) return [];
+    return list.flatMap((t) => {
+      if (!isObject(t)) return [];
+      const id = str(t["task"]);
+      const sub = subject(t["subject"]);
+      return id && sub
+        ? [{ task: id, outcome, subject: sub, reason: str(t["reason"]), links: links(t["links"]) }]
+        : [];
+    });
+  });
+}
+
+function attentions(v: unknown): Attention[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((a) => {
+    if (!isObject(a)) return [];
+    const id = str(a["id"]);
+    if (!id) return [];
+    return [
+      {
+        id,
+        task: str(a["task"]),
+        reason: str(a["reason"]) ?? "",
+        needsYou: a["needsYou"] === true,
+        links: links(a["links"]),
+      },
+    ];
+  });
+}
+
 function eventRows(value: unknown): RunEventRow[] {
   if (!Array.isArray(value)) return [];
   const rows: RunEventRow[] = [];
@@ -239,97 +241,208 @@ function eventRows(value: unknown): RunEventRow[] {
     if (!isObject(v) || !isString(v["type"])) continue;
     rows.push({
       seq: isCount(v["seq"]) ? v["seq"] : null,
-      ts: optString(v["ts"]),
+      ts: str(v["ts"]),
       type: v["type"],
       tone: isTone(v["tone"]) ? v["tone"] : "neutral",
-      issue: isCount(v["issue"]) ? v["issue"] : null,
-      step: optString(v["step"]),
-      result: optString(v["result"]),
-      prUrl: optString(v["prUrl"]),
+      task: str(v["task"]),
+      step: str(v["step"]),
+      outcome: str(v["outcome"]),
+      link: str(v["link"]),
     });
   }
   return rows;
 }
 
-/** Validates the fields the panel uses; unknown fields are ignored, a wrong known field fails. */
+/**
+ * Validates the core run state the panel uses; unknown fields (and profile extensions) are
+ * ignored, a wrong known field fails.
+ */
 export function parseStatus(value: unknown): DeliverStatus | string {
+  if (!isObject(value)) return "the run is not an object";
+  const run = str(value["run"]);
+  if (!run) return "run is missing";
+  const status = value["status"];
+  if (!STATUSES.includes(status as RunStatus)) return "status is unknown";
+  const updated = value["updated"];
+  if (!isString(updated) || Number.isNaN(Date.parse(updated))) return "updated is not a date";
+  const host: Record<string, string> = {};
+  if (isObject(value["host"]))
+    for (const [k, v] of Object.entries(value["host"])) if (isString(v)) host[k] = v;
+  const agent = isObject(value["agent"]) ? value["agent"] : {};
+  return {
+    run,
+    status: status as RunStatus,
+    outcome: str(value["outcome"]),
+    reason: str(value["reason"]),
+    subject: subject(value["subject"]),
+    progress: progress(value["progress"]),
+    tasks: tasks(value["tasks"]),
+    finished: finishedTasks(value["finished"]),
+    attentions: attentions(value["attentions"]),
+    needsYou: value["needsYou"] === true,
+    links: links(value["links"]),
+    tone: isTone(value["tone"]) ? value["tone"] : "neutral",
+    host,
+    harness: str(agent["harness"]),
+    model: str(agent["model"]),
+    events: eventRows(value["events"]),
+    updated,
+  };
+}
+
+/** Only a `/pull/<n>` URL is a pull request; the producer once wrote the issue URL (#538). */
+const asPullUrl = (v: unknown): string | null =>
+  isString(v) && /\/pull\/\d+\/?$/.test(v) ? v : null;
+
+type LegacyResult = "running" | "done" | "max reached" | "blocked" | "no progress" | "abandoned";
+const LEGACY_RESULTS: readonly string[] = [
+  "running",
+  "done",
+  "max reached",
+  "blocked",
+  "no progress",
+  "abandoned",
+];
+
+/**
+ * Maps the legacy `status.json` of the deliver loop onto the core shape: the milestone is the run
+ * subject with its progress, the current PBI an open task, delivered PBIs succeeded tasks, the
+ * items to decide attentions, the release PR and RC links. A status file has no tone: a blocked
+ * result is danger, a running run that asks for the user warning, a finished run success.
+ */
+export function fromLegacy(value: unknown): DeliverStatus | string {
   if (!isObject(value)) return "the status is not an object";
-  const milestone = value["milestone"];
-  const rel = release(value["release"]);
-  const cur = current(value["current"]);
-  const done = delivered(value["delivered"]);
+  const run = str(value["run"]);
+  const updated = value["updatedAt"];
+  const result = value["result"];
+  if (!run) return "run is missing";
+  if (!isString(updated) || Number.isNaN(Date.parse(updated))) return "updatedAt is not a date";
+  if (!isString(result) || !LEGACY_RESULTS.includes(result)) return "result is unknown";
+  const items = (v: unknown): { number: number; url: string; reason: string }[] =>
+    Array.isArray(v)
+      ? v.flatMap((i) =>
+          isObject(i) && isCount(i["number"]) && isString(i["url"]) && isString(i["reason"])
+            ? [{ number: i["number"], url: i["url"], reason: i["reason"] }]
+            : [],
+        )
+      : [];
   const blocked = items(value["blocked"]);
   const paused = items(value["paused"]);
-  const needsYou = items(value["needsYou"]);
-  const result = value["result"];
-  if (!isString(value["run"])) return "run is missing";
-  if (
-    milestone !== null &&
-    (!isObject(milestone) ||
-      !isString(milestone["key"]) ||
-      !isString(milestone["title"]) ||
-      !isString(milestone["url"]))
-  )
-    return "milestone is invalid";
-  if (value["repository"] !== null && !isString(value["repository"]))
-    return "repository is missing";
-  if (!isCount(value["closed"]) || !isCount(value["total"])) return "closed or total is invalid";
-  if (cur === undefined) return "current is invalid";
-  if (!done) return "delivered is invalid";
-  if (!blocked || !paused || !needsYou) return "blocked, paused or needsYou is invalid";
-  if (!rel) return "release is invalid";
-  if (!isString(value["startedAt"]) || !isString(value["updatedAt"]))
-    return "startedAt or updatedAt is missing";
-  if (Number.isNaN(Date.parse(value["updatedAt"]))) return "updatedAt is not a date";
-  if (!isString(result) || !RESULTS.includes(result as LoopResult)) return "result is unknown";
-  const source = value["source"];
-  const events = eventRows(value["events"]);
-  // A status file (no events) that says "done" while milestone items are still open and nothing is
-  // blocked or paused is a producer artifact between two iterations (#537): the loop still runs.
+  let needsYou = items(value["needsYou"]);
+  const milestone = isObject(value["milestone"]) ? value["milestone"] : null;
+  const closed = isCount(value["closed"]) ? value["closed"] : 0;
+  const total = isCount(value["total"]) ? value["total"] : 0;
+  const rel = isObject(value["release"]) ? value["release"] : {};
+  // A status file that says "done" while milestone items are still open and nothing is blocked or
+  // paused is a producer artifact between two iterations (#537): the loop still runs.
   const premature =
     result === "done" &&
-    (source === undefined || source === null) &&
-    events.length === 0 &&
     milestone !== null &&
-    value["closed"] < value["total"] &&
-    blocked.length + paused.length === 0;
-  const releaseRan = rel.reviewRound !== null || rel.rcUrl !== null || rel.rcVersion !== null;
-  const hideRelease = premature && !releaseRan;
-  // Legacy status.json only: a premature "done" lists the release PR before any release step ran.
-  // testIssue is deliberately not part of releaseRan. Matched on the item text, as the item has no link to the PR.
-  const shownNeedsYou = hideRelease
-    ? needsYou.filter((i) => !/release pr/i.test(i.reason))
-    : needsYou;
-  const finalResult = (premature ? "running" : result) as LoopResult;
+    closed < total &&
+    blocked.length + paused.length === 0 &&
+    value["source"] == null;
+  const releaseRan = [rel["reviewRound"], rel["rcUrl"], rel["rcVersion"]].some((v) => v != null);
+  if (premature && !releaseRan) needsYou = needsYou.filter((i) => !/release pr/i.test(i.reason));
+  const state: LegacyResult = premature ? "running" : (result as LegacyResult);
+  const issue = (n: number, title: string, url: string): Subject => ({
+    kind: "github.issue",
+    id: `#${n}`,
+    title: `#${n} ${title}`.trim(),
+    url,
+  });
+  const cur = isObject(value["current"]) ? value["current"] : null;
+  const curStep = cur && isObject(cur["step"]) ? cur["step"] : null;
+  const curPr = cur ? asPullUrl(cur["prUrl"]) : null;
+  const open: OpenTask[] =
+    cur && isCount(cur["number"]) && isString(cur["title"]) && isString(cur["url"])
+      ? [
+          {
+            task: `#${cur["number"]}`,
+            parent: null,
+            subject: issue(cur["number"], cur["title"], cur["url"]),
+            step: curStep
+              ? {
+                  name: str(curStep["text"]) ?? "",
+                  n: isCount(curStep["n"]) ? curStep["n"] : null,
+                  total: isCount(curStep["total"]) ? curStep["total"] : null,
+                  text: null,
+                }
+              : null,
+            progress: null,
+            links: curPr ? [{ rel: "pull-request", url: curPr, title: null }] : [],
+          },
+        ]
+      : [];
+  const done: FinishedTask[] = Array.isArray(value["delivered"])
+    ? value["delivered"].flatMap((d) => {
+        if (!isObject(d) || !isCount(d["pbi"]) || !isString(d["url"])) return [];
+        const pr = asPullUrl(d["prUrl"]);
+        return [
+          {
+            task: `#${d["pbi"]}`,
+            outcome: "succeeded" as const,
+            subject: issue(d["pbi"], "", d["url"]),
+            reason: null,
+            links: pr ? [{ rel: "pull-request", url: pr, title: null }] : [],
+          },
+        ];
+      })
+    : [];
+  const asks = (list: typeof blocked, label: string, needs: boolean): Attention[] =>
+    list.map((i) => ({
+      id: `${label}-${i.number}`,
+      task: null,
+      reason: `#${i.number} ${i.reason}`,
+      needsYou: needs,
+      links: [{ rel: "issue", url: i.url, title: null }],
+    }));
+  const list = [
+    ...asks(needsYou, "needs-you", true),
+    ...asks(blocked, "blocked", false),
+    ...asks(paused, "paused", false),
+  ];
+  const runLinks: Link[] = [];
+  const relPr = str(rel["prUrl"]);
+  const relRc = str(rel["rcUrl"]);
+  if (relPr && !(premature && !releaseRan))
+    runLinks.push({ rel: "pull-request", url: relPr, title: "Release" });
+  if (relRc) runLinks.push({ rel: "release-candidate", url: relRc, title: str(rel["rcVersion"]) });
+  const tone: Tone =
+    state === "blocked"
+      ? "danger"
+      : list.length > 0 && state === "running"
+        ? "warning"
+        : state === "done"
+          ? "success"
+          : "neutral";
+  const outcome = state === "done" ? "succeeded" : state === "max reached" ? "cancelled" : "failed";
+  const finished = state !== "running" && state !== "abandoned";
+  const ms = milestone && isString(milestone["title"]) ? milestone : null;
   return {
-    run: value["run"],
-    harness: isString(value["harness"]) ? value["harness"] : "",
-    model: isString(value["model"]) ? value["model"] : "",
-    repository: (value["repository"] as string | null) ?? "",
-    milestone: isObject(milestone)
+    run,
+    status: finished ? "finished" : state === "abandoned" ? "abandoned" : "running",
+    outcome: finished ? outcome : null,
+    reason: finished && state !== "done" ? state : null,
+    subject: ms
       ? {
-          key: milestone["key"] as string,
-          title: milestone["title"] as string,
-          url: milestone["url"] as string,
+          kind: "github.milestone",
+          id: str(ms["key"]) ?? "",
+          title: ms["title"] as string,
+          url: str(ms["url"]),
         }
       : null,
-    source: source === "loop" || source === "session" ? source : null,
-    tone: isTone(value["tone"])
-      ? value["tone"]
-      : legacyTone(finalResult, blocked.length + paused.length + shownNeedsYou.length > 0),
-    poimenTerminal: isObject(value["host"]) ? optString(value["host"]["poimenTerminal"]) : null,
-    events,
-    closed: value["closed"],
-    total: value["total"],
-    current: cur,
-    delivered: done,
-    blocked,
-    paused,
-    needsYou: shownNeedsYou,
-    release: hideRelease ? { ...rel, prUrl: null } : rel,
-    startedAt: value["startedAt"],
-    updatedAt: value["updatedAt"],
-    result: finalResult,
+    progress: ms ? { done: closed, total, label: null } : null,
+    tasks: finished ? [] : open,
+    finished: done,
+    attentions: list,
+    needsYou: needsYou.length > 0,
+    links: runLinks,
+    tone,
+    host: {},
+    harness: str(value["harness"]),
+    model: str(value["model"]),
+    events: [],
+    updated,
   };
 }
 
@@ -337,8 +450,7 @@ export function parseStatus(value: unknown): DeliverStatus | string {
 export const cardKey = (card: Pick<DeliverCard, "root" | "run">): string =>
   `${card.root}\n${card.run}`;
 
-function statusCard(root: string, value: unknown): DeliverCard {
-  const status = parseStatus(value);
+function card(root: string, status: DeliverStatus | string): DeliverCard {
   return typeof status === "string"
     ? { root, run: "", state: { kind: "invalid", error: status } }
     : { root, run: status.run, state: { kind: "ok", status } };
@@ -366,9 +478,9 @@ export function cardsOf(root: string, read: DeliverRead): DeliverCard[] {
         },
       ];
     case "ok":
-      return [statusCard(root, read.status)];
+      return [card(root, fromLegacy(read.status))];
     case "events": {
-      const cards = read.runs.map((run) => statusCard(root, run));
+      const cards = read.runs.map((run) => card(root, parseStatus(run)));
       if (read.unknownVersion !== undefined && read.unknownVersion !== null)
         cards.push({
           root,
@@ -380,13 +492,16 @@ export function cardsOf(root: string, read: DeliverRead): DeliverCard[] {
   }
 }
 
-/** `running` older than {@link STALE_MS} is `stale`; else the result as written. */
-export type RunState = Exclude<LoopResult, "abandoned"> | "stale";
+/** `running` for over {@link STALE_MS} without an update, and `abandoned`, are `stale`. */
+export type RunState = "running" | "stale" | "succeeded" | "failed" | "cancelled";
 
 export function runState(status: DeliverStatus, now: number): RunState {
-  if (status.result === "abandoned") return "stale";
-  if (status.result !== "running") return status.result;
-  return now - Date.parse(status.updatedAt) > STALE_MS ? "stale" : "running";
+  if (status.status === "abandoned") return "stale";
+  if (status.status === "running")
+    return now - Date.parse(status.updated) > STALE_MS ? "stale" : "running";
+  return status.outcome === "failed" || status.outcome === "cancelled"
+    ? status.outcome
+    : "succeeded";
 }
 
 /** "just now", "12 min ago", "3 h ago", "2 d ago". */
@@ -403,33 +518,39 @@ export function ageText(iso: string, now: number): string {
 
 /** The line under the title: "running, updated 3 min ago", "finished 12 min ago", ... */
 export function stateText(status: DeliverStatus, now: number): string {
-  const age = ageText(status.updatedAt, now);
+  const age = ageText(status.updated, now);
+  const why = status.reason ? `: ${status.reason}` : "";
   switch (runState(status, now)) {
     case "running":
       return `running, updated ${age}`;
     case "stale":
       return `stale: no update for ${age.replace(" ago", "")}, the run may have stopped`;
-    case "done":
+    case "succeeded":
       return `finished ${age}`;
-    case "max reached":
-      return `stopped at the item limit ${age}`;
-    case "blocked":
-      return `blocked ${age}`;
-    case "no progress":
-      return `stopped without progress ${age}`;
+    case "failed":
+      return `failed ${age}${why}`;
+    case "cancelled":
+      return `cancelled ${age}${why}`;
   }
 }
 
-/** Progress of the milestone in percent, 0 to 100. */
-export function percent(status: Pick<DeliverStatus, "closed" | "total">): number {
-  if (status.total <= 0) return 0;
-  return Math.min(100, Math.round((status.closed / status.total) * 100));
+/** Progress in percent, 0 to 100. */
+export function percent(progress: Pick<Progress, "done" | "total">): number {
+  if (progress.total <= 0) return 0;
+  return Math.min(100, Math.round((progress.done / progress.total) * 100));
 }
+
+/** The words of a progress: "3/9 closed", "1/3". */
+export const progressText = (p: Progress): string =>
+  `${p.done}/${p.total}${p.label ? ` ${p.label}` : ""}`;
 
 /** Whether the tone of the run asks for a look: warning or danger (never read from text). */
 export function needsAttention(status: DeliverStatus): boolean {
   return status.tone === "warning" || status.tone === "danger";
 }
+
+/** What a run is called: its subject, else its id. */
+export const runTitle = (status: DeliverStatus): string => status.subject?.title ?? status.run;
 
 /** The compact status bar item. */
 export interface BarSummary {
@@ -440,33 +561,32 @@ export interface BarSummary {
 
 /**
  * `▶ M5 7/19` per running run, `▶ n runs` for several; `null` without a running run. A fresh run
- * that ended with a warning or danger tone (blocked, no progress) still shows until it is stale,
- * so a stop is not missed; the warning mark follows the tone.
+ * that ended with a warning or danger tone still shows until it is stale, so a stop is not
+ * missed; the warning mark follows the tone.
  */
 export function barSummary(cards: readonly DeliverCard[], now: number): BarSummary | null {
   const active: DeliverStatus[] = [];
-  for (const card of cards) {
-    if (card.state.kind !== "ok") continue;
-    const state = runState(card.state.status, now);
+  for (const c of cards) {
+    if (c.state.kind !== "ok") continue;
+    const state = runState(c.state.status, now);
     if (
       state === "running" ||
       (state !== "stale" &&
-        needsAttention(card.state.status) &&
-        now - Date.parse(card.state.status.updatedAt) < STALE_MS)
+        needsAttention(c.state.status) &&
+        now - Date.parse(c.state.status.updated) < STALE_MS)
     )
-      active.push(card.state.status);
+      active.push(c.state.status);
   }
   if (active.length === 0) return null;
   const label = (s: DeliverStatus) =>
-    s.milestone ? `${s.milestone.key} ${s.closed}/${s.total}` : "session";
+    `${runTitle(s)}${s.progress ? ` ${s.progress.done}/${s.progress.total}` : ""}`;
   const warning = active.some(needsAttention);
   const title = active
-    .map(
-      (s) =>
-        `${s.repository} ${label(s)}${s.current ? `: #${s.current.number} ${s.current.step.text}` : ""}${
-          s.needsYou.length > 0 ? " (needs you)" : ""
-        }`,
-    )
+    .map((s) => {
+      const t = s.tasks[0];
+      const doing = t ? `: ${t.subject.title}${t.step ? ` ${t.step.name}` : ""}` : "";
+      return `${label(s)}${doing}${s.needsYou ? " (needs you)" : ""}`;
+    })
     .join("\n");
   const text =
     active.length === 1
@@ -475,7 +595,7 @@ export function barSummary(cards: readonly DeliverCard[], now: number): BarSumma
   return { text, title, warning };
 }
 
-export type DeliverEventKind = "blocked" | "needs-you" | "release" | "ended";
+export type DeliverEventKind = "blocked" | "needs-you" | "ended";
 
 export interface DeliverEvent {
   kind: DeliverEventKind;
@@ -484,43 +604,41 @@ export interface DeliverEvent {
 }
 
 /**
- * What changed between two reads of the same repository that deserves a notification: a run
- * became blocked, needs a decision, opened the release pull request or ended. Nothing without a
- * previous state (the first read is not news).
+ * What changed between two reads of the same run that deserves a notification: a task failed, a
+ * new attention needs the user, the run ended. Nothing without a previous state (the first read
+ * is not news).
  */
 export function transitions(prev: DeliverStatus | undefined, next: DeliverStatus): DeliverEvent[] {
   if (!prev || prev.run !== next.run) return [];
-  const title = `Deliver ${next.milestone?.key ?? "session"}`;
+  const title = `Run ${runTitle(next)}`;
   const out: DeliverEvent[] = [];
-  const known = new Set(prev.blocked.map((i) => i.number));
-  const newlyBlocked = next.blocked.filter((i) => !known.has(i.number));
-  if (newlyBlocked.length > 0) {
+  const failed = new Set(prev.finished.filter((t) => t.outcome === "failed").map((t) => t.task));
+  const newlyFailed = next.finished.filter((t) => t.outcome === "failed" && !failed.has(t.task));
+  if (newlyFailed.length > 0) {
+    const t = newlyFailed[0];
     out.push({
       kind: "blocked",
       title,
-      body: `#${newlyBlocked[0].number} is blocked: ${newlyBlocked[0].reason}`,
-    });
-  } else if (next.result === "blocked" && prev.result !== "blocked") {
-    out.push({ kind: "blocked", title, body: "The run is blocked" });
-  }
-  const asked = new Set(prev.needsYou.map((i) => i.number));
-  const newlyAsked = next.needsYou.filter((i) => !asked.has(i.number));
-  if (newlyAsked.length > 0) {
-    out.push({
-      kind: "needs-you",
-      title,
-      body: `#${newlyAsked[0].number} needs you: ${newlyAsked[0].reason}`,
+      body: `${t.subject.title} failed${t.reason ? `: ${t.reason}` : ""}`,
     });
   }
-  if (next.release.prUrl && next.release.prUrl !== prev.release.prUrl) {
-    out.push({ kind: "release", title, body: "The release pull request is open" });
-  }
-  if (prev.result === "running" && next.result !== "running" && next.result !== "blocked") {
-    out.push({
-      kind: "ended",
-      title,
-      body: next.result === "done" ? "The run is done" : `The run ended: ${next.result}`,
-    });
+  const asked = new Set(prev.attentions.map((a) => a.id));
+  const newlyAsked = next.attentions.filter((a) => a.needsYou && !asked.has(a.id));
+  if (newlyAsked.length > 0)
+    out.push({ kind: "needs-you", title, body: `Needs you: ${newlyAsked[0].reason}` });
+  if (prev.status === "running" && next.status === "finished") {
+    if (next.outcome === "failed" && newlyFailed.length === 0)
+      out.push({
+        kind: "blocked",
+        title,
+        body: next.reason ? `The run failed: ${next.reason}` : "The run failed",
+      });
+    else if (next.outcome !== "failed")
+      out.push({
+        kind: "ended",
+        title,
+        body: next.outcome === "succeeded" ? "The run is done" : `The run ended: ${next.outcome}`,
+      });
   }
   return out;
 }
