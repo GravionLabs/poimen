@@ -139,10 +139,14 @@ fn wire_pane(terminal: &Terminal, space_id: &str) -> Value {
         "tab_id": terminal.id,
         "workspace_id": space_id,
         "cwd": terminal.cwd,
-        "label": terminal.name,
         "agent_status": wire_status(terminal),
         "focused": false,
     });
+    // The name of a terminal is its label only once it was renamed: the default is the directory
+    // name, which the sidebar already shows for a pane without a label.
+    if terminal.name != default_name(&terminal.cwd) {
+        pane["label"] = json!(terminal.name);
+    }
     if let Some(info) = &terminal.agent {
         if let Some(agent) = info.agent.as_deref().filter(|a| !a.is_empty()) {
             pane["agent"] = json!(agent);
@@ -639,7 +643,7 @@ mod tests {
             snapshot.panes[1],
             json!({
                 "pane_id": "t2", "tab_id": "t2", "workspace_id": "s1", "cwd": "/work/tests",
-                "label": "tests", "agent_status": "unknown", "focused": false,
+                "agent_status": "unknown", "focused": false,
             })
         );
     }
@@ -1138,6 +1142,51 @@ mod tests {
         let (backend, log) = agent_backend("agent-rename-blank", Some("idle"));
         backend.agent_rename("t1", None).unwrap();
         assert_eq!(params_of(&log, "terminal.rename")["name"], "api");
+    }
+
+    #[test]
+    fn a_renamed_agent_pane_shows_its_name_in_the_snapshot() {
+        let path = temp_socket("agent-rename-snapshot");
+        let log = Arc::new(Mutex::new(Vec::new()));
+        // The server keeps the name a rename sets, as it does for the next snapshot.
+        let name = Arc::new(Mutex::new("api".to_owned()));
+        let shared = name.clone();
+        serve(
+            &path,
+            log.clone(),
+            move |method, params| match method {
+                "space.list" => {
+                    Ok(json!({"spaces": [{"id": "s1", "name": "api", "cwd": "/work/api"}]}))
+                }
+                "terminal.list" => {
+                    let mut t = term_json("t1", "s1");
+                    t["name"] = json!(lock(&shared).clone());
+                    t["agent"] = json!({"status": "idle", "agent": "claude"});
+                    Ok(json!({"terminals": [t]}))
+                }
+                "terminal.rename" => {
+                    *lock(&shared) = params["name"].as_str().unwrap().to_owned();
+                    Ok(json!({"terminal": term_json("t1", "s1")}))
+                }
+                _ => Err(("unknown_method", "no")),
+            },
+            vec![],
+        );
+        let backend = PoimenBackend::new(Client::new(path));
+        let pane = |backend: &PoimenBackend| backend.snapshot().unwrap().panes[0].clone();
+        assert_eq!(pane(&backend)["agent"], "claude");
+        assert!(
+            pane(&backend).get("label").is_none(),
+            "default name is not a label"
+        );
+        backend.agent_rename("t1", Some(" review ")).unwrap();
+        assert_eq!(pane(&backend)["label"], "review");
+        assert_eq!(pane(&backend)["agent"], "claude");
+        backend.agent_rename("t1", None).unwrap();
+        assert!(
+            pane(&backend).get("label").is_none(),
+            "a cleared name falls back"
+        );
     }
 
     #[test]

@@ -89,9 +89,20 @@ describe("rowName", () => {
     expect(name).not.toContain("/");
   });
   it("keeps the session title of an agent pane", () => {
+    expect(rowName(pane({ agent: "claude", terminal_title_stripped: "Projektstand" }), "t")).toBe(
+      "Projektstand",
+    );
+  });
+  it("shows the label of an agent pane over its session title and agent name", () => {
     expect(
-      rowName(pane({ agent: "claude", terminal_title_stripped: "Projektstand", label: "x" }), "t"),
-    ).toBe("Projektstand");
+      rowName(
+        pane({ agent: "claude", terminal_title_stripped: "Projektstand", label: " review " }),
+      ),
+    ).toBe("review");
+    expect(rowName(pane({ agent: "claude", label: "review" }))).toBe("review");
+  });
+  it("falls back to the title and agent name when the label is blank", () => {
+    expect(rowName(pane({ agent: "claude", label: "  " }))).toBe("claude");
   });
 });
 

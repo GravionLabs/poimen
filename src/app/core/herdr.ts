@@ -239,13 +239,13 @@ export function paneLabel(pane: Terminal): string {
 }
 
 /**
- * Sidebar name of a pane row. herdr's own sidebar shows an agent pane by its session title and a
- * plain terminal by its label: the pane label, else the tab label (`herdr tab list`, e.g.
+ * Sidebar name of a pane row. The pane label wins when set (a rename); without one, an agent pane
+ * shows its session title, and a plain terminal shows the tab label (`herdr tab list`, e.g.
  * "terminal"). The shell's terminal title (`user@host:~/path`) is never shown. With no label at
  * all, the directory name stands in.
  */
 export function rowName(pane: Terminal, tabLabel?: string): string {
-  if (agentKind(pane)) return paneLabel(pane);
+  if (agentKind(pane)) return pane.label?.trim() || paneLabel(pane);
   return (
     pane.label?.trim() ||
     tabLabel?.trim() ||
