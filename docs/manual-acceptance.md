@@ -337,7 +337,7 @@ section.
 
 ## Linux: `.rpm`
 
-A pre-release has no `.rpm` (an RPM version allows no `-`, so `0.12.0-rc.9` cannot be bundled). Run this
+A pre-release (rc) has no `.rpm` (an RPM version allows no `-`, so `0.12.0-rc009` cannot be bundled). Run this
 section on the stable release once it is published.
 
 ### L-R-1 Install
