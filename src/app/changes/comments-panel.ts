@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from "@angular/core";
-import { paneLabel } from "../core/herdr";
+import { rowName } from "../core/herdr";
 import type { LineComment } from "../core/ui-state";
 import { commentLocation } from "./comment-prompt";
 import { LineComments } from "./line-comments";
@@ -183,8 +183,8 @@ export class CommentsPanel {
     return commentLocation(c);
   }
 
-  protected label(pane: Parameters<typeof paneLabel>[0]): string {
-    return `${pane.agent ?? "agent"} · ${paneLabel(pane)}`;
+  protected label(pane: Parameters<typeof rowName>[0]): string {
+    return `${pane.agent ?? "agent"} · ${rowName(pane)}`;
   }
 
   protected save(c: LineComment, text: string): void {
