@@ -83,7 +83,8 @@ impl Env {
         let started = Instant::now();
         let mut child = cmd.spawn().unwrap();
         let mut stdin = child.stdin.take().unwrap();
-        stdin.write_all(payload.as_bytes()).unwrap();
+        // The hook may exit before it has read its stdin (EPIPE); it reads only the first value.
+        let _ = stdin.write_all(payload.as_bytes());
         let writer = thread::spawn(move || {
             thread::sleep(open_for);
             drop(stdin);
