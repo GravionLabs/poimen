@@ -5,6 +5,34 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.12.0] — 2026-11-08
+
+### Bug Fixes
+- **release**: One version for the app and the poimen-* crates, label the status bar versions (#477) (#479)
+- **terminal**: Tell xterm.js a Windows emulated stream is ConPTY (#455) (#478)
+- **server**: Create the Windows ConPTY in pass-through mode (#455) (#484)
+- **agents**: Hooks read the payload without waiting for EOF and log failed reports (#485) (#494)
+- **agents**: Retry the transcript watch of a new session after /clear (#486) (#495)
+- **panel**: Name Claude Code and GitHub Copilot CLI in the Flow and Output empty states (#496)
+- **build**: Raise the initial bundle warning budget to 1.6 MB (#497) (#498)
+- **terminal**: Let xterm.js handle the wheel on an emulated stream (#503)
+- **release**: Bundle no rpm for a pre-release on Linux (#505) (#506)
+- **templates**: Add a default space template for directories no template matches (#524) (#525)
+- **server**: Ignore a broken pipe in the hook test helper (#527) (#528)
+
+
+### Documentation
+- **adr**: Poimen console with herdr scope next to the app (#172) (#507)
+
+
+### Features
+- **deliver**: Deliver panel with live progress of running deliver loops (#439) (#475)
+- **deliver**: Watch deliver loop status files (#439)
+- **deliver**: Deliver panel with live progress of deliver loops (#439)
+- **release**: SHA256SUMS and build provenance for the installers (#522) (#523)
+- **release**: SHA256SUMS and build provenance for the installers (#522)
+
+
 ## [0.11.0] — 2026-11-06
 
 ### Bug Fixes
@@ -18,6 +46,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - Manual acceptance checklist per OS and package (#461)
 - **site**: Screenshot of the Flow tab (#264) (#470)
+- Update CHANGELOG.md for v0.11.0 [skip ci]
 
 
 ### Features
