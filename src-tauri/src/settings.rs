@@ -688,8 +688,13 @@ pub fn parse_space_templates(
             },
         };
         if dir.is_none() && remote.is_none() {
-            warnings.push(format!("{at}.match needs dir or remote; ignored"));
-            continue;
+            // No `match`: the default template, used when no other template matches.
+            if out.iter().any(|t| t.dir.is_none() && t.remote.is_none()) {
+                warnings.push(format!(
+                    "{at}: a default template (no match) exists already; ignored"
+                ));
+                continue;
+            }
         }
         let Some(agent) = text(obj.get("agent")) else {
             warnings.push(format!("{at}.agent must be a non-empty string; ignored"));
@@ -1767,12 +1772,18 @@ mod tests {
             {"name":"badlayout","match":{"dir":"/x"},"agent":"claude","layout":{"panes":[]}},
             "text"]}"#,
         );
-        assert_eq!(s.space_templates.len(), 1);
+        // `nodir` has no `match`: it is the default template.
+        assert_eq!(s.space_templates.len(), 2);
         let t = &s.space_templates[0];
         assert_eq!((t.name.as_str(), t.dir.as_deref()), ("a", Some("~/src/a")));
+        let d = &s.space_templates[1];
+        assert_eq!(
+            (d.name.as_str(), d.dir.is_none(), d.remote.is_none()),
+            ("nodir", true, true)
+        );
         assert_eq!(t.model.as_deref(), Some("opus"));
         assert_eq!(t.layout.as_ref().unwrap().panes[0].name, "main");
-        assert_eq!(s.warnings.len(), 8, "{:?}", s.warnings);
+        assert_eq!(s.warnings.len(), 7, "{:?}", s.warnings);
         assert!(s.warnings[0].contains("duplicate"));
         assert_eq!(rows("{\"spaceTemplates\":1}").space_templates.len(), 0);
         assert!(resolve(None, none).space_templates.is_empty());
@@ -1791,7 +1802,9 @@ mod tests {
             {"name":"notobj","match":{"remote":"github"},"agent":"claude"},
             {"name":"empty","match":{},"agent":"claude"}]}"#,
         );
-        assert_eq!(s.space_templates.len(), 2, "{:?}", s.warnings);
+        // `empty` (`match: {}`) is the default template.
+        assert_eq!(s.space_templates.len(), 3, "{:?}", s.warnings);
+        assert_eq!(s.space_templates[2].name, "empty");
         let (gh, az) = (&s.space_templates[0], &s.space_templates[1]);
         assert_eq!(gh.dir, None);
         assert_eq!(
@@ -1808,9 +1821,21 @@ mod tests {
                 project: "FLEX Business".into()
             })
         );
-        assert_eq!(s.warnings.len(), 5, "{:?}", s.warnings);
+        assert_eq!(s.warnings.len(), 4, "{:?}", s.warnings);
         assert!(s.warnings[0].contains("owner"));
-        assert!(s.warnings[4].contains("needs dir or remote"));
+    }
+
+    #[test]
+    fn only_one_default_space_template_is_kept() {
+        let s = rows(
+            r#"{"spaceTemplates":[
+            {"name":"one","agent":"claude"},
+            {"name":"two","match":{},"agent":"copilot"}]}"#,
+        );
+        assert_eq!(s.space_templates.len(), 1);
+        assert_eq!(s.space_templates[0].name, "one");
+        assert_eq!(s.warnings.len(), 1, "{:?}", s.warnings);
+        assert!(s.warnings[0].contains("default template"));
     }
 
     #[test]
@@ -2501,7 +2526,10 @@ mod tests {
                 .contains("\"spaceTemplates\"")
         );
         for bad in [
-            serde_json::json!([{"name": "a", "match": {}, "agent": "claude"}]),
+            serde_json::json!([
+                {"name": "a", "agent": "claude"},
+                {"name": "b", "match": {}, "agent": "claude"}
+            ]),
             serde_json::json!([{"name": "a", "match": {"dir": "rel"}, "agent": "claude"}]),
             serde_json::json!([{"name": "a", "match": {"dir": "~/a"}}]),
             serde_json::json!([

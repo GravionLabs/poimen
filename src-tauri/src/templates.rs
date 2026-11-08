@@ -63,7 +63,8 @@ fn contains(prefix: &str, dir: &str) -> bool {
 /// The best template for `dir` and the parsed `origin` of its repository (`None` without a
 /// repository or an `origin`; such a directory matches by `dir` only). A template with both fields
 /// needs both to match. Precedence: both > `remote` only > `dir` only, then the longest `dir`
-/// (path-segment prefix). Case-insensitive paths on Windows and macOS.
+/// (path-segment prefix). A template without `dir` and `remote` is the default: it matches any
+/// directory, below every other kind. Case-insensitive paths on Windows and macOS.
 pub fn resolve<'a>(
     dir: &str,
     remote: Option<&Remote>,
@@ -102,7 +103,7 @@ fn resolve_with<'a>(
             {
                 return None;
             }
-            // both (3) > remote only (2) > dir only (1)
+            // both (3) > remote only (2) > dir only (1) > default, no match (0)
             let tier = u8::from(t.dir.is_some()) + 2 * u8::from(t.remote.is_some());
             Some(((tier, dir_len), t))
         })
@@ -216,6 +217,36 @@ mod tests {
             Some("work")
         );
         assert_eq!(pick_remote("/x", Some(gh("other")), &ts), None);
+    }
+
+    fn default_template(name: &str) -> Template {
+        Template {
+            dir: None,
+            ..t(name, "/unused")
+        }
+    }
+
+    #[test]
+    fn the_default_template_applies_only_when_nothing_else_matches() {
+        let ts = [
+            default_template("default"),
+            t("src", "~/src"),
+            r("work", None, gh("a")),
+        ];
+        assert_eq!(pick("/elsewhere", &ts, false), Some("default"));
+        assert_eq!(pick("/home/jk/src/x", &ts, false), Some("src"));
+        assert_eq!(pick_remote("/elsewhere", Some(gh("a")), &ts), Some("work"));
+        assert_eq!(
+            pick_remote("/elsewhere", Some(gh("b")), &ts),
+            Some("default")
+        );
+        // A template for a parent directory beats the default, however deep the directory is.
+        assert_eq!(pick("/home/jk/src/a/b/c", &ts, false), Some("src"));
+    }
+
+    #[test]
+    fn without_a_default_template_nothing_matches() {
+        assert_eq!(pick("/elsewhere", &[t("src", "~/src")], false), None);
     }
 
     #[test]

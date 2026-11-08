@@ -106,7 +106,6 @@ export function isValidDir(dir: string): boolean {
 
 export interface TemplateErrors {
   name?: string;
-  match?: string;
   dir?: string;
   remote?: string;
   agent?: string;
@@ -140,7 +139,6 @@ export function templateErrors(
           : "The organization and the project are required";
     }
   }
-  if (!dir && !draft.remote) errors.match = "Set a directory, a remote, or both";
   const agent = draft.agent.trim();
   if (!agent) errors.agent = "Choose an agent";
   else if (!harnessIds.includes(agent)) errors.agent = `Unknown harness "${agent}"`;
@@ -154,11 +152,11 @@ export function hasErrors(errors: TemplateErrors): boolean {
   return Object.keys(errors).length > 0;
 }
 
-/** The match of a template in words: `~/src`, `github acme`, or both joined by " + ". */
+/** The match of a template in words: `~/src`, `github acme`, both joined by " + ", or the default. */
 export function matchLabel(t: SpaceTemplate): string {
   const parts: string[] = [];
   if (t.dir) parts.push(t.dir);
   if (t.remote?.provider === "github") parts.push(`github.com/${t.remote.owner}`);
   else if (t.remote) parts.push(`azure ${t.remote.organization}/${t.remote.project}`);
-  return parts.join(" + ");
+  return parts.length ? parts.join(" + ") : "default (all other directories)";
 }
