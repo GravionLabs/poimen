@@ -65,6 +65,18 @@ export interface LoopRelease {
   testIssue: { number: number; url: string } | null;
 }
 
+/** One progress event of a run, as the Events tab of the bottom panel lists it. */
+export interface RunEventRow {
+  seq: number | null;
+  ts: string | null;
+  type: string;
+  tone: Tone;
+  issue: number | null;
+  step: string | null;
+  result: string | null;
+  prUrl: string | null;
+}
+
 /** The parts of a run state the panel shows (unknown fields are ignored). */
 export interface DeliverStatus {
   run: string;
@@ -75,6 +87,10 @@ export interface DeliverStatus {
   milestone: { key: string; title: string; url: string } | null;
   source: RunSource | null;
   tone: Tone;
+  /** The poimen terminal the run lives in (`run.started` `host`), `null` when unknown. */
+  poimenTerminal: string | null;
+  /** The events of the run in file order; empty for a status file. */
+  events: RunEventRow[];
   closed: number;
   total: number;
   current: LoopCurrent | null;
@@ -199,6 +215,28 @@ function delivered(value: unknown): LoopDelivered[] | null {
   return out;
 }
 
+const optString = (v: unknown): string | null => (isString(v) ? v : null);
+
+/** Tolerant: a malformed row is dropped, the rest of the run still shows. */
+function eventRows(value: unknown): RunEventRow[] {
+  if (!Array.isArray(value)) return [];
+  const rows: RunEventRow[] = [];
+  for (const v of value) {
+    if (!isObject(v) || !isString(v["type"])) continue;
+    rows.push({
+      seq: isCount(v["seq"]) ? v["seq"] : null,
+      ts: optString(v["ts"]),
+      type: v["type"],
+      tone: isTone(v["tone"]) ? v["tone"] : "neutral",
+      issue: isCount(v["issue"]) ? v["issue"] : null,
+      step: optString(v["step"]),
+      result: optString(v["result"]),
+      prUrl: optString(v["prUrl"]),
+    });
+  }
+  return rows;
+}
+
 /** Validates the fields the panel uses; unknown fields are ignored, a wrong known field fails. */
 export function parseStatus(value: unknown): DeliverStatus | string {
   if (!isObject(value)) return "the status is not an object";
@@ -247,6 +285,8 @@ export function parseStatus(value: unknown): DeliverStatus | string {
     tone: isTone(value["tone"])
       ? value["tone"]
       : legacyTone(result as LoopResult, blocked.length + paused.length + needsYou.length > 0),
+    poimenTerminal: isObject(value["host"]) ? optString(value["host"]["poimenTerminal"]) : null,
+    events: eventRows(value["events"]),
     closed: value["closed"],
     total: value["total"],
     current: cur,

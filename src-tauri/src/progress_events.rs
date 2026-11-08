@@ -114,6 +114,33 @@ pub struct Run {
     pub source: Option<String>,
     /// `tone` of the run: of `run.finished` once it ended, else of the last event.
     pub tone: String,
+    /// Where the run lives (`run.started` `host`): the poimen terminal and the herdr pane.
+    pub host: Host,
+    /// One row per event of a known type, in file order.
+    pub events: Vec<RunEvent>,
+}
+
+/// The `host` of `run.started`; the ids that tie a run to a terminal.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Host {
+    pub poimen_terminal: Option<String>,
+    pub herdr_pane: Option<String>,
+}
+
+/// One progress event as the Events tab shows it (harness-neutral).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunEvent {
+    pub seq: Option<i64>,
+    pub ts: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub tone: String,
+    pub issue: Option<u64>,
+    pub step: Option<String>,
+    pub result: Option<String>,
+    pub pr_url: Option<String>,
 }
 
 /// Insertion-ordered map by issue number; an existing key keeps its place, like an ordered
@@ -251,6 +278,8 @@ pub struct Reducer {
     urls: Ordered<String>,
     prs: Ordered<String>,
     tone: String,
+    host: Host,
+    rows: Vec<RunEvent>,
 }
 
 impl Default for Reducer {
@@ -289,6 +318,8 @@ impl Reducer {
             urls: Ordered(Vec::new()),
             prs: Ordered(Vec::new()),
             tone: "neutral".into(),
+            host: Host::default(),
+            rows: Vec::new(),
         }
     }
 
@@ -416,6 +447,26 @@ impl Reducer {
         }
         let is_current = nr.is_some() && self.current.as_ref().map(|c| c.number) == nr;
         self.tone = tone.to_owned();
+        let step = e.get("step").filter(|s| s.is_object()).and_then(|s| {
+            let name = s.get("name").and_then(text)?;
+            Some(match s.get("text").and_then(text) {
+                Some(t) => format!("{name}: {t}"),
+                None => name,
+            })
+        });
+        let result = ["result", "outcome"]
+            .iter()
+            .find_map(|k| e.get(*k).and_then(text));
+        self.rows.push(RunEvent {
+            seq: e.get("seq").and_then(int),
+            ts: ts.map(str::to_owned),
+            kind: ty.to_owned(),
+            tone: tone.to_owned(),
+            issue: nr,
+            step,
+            result,
+            pr_url: pr_url.clone(),
+        });
 
         match ty {
             "run.started" => {
@@ -428,6 +479,12 @@ impl Reducer {
                     if let Some(s) = e.get(key).and_then(text) {
                         *slot = Some(s);
                     }
+                }
+                if let Some(h) = e.get("host").filter(|h| h.is_object()) {
+                    self.host = Host {
+                        poimen_terminal: h.get("poimenTerminal").and_then(text),
+                        herdr_pane: h.get("herdrPane").and_then(text),
+                    };
                 }
                 if let Some(m) = e.get("milestone").filter(|m| m.is_object()) {
                     let field = |k: &str| m.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
@@ -637,6 +694,8 @@ impl Reducer {
             state,
             source: self.source.clone(),
             tone,
+            host: self.host.clone(),
+            events: self.rows.clone(),
         })
     }
 }
@@ -720,6 +779,27 @@ mod tests {
         assert_eq!(running.state.result, "running");
         let abandoned = reduce(&fixture("abandoned", "jsonl"), now(), &|_| true).unwrap();
         assert_eq!(abandoned.tone, "neutral");
+    }
+
+    #[test]
+    fn rows_and_host_come_from_the_events() {
+        let text = r#"{"v":1,"seq":1,"ts":"2026-11-07T10:00:00Z","run":"r","type":"run.started","tone":"neutral","host":{"poimenTerminal":"t7","herdrPane":"w1:p2"}}
+{"v":1,"seq":2,"ts":"2026-11-07T10:01:00Z","run":"r","type":"step.finished","tone":"info","issue":{"number":5,"title":"T","url":"u"},"step":{"name":"implement","text":"green"},"prUrl":"https://github.com/o/r/pull/9"}
+{"v":1,"seq":3,"ts":"2026-11-07T10:02:00Z","run":"r","type":"something.new","tone":"danger"}
+{"v":1,"seq":4,"ts":"2026-11-07T10:03:00Z","run":"r","type":"attention","tone":"warning","issue":{"number":5}}"#;
+        let run = reduce(text, now(), &|_| true).unwrap();
+        assert_eq!(run.host.poimen_terminal.as_deref(), Some("t7"));
+        assert_eq!(run.host.herdr_pane.as_deref(), Some("w1:p2"));
+        let kinds: Vec<&str> = run.events.iter().map(|r| r.kind.as_str()).collect();
+        assert_eq!(kinds, ["run.started", "step.finished", "attention"]);
+        assert_eq!(run.events[1].step.as_deref(), Some("implement: green"));
+        assert_eq!(run.events[1].issue, Some(5));
+        assert_eq!(run.events[1].tone, "info");
+        assert_eq!(
+            run.events[1].pr_url.as_deref(),
+            Some("https://github.com/o/r/pull/9")
+        );
+        assert_eq!(run.events[2].tone, "warning");
     }
 
     #[test]
