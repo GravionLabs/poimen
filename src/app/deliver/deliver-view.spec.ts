@@ -334,6 +334,7 @@ describe("Deliver service", () => {
         "/r",
         set("running", {
           release: { reviewRound: 1, prUrl: "https://github.com/o/n/pull/9" },
+          closed: 9,
           result: "done",
         }),
       );
