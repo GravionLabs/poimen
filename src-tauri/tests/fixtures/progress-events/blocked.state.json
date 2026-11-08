@@ -1,0 +1,34 @@
+{
+  "run": "20261107-100000-bloc",
+  "harness": "claude",
+  "model": "sonnet",
+  "repository": "GravionLabs/skills",
+  "milestone": {
+    "key": "M5",
+    "title": "M5 Events",
+    "url": "https://github.com/GravionLabs/skills/milestone/5"
+  },
+  "closed": 4,
+  "total": 9,
+  "current": null,
+  "delivered": [],
+  "blocked": [
+    {
+      "number": 371,
+      "url": "https://github.com/GravionLabs/skills/issues/371",
+      "reason": "CI red after 2 fix rounds"
+    }
+  ],
+  "paused": [],
+  "needsYou": [],
+  "release": {
+    "reviewRound": null,
+    "prUrl": null,
+    "rcUrl": null,
+    "rcVersion": null,
+    "testIssue": null
+  },
+  "startedAt": "2026-11-07T10:00:00.000Z",
+  "updatedAt": "2026-11-07T10:45:05.000Z",
+  "result": "blocked"
+}

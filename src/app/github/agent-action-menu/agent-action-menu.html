@@ -1,0 +1,28 @@
+@let m = actions.menu();
+@if (m) {
+  <ul
+    class="menu"
+    role="menu"
+    aria-label="Agent actions"
+    data-testid="agent-action-menu"
+    [style.left.px]="m.x"
+    [style.top.px]="m.y"
+  >
+    @for (o of offered(); track o.action.id) {
+      <li role="none">
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="menu-action"
+          [disabled]="!o.enabled"
+          [attr.title]="o.reason"
+          (click)="actions.request(o.action, m.targets, $event.shiftKey)"
+        >
+          {{ o.action.label }}
+        </button>
+      </li>
+    } @empty {
+      <li class="hint">No agent actions.</li>
+    }
+  </ul>
+}

@@ -10,6 +10,7 @@
         @if (info.notes) {
           <pre class="message">{{ info.notes }}</pre>
         }
+        <p class="restart-note" data-testid="restart-note">{{ restartNote }}</p>
         <button type="button" class="install" (click)="installUpdate.emit()">
           Install and restart
         </button>
@@ -75,6 +76,27 @@
   }
   @if (notice(); as text) {
     <span class="item version warn notice" [title]="text">{{ text }}</span>
+  }
+  @if (serverNotice(); as text) {
+    <span class="item version warn server-notice" data-testid="server-notice" [title]="text">{{
+      text
+    }}</span>
+    <button
+      type="button"
+      class="item update-button"
+      data-testid="restart-server"
+      (click)="restartServer.emit()"
+    >
+      Restart server
+    </button>
+    <button
+      type="button"
+      class="item update-button"
+      data-testid="later-server"
+      (click)="laterServer.emit()"
+    >
+      Later
+    </button>
   }
   <span class="spacer"></span>
   @if (paneId(); as id) {

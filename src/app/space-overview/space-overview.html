@@ -1,0 +1,164 @@
+@if (node(); as n) {
+  <header class="head">
+    <h2>Space: {{ n.workspace.label }}</h2>
+    <div class="space-actions" role="group" aria-label="Space actions">
+      <button type="button" class="act-new" (click)="newPane()">New pane</button>
+      <button
+        type="button"
+        class="act-explorer"
+        [disabled]="!directory()"
+        (click)="explorerRequested.emit(directory()!)"
+      >
+        Open in explorer
+      </button>
+      <button type="button" class="act-pr" [disabled]="!pullUrl()" (click)="openPull()">
+        Open PR
+      </button>
+      <button type="button" class="act-delete" (click)="deleteRequested.emit(n.workspace.space_id)">
+        Delete space
+      </button>
+    </div>
+  </header>
+  @if (rows().length === 0) {
+    <p class="empty">This space has no panes.</p>
+  } @else {
+    <table aria-label="Panes">
+      <thead>
+        <tr>
+          <th>Pane</th>
+          <th>Kind</th>
+          <th>Session</th>
+          <th>Last activity</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of rows(); track row.paneId) {
+          <tr class="pane">
+            <td class="label">{{ row.label }}</td>
+            <td class="kind">{{ row.kind === "agent" ? "Agent " + row.agent : "Terminal" }}</td>
+            <td class="status">
+              <span class="dot status-{{ row.status }}"></span>{{ row.status }}
+            </td>
+            <td class="activity">{{ activity(row.activityAt) }}</td>
+            <td class="actions">
+              <button type="button" class="act-focus" (click)="focus(row.paneId)">Focus</button>
+              @if (row.kind === "agent") {
+                <button type="button" class="act-restart" (click)="restart(row.paneId)">
+                  Restart
+                </button>
+                <button type="button" class="act-flow" (click)="flow(row.paneId)">Flow</button>
+                <button type="button" class="act-output" (click)="outputRequested.emit(row.paneId)">
+                  Output
+                </button>
+              }
+              <button type="button" class="act-rename" (click)="rename(row.paneId)">Rename</button>
+              <button type="button" class="act-close" (click)="close(row.paneId)">Close</button>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+  <section id="config" class="config" aria-labelledby="config-title">
+    <h3 id="config-title">Configuration</h3>
+    <div class="field">
+      <label for="cfg-name">Name</label>
+      <input
+        id="cfg-name"
+        class="cfg-name"
+        type="text"
+        autocomplete="off"
+        [value]="name() ?? n.workspace.label"
+        (input)="setName($event)"
+      />
+      <button type="button" class="cfg-rename" (click)="renameSpace()">Rename</button>
+      @if (nameError(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+    </div>
+    <div class="field">
+      <span class="label">Directory</span>
+      <code class="cfg-dir">{{ directory() ?? "none" }}</code>
+    </div>
+    @if (directory()) {
+      <p class="hint">
+        Project file <code>.poimen/config.json</code>{{ fileExists() ? "" : " (not created yet)" }}.
+        Other keys of the file are kept.
+      </p>
+      @if (fileError(); as message) {
+        <p class="error cfg-file-error" role="alert">{{ message }}</p>
+      }
+      @if (errorOf("file"); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+      <div class="field">
+        <label for="cfg-setup">Setup command</label>
+        <input
+          id="cfg-setup"
+          class="cfg-setup"
+          type="text"
+          autocomplete="off"
+          [value]="form().setup"
+          (input)="setField('setup', $event)"
+        />
+        @if (errorOf("setup"); as message) {
+          <p class="error" role="alert">{{ message }}</p>
+        }
+      </div>
+      <div class="field">
+        <label for="cfg-teardown">Teardown command</label>
+        <input
+          id="cfg-teardown"
+          class="cfg-teardown"
+          type="text"
+          autocomplete="off"
+          [value]="form().teardown"
+          (input)="setField('teardown', $event)"
+        />
+        @if (errorOf("teardown"); as message) {
+          <p class="error" role="alert">{{ message }}</p>
+        }
+      </div>
+      <div class="field">
+        <label for="cfg-layout">Layout (panes, JSON)</label>
+        <textarea
+          id="cfg-layout"
+          class="cfg-layout"
+          rows="8"
+          spellcheck="false"
+          [value]="form().layout"
+          (input)="setField('layout', $event)"
+        ></textarea>
+        @if (errorOf("layout"); as message) {
+          <p class="error" role="alert">{{ message }}</p>
+        }
+      </div>
+      @if (trust(); as request) {
+        <div class="trust" role="alert">
+          <p>The saved file would run these commands. Trust them for this repository?</p>
+          <ul>
+            @for (c of request.commands; track $index) {
+              <li>
+                <span>{{ c.what }}</span
+                >: <code>{{ c.command }}</code>
+              </li>
+            }
+          </ul>
+          <button type="button" class="cfg-trust" (click)="save(true)">Trust and save</button>
+          <button type="button" class="cfg-trust-cancel" (click)="cancelTrust()">Cancel</button>
+        </div>
+      }
+      <div class="field">
+        <button type="button" class="cfg-save" [disabled]="!!fileError()" (click)="save()">
+          Save
+        </button>
+        @if (status(); as message) {
+          <span class="status-note" role="status">{{ message }}</span>
+        }
+      </div>
+    }
+  </section>
+} @else {
+  <p class="empty">This space no longer exists.</p>
+}

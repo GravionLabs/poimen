@@ -6,11 +6,17 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ACTIVITY_VIEWS } from "../activity-bar/activity-bar";
 import { POIMEN_COMMANDS } from "../core/command-palette";
 import { EditorTabs, GITHUB_TAB, tabKind } from "../core/editor-tabs";
-import { UI_STORAGE } from "../core/ui-state";
+import { UI_STORAGE, UiState, type GithubPage } from "../core/ui-state";
 import { tauri } from "../core/tauri.mock";
+import { AgentActionMenu } from "./agent-action-menu/agent-action-menu";
 import { GithubView } from "./github-view";
 import { IssuesSection } from "./issues-section";
+import { IssueDetailPane } from "./issue-detail/issue-detail";
+import { PullDetailPane } from "./pull-detail/pull-detail";
+import { GithubIssues } from "./issues";
 import { MilestonesSection } from "./milestones-section";
+import { InboxSection } from "./inbox-section";
+import { deriveInbox, inboxCount } from "./inbox";
 import {
   GithubPulls,
   ageText,
@@ -18,7 +24,9 @@ import {
   filterPulls,
   flattenPulls,
   keyRange,
-  reviewText,
+  reviewBadge,
+  checkBadges,
+  groupPulls,
   worktreeOf,
   type Pull,
   type PullsResult,
@@ -85,8 +93,15 @@ const RESULT: PullsResult = {
   ],
 };
 
-async function render(result: PullsResult = RESULT) {
+async function render(result: PullsResult = RESULT, page: GithubPage | null = "pulls") {
   tauri.answer("github_pulls", () => result);
+  TestBed.overrideComponent(AgentActionMenu, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/agent-action-menu/agent-action-menu.html", "utf8"),
+    },
+  });
   TestBed.overrideComponent(GithubView, {
     set: {
       templateUrl: undefined,
@@ -101,6 +116,13 @@ async function render(result: PullsResult = RESULT) {
       template: readFileSync("src/app/github/issues-section.html", "utf8"),
     },
   });
+  TestBed.overrideComponent(InboxSection, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/inbox-section.html", "utf8"),
+    },
+  });
   TestBed.overrideComponent(MilestonesSection, {
     set: {
       templateUrl: undefined,
@@ -108,13 +130,95 @@ async function render(result: PullsResult = RESULT) {
       template: readFileSync("src/app/github/milestones-section.html", "utf8"),
     },
   });
+  TestBed.overrideComponent(PullDetailPane, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/pull-detail/pull-detail.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(IssueDetailPane, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/issue-detail/issue-detail.html", "utf8"),
+    },
+  });
+  if (page) TestBed.inject(UiState).selectGithubPage(page);
   const fixture = TestBed.createComponent(GithubView);
   await fixture.whenStable();
   fixture.detectChanges();
   return fixture;
 }
 
-const rows = (el: HTMLElement) => [...el.querySelectorAll("tbody tr")].map((r) => r.textContent!);
+const rows = (el: HTMLElement) =>
+  [...el.querySelectorAll("tbody tr.row")].map((r) => r.textContent!);
+
+describe("deriveInbox", () => {
+  const mk = (n: number, over: Partial<Pull>) => pull(n, over);
+  const pulls: PullsResult = {
+    viewer: "JK",
+    repos: [
+      {
+        root: "/a",
+        repo: "o/a",
+        status: "ok",
+        pulls: [
+          mk(1, { author: "x", reviewRequests: ["jk"] }),
+          mk(2, { checks: { state: "failing", passed: 0, failed: 1, pending: 0 } }),
+          mk(3, { reviewDecision: "CHANGES_REQUESTED" }),
+          mk(4, { checks: { state: "passing", passed: 1, failed: 0, pending: 0 } }),
+          mk(5, { author: "x", checks: { state: "failing", passed: 0, failed: 1, pending: 0 } }),
+        ],
+      },
+      { root: "/b", repo: "o/b", status: "error", error: { kind: "offline" } },
+    ],
+  };
+  const issue = (number: number, assignees: string[], state: "OPEN" | "CLOSED" = "OPEN") => ({
+    number,
+    title: `i${number}`,
+    url: "u",
+    state,
+    labels: [],
+    assignees,
+    milestone: null,
+    parent: null,
+    subTotal: 0,
+    subCompleted: 0,
+    prs: [],
+  });
+  const issues = [
+    {
+      root: "/a",
+      repo: "o/a",
+      status: "ok" as const,
+      truncated: false,
+      issues: [issue(7, ["jk"]), issue(8, ["x"]), issue(9, ["jk"], "CLOSED")],
+    },
+  ];
+
+  it("collects the three sections", () => {
+    const s = deriveInbox(pulls, issues);
+    expect(s.map((x) => [x.id, x.entries.map((e) => e.number)])).toEqual([
+      ["review", [1]],
+      ["mine", [2, 3]],
+      ["issues", [7]],
+    ]);
+    expect(s[1].entries.map((e) => e.reason)).toEqual(["Checks failed", "Changes requested"]);
+    expect(inboxCount(s)).toBe(4);
+  });
+
+  it("hides empty sections", () => {
+    const s = deriveInbox(pulls, []);
+    expect(s.map((x) => x.id)).toEqual(["review", "mine"]);
+  });
+
+  it("is empty without a viewer or without data", () => {
+    expect(deriveInbox({ ...pulls, viewer: null }, issues)).toEqual([]);
+    expect(deriveInbox(null, null)).toEqual([]);
+    expect(inboxCount([])).toBe(0);
+  });
+});
 
 describe("pull request helpers", () => {
   const all = flattenPulls(RESULT.repos);
@@ -147,11 +251,51 @@ describe("pull request helpers", () => {
     expect(filterPulls(all, { ...f, repo: null, text: "nothing" })).toEqual([]);
   });
 
-  it("describes review state, errors and age", () => {
-    expect(reviewText(pull(1, { isDraft: true }))).toBe("Draft");
-    expect(reviewText(pull(1, { reviewDecision: "CHANGES_REQUESTED" }))).toBe("Changes requested");
-    expect(reviewText(pull(1, { reviewRequests: ["x"] }))).toBe("Requested");
-    expect(reviewText(pull(1))).toBe("None");
+  it("maps the review decision to a badge, nothing for none or a draft", () => {
+    expect(reviewBadge(pull(1, { reviewDecision: "APPROVED" }))).toEqual({
+      label: "Approved",
+      tone: "success",
+    });
+    expect(reviewBadge(pull(1, { reviewDecision: "CHANGES_REQUESTED" }))).toEqual({
+      label: "Changes requested",
+      tone: "danger",
+    });
+    expect(reviewBadge(pull(1, { reviewDecision: "REVIEW_REQUIRED" }))).toEqual({
+      label: "Review required",
+      tone: "warning",
+    });
+    expect(reviewBadge(pull(1))).toBeNull();
+    expect(reviewBadge(pull(1, { reviewRequests: ["x"] }))).toBeNull();
+    expect(reviewBadge(pull(1, { isDraft: true, reviewDecision: "APPROVED" }))).toBeNull();
+  });
+
+  it("maps checks to icons with counts, leaving out empty states", () => {
+    const c = (
+      state: "passing" | "failing" | "pending" | "none",
+      p: number,
+      f: number,
+      n: number,
+    ) => checkBadges({ state, passed: p, failed: f, pending: n }).map((b) => [b.kind, b.count]);
+    expect(c("failing", 8, 0, 2)).toEqual([
+      ["passed", 8],
+      ["pending", 2],
+    ]);
+    expect(c("failing", 3, 1, 0)).toEqual([
+      ["passed", 3],
+      ["failed", 1],
+    ]);
+    expect(c("none", 0, 0, 0)).toEqual([]);
+  });
+
+  it("groups rows by repository in first-seen order", () => {
+    expect(groupPulls(all).map((g) => [g.repo, g.rows.length])).toEqual([
+      ["o/n", 3],
+      ["o/k", 1],
+    ]);
+    expect(groupPulls([])).toEqual([]);
+  });
+
+  it("describes errors and age", () => {
     expect(errorText({ kind: "not-logged-in" })).toContain("gh auth login");
     const now = Date.parse("2026-11-04T00:00:00Z");
     expect(ageText("2026-11-03T22:00:00Z", now)).toBe("2h");
@@ -202,11 +346,15 @@ describe("GithubView", () => {
     pulls.scope.set("mine");
     fixture.detectChanges();
     const text = rows(fixture.nativeElement)[0];
-    expect(text).toContain("o/n");
     expect(text).toContain("#2");
     expect(text).toContain("Add view");
     expect(text).toContain("jk");
-    expect(text).toContain("3 / 1 / 0");
+    expect(text).not.toContain("3 / 1 / 0");
+    const checks = fixture.nativeElement.querySelector("tr.row [data-testid=checks]");
+    expect(
+      [...checks.querySelectorAll(".check")].map((c: Element) => c.getAttribute("aria-label")),
+    ).toEqual(["3 passed", "1 failed"]);
+    expect(checks.getAttribute("title")).toContain("3 passed");
     expect(text).toContain("Approved");
     expect(text).toContain("+10");
     expect(text).toContain("-2");
@@ -230,7 +378,39 @@ describe("GithubView", () => {
     input.dispatchEvent(new Event("input"));
     fixture.detectChanges();
     expect(rows(el)).toEqual([expect.stringContaining("Draft idea")]);
-    expect(rows(el)[0]).toContain("Draft");
+    expect(el.querySelector("[data-testid=draft]")!.textContent).toBe("Draft");
+  });
+
+  it("groups pull requests under a header per repository instead of a column", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    TestBed.inject(GithubPulls).scope.set("all");
+    fixture.detectChanges();
+    expect(
+      [...el.querySelectorAll("tr.group")].map((g) => g.textContent!.replace(/\s+/g, " ").trim()),
+    ).toEqual(["o/n 3", "o/k 1"]);
+    expect([...el.querySelectorAll("thead th")].map((h) => h.textContent)).not.toContain(
+      "Repository",
+    );
+    expect(el.querySelector("[data-testid=review]")!.textContent).toBe("Approved");
+  });
+
+  it("hides repositories without matches unless Show empty repositories is on", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    const groups = () => [...el.querySelectorAll("tr.group")].length;
+    fixture.detectChanges();
+    expect(groups()).toBe(1);
+    const toggle = el.querySelector<HTMLInputElement>("[data-testid=show-empty]")!;
+    expect(toggle.checked).toBe(false);
+    toggle.click();
+    fixture.detectChanges();
+    expect(TestBed.inject(UiState).githubShowEmpty()).toBe(true);
+    expect(groups()).toBe(2);
+    expect(el.querySelector("tr.empty-group")!.textContent).toContain("No pull requests match");
+    toggle.click();
+    fixture.detectChanges();
+    expect(groups()).toBe(1);
   });
 
   it("selects with the checkbox, with Shift for a range, and with the keyboard", async () => {
@@ -289,10 +469,10 @@ describe("GithubView", () => {
     const pulls = TestBed.inject(GithubPulls);
     pulls.scope.set("all");
     fixture.detectChanges();
-    const buttons = [...el.querySelectorAll<HTMLButtonElement>("tbody button")].filter((b) =>
-      b.textContent!.includes("Open in browser"),
-    );
-    expect(buttons[0].textContent).toContain("Open in browser");
+    const buttons = [
+      ...el.querySelectorAll<HTMLButtonElement>('tbody .icon-btn[title="Open in browser"]'),
+    ];
+    expect(buttons[0].title).toBe("Open in browser");
     expect(buttons[0].disabled).toBe(false);
     expect(buttons[3].disabled).toBe(true);
     buttons[0].click();
@@ -418,5 +598,235 @@ describe("pull request worktrees", () => {
     await fixture.whenStable();
     expect(tauri.calls("pr_worktree")[0]).toEqual({ repoDir: "/src/n", nr: 1, headRef: "b" });
     expect(tauri.calls("create_space")[0]).toMatchObject({ cwd: "/src/n-pr1" });
+  });
+});
+
+describe("GithubView sub-pages", () => {
+  const issueOf = (number: number, milestone: string | null) => ({
+    number,
+    title: `issue ${number}`,
+    url: `https://github.com/o/n/issues/${number}`,
+    state: "OPEN" as const,
+    labels: [],
+    assignees: [],
+    milestone,
+    parent: null,
+    subTotal: 0,
+    subCompleted: 0,
+    prs: [],
+  });
+  const ISSUES = [
+    {
+      root: "/src/n",
+      repo: "o/n",
+      status: "ok",
+      truncated: false,
+      issues: [issueOf(10, "1.2.0"), issueOf(11, null)],
+    },
+    {
+      root: "/src/k",
+      repo: "o/k",
+      status: "ok",
+      truncated: false,
+      issues: [issueOf(20, null)],
+    },
+  ];
+  const ms = (number: number, title: string) => ({
+    number,
+    title,
+    url: `https://github.com/o/n/milestone/${number}`,
+    dueOn: null,
+    open: 1,
+    closed: 0,
+    current: false,
+  });
+  const MILESTONES = [
+    { root: "/src/n", repo: "o/n", status: "ok", milestones: [ms(1, "1.2.0"), ms(2, "1.3.0")] },
+    { root: "/src/k", repo: "o/k", status: "ok", milestones: [ms(3, "2.0.0")] },
+  ];
+  let stored: Record<string, string>;
+
+  beforeEach(() => {
+    tauri.reset();
+    TestBed.resetTestingModule();
+    stored = {};
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: UI_STORAGE,
+          useValue: {
+            getItem: (k: string) => stored[k] ?? null,
+            setItem: (k: string, v: string) => (stored[k] = v),
+          },
+        },
+      ],
+    });
+    tauri.answer("github_issues", () => ISSUES);
+    tauri.answer("github_milestones", () => MILESTONES);
+  });
+  afterEach(() => TestBed.resetTestingModule());
+
+  const navAll = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>("nav button")];
+  const nav = (el: HTMLElement) => navAll(el).filter((b) => b.dataset["page"] !== "inbox");
+  const press = (b: HTMLElement, key: string) =>
+    b.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+
+  it("shows a count per page and marks the active one with aria-current", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(nav(el).map((b) => b.textContent!.replace(/\s+/g, " ").trim())).toEqual([
+      "Pull requests 1",
+      "Issues 3",
+      "Milestones 3",
+    ]);
+    expect(nav(el).map((b) => b.getAttribute("aria-current"))).toEqual(["page", null, null]);
+  });
+
+  it("renders only the selected page and moves with ArrowDown, ArrowUp and Enter", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector("app-github-issues")).toBeNull();
+    expect(el.querySelector("app-github-milestones")).toBeNull();
+    press(nav(el)[0], "ArrowDown");
+    fixture.detectChanges();
+    expect(nav(el)[1].getAttribute("aria-current")).toBe("page");
+    expect(el.querySelector("app-github-issues")).not.toBeNull();
+    expect(el.querySelector("table")).toBeNull();
+    press(nav(el)[1], "ArrowDown");
+    press(nav(el)[2], "ArrowDown");
+    fixture.detectChanges();
+    expect(nav(el)[2].getAttribute("aria-current")).toBe("page");
+    press(nav(el)[2], "ArrowUp");
+    fixture.detectChanges();
+    expect(nav(el)[1].getAttribute("aria-current")).toBe("page");
+    nav(el)[0].focus();
+    press(nav(el)[0], "Enter");
+    fixture.detectChanges();
+    expect(nav(el)[0].getAttribute("aria-current")).toBe("page");
+    expect(el.querySelector("table")).not.toBeNull();
+  });
+
+  it("keeps the selected page across a reopen", async () => {
+    const first = await render(RESULT, null);
+    nav(first.nativeElement)[2].click();
+    first.detectChanges();
+    expect(JSON.parse(stored["poimen.ui"] ?? Object.values(stored)[0]).githubPage).toBe(
+      "milestones",
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: UI_STORAGE,
+          useValue: { getItem: (k: string) => stored[k] ?? null, setItem: () => undefined },
+        },
+      ],
+    });
+    const second = await render(RESULT, null);
+    expect(nav(second.nativeElement)[2].getAttribute("aria-current")).toBe("page");
+    expect(second.nativeElement.querySelector("app-github-milestones")).not.toBeNull();
+  });
+
+  it("applies the shared repository filter to pull requests, issues and milestones", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    const select = el.querySelector<HTMLSelectElement>("aside select")!;
+    expect([...select.options].map((o) => o.value)).toEqual(["", "o/k", "o/m", "o/n"]);
+    expect(el.querySelectorAll(".toolbar select")).toHaveLength(0);
+    select.value = "o/k";
+    select.dispatchEvent(new Event("change"));
+    fixture.detectChanges();
+    expect(nav(el).map((b) => b.querySelector(".nav-count")!.textContent)).toEqual(["0", "1", "1"]);
+    nav(el)[1].click();
+    fixture.detectChanges();
+    expect(el.querySelectorAll("app-github-issues h3").length).toBe(1);
+    expect(el.querySelector("app-github-issues h3")!.textContent).toContain("o/k");
+    nav(el)[2].click();
+    fixture.detectChanges();
+    expect(el.querySelector("app-github-milestones h3")!.textContent).toContain("o/k");
+    expect(el.querySelectorAll("app-github-milestones li.item")).toHaveLength(1);
+  });
+
+  it("switches to Issues, filtered by the milestone, when a milestone is clicked", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    nav(el)[2].click();
+    fixture.detectChanges();
+    el.querySelector<HTMLElement>("li[data-title='1.2.0'] button.pick")!.click();
+    fixture.detectChanges();
+    expect(nav(el)[1].getAttribute("aria-current")).toBe("page");
+    expect(TestBed.inject(UiState).githubPage()).toBe("issues");
+    expect(el.querySelector("app-github-issues")!.textContent).toContain("issue 10");
+    expect(el.querySelector("app-github-issues")!.textContent).not.toContain("issue 11");
+  });
+
+  it("has a single Refresh that reloads the active page only", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    nav(el)[1].click();
+    fixture.detectChanges();
+    expect(
+      [...el.querySelectorAll("button")].filter((b) => /Refresh/.test(b.textContent!)),
+    ).toHaveLength(1);
+    const before = {
+      pulls: tauri.calls("github_pulls").length,
+      issues: tauri.calls("github_issues").length,
+      milestones: tauri.calls("github_milestones").length,
+    };
+    [...el.querySelectorAll("button")].find((b) => b.textContent!.trim() === "Refresh")!.click();
+    await fixture.whenStable();
+    expect(tauri.calls("github_issues")).toHaveLength(before.issues + 1);
+    expect(tauri.calls("github_pulls")).toHaveLength(before.pulls);
+    expect(tauri.calls("github_milestones")).toHaveLength(before.milestones);
+  });
+
+  it("starts on the Inbox when nothing is persisted and counts its entries", async () => {
+    const fixture = await render(RESULT, null);
+    const el: HTMLElement = fixture.nativeElement;
+    expect(TestBed.inject(UiState).githubPage()).toBe("inbox");
+    expect(navAll(el)[0].getAttribute("aria-current")).toBe("page");
+    expect(el.querySelector("[data-testid=count-inbox]")!.textContent).toBe("2");
+    expect(el.querySelector("[data-testid=inbox-review]")!.textContent).toContain(
+      "Review requested",
+    );
+    expect(el.querySelector("[data-testid=inbox-mine]")).not.toBeNull();
+    expect(el.querySelector("[data-testid=inbox-issues]")).toBeNull();
+    expect(stored["poimen.ui-state"]).toBeUndefined();
+  });
+
+  it("opens the pull request of an inbox entry on its page with the pane open", async () => {
+    const fixture = await render(RESULT, null);
+    const el: HTMLElement = fixture.nativeElement;
+    el.querySelector<HTMLElement>("app-github-inbox button.pick")!.click();
+    fixture.detectChanges();
+    expect(TestBed.inject(UiState).githubPage()).toBe("pulls");
+    expect(TestBed.inject(GithubPulls).detailKey()).toBe("o/n#1");
+  });
+
+  it("opens the issue of an inbox entry on the Issues page", async () => {
+    tauri.answer("github_issues", () => [
+      {
+        root: "/src/n",
+        repo: "o/n",
+        status: "ok",
+        truncated: false,
+        issues: [{ ...issueOf(10, null), assignees: ["JK"] }],
+      },
+    ]);
+    const fixture = await render(RESULT, null);
+    const el: HTMLElement = fixture.nativeElement;
+    const entries = [...el.querySelectorAll<HTMLElement>("app-github-inbox button.pick")];
+    expect(entries).toHaveLength(3);
+    entries[2].click();
+    fixture.detectChanges();
+    expect(TestBed.inject(UiState).githubPage()).toBe("issues");
+    expect(TestBed.inject(GithubIssues).detailKey()).toBe("o/n#10");
+  });
+
+  it("offers the sub-pages in the command palette", () => {
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "githubInbox", title: "GitHub: Inbox" });
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "githubPulls", title: "GitHub: Pull requests" });
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "githubIssues", title: "GitHub: Issues" });
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "githubMilestones", title: "GitHub: Milestones" });
   });
 });

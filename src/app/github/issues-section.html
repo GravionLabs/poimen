@@ -1,9 +1,12 @@
-<section class="issues">
+<section
+  class="issues"
+  tabindex="0"
+  aria-label="Issues"
+  (keydown)="onKey($event)"
+  (click)="onClick($event)"
+>
   <header>
     <h2>Issues</h2>
-    <button type="button" (click)="issues.load()" [disabled]="issues.loading()">
-      {{ issues.loading() ? "Refreshing..." : "Refresh" }}
-    </button>
   </header>
   @if (issues.error(); as err) {
     <p class="problem" role="alert">Could not read the issues: {{ err }}</p>
@@ -61,7 +64,17 @@
       <ul class="tree" [attr.aria-label]="tree.repo + ' issues'">
         @for (row of issues.rows(tree); track row.key) {
           @let i = row.node.issue;
-          <li class="row" [style.padding-left.px]="row.depth * 20" [attr.data-number]="i.number">
+          <li
+            class="row"
+            [class.selected]="
+              issues.selected()?.repo === tree.repo && issues.selected()?.number === i.number
+            "
+            [style.padding-left.px]="row.depth * 20"
+            [class.cursor]="issues.cursor() === tree.repo + '#' + i.number"
+            [attr.data-number]="i.number"
+            [attr.data-repo]="tree.repo"
+            (contextmenu)="openRowMenu($event, tree.repo, tree.root, i)"
+          >
             @if (row.node.children.length) {
               <button
                 type="button"
@@ -76,17 +89,37 @@
             } @else {
               <span class="twisty"></span>
             }
-            <span class="badge level-{{ row.node.level }}">{{ row.node.level }}</span>
+            <span class="badge badge-level-{{ row.node.level }}" data-testid="level">{{
+              levelBadge(row.node.level).label
+            }}</span>
             <span class="nr">#{{ i.number }}</span>
             <span class="title">{{ i.title }}</span>
-            @for (m of markers(i); track m) {
-              <span class="marker" data-testid="marker">[{{ m }}]</span>
+            @if (runs.badge(tree.repo, i.number); as run) {
+              <button
+                type="button"
+                class="badge badge-{{ run.state === 'running' ? 'primary' : 'warning' }}"
+                data-testid="run-badge"
+                title="Show the agent"
+                (click)="runs.focus(run.paneId)"
+              >
+                {{ run.text }}
+              </button>
+            }
+            @for (l of labelChips(i); track l) {
+              <span class="chip" data-testid="chip">{{ l }}</span>
             }
             @for (a of i.assignees; track a) {
-              <span class="assignee" data-testid="assignee">[&#64;{{ a }}]</span>
+              <span class="assignee" data-testid="assignee">&#64;{{ a }}</span>
             }
-            @if (i.subTotal) {
-              <span class="hint">{{ i.subCompleted }}/{{ i.subTotal }}</span>
+            @if (progress(row.node.level, i); as p) {
+              <span class="progress" data-testid="progress" [title]="p.percent + '% done'">
+                <span class="hint">{{ p.done }}/{{ p.total }}</span>
+                <progress
+                  max="100"
+                  [value]="p.percent"
+                  [attr.aria-label]="'Sub-issues of #' + i.number"
+                ></progress>
+              </span>
             }
             @for (pr of i.prs; track pr.number) {
               <span class="pr" data-testid="pr">
@@ -99,21 +132,40 @@
                 >
                   PR #{{ pr.number }}
                 </button>
-                @if (pr.checks.state !== "none") {
-                  <span class="checks-{{ pr.checks.state }}" [title]="checksText(pr.checks)">
-                    {{ pr.checks.passed }} / {{ pr.checks.failed }} / {{ pr.checks.pending }}
-                  </span>
-                }
+                <span class="checks" [title]="checksText(pr.checks)">
+                  @for (c of checkBadges(pr.checks); track c.kind) {
+                    <span
+                      class="check check-{{ c.kind }}"
+                      role="img"
+                      [attr.aria-label]="c.count + ' ' + c.label"
+                    >
+                      <span aria-hidden="true">{{ c.icon }}</span
+                      >{{ c.count }}
+                    </span>
+                  }
+                </span>
               </span>
             }
             <button
               type="button"
-              class="link open"
+              class="icon-btn"
+              title="Agent actions"
+              data-testid="row-menu"
+              data-action-menu-button
+              [attr.aria-label]="'Agent actions for #' + i.number"
+              (click)="openRowMenu($event, tree.repo, tree.root, i)"
+            >
+              ⋯
+            </button>
+            <button
+              type="button"
+              class="icon-btn open"
+              title="Open in browser"
               [disabled]="!isGithubUrl(i.url)"
               [attr.aria-label]="'Open issue #' + i.number + ' in browser'"
               (click)="issues.openUrl(i.url)"
             >
-              Open
+              ↗
             </button>
           </li>
         }

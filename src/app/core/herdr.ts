@@ -434,6 +434,36 @@ export function workspaceDirs(snapshot: Snapshot, workspaceId: string): string[]
   return [...new Set(dirs)];
 }
 
+/** Path segments for comparing directories; Windows paths (drive letter or UNC) ignore case. */
+function comparableSegments(path: string): string[] {
+  const windows = /^[a-z]:/i.test(path) || /^[\\/]{2}/.test(path);
+  const segments = pathSegments(path);
+  return windows ? segments.map((s) => s.toLowerCase()) : segments;
+}
+
+/**
+ * The space whose root contains `dir`: a pane of the space works in `dir` or above it. The deepest
+ * such directory wins, then the lowest space number; `undefined` when no space contains it.
+ */
+export function spaceContaining(snapshot: Snapshot, dir: string): string | undefined {
+  const target = comparableSegments(dir.trim());
+  if (target.length === 0) return undefined;
+  let best: { id: string; depth: number; number: number } | undefined;
+  for (const space of snapshot.spaces) {
+    for (const root of workspaceDirs(snapshot, space.space_id)) {
+      const segments = comparableSegments(root);
+      if (segments.length === 0 || segments.length > target.length) continue;
+      if (!segments.every((s, i) => s === target[i])) continue;
+      const better =
+        !best ||
+        segments.length > best.depth ||
+        (segments.length === best.depth && space.number < best.number);
+      if (better) best = { id: space.space_id, depth: segments.length, number: space.number };
+    }
+  }
+  return best?.id;
+}
+
 /** What the close confirmation says: an agent that is still working or waiting gets a warning. */
 export function closeWarning(pane: Terminal | undefined): string {
   const agent = pane ? agentKind(pane) : undefined;

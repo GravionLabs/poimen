@@ -111,6 +111,33 @@ fn sh(space_id: &str) -> TerminalCreate {
 const ENTER: &str = if cfg!(windows) { "\r" } else { "\n" };
 
 #[test]
+fn shutdown_ends_the_terminals_removes_the_socket_and_runs_the_hook() {
+    let env = Env::new("shutdown");
+    let config = env.config();
+    let server = Server::bind(config.clone()).unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    // The hook stands in for the process exit of the binary; the test process must live on.
+    server.on_shutdown(move || done_tx.send(()).unwrap());
+    thread::spawn(move || server.serve());
+    let client = Client::new(&config.socket);
+
+    let space = client.create_space("s", &env.work()).unwrap();
+    let terminal = client.create_terminal(&sh(&space.id)).unwrap();
+    assert_eq!(client.list_terminals(None).unwrap().len(), 1);
+    let events = events(&client);
+
+    client.shutdown().unwrap();
+
+    done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    wait_for_event(
+        &events,
+        |e| matches!(e, Event::TerminalClosed { terminal_id, .. } if *terminal_id == terminal.id),
+    );
+    #[cfg(unix)]
+    assert!(!config.socket.exists());
+}
+
+#[test]
 fn ping_reports_the_protocol_version() {
     let env = Env::new("ping");
     let client = start(&env.config());

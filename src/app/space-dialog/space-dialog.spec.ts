@@ -136,16 +136,29 @@ describe("SpaceDialog", () => {
       expect(hint(root)).toBe("Template: GravionLabs · Claude");
     });
 
-    it("says default when no template applies", async () => {
+    it("says no template when none applies", async () => {
       const { actions, root, settle, type } = await setup();
       bridge.invoke.mockResolvedValue(null);
       actions.ask();
       await settle();
       await type(".path", "/elsewhere");
-      expect(hint(root)).toBe("Template: default");
+      expect(hint(root)).toBe("No template");
     });
 
-    it("says default when the lookup fails", async () => {
+    it("marks the default template", async () => {
+      const { actions, root, settle, type } = await setup();
+      bridge.invoke.mockImplementation(async (command: string) =>
+        command === "resolve_space_template"
+          ? { name: "default", agent: "claude", default: true }
+          : [],
+      );
+      actions.ask();
+      await settle();
+      await type(".path", "/elsewhere");
+      expect(hint(root)).toBe("Template: default (default) · Claude");
+    });
+
+    it("says no template when the lookup fails", async () => {
       const { actions, root, settle, type } = await setup();
       bridge.invoke.mockImplementation(async (command: string) => {
         if (command === "resolve_space_template") throw "boom";
@@ -154,7 +167,7 @@ describe("SpaceDialog", () => {
       actions.ask();
       await settle();
       await type(".path", "/work/app");
-      expect(hint(root)).toBe("Template: default");
+      expect(hint(root)).toBe("No template");
     });
 
     it("looks up the picked directory, and only the newest answer counts", async () => {

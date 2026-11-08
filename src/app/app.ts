@@ -25,6 +25,7 @@ import {
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Attention, type StatusChange } from "./core/attention";
+import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { Notifier, type NotifyContext } from "./core/notifier";
 import { NotificationCenter } from "./core/notification-center";
@@ -38,7 +39,7 @@ import { Updater } from "./core/updater";
 import { Usage } from "./core/usage";
 import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 import {
@@ -46,6 +47,8 @@ import {
   changesDir,
   flowPane,
   flowTab,
+  spaceOfTab,
+  spaceTab,
   tabKind,
   tabPaneId,
   type EditorGroup,
@@ -59,6 +62,7 @@ import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
 import { ChangesView } from "./changes/changes-view";
+import { SpaceOverview } from "./space-overview/space-overview";
 import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
@@ -66,15 +70,20 @@ import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { CommandPalette } from "./core/command-palette";
+import { ExplorerSelection } from "./core/explorer-selection";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
 import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import { TaskDialog } from "./task-dialog/task-dialog";
 import { HooksDialog } from "./hooks-dialog/hooks-dialog";
+import { ServerDialog } from "./server-dialog/server-dialog";
+import { ServerRestart } from "./core/server-restart";
 import { ResultDialog } from "./result-dialog/result-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
+import { AgentActionDialog } from "./github/agent-action-dialog/agent-action-dialog";
+import { AgentActions } from "./github/agent-actions";
 import { TaskStarter } from "./core/task-start";
 import { ProjectTeardown } from "./core/project-teardown";
 import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
@@ -110,14 +119,17 @@ const ZOOM_STEP = 1;
     BottomPanel,
     FlowTab,
     ChangesView,
+    SpaceOverview,
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
     HooksDialog,
+    ServerDialog,
     TrustDialog,
     ResultDialog,
     AgentPickerView,
     TaskDialog,
+    AgentActionDialog,
     PaletteView,
     ShortcutsDialog,
   ],
@@ -129,6 +141,7 @@ export class App {
   protected readonly store = inject(HerdrStore);
   protected readonly updater = inject(Updater);
   protected readonly usage = inject(Usage);
+  protected readonly serverRestart = inject(ServerRestart);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
@@ -137,6 +150,7 @@ export class App {
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
   private readonly paneActions = inject(PaneActions);
+  private readonly explorerSelection = inject(ExplorerSelection);
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
@@ -146,6 +160,7 @@ export class App {
   private readonly cleanup = inject(TaskCleanup);
   private readonly teardown = inject(ProjectTeardown);
   private readonly projectEntries = inject(ProjectEntries);
+  protected readonly agentActions = inject(AgentActions);
   protected readonly deliver = inject(Deliver);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
@@ -170,6 +185,7 @@ export class App {
 
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
+  private readonly agentRuns = inject(AgentRuns);
   private readonly notifier = inject(Notifier);
   private readonly center = inject(NotificationCenter);
   /** Last known state of each open pane, kept when herdr drops the pane. */
@@ -196,6 +212,11 @@ export class App {
           }
           if (tabKind(tab.paneId) === "deliver") {
             return { id: tab.paneId, label: "Deliver", title: "Deliver loops" };
+          }
+          const spaceOf = spaceOfTab(tab.paneId);
+          if (spaceOf !== null) {
+            const name = snap.spaces.find((w) => w.space_id === spaceOf)?.label ?? spaceOf;
+            return { id: tab.paneId, label: `Space: ${name}`, title: `Overview of space ${name}` };
           }
           const changesOf = changesDir(tab.paneId);
           if (changesOf !== null) {
@@ -265,6 +286,7 @@ export class App {
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
       untracked(() => {
         const changes = this.attention.observe(statuses, viewed);
+        this.agentRuns.observe(statuses);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
         this.notifyChanges(changes);
       });
@@ -325,6 +347,22 @@ export class App {
     void this.prefs.start();
     void this.userSchemes.start();
     void this.store.start().then(() => this.dropMissing());
+    void this.seedDefaults();
+  }
+
+  /**
+   * The first start of this version writes the default layout and template into config.json when
+   * it has neither key (`seed_space_defaults`). The UI state remembers that it ran; a failure is
+   * retried at the next start.
+   */
+  private async seedDefaults(): Promise<void> {
+    if (this.ui.defaultsSeeded()) return;
+    try {
+      await this.bridge.invoke("seed_space_defaults");
+      this.ui.markDefaultsSeeded();
+    } catch {
+      // retried at the next start
+    }
   }
 
   /**
@@ -401,8 +439,25 @@ export class App {
       this.editor.openGithub();
       return;
     }
+    const githubPage = {
+      githubInbox: "inbox",
+      githubPulls: "pulls",
+      githubIssues: "issues",
+      githubMilestones: "milestones",
+    }[id] as GithubPage | undefined;
+    if (githubPage) {
+      this.ui.selectGithubPage(githubPage);
+      this.editor.openGithub();
+      return;
+    }
     if (id === "openDeliver") {
       this.editor.openDeliver();
+      return;
+    }
+    if (id === "showSpaceOverview") {
+      const spaceId = this.focusedSpace();
+      if (spaceId) this.editor.openSpace(spaceId);
+      else this.spaceActions.notify("Show Space Overview: there is no focused space");
       return;
     }
     if (id === "showChanges") {
@@ -413,8 +468,16 @@ export class App {
       this.startTaskInActiveRepo();
       return;
     }
+    if (id === "openTerminalHere") {
+      this.openTerminalInSelectedDir();
+      return;
+    }
     if (id === "cleanupTasks") {
       this.cleanupInActiveRepo();
+      return;
+    }
+    if (id === "quitAndStopServer") {
+      this.serverRestart.askQuit();
       return;
     }
     if (id === "projectTeardown") {
@@ -495,6 +558,16 @@ export class App {
     else this.spaceActions.notify("Show Changes: there is no focused space");
   }
 
+  /** The palette entry: a terminal in the folder last picked in the explorer. */
+  private openTerminalInSelectedDir(): void {
+    const dir = this.explorerSelection.dir();
+    if (!dir) {
+      this.spaceActions.notify("Open terminal: select a folder in the explorer first");
+      return;
+    }
+    void this.paneActions.openTerminalIn(dir).then((pane) => pane && this.open(pane, true));
+  }
+
   /** The palette entry: the picker for the repository of the active pane. */
   private startTaskInActiveRepo(): void {
     const repo = this.activeRepo();
@@ -565,7 +638,48 @@ export class App {
   /** Closes a space (asks first when it has panes); `undefined` is a no-op (no active space). */
   protected closeSpace(workspaceId: string | undefined): void {
     if (!workspaceId) return;
-    void this.spaceActions.requestClose(workspaceId).then((ids) => ids && this.onSpaceClosed(ids));
+    void this.spaceActions.requestClose(workspaceId).then((ids) => {
+      if (!ids) return;
+      this.onSpaceClosed(ids);
+      this.editor.close(spaceTab(workspaceId));
+    });
+  }
+
+  /** A click or Enter on a space row of the sidebar: its overview tab. */
+  protected openSpaceOverview(spaceId: string): void {
+    this.editor.openSpace(spaceId);
+  }
+
+  /** Bumped by the gear icon so an open overview scrolls to its configuration section. */
+  protected readonly configNonce = signal(0);
+
+  /** The gear icon of a space row: the overview, scrolled to the configuration section. */
+  protected openSpaceConfig(spaceId: string): void {
+    this.editor.openSpace(spaceId);
+    this.configNonce.update((n) => n + 1);
+  }
+
+  /** "Output" of the space overview: the pane's tab with the Output panel. */
+  protected openPaneOutput(paneId: string): void {
+    this.editor.open(paneId, true);
+    this.ui.selectPanelTab("output");
+  }
+
+  /** "Open in explorer" of the space overview: the explorer view with the directory picked. */
+  protected openInExplorer(dir: string): void {
+    this.explorerSelection.select(dir);
+    if (this.ui.activeView() !== "explorer" || this.ui.sidebarCollapsed()) {
+      this.selectView("explorer");
+    }
+  }
+
+  /** The space of the group's active tab when that is a space overview. */
+  protected spaceOf(group: EditorGroup): string | null {
+    return group.activeId === null ? null : spaceOfTab(group.activeId);
+  }
+
+  protected isSpace(id: string): boolean {
+    return tabKind(id) === "space";
   }
 
   /** A space closed in herdr: the tabs of its panes go with it. */

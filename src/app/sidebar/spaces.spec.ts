@@ -200,7 +200,7 @@ describe("renderRow", () => {
     ]);
     expect(
       texts(renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, space([a, a]), ctx)),
-    ).toEqual([["One", "idle", "main", "…/b/c"]]);
+    ).toEqual([["One", "idle", "main"], ["…/b/c"]]);
   });
 
   it("skips empty values, repeats of the name or an earlier value, and empty lines", () => {
@@ -242,7 +242,7 @@ describe("renderRow", () => {
       const sp = space([r, r]);
       expect(
         texts(renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, sp, spaceContext(sp))),
-      ).toEqual([["One", "idle", "main", "●2", "↑1", "…/b/c"]]);
+      ).toEqual([["One", "idle", "main", "●2", "↑1"], ["…/b/c"]]);
     });
 
     it("shows a pane value only when it differs from the workspace", () => {

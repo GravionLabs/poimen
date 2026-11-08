@@ -12,7 +12,9 @@ import {
   filterTree,
   flattenTree,
   issueLevel,
-  markers,
+  issueProgress,
+  labelChips,
+  levelBadge,
   type Issue,
   type RepoIssues,
 } from "./issues";
@@ -110,7 +112,7 @@ describe("buildTree", () => {
 
 describe("filterTree and flattenTree", () => {
   const issues = [
-    issue(1, { labels: ["epic"], title: "Views" }),
+    issue(1, { labels: ["epic"], title: "Views", subTotal: 4, subCompleted: 1 }),
     issue(2, { labels: ["pbi", "needs-refinement"], parent: parent(1), assignees: ["jk"] }),
     issue(3, { labels: ["bug"], parent: parent(1), title: "Crash" }),
     issue(4, { labels: ["pbi"], title: "Loose" }),
@@ -165,11 +167,30 @@ describe("filterTree and flattenTree", () => {
     );
   });
 
-  it("reports the marker labels", () => {
-    expect(markers(issue(1, { labels: ["Needs-Decision", "x", "needs-refinement"] }))).toEqual([
-      "needs-refinement",
+  it("shows labels as chips without the level label", () => {
+    expect(labelChips(issue(1, { labels: ["pbi", "needs-decision", "Epic", "x"] }))).toEqual([
       "needs-decision",
+      "x",
     ]);
+    expect(labelChips(issue(1))).toEqual([]);
+  });
+
+  it("maps every level to a badge", () => {
+    expect(levelBadge("epic")).toEqual({ label: "epic", tone: "epic" });
+    expect(levelBadge("bug")).toEqual({ label: "bug", tone: "bug" });
+    expect(levelBadge("other").tone).toBe("other");
+  });
+
+  it("reports sub-issue progress for epics and features only", () => {
+    expect(issueProgress("epic", { subTotal: 4, subCompleted: 1 })).toEqual({
+      done: 1,
+      total: 4,
+      percent: 25,
+    });
+    expect(issueProgress("feature", { subTotal: 3, subCompleted: 3 })?.percent).toBe(100);
+    expect(issueProgress("feature", { subTotal: 0, subCompleted: 0 })).toBeNull();
+    expect(issueProgress("pbi", { subTotal: 4, subCompleted: 1 })).toBeNull();
+    expect(issueProgress("epic", { subTotal: 2, subCompleted: 5 })?.percent).toBe(100);
   });
 });
 
@@ -207,7 +228,7 @@ const RESULT: RepoIssues[] = [
     status: "ok",
     truncated: false,
     issues: [
-      issue(1, { labels: ["epic"], title: "Views" }),
+      issue(1, { labels: ["epic"], title: "Views", subTotal: 4, subCompleted: 1 }),
       issue(2, {
         labels: ["pbi", "needs-refinement", "needs-decision"],
         parent: parent(1),
@@ -264,11 +285,20 @@ describe("IssuesSection", () => {
     expect(tauri.calls("github_issues")).toEqual([{ dirs: expect.any(Array), closed: false }]);
     expect(items(el)).toHaveLength(2);
     const child = items(el)[1].textContent!;
-    expect(child).toContain("[needs-refinement]");
-    expect(child).toContain("[needs-decision]");
-    expect(child).toContain("[@jk]");
+    expect(
+      [...items(el)[1].querySelectorAll("[data-testid=chip]")].map((c) => c.textContent),
+    ).toEqual(["needs-refinement", "needs-decision"]);
+    expect(items(el)[1].querySelector("[data-testid=level]")!.textContent).toBe("pbi");
+    expect(items(el)[1].querySelector("[data-testid=progress]")).toBeNull();
+    expect(child).toContain("@jk");
     expect(child).toContain("PR #40");
-    expect(child).toContain("3 / 1 / 0");
+    expect(child).not.toContain("3 / 1 / 0");
+    expect(
+      [...items(el)[1].querySelectorAll(".check")].map((c) => c.getAttribute("aria-label")),
+    ).toEqual(["3 passed", "1 failed"]);
+    const bar = items(el)[0].querySelector("[data-testid=progress]")!;
+    expect(bar.textContent).toContain("1/4");
+    expect(bar.querySelector("progress")!.value).toBe(25);
     expect(el.querySelector("[data-testid=issue-error]")!.textContent).toContain("o/m");
   });
 
@@ -295,6 +325,9 @@ describe("IssuesSection", () => {
     issues.assignee.set("nobody");
     fixture.detectChanges();
     expect(items(el)).toHaveLength(0);
+    expect(el.querySelector("[data-testid=issues-empty]")).toBeNull();
+    TestBed.inject(UiState).setGithubShowEmpty(true);
+    fixture.detectChanges();
     expect(el.querySelector("[data-testid=issues-empty]")).not.toBeNull();
     issues.assignee.set(null);
     const input = el.querySelector<HTMLInputElement>("input[type=search]")!;

@@ -1,6 +1,17 @@
 import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
-import { GithubIssues, LEVELS, markers, type Level, type StateFilter } from "./issues";
-import { checksText, errorText, isGithubUrl } from "./pulls";
+import { AgentRuns } from "./agent-runs";
+import { AgentActions, issueTarget } from "./agent-actions";
+import {
+  GithubIssues,
+  type Issue,
+  LEVELS,
+  issueProgress,
+  labelChips,
+  levelBadge,
+  type Level,
+  type StateFilter,
+} from "./issues";
+import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
 
 /** The "Issues" section of the GitHub tab: the issue tree per repository with linked pull requests. */
 @Component({
@@ -11,11 +22,22 @@ import { checksText, errorText, isGithubUrl } from "./pulls";
 })
 export class IssuesSection {
   protected readonly issues = inject(GithubIssues);
+  private readonly agentActions = inject(AgentActions);
+  protected readonly runs = inject(AgentRuns);
   protected readonly levels = LEVELS;
-  protected readonly markers = markers;
+  protected readonly labelChips = labelChips;
+  protected readonly levelBadge = levelBadge;
+  protected readonly progress = issueProgress;
+  protected readonly checkBadges = checkBadges;
   protected readonly errorText = errorText;
   protected readonly checksText = checksText;
   protected readonly isGithubUrl = isGithubUrl;
+
+  /** The `⋯` button or the context menu of an issue row. */
+  protected openRowMenu(event: MouseEvent, repo: string, root: string, issue: Issue): void {
+    event.preventDefault();
+    this.agentActions.openMenu([issueTarget(repo, root, issue)], event.clientX, event.clientY);
+  }
 
   constructor() {
     void this.issues.load(false);
@@ -24,6 +46,29 @@ export class IssuesSection {
   @HostListener("window:focus")
   protected onFocus(): void {
     void this.issues.load(false);
+  }
+
+  /** Up and Down move the cursor row, Enter opens its detail pane. */
+  protected onKey(event: KeyboardEvent): void {
+    // Inside a filter or button the key keeps its own meaning.
+    if (event.target instanceof HTMLElement && event.target.closest("input, button, select"))
+      return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      this.issues.moveCursor(event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Enter" && this.issues.cursor()) {
+      event.preventDefault();
+      this.issues.openCursor();
+    }
+  }
+
+  /** A click on a row (not on its buttons) puts the cursor there and opens the pane. */
+  protected onClick(event: MouseEvent): void {
+    if (!(event.target instanceof HTMLElement) || event.target.closest("input, button, select")) {
+      return;
+    }
+    const row = event.target.closest<HTMLElement>("li.row[data-number]");
+    if (row) void this.issues.openDetail(row.dataset["repo"] ?? "", Number(row.dataset["number"]));
   }
 
   protected value(event: Event): string {

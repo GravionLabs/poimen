@@ -28,6 +28,14 @@ const stateOn = (storage: UiStorage | null) =>
     providers: [{ provide: UI_STORAGE, useValue: storage }, UiState],
   }).get(UiState);
 
+describe("defaultsSeeded", () => {
+  it("is remembered once the first-start defaults were written", () => {
+    expect(parseLayout(null).defaultsSeeded).toBeUndefined();
+    expect(parseLayout(JSON.stringify({ defaultsSeeded: true })).defaultsSeeded).toBe(true);
+    expect(parseLayout(JSON.stringify({ defaultsSeeded: "yes" })).defaultsSeeded).toBeUndefined();
+  });
+});
+
 describe("clampSidebarWidth", () => {
   it("keeps a width in range", () => expect(clampSidebarWidth(300)).toBe(300));
   it("raises to the minimum", () => expect(clampSidebarWidth(10)).toBe(SIDEBAR_MIN_WIDTH));
@@ -282,5 +290,19 @@ describe("hooks offer state", () => {
     expect(
       parseLayout(JSON.stringify({ hooksOfferDismissed: "yes" })).hooksOfferDismissed,
     ).toBeUndefined();
+  });
+});
+
+describe("GitHub empty repositories", () => {
+  it("are hidden until shown, then remembered", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    expect(state.githubShowEmpty()).toBe(false);
+    state.setGithubShowEmpty(true);
+    expect(parseLayout(storage.data.get(UI_STATE_KEY)!).githubShowEmpty).toBe(true);
+    expect(stateOn(storage).githubShowEmpty()).toBe(true);
+    state.setGithubShowEmpty(false);
+    expect(stateOn(storage).githubShowEmpty()).toBe(false);
+    expect(parseLayout(JSON.stringify({ githubShowEmpty: "yes" })).githubShowEmpty).toBeUndefined();
   });
 });

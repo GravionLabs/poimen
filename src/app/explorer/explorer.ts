@@ -12,12 +12,15 @@ import {
 import { HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
 import { EditorTabs } from "../core/editor-tabs";
+import { ExplorerSelection } from "../core/explorer-selection";
+import { PaneActions } from "../core/pane-actions";
 import { HerdrStore } from "../core/herdr-store";
 import { SpaceActions } from "../core/space-actions";
 import { SettingsStore } from "../core/settings";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
+import { GitSync } from "./git-sync";
 
 /** A directory as the backend lists it (`list_child_dirs`). */
 export interface DirEntry {
@@ -107,6 +110,9 @@ export class Explorer {
   private readonly spaceActions = inject(SpaceActions);
   private readonly tasks = inject(TaskStarter);
   private readonly editor = inject(EditorTabs);
+  private readonly panes = inject(PaneActions);
+  private readonly selection = inject(ExplorerSelection);
+  private readonly sync = inject(GitSync);
   private readonly children = signal<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
   private readonly requested = new Set<string>();
 
@@ -154,12 +160,26 @@ export class Explorer {
   protected readonly menuAt = signal<{ path: string; x: number; y: number } | null>(null);
 
   /** The directory of the open menu is a repository: it offers to start a task. */
-  protected readonly menuRepo = signal(false);
+  protected readonly menuRepo = signal<boolean | null>(null);
+
+  protected select(path: string): void {
+    this.selection.select(path);
+  }
+
+  /** Opens a terminal in `path`: in the space containing it, else in a new space. */
+  protected openTerminal(path: string): void {
+    this.closeMenu();
+    this.selection.select(path);
+    void this.panes
+      .openTerminalIn(path)
+      .then((pane) => pane && this.editor.open(pane.terminal_id, true));
+  }
 
   protected openMenu(event: MouseEvent, path: string): void {
+    this.selection.select(path);
     event.preventDefault();
     event.stopPropagation();
-    this.menuRepo.set(false);
+    this.menuRepo.set(null);
     this.menuAt.set({ path, x: event.clientX, y: event.clientY });
     void this.checkRepo(path);
   }
@@ -189,6 +209,21 @@ export class Explorer {
   protected showChanges(path: string): void {
     this.closeMenu();
     this.editor.openChanges(path);
+  }
+
+  protected fetchRepo(path: string): void {
+    this.closeMenu();
+    void this.sync.fetch(path);
+  }
+
+  protected pullRepo(path: string): void {
+    this.closeMenu();
+    void this.sync.pull(path);
+  }
+
+  protected fetchAll(path: string): void {
+    this.closeMenu();
+    void this.sync.fetchAll(path);
   }
 
   /** Creates the space of a directory, or focuses the one it already has. */

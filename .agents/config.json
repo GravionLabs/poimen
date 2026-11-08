@@ -1,0 +1,10 @@
+{
+  "release": {
+    "prerelease": "gh workflow run release.yml --ref release/next -f prerelease=true",
+    "test": {
+      "platforms": ["macOS", "Windows", "Linux"],
+      "template": ".github/release-test.md",
+      "gate": false
+    }
+  }
+}

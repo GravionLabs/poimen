@@ -6,7 +6,12 @@ import { HxTheme } from "@gravionlabs/helix-ui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bundled } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
-import { DEFAULT_SETTINGS, parseHarnesses, SettingsStore } from "../core/settings";
+import {
+  DEFAULT_SETTINGS,
+  parseAgentActions,
+  parseHarnesses,
+  SettingsStore,
+} from "../core/settings";
 import { tauri } from "../core/tauri.mock";
 import { HooksOffer } from "../core/hooks-offer";
 import { TauriBridge } from "../core/tauri";
@@ -463,6 +468,90 @@ describe("SettingsView agents section", () => {
     expect(rows[0]).toContain("available");
     expect(rows[0]).toContain("Models: opus");
     expect(rows[1]).toContain("not found");
+  });
+});
+
+describe("SettingsView agent actions", () => {
+  beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
+
+  it("lists the resolved actions with their source", async () => {
+    const { fixture, host, store } = setup(undefined, undefined, "agents");
+    tauri.answer("get_agent_actions", () => ({
+      actions: [
+        { id: "plan", label: "Plan", on: "issue", prompt: "Plan {nr}", source: "default" },
+        { id: "refine", label: "Refine", on: "issue", prompt: "/x {nr}", source: "user" },
+      ],
+      note: null,
+    }));
+    store["_settings"].set({ ...DEFAULT_SETTINGS, warnings: ["x"] });
+    fixture.detectChanges();
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.detectChanges();
+    const rows = [...host.querySelectorAll(".agent-actions li")].map((li) => li.textContent);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain("Plan");
+    expect(rows[0]).toContain("default");
+    expect(rows[1]).toContain("user");
+    expect(tauri.calls("get_agent_actions")[0]).toEqual({ root: null });
+  });
+});
+
+describe("parseAgentActions", () => {
+  it("reads actions and skips malformed entries", () => {
+    expect(
+      parseAgentActions({
+        actions: [
+          {
+            id: "a",
+            label: "A",
+            on: "pr",
+            prompt: "p",
+            run: "ask",
+            harness: "x",
+            model: "opus",
+            when: { label: ["bug"], noChildren: true, checks: "failed" },
+            source: "project",
+          },
+          { id: "b", on: "issue", prompt: "q", source: "user" },
+          { id: "c", on: "repo", prompt: "q", source: "user" },
+          { id: "d", on: "issue", prompt: "q", source: "other" },
+          null,
+        ],
+      }),
+    ).toEqual([
+      {
+        id: "a",
+        label: "A",
+        on: "pr",
+        prompt: "p",
+        run: "ask",
+        harness: "x",
+        model: "opus",
+        when: {
+          level: [],
+          label: ["bug"],
+          noChildren: true,
+          checks: "failed",
+          state: [],
+          review: null,
+        },
+        batch: "each",
+        source: "project",
+      },
+      {
+        id: "b",
+        label: "b",
+        on: "issue",
+        prompt: "q",
+        run: "repoRoot",
+        harness: null,
+        model: null,
+        when: { level: [], label: [], noChildren: false, checks: null, state: [], review: null },
+        batch: "each",
+        source: "user",
+      },
+    ]);
+    expect(parseAgentActions("nope")).toEqual([]);
   });
 });
 

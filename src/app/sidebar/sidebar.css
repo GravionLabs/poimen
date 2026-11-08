@@ -130,7 +130,8 @@
   flex: 1;
   min-width: 0;
   gap: 6px;
-  align-items: center;
+  /* Badge, gear, close and chevron sit at the end of line 1 (16px high), not centered on both lines. */
+  align-items: flex-start;
   min-height: 16px;
   line-height: 16px;
   color: var(--h-text-muted-color);
@@ -220,7 +221,12 @@
 }
 
 .space-name {
-  flex: none;
+  /* Shrinks first (weight 4): state text and the actions keep their width at the narrowest sidebar. */
+  flex: 0 4 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .space-edit {
@@ -266,6 +272,8 @@
 /* Expand/collapse state at the right edge of a workspace row; a click toggles (see Sidebar.toggle). */
 .chevron {
   flex: none;
+  align-self: flex-start;
+  margin-top: 4px;
   margin-left: auto;
   width: 6px;
   height: 6px;
@@ -281,6 +289,7 @@
 }
 
 /* Close icon left of the chevron (or at the row end without one); calm until hover, focus or active. */
+.gear,
 .close {
   all: unset;
   flex: none;
@@ -307,22 +316,33 @@
   display: none;
 }
 
+.gear + .close {
+  margin-left: 0;
+}
+
 .close + .chevron {
   margin-left: 0;
 }
 
+.space:hover .gear,
+.space.chosen .gear,
+.gear:focus-visible,
 .space:hover .close,
 .space.chosen .close,
 .close:focus-visible,
+.spaces ::ng-deep [role="treeitem"]:focus-visible .gear,
 .spaces ::ng-deep [role="treeitem"]:focus-visible .close {
   opacity: 1;
 }
 
+.gear:hover,
+.gear:focus-visible,
 .close:hover,
 .close:focus-visible {
   background: color-mix(in srgb, currentcolor 18%, transparent);
 }
 
+.gear:focus-visible,
 .close:focus-visible {
   outline: 1px solid currentcolor;
 }
@@ -472,7 +492,7 @@
 /* Unread: finished while not viewed; on a workspace row the count of its unread panes. */
 .badge {
   flex: none;
-  align-self: center;
+  align-self: flex-start;
   margin-left: auto;
   min-width: 16px;
   padding: 0 5px;

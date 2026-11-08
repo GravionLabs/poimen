@@ -1,5 +1,6 @@
-//! Starting `poimen-server` (ADR 0003) when it is absent. poimen never stops it: the server owns
-//! the PTYs and outlives the app. The wire protocol lives in `crates/poimen-protocol`, the client
+//! Starting `poimen-server` (ADR 0003) when it is absent. poimen stops it only on a confirmed
+//! restart (an older server than the bundled one, [`restart`]) and a confirmed "Quit poimen and
+//! stop server" ([`stop`]); otherwise the server owns the PTYs and outlives the app. The wire protocol lives in `crates/poimen-protocol`, the client
 //! in `crates/poimen-client`; this module only decides whether to start a server and does so
 //! detached, like `backend.rs` does for herdr. On Windows it starts a per-version copy under
 //! `%LOCALAPPDATA%\poimen-server\bin` (see [`stage`]), breaking away from the app's job; inside
@@ -31,6 +32,8 @@ pub enum StartError {
     Timeout(Duration),
     /// A server runs but refused the connection (Windows: started elevated, see [`Ping`]).
     Denied(String),
+    /// The running server did not stop after `server.shutdown`.
+    Shutdown(String),
 }
 
 /// What a `ping` of the socket found.
@@ -38,6 +41,12 @@ pub enum StartError {
 pub enum Ping {
     /// A server answered with the protocol poimen speaks.
     Answers,
+    /// A server with the protocol poimen speaks, but older than the bundled one. Never replaced
+    /// without the user's consent: stopping it ends every terminal.
+    Outdated { running: String },
+    /// A server with another protocol version: it cannot be talked to, and a second one cannot
+    /// start on its socket.
+    Incompatible { running: String, protocol: u32 },
     /// No server, or one that does not answer (in time or with that protocol).
     Absent,
     /// The connect was denied: on Windows the pipe admits its owner only, so a server started
@@ -55,7 +64,7 @@ impl fmt::Display for StartError {
             StartError::Timeout(t) => {
                 write!(f, "`poimen-server` did not answer within {} s", t.as_secs())
             }
-            StartError::Denied(e) => write!(f, "{e}"),
+            StartError::Denied(e) | StartError::Shutdown(e) => write!(f, "{e}"),
         }
     }
 }
@@ -67,15 +76,27 @@ pub trait Runner {
     fn resolve(&self) -> Option<PathBuf>;
     /// Starts the program detached and returns without waiting for it.
     fn spawn(&self, program: &Path) -> io::Result<()>;
+    /// Asks the running server to end every terminal and exit (`server.shutdown`).
+    fn shutdown(&self) -> Result<(), String>;
     fn sleep(&self, duration: Duration);
     fn now(&self) -> Duration;
 }
 
 /// Returns at once when a server answers; otherwise starts one (when `auto_start`) and waits until
-/// it answers. Never stops or restarts a running server.
+/// it answers. Never stops or restarts a running server: an outdated or incompatible one is only
+/// reported ([`Outcome::Outdated`], [`Outcome::Incompatible`]); [`restart`] replaces it.
 pub fn ensure_running(runner: &impl Runner, auto_start: bool) -> Result<Outcome, StartError> {
     match runner.ping() {
         Ping::Answers => return Ok(Outcome::AlreadyRunning),
+        Ping::Outdated { running } => {
+            return Ok(Outcome::Outdated {
+                running,
+                bundled: BUNDLED_VERSION.to_string(),
+            });
+        }
+        Ping::Incompatible { running, protocol } => {
+            return Ok(Outcome::Incompatible { running, protocol });
+        }
         Ping::Denied(e) => return Err(StartError::Denied(e)),
         Ping::Absent => {}
     }
@@ -92,10 +113,46 @@ pub fn ensure_running(runner: &impl Runner, auto_start: bool) -> Result<Outcome,
         match runner.ping() {
             Ping::Answers => return Ok(Outcome::Started),
             Ping::Denied(e) => return Err(StartError::Denied(e)),
-            Ping::Absent => {}
+            // Another poimen raced us with an older server: report it as above.
+            Ping::Outdated { .. } | Ping::Incompatible { .. } | Ping::Absent => {}
         }
     }
     Err(StartError::Timeout(START_TIMEOUT))
+}
+
+/// The version poimen bundles the server at (the app and the server share the workspace version).
+pub const BUNDLED_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Asks the running server to shut down and waits until nothing answers any more. Ends every
+/// terminal: call it only after the user confirmed.
+pub fn stop(runner: &impl Runner) -> Result<(), StartError> {
+    match runner.ping() {
+        Ping::Absent => return Ok(()),
+        Ping::Denied(e) => return Err(StartError::Denied(e)),
+        _ => {}
+    }
+    runner.shutdown().map_err(|e| {
+        StartError::Shutdown(format!(
+            "could not stop the running `poimen-server`: {e}. A server older than this poimen may not know `server.shutdown`: end its process by hand"
+        ))
+    })?;
+    let start = runner.now();
+    while runner.now().saturating_sub(start) < START_TIMEOUT {
+        if runner.ping() == Ping::Absent {
+            return Ok(());
+        }
+        runner.sleep(POLL_INTERVAL);
+    }
+    Err(StartError::Shutdown(format!(
+        "`poimen-server` did not stop within {} s",
+        START_TIMEOUT.as_secs()
+    )))
+}
+
+/// The confirmed restart: [`stop`] the running server, then start the bundled one.
+pub fn restart(runner: &impl Runner) -> Result<Outcome, StartError> {
+    stop(runner)?;
+    ensure_running(runner, true)
 }
 
 /// The file name of the bundled server next to the app executable: Tauri installs the sidecar
@@ -267,15 +324,39 @@ fn reuse_staged(error: io::Error, target: &Path) -> io::Result<()> {
     if target.is_file() { Ok(()) } else { Err(error) }
 }
 
+/// Whether `running` is an older version than `bundled`: `x.y.z` compared numerically, a
+/// pre-release suffix ignored. A version that does not parse is never called outdated.
+pub fn is_older(running: &str, bundled: &str) -> bool {
+    fn parse(v: &str) -> Option<Vec<u64>> {
+        let core = v.split(['-', '+']).next()?;
+        core.split('.').map(|p| p.parse().ok()).collect()
+    }
+    match (parse(running), parse(bundled)) {
+        (Some(r), Some(b)) => r < b,
+        _ => false,
+    }
+}
+
 /// What a ping result means. Only on Windows is a denied connect [`Ping::Denied`] (the pipe of an
 /// elevated server); on Unix the client's directory check denies a loose or foreign socket
 /// directory, and starting a server heals that (it makes its own directory private again).
 fn classify(
     result: Result<poimen_client::protocol::PingResult, ClientError>,
     windows: bool,
+    bundled: &str,
 ) -> Ping {
     match result {
-        Ok(p) if p.protocol == poimen_client::protocol::PROTOCOL_VERSION => Ping::Answers,
+        Ok(p) if p.protocol == poimen_client::protocol::PROTOCOL_VERSION => {
+            if is_older(&p.version, bundled) {
+                Ping::Outdated { running: p.version }
+            } else {
+                Ping::Answers
+            }
+        }
+        Ok(p) => Ping::Incompatible {
+            running: p.version,
+            protocol: p.protocol,
+        },
         Err(ref e @ ClientError::Connect(ref io))
             if windows && io.kind() == io::ErrorKind::PermissionDenied =>
         {
@@ -309,7 +390,7 @@ impl Default for SystemRunner {
 
 impl Runner for SystemRunner {
     fn ping(&self) -> Ping {
-        classify(self.client.ping(), cfg!(windows))
+        classify(self.client.ping(), cfg!(windows), BUNDLED_VERSION)
     }
 
     fn resolve(&self) -> Option<PathBuf> {
@@ -350,6 +431,10 @@ impl Runner for SystemRunner {
         Ok(())
     }
 
+    fn shutdown(&self) -> Result<(), String> {
+        self.client.shutdown().map_err(|e| e.to_string())
+    }
+
     fn sleep(&self, duration: Duration) {
         std::thread::sleep(duration);
     }
@@ -368,6 +453,10 @@ mod tests {
     struct Fake {
         denied: bool,
         running: Cell<bool>,
+        /// What a running server's ping says; `None`: a current server (`Answers`).
+        found: RefCell<Option<Ping>>,
+        shutdowns: Cell<u32>,
+        shutdown_fails: bool,
         installed: bool,
         becomes_up: bool,
         spawned: RefCell<Vec<PathBuf>>,
@@ -379,6 +468,9 @@ mod tests {
             Self {
                 denied: false,
                 running: Cell::new(running),
+                found: RefCell::new(None),
+                shutdowns: Cell::new(0),
+                shutdown_fails: false,
                 installed,
                 becomes_up,
                 spawned: RefCell::new(vec![]),
@@ -392,7 +484,7 @@ mod tests {
             if self.denied {
                 Ping::Denied("denied".into())
             } else if self.running.get() {
-                Ping::Answers
+                self.found.borrow().clone().unwrap_or(Ping::Answers)
             } else {
                 Ping::Absent
             }
@@ -403,6 +495,16 @@ mod tests {
         fn spawn(&self, program: &Path) -> io::Result<()> {
             self.spawned.borrow_mut().push(program.to_path_buf());
             self.running.set(self.becomes_up);
+            self.found.replace(None);
+            Ok(())
+        }
+        fn shutdown(&self) -> Result<(), String> {
+            self.shutdowns.set(self.shutdowns.get() + 1);
+            if self.shutdown_fails {
+                return Err("unknown method server.shutdown".into());
+            }
+            self.running.set(false);
+            self.found.replace(None);
             Ok(())
         }
         fn sleep(&self, d: Duration) {
@@ -663,10 +765,13 @@ mod tests {
 
     #[test]
     fn a_denied_connect_is_denied_on_windows_only() {
-        assert!(matches!(classify(Err(denied()), true), Ping::Denied(_)));
-        assert_eq!(classify(Err(denied()), false), Ping::Absent);
+        assert!(matches!(
+            classify(Err(denied()), true, "0.8.0"),
+            Ping::Denied(_)
+        ));
+        assert_eq!(classify(Err(denied()), false, "0.8.0"), Ping::Absent);
         let refused = ClientError::Connect(io::Error::from(io::ErrorKind::ConnectionRefused));
-        assert_eq!(classify(Err(refused), true), Ping::Absent);
+        assert_eq!(classify(Err(refused), true, "0.8.0"), Ping::Absent);
     }
 
     #[test]
@@ -679,8 +784,130 @@ mod tests {
             })
         };
         let current = poimen_client::protocol::PROTOCOL_VERSION;
-        assert_eq!(classify(pong(current), false), Ping::Answers);
-        assert_eq!(classify(pong(current + 1), false), Ping::Absent);
+        assert_eq!(classify(pong(current), false, "0.8.0"), Ping::Answers);
+    }
+
+    fn pong_of(
+        version: &str,
+        protocol: u32,
+    ) -> Result<poimen_client::protocol::PingResult, ClientError> {
+        Ok(poimen_client::protocol::PingResult {
+            version: version.into(),
+            protocol,
+            pid: 1,
+        })
+    }
+
+    #[test]
+    fn an_older_server_is_outdated_and_a_newer_or_equal_one_answers() {
+        let current = poimen_client::protocol::PROTOCOL_VERSION;
+        assert_eq!(
+            classify(pong_of("0.11.2", current), false, "0.12.0"),
+            Ping::Outdated {
+                running: "0.11.2".into()
+            }
+        );
+        assert_eq!(
+            classify(pong_of("0.12.0", current), false, "0.12.0"),
+            Ping::Answers
+        );
+        assert_eq!(
+            classify(pong_of("0.12.0-rc1", current), false, "0.12.0"),
+            Ping::Answers
+        );
+        assert_eq!(
+            classify(pong_of("0.13.0", current), false, "0.12.0"),
+            Ping::Answers
+        );
+        // numeric, not textual: 0.9.0 is older than 0.10.0
+        assert!(is_older("0.9.0", "0.10.0"));
+        assert!(!is_older("garbage", "0.10.0"));
+    }
+
+    #[test]
+    fn another_protocol_is_incompatible_not_absent() {
+        let current = poimen_client::protocol::PROTOCOL_VERSION;
+        assert_eq!(
+            classify(pong_of("0.5.0", current + 1), false, "0.12.0"),
+            Ping::Incompatible {
+                running: "0.5.0".into(),
+                protocol: current + 1
+            }
+        );
+    }
+
+    fn outdated_fake() -> Fake {
+        let fake = Fake::new(true, true, true);
+        fake.found.replace(Some(Ping::Outdated {
+            running: "0.1.0".into(),
+        }));
+        fake
+    }
+
+    #[test]
+    fn an_outdated_server_is_reported_and_neither_stopped_nor_replaced() {
+        let fake = outdated_fake();
+        assert_eq!(
+            ensure_running(&fake, true),
+            Ok(Outcome::Outdated {
+                running: "0.1.0".into(),
+                bundled: BUNDLED_VERSION.into()
+            })
+        );
+        assert_eq!(fake.shutdowns.get(), 0);
+        assert!(fake.spawned.borrow().is_empty());
+    }
+
+    #[test]
+    fn an_incompatible_server_is_reported_and_no_second_server_is_spawned() {
+        let fake = Fake::new(true, true, true);
+        fake.found.replace(Some(Ping::Incompatible {
+            running: "0.1.0".into(),
+            protocol: 1,
+        }));
+        assert_eq!(
+            ensure_running(&fake, true),
+            Ok(Outcome::Incompatible {
+                running: "0.1.0".into(),
+                protocol: 1
+            })
+        );
+        assert!(fake.spawned.borrow().is_empty());
+        assert_eq!(fake.shutdowns.get(), 0);
+    }
+
+    #[test]
+    fn a_confirmed_restart_shuts_down_then_starts_the_bundled_server() {
+        let fake = outdated_fake();
+        assert_eq!(restart(&fake), Ok(Outcome::Started));
+        assert_eq!(fake.shutdowns.get(), 1);
+        assert_eq!(fake.spawned.borrow().len(), 1);
+        assert_eq!(fake.ping(), Ping::Answers);
+    }
+
+    #[test]
+    fn a_restart_whose_shutdown_fails_starts_nothing() {
+        let fake = Fake {
+            shutdown_fails: true,
+            ..outdated_fake()
+        };
+        assert!(matches!(restart(&fake), Err(StartError::Shutdown(_))));
+        assert!(fake.spawned.borrow().is_empty());
+    }
+
+    #[test]
+    fn stop_without_a_server_asks_for_nothing() {
+        let fake = Fake::new(false, true, true);
+        assert_eq!(stop(&fake), Ok(()));
+        assert_eq!(fake.shutdowns.get(), 0);
+    }
+
+    #[test]
+    fn stop_shuts_a_current_server_down_and_starts_nothing() {
+        let fake = Fake::new(true, true, true);
+        assert_eq!(stop(&fake), Ok(()));
+        assert_eq!(fake.shutdowns.get(), 1);
+        assert!(fake.spawned.borrow().is_empty());
     }
 
     /// The real ping of a socket in a loose directory (0755), with a fake start.
@@ -704,6 +931,9 @@ mod tests {
         }
         fn spawn(&self, program: &Path) -> io::Result<()> {
             self.fake.spawn(program)
+        }
+        fn shutdown(&self) -> Result<(), String> {
+            self.fake.shutdown()
         }
         fn sleep(&self, d: Duration) {
             self.fake.sleep(d)

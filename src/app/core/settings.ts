@@ -101,6 +101,74 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
   });
 }
 
+/** When an agent action is offered (`When` of `agent_actions.rs`); every given condition must hold. */
+export interface AgentActionWhen {
+  level: string[];
+  label: string[];
+  noChildren: boolean;
+  checks: string | null;
+  state: string[];
+  review: string | null;
+}
+
+/** A resolved agent action (`get_agent_actions`, wire shape of `agent_actions.rs`). */
+export interface AgentAction {
+  id: string;
+  label: string;
+  on: "issue" | "pr" | "milestone";
+  prompt: string;
+  run: string;
+  harness: string | null;
+  model: string | null;
+  when: AgentActionWhen;
+  batch: string;
+  /** Where the entry comes from. */
+  source: "default" | "user" | "project";
+}
+
+function parseWhen(raw: unknown): AgentActionWhen {
+  const r = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  const list = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  return {
+    level: list(r["level"]),
+    label: list(r["label"]),
+    noChildren: r["noChildren"] === true,
+    checks: typeof r["checks"] === "string" ? r["checks"] : null,
+    state: list(r["state"]),
+    review: typeof r["review"] === "string" ? r["review"] : null,
+  };
+}
+
+/** The actions of a `get_agent_actions` answer; malformed entries are skipped. */
+export function parseAgentActions(raw: unknown): AgentAction[] {
+  const list = (raw as { actions?: unknown } | null)?.actions;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((item): AgentAction[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const r = item as Record<string, unknown>;
+    const on = r["on"];
+    const source = r["source"];
+    if (typeof r["id"] !== "string" || typeof r["prompt"] !== "string") return [];
+    if (on !== "issue" && on !== "pr" && on !== "milestone") return [];
+    if (source !== "default" && source !== "user" && source !== "project") return [];
+    return [
+      {
+        id: r["id"],
+        label: typeof r["label"] === "string" ? r["label"] : r["id"],
+        on,
+        prompt: r["prompt"],
+        run: typeof r["run"] === "string" ? r["run"] : "repoRoot",
+        harness: typeof r["harness"] === "string" ? r["harness"] : null,
+        model: typeof r["model"] === "string" ? r["model"] : null,
+        when: parseWhen(r["when"]),
+        batch: typeof r["batch"] === "string" ? r["batch"] : "each",
+        source,
+      },
+    ];
+  });
+}
+
 function commandSpec(v: unknown): string[] | string | null {
   if (typeof v === "string") return v;
   if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as string[];
@@ -506,12 +574,7 @@ export class SettingsStore {
     });
   }
 
-  /** Removes `spaces.layout`, so new spaces use the built-in default again. */
-  resetSpacesLayout(): Promise<boolean> {
-    return this.write({ spacesLayout: null }, "the new space layout", "remove_spaces_layout", {});
-  }
-
-  /** The built-in layout of a new space; `null` when the backend cannot be asked. */
+  /** The default layout of a new space (seeded for the installed agents); `null` when the backend cannot be asked. */
   async defaultSpacesLayout(): Promise<SpaceLayout | null> {
     try {
       return parseSpaceLayout(await this.bridge.invoke("default_spaces_layout"));

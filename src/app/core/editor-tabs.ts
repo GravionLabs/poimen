@@ -48,17 +48,31 @@ export function changesDir(id: string): string | null {
   return id.startsWith(CHANGES_TAB_PREFIX) ? id.slice(CHANGES_TAB_PREFIX.length) : null;
 }
 
+/** Prefix of a space overview tab id; the rest is the id of the space it shows. */
+const SPACE_TAB_PREFIX = "poimen:space:";
+
+/** The id of the overview tab of `spaceId` (at most one per space). */
+export function spaceTab(spaceId: string): string {
+  return SPACE_TAB_PREFIX + spaceId;
+}
+
+/** The space an overview tab belongs to; `null` for any other tab. */
+export function spaceOfTab(id: string): string | null {
+  return id.startsWith(SPACE_TAB_PREFIX) ? id.slice(SPACE_TAB_PREFIX.length) : null;
+}
+
 /**
  * What a tab shows: a herdr pane (live terminal), the settings view, GitHub, the flow of a
- * pane's agent run or the changes of a directory.
+ * pane's agent run, the changes of a directory or the overview of a space.
  */
-export type TabKind = "pane" | "settings" | "github" | "deliver" | "flow" | "changes";
+export type TabKind = "pane" | "settings" | "github" | "deliver" | "flow" | "changes" | "space";
 
 export function tabKind(id: string): TabKind {
   if (id === SETTINGS_TAB) return "settings";
   if (id === GITHUB_TAB) return "github";
   if (id === DELIVER_TAB) return "deliver";
   if (changesDir(id) !== null) return "changes";
+  if (spaceOfTab(id) !== null) return "space";
   return flowPane(id) !== null ? "flow" : "pane";
 }
 
@@ -283,6 +297,11 @@ export class EditorTabs {
   /** Opens the changes tab of `dir` (at most one per directory) as a pinned tab, or activates it. */
   openChanges(dir: string): void {
     this.openPinned(changesTab(dir));
+  }
+
+  /** Opens the overview tab of `spaceId` (at most one per space) as a pinned tab, or activates it. */
+  openSpace(spaceId: string): void {
+    this.openPinned(spaceTab(spaceId));
   }
 
   /** Appends a pinned tab to the focused group, or activates it when it is open anywhere. */

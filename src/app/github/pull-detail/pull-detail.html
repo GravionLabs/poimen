@@ -1,0 +1,141 @@
+@let row = pulls.detailRow();
+@if (row) {
+  <aside class="pane" aria-label="Pull request detail" tabindex="-1" data-testid="pull-detail">
+    <header class="head">
+      <div class="title">
+        <h2>{{ row.title }}</h2>
+        <button
+          type="button"
+          class="icon-btn"
+          title="Close"
+          aria-label="Close detail"
+          data-testid="detail-close"
+          (click)="pulls.closeDetail()"
+        >
+          ×
+        </button>
+      </div>
+      <div class="meta">
+        <span class="mono" data-testid="detail-number">#{{ row.number }}</span>
+        @if (runs.badge(row.repo, row.number); as run) {
+          <button
+            type="button"
+            class="badge badge-{{ run.state === 'running' ? 'primary' : 'warning' }}"
+            data-testid="detail-run-badge"
+            title="Show the agent"
+            (click)="runs.focus(run.paneId)"
+          >
+            {{ run.text }}
+          </button>
+        }
+        <span class="mono" data-testid="detail-branches"
+          >{{ row.headRef }} → {{ row.baseRef }}</span
+        >
+        <button
+          type="button"
+          class="icon-btn"
+          title="Open in browser"
+          [attr.aria-label]="'Open #' + row.number + ' in browser'"
+          [disabled]="!isGithubUrl(row.url)"
+          (click)="pulls.openUrl(row.url)"
+        >
+          ↗
+        </button>
+      </div>
+      <!-- Action bar: agent actions; later actions (merge, review, ...) go here, see the viewerCan* flags. -->
+      <div class="actions" role="toolbar" aria-label="Pull request actions" data-testid="actions">
+        @for (o of offered(); track o.action.id) {
+          <button
+            type="button"
+            data-testid="agent-action"
+            [disabled]="!o.enabled"
+            [attr.title]="o.reason ?? 'Shift+click: choose harness and model'"
+            (click)="agentActions.request(o.action, targets(), $event.shiftKey)"
+          >
+            {{ o.action.label }}
+          </button>
+        }
+      </div>
+    </header>
+    @if (errorMessage(); as message) {
+      <p class="problem" role="alert" data-testid="detail-error">
+        Could not read the pull request: {{ message }}
+      </p>
+    } @else if (pulls.detail(); as d) {
+      <section aria-labelledby="pd-desc">
+        <h3 id="pd-desc">Description</h3>
+        @if (d.body.trim()) {
+          <div class="markdown" data-testid="detail-body" [innerHTML]="body()"></div>
+        } @else {
+          <p class="hint">No description.</p>
+        }
+      </section>
+      <section aria-labelledby="pd-checks">
+        <h3 id="pd-checks">Checks</h3>
+        @if (d.checks.length === 0) {
+          <p class="hint">No checks.</p>
+        } @else {
+          <ul class="list" data-testid="detail-checks">
+            @for (c of d.checks; track $index) {
+              <li class="check-{{ c.state }}">
+                <span class="state">{{ c.state }}</span>
+                @if (c.url && isGithubUrl(c.url)) {
+                  <a
+                    href="#"
+                    class="link"
+                    (click)="$event.preventDefault(); pulls.openUrl(c.url)"
+                    >{{ c.name }}</a
+                  >
+                } @else {
+                  <span>{{ c.name }}</span>
+                }
+              </li>
+            }
+          </ul>
+        }
+      </section>
+      <section aria-labelledby="pd-reviews">
+        <h3 id="pd-reviews">Reviews</h3>
+        @if (d.reviews.length === 0) {
+          <p class="hint">No reviews.</p>
+        } @else {
+          <ul class="list" data-testid="detail-reviews">
+            @for (r of d.reviews; track $index) {
+              <li>
+                <span class="state">{{ stateLabel(r.state) }}</span>
+                <span>{{ r.author ?? "ghost" }}</span>
+                @if (r.submittedAt) {
+                  <span class="hint">{{ r.submittedAt.slice(0, 10) }}</span>
+                }
+              </li>
+            }
+          </ul>
+        }
+      </section>
+      <section aria-labelledby="pd-issues">
+        <h3 id="pd-issues">Linked issues</h3>
+        @if (d.linkedIssues.length === 0) {
+          <p class="hint">No linked issues.</p>
+        } @else {
+          <ul class="list" data-testid="detail-issues">
+            @for (i of d.linkedIssues; track i.repo + i.number) {
+              <li>
+                <button
+                  type="button"
+                  class="link"
+                  data-testid="detail-issue"
+                  (click)="openIssue(i)"
+                >
+                  {{ i.repo }}#{{ i.number }} {{ i.title }}
+                </button>
+                <span class="hint">{{ stateLabel(i.state) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+    } @else {
+      <p class="hint" data-testid="detail-loading">Loading...</p>
+    }
+  </aside>
+}

@@ -46,6 +46,8 @@ pub struct ProjectConfig {
     pub presets: Vec<Preset>,
     /// `tasks`: modes and `worktreeDir` that override the user's (merged by name).
     pub tasks: Option<crate::settings::TaskOverride>,
+    /// `github.agentActions`: entries that override the user's by `id`.
+    pub agent_actions: Vec<crate::agent_actions::Spec>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -419,6 +421,17 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
         if tasks.modes.is_some() || tasks.worktree_dir.is_some() {
             out.config.tasks = Some(tasks);
         }
+    }
+
+    if !data["github"]["agentActions"].is_null() {
+        let mut warnings = Vec::new();
+        out.config.agent_actions = crate::agent_actions::parse(
+            &data["github"]["agentActions"],
+            "github.agentActions",
+            &mut warnings,
+        );
+        out.warnings
+            .extend(warnings.into_iter().map(|w| format!("{file}: {w}")));
     }
 
     let mut names: HashSet<String> = HashSet::new();

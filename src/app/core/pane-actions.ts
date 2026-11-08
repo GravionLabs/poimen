@@ -4,11 +4,13 @@ import {
   closeWarning,
   paneDir,
   rowName,
+  spaceContaining,
   workspaceDirs,
   type Terminal,
   type SplitDirection,
 } from "./herdr";
 import { HerdrStore } from "./herdr-store";
+import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
 
 /** A dialog the user has to answer before a pane is created or closed. */
@@ -26,6 +28,7 @@ export type PaneDialogState =
 export class PaneActions {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(HerdrStore);
+  private readonly spaces = inject(SpaceActions);
 
   private readonly _dialog = signal<PaneDialogState | null>(null);
   private readonly _error = signal<string | null>(null);
@@ -100,6 +103,24 @@ export class PaneActions {
         cwd: cwd.trim() || null,
       }),
     );
+  }
+
+  /**
+   * Opens a terminal whose working directory is `dir`: a new tab in the space whose root contains
+   * it, else in a new space for `dir` (its first terminal). Resolves to the terminal, if any.
+   */
+  async openTerminalIn(dir: string): Promise<Terminal | undefined> {
+    const cwd = dir.trim();
+    if (!cwd) return undefined;
+    const spaceId = spaceContaining(this.store.snapshot(), cwd);
+    if (spaceId) {
+      return this.create(() =>
+        this.bridge.invoke<string | null>("terminal_create", { workspaceId: spaceId, cwd }),
+      );
+    }
+    const outcome = await this.spaces.create(cwd, "");
+    if (!outcome) return undefined;
+    return this.store.snapshot().terminals.find((t) => t.space_id === outcome.workspace_id);
   }
 
   /** Splits `paneId`; the new shell starts in the pane's directory. Resolves to the new pane. */

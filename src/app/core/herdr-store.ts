@@ -28,10 +28,20 @@ export const REPOS_REFRESH_MS = 60_000;
 export type ConnectionState =
   { state: "connected" } | { state: "reconnecting" | "unreachable"; reason: string };
 
-/** What `ensure_backend` found: `running` (already), `started`, `disabled` (`herdr.autoStart` off) or `failed`. */
+/**
+ * What `ensure_backend` found: `running` (already), `started`, `disabled` (`herdr.autoStart` off),
+ * `outdated` (a poimen-server older than the bundled one runs), `incompatible` (one with another
+ * protocol version runs) or `failed`. The last two are only reported; restarting is the user's call.
+ */
 export interface BackendStatus {
-  state: "running" | "started" | "disabled" | "failed";
+  state: "running" | "started" | "disabled" | "outdated" | "incompatible" | "failed";
   reason: string | null;
+  /** Version of the running server (`outdated`, `incompatible`). */
+  running?: string;
+  /** Version poimen bundles (`outdated`). */
+  bundled?: string;
+  /** Protocol version of the running server (`incompatible`). */
+  protocol?: number;
 }
 
 /** Whether the window has focus; false outside a browser. */

@@ -1,0 +1,31 @@
+{
+  "data": {
+    "repository": {
+      "issue": {
+        "number": 337,
+        "title": "[PBI] feat(github): issue detail pane",
+        "url": "https://github.com/GravionLabs/poimen/issues/337",
+        "body": "Selecting an issue opens a **detail pane**.",
+        "state": "CLOSED",
+        "stateReason": "COMPLETED",
+        "author": { "login": "jkaufmann" },
+        "viewerCanUpdate": true,
+        "labels": { "nodes": [{ "name": "pbi" }, { "name": "frontend" }] },
+        "assignees": { "nodes": [{ "login": "jkaufmann" }] },
+        "milestone": { "title": "M2" },
+        "parent": { "number": 300, "title": "[Feature] GitHub planner", "repository": { "nameWithOwner": "GravionLabs/poimen" } },
+        "subIssues": {
+          "nodes": [
+            { "number": 338, "title": "Sub one", "state": "OPEN", "repository": { "nameWithOwner": "GravionLabs/poimen" } },
+            { "number": 339, "title": "Sub two", "state": "CLOSED", "repository": { "nameWithOwner": "GravionLabs/poimen" } }
+          ]
+        },
+        "closedByPullRequestsReferences": {
+          "nodes": [
+            { "number": 540, "title": "feat(github): issue detail pane", "url": "https://github.com/GravionLabs/poimen/pull/540", "state": "MERGED", "repository": { "nameWithOwner": "GravionLabs/poimen" } }
+          ]
+        }
+      }
+    }
+  }
+}

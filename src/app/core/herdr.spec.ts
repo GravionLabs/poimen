@@ -18,6 +18,7 @@ import {
   waitingCount,
   agentKinds,
   closeWarning,
+  spaceContaining,
   workspaceDirs,
   type Terminal,
   type Snapshot,
@@ -205,6 +206,50 @@ describe("workspaceDirs", () => {
 
   it("is empty for a workspace without panes", () => {
     expect(workspaceDirs(snapshot, "w9")).toEqual([]);
+  });
+});
+
+describe("spaceContaining", () => {
+  const space = (space_id: string, number: number) => ({
+    space_id,
+    label: space_id,
+    number,
+    agent_status: "idle" as const,
+  });
+  const snapshot = (cwds: Record<string, string>): Snapshot => ({
+    spaces: Object.keys(cwds).map((id, i) => space(id, i + 1)),
+    tabs: [],
+    terminals: Object.entries(cwds).map(([space_id, cwd]) =>
+      pane({ terminal_id: `${space_id}:p`, space_id, cwd }),
+    ),
+  });
+
+  it("finds the space whose root is above the directory or the directory itself", () => {
+    const s = snapshot({ w1: "/work/app", w2: "/other" });
+    expect(spaceContaining(s, "/work/app/src/deep")).toBe("w1");
+    expect(spaceContaining(s, "/work/app/")).toBe("w1");
+  });
+
+  it("prefers the deepest root", () => {
+    const s = snapshot({ w1: "/work", w2: "/work/app" });
+    expect(spaceContaining(s, "/work/app/src")).toBe("w2");
+  });
+
+  it("does not match a sibling that shares a name prefix or a deeper root", () => {
+    const s = snapshot({ w1: "/work/app", w2: "/work/app/src" });
+    expect(spaceContaining(s, "/work/application")).toBeUndefined();
+    expect(spaceContaining(snapshot({ w2: "/work/app/src" }), "/work/app")).toBeUndefined();
+  });
+
+  it("matches Windows paths with drive letters, spaces and backslashes, ignoring case", () => {
+    const s = snapshot({ w1: "C:\\Users\\Jo Doe\\My Projects" });
+    expect(spaceContaining(s, "c:/users/jo doe/my projects/app")).toBe("w1");
+    expect(spaceContaining(s, "D:\\Users\\Jo Doe\\My Projects\\app")).toBeUndefined();
+  });
+
+  it("is undefined for a blank directory or no spaces", () => {
+    expect(spaceContaining(snapshot({}), "/a")).toBeUndefined();
+    expect(spaceContaining(snapshot({ w1: "/a" }), "  ")).toBeUndefined();
   });
 });
 

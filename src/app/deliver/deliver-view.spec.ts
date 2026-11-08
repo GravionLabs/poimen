@@ -69,9 +69,7 @@ beforeEach(() => {
 describe("Deliver panel", () => {
   it("explains where loops come from while there are none", async () => {
     const { el } = await render();
-    expect(text(el.querySelector("[data-testid=empty]"))).toContain(
-      ".agents/deliver-loop/status.json",
-    );
+    expect(text(el.querySelector("[data-testid=empty]"))).toContain(".agents/events/<run>.jsonl");
     expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(0);
   });
 
@@ -91,6 +89,23 @@ describe("Deliver panel", () => {
     expect(text(el.querySelector("[data-testid=delivered]"))).toContain("#325 → PR #340");
     expect(el.querySelector("[data-testid=needs-you]")).toBeNull();
     expect(el.querySelector("[data-testid=start]")).toBeNull();
+  });
+
+  it("shows no pull request link for a delivered entry whose prUrl is the issue URL (#538)", async () => {
+    const { el, deliver, show } = await render();
+    const issue = "https://github.com/GravionLabs/poimen/issues/334";
+    const file = read("running");
+    if (file.kind !== "ok") throw new Error("fixture");
+    deliver.apply("/src/skills", {
+      ...file,
+      status: { ...(file.status as object), delivered: [{ pbi: 334, url: issue, prUrl: issue }] },
+    });
+    await show();
+    const row = text(el.querySelector("[data-testid=delivered]"));
+    expect(row).toContain("#334");
+    expect(row).not.toContain(issue);
+    expect(row).not.toContain("PR #");
+    expect(el.querySelectorAll("[data-testid=delivered] button")).toHaveLength(1);
   });
 
   it("lists blocked, paused and needs-you items with their reasons", async () => {
@@ -192,6 +207,86 @@ describe("Deliver panel", () => {
   });
 });
 
+describe("Deliver panel with progress events", () => {
+  const events = (...names: string[]): DeliverRead => ({
+    kind: "events",
+    runs: names.map((n) =>
+      JSON.parse(readFileSync(`src/app/deliver/fixtures/events-${n}.json`, "utf8")),
+    ),
+  });
+
+  it("shows a loop and an interactive session side by side, colored by tone", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", events("blocked", "session"));
+    await show();
+    const cards = [...el.querySelectorAll("[data-testid=card]")];
+    expect(cards).toHaveLength(2);
+    expect(cards.map((c) => c.getAttribute("data-tone"))).toEqual(["danger", "neutral"]);
+    expect(cards.map((c) => text(c.querySelector("[data-testid=source]")))).toEqual([
+      "loop",
+      "session",
+    ]);
+    expect(text(cards[1].querySelector("h2"))).toContain("Interactive deliver");
+    expect(cards[1].querySelector("[data-testid=progress]")).toBeNull();
+    expect(cards[1].querySelector("[data-testid=start]")).toBeNull();
+  });
+
+  it("shows the RC and the open RC test as needs you without marking the run blocked", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", events("rc-test"));
+    await show();
+    expect(text(el.querySelector("[data-testid=rc]"))).toBe("3.2.0-rc.1");
+    expect(text(el.querySelector("[data-testid=release]"))).toContain("PR #391");
+    expect(text(el.querySelector("[data-testid=needs-you]"))).toContain("#400 RC test");
+    expect(el.querySelector("[data-testid=blocked]")).toBeNull();
+    expect(el.querySelector("[data-testid=card]")?.getAttribute("data-tone")).toBe("success");
+    button(el, "3.2.0-rc.1").click();
+    expect(opener.openUrl).toHaveBeenCalledWith(
+      "https://github.com/GravionLabs/skills/releases/tag/v3.2.0-rc.1",
+    );
+  });
+
+  it("shows an abandoned run as stale", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", events("abandoned"));
+    deliver.now.set(Date.parse("2026-11-07T12:00:00Z"));
+    await show();
+    expect(el.querySelector(".card.state-stale")).not.toBeNull();
+    expect(text(el.querySelector("[data-testid=state]"))).toContain("stale");
+  });
+
+  it("hints at events of a version it does not know, keeping the readable runs", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", { ...events("blocked"), unknownVersion: 2 } as DeliverRead);
+    await show();
+    expect(text(el.querySelector("[data-testid=events-version]"))).toContain("version 2");
+    expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(2);
+  });
+
+  it("keeps the order of the runs on an update and drops the runs that are gone", async () => {
+    const { deliver } = await render();
+    deliver.apply("/r", events("blocked", "session"));
+    const order = () =>
+      deliver.cards().map((c) => (c.state.kind === "ok" ? c.state.status.source : c.state.kind));
+    expect(order()).toEqual(["loop", "session"]);
+    deliver.apply("/r", events("session", "blocked"));
+    expect(order()).toEqual(["loop", "session"]);
+    deliver.apply("/r", events("session"));
+    expect(order()).toEqual(["session"]);
+  });
+
+  it("does not notify for the first read and notifies for a new decision of a run", async () => {
+    const { deliver } = await render();
+    const notify = vi.spyOn(TestBed.inject(TauriBridge), "notify").mockResolvedValue(true);
+    deliver.apply("/r", events("session"));
+    expect(notify).not.toHaveBeenCalled();
+    const next = JSON.parse(readFileSync("src/app/deliver/fixtures/events-session.json", "utf8"));
+    next.needsYou = [{ number: 5, url: "u", reason: "pick one" }];
+    deliver.apply("/r", { kind: "events", runs: [next] });
+    expect(notify.mock.calls.map((c) => c[1])).toEqual(["#5 needs you: pick one"]);
+  });
+});
+
 describe("Deliver service", () => {
   it("receives deliver events once started, and stops listening", async () => {
     const { deliver } = await render();
@@ -256,6 +351,7 @@ describe("Deliver service", () => {
         "/r",
         set("running", {
           release: { reviewRound: 1, prUrl: "https://github.com/o/n/pull/9" },
+          closed: 9,
           result: "done",
         }),
       );

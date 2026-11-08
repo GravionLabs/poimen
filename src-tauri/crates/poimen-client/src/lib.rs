@@ -240,6 +240,12 @@ impl Client {
         )
     }
 
+    /// Asks the server to end every terminal and exit (`server.shutdown`). Only after the user
+    /// confirmed; the server answers, then goes away shortly after.
+    pub fn shutdown(&self) -> Result<(), ClientError> {
+        self.request("server.shutdown", Value::Null).map(drop)
+    }
+
     pub fn close_terminal(&self, terminal_id: &str) -> Result<(), ClientError> {
         self.request(
             "terminal.close",

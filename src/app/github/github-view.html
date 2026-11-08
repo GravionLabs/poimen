@@ -1,152 +1,264 @@
 <div class="page">
   <header>
-    <h1>Pull requests</h1>
-    <button type="button" (click)="refresh()" [disabled]="pulls.loading()">
-      {{ pulls.loading() ? "Refreshing..." : "Refresh" }}
+    <h1>GitHub</h1>
+    <button type="button" (click)="refresh()" [disabled]="loading">
+      {{ loading ? "Refreshing..." : "Refresh" }}
     </button>
   </header>
-  @if (pulls.error(); as err) {
-    <p class="problem" role="alert">Could not read the pull requests: {{ err }}</p>
-  }
-  @let result = pulls.result();
-  @if (!result) {
-    @if (!pulls.error()) {
-      <p class="hint">Loading...</p>
-    }
-  } @else {
-    <div class="toolbar" role="group" aria-label="Filters">
-      @for (s of scopes; track s.id) {
-        <button
-          type="button"
-          [class.active]="pulls.scope() === s.id"
-          [attr.aria-pressed]="pulls.scope() === s.id"
-          (click)="pulls.scope.set(s.id)"
-        >
-          {{ s.label }}
-        </button>
-      }
+  <div class="layout">
+    <aside class="side">
       <select
         aria-label="Repository"
-        [value]="pulls.repoFilter() ?? ''"
+        [value]="filter.repo() ?? ''"
         (change)="setRepo($any($event.target).value)"
       >
         <option value="">All repositories</option>
-        @for (name of pulls.repoNames(); track name) {
+        @for (name of repoNames(); track name) {
           <option [value]="name">{{ name }}</option>
         }
       </select>
-      <input
-        type="search"
-        aria-label="Filter by title or number"
-        placeholder="Title or number"
-        [value]="pulls.text()"
-        (input)="pulls.text.set($any($event.target).value)"
-      />
-      <span class="count" data-testid="count">
-        {{ pulls.visible().length }} shown
-        @if (pulls.selected().size) {
-          , {{ pulls.selectedPulls().length }} selected
-        }
-      </span>
-    </div>
-    @if (result.repos.length === 0) {
-      <p class="hint" data-testid="no-repos">
-        No GitHub repository found among the spaces and explorer roots.
-      </p>
-    }
-    @for (repo of result.repos; track repo.root) {
-      @if (repo.status === "error") {
-        <p class="problem" role="alert" data-testid="repo-error">
-          {{ repo.repo }}: {{ errorText(repo.error) }}
-        </p>
-      }
-    }
-    @if (result.repos.length > 0) {
-      @if (pulls.visible().length === 0) {
-        <p class="hint" data-testid="empty">No pull requests match.</p>
-      } @else {
-        <table>
-          <thead>
-            <tr>
-              <th></th>
-              <th>Repository</th>
-              <th>#</th>
-              <th>Title</th>
-              <th>Author</th>
-              <th>Checks</th>
-              <th>Review</th>
-              <th class="num">Size</th>
-              <th class="num">Age</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody tabindex="0" (keydown)="onKey($event)" aria-label="Pull requests">
-            @for (row of pulls.visible(); track row.key) {
-              <tr
-                [class.selected]="pulls.selected().has(row.key)"
-                [class.cursor]="pulls.cursor() === row.key"
-                [attr.data-key]="row.key"
-              >
-                <td>
-                  <input
-                    type="checkbox"
-                    [attr.aria-label]="'Select #' + row.number"
-                    [checked]="pulls.selected().has(row.key)"
-                    (click)="onCheck($event, row.key)"
-                  />
-                </td>
-                <td class="mono">{{ row.repo }}</td>
-                <td>#{{ row.number }}</td>
-                <td>
-                  {{ row.title }}
-                  @if (row.isDraft) {
-                    <span class="badge">draft</span>
-                  }
-                </td>
-                <td>{{ row.author ?? "ghost" }}</td>
-                <td>
-                  @if (row.checks.state !== "none") {
-                    <span
-                      class="checks-{{ row.checks.state }}"
-                      [title]="checksText(row.checks)"
-                      data-testid="checks"
-                    >
-                      {{ row.checks.passed }} / {{ row.checks.failed }} / {{ row.checks.pending }}
-                    </span>
-                  }
-                </td>
-                <td>{{ reviewText(row) }}</td>
-                <td class="num">
-                  <span class="add">+{{ row.additions }}</span>
-                  <span class="del">-{{ row.deletions }}</span>
-                </td>
-                <td class="num">{{ age(row) }}</td>
-                <td>
-                  <button
-                    type="button"
-                    [disabled]="!isGithubUrl(row.url)"
-                    (click)="pulls.openUrl(row.url)"
-                  >
-                    Open in browser
-                  </button>
-                  @if (pulls.worktreeFor(row)) {
-                    <button type="button" data-testid="open-space" (click)="pulls.openSpace(row)">
-                      Open space
-                    </button>
-                  } @else {
-                    <button type="button" data-testid="check-out" (click)="pulls.checkout(row)">
-                      Check out
-                    </button>
-                  }
-                </td>
-              </tr>
+      <label class="show-empty">
+        <input
+          type="checkbox"
+          data-testid="show-empty"
+          [checked]="ui.githubShowEmpty()"
+          (change)="ui.setGithubShowEmpty($any($event.target).checked)"
+        />
+        Show empty repositories
+      </label>
+      <nav aria-label="GitHub sub-pages" class="nav">
+        @for (p of pages(); track p.id) {
+          <button
+            type="button"
+            class="nav-item"
+            [attr.data-page]="p.id"
+            [attr.aria-current]="ui.githubPage() === p.id ? 'page' : null"
+            [class.active]="ui.githubPage() === p.id"
+            (click)="selectPage(p.id)"
+            (keydown)="onNavKey($event, p.id)"
+          >
+            {{ p.label }}
+            @if (p.count !== null) {
+              <span class="nav-count" [attr.data-testid]="'count-' + p.id">{{ p.count }}</span>
             }
-          </tbody>
-        </table>
-        <p class="hint">Checks: passed / failed / pending.</p>
+          </button>
+        }
+      </nav>
+    </aside>
+    <main class="content">
+      @switch (ui.githubPage()) {
+        @case ("inbox") {
+          <app-github-inbox />
+        }
+        @case ("pulls") {
+          @if (pulls.error(); as err) {
+            <p class="problem" role="alert">Could not read the pull requests: {{ err }}</p>
+          }
+          @let result = pulls.result();
+          @if (!result) {
+            @if (!pulls.error()) {
+              <p class="hint">Loading...</p>
+            }
+          } @else {
+            <div class="toolbar" role="group" aria-label="Filters">
+              @for (s of scopes; track s.id) {
+                <button
+                  type="button"
+                  [class.active]="pulls.scope() === s.id"
+                  [attr.aria-pressed]="pulls.scope() === s.id"
+                  (click)="pulls.scope.set(s.id)"
+                >
+                  {{ s.label }}
+                </button>
+              }
+              <input
+                type="search"
+                aria-label="Filter by title or number"
+                placeholder="Title or number"
+                [value]="pulls.text()"
+                (input)="pulls.text.set($any($event.target).value)"
+              />
+              <span class="count" data-testid="count">
+                {{ pulls.visible().length }} shown
+                @if (pulls.selected().size) {
+                  , {{ pulls.selectedPulls().length }} selected
+                }
+              </span>
+            </div>
+            @if (result.repos.length === 0) {
+              <p class="hint" data-testid="no-repos">
+                No GitHub repository found among the spaces and explorer roots.
+              </p>
+            }
+            @for (repo of result.repos; track repo.root) {
+              @if (repo.status === "error") {
+                <p class="problem" role="alert" data-testid="repo-error">
+                  {{ repo.repo }}: {{ errorText(repo.error) }}
+                </p>
+              }
+            }
+            @if (result.repos.length > 0) {
+              @if (pulls.groups().length === 0) {
+                <p class="hint" data-testid="empty">No pull requests match.</p>
+              } @else {
+                <table>
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>#</th>
+                      <th>Title</th>
+                      <th>Author</th>
+                      <th>Checks</th>
+                      <th>Review</th>
+                      <th class="num">Size</th>
+                      <th class="num">Age</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody tabindex="0" (keydown)="onKey($event)" aria-label="Pull requests">
+                    @for (group of pulls.groups(); track group.root) {
+                      <tr class="group" data-testid="group">
+                        <th colspan="9" scope="colgroup" class="mono">
+                          {{ group.repo }}
+                          <span class="hint">{{ group.rows.length }}</span>
+                        </th>
+                      </tr>
+                      @if (group.rows.length === 0) {
+                        <tr class="empty-group">
+                          <td colspan="9" class="hint">No pull requests match.</td>
+                        </tr>
+                      }
+                      @for (row of group.rows; track row.key) {
+                        <tr
+                          class="row"
+                          tabindex="-1"
+                          [class.selected]="pulls.selected().has(row.key)"
+                          [class.cursor]="pulls.cursor() === row.key"
+                          [attr.data-key]="row.key"
+                          (click)="onRowClick($event, row)"
+                          (contextmenu)="openRowMenu($event, row)"
+                        >
+                          <td>
+                            <input
+                              type="checkbox"
+                              [attr.aria-label]="'Select #' + row.number"
+                              [checked]="pulls.selected().has(row.key)"
+                              (click)="onCheck($event, row.key)"
+                            />
+                          </td>
+                          <td>#{{ row.number }}</td>
+                          <td>
+                            {{ row.title }}
+                            @if (runs.badge(row.repo, row.number); as run) {
+                              <button
+                                type="button"
+                                class="badge badge-{{
+                                  run.state === 'running' ? 'primary' : 'warning'
+                                }}"
+                                data-testid="run-badge"
+                                title="Show the agent"
+                                (click)="runs.focus(run.paneId)"
+                              >
+                                {{ run.text }}
+                              </button>
+                            }
+                            @if (row.isDraft) {
+                              <span class="badge badge-neutral" data-testid="draft">Draft</span>
+                            }
+                          </td>
+                          <td>{{ row.author ?? "ghost" }}</td>
+                          <td>
+                            <span
+                              class="checks"
+                              [title]="checksText(row.checks)"
+                              data-testid="checks"
+                            >
+                              @for (c of checkBadges(row.checks); track c.kind) {
+                                <span
+                                  class="check check-{{ c.kind }}"
+                                  role="img"
+                                  [attr.aria-label]="c.count + ' ' + c.label"
+                                >
+                                  <span aria-hidden="true">{{ c.icon }}</span
+                                  >{{ c.count }}
+                                </span>
+                              }
+                            </span>
+                          </td>
+                          <td>
+                            @if (reviewBadge(row); as review) {
+                              <span class="badge badge-{{ review.tone }}" data-testid="review">{{
+                                review.label
+                              }}</span>
+                            }
+                          </td>
+                          <td class="num">
+                            <span class="add">+{{ row.additions }}</span>
+                            <span class="del">-{{ row.deletions }}</span>
+                          </td>
+                          <td class="num">{{ age(row) }}</td>
+                          <td class="actions">
+                            @if (pulls.worktreeFor(row)) {
+                              <button
+                                type="button"
+                                data-testid="open-space"
+                                (click)="pulls.openSpace(row)"
+                              >
+                                Open space
+                              </button>
+                            } @else {
+                              <button
+                                type="button"
+                                data-testid="check-out"
+                                (click)="pulls.checkout(row)"
+                              >
+                                Check out
+                              </button>
+                            }
+                            <button
+                              type="button"
+                              class="icon-btn"
+                              title="Agent actions"
+                              data-testid="row-menu"
+                              data-action-menu-button
+                              [attr.aria-label]="'Agent actions for #' + row.number"
+                              (click)="openRowMenu($event, row)"
+                            >
+                              ⋯
+                            </button>
+                            <button
+                              type="button"
+                              class="icon-btn"
+                              title="Open in browser"
+                              [attr.aria-label]="'Open #' + row.number + ' in browser'"
+                              [disabled]="!isGithubUrl(row.url)"
+                              (click)="pulls.openUrl(row.url)"
+                            >
+                              ↗
+                            </button>
+                          </td>
+                        </tr>
+                      }
+                    }
+                  </tbody>
+                </table>
+              }
+            }
+          }
+        }
+        @case ("issues") {
+          <app-github-issues />
+        }
+        @case ("milestones") {
+          <app-github-milestones />
+        }
       }
+    </main>
+    @if (ui.githubPage() === "pulls") {
+      <app-pull-detail />
+    } @else if (ui.githubPage() === "issues") {
+      <app-issue-detail />
     }
-  }
-  <app-github-milestones />
-  <app-github-issues />
+  </div>
+  <app-agent-action-menu />
 </div>

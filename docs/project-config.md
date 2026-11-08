@@ -44,6 +44,12 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
   `model`, `prompt`) or a command as an argv array (`["pwsh", "run.ps1", "{nr}"]`, each element
   expanded on its own, no shell); `cleanup` is an argv array. A string `command` or `cleanup` still
   works for one release with a deprecation warning.
+- `github.agentActions[]`: agent actions for issues and pull requests, same schema as
+  `github.agentActions` in the user `config.json` (`id`, `label`, `on`, `when`, `prompt`, `run`,
+  `harness`, `model`, `batch`). They merge by `id` over the user's and the built-in ones
+  (`"disabled": true` removes one); their prompts count as commands for the trust question and are
+  only used in a trusted repository. `get_agent_actions(root)` returns the result with the source
+  of each entry.
 - `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`). Each is a palette
   entry `Project: <name>`: `terminal` opens a tab named after it in the directory of the focused
   space and types the command; `agent` sends it as a prompt to the space's agent (a picker when
@@ -64,7 +70,7 @@ the fallback. When neither exists, the entry is skipped with a warning.
 
 For a new space: `layout` of `.poimen/config.json`, else the deprecated
 `.agents/herdr-layout.json` (still read until 1.0; a warning is shown each time a space is
-created), else `spaces.layout` of the user config, else the built-in default. An invalid project
+created), else `spaces.layout` of the user config (seeded on the first start), else the built-in default. An invalid project
 layout shows a warning naming the file and the space gets a single pane.
 
 ## Trust
@@ -83,3 +89,13 @@ Any change to the file changes its hash and revokes the trust, so the question c
 both `.poimen/config.json` and the deprecated `.agents/herdr-layout.json` present, the hash covers
 both. The settings view section "Trusted projects" lists the roots with a "Revoke" button. The
 layout of `spaces.layout` in the user config and the built-in default need no trust.
+
+## Editing in the space overview
+
+The overview tab of a space has a Configuration section (opened by the gear icon on the space
+row): the name of the space, its directory (read-only) and the `setup`, `teardown` and `layout`
+keys of this file. Saving merges only those keys into the existing JSON object, so `commands`,
+`presets`, `tasks` and any unknown key stay as they are (a file that is not valid JSON is never
+overwritten). A layout must pass the same checks as above; errors show next to the field. Because
+a saved file has a new hash, poimen lists its commands and asks for trust first (see Trust);
+nothing is written until you confirm.

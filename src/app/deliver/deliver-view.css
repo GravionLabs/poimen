@@ -50,9 +50,27 @@ h3 {
   border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
 }
-.card.state-blocked,
+/* Colors follow the tone of the run, never its text. */
+.card.tone-success {
+  border-color: var(--h-success-color, #2da44e);
+}
+.card.tone-warning,
 .card.state-stale {
   border-color: var(--h-warning-color, #d9a400);
+}
+.card.tone-danger {
+  border-color: var(--h-danger-color, #d33);
+}
+.card.tone-info {
+  border-color: var(--h-primary-color, #3b82f6);
+}
+.badge {
+  font-size: 11px;
+  font-weight: normal;
+  padding: 0 6px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 8px;
+  color: var(--h-text-muted-color);
 }
 .card-head {
   display: flex;
@@ -64,9 +82,18 @@ h3 {
   font-size: 12px;
   color: var(--h-text-muted-color);
 }
-.state-blocked .state,
+.tone-success .state {
+  color: var(--h-success-color, #2da44e);
+}
+.tone-warning .state,
 .state-stale .state {
   color: var(--h-warning-color, #d9a400);
+}
+.tone-danger .state {
+  color: var(--h-danger-color, #d33);
+}
+.tone-info .state {
+  color: var(--h-primary-color, #3b82f6);
 }
 .bar {
   height: 8px;
@@ -79,8 +106,14 @@ h3 {
   height: 100%;
   background: var(--h-primary-color, #3b82f6);
 }
-.state-done .fill {
+.tone-success .fill {
   background: var(--h-success-color, #2da44e);
+}
+.tone-warning .fill {
+  background: var(--h-warning-color, #d9a400);
+}
+.tone-danger .fill {
+  background: var(--h-danger-color, #d33);
 }
 .progress {
   margin: 4px 0 8px;

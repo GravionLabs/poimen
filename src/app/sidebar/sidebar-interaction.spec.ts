@@ -136,6 +136,22 @@ describe("Sidebar with the real hx-tree", () => {
     expect(selected).toEqual(["w1:p1", "w1:p1"]);
   });
 
+  it("keeps the chevron outside the text lines and anchors the row actions to line 1", async () => {
+    const { workspace } = await setup();
+    const space = workspace().querySelector<HTMLElement>(".space")!;
+    const main = space.querySelector(".main")!;
+    const chevron = space.querySelector(".chevron")!;
+    // The actions are siblings of the text block, so line 2 holds only its own segments.
+    expect(chevron.parentElement).toBe(space);
+    expect(main.contains(chevron)).toBe(false);
+    // jsdom has no layout: the placement is the stylesheet's top alignment, not centering.
+    const css = readFileSync("src/app/sidebar/sidebar.css", "utf8");
+    expect(css).toMatch(/\.space \{[^}]*align-items: flex-start;/);
+    expect(css).toMatch(/\.badge \{[^}]*align-self: flex-start;/);
+    expect(css).toMatch(/\.space-name \{[^}]*flex: 0 4 auto;/);
+    expect(css).toMatch(/\.state \{\s*flex: none;/);
+  });
+
   it("starts expanded and collapses and expands again with the chevron, without selecting", async () => {
     const { root, settle, workspace, selected } = await setup();
     expect(workspace().getAttribute("aria-expanded")).toBe("true");
@@ -174,6 +190,18 @@ describe("Sidebar with the real hx-tree", () => {
     expect(close.nextElementSibling?.classList.contains("chevron")).toBe(true);
   });
 
+  it("opens the configuration of the space from the gear without selecting the row", async () => {
+    const { fixture, workspace, settle, selected } = await setup();
+    const configured: string[] = [];
+    fixture.componentInstance.configOpened.subscribe((id) => configured.push(id));
+    const gear = workspace().querySelector<HTMLButtonElement>(".gear")!;
+    expect(gear.getAttribute("aria-label")).toBe("Configure space One");
+    gear.click();
+    await settle();
+    expect(configured).toEqual(["w1"]);
+    expect(selected).toEqual([]);
+  });
+
   it("closes through the menu action without selecting or toggling the row", async () => {
     const { fixture, workspace, settle, selected } = await setup();
     const actions: unknown[] = [];
@@ -183,6 +211,18 @@ describe("Sidebar with the real hx-tree", () => {
     expect(actions).toEqual([{ kind: "workspace", id: "w1", action: "close-space" }]);
     expect(selected).toEqual([]);
     expect(workspace().getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens the overview of the space on a click on its row, not on a pane row", async () => {
+    const { fixture, workspace, settle, click, selected } = await setup();
+    const opened: string[] = [];
+    fixture.componentInstance.spaceOpened.subscribe((id) => opened.push(id));
+    workspace().querySelector<HTMLElement>(".space")!.click();
+    await settle();
+    expect(opened).toEqual(["w1"]);
+    await click("claude");
+    expect(opened).toEqual(["w1"]);
+    expect(selected).toEqual(["w1:p1"]);
   });
 
   describe("inline rename", () => {

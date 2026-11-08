@@ -1,3 +1,4 @@
+mod agent_actions;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
@@ -6,6 +7,7 @@ mod changes_git;
 mod copilot;
 mod deliver;
 mod git;
+mod git_sync;
 mod github;
 mod github_branches;
 mod github_issues;
@@ -20,7 +22,9 @@ mod layout;
 mod live;
 mod poimen_backend;
 mod poimen_server;
+mod progress_events;
 mod project;
+mod project_edit;
 mod remote;
 mod schemes;
 mod settings;
@@ -256,6 +260,23 @@ async fn github_pulls(
         .map_err(|e| e.to_string())
 }
 
+/// One pull request in detail (body, checks, reviews, linked issues) in the repository of `root`.
+/// Read-only; the GraphQL cache of the client holds it for 30 s.
+#[tauri::command]
+async fn github_pull_detail(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+) -> Result<github_pulls::PullDetail, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || github_pulls::load_detail(&client, &root, number))
+        .await
+        .map_err(|e| github::GhError::Other {
+            message: e.to_string(),
+        })?
+}
+
 /// The pull request (open or merged) of the branch of each directory, one GraphQL query per
 /// repository; directories without one are left out. Read-only; `gh` errors give an empty answer.
 #[tauri::command]
@@ -267,6 +288,23 @@ async fn branch_pulls(
     tauri::async_runtime::spawn_blocking(move || github_branches::load(&client, dirs))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// One issue in detail (body, labels, sub-issues, closing pull requests) in the repository of
+/// `root`. Read-only; the GraphQL cache of the client holds it for 30 s.
+#[tauri::command]
+async fn github_issue_detail(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+) -> Result<github_issues::IssueDetail, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || github_issues::load_detail(&client, &root, number))
+        .await
+        .map_err(|e| github::GhError::Other {
+            message: e.to_string(),
+        })?
 }
 
 /// Issues of the GitHub repositories among `dirs` with parent links and linked pull requests (open
@@ -374,6 +412,8 @@ fn template_for<'a>(
 struct TemplateHint {
     name: String,
     agent: String,
+    /// The default template (no `match`), which the dialog says.
+    default: bool,
 }
 
 fn resolve_space_template_with(home: Option<&std::path::Path>, cwd: &str) -> Option<TemplateHint> {
@@ -382,6 +422,7 @@ fn resolve_space_template_with(home: Option<&std::path::Path>, cwd: &str) -> Opt
     template_for(&dir, &user, home).map(|t| TemplateHint {
         name: t.name.clone(),
         agent: t.agent.clone(),
+        default: t.dir.is_none() && t.remote.is_none(),
     })
 }
 
@@ -623,6 +664,39 @@ async fn project_config(dir: String) -> Result<project::Loaded, String> {
     .map_err(|e| e.to_string())
 }
 
+/// The text of the project file of the repository containing `dir`, for the space overview.
+#[tauri::command]
+async fn project_file(dir: String) -> Result<project_edit::ProjectFile, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        project_edit::read(&root)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Merges `patch` (`layout`, `setup`, `teardown`) into the project file; the new content goes
+/// through `trust::gate` first (an untrusted hash answers with the request, nothing written).
+#[tauri::command]
+async fn project_save(
+    dir: String,
+    patch: serde_json::Value,
+    decision: Option<trust::Decision>,
+) -> Result<project_edit::SaveOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        let trusted = get_settings().trusted_projects;
+        let outcome = project_edit::save(&root, &patch, &trusted, decision.as_ref())?;
+        if let Some(hash) = &outcome.store {
+            let home = home_dir().ok_or("the home directory is not known")?;
+            settings::trust_project(&home, &root, hash)?;
+        }
+        Ok(outcome)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The `commands[]` and `presets[]` of the project file of the repository of `dir`, for the
 /// palette (names only), and whether the file still needs the user's trust.
 #[tauri::command]
@@ -753,6 +827,47 @@ async fn ensure_backend(
         Ok(status)
     })
     .await
+}
+
+/// Stops the running server and starts the bundled one. Ends every terminal: the frontend calls it
+/// only after the user confirmed which terminals end. Serialized with `ensure_backend`.
+#[tauri::command]
+async fn restart_server(
+    backend: State<'_, Shared>,
+    lock: State<'_, StartLock>,
+    colors: State<'_, terminal_colors::TerminalColors>,
+    kind: State<'_, BackendKind>,
+) -> Result<backend::BackendStatus, String> {
+    let lock = lock.0.clone();
+    let colors = colors.inner().clone();
+    let poimen = kind.0 == "poimen";
+    on_backend(backend.inner(), move |b| {
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let status: backend::BackendStatus = b.restart_server().into();
+        if poimen && status.state == "started" {
+            let _ = colors.push(&poimen_client::Client::default());
+        }
+        Ok(status)
+    })
+    .await
+}
+
+/// The confirmed "Quit poimen and stop server": stops the server (ending every terminal), then
+/// quits the app. When the server cannot be stopped the app stays open and the error is returned.
+#[tauri::command]
+async fn quit_and_stop_server(
+    app: AppHandle,
+    backend: State<'_, Shared>,
+    lock: State<'_, StartLock>,
+) -> Result<(), String> {
+    let lock = lock.0.clone();
+    on_backend(backend.inner(), move |b| {
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        b.stop_server().map_err(|e| e.to_string())
+    })
+    .await?;
+    app.exit(0);
+    Ok(())
 }
 
 /// Whether Claude Code and Copilot CLI have the poimen hooks (`poimen-server integration status`).
@@ -992,6 +1107,66 @@ async fn get_task_modes(dir: Option<String>) -> tasks::Resolved {
     })
 }
 
+/// The agent actions for the repository of `root`: defaults, the user's `github.agentActions` and
+/// the trusted project file's, each entry with its source; without `root` only the first two.
+#[tauri::command]
+async fn get_agent_actions(root: Option<String>) -> agent_actions::Resolved {
+    tauri::async_runtime::spawn_blocking(move || resolved_agent_actions(root))
+        .await
+        .unwrap_or_default()
+}
+
+fn resolved_agent_actions(root: Option<String>) -> agent_actions::Resolved {
+    let settings = get_settings();
+    let Some(dir) = root else {
+        return agent_actions::Resolved {
+            actions: agent_actions::resolve(&settings.agent_actions, &[]),
+            note: None,
+        };
+    };
+    let root = git::toplevel(&dir).unwrap_or(dir);
+    let sources = trust::Sources::read(&root);
+    agent_actions::for_project(
+        &settings.agent_actions,
+        &settings.harnesses,
+        &sources,
+        &settings.trusted_projects,
+    )
+}
+
+/// The programs to start for the action `id` on `items` in the repository of `root`; `harness` and
+/// `model` replace the action's own (the dialog of Shift+click).
+#[tauri::command]
+async fn agent_action_plan(
+    root: String,
+    id: String,
+    repo: String,
+    items: Vec<agent_actions::Item>,
+    harness: Option<String>,
+    model: Option<String>,
+    suffix: Option<String>,
+) -> Result<Vec<agent_actions::Launch>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let resolved = resolved_agent_actions(Some(root));
+        let action = resolved
+            .actions
+            .iter()
+            .find(|a| a.spec.id == id)
+            .ok_or_else(|| format!("unknown agent action {id:?}"))?;
+        agent_actions::plan(
+            &action.spec,
+            &get_settings().harnesses,
+            &repo,
+            &items,
+            harness.as_deref(),
+            model.as_deref(),
+            suffix.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The user color schemes (`~/.config/poimen/themes/*.toml`); changes arrive as `color-schemes` events.
 #[tauri::command]
 fn get_color_schemes() -> schemes::Schemes {
@@ -1096,10 +1271,24 @@ fn remove_spaces_layout() -> Result<(), String> {
     settings::remove_spaces_layout(&home)
 }
 
-/// The built-in pane layout of a new space, shown by the settings view when none is configured.
+/// The default pane layout of a new space (the first-start seeding for the installed agents),
+/// shown by the settings view as the "Default" layout.
 #[tauri::command]
 fn default_spaces_layout() -> layout::Layout {
-    layout::default_layout()
+    let path = gui_path::child_path();
+    templates::seeded(|p| gui_path::resolve_program(p, &path).is_some()).0
+}
+
+/// Writes the first-start defaults (`spaces.layout` and the default space template) when the
+/// config has neither key; `true` when it wrote them. Called once by the app (the UI state
+/// remembers that it ran).
+#[tauri::command]
+fn seed_space_defaults() -> Result<bool, String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    let path = gui_path::child_path();
+    let (layout, templates) =
+        templates::seed_values(|p| gui_path::resolve_program(p, &path).is_some());
+    settings::seed_defaults(&home, &layout, &templates)
 }
 
 /// The changed files of the worktree `dir` against its base or `HEAD` (read-only git).
@@ -1171,6 +1360,37 @@ async fn changes_push(dir: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// `git fetch --prune` of the repository containing `dir`.
+#[tauri::command]
+async fn git_fetch(dir: String) -> Result<git_sync::Outcome, String> {
+    tauri::async_runtime::spawn_blocking(move || git_sync::fetch(&dir, home_dir().as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// `git pull --ff-only` of the repository containing `dir`; refusals come back as the error.
+#[tauri::command]
+async fn git_pull(dir: String) -> Result<git_sync::Outcome, String> {
+    tauri::async_runtime::spawn_blocking(move || git_sync::pull(&dir, home_dir().as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Fetches every repository below `dir`; `git-sync-progress` events carry `{ done, total, path }`.
+#[tauri::command]
+async fn git_fetch_all(app: AppHandle, dir: String) -> Result<git_sync::Summary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_sync::fetch_all(&dir, home_dir().as_deref(), |done, total, path| {
+            let _ = app.emit(
+                "git-sync-progress",
+                json!({ "done": done, "total": total, "path": path }),
+            );
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, String> {
@@ -1236,8 +1456,9 @@ fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
     }
 }
 
-/// Watches the deliver loop status file (`.agents/deliver-loop/status.json`) of the repositories
-/// of `dirs` (one watch per repository toplevel; worktrees count as their own), replacing the
+/// Watches the deliver runs (progress events in `<git-common-dir>/.agents/events`, else the
+/// status file `.agents/deliver-loop/status.json`) of the repositories of `dirs` (one watch per
+/// repository: its worktrees count as one, named by the toplevel of the first), replacing the
 /// watched set; each change arrives as a `deliver` event `{ root, read }`, first with the current
 /// content. Returns the watched roots. Read-only.
 #[tauri::command]
@@ -1246,19 +1467,9 @@ async fn deliver_watch(
     watch: State<'_, DeliverWatch>,
     dirs: Vec<String>,
 ) -> Result<Vec<String>, String> {
-    let roots = tauri::async_runtime::spawn_blocking(move || {
-        let mut roots: Vec<String> = Vec::new();
-        for dir in dirs {
-            if let Some(top) = git::toplevel(&dir)
-                && !roots.contains(&top)
-            {
-                roots.push(top);
-            }
-        }
-        roots
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let roots = tauri::async_runtime::spawn_blocking(move || git::repo_roots(&dirs))
+        .await
+        .map_err(|e| e.to_string())?;
     let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
     let current = watches.keys().cloned().collect();
     let (stop, start) = deliver::plan(&current, &roots);
@@ -1617,6 +1828,8 @@ pub fn run() {
             snapshot,
             herdr_info,
             ensure_backend,
+            restart_server,
+            quit_and_stop_server,
             backend_kind,
             set_terminal_colors,
             hooks_status,
@@ -1638,8 +1851,10 @@ pub fn run() {
             space_rename,
             terminal_create,
             github_pulls,
+            github_pull_detail,
             branch_pulls,
             github_issues,
+            github_issue_detail,
             github_milestones,
             task_issues,
             github_repo,
@@ -1652,6 +1867,8 @@ pub fn run() {
             get_usage,
             get_settings,
             get_harnesses,
+            get_agent_actions,
+            agent_action_plan,
             get_task_modes,
             task_worktree,
             changes_list,
@@ -1661,6 +1878,9 @@ pub fn run() {
             changes_stage,
             changes_commit,
             changes_push,
+            git_fetch,
+            git_pull,
+            git_fetch_all,
             pr_worktree,
             worktree_branches,
             task_plan,
@@ -1679,7 +1899,10 @@ pub fn run() {
             revoke_project,
             remove_spaces_layout,
             default_spaces_layout,
+            seed_space_defaults,
             project_config,
+            project_file,
+            project_save,
             project_entries,
             project_run,
             repo_info,
@@ -2004,7 +2227,8 @@ mod build_layout_tests {
             resolve_space_template_with(Some(&home), &dir),
             Some(TemplateHint {
                 name: "app".into(),
-                agent: "claude".into()
+                agent: "claude".into(),
+                default: false,
             })
         );
         let outside = home.to_string_lossy().into_owned();
@@ -2014,6 +2238,20 @@ mod build_layout_tests {
             None
         );
         assert_eq!(resolve_space_template_with(None, &dir), None);
+    }
+
+    #[test]
+    fn the_default_template_is_marked_as_the_default_in_the_hint() {
+        let (home, dir) =
+            home_with_templates(r#"{"spaceTemplates":[{"name":"default","agent":"copilot"}]}"#);
+        assert_eq!(
+            resolve_space_template_with(Some(&home), &dir),
+            Some(TemplateHint {
+                name: "default".into(),
+                agent: "copilot".into(),
+                default: true,
+            })
+        );
     }
 
     #[test]

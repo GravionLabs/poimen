@@ -42,6 +42,15 @@
       }
     </select>
   }
+  @if (ui.panelTab() === "events" && spaceRuns().length) {
+    <select class="picker" aria-label="Run" (change)="pickRun($event)">
+      @for (r of spaceRuns(); track r.key) {
+        <option [value]="r.key" [selected]="r.key === run()?.key">
+          {{ runLabel(r, now()) }}
+        </option>
+      }
+    </select>
+  }
   <span class="spacer"></span>
   @if (ui.panelTab() === "flow" && subagents.supported() && subagents.paneId(); as paneId) {
     <button
@@ -53,7 +62,7 @@
       Open in editor
     </button>
   }
-  @if (ui.panelTab() === "output" && !following()) {
+  @if ((ui.panelTab() === "output" || ui.panelTab() === "events") && !following()) {
     <button type="button" class="action" (click)="resume()">Resume auto-scroll</button>
   }
   <button
@@ -123,6 +132,32 @@
       <app-flow-view [now]="now()" (openAgent)="openInOutput($event)" />
     }
   }
+}
+@if (ui.panelTab() === "events") {
+  <div class="body" #box aria-label="Run events" (scroll)="onScroll()">
+    @if (!run()) {
+      <p class="empty">
+        No run in this space yet. A deliver loop or an agent session reports its progress here.
+      </p>
+    } @else {
+      @for (row of rows(); track $index) {
+        <div
+          class="event"
+          [class]="toneStyle(row.tone).class"
+          [class.attention]="toneStyle(row.tone).attention"
+        >
+          <span class="icon" aria-hidden="true">{{ toneStyle(row.tone).icon }}</span>
+          <span class="time">{{ eventTime(row.ts) }}</span>
+          <span class="issue">{{ row.issue === null ? "" : "#" + row.issue }}</span>
+          <span class="step">{{ row.step ?? row.type }}</span>
+          <span class="result">{{ row.result ?? "" }}</span>
+          @if (row.prUrl; as url) {
+            <a class="pr" [href]="url" (click)="openPr($event, url)">PR</a>
+          }
+        </div>
+      }
+    }
+  </div>
 }
 @if (ui.panelTab() === "log") {
   <div class="body" aria-label="Task log">

@@ -10,6 +10,8 @@ import {
   flowTab,
   moveItem,
   parseEditor,
+  spaceOfTab,
+  spaceTab,
   tabKind,
   tabPaneId,
 } from "./editor-tabs";
@@ -43,6 +45,26 @@ describe("flow tab ids", () => {
     expect(tabPaneId(flowTab("w1:p2"))).toBe("w1:p2");
     expect(tabPaneId("w1:p2")).toBe("w1:p2");
     expect(tabPaneId("poimen:settings")).toBeNull();
+  });
+});
+
+describe("space overview tab ids", () => {
+  it("map a space to its overview tab and back", () => {
+    expect(spaceOfTab(spaceTab("w1"))).toBe("w1");
+    expect(spaceOfTab("w1:p2")).toBeNull();
+    expect(tabKind(spaceTab("w1"))).toBe("space");
+    expect(tabPaneId(spaceTab("w1"))).toBeNull();
+  });
+
+  it("opens one pinned tab per space and focuses it again", () => {
+    TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: null }] });
+    const tabs = TestBed.inject(EditorTabs);
+    tabs.openSpace("w1");
+    tabs.open("w1:p1");
+    tabs.openSpace("w1");
+    expect(tabs.tabs().map((t) => t.paneId)).toEqual([spaceTab("w1"), "w1:p1"]);
+    expect(tabs.tabs()[0].pinned).toBe(true);
+    expect(tabs.activeId()).toBe(spaceTab("w1"));
   });
 });
 

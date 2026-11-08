@@ -3,6 +3,8 @@ import { paneDir } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
+import { GithubFilter } from "./github-filter";
+import { UiState } from "../core/ui-state";
 import { REFRESH_MIN_MS, isGithubUrl, type GhError } from "./pulls";
 
 /** A milestone as `github_milestones` returns it (`Milestone` of `github_milestones.rs`). */
@@ -27,6 +29,11 @@ export function progressPercent(m: Pick<Milestone, "open" | "closed">): number {
   return total === 0 ? 0 : Math.round((m.closed / total) * 100);
 }
 
+/** A milestone with closed issues and no open ones can be closed. */
+export function readyToClose(m: Pick<Milestone, "open" | "closed">): boolean {
+  return m.open === 0 && m.closed > 0;
+}
+
 /** "Due 2026-11-20", or "No due date". */
 export function dueText(dueOn: string | null): string {
   return dueOn ? `Due ${dueOn.slice(0, 10)}` : "No due date";
@@ -44,6 +51,8 @@ export class GithubMilestones {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(HerdrStore);
   private readonly settings = inject(SettingsStore);
+  private readonly ui = inject(UiState);
+  private readonly filter = inject(GithubFilter);
 
   private readonly _result = signal<RepoMilestones[] | null>(null);
   private readonly _loading = signal(false);
@@ -56,17 +65,29 @@ export class GithubMilestones {
   readonly selected = signal<MilestoneSelection | null>(null);
 
   readonly repos = computed(() =>
-    (this._result() ?? []).flatMap((r) => (r.status === "ok" ? [r] : [])),
+    (this._result() ?? []).flatMap((r) =>
+      r.status === "ok" &&
+      this.filter.allows(r.repo) &&
+      (r.milestones.length > 0 || this.ui.githubShowEmpty())
+        ? [r]
+        : [],
+    ),
   );
+  /** Repositories that were read, for the shared repository filter. */
+  readonly repoNames = computed(() => (this._result() ?? []).map((r) => r.repo));
+  /** Open milestones of the repositories that pass the repository filter. */
+  readonly count = computed(() => this.repos().reduce((n, r) => n + r.milestones.length, 0));
   readonly errors = computed(() =>
     (this._result() ?? []).flatMap((r) =>
       r.status === "error" ? [{ repo: r.repo, error: r.error }] : [],
     ),
   );
 
-  /** Selecting the selected milestone again clears the filter. */
+  /** Selecting the selected milestone again clears the filter; a new selection shows the issues. */
   toggle(repo: string, title: string): void {
-    this.selected.set(this.isSelected(repo, title) ? null : { repo, title });
+    const clear = this.isSelected(repo, title);
+    this.selected.set(clear ? null : { repo, title });
+    if (!clear) this.ui.selectGithubPage("issues");
   }
 
   isSelected(repo: string, title: string): boolean {

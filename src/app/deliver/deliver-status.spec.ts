@@ -4,7 +4,7 @@ import {
   STALE_MS,
   ageText,
   barSummary,
-  cardOf,
+  cardsOf,
   needsAttention,
   parseStatus,
   percent,
@@ -17,6 +17,14 @@ import {
 
 const fixture = (name: string): Record<string, unknown> =>
   JSON.parse(readFileSync(`src/app/deliver/fixtures/status-${name}.json`, "utf8"));
+/** A run state as the backend folds it from progress events (`progress_events.rs`). */
+const eventsFixture = (name: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(`src/app/deliver/fixtures/events-${name}.json`, "utf8"));
+const runOf = (name: string): DeliverStatus => {
+  const parsed = parseStatus(eventsFixture(name));
+  if (typeof parsed === "string") throw new Error(parsed);
+  return parsed;
+};
 const status = (name: string): DeliverStatus => {
   const parsed = parseStatus(fixture(name));
   if (typeof parsed === "string") throw new Error(parsed);
@@ -28,6 +36,30 @@ const BLOCKED = status("blocked");
 const DONE = status("done");
 /** Two minutes after the last update of the running fixture. */
 const NOW = Date.parse(RUNNING.updatedAt) + 2 * 60_000;
+
+describe("a status file written between iterations (#537)", () => {
+  const between = {
+    ...fixture("done"),
+    closed: 7,
+    total: 23,
+    release: { reviewRound: null, prUrl: "https://github.com/GravionLabs/skills/pull/530" },
+  };
+
+  it("stays running with current null and open items, without a release ask", () => {
+    const parsed = parseStatus(between);
+    if (typeof parsed === "string") throw new Error(parsed);
+    expect(parsed.result).toBe("running");
+    expect(runState(parsed, Date.parse(parsed.updatedAt) + 60_000)).toBe("running");
+    expect(parsed.needsYou).toEqual([]);
+    expect(parsed.tone).not.toBe("warning");
+    expect(parsed.release.prUrl).toBeNull();
+  });
+
+  it("keeps done when every item is closed", () => {
+    expect(DONE.result).toBe("done");
+    expect(DONE.needsYou).toHaveLength(1);
+  });
+});
 
 describe("parseStatus", () => {
   it("reads the three fixtures of the schema", () => {
@@ -63,35 +95,124 @@ describe("parseStatus", () => {
   });
 });
 
-describe("cardOf", () => {
-  it("has no card for a repository without a status file", () => {
-    expect(cardOf("/r", { kind: "missing" })).toBeNull();
+describe("cardsOf", () => {
+  it("has no card for a repository without runs", () => {
+    expect(cardsOf("/r", { kind: "missing" })).toEqual([]);
   });
 
   it("turns another schema version into a hint, not an error", () => {
-    expect(cardOf("/r", { kind: "unsupported", schemaVersion: 2 })?.state).toEqual({
+    expect(cardsOf("/r", { kind: "unsupported", schemaVersion: 2 })[0].state).toEqual({
       kind: "unsupported",
       version: "2",
     });
-    expect(cardOf("/r", { kind: "unsupported" })?.state).toEqual({
+    expect(cardsOf("/r", { kind: "unsupported" })[0].state).toEqual({
       kind: "unsupported",
       version: "none",
     });
   });
 
   it("keeps a broken file as an invalid card", () => {
-    expect(cardOf("/r", { kind: "invalid", error: "EOF" })?.state).toEqual({
+    expect(cardsOf("/r", { kind: "invalid", error: "EOF" })[0].state).toEqual({
       kind: "invalid",
       error: "EOF",
     });
-    expect(cardOf("/r", { kind: "ok", status: { schemaVersion: 1 } })?.state.kind).toBe("invalid");
+    expect(cardsOf("/r", { kind: "ok", status: { schemaVersion: 1 } })[0].state.kind).toBe(
+      "invalid",
+    );
   });
 
   it("parses an ok read", () => {
-    expect(cardOf("/r", { kind: "ok", status: fixture("done") })).toMatchObject({
-      root: "/r",
-      state: { kind: "ok", status: { result: "done" } },
+    expect(cardsOf("/r", { kind: "ok", status: fixture("done") })).toMatchObject([
+      { root: "/r", run: DONE.run, state: { kind: "ok", status: { result: "done" } } },
+    ]);
+  });
+
+  it("makes one card per run of the events, loops and sessions alike", () => {
+    const cards = cardsOf("/r", {
+      kind: "events",
+      runs: [eventsFixture("session"), eventsFixture("blocked")],
     });
+    expect(
+      cards.map((c) => (c.state.kind === "ok" ? c.state.status.source : c.state.kind)),
+    ).toEqual(["session", "loop"]);
+    expect(cards[0].run).not.toBe(cards[1].run);
+  });
+
+  it("adds a hint for events of an unknown version next to the runs it can read", () => {
+    const cards = cardsOf("/r", {
+      kind: "events",
+      runs: [eventsFixture("blocked")],
+      unknownVersion: 2,
+    });
+    expect(cards).toHaveLength(2);
+    expect(cards[1].state).toEqual({ kind: "events-version", version: "2" });
+    expect(cardsOf("/r", { kind: "events", runs: [], unknownVersion: 3 })).toHaveLength(1);
+  });
+
+  it("reports a run state it cannot read as an invalid card", () => {
+    const cards = cardsOf("/r", { kind: "events", runs: [{ run: "x" }] });
+    expect(cards[0].state.kind).toBe("invalid");
+  });
+});
+
+describe("tone", () => {
+  it("is the tone of the events, not derived from the text", () => {
+    expect(runOf("blocked").tone).toBe("danger");
+    expect(runOf("rc-test").tone).toBe("success");
+    expect(runOf("session").tone).toBe("neutral");
+    expect(needsAttention(runOf("blocked"))).toBe(true);
+    expect(needsAttention(runOf("rc-test"))).toBe(false);
+  });
+
+  it("is derived for a status file, which has none", () => {
+    expect(RUNNING.tone).toBe("neutral");
+    expect(BLOCKED.tone).toBe("danger");
+    expect(DONE.tone).toBe("success");
+    expect(status("running").source).toBeNull();
+  });
+
+  it("falls back to neutral-by-state for a tone it does not know", () => {
+    const parsed = parseStatus({ ...eventsFixture("blocked"), tone: "loud" });
+    expect(typeof parsed === "object" && parsed.tone).toBe("danger");
+  });
+});
+
+describe("runs from events", () => {
+  it("shows the release candidate and the open RC test beside the release PR as needs you", () => {
+    const rc = runOf("rc-test");
+    expect(rc.release).toMatchObject({
+      rcVersion: "3.2.0-rc.1",
+      rcUrl: expect.stringContaining("v3.2.0-rc.1"),
+      prUrl: expect.stringContaining("/pull/391"),
+      testIssue: { number: 400 },
+    });
+    expect(rc.needsYou).toEqual([expect.objectContaining({ number: 400, reason: "RC test" })]);
+    expect(rc.blocked).toEqual([]);
+    expect(runState(rc, Date.parse(rc.updatedAt))).toBe("done");
+  });
+
+  it("reads a session without milestone", () => {
+    const session = runOf("session");
+    expect(session.milestone).toBeNull();
+    expect(
+      barSummary(
+        [{ root: "/r", run: session.run, state: { kind: "ok", status: session } }],
+        Date.parse(session.updatedAt) + 60_000,
+      )?.text,
+    ).toBe("▶ session");
+  });
+
+  it("shows an abandoned run as stale, also in words", () => {
+    const abandoned = runOf("abandoned");
+    const now = Date.parse(abandoned.updatedAt) + 60_000;
+    expect(runState(abandoned, now)).toBe("stale");
+    expect(stateText(abandoned, now)).toContain("stale");
+    expect(
+      barSummary(
+        [{ root: "/r", run: abandoned.run, state: { kind: "ok", status: abandoned } }],
+        now,
+      ),
+    ).toBeNull();
   });
 });
 
@@ -125,16 +246,17 @@ describe("run state, age and progress", () => {
     expect(percent({ closed: 12, total: 9 })).toBe(100);
   });
 
-  it("asks for the user on blocked, paused and needs-you items", () => {
+  it("asks for a look on a warning or danger tone", () => {
     expect(needsAttention(RUNNING)).toBe(false);
     expect(needsAttention(BLOCKED)).toBe(true);
-    expect(needsAttention({ ...RUNNING, paused: BLOCKED.paused })).toBe(true);
+    expect(needsAttention({ ...RUNNING, tone: "warning" })).toBe(true);
   });
 });
 
 describe("barSummary", () => {
   const card = (s: DeliverStatus, root = "/r"): DeliverCard => ({
     root,
+    run: s.run,
     state: { kind: "ok", status: s },
   });
 
@@ -149,8 +271,10 @@ describe("barSummary", () => {
     expect(barSummary([card(RUNNING, "/a"), card(RUNNING, "/b")], NOW)?.text).toBe("▶ 2 runs");
   });
 
-  it("turns into a warning when a loop is blocked or needs the user", () => {
-    const needs = { ...RUNNING, needsYou: BLOCKED.needsYou };
+  it("turns into a warning by the tone of the run, not by its items", () => {
+    const needs = { ...RUNNING, needsYou: BLOCKED.needsYou, tone: "warning" as const };
+    const quiet = { ...RUNNING, needsYou: BLOCKED.needsYou };
+    expect(barSummary([card(quiet)], NOW)?.warning).toBe(false);
     expect(barSummary([card(needs)], NOW)).toMatchObject({ text: "⚠ M4 3/9", warning: true });
     const blocked = { ...BLOCKED, updatedAt: RUNNING.updatedAt };
     expect(barSummary([card(blocked)], NOW)?.warning).toBe(true);
@@ -160,7 +284,7 @@ describe("barSummary", () => {
     expect(barSummary([card(DONE)], Date.parse(DONE.updatedAt))).toBeNull();
     expect(barSummary([card(RUNNING)], NOW + 2 * STALE_MS)).toBeNull();
     expect(
-      barSummary([{ root: "/r", state: { kind: "unsupported", version: "2" } }], NOW),
+      barSummary([{ root: "/r", run: "", state: { kind: "unsupported", version: "2" } }], NOW),
     ).toBeNull();
     expect(barSummary([], NOW)).toBeNull();
   });
@@ -183,6 +307,12 @@ describe("transitions", () => {
     expect(transitions(next, next)).toEqual([]);
   });
 
+  it("names a session without a milestone", () => {
+    const session = runOf("session");
+    const next = { ...session, needsYou: BLOCKED.needsYou };
+    expect(transitions(session, next)[0].title).toBe("Deliver session");
+  });
+
   it("reports a run that ends blocked and a new decision", () => {
     expect(transitions(RUNNING, { ...RUNNING, result: "blocked" }).map((e) => e.kind)).toEqual([
       "blocked",
@@ -196,5 +326,25 @@ describe("transitions", () => {
     const next = { ...RUNNING, release: DONE.release, result: "done" as const };
     expect(transitions(RUNNING, next).map((e) => e.kind)).toEqual(["release", "ended"]);
     expect(transitions(next, next)).toEqual([]);
+  });
+});
+
+describe("delivered entries (#538)", () => {
+  const withDelivered = (delivered: unknown[]) => {
+    const parsed = parseStatus({ ...fixture("running"), delivered });
+    if (typeof parsed === "string") throw new Error(parsed);
+    return parsed.delivered;
+  };
+
+  it("drops a prUrl that is the issue URL, keeps a pull request URL", () => {
+    const issue = "https://github.com/GravionLabs/poimen/issues/334";
+    const pull = "https://github.com/GravionLabs/poimen/pull/335";
+    expect(
+      withDelivered([
+        { pbi: 334, url: issue, prUrl: issue },
+        { pbi: 335, url: "u", prUrl: pull },
+        { pbi: 336, url: "u" },
+      ]).map((d) => d.prUrl),
+    ).toEqual([null, pull, null]);
   });
 });

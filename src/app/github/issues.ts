@@ -4,8 +4,9 @@ import { HerdrStore } from "../core/herdr-store";
 import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
+import { GithubFilter } from "./github-filter";
 import { GithubMilestones } from "./milestones";
-import { REFRESH_MIN_MS, isGithubUrl, type Checks, type GhError } from "./pulls";
+import { REFRESH_MIN_MS, ghErrorOf, isGithubUrl, type Checks, type GhError } from "./pulls";
 
 /** A pull request linked to an issue (`LinkedPr` of `github_issues.rs`). */
 export interface LinkedPr {
@@ -158,11 +159,65 @@ export function flattenTree(
   return rows;
 }
 
-/** Labels shown as a bracketed marker on the row. */
-export const MARKER_LABELS = ["needs-refinement", "needs-decision"] as const;
+/** The labels shown as chips: all but the level labels, which the level badge stands for. */
+export function labelChips(issue: Pick<Issue, "labels">): string[] {
+  return issue.labels.filter((l) => !LEVELS.includes(l.toLowerCase() as Level));
+}
 
-export function markers(issue: Issue): string[] {
-  return MARKER_LABELS.filter((m) => issue.labels.some((l) => l.toLowerCase() === m));
+/** The level as a badge; the tone picks the color of the level in the stylesheet. */
+export function levelBadge(level: Level): { label: string; tone: Level } {
+  return { label: level, tone: level };
+}
+
+/** Sub-issue progress of an epic or feature: `done/total` and a percentage. */
+export function issueProgress(
+  level: Level,
+  issue: Pick<Issue, "subTotal" | "subCompleted">,
+): { done: number; total: number; percent: number } | null {
+  if ((level !== "epic" && level !== "feature") || issue.subTotal <= 0) return null;
+  const done = Math.min(issue.subCompleted, issue.subTotal);
+  return { done, total: issue.subTotal, percent: Math.round((done / issue.subTotal) * 100) };
+}
+
+/** A sub-issue or the parent in an issue's detail (`RelatedIssue` of `github_issues.rs`). */
+export interface RelatedIssue {
+  number: number;
+  title: string;
+  state: string;
+  /** `owner/name`. */
+  repo: string;
+}
+
+/** A pull request that closes the issue (`ClosingPr` of `github_issues.rs`). */
+export interface ClosingPr {
+  number: number;
+  title: string;
+  url: string;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  repo: string;
+}
+
+/** An issue in detail (`IssueDetail` of `github_issues.rs`). */
+export interface IssueDetail {
+  number: number;
+  title: string;
+  url: string;
+  body: string;
+  state: "OPEN" | "CLOSED";
+  stateReason: string | null;
+  author: string | null;
+  labels: string[];
+  assignees: string[];
+  milestone: string | null;
+  parent: RelatedIssue | null;
+  subIssues: RelatedIssue[];
+  pullRequests: ClosingPr[];
+  viewerCanUpdate: boolean;
+}
+
+/** The key of an issue over all repositories: `owner/name#number`. */
+export function issueKey(repo: string, number: number): string {
+  return `${repo}#${number}`;
 }
 
 /** One repository ready for the view. */
@@ -188,16 +243,32 @@ export class GithubIssues {
   private readonly settings = inject(SettingsStore);
   private readonly ui = inject(UiState);
   private readonly milestones = inject(GithubMilestones);
+  private readonly filter = inject(GithubFilter);
 
   private readonly _result = signal<RepoIssues[] | null>(null);
   private readonly _loading = signal(false);
   private readonly _error = signal<string | null>(null);
+  private readonly _selected = signal<{ repo: string; number: number } | null>(null);
+  private readonly _cursor = signal<string | null>(null);
+  private readonly _detailKey = signal<string | null>(null);
+  private readonly _detail = signal<IssueDetail | null>(null);
+  private readonly _detailError = signal<GhError | string | null>(null);
+  private readonly _detailLoading = signal(false);
   private last = 0;
 
   readonly result = this._result.asReadonly();
   readonly loading = this._loading.asReadonly();
   readonly error = this._error.asReadonly();
 
+  /** The issue picked from elsewhere (a pull request's linked issue); highlighted in the tree. */
+  readonly selected = this._selected.asReadonly();
+  /** Key (`owner/name#number`) of the row the keyboard cursor is on. */
+  readonly cursor = this._cursor.asReadonly();
+  /** Key of the issue whose detail pane is open. */
+  readonly detailKey = this._detailKey.asReadonly();
+  readonly detail = this._detail.asReadonly();
+  readonly detailError = this._detailError.asReadonly();
+  readonly detailLoading = this._detailLoading.asReadonly();
   readonly state = signal<StateFilter>("open");
   readonly label = signal<string | null>(null);
   readonly level = signal<Level | null>(null);
@@ -228,23 +299,113 @@ export class GithubIssues {
       milestone: null,
       text: this.text(),
     };
-    return this.okRepos().map((r) => {
-      // The selected milestone filters the tree of its own repository.
-      const filter = { ...base, milestone: this.milestones.forRepo(r.repo) };
-      const roots = filterTree(buildTree(r.repo, r.issues), filter);
-      return {
-        root: r.root,
-        repo: r.repo,
-        truncated: r.truncated,
-        roots,
-        count: flattenTree(roots, () => false).length,
-      };
-    });
+    return this.okRepos()
+      .filter((r) => this.filter.allows(r.repo))
+      .map((r) => {
+        // The selected milestone filters the tree of its own repository.
+        const filter = { ...base, milestone: this.milestones.forRepo(r.repo) };
+        const roots = filterTree(buildTree(r.repo, r.issues), filter);
+        return {
+          root: r.root,
+          repo: r.repo,
+          truncated: r.truncated,
+          roots,
+          count: flattenTree(roots, () => false).length,
+        };
+      })
+      .filter((t) => t.count > 0 || this.ui.githubShowEmpty());
   });
+
+  /** Issues shown after all filters, over the repositories that pass the repository filter. */
+  readonly count = computed(() => this.trees().reduce((n, t) => n + t.count, 0));
+
+  /** Repositories that were read, for the shared repository filter. */
+  readonly repoNames = computed(() => (this._result() ?? []).map((r) => r.repo));
+
+  /** The issue of the open detail pane as the list knows it (absent when filtered out). */
+  readonly detailIssue = computed(() => {
+    const key = this._detailKey();
+    if (key === null) return null;
+    for (const r of this.okRepos()) {
+      const issue = r.issues.find((i) => issueKey(r.repo, i.number) === key);
+      if (issue) return { repo: r.repo, issue };
+    }
+    return null;
+  });
+
+  /** The visible rows over all repositories, in screen order. */
+  private readonly visibleKeys = computed(() =>
+    this.trees().flatMap((t) => this.rows(t).map((r) => issueKey(t.repo, r.node.issue.number))),
+  );
 
   /** The visible rows of one repository. */
   rows(tree: RepoTree): IssueRow[] {
     return flattenTree(tree.roots, (n) => this.isCollapsed(tree.repo, n));
+  }
+
+  select(repo: string, number: number): void {
+    this._selected.set({ repo, number });
+    this._cursor.set(issueKey(repo, number));
+  }
+
+  /** Moves the keyboard cursor by `delta` rows within the visible rows (clamped). */
+  moveCursor(delta: number): void {
+    const keys = this.visibleKeys();
+    if (!keys.length) return;
+    const at = this._cursor() === null ? -1 : keys.indexOf(this._cursor()!);
+    const next = Math.min(
+      keys.length - 1,
+      Math.max(0, at < 0 ? (delta > 0 ? 0 : keys.length - 1) : at + delta),
+    );
+    this._cursor.set(keys[next]);
+  }
+
+  /** Opens the detail pane of the cursor row, if any. */
+  openCursor(): void {
+    const key = this._cursor();
+    const at = key === null ? -1 : key.lastIndexOf("#");
+    if (key !== null && at > 0) void this.openDetail(key.slice(0, at), Number(key.slice(at + 1)));
+  }
+
+  /**
+   * Opens the detail pane of an issue and reads its detail (the backend caches for 30 s). A
+   * repository the list did not read has no directory to ask, so nothing opens.
+   */
+  async openDetail(repo: string, number: number): Promise<void> {
+    const root = (this._result() ?? []).find(
+      (r) => r.repo.toLowerCase() === repo.toLowerCase(),
+    )?.root;
+    if (root === undefined) return;
+    const key = issueKey(repo, number);
+    this._selected.set({ repo, number });
+    this._cursor.set(key);
+    this._detailKey.set(key);
+    this._detail.set(null);
+    this._detailError.set(null);
+    this._detailLoading.set(true);
+    try {
+      const detail = await this.bridge.invoke<IssueDetail>("github_issue_detail", {
+        root,
+        number,
+      });
+      if (this._detailKey() === key) this._detail.set(detail);
+    } catch (err) {
+      if (this._detailKey() === key) this._detailError.set(ghErrorOf(err));
+    } finally {
+      if (this._detailKey() === key) this._detailLoading.set(false);
+    }
+  }
+
+  closeDetail(): void {
+    this._detailKey.set(null);
+    this._detail.set(null);
+    this._detailError.set(null);
+    this._detailLoading.set(false);
+  }
+
+  /** True when `repo` was read, so its issues can open in the pane. */
+  knows(repo: string): boolean {
+    return (this._result() ?? []).some((r) => r.repo.toLowerCase() === repo.toLowerCase());
   }
 
   isCollapsed(repo: string, number: number): boolean {

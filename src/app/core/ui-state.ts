@@ -12,7 +12,7 @@ export const PANEL_MIN_HEIGHT = 80;
 export const PANEL_MAX_HEIGHT = 900;
 export const PANEL_DEFAULT_HEIGHT = 260;
 /** Tabs of the bottom panel: subagent transcripts (Output) and the run as a graph (Flow). */
-export const PANEL_TABS = ["output", "flow", "log"] as const;
+export const PANEL_TABS = ["output", "flow", "events", "log"] as const;
 export const DEFAULT_PANEL_TAB = "output";
 /** How many run command palette entries are remembered as "Recent". */
 export const RECENT_COMMANDS_LIMIT = 5;
@@ -94,6 +94,12 @@ export function parseLineComments(value: unknown): Record<string, CommentSet> {
   return out;
 }
 
+export type GithubPage = "inbox" | "pulls" | "issues" | "milestones";
+
+export function isGithubPage(value: unknown): value is GithubPage {
+  return value === "inbox" || value === "pulls" || value === "issues" || value === "milestones";
+}
+
 export interface LayoutState {
   sidebarWidth: number;
   sidebarCollapsed: boolean;
@@ -121,6 +127,10 @@ export interface LayoutState {
   lineComments?: Record<string, CommentSet>;
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
   collapsedIssues?: Record<string, number[]>;
+  /** The selected sub-page of the GitHub tab (`pulls`, `issues` or `milestones`). */
+  githubPage?: string;
+  /** The GitHub tab also lists repositories without matches. */
+  githubShowEmpty?: boolean;
   /** The page selected in the settings view (an id of its category list); may no longer exist. */
   settingsPage?: string;
   /** Ids of the collapsed groups of the settings category tree. */
@@ -129,6 +139,8 @@ export interface LayoutState {
   hooksOfferDismissed?: boolean;
   /** Agents whose hooks were seen installed; a dismissed offer returns when one goes missing. */
   hooksSeen?: string[];
+  /** The first-start defaults (`spaces.layout`, default space template) were written once. */
+  defaultsSeeded?: boolean;
 }
 
 export function clampPanelHeight(height: number): number {
@@ -184,10 +196,13 @@ export function parseLayout(raw: string | null): LayoutState {
       changesLayout,
       lineComments,
       collapsedIssues,
+      githubPage,
+      githubShowEmpty,
       settingsPage,
       settingsCollapsed,
       hooksOfferDismissed,
       hooksSeen,
+      defaultsSeeded,
     } = data as Record<string, unknown>;
     const comments = parseLineComments(lineComments);
     if (Object.keys(comments).length) state.lineComments = comments;
@@ -207,7 +222,10 @@ export function parseLayout(raw: string | null): LayoutState {
       if (entries.length) state.collapsedIssues = Object.fromEntries(entries);
     }
     if (typeof settingsPage === "string" && settingsPage) state.settingsPage = settingsPage;
+    if (isGithubPage(githubPage)) state.githubPage = githubPage;
+    if (githubShowEmpty === true) state.githubShowEmpty = true;
     if (hooksOfferDismissed === true) state.hooksOfferDismissed = true;
+    if (defaultsSeeded === true) state.defaultsSeeded = true;
     if (Array.isArray(hooksSeen)) {
       const seen = hooksSeen.filter((d): d is string => typeof d === "string" && d !== "");
       if (seen.length) state.hooksSeen = [...new Set(seen)];
@@ -280,6 +298,12 @@ export class UiState {
   readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
     this.initial.collapsedIssues ?? {},
   );
+  /** The selected sub-page of the GitHub tab. */
+  readonly githubPage = signal<GithubPage>(
+    isGithubPage(this.initial.githubPage) ? this.initial.githubPage : "inbox",
+  );
+  /** Whether the GitHub tab lists repositories without matches (hidden by default). */
+  readonly githubShowEmpty = signal(this.initial.githubShowEmpty === true);
   /** How the Changes tab shows a diff (side by side by default). */
   readonly changesLayout = signal<"inline" | "split">(
     this.initial.changesLayout === "inline" ? "inline" : "split",
@@ -298,6 +322,9 @@ export class UiState {
   readonly hooksOfferDismissed = signal(this.initial.hooksOfferDismissed === true);
   /** Agents whose hooks were seen installed (persisted). */
   readonly hooksSeen = signal<readonly string[]>(this.initial.hooksSeen ?? []);
+
+  /** The first-start defaults were written; they are not written again (even when deleted later). */
+  readonly defaultsSeeded = signal(this.initial.defaultsSeeded === true);
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -324,6 +351,16 @@ export class UiState {
     this.save();
   }
 
+  selectGithubPage(page: GithubPage): void {
+    this.githubPage.set(page);
+    this.save();
+  }
+
+  setGithubShowEmpty(show: boolean): void {
+    this.githubShowEmpty.set(show);
+    this.save();
+  }
+
   selectSettingsPage(id: string): void {
     this.settingsPage.set(id);
     this.save();
@@ -339,6 +376,11 @@ export class UiState {
 
   dismissHooksOffer(): void {
     this.hooksOfferDismissed.set(true);
+    this.save();
+  }
+
+  markDefaultsSeeded(): void {
+    this.defaultsSeeded.set(true);
     this.save();
   }
 
@@ -469,12 +511,15 @@ export class UiState {
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,
+      githubPage: this.githubPage() === "inbox" ? undefined : this.githubPage(),
+      githubShowEmpty: this.githubShowEmpty() ? true : undefined,
       changesLayout: this.changesLayout() === "inline" ? "inline" : undefined,
       lineComments: Object.keys(this.lineComments()).length ? this.lineComments() : undefined,
       settingsPage: this.settingsPage() ?? undefined,
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
       hooksOfferDismissed: this.hooksOfferDismissed() ? true : undefined,
       hooksSeen: this.hooksSeen().length ? [...this.hooksSeen()] : undefined,
+      defaultsSeeded: this.defaultsSeeded() ? true : undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));
