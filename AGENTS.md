@@ -48,6 +48,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - Color schemes: bundled and imported schemes, a derived chrome and the `colorSchema` setting ([ADR 0002](docs/adr/0002-color-schemes.md)).
 - Own terminal backend `poimen-server`, the default; herdr is the alternative until removed; agent status from Claude Code and Copilot hooks (proposed, [ADR 0003](docs/adr/0003-own-terminal-backend-without-herdr.md)).
 - GitHub views and agent harnesses native in poimen; the herdr plugin integration (ADR 0004) is removed (accepted, [ADR 0005](docs/adr/0005-github-views-and-agent-harnesses.md)).
+- poimen console with herdr scope: one `poimen` binary (TUI and CLI), tabs and splits owned by poimen-server, shared code in `poimen-core`; supersedes ADR 0003's TUI/CLI exclusion and "the app owns layout" (proposed, [ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)).
 
 ## Verification
 
