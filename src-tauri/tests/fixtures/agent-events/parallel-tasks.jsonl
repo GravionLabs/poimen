@@ -1,0 +1,9 @@
+{"v":1,"seq":1,"ts":"2026-11-08T10:00:01.000Z","run":"r2","type":"run.started","tone":"neutral","profiles":[],"host":{"herdr.pane":"w1:p2"}}
+{"v":1,"seq":2,"ts":"2026-11-08T10:00:02.000Z","run":"r2","type":"task.started","tone":"neutral","task":"g","subject":{"kind":"github.epic","id":"GravionLabs/demo#10","title":"Epic"}}
+{"v":1,"seq":3,"ts":"2026-11-08T10:00:03.000Z","run":"r2","type":"task.started","tone":"neutral","task":"t1","parent":"g","subject":{"kind":"github.issue","id":"GravionLabs/demo#11","title":"First","url":"https://github.com/GravionLabs/demo/issues/11"}}
+{"v":1,"seq":4,"ts":"2026-11-08T10:00:04.000Z","run":"r2","type":"task.started","tone":"neutral","task":"t2","parent":"g","subject":{"kind":"github.issue","id":"GravionLabs/demo#12","title":"Second","url":"https://github.com/GravionLabs/demo/issues/12"}}
+{"v":1,"seq":5,"ts":"2026-11-08T10:00:05.000Z","run":"r2","type":"step.started","tone":"neutral","task":"t1","step":{"name":"review"}}
+{"v":1,"seq":6,"ts":"2026-11-08T10:00:06.000Z","run":"r2","type":"step.started","tone":"neutral","task":"t2","step":{"name":"implement","n":1,"total":3,"text":"writing code"}}
+{"v":1,"seq":7,"ts":"2026-11-08T10:00:07.000Z","run":"r2","type":"progress","tone":"neutral","task":"t2","done":1,"total":3,"label":"steps"}
+{"v":1,"seq":8,"ts":"2026-11-08T10:00:08.000Z","run":"r2","type":"task.finished","tone":"danger","task":"t1","outcome":"failed","reason":"review rejected"}
+{"v":1,"seq":9,"ts":"2026-11-08T10:00:09.000Z","run":"r2","type":"step.started","tone":"neutral","task":"t2","step":{"name":"test","n":2,"total":3}}

@@ -10,9 +10,10 @@ import type { Terminal } from "../core/herdr";
 import { TauriBridge } from "../core/tauri";
 import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE } from "../core/ui-state";
+import { HerdrStore } from "../core/herdr-store";
 import { Deliver, loopPane, milestoneNumber } from "./deliver";
-import { DeliverView, prLabel } from "./deliver-view";
-import type { DeliverRead } from "./deliver-status";
+import { DeliverView, linkLabel, prLabel, stepText } from "./deliver-view";
+import { cardsOf, type DeliverCard, type DeliverRead, type DeliverStatus } from "./deliver-status";
 
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -30,6 +31,13 @@ beforeAll(() => {
   } catch {
     // already initialized by the shared setup
   }
+});
+
+const events = (...names: string[]): DeliverRead => ({
+  kind: "events",
+  runs: names.map((n) =>
+    JSON.parse(readFileSync(`src/app/deliver/fixtures/events-${n}.json`, "utf8")),
+  ),
 });
 
 const read = (name: string): DeliverRead => ({
@@ -67,83 +75,98 @@ beforeEach(() => {
 });
 
 describe("Deliver panel", () => {
-  it("explains where loops come from while there are none", async () => {
+  it("explains where runs come from while there are none", async () => {
     const { el } = await render();
     expect(text(el.querySelector("[data-testid=empty]"))).toContain(".agents/events/<run>.jsonl");
     expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(0);
   });
 
-  it("shows a running loop: milestone, progress, current PBI and step, delivered PBIs", async () => {
+  it("shows a run from the core: subject, progress, open tasks with step, links", async () => {
     const { el, deliver, show } = await render();
-    deliver.apply("/src/skills", read("running"));
-    deliver.now.set(Date.parse("2026-11-06T10:43:37Z"));
+    deliver.apply("/r", events("milestone"));
+    deliver.now.set(Date.parse("2026-11-08T12:00:00Z"));
     await show();
     expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(1);
     expect(text(el.querySelector("h2"))).toContain("M4 Deliver loop");
-    expect(text(el.querySelector("[data-testid=progress]"))).toBe("3/9 closed");
+    expect(text(el.querySelector("[data-testid=progress]"))).toBe("3/9 issues");
     expect(el.querySelector(".fill")?.getAttribute("style")).toContain("33");
-    expect(text(el.querySelector("[data-testid=current]"))).toContain("#332 [PBI] feat(delivery)");
-    expect(text(el.querySelector("[data-testid=step]"))).toBe("step 3/7");
-    expect(text(el.querySelector("[data-testid=current]"))).toContain("implement: tests green");
+    const tasks = [...el.querySelectorAll("[data-testid=task]")].map((t) => text(t));
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]).toContain("Second");
+    expect(tasks[0]).toContain("implement 2/3");
+    expect(tasks[0]).toContain("tests green");
+    expect(text(el.querySelector("[data-testid=task-progress]"))).toBe("1/3 steps");
+    // A subject of a kind poimen does not know is shown generically.
+    expect(tasks[1]).toContain("A thing of a kind poimen does not know");
     expect(text(el.querySelector("[data-testid=state]"))).toBe("running, updated 2 min ago");
-    expect(text(el.querySelector("[data-testid=delivered]"))).toContain("#325 → PR #340");
-    expect(el.querySelector("[data-testid=needs-you]")).toBeNull();
-    expect(el.querySelector("[data-testid=start]")).toBeNull();
+    expect(text(el.querySelector("[data-testid=links]"))).toContain("PR #21");
+    expect(text(el.querySelector("[data-testid=links]"))).toContain("log");
   });
 
-  it("shows no pull request link for a delivered entry whose prUrl is the issue URL (#538)", async () => {
+  it("lists what finished per outcome with reasons and links", async () => {
     const { el, deliver, show } = await render();
-    const issue = "https://github.com/GravionLabs/poimen/issues/334";
-    const file = read("running");
-    if (file.kind !== "ok") throw new Error("fixture");
-    deliver.apply("/src/skills", {
-      ...file,
-      status: { ...(file.status as object), delivered: [{ pbi: 334, url: issue, prUrl: issue }] },
-    });
+    deliver.apply("/r", events("milestone"));
     await show();
-    const row = text(el.querySelector("[data-testid=delivered]"));
-    expect(row).toContain("#334");
-    expect(row).not.toContain(issue);
-    expect(row).not.toContain("PR #");
-    expect(el.querySelectorAll("[data-testid=delivered] button")).toHaveLength(1);
+    const rows = [...el.querySelectorAll("[data-testid=finished] li")].map((r) => text(r));
+    expect(rows[0]).toContain("First");
+    expect(rows[0]).toContain("succeeded");
+    expect(rows[0]).toContain("PR #21");
+    expect(rows[1]).toContain("Zero");
+    expect(rows[1]).toContain("failed: review rejected");
   });
 
-  it("lists blocked, paused and needs-you items with their reasons", async () => {
+  it("shows needs-you attentions apart from other notices, with their links", async () => {
     const { el, deliver, show } = await render();
-    deliver.apply("/src/skills", read("blocked"));
+    deliver.apply("/r", events("milestone"));
     await show();
-    expect(text(el.querySelector("[data-testid=blocked]"))).toContain("CI red on the PR");
-    expect(text(el.querySelector("[data-testid=paused]"))).toContain("review round 2");
     expect(text(el.querySelector("[data-testid=needs-you]"))).toContain(
-      "decide whether the schema field names are final",
+      "decide whether the field names are final",
     );
-    expect(el.querySelector("[data-testid=current]")).toBeNull();
+    expect(text(el.querySelector("[data-testid=needs-you]"))).toContain("log");
+    expect(text(el.querySelector("[data-testid=notices]"))).toContain("run-wide notice");
+    expect(text(el.querySelector("[data-testid=notices]"))).not.toContain("decide");
   });
 
-  it("shows the release pull request and how long ago the run finished", async () => {
+  it("colors the card by the tone of the run and shows the writer's agent", async () => {
     const { el, deliver, show } = await render();
-    deliver.apply("/src/skills", read("done"));
-    const done = JSON.parse(readFileSync("src/app/deliver/fixtures/status-done.json", "utf8")) as {
-      updatedAt: string;
-      release: { prUrl: string };
-    };
-    deliver.now.set(Date.parse(done.updatedAt) + 12 * 60_000);
+    deliver.apply("/r", events("milestone", "failed"));
     await show();
-    expect(text(el.querySelector("[data-testid=state]"))).toBe("finished 12 min ago");
-    expect(text(el.querySelector("[data-testid=release]"))).toContain(prLabel(done.release.prUrl));
-    expect(el.querySelector("[data-testid=start]")).not.toBeNull();
+    const cards = [...el.querySelectorAll("[data-testid=card]")];
+    expect(cards.map((c) => c.getAttribute("data-tone"))).toEqual(["warning", "danger"]);
+    expect(text(cards[0].querySelector("footer .hint"))).toBe("claude sonnet · /r");
+    expect(text(cards[1].querySelector("[data-testid=state]"))).toContain("failed");
   });
 
-  it("marks a running loop without updates for over an hour as stale", async () => {
+  it("shows a run without subject, progress or agent from the core alone", async () => {
     const { el, deliver, show } = await render();
-    deliver.apply("/src/skills", read("running"));
-    deliver.now.set(Date.parse("2026-11-06T10:41:37Z") + 61 * 60_000);
+    deliver.apply("/r", events("session"));
     await show();
+    const card = el.querySelector("[data-testid=card]")!;
+    expect(text(card.querySelector("h2"))).toBe("20261108-110000-sess");
+    expect(card.querySelector("[data-testid=progress]")).toBeNull();
+    expect(card.querySelector("[data-testid=start]")).toBeNull();
+    expect(card.querySelector("[data-testid=open-subject]")).toBeNull();
+    expect(text(card.querySelector("[data-testid=step]"))).toBe("review");
+  });
+
+  it("marks a running run without updates for over an hour, and an abandoned one, as stale", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", events("milestone", "abandoned"));
+    deliver.now.set(Date.parse("2026-11-08T11:58:00Z") + 61 * 60_000);
+    await show();
+    expect(el.querySelectorAll(".card.state-stale")).toHaveLength(2);
     expect(text(el.querySelector("[data-testid=state]"))).toContain("stale");
-    expect(el.querySelector(".card.state-stale")).not.toBeNull();
   });
 
-  it("shows a hint for an unknown schema version and for a broken file", async () => {
+  it("hints at events of a version it does not know, keeping the readable runs", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", { ...events("failed"), unknownVersion: 2 } as DeliverRead);
+    await show();
+    expect(text(el.querySelector("[data-testid=events-version]"))).toContain("version 2");
+    expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(2);
+  });
+
+  it("shows a hint for an unknown legacy schema version and for a broken file", async () => {
     const { el, deliver, show } = await render();
     deliver.apply("/a", { kind: "unsupported", schemaVersion: 2 });
     deliver.apply("/b", { kind: "invalid", error: "expected value at line 1" });
@@ -153,25 +176,27 @@ describe("Deliver panel", () => {
     expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(2);
   });
 
-  it("drops the card when the file disappears", async () => {
+  it("shows a legacy status file like any other run and drops the card when it disappears", async () => {
     const { el, deliver, show } = await render();
     deliver.apply("/src/skills", read("running"));
+    await show();
+    expect(text(el.querySelector("h2"))).toContain("M4");
+    expect(text(el.querySelector("[data-testid=progress]"))).toBe("3/9");
+    expect(text(el.querySelector("[data-testid=finished]"))).toContain("#325");
     deliver.apply("/src/skills", { kind: "missing" });
     await show();
     expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(0);
   });
 
-  it("opens the milestone, issue and pull request links in the browser, GitHub only", async () => {
+  it("opens subject, task and link URLs in the browser, GitHub only", async () => {
     const { el, deliver, show } = await render();
-    deliver.apply("/src/skills", read("running"));
+    deliver.apply("/r", events("milestone"));
     await show();
     button(el, "Open milestone").click();
-    expect(opener.openUrl).toHaveBeenCalledWith(
-      "https://github.com/GravionLabs/skills/milestone/4",
-    );
-    button(el, "#332").click();
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/GravionLabs/demo/milestone/4");
+    button(el, "Second").click();
     expect(opener.openUrl).toHaveBeenLastCalledWith(
-      "https://github.com/GravionLabs/skills/issues/332",
+      "https://github.com/GravionLabs/demo/issues/12",
     );
     opener.openUrl.mockClear();
     await deliver.openUrl("https://evil.example/x");
@@ -179,9 +204,9 @@ describe("Deliver panel", () => {
     expect(opener.openUrl).not.toHaveBeenCalled();
   });
 
-  it("focuses the terminal of the loop when there is one", async () => {
+  it("focuses the terminal of the run when there is one", async () => {
     const { fixture, el, deliver, show } = await render();
-    deliver.apply("/src/skills", read("running"));
+    deliver.apply("/r", events("milestone"));
     vi.spyOn(deliver, "paneOf").mockReturnValue("t7");
     const chosen: string[] = [];
     fixture.componentInstance.paneChosen.subscribe((id) => chosen.push(id));
@@ -190,7 +215,7 @@ describe("Deliver panel", () => {
     expect(chosen).toEqual(["t7"]);
   });
 
-  it("starts the loop for the milestone through the deliver-loop task mode", async () => {
+  it("starts the loop for a finished milestone run through the deliver-loop task mode", async () => {
     tauri.answer("task_plan", () => {
       throw new Error("no task mode named deliver-loop");
     });
@@ -205,74 +230,27 @@ describe("Deliver panel", () => {
       issue: { nr: 3, title: "M3 Roadmap and release" },
     });
   });
+
+  it("offers no loop for a running run or a subject that is not a milestone", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", events("milestone", "abandoned"));
+    deliver.now.set(Date.parse("2026-11-08T12:00:00Z"));
+    await show();
+    expect(el.querySelectorAll("[data-testid=start]")).toHaveLength(0);
+  });
 });
 
-describe("Deliver panel with progress events", () => {
-  const events = (...names: string[]): DeliverRead => ({
-    kind: "events",
-    runs: names.map((n) =>
-      JSON.parse(readFileSync(`src/app/deliver/fixtures/events-${n}.json`, "utf8")),
-    ),
-  });
-
-  it("shows a loop and an interactive session side by side, colored by tone", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", events("blocked", "session"));
-    await show();
-    const cards = [...el.querySelectorAll("[data-testid=card]")];
-    expect(cards).toHaveLength(2);
-    expect(cards.map((c) => c.getAttribute("data-tone"))).toEqual(["danger", "neutral"]);
-    expect(cards.map((c) => text(c.querySelector("[data-testid=source]")))).toEqual([
-      "loop",
-      "session",
-    ]);
-    expect(text(cards[1].querySelector("h2"))).toContain("Interactive deliver");
-    expect(cards[1].querySelector("[data-testid=progress]")).toBeNull();
-    expect(cards[1].querySelector("[data-testid=start]")).toBeNull();
-  });
-
-  it("shows the RC and the open RC test as needs you without marking the run blocked", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", events("rc-test"));
-    await show();
-    expect(text(el.querySelector("[data-testid=rc]"))).toBe("3.2.0-rc.1");
-    expect(text(el.querySelector("[data-testid=release]"))).toContain("PR #391");
-    expect(text(el.querySelector("[data-testid=needs-you]"))).toContain("#400 RC test");
-    expect(el.querySelector("[data-testid=blocked]")).toBeNull();
-    expect(el.querySelector("[data-testid=card]")?.getAttribute("data-tone")).toBe("success");
-    button(el, "3.2.0-rc.1").click();
-    expect(opener.openUrl).toHaveBeenCalledWith(
-      "https://github.com/GravionLabs/skills/releases/tag/v3.2.0-rc.1",
-    );
-  });
-
-  it("shows an abandoned run as stale", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", events("abandoned"));
-    deliver.now.set(Date.parse("2026-11-07T12:00:00Z"));
-    await show();
-    expect(el.querySelector(".card.state-stale")).not.toBeNull();
-    expect(text(el.querySelector("[data-testid=state]"))).toContain("stale");
-  });
-
-  it("hints at events of a version it does not know, keeping the readable runs", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", { ...events("blocked"), unknownVersion: 2 } as DeliverRead);
-    await show();
-    expect(text(el.querySelector("[data-testid=events-version]"))).toContain("version 2");
-    expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(2);
-  });
-
+describe("Deliver service ordering and notifications", () => {
   it("keeps the order of the runs on an update and drops the runs that are gone", async () => {
     const { deliver } = await render();
-    deliver.apply("/r", events("blocked", "session"));
+    deliver.apply("/r", events("failed", "session"));
     const order = () =>
-      deliver.cards().map((c) => (c.state.kind === "ok" ? c.state.status.source : c.state.kind));
-    expect(order()).toEqual(["loop", "session"]);
-    deliver.apply("/r", events("session", "blocked"));
-    expect(order()).toEqual(["loop", "session"]);
+      deliver.cards().map((c) => (c.state.kind === "ok" ? c.state.status.tone : c.state.kind));
+    expect(order()).toEqual(["danger", "neutral"]);
+    deliver.apply("/r", events("session", "failed"));
+    expect(order()).toEqual(["danger", "neutral"]);
     deliver.apply("/r", events("session"));
-    expect(order()).toEqual(["session"]);
+    expect(order()).toEqual(["neutral"]);
   });
 
   it("does not notify for the first read and notifies for a new decision of a run", async () => {
@@ -281,9 +259,10 @@ describe("Deliver panel with progress events", () => {
     deliver.apply("/r", events("session"));
     expect(notify).not.toHaveBeenCalled();
     const next = JSON.parse(readFileSync("src/app/deliver/fixtures/events-session.json", "utf8"));
-    next.needsYou = [{ number: 5, url: "u", reason: "pick one" }];
+    next.attentions = [{ id: "a", reason: "pick one", needsYou: true }];
     deliver.apply("/r", { kind: "events", runs: [next] });
-    expect(notify.mock.calls.map((c) => c[1])).toEqual(["#5 needs you: pick one"]);
+    expect(notify.mock.calls.map((c) => c[1])).toEqual(["Needs you: pick one"]);
+    expect(notify.mock.calls[0][2]).toEqual({ deliverRoot: "/r" });
   });
 });
 
@@ -323,45 +302,38 @@ describe("Deliver service", () => {
   });
 
   describe("notifications", () => {
-    const set = (name: string, over: Record<string, unknown>): DeliverRead => ({
-      kind: "ok",
-      status: {
-        ...JSON.parse(readFileSync(`src/app/deliver/fixtures/status-${name}.json`, "utf8")),
-        ...over,
-      },
-    });
-
-    it("notifies when a run becomes blocked, needs a decision, opens the release PR or ends", async () => {
+    it("notifies when a task fails, a decision is needed or the run ends", async () => {
       const { deliver } = await render();
       const notify = vi.spyOn(TestBed.inject(TauriBridge), "notify").mockResolvedValue(true);
-      deliver.apply("/r", read("running"));
+      const base = JSON.parse(readFileSync("src/app/deliver/fixtures/events-session.json", "utf8"));
+      const step = (over: Record<string, unknown>): DeliverRead => ({
+        kind: "events",
+        runs: [{ ...base, ...over }],
+      });
+      deliver.apply("/r", step({}));
       expect(notify).not.toHaveBeenCalled();
+      deliver.apply("/r", step({ attentions: [{ id: "a", reason: "pick one", needsYou: true }] }));
       deliver.apply(
         "/r",
-        set("running", { needsYou: [{ number: 9, url: "u", reason: "pick one" }] }),
-      );
-      deliver.apply(
-        "/r",
-        set("running", {
-          needsYou: [{ number: 9, url: "u", reason: "pick one" }],
-          blocked: [{ number: 335, url: "u", reason: "CI red" }],
+        step({
+          attentions: [{ id: "a", reason: "pick one", needsYou: true }],
+          finished: {
+            succeeded: [],
+            failed: [{ task: "t2", subject: { id: "2", title: "Second" }, reason: "CI red" }],
+            cancelled: [],
+            skipped: [],
+          },
         }),
       );
       deliver.apply(
         "/r",
-        set("running", {
-          release: { reviewRound: 1, prUrl: "https://github.com/o/n/pull/9" },
-          closed: 9,
-          result: "done",
-        }),
+        step({ status: "finished", outcome: "succeeded", tasks: [], attentions: [] }),
       );
       expect(notify.mock.calls.map((c) => c[1])).toEqual([
-        "#9 needs you: pick one",
-        "#335 is blocked: CI red",
-        "The release pull request is open",
+        "Needs you: pick one",
+        "Second failed: CI red",
         "The run is done",
       ]);
-      expect(notify.mock.calls[0][2]).toEqual({ deliverRoot: "/r" });
     });
 
     it("does not notify for the first read of a repository", async () => {
@@ -389,10 +361,49 @@ describe("helpers", () => {
     expect(loopPane([panes[0], panes[3]], "/src/skills", "claude")).toBeUndefined();
   });
 
-  it("reads the milestone number of a key", () => {
-    expect(milestoneNumber("M5")).toBe(5);
-    expect(milestoneNumber("M5.1")).toBe(5);
-    expect(milestoneNumber("x")).toBe(0);
+  it("reads the milestone number of a subject: the M<n> name, else the #<number> of the id", () => {
+    expect(milestoneNumber({ id: "M5", title: "t" })).toBe(5);
+    expect(milestoneNumber({ id: "M5.1", title: "t" })).toBe(5);
+    expect(milestoneNumber({ id: "o/r#12", title: "M7 Roadmap" })).toBe(7);
+    expect(milestoneNumber({ id: "o/r#12", title: "Roadmap" })).toBe(12);
+    expect(milestoneNumber({ id: "x", title: "y" })).toBe(0);
+  });
+
+  it("names a link by its title, a pull request number or its rel", () => {
+    expect(linkLabel({ rel: "log", url: "https://x", title: "CI log" })).toBe("CI log");
+    expect(
+      linkLabel({ rel: "pull-request", url: "https://github.com/o/n/pull/3", title: null }),
+    ).toBe("PR #3");
+    expect(linkLabel({ rel: "log", url: "https://x", title: null })).toBe("log");
+    expect(stepText({ name: "implement", n: 2, total: 3, text: null })).toBe("implement 2/3");
+    expect(stepText({ name: "review", n: null, total: null, text: null })).toBe("review");
+  });
+
+  it("finds the terminal of a run: the host terminal when open, else an agent pane", () => {
+    const { deliver } = (() => {
+      TestBed.resetTestingModule();
+      return { deliver: TestBed.inject(Deliver) };
+    })();
+    const store = TestBed.inject(HerdrStore);
+    vi.spyOn(store, "snapshot").mockReturnValue({
+      terminals: [pane("t7", "/elsewhere"), pane("t2", "/r", "claude")],
+    } as never);
+    const card = (host: Record<string, string>): DeliverCard => ({
+      root: "/r",
+      run: "x",
+      state: {
+        kind: "ok",
+        status: {
+          ...(cardsOf("/r", events("session"))[0]!.state as { status: DeliverStatus }).status,
+          host,
+        },
+      },
+    });
+    expect(deliver.paneOf(card({ "poimen.terminal": "t7" }))).toBe("t7");
+    expect(deliver.paneOf(card({ "poimen.terminal": "gone" }))).toBe("t2");
+    expect(deliver.paneOf({ root: "/r", run: "", state: { kind: "invalid", error: "x" } })).toBe(
+      undefined,
+    );
   });
 
   it("labels a pull request URL", () => {

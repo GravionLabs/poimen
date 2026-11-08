@@ -2,31 +2,21 @@ import { describe, expect, it } from "vitest";
 import { parseStatus, type DeliverCard } from "../deliver/deliver-status";
 import { eventTime, runsOfSpace, selectRun, toneStyle } from "./run-events";
 
-const base = {
-  harness: "claude",
-  model: "m",
-  repository: "o/r",
-  milestone: null,
-  closed: 0,
-  total: 0,
-  current: null,
-  delivered: [],
-  blocked: [],
-  paused: [],
-  needsYou: [],
-  release: {},
-  startedAt: "2026-11-07T10:00:00.000Z",
-  result: "running",
-};
-
-function card(run: string, updatedAt: string, terminal?: string, root = "/repo"): DeliverCard {
+function card(run: string, updated: string, terminal?: string, root = "/repo"): DeliverCard {
   const status = parseStatus({
-    ...base,
+    v: 1,
     run,
-    updatedAt,
-    host: terminal ? { poimenTerminal: terminal } : {},
+    status: "running",
+    tasks: [],
+    finished: {},
+    attentions: [],
+    needsYou: false,
+    links: [],
+    updated,
+    tone: "neutral",
+    host: terminal ? { "poimen.terminal": terminal } : {},
     events: [
-      { type: "step.finished", tone: "info", issue: 5, step: "implement", ts: updatedAt },
+      { type: "step.finished", tone: "info", task: "t5", step: "implement", ts: updated },
       { type: "bogus-row-without-tone" },
       "not a row",
     ],
@@ -71,7 +61,7 @@ describe("runs of a space", () => {
   it("keeps valid event rows and drops malformed ones", () => {
     const events = runsOfSpace(cards, "/repo")[0]!.status.events;
     expect(events.map((e) => e.type)).toEqual(["step.finished", "bogus-row-without-tone"]);
-    expect(events[0]).toMatchObject({ tone: "info", issue: 5, step: "implement" });
+    expect(events[0]).toMatchObject({ tone: "info", task: "t5", step: "implement" });
     expect(events[1]!.tone).toBe("neutral");
   });
 });

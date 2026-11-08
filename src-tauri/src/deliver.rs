@@ -1,7 +1,7 @@
 //! Live state of deliver runs. Primary source: the progress events of
 //! `<git-common-dir>/.agents/events/*.jsonl` (ADR 0001 of GravionLabs/skills), each file replayed
 //! from the start and then followed (`Tailer`), a half-written last line left for the next read,
-//! folded by `progress_events.rs`; interactive `/deliver` sessions and loops alike. Fallback
+//! folded by `agent_events.rs`; interactive `/deliver` sessions and loops alike. Fallback
 //! during the migration: `<repo>/.agents/deliver-loop/status.json` (schema
 //! `deliver-loop-status.schema.json`, `schemaVersion: 1`) when the repository has no events. Both
 //! are watched with `notify`, no polling. The loop writes status.json atomically (temp file, then
@@ -17,7 +17,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::progress_events::{self, Reducer, Run};
+use crate::agent_events::{self, Reducer, Run};
 
 /// The status file relative to a repository root.
 pub const STATUS_PATH: &str = ".agents/deliver-loop/status.json";
@@ -112,7 +112,7 @@ impl Tailer {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                if !is_run_file(&path) {
                     continue;
                 }
                 let Ok(meta) = std::fs::symlink_metadata(&path) else {
@@ -142,7 +142,7 @@ impl Tailer {
         let mut runs = Vec::new();
         for (path, state) in &self.files {
             unknown = unknown.or(state.reducer.unknown_v);
-            if let Some(mut run) = state.reducer.snapshot(now, &progress_events::pid_alive) {
+            if let Some(mut run) = state.reducer.snapshot(now, &agent_events::pid_alive) {
                 if run.state.run.is_empty()
                     && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
                 {
@@ -150,10 +150,10 @@ impl Tailer {
                 }
                 let last = run
                     .state
-                    .updated_at
+                    .updated
                     .as_deref()
-                    .and_then(progress_events::parse_ts);
-                let over = run.state.result != "running";
+                    .and_then(agent_events::parse_ts);
+                let over = run.state.status != "running";
                 if over && last.is_some_and(|t| now - t > RECENT_SECS) {
                     continue;
                 }
@@ -162,13 +162,28 @@ impl Tailer {
         }
         runs.sort_by(|a, b| {
             b.state
-                .updated_at
-                .cmp(&a.state.updated_at)
+                .updated
+                .cmp(&a.state.updated)
                 .then_with(|| a.state.run.cmp(&b.state.run))
         });
         runs.truncate(MAX_RUNS);
         (runs, unknown)
     }
+}
+
+/// Whether `path` is a run file of the jsonl-file binding: `<run>.jsonl` with a run id of
+/// `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; files with other names are ignored.
+fn is_run_file(path: &Path) -> bool {
+    let (Some(stem), Some("jsonl")) = (
+        path.file_stem().and_then(|s| s.to_str()),
+        path.extension().and_then(|e| e.to_str()),
+    ) else {
+        return false;
+    };
+    let mut chars = stem.chars();
+    stem.len() <= 128
+        && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 fn now_secs() -> f64 {
@@ -525,6 +540,11 @@ mod tests {
         next(&|r| *r == Read::Missing);
     }
 
+    /// A `progress` event of the run `r1` with `done` of `total` for the run subject.
+    fn progress(seq: u32, done: u32) -> String {
+        event(seq, "progress", &format!(r#","done":{done},"total":4"#))
+    }
+
     fn event(seq: u32, ty: &str, extra: &str) -> String {
         let ts = format!("2026-11-07T11:{:02}:00Z", seq);
         format!(
@@ -544,59 +564,66 @@ mod tests {
     }
 
     fn now() -> f64 {
-        progress_events::parse_ts("2026-11-07T12:00:00Z").unwrap()
+        agent_events::parse_ts("2026-11-07T12:00:00Z").unwrap()
     }
 
     #[test]
     fn the_tailer_replays_then_follows_and_waits_for_a_complete_line() {
         let dir = temp_dir("tail");
         let file = dir.join("r1.jsonl");
-        append(
-            &file,
-            &(event(1, "run.started", r#","source":"session""#)
-                + &event(2, "milestone.progress", r#","closed":1,"total":4"#)),
-        );
+        append(&file, &(event(1, "run.started", "") + &progress(2, 1)));
         let mut tailer = Tailer::default();
         // The third event is half written.
-        let half = event(3, "milestone.progress", r#","closed":2,"total":4"#);
+        let half = progress(3, 2);
         append(&file, &half[..half.len() / 2]);
         let (runs, unknown) = tailer.read(&dir, now());
         assert_eq!(unknown, None);
         assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].state.closed, 1);
-        assert_eq!(runs[0].source.as_deref(), Some("session"));
+        assert_eq!(runs[0].state.progress.as_ref().unwrap()["done"], 1);
         // The rest arrives: it is folded once.
         append(&file, &half[half.len() / 2..]);
         let (runs, _) = tailer.read(&dir, now());
-        assert_eq!(runs[0].state.closed, 2);
+        assert_eq!(runs[0].state.progress.as_ref().unwrap()["done"], 2);
         // A truncated file is replayed.
         std::fs::write(&file, event(1, "run.started", "")).unwrap();
         let (runs, _) = tailer.read(&dir, now());
-        assert_eq!(runs[0].state.closed, 0);
+        assert!(runs[0].state.progress.is_none());
         // A removed file is forgotten.
         std::fs::remove_file(&file).unwrap();
         assert!(tailer.read(&dir, now()).0.is_empty());
     }
 
     #[test]
-    fn the_tailer_lists_loops_and_sessions_and_hides_old_finished_runs() {
+    fn the_tailer_lists_runs_and_hides_old_finished_runs_and_foreign_files() {
         let dir = temp_dir("runs");
-        append(
-            &dir.join("a.jsonl"),
-            &(event(1, "run.started", r#","source":"loop""#)),
-        );
+        append(&dir.join("a.jsonl"), &event(1, "run.started", ""));
         append(
             &dir.join("b.jsonl"),
-            &(event(1, "run.started", r#","source":"session""#)
-                + &event(2, "run.finished", r#","result":"done""#)),
+            &(event(1, "run.started", "") + &event(2, "run.finished", r#","outcome":"succeeded""#)),
         );
-        let old = r#"{"v":1,"seq":1,"ts":"2026-11-01T10:00:00Z","run":"old","type":"run.finished","tone":"success","result":"done"}"#;
+        let old = r#"{"v":1,"seq":1,"ts":"2026-11-01T10:00:00Z","run":"old","type":"run.finished","tone":"success","outcome":"succeeded"}"#;
         append(&dir.join("old.jsonl"), &(old.to_owned() + "\n"));
         append(&dir.join("notes.txt"), "not an event file\n");
+        append(&dir.join(".hidden.jsonl"), &event(1, "run.started", ""));
+        append(&dir.join("has space.jsonl"), &event(1, "run.started", ""));
         let (runs, _) = Tailer::default().read(&dir, now());
-        let sources: Vec<_> = runs.iter().map(|r| r.source.as_deref()).collect();
-        assert_eq!(runs.len(), 2, "{sources:?}");
-        assert!(sources.contains(&Some("loop")) && sources.contains(&Some("session")));
+        let mut status: Vec<_> = runs.iter().map(|r| r.state.status.as_str()).collect();
+        status.sort_unstable();
+        assert_eq!(status, ["finished", "running"]);
+    }
+
+    #[test]
+    fn only_run_ids_of_the_binding_name_a_run_file() {
+        for ok in ["r1.jsonl", "2026-11-08.run_1.jsonl", "A.jsonl"] {
+            assert!(is_run_file(Path::new(ok)), "{ok}");
+        }
+        for bad in [".x.jsonl", "a b.jsonl", "r1.txt", "r1", "-x.jsonl"] {
+            assert!(!is_run_file(Path::new(bad)), "{bad}");
+        }
+        assert!(!is_run_file(Path::new(&format!(
+            "{}.jsonl",
+            "a".repeat(129)
+        ))));
     }
 
     #[test]
@@ -675,15 +702,19 @@ mod tests {
                 .unwrap()
                 .as_secs();
             format!(
-                r#"{{"v":1,"seq":1,"ts":"{0}","run":"r1","type":"milestone.progress","tone":"neutral","closed":{closed},"total":5}}"#,
+                r#"{{"v":1,"seq":1,"ts":"{0}","run":"r1","type":"progress","tone":"neutral","done":{closed},"total":5}}"#,
                 iso(secs)
             ) + "\n"
         };
         append(&file, &fresh(2));
-        next(&|r| matches!(r, Read::Events { runs, .. } if runs[0].state.closed == 2));
+        next(
+            &|r| matches!(r, Read::Events { runs, .. } if runs[0].state.progress.as_ref().is_some_and(|p| p["done"] == 2)),
+        );
         let more = fresh(3).replace("\"seq\":1", "\"seq\":2");
         append(&file, &more);
-        next(&|r| matches!(r, Read::Events { runs, .. } if runs[0].state.closed == 3));
+        next(
+            &|r| matches!(r, Read::Events { runs, .. } if runs[0].state.progress.as_ref().is_some_and(|p| p["done"] == 3)),
+        );
     }
 
     /// `YYYY-MM-DDTHH:MM:SSZ` of epoch seconds (civil from days).

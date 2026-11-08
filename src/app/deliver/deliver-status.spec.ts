@@ -5,9 +5,11 @@ import {
   ageText,
   barSummary,
   cardsOf,
+  fromLegacy,
   needsAttention,
   parseStatus,
   percent,
+  progressText,
   runState,
   stateText,
   transitions,
@@ -15,83 +17,93 @@ import {
   type DeliverStatus,
 } from "./deliver-status";
 
-const fixture = (name: string): Record<string, unknown> =>
-  JSON.parse(readFileSync(`src/app/deliver/fixtures/status-${name}.json`, "utf8"));
-/** A run state as the backend folds it from progress events (`progress_events.rs`). */
-const eventsFixture = (name: string): Record<string, unknown> =>
-  JSON.parse(readFileSync(`src/app/deliver/fixtures/events-${name}.json`, "utf8"));
-const runOf = (name: string): DeliverStatus => {
-  const parsed = parseStatus(eventsFixture(name));
+const json = (path: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(`src/app/deliver/fixtures/${path}.json`, "utf8"));
+const must = (parsed: DeliverStatus | string): DeliverStatus => {
   if (typeof parsed === "string") throw new Error(parsed);
   return parsed;
 };
-const status = (name: string): DeliverStatus => {
-  const parsed = parseStatus(fixture(name));
-  if (typeof parsed === "string") throw new Error(parsed);
-  return parsed;
-};
+/** A run state as the backend folds it from agent-events (`agent_events.rs`). */
+const run = (name: string): DeliverStatus => must(parseStatus(json(`events-${name}`)));
+const legacy = (name: string): DeliverStatus => must(fromLegacy(json(`status-${name}`)));
 
-const RUNNING = status("running");
-const BLOCKED = status("blocked");
-const DONE = status("done");
-/** Two minutes after the last update of the running fixture. */
-const NOW = Date.parse(RUNNING.updatedAt) + 2 * 60_000;
+const MILESTONE = run("milestone");
+const SESSION = run("session");
+const FAILED = run("failed");
+const ABANDONED = run("abandoned");
+/** Two minutes after the last update of the milestone run. */
+const NOW = Date.parse(MILESTONE.updated) + 2 * 60_000;
 
-describe("a status file written between iterations (#537)", () => {
-  const between = {
-    ...fixture("done"),
-    closed: 7,
-    total: 23,
-    release: { reviewRound: null, prUrl: "https://github.com/GravionLabs/skills/pull/530" },
-  };
-
-  it("stays running with current null and open items, without a release ask", () => {
-    const parsed = parseStatus(between);
-    if (typeof parsed === "string") throw new Error(parsed);
-    expect(parsed.result).toBe("running");
-    expect(runState(parsed, Date.parse(parsed.updatedAt) + 60_000)).toBe("running");
-    expect(parsed.needsYou).toEqual([]);
-    expect(parsed.tone).not.toBe("warning");
-    expect(parsed.release.prUrl).toBeNull();
-  });
-
-  it("keeps done when every item is closed", () => {
-    expect(DONE.result).toBe("done");
-    expect(DONE.needsYou).toHaveLength(1);
-  });
+const ok = (status: DeliverStatus): DeliverCard => ({
+  root: "/r",
+  run: status.run,
+  state: { kind: "ok", status },
 });
 
-describe("parseStatus", () => {
-  it("reads the three fixtures of the schema", () => {
-    expect(RUNNING).toMatchObject({
-      closed: 3,
-      total: 9,
-      result: "running",
-      current: { number: 332, step: { n: 3, total: 7, text: "implement: tests green" } },
+describe("parseStatus of a core run", () => {
+  it("reads subject, progress, open tasks with step, finished tasks, attentions and links", () => {
+    expect(MILESTONE).toMatchObject({
+      status: "running",
+      subject: { kind: "github.milestone", title: "M4 Deliver loop" },
+      progress: { done: 3, total: 9, label: "issues" },
+      needsYou: true,
+      tone: "warning",
+      harness: "claude",
+      host: { "poimen.terminal": "t7" },
     });
-    expect(BLOCKED.current).toBeNull();
-    expect(BLOCKED.needsYou).toHaveLength(1);
-    expect(DONE.release.prUrl).toMatch(/\/pull\//);
+    expect(MILESTONE.tasks[0]).toMatchObject({
+      task: "t12",
+      step: { name: "implement", n: 2, total: 3, text: "tests green" },
+      progress: { done: 1, total: 3, label: "steps" },
+    });
+    expect(MILESTONE.tasks[1]).toMatchObject({ parent: "t12", subject: { kind: "custom.thing" } });
+    expect(MILESTONE.finished.map((t) => [t.task, t.outcome])).toEqual([
+      ["t11", "succeeded"],
+      ["t10", "failed"],
+    ]);
+    expect(MILESTONE.finished[0]!.links[0]).toMatchObject({ rel: "pull-request" });
+    expect(MILESTONE.attentions.filter((a) => a.needsYou).map((a) => a.id)).toEqual(["a1"]);
+    expect(MILESTONE.links.map((l) => l.rel)).toEqual(["pull-request", "log"]);
+    expect(MILESTONE.events.map((e) => e.type)).toEqual([
+      "run.started",
+      "step.finished",
+      "attention",
+    ]);
+    expect(MILESTONE.events[1]).toMatchObject({ task: "t11", step: "pr", tone: "success" });
   });
 
-  it("ignores unknown fields at every level", () => {
-    const raw = fixture("running");
-    const extended = { ...raw, future: 1, milestone: { ...(raw["milestone"] as object), x: 2 } };
-    expect(parseStatus(extended)).toMatchObject({ run: RUNNING.run });
+  it("shows a run from the core alone: no subject, no profile, no deliver fields", () => {
+    expect(SESSION.subject).toBeNull();
+    expect(SESSION.progress).toBeNull();
+    expect(SESSION.tasks).toHaveLength(1);
+    expect(SESSION.tasks[0]!.step).toEqual({ name: "review", n: null, total: null, text: null });
+    expect(SESSION.harness).toBeNull();
+  });
+
+  it("ignores unknown fields, profile objects, unknown kinds and a malformed task", () => {
+    const raw = json("events-milestone");
+    const extended = {
+      ...raw,
+      future: 1,
+      deliver: { anything: true },
+      tasks: [...(raw["tasks"] as unknown[]), { task: "broken" }, "not a task"],
+    };
+    const parsed = must(parseStatus(extended));
+    expect(parsed.tasks.map((t) => t.task)).toEqual(["t12", "t13"]);
+    expect(parsed.run).toBe(MILESTONE.run);
   });
 
   it.each([
     ["not an object", 42],
-    ["a missing milestone", { ...fixture("running"), milestone: undefined }],
-    ["a result outside the enum", { ...fixture("running"), result: "paused" }],
-    ["a negative count", { ...fixture("running"), closed: -1 }],
-    [
-      "a blocked item without a reason",
-      { ...fixture("running"), blocked: [{ number: 1, url: "u" }] },
-    ],
-    ["an updatedAt that is no date", { ...fixture("running"), updatedAt: "yesterday" }],
+    ["a missing run", { ...json("events-session"), run: undefined }],
+    ["a status outside the enum", { ...json("events-session"), status: "paused" }],
+    ["an updated that is no date", { ...json("events-session"), updated: "yesterday" }],
   ])("reports %s instead of throwing", (_name, value) => {
     expect(typeof parseStatus(value)).toBe("string");
+  });
+
+  it("falls back to neutral for a tone it does not know", () => {
+    expect(must(parseStatus({ ...json("events-session"), tone: "purple" })).tone).toBe("neutral");
   });
 });
 
@@ -100,251 +112,224 @@ describe("cardsOf", () => {
     expect(cardsOf("/r", { kind: "missing" })).toEqual([]);
   });
 
-  it("turns another schema version into a hint, not an error", () => {
-    expect(cardsOf("/r", { kind: "unsupported", schemaVersion: 2 })[0].state).toEqual({
-      kind: "unsupported",
-      version: "2",
-    });
-    expect(cardsOf("/r", { kind: "unsupported" })[0].state).toEqual({
-      kind: "unsupported",
-      version: "none",
-    });
-  });
-
-  it("keeps a broken file as an invalid card", () => {
-    expect(cardsOf("/r", { kind: "invalid", error: "EOF" })[0].state).toEqual({
-      kind: "invalid",
-      error: "EOF",
-    });
-    expect(cardsOf("/r", { kind: "ok", status: { schemaVersion: 1 } })[0].state.kind).toBe(
-      "invalid",
-    );
-  });
-
-  it("parses an ok read", () => {
-    expect(cardsOf("/r", { kind: "ok", status: fixture("done") })).toMatchObject([
-      { root: "/r", run: DONE.run, state: { kind: "ok", status: { result: "done" } } },
-    ]);
-  });
-
-  it("makes one card per run of the events, loops and sessions alike", () => {
+  it("makes one card per run, whoever wrote it", () => {
     const cards = cardsOf("/r", {
       kind: "events",
-      runs: [eventsFixture("session"), eventsFixture("blocked")],
+      runs: [json("events-milestone"), json("events-session")],
     });
-    expect(
-      cards.map((c) => (c.state.kind === "ok" ? c.state.status.source : c.state.kind)),
-    ).toEqual(["session", "loop"]);
-    expect(cards[0].run).not.toBe(cards[1].run);
+    expect(cards.map((c) => c.run)).toEqual([MILESTONE.run, SESSION.run]);
+    expect(cards.every((c) => c.state.kind === "ok")).toBe(true);
   });
 
   it("adds a hint for events of an unknown version next to the runs it can read", () => {
     const cards = cardsOf("/r", {
       kind: "events",
-      runs: [eventsFixture("blocked")],
+      runs: [json("events-session")],
       unknownVersion: 2,
     });
     expect(cards).toHaveLength(2);
-    expect(cards[1].state).toEqual({ kind: "events-version", version: "2" });
-    expect(cardsOf("/r", { kind: "events", runs: [], unknownVersion: 3 })).toHaveLength(1);
+    expect(cards[1]!.state).toEqual({ kind: "events-version", version: "2" });
   });
 
-  it("reports a run state it cannot read as an invalid card", () => {
-    const cards = cardsOf("/r", { kind: "events", runs: [{ run: "x" }] });
-    expect(cards[0].state.kind).toBe("invalid");
-  });
-});
-
-describe("tone", () => {
-  it("is the tone of the events, not derived from the text", () => {
-    expect(runOf("blocked").tone).toBe("danger");
-    expect(runOf("rc-test").tone).toBe("success");
-    expect(runOf("session").tone).toBe("neutral");
-    expect(needsAttention(runOf("blocked"))).toBe(true);
-    expect(needsAttention(runOf("rc-test"))).toBe(false);
+  it("reports a run it cannot read as an invalid card", () => {
+    const [card] = cardsOf("/r", { kind: "events", runs: [{ run: "x" }] });
+    expect(card!.state.kind).toBe("invalid");
   });
 
-  it("is derived for a status file, which has none", () => {
-    expect(RUNNING.tone).toBe("neutral");
-    expect(BLOCKED.tone).toBe("danger");
-    expect(DONE.tone).toBe("success");
-    expect(status("running").source).toBeNull();
-  });
-
-  it("falls back to neutral-by-state for a tone it does not know", () => {
-    const parsed = parseStatus({ ...eventsFixture("blocked"), tone: "loud" });
-    expect(typeof parsed === "object" && parsed.tone).toBe("danger");
-  });
-});
-
-describe("runs from events", () => {
-  it("shows the release candidate and the open RC test beside the release PR as needs you", () => {
-    const rc = runOf("rc-test");
-    expect(rc.release).toMatchObject({
-      rcVersion: "3.2.0-rc.1",
-      rcUrl: expect.stringContaining("v3.2.0-rc.1"),
-      prUrl: expect.stringContaining("/pull/391"),
-      testIssue: { number: 400 },
+  it("turns another schema version of the legacy file into a hint and a broken one into an error", () => {
+    expect(cardsOf("/r", { kind: "unsupported", schemaVersion: 2 })[0]!.state).toEqual({
+      kind: "unsupported",
+      version: "2",
     });
-    expect(rc.needsYou).toEqual([expect.objectContaining({ number: 400, reason: "RC test" })]);
-    expect(rc.blocked).toEqual([]);
-    expect(runState(rc, Date.parse(rc.updatedAt))).toBe("done");
+    expect(cardsOf("/r", { kind: "unsupported" })[0]!.state).toEqual({
+      kind: "unsupported",
+      version: "none",
+    });
+    expect(cardsOf("/r", { kind: "invalid", error: "boom" })[0]!.state).toEqual({
+      kind: "invalid",
+      error: "boom",
+    });
   });
 
-  it("reads a session without milestone", () => {
-    const session = runOf("session");
-    expect(session.milestone).toBeNull();
-    expect(
-      barSummary(
-        [{ root: "/r", run: session.run, state: { kind: "ok", status: session } }],
-        Date.parse(session.updatedAt) + 60_000,
-      )?.text,
-    ).toBe("▶ session");
+  it("maps a legacy status file onto the core shape", () => {
+    const [card] = cardsOf("/r", { kind: "ok", status: json("status-running") });
+    expect(card!.state.kind).toBe("ok");
+  });
+});
+
+describe("legacy status.json mapped onto the core shape", () => {
+  it("shows the milestone as subject and progress, the current PBI as an open task", () => {
+    const s = legacy("running");
+    expect(s).toMatchObject({
+      status: "running",
+      subject: { kind: "github.milestone", title: expect.stringContaining("M4") },
+      progress: { done: 3, total: 9 },
+    });
+    expect(s.tasks[0]).toMatchObject({
+      task: "#332",
+      step: { name: "implement: tests green", n: 3, total: 7 },
+    });
+    expect(s.finished.some((t) => t.task === "#325")).toBe(true);
   });
 
-  it("shows an abandoned run as stale, also in words", () => {
-    const abandoned = runOf("abandoned");
-    const now = Date.parse(abandoned.updatedAt) + 60_000;
-    expect(runState(abandoned, now)).toBe("stale");
-    expect(stateText(abandoned, now)).toContain("stale");
-    expect(
-      barSummary(
-        [{ root: "/r", run: abandoned.run, state: { kind: "ok", status: abandoned } }],
-        now,
-      ),
-    ).toBeNull();
+  it("keeps blocked and paused items as attentions and asks for the user once", () => {
+    const s = legacy("blocked");
+    expect(s.tone).toBe("danger");
+    expect(s.tasks).toEqual([]);
+    expect(s.attentions.some((a) => a.reason.includes("CI red on the PR"))).toBe(true);
+    expect(s.attentions.filter((a) => a.needsYou)).toHaveLength(1);
+    expect(s.needsYou).toBe(true);
+  });
+
+  it("maps a done run to a succeeded finish with the release PR as a link", () => {
+    const s = legacy("done");
+    expect(s).toMatchObject({ status: "finished", outcome: "succeeded", tone: "success" });
+    expect(s.links[0]).toMatchObject({ rel: "pull-request", title: "Release" });
+  });
+
+  it("stays running between two iterations (#537) without a release ask", () => {
+    const raw: Record<string, unknown> = {
+      ...json("status-done"),
+      closed: 2,
+      total: 9,
+      blocked: [],
+      paused: [],
+      release: {},
+      needsYou: [{ number: 1, url: "u", reason: "Release PR is ready" }],
+    };
+    delete raw["source"];
+    const s = must(fromLegacy(raw));
+    expect(s.status).toBe("running");
+    expect(s.attentions).toEqual([]);
+    expect(s.links).toEqual([]);
+  });
+
+  it("drops a pull request URL that is the issue URL (#538)", () => {
+    const issue = "https://github.com/GravionLabs/poimen/issues/334";
+    const s = must(
+      fromLegacy({
+        ...json("status-running"),
+        delivered: [{ pbi: 334, url: issue, prUrl: issue }],
+      }),
+    );
+    expect(s.finished[0]!.links).toEqual([]);
+  });
+
+  it.each([
+    ["not an object", 7],
+    ["a result outside the enum", { ...json("status-running"), result: "paused" }],
+    ["an updatedAt that is no date", { ...json("status-running"), updatedAt: "yesterday" }],
+  ])("reports %s instead of throwing", (_name, value) => {
+    expect(typeof fromLegacy(value)).toBe("string");
   });
 });
 
 describe("run state, age and progress", () => {
-  it("is stale only when running for over an hour without an update", () => {
-    const updated = Date.parse(RUNNING.updatedAt);
-    expect(runState(RUNNING, updated + STALE_MS)).toBe("running");
-    expect(runState(RUNNING, updated + STALE_MS + 1)).toBe("stale");
-    expect(runState(DONE, updated + 10 * STALE_MS)).toBe("done");
+  it("is stale only when running for over an hour without an update, or abandoned", () => {
+    expect(runState(MILESTONE, NOW)).toBe("running");
+    expect(runState(MILESTONE, Date.parse(MILESTONE.updated) + STALE_MS + 1)).toBe("stale");
+    expect(runState(ABANDONED, Date.parse(ABANDONED.updated))).toBe("stale");
+  });
+
+  it("follows the outcome of a finished run", () => {
+    expect(runState(FAILED, NOW)).toBe("failed");
+    expect(runState({ ...FAILED, outcome: "cancelled" }, NOW)).toBe("cancelled");
+    expect(runState({ ...FAILED, outcome: "succeeded" }, NOW)).toBe("succeeded");
   });
 
   it("words the age", () => {
-    const t = Date.parse("2026-11-06T10:00:00Z");
-    expect(ageText("2026-11-06T10:00:00Z", t + 20_000)).toBe("just now");
-    expect(ageText("2026-11-06T10:00:00Z", t + 12 * 60_000)).toBe("12 min ago");
-    expect(ageText("2026-11-06T10:00:00Z", t + 3 * 3_600_000)).toBe("3 h ago");
-    expect(ageText("2026-11-06T10:00:00Z", t + 50 * 3_600_000)).toBe("2 d ago");
-    expect(ageText("nonsense", t)).toBe("");
+    const now = Date.parse("2026-11-08T12:00:00Z");
+    expect(ageText("2026-11-08T12:00:00Z", now)).toBe("just now");
+    expect(ageText("2026-11-08T11:48:00Z", now)).toBe("12 min ago");
+    expect(ageText("2026-11-08T09:00:00Z", now)).toBe("3 h ago");
+    expect(ageText("2026-11-06T12:00:00Z", now)).toBe("2 d ago");
+    expect(ageText("nope", now)).toBe("");
   });
 
-  it("says finished, running and stale in words", () => {
-    const doneAt = Date.parse(DONE.updatedAt);
-    expect(stateText(DONE, doneAt + 12 * 60_000)).toBe("finished 12 min ago");
-    expect(stateText(RUNNING, NOW)).toBe("running, updated 2 min ago");
-    expect(stateText(RUNNING, NOW + 2 * STALE_MS)).toContain("stale");
+  it("says running, stale and the end of a run in words", () => {
+    expect(stateText(MILESTONE, NOW)).toBe("running, updated 2 min ago");
+    expect(stateText(MILESTONE, Date.parse(MILESTONE.updated) + 61 * 60_000)).toContain("stale");
+    expect(stateText(FAILED, Date.parse(FAILED.updated) + 60_000)).toBe(
+      "failed 1 min ago: CI stayed red",
+    );
+    expect(stateText({ ...FAILED, outcome: "succeeded", reason: null }, NOW)).toContain("finished");
   });
 
-  it("computes the progress, also for an empty milestone", () => {
-    expect(percent({ closed: 3, total: 9 })).toBe(33);
-    expect(percent({ closed: 0, total: 0 })).toBe(0);
-    expect(percent({ closed: 12, total: 9 })).toBe(100);
+  it("computes the progress, also for an empty one", () => {
+    expect(percent({ done: 3, total: 9 })).toBe(33);
+    expect(percent({ done: 0, total: 0 })).toBe(0);
+    expect(percent({ done: 12, total: 9 })).toBe(100);
+    expect(progressText({ done: 3, total: 9, label: "issues" })).toBe("3/9 issues");
+    expect(progressText({ done: 1, total: 2, label: null })).toBe("1/2");
   });
 
   it("asks for a look on a warning or danger tone", () => {
-    expect(needsAttention(RUNNING)).toBe(false);
-    expect(needsAttention(BLOCKED)).toBe(true);
-    expect(needsAttention({ ...RUNNING, tone: "warning" })).toBe(true);
+    expect(needsAttention(MILESTONE)).toBe(true);
+    expect(needsAttention(SESSION)).toBe(false);
+    expect(needsAttention(FAILED)).toBe(true);
   });
 });
 
 describe("barSummary", () => {
-  const card = (s: DeliverStatus, root = "/r"): DeliverCard => ({
-    root,
-    run: s.run,
-    state: { kind: "ok", status: s },
+  it("shows one running run as its subject and progress", () => {
+    const bar = barSummary([ok(MILESTONE)], NOW);
+    expect(bar?.text).toBe("⚠ M4 Deliver loop 3/9");
+    expect(bar?.title).toContain("Second implement");
+    expect(bar?.title).toContain("(needs you)");
   });
 
-  it("shows one running loop as milestone and progress", () => {
-    expect(barSummary([card(RUNNING)], NOW)).toMatchObject({
-      text: "▶ M4 3/9",
-      warning: false,
-    });
+  it("names a run without subject by its id and counts several runs", () => {
+    expect(barSummary([ok(SESSION)], Date.parse(SESSION.updated))?.text).toBe(`▶ ${SESSION.run}`);
+    expect(barSummary([ok(MILESTONE), ok(SESSION)], Date.parse(SESSION.updated))?.text).toBe(
+      "⚠ 2 runs",
+    );
   });
 
-  it("counts several running loops", () => {
-    expect(barSummary([card(RUNNING, "/a"), card(RUNNING, "/b")], NOW)?.text).toBe("▶ 2 runs");
-  });
-
-  it("turns into a warning by the tone of the run, not by its items", () => {
-    const needs = { ...RUNNING, needsYou: BLOCKED.needsYou, tone: "warning" as const };
-    const quiet = { ...RUNNING, needsYou: BLOCKED.needsYou };
-    expect(barSummary([card(quiet)], NOW)?.warning).toBe(false);
-    expect(barSummary([card(needs)], NOW)).toMatchObject({ text: "⚠ M4 3/9", warning: true });
-    const blocked = { ...BLOCKED, updatedAt: RUNNING.updatedAt };
-    expect(barSummary([card(blocked)], NOW)?.warning).toBe(true);
-  });
-
-  it("hides finished, stale and unreadable runs", () => {
-    expect(barSummary([card(DONE)], Date.parse(DONE.updatedAt))).toBeNull();
-    expect(barSummary([card(RUNNING)], NOW + 2 * STALE_MS)).toBeNull();
+  it("keeps a fresh run that ended with a warning tone, hides finished, stale and unreadable ones", () => {
+    const fresh = Date.parse(FAILED.updated) + 60_000;
+    expect(barSummary([ok(FAILED)], fresh)?.warning).toBe(true);
+    expect(barSummary([ok({ ...FAILED, tone: "success" })], fresh)).toBeNull();
+    expect(barSummary([ok(FAILED)], Date.parse(FAILED.updated) + STALE_MS + 1)).toBeNull();
+    expect(barSummary([ok(ABANDONED)], Date.parse(ABANDONED.updated))).toBeNull();
     expect(
-      barSummary([{ root: "/r", run: "", state: { kind: "unsupported", version: "2" } }], NOW),
+      barSummary([{ root: "/r", run: "", state: { kind: "invalid", error: "x" } }], NOW),
     ).toBeNull();
-    expect(barSummary([], NOW)).toBeNull();
   });
 });
 
 describe("transitions", () => {
   it("has nothing to say without a previous state or for another run", () => {
-    expect(transitions(undefined, BLOCKED)).toEqual([]);
-    expect(transitions({ ...RUNNING, run: "other" }, BLOCKED)).toEqual([]);
+    expect(transitions(undefined, MILESTONE)).toEqual([]);
+    expect(transitions(SESSION, MILESTONE)).toEqual([]);
   });
 
-  it("reports a newly blocked item once", () => {
-    const next = { ...RUNNING, blocked: BLOCKED.blocked };
-    expect(transitions(RUNNING, next)).toEqual([
-      expect.objectContaining({
-        kind: "blocked",
-        body: "#335 is blocked: CI red on the PR: check lint:ps failed",
-      }),
+  it("reports a newly failed task and a new decision once", () => {
+    const before: DeliverStatus = {
+      ...MILESTONE,
+      finished: MILESTONE.finished.filter((t) => t.outcome !== "failed"),
+      attentions: [],
+    };
+    const events = transitions(before, MILESTONE);
+    expect(events.map((e) => e.kind)).toEqual(["blocked", "needs-you"]);
+    expect(events[0]!.body).toBe("Zero failed: review rejected");
+    expect(events[1]!.body).toContain("decide whether the field names are final");
+    expect(events[0]!.title).toBe("Run M4 Deliver loop");
+    expect(transitions(MILESTONE, MILESTONE)).toEqual([]);
+  });
+
+  it("reports the end of a run once: done, cancelled, or failed without a failed task", () => {
+    const running: DeliverStatus = { ...SESSION };
+    const done: DeliverStatus = { ...SESSION, status: "finished", outcome: "succeeded" };
+    expect(transitions(running, done)).toEqual([
+      { kind: "ended", title: `Run ${SESSION.run}`, body: "The run is done" },
     ]);
-    expect(transitions(next, next)).toEqual([]);
-  });
-
-  it("names a session without a milestone", () => {
-    const session = runOf("session");
-    const next = { ...session, needsYou: BLOCKED.needsYou };
-    expect(transitions(session, next)[0].title).toBe("Deliver session");
-  });
-
-  it("reports a run that ends blocked and a new decision", () => {
-    expect(transitions(RUNNING, { ...RUNNING, result: "blocked" }).map((e) => e.kind)).toEqual([
-      "blocked",
+    expect(transitions(done, done)).toEqual([]);
+    expect(transitions(running, { ...done, outcome: "cancelled" })[0]!.body).toBe(
+      "The run ended: cancelled",
+    );
+    const failed = transitions(running, { ...done, outcome: "failed", reason: "boom" });
+    expect(failed).toEqual([
+      { kind: "blocked", title: `Run ${SESSION.run}`, body: "The run failed: boom" },
     ]);
-    expect(
-      transitions(RUNNING, { ...RUNNING, needsYou: BLOCKED.needsYou }).map((e) => e.kind),
-    ).toEqual(["needs-you"]);
-  });
-
-  it("reports the release pull request and the end of the run once", () => {
-    const next = { ...RUNNING, release: DONE.release, result: "done" as const };
-    expect(transitions(RUNNING, next).map((e) => e.kind)).toEqual(["release", "ended"]);
-    expect(transitions(next, next)).toEqual([]);
-  });
-});
-
-describe("delivered entries (#538)", () => {
-  const withDelivered = (delivered: unknown[]) => {
-    const parsed = parseStatus({ ...fixture("running"), delivered });
-    if (typeof parsed === "string") throw new Error(parsed);
-    return parsed.delivered;
-  };
-
-  it("drops a prUrl that is the issue URL, keeps a pull request URL", () => {
-    const issue = "https://github.com/GravionLabs/poimen/issues/334";
-    const pull = "https://github.com/GravionLabs/poimen/pull/335";
-    expect(
-      withDelivered([
-        { pbi: 334, url: issue, prUrl: issue },
-        { pbi: 335, url: "u", prUrl: pull },
-        { pbi: 336, url: "u" },
-      ]).map((d) => d.prUrl),
-    ).toEqual([null, pull, null]);
   });
 });
