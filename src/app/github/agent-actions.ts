@@ -14,7 +14,26 @@ import { GithubIssues, issueLevel, type Issue } from "./issues";
 import { GithubPulls, type PullRow } from "./pulls";
 
 /** Where the agent of an action runs: the repository root or a worktree of the issue or PR. */
-export type RunWhere = "root" | "worktree";
+export type RunWhere = "root" | "worktree" | "diff";
+
+/** Fixed suffix of the review mode "diff only": read the diff through `gh`, change nothing. */
+export const DIFF_ONLY_SUFFIX =
+  "Read the changes with `gh pr diff {nr}` and do not change any files.";
+/** Fixed suffix of "Post review on GitHub". */
+export const POST_REVIEW_SUFFIX =
+  "When you are done, post your review on GitHub with `gh pr review {nr} --comment`.";
+
+/** The prompt suffix the review extras of the dialog add (empty when none is chosen). */
+export function reviewSuffix(diffOnly: boolean, post: boolean): string {
+  return [diffOnly ? DIFF_ONLY_SUFFIX : "", post ? POST_REVIEW_SUFFIX : ""]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Whether the dialog shows the review extras (mode and posting) for `action`. */
+export function hasReviewExtras(action: AgentAction): boolean {
+  return action.id === "review" && action.on === "pr";
+}
 
 const LABEL_MAX = 40;
 
@@ -124,6 +143,8 @@ export interface ActionDialog {
   model: string;
   /** Chosen for an `ask` action; the others have it fixed by `run`. */
   where: RunWhere;
+  /** Review only: post the result with `gh pr review`. */
+  post: boolean;
 }
 
 /** The popup of a row: opened by the `⋯` button or the context menu. */
@@ -279,7 +300,8 @@ export class AgentActions {
       targets: [...targets],
       harness,
       model: action.model ?? "",
-      where: action.run === "worktree" ? "worktree" : "root",
+      where: hasReviewExtras(action) ? "diff" : action.run === "worktree" ? "worktree" : "root",
+      post: false,
     });
     return null;
   }
@@ -290,7 +312,7 @@ export class AgentActions {
     return action ? this.request(action, this.current(), false) : null;
   }
 
-  setDialog(patch: Partial<Pick<ActionDialog, "harness" | "model" | "where">>): void {
+  setDialog(patch: Partial<Pick<ActionDialog, "harness" | "model" | "where" | "post">>): void {
     this._dialog.update((d) => (d ? { ...d, ...patch } : d));
   }
 
@@ -307,6 +329,7 @@ export class AgentActions {
       harness: d.harness,
       model: d.model,
       where: d.where,
+      post: d.post,
     });
   }
 
@@ -335,12 +358,17 @@ export class AgentActions {
   async run(
     action: AgentAction,
     targets: readonly ActionTarget[],
-    choice?: { harness: string; model: string; where?: RunWhere },
+    choice?: { harness: string; model: string; where?: RunWhere; post?: boolean },
   ): Promise<RunSummary | null> {
     const first = targets[0];
     if (!first) return null;
-    const where: RunWhere =
-      action.run === "worktree" || (action.run === "ask" && choice?.where === "worktree")
+    const extras = hasReviewExtras(action) && choice !== undefined;
+    const diffOnly = extras && choice?.where === "diff";
+    const suffix = extras ? reviewSuffix(diffOnly, choice?.post === true) : "";
+    const where: RunWhere = diffOnly
+      ? "diff"
+      : action.run === "worktree" ||
+          ((action.run === "ask" || extras) && choice?.where === "worktree")
         ? "worktree"
         : "root";
     let launches: Launch[];
@@ -358,6 +386,7 @@ export class AgentActions {
         })),
         harness: choice?.harness || null,
         model: choice?.model || null,
+        suffix: suffix || undefined,
       });
     } catch (err) {
       this.spaces.notify(`${action.label}: ${text(err)}`);
@@ -371,7 +400,7 @@ export class AgentActions {
     if (where === "worktree") return this.runInWorktrees(action, first.root, groups);
     let summary: RunSummary | null = null;
     const after = async (outcome: SpaceOutcome): Promise<void> => {
-      summary = await this.startAll(action, first.root, outcome.workspace_id, groups);
+      summary = await this.startAll(action, first.root, outcome.workspace_id, groups, diffOnly);
       await this.store.refresh();
       this.spaces.notify(summaryText(action.label, summary));
     };
@@ -507,6 +536,7 @@ export class AgentActions {
     root: string,
     workspaceId: string,
     groups: { launch: Launch; targets: ActionTarget[] }[],
+    diffOnly = false,
   ): Promise<RunSummary> {
     const results = await Promise.allSettled(
       groups.map(async ({ launch, targets }) => {
@@ -518,7 +548,7 @@ export class AgentActions {
         await this.bridge.invoke("agent_start", {
           paneId,
           kind: launch.kind,
-          name: `${action.label} ${numbers(targets).replaceAll(",", "")}`,
+          name: `${diffOnly ? "review" : action.label} ${numbers(targets).replaceAll(",", "")}`,
           args: launch.args,
         });
       }),

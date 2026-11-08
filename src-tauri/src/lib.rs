@@ -1064,6 +1064,7 @@ async fn agent_action_plan(
     items: Vec<agent_actions::Item>,
     harness: Option<String>,
     model: Option<String>,
+    suffix: Option<String>,
 ) -> Result<Vec<agent_actions::Launch>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let resolved = resolved_agent_actions(Some(root));
@@ -1079,6 +1080,7 @@ async fn agent_action_plan(
             &items,
             harness.as_deref(),
             model.as_deref(),
+            suffix.as_deref(),
         )
     })
     .await

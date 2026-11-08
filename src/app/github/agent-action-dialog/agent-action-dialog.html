@@ -16,7 +16,24 @@
     (keydown)="onKey($event)"
   >
     <h2>{{ d.action.label }} {{ targetsText() }}</h2>
-    @if (d.action.run === "ask") {
+    @if (hasReviewExtras(d.action)) {
+      <label>
+        Mode
+        <select data-testid="dialog-mode" (change)="where($event)">
+          <option value="worktree" [selected]="d.where === 'worktree'">Worktree</option>
+          <option value="diff" [selected]="d.where === 'diff'">Diff only</option>
+        </select>
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          data-testid="dialog-post"
+          [checked]="d.post"
+          (change)="post($event)"
+        />
+        Post review on GitHub
+      </label>
+    } @else if (d.action.run === "ask") {
       <label>
         Run in
         <select data-testid="dialog-where" (change)="where($event)">

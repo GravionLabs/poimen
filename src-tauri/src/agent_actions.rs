@@ -142,14 +142,17 @@ pub fn defaults() -> Vec<Spec> {
             "Refine GitHub issue #{nr} in {repo}: {title} ({url}). Check that its acceptance \
              criteria are complete and testable, and list what is still open.",
         ),
-        spec(
-            "review",
-            "Review",
-            On::Pr,
-            When::default(),
-            "Review pull request #{nr} in {repo}: {title} ({url}), branch {branch} into {base}. \
-             Report blocking findings separately from notes.",
-        ),
+        Spec {
+            run: Run::Ask,
+            ..spec(
+                "review",
+                "Review",
+                On::Pr,
+                When::default(),
+                "Review pull request #{nr} in {repo}: {title} ({url}), branch {branch} against its \
+                 base {base}. Report your findings, blocking ones separately from notes.",
+            )
+        },
         spec(
             "fix-checks",
             "Fix checks",
@@ -555,7 +558,7 @@ pub struct Launch {
 
 /// What to start for `action` on `items`, with an optional harness or model chosen by the user
 /// instead of the action's own (the Shift+click dialog). One launch per item for `each`, one for
-/// `once`.
+/// `once`. `suffix` (fixed text of the app, placeholders allowed) is appended to the prompt.
 pub fn plan(
     action: &Spec,
     harnesses: &[Harness],
@@ -563,8 +566,12 @@ pub fn plan(
     items: &[Item],
     harness: Option<&str>,
     model: Option<&str>,
+    suffix: Option<&str>,
 ) -> Result<Vec<Launch>, String> {
     let mut spec = action.clone();
+    if let Some(sfx) = suffix.map(str::trim).filter(|s| !s.is_empty()) {
+        spec.prompt = format!("{}\n\n{sfx}", spec.prompt);
+    }
     if let Some(h) = harness.filter(|h| !h.is_empty()) {
         spec.harness = Some(h.to_owned());
     }
@@ -960,7 +967,7 @@ mod tests {
         let review = d.iter().find(|s| s.id == "review").unwrap();
         let hs = harness::default_harnesses();
         let items = [item(7, "A"), item(8, "B")];
-        let each = plan(review, &hs, "o/r", &items, None, None).unwrap();
+        let each = plan(review, &hs, "o/r", &items, None, None, None).unwrap();
         assert_eq!(each.len(), 2);
         assert_eq!(each[0].kind, "claude");
         assert!(each[1].args[0].contains("#8"));
@@ -971,11 +978,12 @@ mod tests {
             &items[..1],
             Some("copilot"),
             Some("auto"),
+            None,
         )
         .unwrap();
         assert_eq!(chosen[0].kind, "copilot");
         assert_eq!(&chosen[0].args[..2], ["--model", "auto"]);
-        assert!(plan(review, &hs, "o/r", &items, Some("nope"), None).is_err());
+        assert!(plan(review, &hs, "o/r", &items, Some("nope"), None, None).is_err());
     }
 
     #[test]
@@ -984,8 +992,52 @@ mod tests {
         once.batch = Batch::Once;
         once.prompt = "do {nrs}".into();
         let hs = harness::default_harnesses();
-        let l = plan(&once, &hs, "o/r", &[item(1, "a"), item(2, "b")], None, None).unwrap();
+        let l = plan(
+            &once,
+            &hs,
+            "o/r",
+            &[item(1, "a"), item(2, "b")],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(l.len(), 1);
         assert_eq!(l[0].args.last().unwrap(), "do 1 2");
+    }
+
+    #[test]
+    fn review_is_ask_and_names_no_skill() {
+        let d = defaults();
+        let review = d.iter().find(|s| s.id == "review").unwrap();
+        assert_eq!(review.run, Run::Ask);
+        assert_eq!(review.on, On::Pr);
+        assert!(!review.prompt.starts_with('/'));
+        assert!(review.prompt.contains("against its base {base}"));
+    }
+
+    #[test]
+    fn plan_appends_the_suffix_with_placeholders_expanded() {
+        let d = defaults();
+        let review = d.iter().find(|s| s.id == "review").unwrap();
+        let hs = harness::default_harnesses();
+        let l = plan(
+            review,
+            &hs,
+            "o/r",
+            &[item(7, "A")],
+            None,
+            None,
+            Some("Run `gh pr diff {nr}`."),
+        )
+        .unwrap();
+        assert!(
+            l[0].args
+                .last()
+                .unwrap()
+                .ends_with("\n\nRun `gh pr diff 7`.")
+        );
+        let none = plan(review, &hs, "o/r", &[item(7, "A")], None, None, Some("  ")).unwrap();
+        assert!(!none[0].args.last().unwrap().contains("gh pr"));
     }
 }
