@@ -1,0 +1,28 @@
+{
+  "run": "20261107-100000-aban",
+  "harness": "claude",
+  "model": "sonnet",
+  "repository": "GravionLabs/skills",
+  "milestone": {
+    "key": "M5",
+    "title": "M5 Events",
+    "url": "https://github.com/GravionLabs/skills/milestone/5"
+  },
+  "closed": 0,
+  "total": 0,
+  "current": null,
+  "delivered": [],
+  "blocked": [],
+  "paused": [],
+  "needsYou": [],
+  "release": {
+    "reviewRound": null,
+    "prUrl": null,
+    "rcUrl": null,
+    "rcVersion": null,
+    "testIssue": null
+  },
+  "startedAt": "2026-11-07T09:00:00.000Z",
+  "updatedAt": "2026-11-07T09:30:00.000Z",
+  "result": "abandoned"
+}

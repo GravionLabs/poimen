@@ -7,7 +7,8 @@ import { TauriBridge, type Unlisten } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
 import {
   barSummary,
-  cardOf,
+  cardKey,
+  cardsOf,
   transitions,
   type DeliverCard,
   type DeliverEvent,
@@ -24,6 +25,12 @@ const CLOCK_MS = 30_000;
 interface DeliverEventPayload {
   root: string;
   read: DeliverRead;
+}
+
+/** Position of a card among `cards` by key; cards not there come after all others. */
+function index(cards: readonly DeliverCard[], card: DeliverCard): number {
+  const i = cards.findIndex((c) => cardKey(c) === cardKey(card));
+  return i < 0 ? Number.MAX_SAFE_INTEGER : i;
 }
 
 /** The pane that runs the loop of `root`: an agent of the loop's harness inside it, else any agent. */
@@ -47,9 +54,10 @@ export function milestoneNumber(key: string): number {
 }
 
 /**
- * The deliver loops of the repositories of the open spaces: the backend watches each
- * `.agents/deliver-loop/status.json` (`deliver_watch`) and pushes `deliver` events; this keeps one
- * card per repository that has a file, and raises the notifications when a run changes.
+ * The deliver runs of the repositories of the open spaces: the backend watches each repository's
+ * progress events (`.agents/events` of the common dir, else the legacy
+ * `.agents/deliver-loop/status.json`; `deliver_watch`) and pushes `deliver` events; this keeps one
+ * card per run, and raises the notifications when a run changes.
  */
 @Injectable({ providedIn: "root" })
 export class Deliver {
@@ -58,7 +66,7 @@ export class Deliver {
   private readonly prefs = inject(SettingsStore);
   private readonly tasks = inject(TaskStarter);
 
-  /** One card per repository with a status file, in the order the files appeared. */
+  /** One card per run (progress events) or status file, in the order they appeared. */
   readonly cards = signal<readonly DeliverCard[]>([]);
   /** The clock of the age texts. */
   readonly now = signal(Date.now());
@@ -103,18 +111,24 @@ export class Deliver {
     }
   }
 
-  /** Applies one read of a repository: card, then notifications for what changed. */
+  /** Applies one read of a repository: its cards, then notifications for what changed. */
   apply(root: string, read: DeliverRead): void {
-    const before = this.cards().find((c) => c.root === root);
-    const card = cardOf(root, read);
+    const before = this.cards().filter((c) => c.root === root);
+    const next = cardsOf(root, read);
     this.cards.update((cards) => {
       const rest = cards.filter((c) => c.root !== root);
-      if (!card) return rest;
-      // Keep the position of a card that is only updated.
-      return before ? cards.map((c) => (c.root === root ? card : c)) : [...rest, card];
+      // Keep the place of a card that is only updated; new cards come last.
+      const at = cards.findIndex((c) => c.root === root);
+      const placed = [...next].sort(
+        (x, y) => index(before, x) - index(before, y) || next.indexOf(x) - next.indexOf(y),
+      );
+      return at < 0 ? [...rest, ...placed] : [...rest.slice(0, at), ...placed, ...rest.slice(at)];
     });
-    if (before?.state.kind === "ok" && card?.state.kind === "ok")
-      this.notify(root, transitions(before.state.status, card.state.status));
+    for (const card of next) {
+      const old = before.find((c) => cardKey(c) === cardKey(card));
+      if (old?.state.kind === "ok" && card.state.kind === "ok")
+        this.notify(root, transitions(old.state.status, card.state.status));
+    }
   }
 
   private notify(root: string, events: readonly DeliverEvent[]): void {
@@ -145,10 +159,13 @@ export class Deliver {
    * worktree: a tab in the space of the repository), with the milestone number as `{nr}`.
    */
   startLoop(status: DeliverStatus, root: string): Promise<boolean> {
+    const milestone = status.milestone;
+    // An interactive session has no milestone to run a loop for.
+    if (!milestone) return Promise.resolve(false);
     return this.tasks.run(root, {
-      number: milestoneNumber(status.milestone.key),
-      title: status.milestone.title,
-      url: status.milestone.url,
+      number: milestoneNumber(milestone.key),
+      title: milestone.title,
+      url: milestone.url,
       mode: DELIVER_MODE,
     });
   }

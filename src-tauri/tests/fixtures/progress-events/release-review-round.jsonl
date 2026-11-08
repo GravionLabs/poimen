@@ -1,0 +1,5 @@
+{"v":1,"seq":1,"ts":"2026-11-07T10:00:00.000Z","run":"20261107-100000-rele","type":"run.started","tone":"neutral","source":"loop","harness":"claude","model":"sonnet","repository":"GravionLabs/skills","milestone":{"key":"M5","title":"M5 Events","url":"https://github.com/GravionLabs/skills/milestone/5"},"pid":4242,"host":{"herdrPane":"w1:p2"}}
+{"v":1,"seq":2,"ts":"2026-11-07T10:00:05.000Z","run":"20261107-100000-rele","type":"milestone.progress","tone":"neutral","closed":9,"total":9}
+{"v":1,"seq":3,"ts":"2026-11-07T11:00:00.000Z","run":"20261107-100000-rele","type":"release.updated","tone":"neutral","reviewRound":1}
+{"v":1,"seq":4,"ts":"2026-11-07T11:20:00.000Z","run":"20261107-100000-rele","type":"release.updated","tone":"neutral","reviewRound":2}
+{"v":1,"seq":5,"ts":"2026-11-07T11:40:00.000Z","run":"20261107-100000-rele","type":"release.updated","tone":"neutral","prUrl":"https://github.com/GravionLabs/skills/pull/390"}

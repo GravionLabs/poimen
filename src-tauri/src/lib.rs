@@ -22,6 +22,7 @@ mod layout;
 mod live;
 mod poimen_backend;
 mod poimen_server;
+mod progress_events;
 mod project;
 mod project_edit;
 mod remote;
@@ -1438,8 +1439,9 @@ fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
     }
 }
 
-/// Watches the deliver loop status file (`.agents/deliver-loop/status.json`) of the repositories
-/// of `dirs` (one watch per repository toplevel; worktrees count as their own), replacing the
+/// Watches the deliver runs (progress events in `<git-common-dir>/.agents/events`, else the
+/// status file `.agents/deliver-loop/status.json`) of the repositories of `dirs` (one watch per
+/// repository: its worktrees count as one, named by the toplevel of the first), replacing the
 /// watched set; each change arrives as a `deliver` event `{ root, read }`, first with the current
 /// content. Returns the watched roots. Read-only.
 #[tauri::command]
@@ -1448,19 +1450,9 @@ async fn deliver_watch(
     watch: State<'_, DeliverWatch>,
     dirs: Vec<String>,
 ) -> Result<Vec<String>, String> {
-    let roots = tauri::async_runtime::spawn_blocking(move || {
-        let mut roots: Vec<String> = Vec::new();
-        for dir in dirs {
-            if let Some(top) = git::toplevel(&dir)
-                && !roots.contains(&top)
-            {
-                roots.push(top);
-            }
-        }
-        roots
-    })
-    .await
-    .map_err(|e| e.to_string())?;
+    let roots = tauri::async_runtime::spawn_blocking(move || git::repo_roots(&dirs))
+        .await
+        .map_err(|e| e.to_string())?;
     let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
     let current = watches.keys().cloned().collect();
     let (stop, start) = deliver::plan(&current, &roots);
