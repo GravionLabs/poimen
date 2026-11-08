@@ -2,9 +2,10 @@ name: CI
 
 # Checks of the frontend (src/), the server crates and the Tauri crate (src-tauri/). On pull requests the `changes`
 # job decides from the diff which areas changed (frontend, rust, or this workflow = both); jobs of an untouched area
-# are skipped. The Rust jobs follow the `rust` area only: a frontend-only change cannot break the Rust build. The `ci`
-# job always runs last and is the single check to require on a branch (green when the checks passed or were skipped
-# for lack of changes in their area).
+# are skipped. The Rust jobs follow the `rust` area: src-tauri/, rust-toolchain.toml and the frontend fixtures that Rust
+# tests read (src/app/deliver/fixtures/); other frontend changes cannot break the Rust build. The `ci` job always runs
+# last and is the single check to require on a branch (green when the checks passed or were skipped for lack of
+# changes in their area).
 # Pushes to main run these checks through release.yml (workflow_call), so they run once per release.
 on:
   workflow_dispatch:
@@ -42,7 +43,7 @@ jobs:
             exit 0
           fi
           frontend='^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|angular\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|vitest\.[^/]*|\.prettier[^/]*|src/.*|\.github/workflows/ci\.yml)$'
-          rust='^(rust-toolchain\.toml|src-tauri/.*|\.github/workflows/ci\.yml)$'
+          rust='^(rust-toolchain\.toml|src-tauri/.*|src/app/deliver/fixtures/.*|\.github/workflows/ci\.yml)$'
           git diff --name-only "$BASE_SHA" HEAD > changed.txt
           cat changed.txt
           f=false
@@ -90,7 +91,8 @@ jobs:
           packages: "poimen-protocol poimen-client poimen-server"
 
   # The app crate needs the Tauri Linux libraries and the built frontend (the Tauri macros embed frontendDist). The
-  # frontend build here only satisfies those macros, so it runs when src-tauri/ changed, not for a frontend-only change.
+  # frontend build here only satisfies those macros. This job also runs for changes to the frontend fixtures the Rust
+  # tests read (src/app/deliver/fixtures/).
   rust:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
