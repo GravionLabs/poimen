@@ -73,6 +73,14 @@
       [class.chosen]="d.selected"
       [class.closing]="isClosing(d.workspace.space_id)"
       [attr.aria-busy]="isClosing(d.workspace.space_id) || null"
+      [attr.draggable]="canDrag(d.workspace.space_id) ? 'true' : null"
+      [class.dragging]="dragging() === d.workspace.space_id"
+      [class.drop-before]="dropMark()?.id === d.workspace.space_id && !dropMark()!.after"
+      [class.drop-after]="dropMark()?.id === d.workspace.space_id && dropMark()!.after"
+      (dragstart)="dragStart($event, d.workspace.space_id)"
+      (dragover)="dragOver($event, d.workspace.space_id)"
+      (drop)="drop($event, d.workspace.space_id)"
+      (dragend)="dragEnd()"
       (contextmenu)="openMenu($event, 'workspace', d.workspace.space_id)"
     >
       <span class="main space-main">

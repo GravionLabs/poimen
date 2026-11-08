@@ -490,6 +490,12 @@ export class App {
       if (spaceId) this.spaceActions.askRename(spaceId);
       return;
     }
+    if (id === "moveSpaceUp" || id === "moveSpaceDown") {
+      const paneId = this.activePaneId();
+      const spaceId = paneId ? this.pane(paneId)?.space_id : undefined;
+      if (spaceId) this.spaceActions.shift(spaceId, id === "moveSpaceUp" ? -1 : 1);
+      return;
+    }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
       this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);

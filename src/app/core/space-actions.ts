@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from "@angular/core";
-import { agentKind, pathSegments, type Snapshot } from "./herdr";
+import { agentKind, orderSpaces, pathSegments, reorderIds, type Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import type { TemplateHint } from "./space-templates";
 import { TauriBridge } from "./tauri";
@@ -70,8 +70,12 @@ export interface SpaceRenaming {
 }
 
 /** The space to focus after `workspaceId` closed: the next one, else the previous; `null` if none. */
-export function neighbourSpace(snapshot: Snapshot, workspaceId: string): string | null {
-  const ids = [...snapshot.spaces].sort((a, b) => a.number - b.number).map((w) => w.space_id);
+export function neighbourSpace(
+  snapshot: Snapshot,
+  workspaceId: string,
+  order: readonly string[] = [],
+): string | null {
+  const ids = orderSpaces(snapshot.spaces, order).map((w) => w.space_id);
   const i = ids.indexOf(workspaceId);
   if (i < 0) return null;
   return ids[i + 1] ?? ids[i - 1] ?? null;
@@ -349,6 +353,23 @@ export class SpaceActions {
     this._closing.set(null);
   }
 
+  /**
+   * Drops `sourceId` before or after `targetId` in the user's space order. Nothing happens for the
+   * same space, an unknown id or a drop that leaves the order as it is.
+   */
+  reorder(sourceId: string, targetId: string, after: boolean): void {
+    const ids = this.store.orderedSpaces().map((s) => s.space_id);
+    const next = reorderIds(ids, sourceId, targetId, after);
+    if (next) this.ui.setSpaceOrder(next);
+  }
+
+  /** Moves a space one step up (`-1`) or down (`1`); at either end nothing happens. */
+  shift(spaceId: string, delta: -1 | 1): void {
+    const ids = this.store.orderedSpaces().map((s) => s.space_id);
+    const target = ids[ids.indexOf(spaceId) + delta];
+    if (target) this.reorder(spaceId, target, delta === 1);
+  }
+
   dismissCloseError(): void {
     this._closeError.set(null);
   }
@@ -363,7 +384,7 @@ export class SpaceActions {
     try {
       await this.bridge.invoke("space_close", {
         workspaceId,
-        focus: neighbourSpace(snapshot, workspaceId),
+        focus: neighbourSpace(snapshot, workspaceId, this.store.spaceOrder()),
       });
     } catch (err) {
       this._closeError.set(String(err));
