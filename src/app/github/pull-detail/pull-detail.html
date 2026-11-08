@@ -17,6 +17,17 @@
       </div>
       <div class="meta">
         <span class="mono" data-testid="detail-number">#{{ row.number }}</span>
+        @if (runs.badge(row.repo, row.number); as run) {
+          <button
+            type="button"
+            class="badge badge-{{ run.state === 'running' ? 'primary' : 'warning' }}"
+            data-testid="detail-run-badge"
+            title="Show the agent"
+            (click)="runs.focus(run.paneId)"
+          >
+            {{ run.text }}
+          </button>
+        }
         <span class="mono" data-testid="detail-branches"
           >{{ row.headRef }} → {{ row.baseRef }}</span
         >

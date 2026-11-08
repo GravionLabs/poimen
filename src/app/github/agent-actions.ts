@@ -10,6 +10,7 @@ import {
 import { SpaceActions, type SpaceOutcome } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
+import { AgentRuns } from "./agent-runs";
 import { GithubIssues, issueLevel, type Issue } from "./issues";
 import { GithubPulls, type PullRow } from "./pulls";
 
@@ -210,6 +211,7 @@ export class AgentActions {
   private readonly pulls = inject(GithubPulls);
   private readonly issues = inject(GithubIssues);
   private readonly ui = inject(UiState);
+  private readonly runs = inject(AgentRuns);
 
   private readonly byRoot = signal<ReadonlyMap<string, readonly AgentAction[]>>(new Map());
   private readonly _dialog = signal<ActionDialog | null>(null);
@@ -529,6 +531,18 @@ export class AgentActions {
       name: `${action.label} ${numbers(group.targets).replaceAll(",", "")}`,
       args: group.launch.args,
     });
+    this.record(paneId, action, group.targets);
+  }
+
+  /** Remembers the pane of a started agent so the rows of its targets show the run. */
+  private record(paneId: string, action: AgentAction, targets: readonly ActionTarget[]): void {
+    this.runs.add({
+      paneId,
+      repo: targets[0].repo,
+      numbers: targets.map((t) => t.number),
+      actionId: action.id,
+      label: action.label,
+    });
   }
 
   private async startAll(
@@ -551,6 +565,7 @@ export class AgentActions {
           name: `${diffOnly ? "review" : action.label} ${numbers(targets).replaceAll(",", "")}`,
           args: launch.args,
         });
+        this.record(paneId, action, targets);
       }),
     );
     const summary: RunSummary = { started: [], failed: [] };

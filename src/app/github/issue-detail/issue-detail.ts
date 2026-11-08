@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
 import { UiState } from "../../core/ui-state";
+import { AgentRuns } from "../agent-runs";
 import { AgentActions, issueTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues, issueKey, issueLevel, levelBadge, type ClosingPr } from "../issues";
 import { renderMarkdown } from "../markdown";
@@ -29,6 +30,7 @@ export class IssueDetailPane {
   });
 
   protected readonly agentActions = inject(AgentActions);
+  protected readonly runs = inject(AgentRuns);
 
   /** The issue the agent actions run on (as the list knows it). */
   protected readonly targets = computed<ActionTarget[]>(() => {
@@ -42,17 +44,19 @@ export class IssueDetailPane {
   protected readonly head = computed(() => {
     const key = this.issues.detailKey();
     if (key === null) return null;
+    const repo = key.slice(0, key.lastIndexOf("#"));
     const d = this.issues.detail();
     const listed = this.issues.detailIssue()?.issue;
     const src = d ?? listed;
     if (!src)
       return {
+        repo,
         number: Number(key.slice(key.lastIndexOf("#") + 1)),
         title: "",
         url: "",
         level: null,
       };
-    return { number: src.number, title: src.title, url: src.url, level: issueLevel(src) };
+    return { repo, number: src.number, title: src.title, url: src.url, level: issueLevel(src) };
   });
 
   /** Selects a sub-issue or the parent: its detail opens in this pane. */

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
 import { UiState } from "../../core/ui-state";
+import { AgentRuns } from "../agent-runs";
 import { AgentActions, pullTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues } from "../issues";
 import { renderMarkdown } from "../markdown";
@@ -21,6 +22,7 @@ export class PullDetailPane {
   private readonly issues = inject(GithubIssues);
   private readonly ui = inject(UiState);
   protected readonly agentActions = inject(AgentActions);
+  protected readonly runs = inject(AgentRuns);
   protected readonly isGithubUrl = isGithubUrl;
   /** The pull request the agent actions run on. */
   protected readonly targets = computed<ActionTarget[]>(() => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts } from "./agent-prompt";
 import { AgentActions } from "../github/agent-actions";
+import { AgentRuns } from "../github/agent-runs";
 import { GithubFilter } from "../github/github-filter";
 import { GithubIssues } from "../github/issues";
 import { GithubMilestones } from "../github/milestones";
@@ -56,6 +57,7 @@ describe("CommandPalette", () => {
         GithubMilestones,
         GithubPulls,
         GithubIssues,
+        AgentRuns,
         AgentActions,
         CommandPalette,
       ],

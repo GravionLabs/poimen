@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
+import { AgentRuns } from "./agent-runs";
 import { AgentActions, issueTarget } from "./agent-actions";
 import {
   GithubIssues,
@@ -22,6 +23,7 @@ import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
 export class IssuesSection {
   protected readonly issues = inject(GithubIssues);
   private readonly agentActions = inject(AgentActions);
+  protected readonly runs = inject(AgentRuns);
   protected readonly levels = LEVELS;
   protected readonly labelChips = labelChips;
   protected readonly levelBadge = levelBadge;
