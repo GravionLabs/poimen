@@ -18,6 +18,24 @@ Set `"backend": "herdr"` in `~/.config/poimen/config.json` to use [herdr](https:
 
 Get the installer for your system from the [download page](/download) or from the [latest release](https://github.com/GravionLabs/poimen/releases/latest) on GitHub.
 
+### Verify the download
+
+The installers are not code-signed. Each release carries a `SHA256SUMS` file and a build provenance attestation instead, so you can check that a file is unchanged and was built by poimen's release workflow on GitHub.
+
+Checksum: download `SHA256SUMS` from the same release and compare the line of your file.
+
+- **Windows (PowerShell):** `(Get-FileHash .\poimen_<version>_x64-setup.exe -Algorithm SHA256).Hash`, then compare it with the line in `SHA256SUMS` (the case does not matter).
+- **macOS:** `shasum -a 256 -c SHA256SUMS --ignore-missing`
+- **Linux:** `sha256sum -c SHA256SUMS --ignore-missing`
+
+Provenance, with the [GitHub CLI](https://cli.github.com/):
+
+```sh
+gh attestation verify poimen_<version>_x64-setup.exe --repo GravionLabs/poimen
+```
+
+It succeeds only for a file that the release workflow of `GravionLabs/poimen` built. A verified file can still make Windows SmartScreen or Microsoft Defender warn on the first runs of a new version, because they rate unsigned files by how often they have been seen.
+
 ## macOS (Apple Silicon)
 
 1. Open the `.dmg` and drag poimen to `Applications`.
