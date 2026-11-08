@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Terminal, Snapshot } from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import { PaneActions } from "./pane-actions";
+import { UI_STORAGE, UiState } from "./ui-state";
+import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -35,7 +37,16 @@ describe("PaneActions", () => {
       terminals: [pane("w1:p1"), pane("w1:p2", { agent: "claude", agent_status: "working" })],
     };
     tauri.answer("snapshot", () => current);
-    const injector = Injector.create({ providers: [TauriBridge, HerdrStore, PaneActions] });
+    const injector = Injector.create({
+      providers: [
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        TauriBridge,
+        HerdrStore,
+        SpaceActions,
+        PaneActions,
+      ],
+    });
     store = injector.get(HerdrStore);
     actions = injector.get(PaneActions);
     await store.refresh();
@@ -192,5 +203,31 @@ describe("PaneActions", () => {
     expect(await actions.confirmClose()).toBeUndefined();
     expect(await actions.confirmNew("/x")).toBeUndefined();
     expect(tauri.calls("pane_close")).toEqual([]);
+  });
+
+  describe("openTerminalIn", () => {
+    it("adds a terminal to the space whose root contains the directory, with that cwd", async () => {
+      tauri.answer("terminal_create", () => "w1:p3");
+      const created = pane("w1:p3", { cwd: "/work/app/src" });
+      tauri.answer("snapshot", () => ({ ...current, terminals: [...current.terminals, created] }));
+      const result = await actions.openTerminalIn("/work/app/src");
+      expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w1", cwd: "/work/app/src" }]);
+      expect(result?.terminal_id).toBe("w1:p3");
+    });
+
+    it("creates a space for the directory when no space contains it", async () => {
+      tauri.answer("create_space", () => ({ workspace_id: "w2", created: true }));
+      const fresh = pane("w2:p1", { space_id: "w2", cwd: "/other" });
+      tauri.answer("snapshot", () => ({ ...current, terminals: [...current.terminals, fresh] }));
+      const result = await actions.openTerminalIn("/other");
+      expect(tauri.calls("terminal_create")).toEqual([]);
+      expect(tauri.calls("create_space")[0]).toMatchObject({ cwd: "/other" });
+      expect(result?.terminal_id).toBe("w2:p1");
+    });
+
+    it("does nothing for a blank directory", async () => {
+      expect(await actions.openTerminalIn("  ")).toBeUndefined();
+      expect(tauri.calls("terminal_create")).toEqual([]);
+    });
   });
 });

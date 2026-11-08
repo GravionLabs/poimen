@@ -67,6 +67,7 @@ import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { CommandPalette } from "./core/command-palette";
+import { ExplorerSelection } from "./core/explorer-selection";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
 import { ShortcutsOverview } from "./core/shortcuts-overview";
@@ -141,6 +142,7 @@ export class App {
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
   private readonly paneActions = inject(PaneActions);
+  private readonly explorerSelection = inject(ExplorerSelection);
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
@@ -431,6 +433,10 @@ export class App {
       this.startTaskInActiveRepo();
       return;
     }
+    if (id === "openTerminalHere") {
+      this.openTerminalInSelectedDir();
+      return;
+    }
     if (id === "cleanupTasks") {
       this.cleanupInActiveRepo();
       return;
@@ -511,6 +517,16 @@ export class App {
     const dir = pane ? paneDir(pane) : undefined;
     if (dir) this.editor.openChanges(this.activeRepo() ?? dir);
     else this.spaceActions.notify("Show Changes: there is no focused space");
+  }
+
+  /** The palette entry: a terminal in the folder last picked in the explorer. */
+  private openTerminalInSelectedDir(): void {
+    const dir = this.explorerSelection.dir();
+    if (!dir) {
+      this.spaceActions.notify("Open terminal: select a folder in the explorer first");
+      return;
+    }
+    void this.paneActions.openTerminalIn(dir).then((pane) => pane && this.open(pane, true));
   }
 
   /** The palette entry: the picker for the repository of the active pane. */

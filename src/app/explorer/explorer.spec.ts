@@ -5,6 +5,9 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { HerdrStore } from "../core/herdr-store";
+import { PaneActions } from "../core/pane-actions";
+import { EditorTabs } from "../core/editor-tabs";
+import { ExplorerSelection } from "../core/explorer-selection";
 import { SpaceActions } from "../core/space-actions";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
@@ -92,6 +95,8 @@ const tree: Record<string, DirEntry[]> = {
 
 async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: string[] = []) {
   const create = vi.fn(async () => undefined);
+  const openTerminalIn = vi.fn(async (dir: string) => ({ terminal_id: "p9", dir }));
+  const open = vi.fn();
   TestBed.resetTestingModule();
   const calls: { path: string; hidden: boolean }[] = [];
   const data = new Map<string, string>();
@@ -109,6 +114,8 @@ async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: strin
         },
       },
       { provide: SpaceActions, useValue: { create } },
+      { provide: PaneActions, useValue: { openTerminalIn } },
+      { provide: EditorTabs, useValue: { open } },
       {
         provide: HerdrStore,
         useValue: {
@@ -165,7 +172,7 @@ async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: strin
     input.dispatchEvent(new Event("input"));
     await settle();
   };
-  return { calls, data, labels, toggle, create, item, root, settle, type };
+  return { calls, data, labels, toggle, create, item, root, settle, type, openTerminalIn, open };
 }
 
 describe("Explorer with the real hx-tree", () => {
@@ -223,6 +230,30 @@ describe("Explorer with the real hx-tree", () => {
     await settle();
     expect(create).toHaveBeenCalledWith("/r/a", "");
     expect(root.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("opens a terminal from the context menu and shows it", async () => {
+    const { toggle, item, root, openTerminalIn, open, settle } = await setup();
+    await toggle("/r");
+    item("a")
+      .querySelector(".dir")!
+      .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await settle();
+    const entry = [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (e) => e.textContent?.trim() === "Open terminal here",
+    )!;
+    entry.click();
+    await settle();
+    expect(openTerminalIn).toHaveBeenCalledWith("/r/a");
+    expect(open).toHaveBeenCalledWith("p9", true);
+    expect(TestBed.inject(ExplorerSelection).dir()).toBe("/r/a");
+  });
+
+  it("opens a terminal from the inline action of any directory", async () => {
+    const { toggle, item, openTerminalIn } = await setup();
+    await toggle("/r");
+    item("locked").querySelector<HTMLElement>(".open-terminal")!.click();
+    expect(openTerminalIn).toHaveBeenCalledWith("/r/locked");
   });
 
   it("creates (or focuses) a space on double-click", async () => {

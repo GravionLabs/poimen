@@ -12,6 +12,8 @@ import {
 import { HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
 import { EditorTabs } from "../core/editor-tabs";
+import { ExplorerSelection } from "../core/explorer-selection";
+import { PaneActions } from "../core/pane-actions";
 import { HerdrStore } from "../core/herdr-store";
 import { SpaceActions } from "../core/space-actions";
 import { SettingsStore } from "../core/settings";
@@ -107,6 +109,8 @@ export class Explorer {
   private readonly spaceActions = inject(SpaceActions);
   private readonly tasks = inject(TaskStarter);
   private readonly editor = inject(EditorTabs);
+  private readonly panes = inject(PaneActions);
+  private readonly selection = inject(ExplorerSelection);
   private readonly children = signal<ReadonlyMap<string, readonly DirEntry[]>>(new Map());
   private readonly requested = new Set<string>();
 
@@ -156,7 +160,21 @@ export class Explorer {
   /** The directory of the open menu is a repository: it offers to start a task. */
   protected readonly menuRepo = signal(false);
 
+  protected select(path: string): void {
+    this.selection.select(path);
+  }
+
+  /** Opens a terminal in `path`: in the space containing it, else in a new space. */
+  protected openTerminal(path: string): void {
+    this.closeMenu();
+    this.selection.select(path);
+    void this.panes
+      .openTerminalIn(path)
+      .then((pane) => pane && this.editor.open(pane.terminal_id, true));
+  }
+
   protected openMenu(event: MouseEvent, path: string): void {
+    this.selection.select(path);
     event.preventDefault();
     event.stopPropagation();
     this.menuRepo.set(false);

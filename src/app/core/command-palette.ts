@@ -21,6 +21,7 @@ export interface PoimenCommand {
     | "closeSpace"
     | "renameSpace"
     | "startTask"
+    | "openTerminalHere"
     | "cleanupTasks"
     | "projectTeardown"
     | "projectEntry"
@@ -55,6 +56,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "openDeliver", title: "Open Deliver" },
   { id: "showChanges", title: "Show Changes" },
   { id: "startTask", title: "Start task from issue…" },
+  { id: "openTerminalHere", title: "Open terminal in the selected folder" },
   { id: "cleanupTasks", title: "Clean up merged tasks" },
   { id: "projectTeardown", title: "Project: Run teardown" },
 ];
@@ -125,6 +127,7 @@ export class CommandPalette {
         c.id === "closeSpace" ||
         c.id === "renameSpace" ||
         c.id === "startTask" ||
+        c.id === "openTerminalHere" ||
         c.id === "cleanupTasks" ||
         c.id === "projectTeardown" ||
         c.id === "projectEntry" ||
