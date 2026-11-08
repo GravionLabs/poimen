@@ -20,6 +20,8 @@ import {
   defaultTerminalFontFamily,
   defaultTerminalFontSize,
   parseHarnesses,
+  parseAgentActions,
+  type AgentAction,
   SettingsStore,
   type ColorSchemeSetting,
   type HarnessInfo,
@@ -285,6 +287,7 @@ export class SettingsView {
   }
 
   protected readonly harnesses = signal<HarnessInfo[]>([]);
+  protected readonly agentActions = signal<AgentAction[]>([]);
 
   constructor() {
     effect(() => {
@@ -297,6 +300,10 @@ export class SettingsView {
         .invoke<unknown>("get_harnesses")
         .then((raw) => this.harnesses.set(parseHarnesses(raw)))
         .catch(() => this.harnesses.set([]));
+      void this.bridge
+        .invoke<unknown>("get_agent_actions", { root: null })
+        .then((raw) => this.agentActions.set(parseAgentActions(raw)))
+        .catch(() => this.agentActions.set([]));
     });
   }
 

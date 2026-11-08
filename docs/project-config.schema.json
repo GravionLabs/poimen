@@ -58,6 +58,35 @@
         }
       }
     },
+    "github": {
+      "type": "object",
+      "description": "GitHub settings of this repository.",
+      "properties": {
+        "agentActions": {
+          "type": "array",
+          "description": "Agent actions for issues and pull requests; merged by id over the user's and the defaults (\"disabled\": true removes one). Needs trust.",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "disabled": { "type": "boolean" },
+              "label": { "type": "string" },
+              "on": { "enum": ["issue", "pr", "milestone"] },
+              "when": { "type": "object" },
+              "prompt": {
+                "type": "string",
+                "description": "Placeholders: nr, nrs, title, url, repo, branch, base."
+              },
+              "run": { "enum": ["repoRoot", "worktree", "ask"] },
+              "harness": { "type": "string" },
+              "model": { "type": "string" },
+              "batch": { "enum": ["each", "once"] }
+            }
+          }
+        }
+      }
+    },
     "presets": {
       "type": "array",
       "description": "Entries need a unique name and the panes of a layout.",
