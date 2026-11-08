@@ -101,6 +101,16 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
   });
 }
 
+/** When an agent action is offered (`When` of `agent_actions.rs`); every given condition must hold. */
+export interface AgentActionWhen {
+  level: string[];
+  label: string[];
+  noChildren: boolean;
+  checks: string | null;
+  state: string[];
+  review: string | null;
+}
+
 /** A resolved agent action (`get_agent_actions`, wire shape of `agent_actions.rs`). */
 export interface AgentAction {
   id: string;
@@ -109,9 +119,25 @@ export interface AgentAction {
   prompt: string;
   run: string;
   harness: string | null;
+  model: string | null;
+  when: AgentActionWhen;
   batch: string;
   /** Where the entry comes from. */
   source: "default" | "user" | "project";
+}
+
+function parseWhen(raw: unknown): AgentActionWhen {
+  const r = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  const list = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  return {
+    level: list(r["level"]),
+    label: list(r["label"]),
+    noChildren: r["noChildren"] === true,
+    checks: typeof r["checks"] === "string" ? r["checks"] : null,
+    state: list(r["state"]),
+    review: typeof r["review"] === "string" ? r["review"] : null,
+  };
 }
 
 /** The actions of a `get_agent_actions` answer; malformed entries are skipped. */
@@ -134,6 +160,8 @@ export function parseAgentActions(raw: unknown): AgentAction[] {
         prompt: r["prompt"],
         run: typeof r["run"] === "string" ? r["run"] : "repoRoot",
         harness: typeof r["harness"] === "string" ? r["harness"] : null,
+        model: typeof r["model"] === "string" ? r["model"] : null,
+        when: parseWhen(r["when"]),
         batch: typeof r["batch"] === "string" ? r["batch"] : "each",
         source,
       },

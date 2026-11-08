@@ -31,13 +31,20 @@
           ↗
         </button>
       </div>
-      <!-- Action bar: later actions (merge, review, ...) go here; see the viewerCan* flags. -->
-      <div
-        class="actions"
-        role="toolbar"
-        aria-label="Pull request actions"
-        data-testid="actions"
-      ></div>
+      <!-- Action bar: agent actions; later actions (merge, review, ...) go here, see the viewerCan* flags. -->
+      <div class="actions" role="toolbar" aria-label="Pull request actions" data-testid="actions">
+        @for (o of offered(); track o.action.id) {
+          <button
+            type="button"
+            data-testid="agent-action"
+            [disabled]="!o.enabled"
+            [attr.title]="o.reason ?? 'Shift+click: choose harness and model'"
+            (click)="agentActions.request(o.action, targets(), $event.shiftKey)"
+          >
+            {{ o.action.label }}
+          </button>
+        }
+      </div>
     </header>
     @if (errorMessage(); as message) {
       <p class="problem" role="alert" data-testid="detail-error">

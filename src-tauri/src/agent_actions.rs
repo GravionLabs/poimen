@@ -6,7 +6,7 @@
 // The expansion is consumed by the GitHub views (a later PBI); until then only tests call it.
 #![allow(dead_code)]
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::harness::{self, Harness};
@@ -460,7 +460,7 @@ pub fn matches(action: &Spec, t: &Target) -> bool {
 }
 
 /// One issue, pull request or milestone an action runs on.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Item {
     pub nr: u64,
     pub title: String,
@@ -544,6 +544,43 @@ pub fn expand(
         Batch::Once if items.is_empty() => Vec::new(),
         Batch::Once => vec![argv(&items.iter().collect::<Vec<_>>())],
     })
+}
+
+/// A program and its arguments, the `kind` and `args` of `agent_start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Launch {
+    pub kind: String,
+    pub args: Vec<String>,
+}
+
+/// What to start for `action` on `items`, with an optional harness or model chosen by the user
+/// instead of the action's own (the Shift+click dialog). One launch per item for `each`, one for
+/// `once`.
+pub fn plan(
+    action: &Spec,
+    harnesses: &[Harness],
+    repo: &str,
+    items: &[Item],
+    harness: Option<&str>,
+    model: Option<&str>,
+) -> Result<Vec<Launch>, String> {
+    let mut spec = action.clone();
+    if let Some(h) = harness.filter(|h| !h.is_empty()) {
+        spec.harness = Some(h.to_owned());
+    }
+    if let Some(m) = model.filter(|m| !m.is_empty()) {
+        spec.model = Some(m.to_owned());
+    }
+    expand(&spec, harnesses, repo, items)?
+        .into_iter()
+        .map(|mut argv| {
+            if argv.is_empty() {
+                return Err("the harness has no command".to_owned());
+            }
+            let kind = argv.remove(0);
+            Ok(Launch { kind, args: argv })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -915,5 +952,40 @@ mod tests {
         s[0].harness = Some("gone".into());
         let e = expand(&s[0], &harness::default_harnesses(), "r", &[item(1, "t")]).unwrap_err();
         assert!(e.contains("gone"));
+    }
+
+    #[test]
+    fn plan_splits_the_program_and_applies_the_chosen_harness_and_model() {
+        let d = defaults();
+        let review = d.iter().find(|s| s.id == "review").unwrap();
+        let hs = harness::default_harnesses();
+        let items = [item(7, "A"), item(8, "B")];
+        let each = plan(review, &hs, "o/r", &items, None, None).unwrap();
+        assert_eq!(each.len(), 2);
+        assert_eq!(each[0].kind, "claude");
+        assert!(each[1].args[0].contains("#8"));
+        let chosen = plan(
+            review,
+            &hs,
+            "o/r",
+            &items[..1],
+            Some("copilot"),
+            Some("auto"),
+        )
+        .unwrap();
+        assert_eq!(chosen[0].kind, "copilot");
+        assert_eq!(&chosen[0].args[..2], ["--model", "auto"]);
+        assert!(plan(review, &hs, "o/r", &items, Some("nope"), None).is_err());
+    }
+
+    #[test]
+    fn plan_for_once_is_one_launch_with_all_numbers() {
+        let mut once = defaults().remove(0);
+        once.batch = Batch::Once;
+        once.prompt = "do {nrs}".into();
+        let hs = harness::default_harnesses();
+        let l = plan(&once, &hs, "o/r", &[item(1, "a"), item(2, "b")], None, None).unwrap();
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].args.last().unwrap(), "do 1 2");
     }
 }

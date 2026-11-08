@@ -1,0 +1,52 @@
+@let d = actions.dialog();
+@if (d) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Cancel"
+    (click)="actions.cancelDialog()"
+  ></button>
+  <div
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-label]="d.action.label"
+    data-testid="agent-action-dialog"
+    (keydown)="onKey($event)"
+  >
+    <h2>{{ d.action.label }} {{ targetsText() }}</h2>
+    <label>
+      Harness
+      <select data-testid="dialog-harness" (change)="harness($event)">
+        @if (!actions.harnesses().length) {
+          <option [value]="d.harness">{{ d.harness || "(none available)" }}</option>
+        }
+        @for (h of actions.harnesses(); track h.id) {
+          <option [value]="h.id" [selected]="h.id === d.harness">{{ h.id }}</option>
+        }
+      </select>
+    </label>
+    <label>
+      Model
+      <select data-testid="dialog-model" (change)="model($event)">
+        <option value="" [selected]="d.model === ''">(harness default)</option>
+        @for (m of models(); track m) {
+          <option [value]="m" [selected]="m === d.model">{{ m }}</option>
+        }
+      </select>
+    </label>
+    <div class="buttons">
+      <button type="button" (click)="actions.cancelDialog()">Cancel</button>
+      <button
+        type="button"
+        class="primary"
+        data-testid="dialog-start"
+        [disabled]="!d.harness"
+        (click)="actions.confirmDialog()"
+      >
+        Start
+      </button>
+    </div>
+  </div>
+}

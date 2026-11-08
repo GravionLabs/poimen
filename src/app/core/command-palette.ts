@@ -1,4 +1,5 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
+import { AgentActions } from "../github/agent-actions";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
 import { ProjectEntries, type ProjectEntry } from "./project-entries";
@@ -22,7 +23,8 @@ export interface PoimenCommand {
     | "startTask"
     | "cleanupTasks"
     | "projectTeardown"
-    | "projectEntry";
+    | "projectEntry"
+    | "agentAction";
   title: string;
 }
 
@@ -65,6 +67,8 @@ export interface PaletteItem {
   command: PoimenCommand["id"];
   /** A command or preset of the project file (`command` is `projectEntry`). */
   entry?: ProjectEntry;
+  /** An agent action of the GitHub view (`command` is `agentAction`). */
+  agentActionId?: string;
   /** The project file is not trusted: running the entry asks first. */
   locked?: boolean;
 }
@@ -86,6 +90,7 @@ export type PaletteRow =
 export const POIMEN_GROUP = "Poimen";
 export const RECENT_GROUP = "Recent";
 export const PROJECT_GROUP = "Project";
+export const GITHUB_GROUP = "GitHub";
 
 /**
  * The command palette: the poimen commands, fuzzy filtered.
@@ -95,6 +100,7 @@ export class CommandPalette {
   private readonly keymap = inject(Keymap);
   private readonly ui = inject(UiState);
   private readonly project = inject(ProjectEntries);
+  private readonly agentActions = inject(AgentActions);
 
   private readonly _open = signal(false);
   private readonly _query = signal("");
@@ -121,12 +127,20 @@ export class CommandPalette {
         c.id === "startTask" ||
         c.id === "cleanupTasks" ||
         c.id === "projectTeardown" ||
-        c.id === "projectEntry"
+        c.id === "projectEntry" ||
+        c.id === "agentAction"
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
     })),
     ...this.projectItems(),
+    ...this.agentActions.entries().map((e): PaletteItem => ({
+      key: `agentAction:${e.action.id}`,
+      title: e.title,
+      shortcut: "",
+      command: "agentAction",
+      agentActionId: e.action.id,
+    })),
   ]);
 
   private projectItems(): PaletteItem[] {
@@ -172,7 +186,8 @@ export class CommandPalette {
     const rest = items.filter((i) => !recent.includes(i));
     const groups: [string, PaletteItem[]][] = [
       [RECENT_GROUP, recent],
-      [POIMEN_GROUP, rest.filter((i) => !i.entry)],
+      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId)],
+      [GITHUB_GROUP, rest.filter((i) => i.agentActionId)],
       [PROJECT_GROUP, rest.filter((i) => i.entry)],
     ];
     for (const [label, members] of groups) {
@@ -194,6 +209,7 @@ export class CommandPalette {
   /** Opens the palette with an empty query. */
   open(): void {
     void this.project.reload();
+    void this.agentActions.reload();
     this._query.set("");
     this._selected.set(0);
     this._open.set(true);

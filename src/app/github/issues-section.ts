@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
+import { AgentActions, issueTarget } from "./agent-actions";
 import {
   GithubIssues,
+  type Issue,
   LEVELS,
   issueProgress,
   labelChips,
@@ -19,6 +21,7 @@ import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
 })
 export class IssuesSection {
   protected readonly issues = inject(GithubIssues);
+  private readonly agentActions = inject(AgentActions);
   protected readonly levels = LEVELS;
   protected readonly labelChips = labelChips;
   protected readonly levelBadge = levelBadge;
@@ -27,6 +30,12 @@ export class IssuesSection {
   protected readonly errorText = errorText;
   protected readonly checksText = checksText;
   protected readonly isGithubUrl = isGithubUrl;
+
+  /** The `⋯` button or the context menu of an issue row. */
+  protected openRowMenu(event: MouseEvent, repo: string, root: string, issue: Issue): void {
+    event.preventDefault();
+    this.agentActions.openMenu([issueTarget(repo, root, issue)], event.clientX, event.clientY);
+  }
 
   constructor() {
     void this.issues.load(false);

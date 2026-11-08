@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
 import { UiState } from "../../core/ui-state";
+import { AgentActions, issueTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues, issueKey, issueLevel, levelBadge, type ClosingPr } from "../issues";
 import { renderMarkdown } from "../markdown";
 import { GithubPulls, errorText, isGithubUrl } from "../pulls";
@@ -26,6 +27,16 @@ export class IssueDetailPane {
     const err = this.issues.detailError();
     return err === null ? null : typeof err === "string" ? err : errorText(err);
   });
+
+  protected readonly agentActions = inject(AgentActions);
+
+  /** The issue the agent actions run on (as the list knows it). */
+  protected readonly targets = computed<ActionTarget[]>(() => {
+    const sel = this.issues.detailIssue();
+    const root = (this.issues.result() ?? []).find((r) => r.repo === sel?.repo)?.root;
+    return sel && root ? [issueTarget(sel.repo, root, sel.issue)] : [];
+  });
+  protected readonly offered = computed(() => this.agentActions.offered(this.targets()));
 
   /** What the header shows: the list row while the detail loads, then the detail. */
   protected readonly head = computed(() => {

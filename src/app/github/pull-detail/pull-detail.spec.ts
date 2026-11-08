@@ -5,6 +5,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { UI_STORAGE, UiState } from "../../core/ui-state";
 import { tauri } from "../../core/tauri.mock";
+import { AgentActionMenu } from "../agent-action-menu/agent-action-menu";
 import { GithubView } from "../github-view";
 import { IssuesSection } from "../issues-section";
 import { GithubIssues } from "../issues";
@@ -97,6 +98,7 @@ async function render(detail: () => unknown = () => DETAIL) {
   tauri.answer("github_pulls", () => RESULT);
   tauri.answer("github_pull_detail", detail);
   withTemplate(GithubView, "github-view.html");
+  withTemplate(AgentActionMenu, "agent-action-menu/agent-action-menu.html");
   withTemplate(IssuesSection, "issues-section.html");
   withTemplate(InboxSection, "inbox-section.html");
   withTemplate(MilestonesSection, "milestones-section.html");

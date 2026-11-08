@@ -1031,25 +1031,58 @@ async fn get_task_modes(dir: Option<String>) -> tasks::Resolved {
 /// the trusted project file's, each entry with its source; without `root` only the first two.
 #[tauri::command]
 async fn get_agent_actions(root: Option<String>) -> agent_actions::Resolved {
-    tauri::async_runtime::spawn_blocking(move || {
-        let settings = get_settings();
-        let Some(dir) = root else {
-            return agent_actions::Resolved {
-                actions: agent_actions::resolve(&settings.agent_actions, &[]),
-                note: None,
-            };
+    tauri::async_runtime::spawn_blocking(move || resolved_agent_actions(root))
+        .await
+        .unwrap_or_default()
+}
+
+fn resolved_agent_actions(root: Option<String>) -> agent_actions::Resolved {
+    let settings = get_settings();
+    let Some(dir) = root else {
+        return agent_actions::Resolved {
+            actions: agent_actions::resolve(&settings.agent_actions, &[]),
+            note: None,
         };
-        let root = git::toplevel(&dir).unwrap_or(dir);
-        let sources = trust::Sources::read(&root);
-        agent_actions::for_project(
-            &settings.agent_actions,
-            &settings.harnesses,
-            &sources,
-            &settings.trusted_projects,
+    };
+    let root = git::toplevel(&dir).unwrap_or(dir);
+    let sources = trust::Sources::read(&root);
+    agent_actions::for_project(
+        &settings.agent_actions,
+        &settings.harnesses,
+        &sources,
+        &settings.trusted_projects,
+    )
+}
+
+/// The programs to start for the action `id` on `items` in the repository of `root`; `harness` and
+/// `model` replace the action's own (the dialog of Shift+click).
+#[tauri::command]
+async fn agent_action_plan(
+    root: String,
+    id: String,
+    repo: String,
+    items: Vec<agent_actions::Item>,
+    harness: Option<String>,
+    model: Option<String>,
+) -> Result<Vec<agent_actions::Launch>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let resolved = resolved_agent_actions(Some(root));
+        let action = resolved
+            .actions
+            .iter()
+            .find(|a| a.spec.id == id)
+            .ok_or_else(|| format!("unknown agent action {id:?}"))?;
+        agent_actions::plan(
+            &action.spec,
+            &get_settings().harnesses,
+            &repo,
+            &items,
+            harness.as_deref(),
+            model.as_deref(),
         )
     })
     .await
-    .unwrap_or_default()
+    .map_err(|e| e.to_string())?
 }
 
 /// The user color schemes (`~/.config/poimen/themes/*.toml`); changes arrive as `color-schemes` events.
@@ -1715,6 +1748,7 @@ pub fn run() {
             get_settings,
             get_harnesses,
             get_agent_actions,
+            agent_action_plan,
             get_task_modes,
             task_worktree,
             changes_list,

@@ -136,6 +136,7 @@
                           [class.cursor]="pulls.cursor() === row.key"
                           [attr.data-key]="row.key"
                           (click)="onRowClick($event, row)"
+                          (contextmenu)="openRowMenu($event, row)"
                         >
                           <td>
                             <input
@@ -204,6 +205,17 @@
                             <button
                               type="button"
                               class="icon-btn"
+                              title="Agent actions"
+                              data-testid="row-menu"
+                              data-action-menu-button
+                              [attr.aria-label]="'Agent actions for #' + row.number"
+                              (click)="openRowMenu($event, row)"
+                            >
+                              ⋯
+                            </button>
+                            <button
+                              type="button"
+                              class="icon-btn"
                               title="Open in browser"
                               [attr.aria-label]="'Open #' + row.number + ' in browser'"
                               [disabled]="!isGithubUrl(row.url)"
@@ -235,4 +247,5 @@
       <app-issue-detail />
     }
   </div>
+  <app-agent-action-menu />
 </div>

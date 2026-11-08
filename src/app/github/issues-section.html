@@ -73,6 +73,7 @@
             [class.cursor]="issues.cursor() === tree.repo + '#' + i.number"
             [attr.data-number]="i.number"
             [attr.data-repo]="tree.repo"
+            (contextmenu)="openRowMenu($event, tree.repo, tree.root, i)"
           >
             @if (row.node.children.length) {
               <button
@@ -134,6 +135,17 @@
                 </span>
               </span>
             }
+            <button
+              type="button"
+              class="icon-btn"
+              title="Agent actions"
+              data-testid="row-menu"
+              data-action-menu-button
+              [attr.aria-label]="'Agent actions for #' + i.number"
+              (click)="openRowMenu($event, tree.repo, tree.root, i)"
+            >
+              ⋯
+            </button>
             <button
               type="button"
               class="icon-btn open"
