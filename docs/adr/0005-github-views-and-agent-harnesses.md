@@ -1,6 +1,6 @@
 # ADR 0005: GitHub views and agent harnesses native in poimen
 
-- Status: Accepted
+- Status: Accepted; the section "No plugin system now, one later" superseded in part by [ADR 0007](0007-plugin-system-with-sandboxed-worker-and-view-contexts.md)
 - Date: 2026-11-04
 - Issues: #229, Feature #186
 - Supersedes: [ADR 0004](0004-native-views-for-herdr-plugins.md) (plugin view contract)
