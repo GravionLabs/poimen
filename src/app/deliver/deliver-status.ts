@@ -269,6 +269,24 @@ export function parseStatus(value: unknown): DeliverStatus | string {
   if (Number.isNaN(Date.parse(value["updatedAt"]))) return "updatedAt is not a date";
   if (!isString(result) || !RESULTS.includes(result as LoopResult)) return "result is unknown";
   const source = value["source"];
+  const events = eventRows(value["events"]);
+  // A status file (no events) that says "done" while milestone items are still open and nothing is
+  // blocked or paused is a producer artifact between two iterations (#537): the loop still runs.
+  const premature =
+    result === "done" &&
+    (source === undefined || source === null) &&
+    events.length === 0 &&
+    milestone !== null &&
+    value["closed"] < value["total"] &&
+    blocked.length + paused.length === 0;
+  const releaseRan = rel.reviewRound !== null || rel.rcUrl !== null || rel.rcVersion !== null;
+  const hideRelease = premature && !releaseRan;
+  // Legacy status.json only: a premature "done" lists the release PR before any release step ran.
+  // testIssue is deliberately not part of releaseRan. Matched on the item text, as the item has no link to the PR.
+  const shownNeedsYou = hideRelease
+    ? needsYou.filter((i) => !/release pr/i.test(i.reason))
+    : needsYou;
+  const finalResult = (premature ? "running" : result) as LoopResult;
   return {
     run: value["run"],
     harness: isString(value["harness"]) ? value["harness"] : "",
@@ -284,20 +302,20 @@ export function parseStatus(value: unknown): DeliverStatus | string {
     source: source === "loop" || source === "session" ? source : null,
     tone: isTone(value["tone"])
       ? value["tone"]
-      : legacyTone(result as LoopResult, blocked.length + paused.length + needsYou.length > 0),
+      : legacyTone(finalResult, blocked.length + paused.length + shownNeedsYou.length > 0),
     poimenTerminal: isObject(value["host"]) ? optString(value["host"]["poimenTerminal"]) : null,
-    events: eventRows(value["events"]),
+    events,
     closed: value["closed"],
     total: value["total"],
     current: cur,
     delivered: done,
     blocked,
     paused,
-    needsYou,
-    release: rel,
+    needsYou: shownNeedsYou,
+    release: hideRelease ? { ...rel, prUrl: null } : rel,
     startedAt: value["startedAt"],
     updatedAt: value["updatedAt"],
-    result: result as LoopResult,
+    result: finalResult,
   };
 }
 

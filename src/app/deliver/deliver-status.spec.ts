@@ -37,6 +37,30 @@ const DONE = status("done");
 /** Two minutes after the last update of the running fixture. */
 const NOW = Date.parse(RUNNING.updatedAt) + 2 * 60_000;
 
+describe("a status file written between iterations (#537)", () => {
+  const between = {
+    ...fixture("done"),
+    closed: 7,
+    total: 23,
+    release: { reviewRound: null, prUrl: "https://github.com/GravionLabs/skills/pull/530" },
+  };
+
+  it("stays running with current null and open items, without a release ask", () => {
+    const parsed = parseStatus(between);
+    if (typeof parsed === "string") throw new Error(parsed);
+    expect(parsed.result).toBe("running");
+    expect(runState(parsed, Date.parse(parsed.updatedAt) + 60_000)).toBe("running");
+    expect(parsed.needsYou).toEqual([]);
+    expect(parsed.tone).not.toBe("warning");
+    expect(parsed.release.prUrl).toBeNull();
+  });
+
+  it("keeps done when every item is closed", () => {
+    expect(DONE.result).toBe("done");
+    expect(DONE.needsYou).toHaveLength(1);
+  });
+});
+
 describe("parseStatus", () => {
   it("reads the three fixtures of the schema", () => {
     expect(RUNNING).toMatchObject({
