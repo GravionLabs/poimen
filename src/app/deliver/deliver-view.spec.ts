@@ -91,6 +91,23 @@ describe("Deliver panel", () => {
     expect(el.querySelector("[data-testid=start]")).toBeNull();
   });
 
+  it("shows no pull request link for a delivered entry whose prUrl is the issue URL (#538)", async () => {
+    const { el, deliver, show } = await render();
+    const issue = "https://github.com/GravionLabs/poimen/issues/334";
+    const file = read("running");
+    if (file.kind !== "ok") throw new Error("fixture");
+    deliver.apply("/src/skills", {
+      ...file,
+      status: { ...(file.status as object), delivered: [{ pbi: 334, url: issue, prUrl: issue }] },
+    });
+    await show();
+    const row = text(el.querySelector("[data-testid=delivered]"));
+    expect(row).toContain("#334");
+    expect(row).not.toContain(issue);
+    expect(row).not.toContain("PR #");
+    expect(el.querySelectorAll("[data-testid=delivered] button")).toHaveLength(1);
+  });
+
   it("lists blocked, paused and needs-you items with their reasons", async () => {
     const { el, deliver, show } = await render();
     deliver.apply("/src/skills", read("blocked"));

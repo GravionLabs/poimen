@@ -57,7 +57,7 @@ pub struct Current {
 pub struct Delivered {
     pub pbi: u64,
     pub url: String,
-    pub pr_url: String,
+    pub pr_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -566,7 +566,7 @@ impl Reducer {
                 match e.get("outcome").and_then(Value::as_str).unwrap_or("") {
                     "delivered" => {
                         let url = self.issue_url(n);
-                        let pr_url = self.prs.get(n).cloned().unwrap_or_else(|| url.clone());
+                        let pr_url = self.prs.get(n).cloned();
                         self.delivered.set(
                             n,
                             Delivered {
@@ -800,6 +800,21 @@ mod tests {
             Some("https://github.com/o/r/pull/9")
         );
         assert_eq!(run.events[2].tone, "warning");
+    }
+
+    #[test]
+    fn a_delivered_entry_without_a_pull_request_event_has_no_pr_url() {
+        let text = r#"{"v":1,"seq":1,"ts":"2026-11-07T10:00:00Z","run":"r","type":"run.started","tone":"neutral"}
+{"v":1,"seq":2,"ts":"2026-11-07T10:01:00Z","run":"r","type":"issue.finished","tone":"success","issue":{"number":7,"title":"T","url":"https://github.com/o/r/issues/7"},"outcome":"delivered"}"#;
+        let run = reduce(text, now(), &|_| true).unwrap();
+        assert_eq!(run.state.delivered.len(), 1);
+        assert_eq!(
+            run.state.delivered[0].url,
+            "https://github.com/o/r/issues/7"
+        );
+        assert_eq!(run.state.delivered[0].pr_url, None);
+        let json = serde_json::to_value(&run.state.delivered[0]).unwrap();
+        assert!(json["prUrl"].is_null());
     }
 
     #[test]

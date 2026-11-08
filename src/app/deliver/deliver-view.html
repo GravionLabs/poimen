@@ -135,10 +135,12 @@
                 <button type="button" class="link" (click)="deliver.openUrl(d.url)">
                   #{{ d.pbi }}
                 </button>
-                &rarr;
-                <button type="button" class="link" (click)="deliver.openUrl(d.prUrl)">
-                  {{ prLabel(d.prUrl) }}
-                </button>
+                @if (d.prUrl; as pr) {
+                  &rarr;
+                  <button type="button" class="link" (click)="deliver.openUrl(pr)">
+                    {{ prLabel(pr) }}
+                  </button>
+                }
               </li>
             }
           </ul>

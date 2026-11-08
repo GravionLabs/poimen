@@ -53,8 +53,13 @@ export interface LoopCurrent {
 export interface LoopDelivered {
   pbi: number;
   url: string;
-  prUrl: string;
+  /** The pull request; null when the file carries no pull request URL (#538). */
+  prUrl: string | null;
 }
+
+/** Only a `/pull/<n>` URL is a pull request; the producer once wrote the issue URL (#538). */
+export const asPullUrl = (v: string | null): string | null =>
+  v !== null && /\/pull\/\d+\/?$/.test(v) ? v : null;
 
 /** The release candidate and release pull request of a run (`release.updated`). */
 export interface LoopRelease {
@@ -208,9 +213,18 @@ function delivered(value: unknown): LoopDelivered[] | null {
   if (!Array.isArray(value)) return null;
   const out: LoopDelivered[] = [];
   for (const v of value) {
-    if (!isObject(v) || !isCount(v["pbi"]) || !isString(v["url"]) || !isString(v["prUrl"]))
+    if (
+      !isObject(v) ||
+      !isCount(v["pbi"]) ||
+      !isString(v["url"]) ||
+      !isNullableString(v["prUrl"] ?? null)
+    )
       return null;
-    out.push({ pbi: v["pbi"], url: v["url"], prUrl: v["prUrl"] });
+    out.push({
+      pbi: v["pbi"],
+      url: v["url"],
+      prUrl: asPullUrl((v["prUrl"] as string | null | undefined) ?? null),
+    });
   }
   return out;
 }
