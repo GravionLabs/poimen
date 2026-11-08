@@ -11,8 +11,10 @@ import {
 } from "@angular/core";
 import { FlowView } from "./flow-view";
 import { EditorTabs, tabPaneId } from "../core/editor-tabs";
-import { transcriptEmptyText, type Terminal } from "../core/herdr";
+import { paneDir, transcriptEmptyText, type Terminal } from "../core/herdr";
+import { Deliver } from "../deliver/deliver";
 import { HerdrStore } from "../core/herdr-store";
+import { eventTime, runLabel, runsOfSpace, selectRun, toneStyle } from "./run-events";
 import { TaskLog } from "../core/task-log";
 import { PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT, UiState } from "../core/ui-state";
 import {
@@ -28,6 +30,7 @@ import {
 export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
   output: "Output",
   flow: "Flow",
+  events: "Events",
   log: "Log",
 };
 
@@ -45,6 +48,7 @@ export class BottomPanel {
   protected readonly editor = inject(EditorTabs);
   protected readonly taskLog = inject(TaskLog);
   private readonly store = inject(HerdrStore);
+  protected readonly deliver = inject(Deliver);
   protected readonly minHeight = PANEL_MIN_HEIGHT;
   protected readonly maxHeight = PANEL_MAX_HEIGHT;
   protected readonly tabs = Object.entries(PANEL_TAB_LABELS);
@@ -63,6 +67,19 @@ export class BottomPanel {
   );
   protected readonly flowEmpty = computed(() => transcriptEmptyText(this.activePane(), "The flow"));
 
+  /** The runs of the active space's repository, the one chosen for the Events tab and its rows. */
+  protected readonly spaceRuns = computed(() =>
+    runsOfSpace(this.deliver.cards(), paneDir(this.activePane() ?? ({} as Terminal))),
+  );
+  private readonly pickedRun = signal<string | null>(null);
+  protected readonly run = computed(() =>
+    selectRun(this.spaceRuns(), this.activePane()?.terminal_id, this.pickedRun()),
+  );
+  protected readonly rows = computed(() => this.run()?.status.events ?? []);
+  protected readonly runLabel = runLabel;
+  protected readonly eventTime = eventTime;
+  protected readonly toneStyle = toneStyle;
+
   /** Clock for the durations of running subagents. */
   protected readonly now = signal(Date.now());
   /** New lines scroll into view until the user scrolls up. */
@@ -75,6 +92,7 @@ export class BottomPanel {
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
     effect(() => {
       this.subagents.items();
+      this.rows();
       const element = this.box()?.nativeElement;
       if (element && this.following())
         queueMicrotask(() => (element.scrollTop = element.scrollHeight));
@@ -97,6 +115,16 @@ export class BottomPanel {
     this.subagents.pick(agentId);
     this.following.set(true);
     this.ui.selectPanelTab("output");
+  }
+
+  protected pickRun(event: Event): void {
+    this.pickedRun.set((event.target as HTMLSelectElement).value);
+    this.following.set(true);
+  }
+
+  protected openPr(event: Event, url: string): void {
+    event.preventDefault();
+    void this.deliver.openUrl(url);
   }
 
   protected pick(event: Event): void {

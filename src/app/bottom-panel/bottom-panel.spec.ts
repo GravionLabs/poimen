@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { EditorTabs } from "../core/editor-tabs";
 import type { Terminal } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
+import { Deliver } from "../deliver/deliver";
 import { TaskLog } from "../core/task-log";
 import { UiState } from "../core/ui-state";
 import { Subagents } from "../core/transcripts";
@@ -31,7 +32,11 @@ describe("BottomPanel empty states", () => {
   });
 
   /** Renders the panel on `tab` with the active tab on `panes` (one pane) and `supported`. */
-  function render(tab: "output" | "flow", active: Terminal | undefined, supported: boolean) {
+  function render(
+    tab: "output" | "flow" | "events",
+    active: Terminal | undefined,
+    supported: boolean,
+  ) {
     const ui = { panelTab: signal(tab), panelHeight: signal(200), togglePanel: vi.fn() };
     const subagents = {
       supported: signal(supported),
@@ -64,6 +69,7 @@ describe("BottomPanel empty states", () => {
           provide: EditorTabs,
           useValue: { activeId: signal(active ? active.terminal_id : null), openFlow: vi.fn() },
         },
+        { provide: Deliver, useValue: { cards: signal([]), openUrl: vi.fn() } },
         { provide: TaskLog, useValue: { lines: signal([]) } },
         { provide: HerdrStore, useValue: { panes: signal(panes) } },
       ],
@@ -73,7 +79,7 @@ describe("BottomPanel empty states", () => {
     return {
       text: () =>
         (fixture.nativeElement as HTMLElement).querySelector(".empty")?.textContent?.trim(),
-      show: (next: "output" | "flow") => {
+      show: (next: "output" | "flow" | "events") => {
         ui.panelTab.set(next);
         fixture.detectChanges();
       },
@@ -106,6 +112,14 @@ describe("BottomPanel empty states", () => {
     const active = pane({ agent: "copilot", agent_session: { value: "s1" } });
     const panel = render("flow", active, false);
     expect(panel.text()).toBe("Waiting for the agent's transcript to appear.");
+  });
+
+  it("shows the same empty state on the Events tab for Claude and Copilot", () => {
+    const text = "No run in this space yet.";
+    for (const agent of ["claude", "copilot"]) {
+      const panel = render("events", pane({ agent }), false);
+      expect(panel.text()).toContain(text);
+    }
   });
 
   it("asks for a pane when the active tab has none", () => {
