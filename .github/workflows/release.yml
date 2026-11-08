@@ -9,8 +9,9 @@
 # workflow_dispatch on release/next with prerelease: true: the pre-release for the manual acceptance
 # (docs/manual-acceptance.md). determine-version gives <next stable>-rc.<n>, gh-release tags v<version> on release/next
 # and creates a GitHub pre-release (no changelog commit, no issue closing, no commit to main or release/next), and the
-# installers are attached (no MSI: WiX needs a numeric version). The latest.json of a pre-release is never served
-# from releases/latest, so stable installs do not update to it (docs/updater.md).
+# installers are attached (no MSI: WiX needs a numeric version; no RPM: an RPM version allows no '-'). The
+# latest.json of a pre-release is never served from releases/latest, so stable installs do not update to it
+# (docs/updater.md).
 #
 # workflow_dispatch otherwise (on a branch): builds the same installer matrix with the throw-away version
 # 0.0.<run number> (MSI needs a numeric one) and creates no tag, release or commit. Pull requests never build
@@ -35,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       prerelease:
-        description: "Pre-release from release/next for the manual acceptance (tag v<version>-rc.<n>, GitHub pre-release, installers without MSI)"
+        description: "Pre-release from release/next for the manual acceptance (tag v<version>-rc.<n>, GitHub pre-release, installers without MSI and RPM)"
         type: boolean
         default: false
 
@@ -175,7 +176,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-gnu }
+          # rpm rejects a version with '-' (0.10.0-rc.3), so a pre-release bundles only the .deb and the .AppImage.
+          - {
+              os: ubuntu-24.04,
+              target: x86_64-unknown-linux-gnu,
+              prerelease-args: "--bundles deb,appimage",
+            }
           - { os: macos-latest, target: aarch64-apple-darwin } # Apple Silicon; no macOS x64 build
           # A pre-release version (0.10.0-rc.3) is no numeric WiX version, so it bundles only the NSIS -setup.exe.
           - {
