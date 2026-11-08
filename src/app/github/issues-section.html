@@ -109,6 +109,7 @@
                   @for (c of checkBadges(pr.checks); track c.kind) {
                     <span
                       class="check check-{{ c.kind }}"
+                      role="img"
                       [attr.aria-label]="c.count + ' ' + c.label"
                     >
                       <span aria-hidden="true">{{ c.icon }}</span

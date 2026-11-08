@@ -67,7 +67,7 @@ const MILESTONES: RepoMilestones[] = [
     milestones: [
       ms(1, "1.1.5", { open: 1, closed: 3, current: true, dueOn: "2026-11-20T08:00:00Z" }),
       ms(2, "1.2.0", { open: 3, closed: 0 }),
-      ms(3, "Backlog"),
+      ms(3, "Backlog", { open: 0, closed: 2 }),
     ],
   },
   { root: "/src/m", repo: "o/m", status: "error", error: { kind: "not-logged-in" } },
@@ -92,8 +92,9 @@ describe("milestone helpers", () => {
   });
 
   it("flags a milestone without open issues as ready to close", () => {
-    expect(readyToClose({ open: 0 })).toBe(true);
-    expect(readyToClose({ open: 1 })).toBe(false);
+    expect(readyToClose({ open: 0, closed: 2 })).toBe(true);
+    expect(readyToClose({ open: 0, closed: 0 })).toBe(false);
+    expect(readyToClose({ open: 1, closed: 2 })).toBe(false);
   });
 
   it("formats the due date", () => {
@@ -144,7 +145,7 @@ describe("MilestonesSection", () => {
     expect(first.querySelector("progress")!.value).toBe(75);
     expect(first.classList.contains("current")).toBe(true);
     expect(first.querySelector("[data-testid=ready]")).toBeNull();
-    // 1.2.0 has open issues; Backlog has none: dimmed with the hint.
+    // 1.2.0 has open issues; Backlog has none open and some closed: dimmed with the hint.
     expect(items(el)[1].classList.contains("dim")).toBe(false);
     expect(items(el)[2].classList.contains("dim")).toBe(true);
     expect(items(el)[2].querySelector("[data-testid=ready]")!.textContent).toBe("ready to close");

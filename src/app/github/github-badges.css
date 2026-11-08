@@ -1,3 +1,4 @@
+/* helix-ui has no spacing scale (only per-component paddings), so spacing here is px. */
 /* Badges, chips, check icons, progress bars and the hover icon button shared by the three lists. */
 .badge,
 .chip {
@@ -16,22 +17,22 @@
   border-radius: 4px;
 }
 .badge-success {
-  --badge-tone: var(--h-success-color);
+  --badge-tone: var(--term-ansi-2);
 }
 .badge-danger,
 .badge-level-bug {
-  --badge-tone: var(--h-danger-color);
+  --badge-tone: var(--term-ansi-1);
 }
 .badge-warning,
 .badge-level-feature {
-  --badge-tone: var(--h-warning-color);
+  --badge-tone: var(--term-ansi-3);
 }
 .badge-primary,
 .badge-level-pbi {
   --badge-tone: var(--h-primary-color);
 }
 .badge-level-epic {
-  --badge-tone: var(--h-highlight-color);
+  --badge-tone: var(--term-ansi-5);
 }
 .badge-neutral,
 .badge-level-other {
@@ -46,14 +47,21 @@
   gap: 2px;
   font-size: 12px;
 }
+/* The count keeps the text color (AA); only the icon glyph is tinted, mixed toward the text color. */
+.check {
+  color: var(--h-text-color);
+}
 .check-passed {
-  color: var(--h-success-color);
+  --check-tone: var(--term-ansi-2);
 }
 .check-failed {
-  color: var(--h-danger-color);
+  --check-tone: var(--term-ansi-1);
 }
 .check-pending {
-  color: var(--h-warning-color);
+  --check-tone: var(--term-ansi-3);
+}
+.check > [aria-hidden] {
+  color: color-mix(in srgb, var(--check-tone) 50%, var(--h-text-color));
 }
 progress {
   width: 64px;

@@ -29,9 +29,9 @@ export function progressPercent(m: Pick<Milestone, "open" | "closed">): number {
   return total === 0 ? 0 : Math.round((m.closed / total) * 100);
 }
 
-/** A milestone without open issues can be closed. */
-export function readyToClose(m: Pick<Milestone, "open">): boolean {
-  return m.open === 0;
+/** A milestone with closed issues and no open ones can be closed. */
+export function readyToClose(m: Pick<Milestone, "open" | "closed">): boolean {
+  return m.open === 0 && m.closed > 0;
 }
 
 /** "Due 2026-11-20", or "No due date". */

@@ -1,3 +1,4 @@
+/* helix-ui has no spacing scale (only per-component paddings), so spacing here is px; rows are 34px. */
 @import "./github-badges.css";
 :host {
   display: block;
