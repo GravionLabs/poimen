@@ -328,3 +328,23 @@ describe("transitions", () => {
     expect(transitions(next, next)).toEqual([]);
   });
 });
+
+describe("delivered entries (#538)", () => {
+  const withDelivered = (delivered: unknown[]) => {
+    const parsed = parseStatus({ ...fixture("running"), delivered });
+    if (typeof parsed === "string") throw new Error(parsed);
+    return parsed.delivered;
+  };
+
+  it("drops a prUrl that is the issue URL, keeps a pull request URL", () => {
+    const issue = "https://github.com/GravionLabs/poimen/issues/334";
+    const pull = "https://github.com/GravionLabs/poimen/pull/335";
+    expect(
+      withDelivered([
+        { pbi: 334, url: issue, prUrl: issue },
+        { pbi: 335, url: "u", prUrl: pull },
+        { pbi: 336, url: "u" },
+      ]).map((d) => d.prUrl),
+    ).toEqual([null, pull, null]);
+  });
+});
