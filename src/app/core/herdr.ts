@@ -187,16 +187,36 @@ export function reorderIds(
   return rest.every((id, i) => id === ids[i]) ? null : rest;
 }
 
-export function buildTree(snapshot: Snapshot, order: readonly string[] = []): WorkspaceNode[] {
+/** The tabs of one space in the user's order: ids of `order` first, new tabs by number. */
+export function orderTabs<T extends { tab_id: string; number: number }>(
+  tabs: readonly T[],
+  order: readonly string[] = [],
+): T[] {
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const known = tabs
+    .filter((t) => rank.has(t.tab_id))
+    .sort((a, b) => rank.get(a.tab_id)! - rank.get(b.tab_id)!);
+  const rest = tabs.filter((t) => !rank.has(t.tab_id)).sort(byNumber);
+  return [...known, ...rest];
+}
+
+/** Tab order per `space_id` (`tab_id`s), as the user arranged it. */
+export type TabOrder = Readonly<Record<string, readonly string[]>>;
+
+export function buildTree(
+  snapshot: Snapshot,
+  order: readonly string[] = [],
+  tabOrder: TabOrder = {},
+): WorkspaceNode[] {
   return orderSpaces(snapshot.spaces, order).map((workspace) => ({
     workspace,
-    tabs: snapshot.tabs
-      .filter((tab) => tab.space_id === workspace.space_id)
-      .sort(byNumber)
-      .map((tab) => ({
-        tab,
-        panes: snapshot.terminals.filter((pane) => pane.tab_id === tab.tab_id),
-      })),
+    tabs: orderTabs(
+      snapshot.tabs.filter((tab) => tab.space_id === workspace.space_id),
+      tabOrder[workspace.space_id],
+    ).map((tab) => ({
+      tab,
+      panes: snapshot.terminals.filter((pane) => pane.tab_id === tab.tab_id),
+    })),
   }));
 }
 
@@ -370,8 +390,9 @@ export function buildSpaces(
   repos: ReadonlyMap<string, RepoInfo>,
   pulls: ReadonlyMap<string, BranchPull> = new Map(),
   order: readonly string[] = [],
+  tabOrder: TabOrder = {},
 ): SpaceNode[] {
-  return buildTree(snapshot, order).map(({ workspace, tabs }) => ({
+  return buildTree(snapshot, order, tabOrder).map(({ workspace, tabs }) => ({
     workspace,
     rows: tabs.flatMap(({ tab, panes }) =>
       panes.map((pane): PaneRow => {
