@@ -21,6 +21,8 @@ export interface PoimenCommand {
     | "showSpaceOverview"
     | "closeSpace"
     | "renameSpace"
+    | "moveSpaceUp"
+    | "moveSpaceDown"
     | "startTask"
     | "openTerminalHere"
     | "cleanupTasks"
@@ -34,6 +36,8 @@ export interface PoimenCommand {
 export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "newTerminal", title: "New Terminal..." },
   { id: "renameSpace", title: "Rename Space..." },
+  { id: "moveSpaceUp", title: "Move Space Up" },
+  { id: "moveSpaceDown", title: "Move Space Down" },
   { id: "closeSpace", title: "Close Space" },
   { id: "closeTab", title: "Close Tab" },
   { id: "closeAll", title: "Close All Tabs" },
@@ -131,6 +135,8 @@ export class CommandPalette {
         c.id === "showSpaceOverview" ||
         c.id === "closeSpace" ||
         c.id === "renameSpace" ||
+        c.id === "moveSpaceUp" ||
+        c.id === "moveSpaceDown" ||
         c.id === "startTask" ||
         c.id === "openTerminalHere" ||
         c.id === "cleanupTasks" ||

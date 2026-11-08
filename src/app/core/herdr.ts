@@ -155,8 +155,40 @@ export interface WorkspaceNode {
 
 const byNumber = <T extends { number: number }>(a: T, b: T) => a.number - b.number;
 
-export function buildTree(snapshot: Snapshot): WorkspaceNode[] {
-  return [...snapshot.spaces].sort(byNumber).map((workspace) => ({
+/**
+ * The spaces in the user's order: ids of `order` first (in that order), then the others in backend
+ * number order (new spaces). Ids of `order` that no longer exist are skipped.
+ */
+export function orderSpaces<T extends { space_id: string; number: number }>(
+  spaces: readonly T[],
+  order: readonly string[] = [],
+): T[] {
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const known = spaces
+    .filter((s) => rank.has(s.space_id))
+    .sort((a, b) => rank.get(a.space_id)! - rank.get(b.space_id)!);
+  const rest = spaces.filter((s) => !rank.has(s.space_id)).sort(byNumber);
+  return [...known, ...rest];
+}
+
+/**
+ * The order after dropping `sourceId` before or after `targetId`, or `null` when nothing changes
+ * (same space, an unknown id, or the space already sits there).
+ */
+export function reorderIds(
+  ids: readonly string[],
+  sourceId: string,
+  targetId: string,
+  after: boolean,
+): string[] | null {
+  if (sourceId === targetId || !ids.includes(sourceId) || !ids.includes(targetId)) return null;
+  const rest = ids.filter((id) => id !== sourceId);
+  rest.splice(rest.indexOf(targetId) + (after ? 1 : 0), 0, sourceId);
+  return rest.every((id, i) => id === ids[i]) ? null : rest;
+}
+
+export function buildTree(snapshot: Snapshot, order: readonly string[] = []): WorkspaceNode[] {
+  return orderSpaces(snapshot.spaces, order).map((workspace) => ({
     workspace,
     tabs: snapshot.tabs
       .filter((tab) => tab.space_id === workspace.space_id)
@@ -337,8 +369,9 @@ export function buildSpaces(
   snapshot: Snapshot,
   repos: ReadonlyMap<string, RepoInfo>,
   pulls: ReadonlyMap<string, BranchPull> = new Map(),
+  order: readonly string[] = [],
 ): SpaceNode[] {
-  return buildTree(snapshot).map(({ workspace, tabs }) => ({
+  return buildTree(snapshot, order).map(({ workspace, tabs }) => ({
     workspace,
     rows: tabs.flatMap(({ tab, panes }) =>
       panes.map((pane): PaneRow => {

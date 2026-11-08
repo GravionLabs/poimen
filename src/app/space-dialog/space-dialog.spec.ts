@@ -25,7 +25,11 @@ const snapshot = {
     },
   ],
 };
-const store = { refresh: vi.fn(async () => undefined), snapshot: () => snapshot };
+const store = {
+  refresh: vi.fn(async () => undefined),
+  snapshot: () => snapshot,
+  spaceOrder: () => [],
+};
 
 async function setup() {
   TestBed.resetTestingModule();
