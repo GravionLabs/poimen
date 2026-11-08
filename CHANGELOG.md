@@ -5,6 +5,31 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.14.0] — 2026-11-08
+
+### Bug Fixes
+- **sidebar**: Clear the tab drop marker over a refused row, document the tab order (#556)
+- **server**: Ignore a broken pipe in the hook test helper (#527) (#546)
+- **deliver**: Reducer and panel read the agent-events core (#576)
+- **panes**: A renamed agent pane shows its name (#539) (#577)
+
+
+### Documentation
+- **adr**: Plugin system with sandboxed worker and view contexts (#550) (#551)
+- **adr**: Terminal ownership in a stable PTY host (#573)
+
+
+### Features
+- **sidebar**: Reorder spaces by drag and drop (#555) (#569)
+- **sidebar**: Reorder tabs of a space by drag and drop (#556) (#571)
+- **sidebar**: Reorder tabs of a space by drag and drop (#556)
+- **deliver**: Reducer and panel read the agent-events core (#576)
+
+
+### Refactoring
+- **ci**: Pages.yml uses the ci VitePress workflow (#568) (#578)
+
+
 ## [0.13.0] — 2026-11-08
 
 ### Bug Fixes
@@ -22,6 +47,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - **release**: Run the RC test beside the release PR (#482) (#536)
 - **agents**: Name the changed default for existing installations (#526)
+- Update CHANGELOG.md for v0.13.0 [skip ci]
 
 
 ### Features
