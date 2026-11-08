@@ -1,0 +1,152 @@
+@let h = head();
+@if (h) {
+  <aside class="pane" aria-label="Issue detail" tabindex="-1" data-testid="issue-detail">
+    <header class="head">
+      <div class="title">
+        <h2>{{ h.title || "Issue #" + h.number }}</h2>
+        <button
+          type="button"
+          class="icon-btn"
+          title="Close"
+          aria-label="Close detail"
+          data-testid="detail-close"
+          (click)="issues.closeDetail()"
+        >
+          ×
+        </button>
+      </div>
+      <div class="meta">
+        @if (h.level) {
+          <span class="badge badge-level-{{ h.level }}" data-testid="detail-level">{{
+            levelBadge(h.level).label
+          }}</span>
+        }
+        <span class="mono" data-testid="detail-number">#{{ h.number }}</span>
+        <button
+          type="button"
+          class="icon-btn"
+          title="Open in browser"
+          [attr.aria-label]="'Open #' + h.number + ' in browser'"
+          [disabled]="!isGithubUrl(h.url)"
+          (click)="issues.openUrl(h.url)"
+        >
+          ↗
+        </button>
+      </div>
+      <!-- Action bar: later actions (close, label, ...) go here; see viewerCanUpdate. -->
+      <div class="actions" role="toolbar" aria-label="Issue actions" data-testid="actions"></div>
+    </header>
+    @if (errorMessage(); as message) {
+      <p class="problem" role="alert" data-testid="detail-error">
+        Could not read the issue: {{ message }}
+      </p>
+    } @else if (issues.detail(); as d) {
+      <section aria-labelledby="id-meta">
+        <h3 id="id-meta">Details</h3>
+        <dl class="facts" data-testid="detail-meta">
+          <dt>State</dt>
+          <dd data-testid="detail-state">
+            {{ stateLabel(d.state) }}
+            @if (d.stateReason) {
+              ({{ stateLabel(d.stateReason) }})
+            }
+          </dd>
+          <dt>Author</dt>
+          <dd>{{ d.author ?? "ghost" }}</dd>
+          <dt>Labels</dt>
+          <dd>
+            @if (d.labels.length === 0) {
+              <span class="hint">None</span>
+            } @else {
+              <span class="chips" data-testid="detail-labels">
+                @for (l of d.labels; track l) {
+                  <span class="chip">{{ l }}</span>
+                }
+              </span>
+            }
+          </dd>
+          <dt>Assignees</dt>
+          <dd data-testid="detail-assignees">
+            @if (d.assignees.length === 0) {
+              <span class="hint">Unassigned</span>
+            } @else {
+              {{ d.assignees.join(", ") }}
+            }
+          </dd>
+          <dt>Milestone</dt>
+          <dd data-testid="detail-milestone">
+            @if (d.milestone) {
+              {{ d.milestone }}
+            } @else {
+              <span class="hint">None</span>
+            }
+          </dd>
+          @if (d.parent; as p) {
+            <dt>Parent</dt>
+            <dd>
+              <button
+                type="button"
+                class="link"
+                data-testid="detail-parent"
+                [disabled]="!canOpen(p.repo)"
+                (click)="openIssue(p.repo, p.number)"
+              >
+                #{{ p.number }} {{ p.title }}
+              </button>
+            </dd>
+          }
+        </dl>
+      </section>
+      <section aria-labelledby="id-desc">
+        <h3 id="id-desc">Description</h3>
+        @if (d.body.trim()) {
+          <div class="markdown" data-testid="detail-body" [innerHTML]="body()"></div>
+        } @else {
+          <p class="hint">No description.</p>
+        }
+      </section>
+      <section aria-labelledby="id-subs">
+        <h3 id="id-subs">Sub-issues</h3>
+        @if (d.subIssues.length === 0) {
+          <p class="hint">No sub-issues.</p>
+        } @else {
+          <ul class="list" data-testid="detail-subs">
+            @for (s of d.subIssues; track s.repo + s.number) {
+              <li>
+                <button
+                  type="button"
+                  class="link"
+                  data-testid="detail-sub"
+                  [disabled]="!canOpen(s.repo)"
+                  (click)="openIssue(s.repo, s.number)"
+                >
+                  #{{ s.number }} {{ s.title }}
+                </button>
+                <span class="hint">{{ stateLabel(s.state) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+      <section aria-labelledby="id-prs">
+        <h3 id="id-prs">Linked pull requests</h3>
+        @if (d.pullRequests.length === 0) {
+          <p class="hint">No linked pull requests.</p>
+        } @else {
+          <ul class="list" data-testid="detail-prs">
+            @for (p of d.pullRequests; track p.repo + p.number) {
+              <li>
+                <button type="button" class="link" data-testid="detail-pr" (click)="openPull(p)">
+                  #{{ p.number }} {{ p.title }}
+                </button>
+                <span class="hint">{{ stateLabel(p.state) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+    } @else {
+      <p class="hint" data-testid="detail-loading">Loading...</p>
+    }
+  </aside>
+}

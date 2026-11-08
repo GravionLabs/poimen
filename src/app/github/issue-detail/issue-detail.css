@@ -1,0 +1,25 @@
+@import "../detail-pane.css";
+@import "../github-badges.css";
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  font-size: 11px;
+  padding: 1px 8px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 10px;
+}
+dl.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+dl.facts dt {
+  color: var(--h-text-muted-color);
+}
+dl.facts dd {
+  margin: 0;
+}

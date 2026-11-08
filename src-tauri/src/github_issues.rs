@@ -264,6 +264,126 @@ pub fn load<R: Runner + Sync>(
     })
 }
 
+const DETAIL_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { \
+issue(number: $number) { number title url body state stateReason author { login } viewerCanUpdate \
+labels(first: 30) { nodes { name } } assignees(first: 20) { nodes { login } } milestone { title } \
+parent { number title repository { nameWithOwner } } \
+subIssues(first: 50) { nodes { number title state repository { nameWithOwner } } } \
+closedByPullRequestsReferences(first: 20, includeClosedPrs: true) { nodes { number title url state \
+repository { nameWithOwner } } } } } }";
+
+/// A sub-issue or the parent of an issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RelatedIssue {
+    pub number: u64,
+    pub title: String,
+    /// `OPEN` or `CLOSED` (empty for a parent, which is not asked for its state).
+    pub state: String,
+    /// `owner/name`.
+    pub repo: String,
+}
+
+/// A pull request that closes the issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ClosingPr {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub state: String,
+    /// `owner/name`.
+    pub repo: String,
+}
+
+/// An issue in detail (`github_issue_detail`); `viewer_can_update` is for later actions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueDetail {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub body: String,
+    pub state: String,
+    /// `COMPLETED`, `NOT_PLANNED`, `REOPENED` or `DUPLICATE` once closed.
+    pub state_reason: Option<String>,
+    pub author: Option<String>,
+    pub labels: Vec<String>,
+    pub assignees: Vec<String>,
+    pub milestone: Option<String>,
+    pub parent: Option<RelatedIssue>,
+    pub sub_issues: Vec<RelatedIssue>,
+    pub pull_requests: Vec<ClosingPr>,
+    pub viewer_can_update: bool,
+}
+
+fn str_of(v: &Value) -> String {
+    v.as_str().unwrap_or_default().to_owned()
+}
+
+fn related(node: &Value) -> Option<RelatedIssue> {
+    Some(RelatedIssue {
+        number: node["number"].as_u64()?,
+        title: str_of(&node["title"]),
+        state: str_of(&node["state"]),
+        repo: str_of(&node["repository"]["nameWithOwner"]),
+    })
+}
+
+/// The `repository { issue }` answer of [`DETAIL_QUERY`]; a missing issue is an error.
+pub fn parse_detail(answer: &Value) -> Result<IssueDetail, GhError> {
+    let node = &answer["data"]["repository"]["issue"];
+    let Some(number) = node["number"].as_u64() else {
+        let message = answer["errors"][0]["message"]
+            .as_str()
+            .unwrap_or("unexpected GitHub answer");
+        return Err(GhError::Other {
+            message: message.to_owned(),
+        });
+    };
+    let list = |v: &Value| v.as_array().cloned().unwrap_or_default();
+    Ok(IssueDetail {
+        number,
+        title: str_of(&node["title"]),
+        url: str_of(&node["url"]),
+        body: str_of(&node["body"]),
+        state: node["state"].as_str().unwrap_or("OPEN").to_owned(),
+        state_reason: node["stateReason"].as_str().map(str::to_owned),
+        author: node["author"]["login"].as_str().map(str::to_owned),
+        labels: names(&node["labels"], "name"),
+        assignees: names(&node["assignees"], "login"),
+        milestone: node["milestone"]["title"].as_str().map(str::to_owned),
+        parent: related(&node["parent"]),
+        sub_issues: list(&node["subIssues"]["nodes"])
+            .iter()
+            .filter_map(related)
+            .collect(),
+        pull_requests: list(&node["closedByPullRequestsReferences"]["nodes"])
+            .iter()
+            .filter_map(|p| {
+                Some(ClosingPr {
+                    number: p["number"].as_u64()?,
+                    title: str_of(&p["title"]),
+                    url: str_of(&p["url"]),
+                    state: p["state"].as_str().unwrap_or("OPEN").to_owned(),
+                    repo: str_of(&p["repository"]["nameWithOwner"]),
+                })
+            })
+            .collect(),
+        viewer_can_update: node["viewerCanUpdate"].as_bool().unwrap_or(false),
+    })
+}
+
+/// Detail of issue `number` in the GitHub repository of `root` (one GraphQL query, cached 30 s by
+/// the client).
+pub fn load_detail<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+) -> Result<IssueDetail, GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let vars = json!({ "owner": repo.owner, "name": repo.name, "number": number });
+    parse_detail(&client.graphql(DETAIL_QUERY, &vars)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,5 +489,67 @@ mod tests {
             serde_json::to_value(&repo).unwrap(),
             json!({"root":"/r","repo":"o/n","status":"error","error":{"kind":"not-logged-in"}})
         );
+    }
+
+    fn detail_fixture() -> Value {
+        serde_json::from_str(include_str!("../fixtures/github-issue-detail.json")).unwrap()
+    }
+
+    #[test]
+    fn parses_the_issue_detail_fixture() {
+        let d = parse_detail(&detail_fixture()).unwrap();
+        assert_eq!(d.number, 337);
+        assert_eq!(d.author.as_deref(), Some("jkaufmann"));
+        assert!(d.body.starts_with("Selecting an issue"));
+        assert_eq!(
+            (d.state.as_str(), d.state_reason.as_deref()),
+            ("CLOSED", Some("COMPLETED"))
+        );
+        assert_eq!(d.labels, vec!["pbi", "frontend"]);
+        assert_eq!(d.assignees, vec!["jkaufmann"]);
+        assert_eq!(d.milestone.as_deref(), Some("M2"));
+        let parent = d.parent.unwrap();
+        assert_eq!(
+            (parent.number, parent.repo.as_str()),
+            (300, "GravionLabs/poimen")
+        );
+        let subs: Vec<_> = d
+            .sub_issues
+            .iter()
+            .map(|s| (s.number, s.state.as_str()))
+            .collect();
+        assert_eq!(subs, vec![(338, "OPEN"), (339, "CLOSED")]);
+        assert_eq!(d.pull_requests.len(), 1);
+        assert_eq!(d.pull_requests[0].state, "MERGED");
+        assert_eq!(d.pull_requests[0].repo, "GravionLabs/poimen");
+        assert!(d.viewer_can_update);
+    }
+
+    #[test]
+    fn a_bare_issue_parses_with_defaults_and_a_missing_one_is_an_error() {
+        let bare = json!({"data":{"repository":{"issue":{"number":5}}}});
+        let d = parse_detail(&bare).unwrap();
+        assert!(d.parent.is_none() && d.sub_issues.is_empty() && d.pull_requests.is_empty());
+        assert_eq!(
+            (d.state.as_str(), d.state_reason, d.author),
+            ("OPEN", None, None)
+        );
+        assert!(!d.viewer_can_update);
+        let missing = json!({"data":{"repository":{"issue":null}},"errors":[{"message":"Could not resolve to an Issue"}]});
+        assert_eq!(
+            parse_detail(&missing),
+            Err(GhError::Other {
+                message: "Could not resolve to an Issue".into()
+            })
+        );
+    }
+
+    #[test]
+    fn the_issue_detail_wire_shape_is_camel_case() {
+        let v = serde_json::to_value(parse_detail(&detail_fixture()).unwrap()).unwrap();
+        assert_eq!(v["stateReason"], "COMPLETED");
+        assert_eq!(v["subIssues"][0]["repo"], "GravionLabs/poimen");
+        assert_eq!(v["pullRequests"][0]["number"], 540);
+        assert_eq!(v["viewerCanUpdate"], true);
     }
 }

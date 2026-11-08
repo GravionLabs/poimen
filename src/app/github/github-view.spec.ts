@@ -10,6 +10,7 @@ import { UI_STORAGE, UiState } from "../core/ui-state";
 import { tauri } from "../core/tauri.mock";
 import { GithubView } from "./github-view";
 import { IssuesSection } from "./issues-section";
+import { IssueDetailPane } from "./issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail/pull-detail";
 import { MilestonesSection } from "./milestones-section";
 import {
@@ -116,6 +117,13 @@ async function render(result: PullsResult = RESULT) {
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/github/pull-detail/pull-detail.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(IssueDetailPane, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/issue-detail/issue-detail.html", "utf8"),
     },
   });
   const fixture = TestBed.createComponent(GithubView);

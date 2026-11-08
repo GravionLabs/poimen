@@ -229,6 +229,8 @@
     </main>
     @if (ui.githubPage() === "pulls") {
       <app-pull-detail />
+    } @else if (ui.githubPage() === "issues") {
+      <app-issue-detail />
     }
   </div>
 </div>

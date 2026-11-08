@@ -80,3 +80,13 @@ h3 {
 .row.selected {
   background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
 }
+.row.cursor {
+  outline: 1px solid var(--h-accent-color, currentColor);
+  outline-offset: -1px;
+}
+.row {
+  cursor: pointer;
+}
+.issues:focus-visible {
+  outline: none;
+}
