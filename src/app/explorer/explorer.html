@@ -78,7 +78,7 @@
     >
       Open terminal here
     </button>
-    @if (menuRepo()) {
+    @if (menuRepo() === true) {
       <button
         type="button"
         role="menuitem"
@@ -96,6 +96,34 @@
         (keydown.escape)="closeMenu()"
       >
         Start task from issue…
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="fetchRepo(at.path)"
+        (keydown.escape)="closeMenu()"
+      >
+        Fetch
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="pullRepo(at.path)"
+        (keydown.escape)="closeMenu()"
+      >
+        Pull
+      </button>
+    } @else if (menuRepo() === false) {
+      <button
+        type="button"
+        role="menuitem"
+        class="menu-item"
+        (click)="fetchAll(at.path)"
+        (keydown.escape)="closeMenu()"
+      >
+        Fetch all
       </button>
     }
   </div>

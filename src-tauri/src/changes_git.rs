@@ -91,7 +91,12 @@ fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8
 }
 
 /// Runs git with no prompts and a deadline; returns the combined output.
-fn run_git(top: &str, args: &[&str], timeout: Duration, what: &str) -> Result<String, String> {
+pub(crate) fn run_git(
+    top: &str,
+    args: &[&str],
+    timeout: Duration,
+    what: &str,
+) -> Result<String, String> {
     let mut cmd = crate::gui_path::command("git");
     cmd.args(["-C", top]).args(args);
     cmd.env("GIT_TERMINAL_PROMPT", "0");

@@ -7,6 +7,7 @@ mod changes_git;
 mod copilot;
 mod deliver;
 mod git;
+mod git_sync;
 mod github;
 mod github_branches;
 mod github_issues;
@@ -1266,6 +1267,37 @@ async fn changes_push(dir: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// `git fetch --prune` of the repository containing `dir`.
+#[tauri::command]
+async fn git_fetch(dir: String) -> Result<git_sync::Outcome, String> {
+    tauri::async_runtime::spawn_blocking(move || git_sync::fetch(&dir, home_dir().as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// `git pull --ff-only` of the repository containing `dir`; refusals come back as the error.
+#[tauri::command]
+async fn git_pull(dir: String) -> Result<git_sync::Outcome, String> {
+    tauri::async_runtime::spawn_blocking(move || git_sync::pull(&dir, home_dir().as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Fetches every repository below `dir`; `git-sync-progress` events carry `{ done, total, path }`.
+#[tauri::command]
+async fn git_fetch_all(app: AppHandle, dir: String) -> Result<git_sync::Summary, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_sync::fetch_all(&dir, home_dir().as_deref(), |done, total, path| {
+            let _ = app.emit(
+                "git-sync-progress",
+                json!({ "done": done, "total": total, "path": path }),
+            );
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Branch and worktree flag per directory (read-only `git rev-parse`).
 #[tauri::command]
 async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, String> {
@@ -1760,6 +1792,9 @@ pub fn run() {
             changes_stage,
             changes_commit,
             changes_push,
+            git_fetch,
+            git_pull,
+            git_fetch_all,
             pr_worktree,
             worktree_branches,
             task_plan,
