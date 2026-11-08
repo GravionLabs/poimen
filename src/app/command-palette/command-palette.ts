@@ -33,6 +33,8 @@ export class CommandPalette {
   readonly commandChosen = output<PoimenCommand["id"]>();
   /** A command or preset of the project file was chosen. */
   readonly entryChosen = output<ProjectEntry>();
+  /** An agent action of the GitHub view was chosen (its id). */
+  readonly agentActionChosen = output<string>();
   private readonly field = viewChild<ElementRef<HTMLInputElement>>("field");
 
   /** Top-left corner of the popup, centred on the editor area. */
@@ -103,7 +105,8 @@ export class CommandPalette {
   protected run(item: PaletteItem): void {
     this.palette.recordRun(item);
     this.palette.close();
-    if (item.entry) this.entryChosen.emit(item.entry);
+    if (item.agentActionId) this.agentActionChosen.emit(item.agentActionId);
+    else if (item.entry) this.entryChosen.emit(item.entry);
     else this.commandChosen.emit(item.command);
   }
 }

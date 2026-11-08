@@ -106,8 +106,13 @@
 <app-agent-picker />
 <app-hooks-dialog />
 <app-task-dialog />
+<app-agent-action-dialog />
 <app-shortcuts-dialog />
-<app-command-palette (commandChosen)="run($event)" (entryChosen)="runEntry($event)" />
+<app-command-palette
+  (commandChosen)="run($event)"
+  (entryChosen)="runEntry($event)"
+  (agentActionChosen)="agentActions.runCurrent($event)"
+/>
 
 <ng-template #nodeTpl let-node>
   @if (node.kind === "split") {

@@ -8,6 +8,7 @@ import { POIMEN_COMMANDS } from "../core/command-palette";
 import { EditorTabs, GITHUB_TAB, tabKind } from "../core/editor-tabs";
 import { UI_STORAGE, UiState, type GithubPage } from "../core/ui-state";
 import { tauri } from "../core/tauri.mock";
+import { AgentActionMenu } from "./agent-action-menu/agent-action-menu";
 import { GithubView } from "./github-view";
 import { IssuesSection } from "./issues-section";
 import { IssueDetailPane } from "./issue-detail/issue-detail";
@@ -94,6 +95,13 @@ const RESULT: PullsResult = {
 
 async function render(result: PullsResult = RESULT, page: GithubPage | null = "pulls") {
   tauri.answer("github_pulls", () => result);
+  TestBed.overrideComponent(AgentActionMenu, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/agent-action-menu/agent-action-menu.html", "utf8"),
+    },
+  });
   TestBed.overrideComponent(GithubView, {
     set: {
       templateUrl: undefined,
@@ -461,7 +469,9 @@ describe("GithubView", () => {
     const pulls = TestBed.inject(GithubPulls);
     pulls.scope.set("all");
     fixture.detectChanges();
-    const buttons = [...el.querySelectorAll<HTMLButtonElement>("tbody .icon-btn")];
+    const buttons = [
+      ...el.querySelectorAll<HTMLButtonElement>('tbody .icon-btn[title="Open in browser"]'),
+    ];
     expect(buttons[0].title).toBe("Open in browser");
     expect(buttons[0].disabled).toBe(false);
     expect(buttons[3].disabled).toBe(true);

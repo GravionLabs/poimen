@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
 import { UiState } from "../../core/ui-state";
+import { AgentActions, pullTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues } from "../issues";
 import { renderMarkdown } from "../markdown";
 import { GithubPulls, errorText, isGithubUrl, type LinkedIssue } from "../pulls";
@@ -19,7 +20,14 @@ export class PullDetailPane {
   protected readonly pulls = inject(GithubPulls);
   private readonly issues = inject(GithubIssues);
   private readonly ui = inject(UiState);
+  protected readonly agentActions = inject(AgentActions);
   protected readonly isGithubUrl = isGithubUrl;
+  /** The pull request the agent actions run on. */
+  protected readonly targets = computed<ActionTarget[]>(() => {
+    const row = this.pulls.detailRow();
+    return row ? [pullTarget(row)] : [];
+  });
+  protected readonly offered = computed(() => this.agentActions.offered(this.targets()));
   protected readonly errorText = errorText;
   protected readonly body = computed(() => renderMarkdown(this.pulls.detail()?.body ?? ""));
   protected readonly errorMessage = computed(() => {

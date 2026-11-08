@@ -2,6 +2,11 @@ import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts } from "./agent-prompt";
+import { AgentActions } from "../github/agent-actions";
+import { GithubFilter } from "../github/github-filter";
+import { GithubIssues } from "../github/issues";
+import { GithubMilestones } from "../github/milestones";
+import { GithubPulls } from "../github/pulls";
 import { CommandPalette, POIMEN_COMMANDS } from "./command-palette";
 import { ProjectEntries } from "./project-entries";
 import { SpaceActions } from "./space-actions";
@@ -47,6 +52,11 @@ describe("CommandPalette", () => {
         AgentPrompts,
         AgentPicker,
         ProjectEntries,
+        GithubFilter,
+        GithubMilestones,
+        GithubPulls,
+        GithubIssues,
+        AgentActions,
         CommandPalette,
       ],
     });

@@ -75,6 +75,8 @@ import { HooksDialog } from "./hooks-dialog/hooks-dialog";
 import { ResultDialog } from "./result-dialog/result-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
+import { AgentActionDialog } from "./github/agent-action-dialog/agent-action-dialog";
+import { AgentActions } from "./github/agent-actions";
 import { TaskStarter } from "./core/task-start";
 import { ProjectTeardown } from "./core/project-teardown";
 import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
@@ -118,6 +120,7 @@ const ZOOM_STEP = 1;
     ResultDialog,
     AgentPickerView,
     TaskDialog,
+    AgentActionDialog,
     PaletteView,
     ShortcutsDialog,
   ],
@@ -146,6 +149,7 @@ export class App {
   private readonly cleanup = inject(TaskCleanup);
   private readonly teardown = inject(ProjectTeardown);
   private readonly projectEntries = inject(ProjectEntries);
+  protected readonly agentActions = inject(AgentActions);
   protected readonly deliver = inject(Deliver);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */

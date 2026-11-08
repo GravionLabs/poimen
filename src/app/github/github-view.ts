@@ -1,5 +1,14 @@
-import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  HostListener,
+  computed,
+  effect,
+  inject,
+} from "@angular/core";
 import { UiState, type GithubPage } from "../core/ui-state";
+import { AgentActionMenu } from "./agent-action-menu/agent-action-menu";
+import { AgentActions, pullTarget } from "./agent-actions";
 import { GithubIssues } from "./issues";
 import { GithubMilestones } from "./milestones";
 import { IssuesSection } from "./issues-section";
@@ -24,7 +33,14 @@ import {
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
   selector: "app-github-view",
-  imports: [InboxSection, MilestonesSection, IssuesSection, PullDetailPane, IssueDetailPane],
+  imports: [
+    AgentActionMenu,
+    InboxSection,
+    MilestonesSection,
+    IssuesSection,
+    PullDetailPane,
+    IssueDetailPane,
+  ],
   templateUrl: "./github-view.html",
   styleUrl: "./github-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -34,6 +50,7 @@ export class GithubView {
   protected readonly issues = inject(GithubIssues);
   protected readonly milestones = inject(GithubMilestones);
   protected readonly filter = inject(GithubFilter);
+  private readonly agentActions = inject(AgentActions);
   protected readonly ui = inject(UiState);
   /** The sub-pages of the navigation, the Inbox in front. */
   protected readonly pages = computed<{ id: GithubPage; label: string; count: number | null }[]>(
@@ -77,6 +94,7 @@ export class GithubView {
 
   constructor() {
     this.loadAll(false);
+    effect(() => this.agentActions.ensureLoaded());
   }
 
   /** Escape closes the detail pane of a pull request or an issue. */
@@ -143,6 +161,14 @@ export class GithubView {
       event.preventDefault();
       this.selectPage(page);
     }
+  }
+
+  /** The `⋯` button or the context menu of a row: the actions for it, or for the whole selection. */
+  protected openRowMenu(event: MouseEvent, row: PullRow): void {
+    event.preventDefault();
+    const selected = this.pulls.selectedPulls();
+    const rows = selected.length > 1 && selected.some((r) => r.key === row.key) ? selected : [row];
+    this.agentActions.openMenu(rows.map(pullTarget), event.clientX, event.clientY);
   }
 
   protected age(row: PullRow): string {
