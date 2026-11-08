@@ -101,6 +101,46 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
   });
 }
 
+/** A resolved agent action (`get_agent_actions`, wire shape of `agent_actions.rs`). */
+export interface AgentAction {
+  id: string;
+  label: string;
+  on: "issue" | "pr" | "milestone";
+  prompt: string;
+  run: string;
+  harness: string | null;
+  batch: string;
+  /** Where the entry comes from. */
+  source: "default" | "user" | "project";
+}
+
+/** The actions of a `get_agent_actions` answer; malformed entries are skipped. */
+export function parseAgentActions(raw: unknown): AgentAction[] {
+  const list = (raw as { actions?: unknown } | null)?.actions;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((item): AgentAction[] => {
+    if (typeof item !== "object" || item === null) return [];
+    const r = item as Record<string, unknown>;
+    const on = r["on"];
+    const source = r["source"];
+    if (typeof r["id"] !== "string" || typeof r["prompt"] !== "string") return [];
+    if (on !== "issue" && on !== "pr" && on !== "milestone") return [];
+    if (source !== "default" && source !== "user" && source !== "project") return [];
+    return [
+      {
+        id: r["id"],
+        label: typeof r["label"] === "string" ? r["label"] : r["id"],
+        on,
+        prompt: r["prompt"],
+        run: typeof r["run"] === "string" ? r["run"] : "repoRoot",
+        harness: typeof r["harness"] === "string" ? r["harness"] : null,
+        batch: typeof r["batch"] === "string" ? r["batch"] : "each",
+        source,
+      },
+    ];
+  });
+}
+
 function commandSpec(v: unknown): string[] | string | null {
   if (typeof v === "string") return v;
   if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as string[];

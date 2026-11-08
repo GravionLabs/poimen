@@ -1,3 +1,4 @@
+mod agent_actions;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
@@ -1026,6 +1027,31 @@ async fn get_task_modes(dir: Option<String>) -> tasks::Resolved {
     })
 }
 
+/// The agent actions for the repository of `root`: defaults, the user's `github.agentActions` and
+/// the trusted project file's, each entry with its source; without `root` only the first two.
+#[tauri::command]
+async fn get_agent_actions(root: Option<String>) -> agent_actions::Resolved {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = get_settings();
+        let Some(dir) = root else {
+            return agent_actions::Resolved {
+                actions: agent_actions::resolve(&settings.agent_actions, &[]),
+                note: None,
+            };
+        };
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        let sources = trust::Sources::read(&root);
+        agent_actions::for_project(
+            &settings.agent_actions,
+            &settings.harnesses,
+            &sources,
+            &settings.trusted_projects,
+        )
+    })
+    .await
+    .unwrap_or_default()
+}
+
 /// The user color schemes (`~/.config/poimen/themes/*.toml`); changes arrive as `color-schemes` events.
 #[tauri::command]
 fn get_color_schemes() -> schemes::Schemes {
@@ -1688,6 +1714,7 @@ pub fn run() {
             get_usage,
             get_settings,
             get_harnesses,
+            get_agent_actions,
             get_task_modes,
             task_worktree,
             changes_list,

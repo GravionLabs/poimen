@@ -44,6 +44,12 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
   `model`, `prompt`) or a command as an argv array (`["pwsh", "run.ps1", "{nr}"]`, each element
   expanded on its own, no shell); `cleanup` is an argv array. A string `command` or `cleanup` still
   works for one release with a deprecation warning.
+- `github.agentActions[]`: agent actions for issues and pull requests, same schema as
+  `github.agentActions` in the user `config.json` (`id`, `label`, `on`, `when`, `prompt`, `run`,
+  `harness`, `model`, `batch`). They merge by `id` over the user's and the built-in ones
+  (`"disabled": true` removes one); their prompts count as commands for the trust question and are
+  only used in a trusted repository. `get_agent_actions(root)` returns the result with the source
+  of each entry.
 - `commands[]`: `name` (unique), `command`, `target` (`terminal` or `agent`). Each is a palette
   entry `Project: <name>`: `terminal` opens a tab named after it in the directory of the focused
   space and types the command; `agent` sends it as a prompt to the space's agent (a picker when

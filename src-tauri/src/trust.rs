@@ -112,6 +112,13 @@ impl Sources {
                     }
                 }
             }
+            for a in c.agent_actions.iter().filter(|a| !a.disabled) {
+                add(
+                    &mut out,
+                    format!("agent action \"{}\"", a.id),
+                    &format!("agent: {}", a.prompt),
+                );
+            }
             for preset in &c.presets {
                 panes(
                     &mut out,

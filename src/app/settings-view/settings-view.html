@@ -394,6 +394,21 @@
                 }
               </ul>
               <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
+              <h3>Agent actions</h3>
+              <ul class="agent-actions" [class.hit]="hit('Agent actions')">
+                @for (a of agentActions(); track a.id) {
+                  <li>
+                    <strong>{{ a.label }}</strong>
+                    <span>{{ a.on }}</span>
+                    <code>{{ a.prompt }}</code>
+                    <span class="source">{{ a.source }}</span>
+                  </li>
+                }
+              </ul>
+              <p class="hint">
+                Edit <code>github.agentActions</code> in config.json (or in
+                <code>.poimen/config.json</code> per repository) to change them.
+              </p>
             </section>
           }
           @case ("spaces") {

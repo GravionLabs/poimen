@@ -204,6 +204,10 @@ pub struct Settings {
     pub tasks: crate::tasks::TaskModes,
     /// The agent harnesses (`harnesses`); the defaults are `claude` and `copilot`.
     pub harnesses: Vec<crate::harness::Harness>,
+    /// The user's `github.agentActions` entries (merged over the defaults by
+    /// `get_agent_actions`); not sent to the frontend.
+    #[serde(skip)]
+    pub agent_actions: Vec<crate::agent_actions::Spec>,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -383,6 +387,7 @@ impl Default for Settings {
             trusted_projects: BTreeMap::new(),
             tasks: crate::tasks::TaskModes::default(),
             harnesses: crate::harness::default_harnesses(),
+            agent_actions: Vec::new(),
             home: None,
             warnings: Vec::new(),
         }
@@ -884,6 +889,20 @@ fn resolve_tasks(value: &Value, s: &mut Settings) {
     }
 }
 
+/// `github.agentActions`: invalid entries and unknown harnesses warn and are skipped.
+fn resolve_github(value: &Value, s: &mut Settings) {
+    let Some(obj) = value.as_object() else {
+        s.warnings.push("github must be an object".into());
+        return;
+    };
+    if let Some(actions) = obj.get("agentActions") {
+        let at = "github.agentActions";
+        let parsed = crate::agent_actions::parse(actions, at, &mut s.warnings);
+        s.agent_actions =
+            crate::agent_actions::check_harnesses(parsed, &s.harnesses, at, &mut s.warnings);
+    }
+}
+
 /// Resolves the settings from the file contents. `read_ghostty` is only called when the
 /// `terminal.ghostty` flag is set.
 pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>) -> Settings {
@@ -985,6 +1004,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("harnesses") {
         s.harnesses = crate::harness::resolve(value, &mut s.warnings);
+    }
+    if let Some(value) = root.get("github") {
+        resolve_github(value, &mut s);
     }
 
     if let Some(ui) = root.get("ui") {
@@ -1847,6 +1869,23 @@ mod tests {
         assert_eq!(s.explorer_roots, ["/srv", "~/code"]);
         assert!(s.explorer_show_hidden);
         assert!(s.warnings.is_empty());
+    }
+
+    #[test]
+    fn github_agent_actions_resolve_with_warnings() {
+        let d = rows("{}");
+        assert!(d.agent_actions.is_empty());
+        let s = rows(
+            r#"{"harnesses":{"x":{"command":["x"]}},"github":{"agentActions":[
+                {"id":"a","on":"issue","prompt":"do {nr}","harness":"x"},
+                {"id":"b","on":"issue","prompt":"do","harness":"nope"},
+                {"id":"c","on":"issue"}
+            ]}}"#,
+        );
+        assert_eq!(s.agent_actions.len(), 1);
+        assert_eq!(s.agent_actions[0].id, "a");
+        assert_eq!(s.warnings.len(), 2, "{:?}", s.warnings);
+        assert!(rows(r#"{"github":3}"#).warnings[0].starts_with("github must"));
     }
 
     #[test]
