@@ -284,3 +284,17 @@ describe("hooks offer state", () => {
     ).toBeUndefined();
   });
 });
+
+describe("GitHub empty repositories", () => {
+  it("are hidden until shown, then remembered", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    expect(state.githubShowEmpty()).toBe(false);
+    state.setGithubShowEmpty(true);
+    expect(parseLayout(storage.data.get(UI_STATE_KEY)!).githubShowEmpty).toBe(true);
+    expect(stateOn(storage).githubShowEmpty()).toBe(true);
+    state.setGithubShowEmpty(false);
+    expect(stateOn(storage).githubShowEmpty()).toBe(false);
+    expect(parseLayout(JSON.stringify({ githubShowEmpty: "yes" })).githubShowEmpty).toBeUndefined();
+  });
+});

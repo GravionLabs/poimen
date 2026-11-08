@@ -1,3 +1,5 @@
+/* helix-ui has no spacing scale (only per-component paddings), so spacing here is px; rows are 34px. */
+@import "./github-badges.css";
 .issues {
   margin-top: 32px;
 }
@@ -25,7 +27,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 .problem {
-  color: var(--h-danger-color, #d33);
+  color: var(--h-danger-color);
 }
 .mono {
   font-family: monospace;
@@ -38,11 +40,10 @@ h3 {
 }
 .row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  padding-top: 3px;
-  padding-bottom: 3px;
+  gap: 8px;
+  min-height: 34px;
   border-bottom: 1px solid var(--h-content-border-color);
 }
 .twisty {
@@ -54,17 +55,8 @@ h3 {
   cursor: pointer;
   color: inherit;
 }
-.badge {
-  padding: 0 6px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 8px;
-  font-size: 11px;
-}
 .nr {
   color: var(--h-text-muted-color);
-}
-.marker {
-  color: var(--h-warning-color, #b8860b);
 }
 .assignee {
   color: var(--h-text-muted-color);
@@ -76,20 +68,12 @@ h3 {
 .open {
   margin-left: auto;
 }
-.checks-passing {
-  color: var(--h-success-color, #2a8a3e);
+.row:hover,
+.row:focus-within {
+  background: var(--h-content-hover-background);
 }
-.checks-pending {
-  color: var(--h-warning-color, #b8860b);
-}
-.checks-failing {
-  color: var(--h-danger-color, #d33);
-}
-button.link {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--h-accent-color, inherit);
-  cursor: pointer;
-  text-decoration: underline;
+.progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }

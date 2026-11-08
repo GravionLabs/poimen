@@ -1,3 +1,5 @@
+/* helix-ui has no spacing scale (only per-component paddings), so spacing here is px; rows are 34px. */
+@import "./github-badges.css";
 :host {
   display: block;
   flex: 1;
@@ -29,7 +31,7 @@ h2 {
   font-weight: normal;
 }
 .problem {
-  color: var(--h-danger-color, #d33);
+  color: var(--h-danger-color);
 }
 table {
   width: 100%;
@@ -39,9 +41,10 @@ table {
 th,
 td {
   text-align: left;
-  padding: 4px 8px;
+  padding: 0 8px;
+  height: 34px;
   border-bottom: 1px solid var(--h-content-border-color);
-  vertical-align: top;
+  vertical-align: middle;
 }
 th {
   color: var(--h-text-muted-color);
@@ -53,14 +56,6 @@ th {
 }
 .unclaimed {
   color: var(--h-text-muted-color);
-}
-.badge {
-  display: inline-block;
-  margin-right: 4px;
-  padding: 0 6px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 8px;
-  font-size: 11px;
 }
 .toolbar {
   display: flex;
@@ -83,19 +78,10 @@ th {
   white-space: nowrap;
 }
 .add {
-  color: var(--h-success-color, #2a8a3e);
+  color: var(--h-success-color);
 }
 .del {
-  color: var(--h-danger-color, #d33);
-}
-.checks-passing {
-  color: var(--h-success-color, #2a8a3e);
-}
-.checks-pending {
-  color: var(--h-warning-color, #b8860b);
-}
-.checks-failing {
-  color: var(--h-danger-color, #d33);
+  color: var(--h-danger-color);
 }
 tr.cursor {
   outline: 1px solid var(--h-accent-color, currentColor);
@@ -106,14 +92,6 @@ tr.selected {
 }
 tbody:focus-visible {
   outline: none;
-}
-button.link {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--h-accent-color, inherit);
-  cursor: pointer;
-  text-decoration: underline;
 }
 .layout {
   display: flex;
@@ -156,4 +134,22 @@ button.link {
 .content {
   flex: 1;
   min-width: 0;
+}
+.show-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+}
+tr.group th {
+  height: 34px;
+  padding-top: 8px;
+  color: var(--h-text-color);
+  font-weight: 600;
+  background: var(--h-content-background);
+}
+td.actions {
+  white-space: nowrap;
+  text-align: right;
 }

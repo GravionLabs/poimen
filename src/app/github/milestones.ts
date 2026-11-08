@@ -29,6 +29,11 @@ export function progressPercent(m: Pick<Milestone, "open" | "closed">): number {
   return total === 0 ? 0 : Math.round((m.closed / total) * 100);
 }
 
+/** A milestone with closed issues and no open ones can be closed. */
+export function readyToClose(m: Pick<Milestone, "open" | "closed">): boolean {
+  return m.open === 0 && m.closed > 0;
+}
+
 /** "Due 2026-11-20", or "No due date". */
 export function dueText(dueOn: string | null): string {
   return dueOn ? `Due ${dueOn.slice(0, 10)}` : "No due date";
@@ -61,7 +66,11 @@ export class GithubMilestones {
 
   readonly repos = computed(() =>
     (this._result() ?? []).flatMap((r) =>
-      r.status === "ok" && this.filter.allows(r.repo) ? [r] : [],
+      r.status === "ok" &&
+      this.filter.allows(r.repo) &&
+      (r.milestones.length > 0 || this.ui.githubShowEmpty())
+        ? [r]
+        : [],
     ),
   );
   /** Repositories that were read, for the shared repository filter. */

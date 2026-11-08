@@ -9,10 +9,11 @@ import {
   GithubPulls,
   SCOPES,
   ageText,
+  checkBadges,
   checksText,
   errorText,
   isGithubUrl,
-  reviewText,
+  reviewBadge,
   type PullRow,
 } from "./pulls";
 
@@ -59,7 +60,8 @@ export class GithubView {
   protected readonly scopes = SCOPES;
   protected readonly errorText = errorText;
   protected readonly checksText = checksText;
-  protected readonly reviewText = reviewText;
+  protected readonly reviewBadge = reviewBadge;
+  protected readonly checkBadges = checkBadges;
   protected readonly isGithubUrl = isGithubUrl;
 
   constructor() {

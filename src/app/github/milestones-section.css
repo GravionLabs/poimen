@@ -1,3 +1,5 @@
+/* helix-ui has no spacing scale (only per-component paddings), so spacing here is px; rows are 34px. */
+@import "./github-badges.css";
 .milestones {
   margin-top: 32px;
 }
@@ -22,7 +24,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 .problem {
-  color: var(--h-danger-color, #d33);
+  color: var(--h-danger-color);
 }
 .list {
   list-style: none;
@@ -40,12 +42,14 @@ h3 {
   font-weight: 600;
 }
 .pick {
-  display: flex;
+  display: grid;
+  /* title, badge, due, counts, bar, percent: fixed so the bars line up across rows */
+  grid-template-columns: minmax(8rem, 1fr) 8rem 9rem 10rem 7.5rem 3rem;
   flex: 1;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
-  padding: 4px 6px;
+  min-height: 34px;
+  padding: 0 6px;
   background: none;
   border: 0;
   color: inherit;
@@ -53,23 +57,23 @@ h3 {
   cursor: pointer;
 }
 .pick[aria-pressed="true"] {
-  background: rgba(127, 127, 127, 0.2);
-}
-.badge {
-  padding: 0 6px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 8px;
-  font-size: 11px;
+  background: var(--h-content-hover-background);
 }
 progress {
-  width: 120px;
+  width: 100%;
   height: 8px;
+  accent-color: var(--h-primary-color);
 }
-button.link {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--h-accent-color, inherit);
-  cursor: pointer;
-  text-decoration: underline;
+.pct {
+  text-align: right;
+}
+.item.current {
+  background: color-mix(in srgb, var(--h-primary-color) 8%, transparent);
+}
+.item.dim .pick {
+  opacity: 0.55;
+}
+.item:hover,
+.item:focus-within {
+  background: var(--h-content-hover-background);
 }

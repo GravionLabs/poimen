@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
-import { GithubMilestones, dueText, progressPercent } from "./milestones";
+import { GithubMilestones, dueText, progressPercent, readyToClose } from "./milestones";
 import { errorText, isGithubUrl } from "./pulls";
 
 /** The "Milestones" section of the GitHub tab: open milestones with progress; selecting filters the issues. */
@@ -14,6 +14,7 @@ export class MilestonesSection {
   protected readonly errorText = errorText;
   protected readonly isGithubUrl = isGithubUrl;
   protected readonly dueText = dueText;
+  protected readonly readyToClose = readyToClose;
   protected readonly percent = progressPercent;
 
   constructor() {

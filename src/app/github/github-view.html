@@ -17,6 +17,15 @@
           <option [value]="name">{{ name }}</option>
         }
       </select>
+      <label class="show-empty">
+        <input
+          type="checkbox"
+          data-testid="show-empty"
+          [checked]="ui.githubShowEmpty()"
+          (change)="ui.setGithubShowEmpty($any($event.target).checked)"
+        />
+        Show empty repositories
+      </label>
       <nav aria-label="GitHub sub-pages" class="nav">
         <!-- An Inbox entry (#344) goes here, above the sub-pages. -->
         @for (p of pages(); track p.id) {
@@ -87,14 +96,13 @@
               }
             }
             @if (result.repos.length > 0) {
-              @if (pulls.visible().length === 0) {
+              @if (pulls.groups().length === 0) {
                 <p class="hint" data-testid="empty">No pull requests match.</p>
               } @else {
                 <table>
                   <thead>
                     <tr>
                       <th></th>
-                      <th>Repository</th>
                       <th>#</th>
                       <th>Title</th>
                       <th>Author</th>
@@ -106,78 +114,105 @@
                     </tr>
                   </thead>
                   <tbody tabindex="0" (keydown)="onKey($event)" aria-label="Pull requests">
-                    @for (row of pulls.visible(); track row.key) {
-                      <tr
-                        [class.selected]="pulls.selected().has(row.key)"
-                        [class.cursor]="pulls.cursor() === row.key"
-                        [attr.data-key]="row.key"
-                      >
-                        <td>
-                          <input
-                            type="checkbox"
-                            [attr.aria-label]="'Select #' + row.number"
-                            [checked]="pulls.selected().has(row.key)"
-                            (click)="onCheck($event, row.key)"
-                          />
-                        </td>
-                        <td class="mono">{{ row.repo }}</td>
-                        <td>#{{ row.number }}</td>
-                        <td>
-                          {{ row.title }}
-                          @if (row.isDraft) {
-                            <span class="badge">draft</span>
-                          }
-                        </td>
-                        <td>{{ row.author ?? "ghost" }}</td>
-                        <td>
-                          @if (row.checks.state !== "none") {
+                    @for (group of pulls.groups(); track group.root) {
+                      <tr class="group" data-testid="group">
+                        <th colspan="9" scope="colgroup" class="mono">
+                          {{ group.repo }}
+                          <span class="hint">{{ group.rows.length }}</span>
+                        </th>
+                      </tr>
+                      @if (group.rows.length === 0) {
+                        <tr class="empty-group">
+                          <td colspan="9" class="hint">No pull requests match.</td>
+                        </tr>
+                      }
+                      @for (row of group.rows; track row.key) {
+                        <tr
+                          class="row"
+                          [class.selected]="pulls.selected().has(row.key)"
+                          [class.cursor]="pulls.cursor() === row.key"
+                          [attr.data-key]="row.key"
+                        >
+                          <td>
+                            <input
+                              type="checkbox"
+                              [attr.aria-label]="'Select #' + row.number"
+                              [checked]="pulls.selected().has(row.key)"
+                              (click)="onCheck($event, row.key)"
+                            />
+                          </td>
+                          <td>#{{ row.number }}</td>
+                          <td>
+                            {{ row.title }}
+                            @if (row.isDraft) {
+                              <span class="badge badge-neutral" data-testid="draft">Draft</span>
+                            }
+                          </td>
+                          <td>{{ row.author ?? "ghost" }}</td>
+                          <td>
                             <span
-                              class="checks-{{ row.checks.state }}"
+                              class="checks"
                               [title]="checksText(row.checks)"
                               data-testid="checks"
                             >
-                              {{ row.checks.passed }} / {{ row.checks.failed }} /
-                              {{ row.checks.pending }}
+                              @for (c of checkBadges(row.checks); track c.kind) {
+                                <span
+                                  class="check check-{{ c.kind }}"
+                                  role="img"
+                                  [attr.aria-label]="c.count + ' ' + c.label"
+                                >
+                                  <span aria-hidden="true">{{ c.icon }}</span
+                                  >{{ c.count }}
+                                </span>
+                              }
                             </span>
-                          }
-                        </td>
-                        <td>{{ reviewText(row) }}</td>
-                        <td class="num">
-                          <span class="add">+{{ row.additions }}</span>
-                          <span class="del">-{{ row.deletions }}</span>
-                        </td>
-                        <td class="num">{{ age(row) }}</td>
-                        <td>
-                          <button
-                            type="button"
-                            [disabled]="!isGithubUrl(row.url)"
-                            (click)="pulls.openUrl(row.url)"
-                          >
-                            Open in browser
-                          </button>
-                          @if (pulls.worktreeFor(row)) {
+                          </td>
+                          <td>
+                            @if (reviewBadge(row); as review) {
+                              <span class="badge badge-{{ review.tone }}" data-testid="review">{{
+                                review.label
+                              }}</span>
+                            }
+                          </td>
+                          <td class="num">
+                            <span class="add">+{{ row.additions }}</span>
+                            <span class="del">-{{ row.deletions }}</span>
+                          </td>
+                          <td class="num">{{ age(row) }}</td>
+                          <td class="actions">
+                            @if (pulls.worktreeFor(row)) {
+                              <button
+                                type="button"
+                                data-testid="open-space"
+                                (click)="pulls.openSpace(row)"
+                              >
+                                Open space
+                              </button>
+                            } @else {
+                              <button
+                                type="button"
+                                data-testid="check-out"
+                                (click)="pulls.checkout(row)"
+                              >
+                                Check out
+                              </button>
+                            }
                             <button
                               type="button"
-                              data-testid="open-space"
-                              (click)="pulls.openSpace(row)"
+                              class="icon-btn"
+                              title="Open in browser"
+                              [attr.aria-label]="'Open #' + row.number + ' in browser'"
+                              [disabled]="!isGithubUrl(row.url)"
+                              (click)="pulls.openUrl(row.url)"
                             >
-                              Open space
+                              ↗
                             </button>
-                          } @else {
-                            <button
-                              type="button"
-                              data-testid="check-out"
-                              (click)="pulls.checkout(row)"
-                            >
-                              Check out
-                            </button>
-                          }
-                        </td>
-                      </tr>
+                          </td>
+                        </tr>
+                      }
                     }
                   </tbody>
                 </table>
-                <p class="hint">Checks: passed / failed / pending.</p>
               }
             }
           }

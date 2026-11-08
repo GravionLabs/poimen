@@ -1,6 +1,14 @@
 import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
-import { GithubIssues, LEVELS, markers, type Level, type StateFilter } from "./issues";
-import { checksText, errorText, isGithubUrl } from "./pulls";
+import {
+  GithubIssues,
+  LEVELS,
+  issueProgress,
+  labelChips,
+  levelBadge,
+  type Level,
+  type StateFilter,
+} from "./issues";
+import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
 
 /** The "Issues" section of the GitHub tab: the issue tree per repository with linked pull requests. */
 @Component({
@@ -12,7 +20,10 @@ import { checksText, errorText, isGithubUrl } from "./pulls";
 export class IssuesSection {
   protected readonly issues = inject(GithubIssues);
   protected readonly levels = LEVELS;
-  protected readonly markers = markers;
+  protected readonly labelChips = labelChips;
+  protected readonly levelBadge = levelBadge;
+  protected readonly progress = issueProgress;
+  protected readonly checkBadges = checkBadges;
   protected readonly errorText = errorText;
   protected readonly checksText = checksText;
   protected readonly isGithubUrl = isGithubUrl;

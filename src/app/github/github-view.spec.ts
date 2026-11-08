@@ -18,7 +18,9 @@ import {
   filterPulls,
   flattenPulls,
   keyRange,
-  reviewText,
+  reviewBadge,
+  checkBadges,
+  groupPulls,
   worktreeOf,
   type Pull,
   type PullsResult,
@@ -114,7 +116,8 @@ async function render(result: PullsResult = RESULT) {
   return fixture;
 }
 
-const rows = (el: HTMLElement) => [...el.querySelectorAll("tbody tr")].map((r) => r.textContent!);
+const rows = (el: HTMLElement) =>
+  [...el.querySelectorAll("tbody tr.row")].map((r) => r.textContent!);
 
 describe("pull request helpers", () => {
   const all = flattenPulls(RESULT.repos);
@@ -147,11 +150,51 @@ describe("pull request helpers", () => {
     expect(filterPulls(all, { ...f, repo: null, text: "nothing" })).toEqual([]);
   });
 
-  it("describes review state, errors and age", () => {
-    expect(reviewText(pull(1, { isDraft: true }))).toBe("Draft");
-    expect(reviewText(pull(1, { reviewDecision: "CHANGES_REQUESTED" }))).toBe("Changes requested");
-    expect(reviewText(pull(1, { reviewRequests: ["x"] }))).toBe("Requested");
-    expect(reviewText(pull(1))).toBe("None");
+  it("maps the review decision to a badge, nothing for none or a draft", () => {
+    expect(reviewBadge(pull(1, { reviewDecision: "APPROVED" }))).toEqual({
+      label: "Approved",
+      tone: "success",
+    });
+    expect(reviewBadge(pull(1, { reviewDecision: "CHANGES_REQUESTED" }))).toEqual({
+      label: "Changes requested",
+      tone: "danger",
+    });
+    expect(reviewBadge(pull(1, { reviewDecision: "REVIEW_REQUIRED" }))).toEqual({
+      label: "Review required",
+      tone: "warning",
+    });
+    expect(reviewBadge(pull(1))).toBeNull();
+    expect(reviewBadge(pull(1, { reviewRequests: ["x"] }))).toBeNull();
+    expect(reviewBadge(pull(1, { isDraft: true, reviewDecision: "APPROVED" }))).toBeNull();
+  });
+
+  it("maps checks to icons with counts, leaving out empty states", () => {
+    const c = (
+      state: "passing" | "failing" | "pending" | "none",
+      p: number,
+      f: number,
+      n: number,
+    ) => checkBadges({ state, passed: p, failed: f, pending: n }).map((b) => [b.kind, b.count]);
+    expect(c("failing", 8, 0, 2)).toEqual([
+      ["passed", 8],
+      ["pending", 2],
+    ]);
+    expect(c("failing", 3, 1, 0)).toEqual([
+      ["passed", 3],
+      ["failed", 1],
+    ]);
+    expect(c("none", 0, 0, 0)).toEqual([]);
+  });
+
+  it("groups rows by repository in first-seen order", () => {
+    expect(groupPulls(all).map((g) => [g.repo, g.rows.length])).toEqual([
+      ["o/n", 3],
+      ["o/k", 1],
+    ]);
+    expect(groupPulls([])).toEqual([]);
+  });
+
+  it("describes errors and age", () => {
     expect(errorText({ kind: "not-logged-in" })).toContain("gh auth login");
     const now = Date.parse("2026-11-04T00:00:00Z");
     expect(ageText("2026-11-03T22:00:00Z", now)).toBe("2h");
@@ -202,11 +245,15 @@ describe("GithubView", () => {
     pulls.scope.set("mine");
     fixture.detectChanges();
     const text = rows(fixture.nativeElement)[0];
-    expect(text).toContain("o/n");
     expect(text).toContain("#2");
     expect(text).toContain("Add view");
     expect(text).toContain("jk");
-    expect(text).toContain("3 / 1 / 0");
+    expect(text).not.toContain("3 / 1 / 0");
+    const checks = fixture.nativeElement.querySelector("tr.row [data-testid=checks]");
+    expect(
+      [...checks.querySelectorAll(".check")].map((c: Element) => c.getAttribute("aria-label")),
+    ).toEqual(["3 passed", "1 failed"]);
+    expect(checks.getAttribute("title")).toContain("3 passed");
     expect(text).toContain("Approved");
     expect(text).toContain("+10");
     expect(text).toContain("-2");
@@ -230,7 +277,39 @@ describe("GithubView", () => {
     input.dispatchEvent(new Event("input"));
     fixture.detectChanges();
     expect(rows(el)).toEqual([expect.stringContaining("Draft idea")]);
-    expect(rows(el)[0]).toContain("Draft");
+    expect(el.querySelector("[data-testid=draft]")!.textContent).toBe("Draft");
+  });
+
+  it("groups pull requests under a header per repository instead of a column", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    TestBed.inject(GithubPulls).scope.set("all");
+    fixture.detectChanges();
+    expect(
+      [...el.querySelectorAll("tr.group")].map((g) => g.textContent!.replace(/\s+/g, " ").trim()),
+    ).toEqual(["o/n 3", "o/k 1"]);
+    expect([...el.querySelectorAll("thead th")].map((h) => h.textContent)).not.toContain(
+      "Repository",
+    );
+    expect(el.querySelector("[data-testid=review]")!.textContent).toBe("Approved");
+  });
+
+  it("hides repositories without matches unless Show empty repositories is on", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    const groups = () => [...el.querySelectorAll("tr.group")].length;
+    fixture.detectChanges();
+    expect(groups()).toBe(1);
+    const toggle = el.querySelector<HTMLInputElement>("[data-testid=show-empty]")!;
+    expect(toggle.checked).toBe(false);
+    toggle.click();
+    fixture.detectChanges();
+    expect(TestBed.inject(UiState).githubShowEmpty()).toBe(true);
+    expect(groups()).toBe(2);
+    expect(el.querySelector("tr.empty-group")!.textContent).toContain("No pull requests match");
+    toggle.click();
+    fixture.detectChanges();
+    expect(groups()).toBe(1);
   });
 
   it("selects with the checkbox, with Shift for a range, and with the keyboard", async () => {
@@ -289,10 +368,8 @@ describe("GithubView", () => {
     const pulls = TestBed.inject(GithubPulls);
     pulls.scope.set("all");
     fixture.detectChanges();
-    const buttons = [...el.querySelectorAll<HTMLButtonElement>("tbody button")].filter((b) =>
-      b.textContent!.includes("Open in browser"),
-    );
-    expect(buttons[0].textContent).toContain("Open in browser");
+    const buttons = [...el.querySelectorAll<HTMLButtonElement>("tbody .icon-btn")];
+    expect(buttons[0].title).toBe("Open in browser");
     expect(buttons[0].disabled).toBe(false);
     expect(buttons[3].disabled).toBe(true);
     buttons[0].click();
