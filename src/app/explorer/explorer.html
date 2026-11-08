@@ -20,7 +20,12 @@
   (nodeCollapse)="onCollapse($event)"
 >
   <ng-template hxTreeNode let-node>
-    <span class="dir" (contextmenu)="openMenu($event, node.key)" (dblclick)="createSpace(node.key)">
+    <span
+      class="dir"
+      (mousedown)="select(node.key)"
+      (contextmenu)="openMenu($event, node.key)"
+      (dblclick)="createSpace(node.key)"
+    >
       <span class="hx-tree-node-label">
         @for (part of parts(node.label); track $index) {
           <span [class.hit]="part.hit">{{ part.text }}</span>
@@ -29,6 +34,16 @@
       @if (withSpace().has(node.key)) {
         <span class="has-space" title="Has a space" aria-label="Has a space">●</span>
       }
+      <button
+        type="button"
+        class="open-terminal"
+        title="Open terminal here"
+        aria-label="Open terminal here"
+        (click)="$event.stopPropagation(); openTerminal(node.key)"
+        (dblclick)="$event.stopPropagation()"
+      >
+        &gt;_
+      </button>
     </span>
   </ng-template>
 </hx-tree>
@@ -53,6 +68,15 @@
       (keydown.escape)="closeMenu()"
     >
       Create space here
+    </button>
+    <button
+      type="button"
+      role="menuitem"
+      class="menu-item"
+      (click)="openTerminal(at.path)"
+      (keydown.escape)="closeMenu()"
+    >
+      Open terminal here
     </button>
     @if (menuRepo()) {
       <button

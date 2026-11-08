@@ -95,3 +95,20 @@
   font-size: 12px;
   color: var(--h-text-muted-color);
 }
+
+.open-terminal {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.dir:hover .open-terminal,
+.open-terminal:focus-visible {
+  opacity: 0.8;
+}
