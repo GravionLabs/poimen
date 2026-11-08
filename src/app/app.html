@@ -25,6 +25,7 @@
           (selected)="open($event)"
           (pinned)="open($event, true)"
           (menuAction)="onSidebarMenu($event)"
+          (spaceOpened)="openSpaceOverview($event)"
         />
       }
     </div>
@@ -154,6 +155,8 @@
               <span class="mode ro" title="GitHub">GH</span>
             } @else if (isDeliver(tab.id)) {
               <span class="mode ro" title="Deliver">DL</span>
+            } @else if (isSpace(tab.id)) {
+              <span class="mode ro" title="Space overview">SP</span>
             } @else if (isChanges(tab.id)) {
               <span class="mode ro" title="Changes">CH</span>
             } @else if (isFlow(tab.id)) {
@@ -191,6 +194,16 @@
         @for (flowPaneId of [flowOf(g)]; track flowPaneId) {
           @if (flowPaneId) {
             <app-flow-tab [paneId]="flowPaneId" (openAgent)="openAgentOutput($event)" />
+          }
+        }
+        @for (spaceIdOfGroup of [spaceOf(g)]; track spaceIdOfGroup) {
+          @if (spaceIdOfGroup) {
+            <app-space-overview
+              [space]="spaceIdOfGroup"
+              (outputRequested)="openPaneOutput($event)"
+              (explorerRequested)="openInExplorer($event)"
+              (deleteRequested)="closeSpace($event)"
+            />
           }
         }
         @for (changesDirOfGroup of [changesOf(g)]; track changesDirOfGroup) {

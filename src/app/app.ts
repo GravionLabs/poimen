@@ -47,6 +47,8 @@ import {
   changesDir,
   flowPane,
   flowTab,
+  spaceOfTab,
+  spaceTab,
   tabKind,
   tabPaneId,
   type EditorGroup,
@@ -60,6 +62,7 @@ import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
 import { ChangesView } from "./changes/changes-view";
+import { SpaceOverview } from "./space-overview/space-overview";
 import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
@@ -114,6 +117,7 @@ const ZOOM_STEP = 1;
     BottomPanel,
     FlowTab,
     ChangesView,
+    SpaceOverview,
     NgTemplateOutlet,
     PaneDialog,
     SpaceDialog,
@@ -204,6 +208,11 @@ export class App {
           }
           if (tabKind(tab.paneId) === "deliver") {
             return { id: tab.paneId, label: "Deliver", title: "Deliver loops" };
+          }
+          const spaceOf = spaceOfTab(tab.paneId);
+          if (spaceOf !== null) {
+            const name = snap.spaces.find((w) => w.space_id === spaceOf)?.label ?? spaceOf;
+            return { id: tab.paneId, label: `Space: ${name}`, title: `Overview of space ${name}` };
           }
           const changesOf = changesDir(tab.paneId);
           if (changesOf !== null) {
@@ -425,6 +434,12 @@ export class App {
       this.editor.openDeliver();
       return;
     }
+    if (id === "showSpaceOverview") {
+      const spaceId = this.focusedSpace();
+      if (spaceId) this.editor.openSpace(spaceId);
+      else this.spaceActions.notify("Show Space Overview: there is no focused space");
+      return;
+    }
     if (id === "showChanges") {
       this.showChangesOfActiveSpace();
       return;
@@ -599,7 +614,39 @@ export class App {
   /** Closes a space (asks first when it has panes); `undefined` is a no-op (no active space). */
   protected closeSpace(workspaceId: string | undefined): void {
     if (!workspaceId) return;
-    void this.spaceActions.requestClose(workspaceId).then((ids) => ids && this.onSpaceClosed(ids));
+    void this.spaceActions.requestClose(workspaceId).then((ids) => {
+      if (!ids) return;
+      this.onSpaceClosed(ids);
+      this.editor.close(spaceTab(workspaceId));
+    });
+  }
+
+  /** A click or Enter on a space row of the sidebar: its overview tab. */
+  protected openSpaceOverview(spaceId: string): void {
+    this.editor.openSpace(spaceId);
+  }
+
+  /** "Output" of the space overview: the pane's tab with the Output panel. */
+  protected openPaneOutput(paneId: string): void {
+    this.editor.open(paneId, true);
+    this.ui.selectPanelTab("output");
+  }
+
+  /** "Open in explorer" of the space overview: the explorer view with the directory picked. */
+  protected openInExplorer(dir: string): void {
+    this.explorerSelection.select(dir);
+    if (this.ui.activeView() !== "explorer" || this.ui.sidebarCollapsed()) {
+      this.selectView("explorer");
+    }
+  }
+
+  /** The space of the group's active tab when that is a space overview. */
+  protected spaceOf(group: EditorGroup): string | null {
+    return group.activeId === null ? null : spaceOfTab(group.activeId);
+  }
+
+  protected isSpace(id: string): boolean {
+    return tabKind(id) === "space";
   }
 
   /** A space closed in herdr: the tabs of its panes go with it. */

@@ -335,6 +335,8 @@ export class Sidebar {
   readonly selected = output<Terminal>();
   /** A second click on the same row within {@link DOUBLE_CLICK_MS}: pin the tab. */
   readonly pinned = output<Terminal>();
+  /** A space row was picked (click, Enter): the app opens its overview tab. */
+  readonly spaceOpened = output<string>();
   /** An entry of a row's context menu was picked. */
   readonly menuAction = output<SidebarMenuAction>();
   private last: { key: string; at: number } | null = null;
@@ -494,6 +496,7 @@ export class Sidebar {
     if (key.startsWith(WORKSPACE_PREFIX)) {
       if (this.layout() === "split") this.ui.setSplitWorkspace(key.slice(WORKSPACE_PREFIX.length));
       this.hold(key);
+      this.spaceOpened.emit(key.slice(WORKSPACE_PREFIX.length));
       return;
     }
     const row = this.store
