@@ -1,4 +1,10 @@
-<section class="issues">
+<section
+  class="issues"
+  tabindex="0"
+  aria-label="Issues"
+  (keydown)="onKey($event)"
+  (click)="onClick($event)"
+>
   <header>
     <h2>Issues</h2>
   </header>
@@ -64,7 +70,9 @@
               issues.selected()?.repo === tree.repo && issues.selected()?.number === i.number
             "
             [style.padding-left.px]="row.depth * 20"
+            [class.cursor]="issues.cursor() === tree.repo + '#' + i.number"
             [attr.data-number]="i.number"
+            [attr.data-repo]="tree.repo"
           >
             @if (row.node.children.length) {
               <button

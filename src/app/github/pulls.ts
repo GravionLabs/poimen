@@ -505,6 +505,6 @@ export class GithubPulls {
 }
 
 /** A failed command carries a `GhError` object; anything else is shown as text. */
-function ghErrorOf(err: unknown): GhError | string {
+export function ghErrorOf(err: unknown): GhError | string {
   return err && typeof err === "object" && "kind" in err ? (err as GhError) : String(err);
 }

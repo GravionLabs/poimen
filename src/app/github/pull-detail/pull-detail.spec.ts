@@ -10,6 +10,7 @@ import { IssuesSection } from "../issues-section";
 import { GithubIssues } from "../issues";
 import { MilestonesSection } from "../milestones-section";
 import { GithubPulls, type Pull, type PullDetail, type PullsResult } from "../pulls";
+import { IssueDetailPane } from "../issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail";
 
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
@@ -98,6 +99,7 @@ async function render(detail: () => unknown = () => DETAIL) {
   withTemplate(IssuesSection, "issues-section.html");
   withTemplate(MilestonesSection, "milestones-section.html");
   withTemplate(PullDetailPane, "pull-detail/pull-detail.html");
+  withTemplate(IssueDetailPane, "issue-detail/issue-detail.html");
   const fixture = TestBed.createComponent(GithubView);
   await fixture.whenStable();
   TestBed.inject(GithubPulls).scope.set("all");
@@ -207,7 +209,7 @@ describe("pull request detail pane", () => {
   });
 
   it("overlays the list under 1100 px through its stylesheet", () => {
-    const css = readFileSync("src/app/github/pull-detail/pull-detail.css", "utf8");
+    const css = readFileSync("src/app/github/detail-pane.css", "utf8");
     expect(css).toMatch(/@media \(max-width: 1099\.98px\)[\s\S]*position: absolute/);
   });
 });

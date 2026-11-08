@@ -6,7 +6,7 @@ import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
 import { GithubFilter } from "./github-filter";
 import { GithubMilestones } from "./milestones";
-import { REFRESH_MIN_MS, isGithubUrl, type Checks, type GhError } from "./pulls";
+import { REFRESH_MIN_MS, ghErrorOf, isGithubUrl, type Checks, type GhError } from "./pulls";
 
 /** A pull request linked to an issue (`LinkedPr` of `github_issues.rs`). */
 export interface LinkedPr {
@@ -179,6 +179,47 @@ export function issueProgress(
   return { done, total: issue.subTotal, percent: Math.round((done / issue.subTotal) * 100) };
 }
 
+/** A sub-issue or the parent in an issue's detail (`RelatedIssue` of `github_issues.rs`). */
+export interface RelatedIssue {
+  number: number;
+  title: string;
+  state: string;
+  /** `owner/name`. */
+  repo: string;
+}
+
+/** A pull request that closes the issue (`ClosingPr` of `github_issues.rs`). */
+export interface ClosingPr {
+  number: number;
+  title: string;
+  url: string;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  repo: string;
+}
+
+/** An issue in detail (`IssueDetail` of `github_issues.rs`). */
+export interface IssueDetail {
+  number: number;
+  title: string;
+  url: string;
+  body: string;
+  state: "OPEN" | "CLOSED";
+  stateReason: string | null;
+  author: string | null;
+  labels: string[];
+  assignees: string[];
+  milestone: string | null;
+  parent: RelatedIssue | null;
+  subIssues: RelatedIssue[];
+  pullRequests: ClosingPr[];
+  viewerCanUpdate: boolean;
+}
+
+/** The key of an issue over all repositories: `owner/name#number`. */
+export function issueKey(repo: string, number: number): string {
+  return `${repo}#${number}`;
+}
+
 /** One repository ready for the view. */
 export interface RepoTree {
   root: string;
@@ -208,6 +249,11 @@ export class GithubIssues {
   private readonly _loading = signal(false);
   private readonly _error = signal<string | null>(null);
   private readonly _selected = signal<{ repo: string; number: number } | null>(null);
+  private readonly _cursor = signal<string | null>(null);
+  private readonly _detailKey = signal<string | null>(null);
+  private readonly _detail = signal<IssueDetail | null>(null);
+  private readonly _detailError = signal<GhError | string | null>(null);
+  private readonly _detailLoading = signal(false);
   private last = 0;
 
   readonly result = this._result.asReadonly();
@@ -216,6 +262,13 @@ export class GithubIssues {
 
   /** The issue picked from elsewhere (a pull request's linked issue); highlighted in the tree. */
   readonly selected = this._selected.asReadonly();
+  /** Key (`owner/name#number`) of the row the keyboard cursor is on. */
+  readonly cursor = this._cursor.asReadonly();
+  /** Key of the issue whose detail pane is open. */
+  readonly detailKey = this._detailKey.asReadonly();
+  readonly detail = this._detail.asReadonly();
+  readonly detailError = this._detailError.asReadonly();
+  readonly detailLoading = this._detailLoading.asReadonly();
   readonly state = signal<StateFilter>("open");
   readonly label = signal<string | null>(null);
   readonly level = signal<Level | null>(null);
@@ -269,6 +322,22 @@ export class GithubIssues {
   /** Repositories that were read, for the shared repository filter. */
   readonly repoNames = computed(() => (this._result() ?? []).map((r) => r.repo));
 
+  /** The issue of the open detail pane as the list knows it (absent when filtered out). */
+  readonly detailIssue = computed(() => {
+    const key = this._detailKey();
+    if (key === null) return null;
+    for (const r of this.okRepos()) {
+      const issue = r.issues.find((i) => issueKey(r.repo, i.number) === key);
+      if (issue) return { repo: r.repo, issue };
+    }
+    return null;
+  });
+
+  /** The visible rows over all repositories, in screen order. */
+  private readonly visibleKeys = computed(() =>
+    this.trees().flatMap((t) => this.rows(t).map((r) => issueKey(t.repo, r.node.issue.number))),
+  );
+
   /** The visible rows of one repository. */
   rows(tree: RepoTree): IssueRow[] {
     return flattenTree(tree.roots, (n) => this.isCollapsed(tree.repo, n));
@@ -276,6 +345,67 @@ export class GithubIssues {
 
   select(repo: string, number: number): void {
     this._selected.set({ repo, number });
+    this._cursor.set(issueKey(repo, number));
+  }
+
+  /** Moves the keyboard cursor by `delta` rows within the visible rows (clamped). */
+  moveCursor(delta: number): void {
+    const keys = this.visibleKeys();
+    if (!keys.length) return;
+    const at = this._cursor() === null ? -1 : keys.indexOf(this._cursor()!);
+    const next = Math.min(
+      keys.length - 1,
+      Math.max(0, at < 0 ? (delta > 0 ? 0 : keys.length - 1) : at + delta),
+    );
+    this._cursor.set(keys[next]);
+  }
+
+  /** Opens the detail pane of the cursor row, if any. */
+  openCursor(): void {
+    const key = this._cursor();
+    const at = key === null ? -1 : key.lastIndexOf("#");
+    if (key !== null && at > 0) void this.openDetail(key.slice(0, at), Number(key.slice(at + 1)));
+  }
+
+  /**
+   * Opens the detail pane of an issue and reads its detail (the backend caches for 30 s). A
+   * repository the list did not read has no directory to ask, so nothing opens.
+   */
+  async openDetail(repo: string, number: number): Promise<void> {
+    const root = (this._result() ?? []).find(
+      (r) => r.repo.toLowerCase() === repo.toLowerCase(),
+    )?.root;
+    if (root === undefined) return;
+    const key = issueKey(repo, number);
+    this._selected.set({ repo, number });
+    this._cursor.set(key);
+    this._detailKey.set(key);
+    this._detail.set(null);
+    this._detailError.set(null);
+    this._detailLoading.set(true);
+    try {
+      const detail = await this.bridge.invoke<IssueDetail>("github_issue_detail", {
+        root,
+        number,
+      });
+      if (this._detailKey() === key) this._detail.set(detail);
+    } catch (err) {
+      if (this._detailKey() === key) this._detailError.set(ghErrorOf(err));
+    } finally {
+      if (this._detailKey() === key) this._detailLoading.set(false);
+    }
+  }
+
+  closeDetail(): void {
+    this._detailKey.set(null);
+    this._detail.set(null);
+    this._detailError.set(null);
+    this._detailLoading.set(false);
+  }
+
+  /** True when `repo` was read, so its issues can open in the pane. */
+  knows(repo: string): boolean {
+    return (this._result() ?? []).some((r) => r.repo.toLowerCase() === repo.toLowerCase());
   }
 
   isCollapsed(repo: string, number: number): boolean {

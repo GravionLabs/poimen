@@ -4,6 +4,7 @@ import { GithubIssues } from "./issues";
 import { GithubMilestones } from "./milestones";
 import { IssuesSection } from "./issues-section";
 import { GithubFilter } from "./github-filter";
+import { IssueDetailPane } from "./issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail/pull-detail";
 import { MilestonesSection } from "./milestones-section";
 import {
@@ -21,7 +22,7 @@ import {
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
   selector: "app-github-view",
-  imports: [MilestonesSection, IssuesSection, PullDetailPane],
+  imports: [MilestonesSection, IssuesSection, PullDetailPane, IssueDetailPane],
   templateUrl: "./github-view.html",
   styleUrl: "./github-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -69,10 +70,11 @@ export class GithubView {
     this.loadAll(false);
   }
 
-  /** Escape closes the detail pane of a pull request. */
+  /** Escape closes the detail pane of a pull request or an issue. */
   @HostListener("keydown.escape")
   protected onEscape(): void {
     this.pulls.closeDetail();
+    this.issues.closeDetail();
   }
 
   /** The tab regained focus: read again, but never faster than the 30 s cache. */
