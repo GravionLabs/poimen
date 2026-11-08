@@ -1,6 +1,6 @@
 //! The terminal backend poimen talks to, and starting it when it is not running (ADR 0003).
 //!
-//! poimen never owns pane state and never stops the server: `ensure_running` only starts a missing
+//! poimen never owns pane state and stops the server only on a confirmed restart or quit: `ensure_running` only starts a missing
 //! server, detached from poimen, and waits until it answers. A server that already answers (also
 //! one started by the herdr TUI) is left alone. A later `poimen-server` backend implements the same
 //! trait.
@@ -42,6 +42,11 @@ pub enum Outcome {
     Disabled,
     /// poimen started the server and it answers.
     Started,
+    /// A server answers but is older than the one poimen bundles. Left running: stopping it ends
+    /// every terminal, so it needs the user's consent (`Backend::restart_server`).
+    Outdated { running: String, bundled: String },
+    /// A server answers with another protocol version. No second server is started on its socket.
+    Incompatible { running: String, protocol: u32 },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -196,6 +201,15 @@ pub trait Backend: Send + Sync {
     /// Makes sure the backend answers: returns at once when it does, otherwise starts it (when
     /// `auto_start` allows) and waits. Never stops or restarts a running backend.
     fn ensure_running(&self, auto_start: bool) -> Result<Outcome, StartError>;
+    /// Stops the running server and starts the bundled one. Ends every terminal: only after the
+    /// user confirmed. Not supported by every backend.
+    fn restart_server(&self) -> Result<Outcome, StartError> {
+        Err(StartError::Other("this backend cannot be restarted".into()))
+    }
+    /// Stops the running server (the confirmed "Quit poimen and stop server"). Ends every terminal.
+    fn stop_server(&self) -> Result<(), StartError> {
+        Err(StartError::Other("this backend cannot be stopped".into()))
+    }
     /// Version and protocol; `None` when unreachable or too old to say.
     fn info(&self) -> Option<BackendInfo>;
     /// Lists spaces, tabs and terminals.
@@ -631,26 +645,58 @@ impl<R: Runner + Send + Sync> Backend for HerdrBackend<R> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendStatus {
-    /// `running`, `started`, `disabled` or `failed`.
+    /// `running`, `started`, `disabled`, `outdated`, `incompatible` or `failed`.
     pub state: &'static str,
     /// Why the start failed; `None` otherwise.
     pub reason: Option<String>,
+    /// The version of the running server (`outdated`, `incompatible`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running: Option<String>,
+    /// The version poimen bundles (`outdated`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundled: Option<String>,
+    /// The protocol version of the running server (`incompatible`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<u32>,
 }
 
 impl From<Result<Outcome, StartError>> for BackendStatus {
     fn from(result: Result<Outcome, StartError>) -> Self {
+        let base = Self {
+            state: "failed",
+            reason: None,
+            running: None,
+            bundled: None,
+            protocol: None,
+        };
         match result {
-            Ok(outcome) => Self {
-                state: match outcome {
-                    Outcome::AlreadyRunning => "running",
-                    Outcome::Started => "started",
-                    Outcome::Disabled => "disabled",
-                },
-                reason: None,
+            Ok(Outcome::AlreadyRunning) => Self {
+                state: "running",
+                ..base
+            },
+            Ok(Outcome::Started) => Self {
+                state: "started",
+                ..base
+            },
+            Ok(Outcome::Disabled) => Self {
+                state: "disabled",
+                ..base
+            },
+            Ok(Outcome::Outdated { running, bundled }) => Self {
+                state: "outdated",
+                running: Some(running),
+                bundled: Some(bundled),
+                ..base
+            },
+            Ok(Outcome::Incompatible { running, protocol }) => Self {
+                state: "incompatible",
+                running: Some(running),
+                protocol: Some(protocol),
+                ..base
             },
             Err(err) => Self {
-                state: "failed",
                 reason: Some(err.to_string()),
+                ..base
             },
         }
     }
@@ -914,6 +960,21 @@ mod tests {
         assert_eq!((ok.state, ok.reason), ("started", None));
         let off: BackendStatus = Ok(Outcome::Disabled).into();
         assert_eq!(off.state, "disabled");
+        let old: BackendStatus = Ok(Outcome::Outdated {
+            running: "0.1.0".into(),
+            bundled: "0.2.0".into(),
+        })
+        .into();
+        assert_eq!(
+            serde_json::to_value(old).unwrap(),
+            serde_json::json!({"state": "outdated", "reason": null, "running": "0.1.0", "bundled": "0.2.0"})
+        );
+        let other: BackendStatus = Ok(Outcome::Incompatible {
+            running: "0.1.0".into(),
+            protocol: 2,
+        })
+        .into();
+        assert_eq!((other.state, other.protocol), ("incompatible", Some(2)));
         let bad: BackendStatus = Err(StartError::NotFound).into();
         assert_eq!(bad.state, "failed");
         assert!(bad.reason.unwrap().contains("herdr"));

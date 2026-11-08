@@ -77,6 +77,8 @@ import { ShortcutsOverview } from "./core/shortcuts-overview";
 import { SpaceDialog } from "./space-dialog/space-dialog";
 import { TaskDialog } from "./task-dialog/task-dialog";
 import { HooksDialog } from "./hooks-dialog/hooks-dialog";
+import { ServerDialog } from "./server-dialog/server-dialog";
+import { ServerRestart } from "./core/server-restart";
 import { ResultDialog } from "./result-dialog/result-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
@@ -122,6 +124,7 @@ const ZOOM_STEP = 1;
     PaneDialog,
     SpaceDialog,
     HooksDialog,
+    ServerDialog,
     TrustDialog,
     ResultDialog,
     AgentPickerView,
@@ -138,6 +141,7 @@ export class App {
   protected readonly store = inject(HerdrStore);
   protected readonly updater = inject(Updater);
   protected readonly usage = inject(Usage);
+  protected readonly serverRestart = inject(ServerRestart);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
@@ -454,6 +458,10 @@ export class App {
     }
     if (id === "cleanupTasks") {
       this.cleanupInActiveRepo();
+      return;
+    }
+    if (id === "quitAndStopServer") {
+      this.serverRestart.askQuit();
       return;
     }
     if (id === "projectTeardown") {

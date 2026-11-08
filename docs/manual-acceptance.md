@@ -94,9 +94,15 @@ was shown.
 ### M-8 Update to the next version
 
 - **Steps:** run the previous version with a running agent. Click **Check for updates**, then
-  **Install and restart**.
-- **Expected:** poimen restarts into the new version. The terminals and the agent still run. The
-  hooks still report status. Copies of other server versions are removed once they stop.
+  **Install and restart**. In the new version, read the notice "poimen-server <old> is running,
+  <new> is installed": first **Later** (the old server and its terminals stay), then open the
+  notice again after a restart of poimen, **Restart server** and read the confirmation.
+- **Expected:** the update details say the terminals end when the server is restarted. poimen
+  restarts into the new version. The terminals and the agent still run until **Restart server** is
+  confirmed; the confirmation names the running terminals that end. After it the bundled server
+  runs and the notice is gone. The hooks report status again. Copies of other server versions are
+  removed once they stop. The palette entry **Quit poimen and stop server** asks the same
+  confirmation, stops the server and quits.
 - **Source:** #46, `docs/updater.md`.
 
 ### M-9 App Translocation of a moved app
@@ -171,7 +177,10 @@ The open M10 checks (W-S-9 to W-S-14) run once, here. The `.msi` section repeats
 - **Steps:** run the previous version with a running agent and a PowerShell terminal. Check for
   updates, then install and restart.
 - **Expected:** the update installs although `poimen-server.exe` of the old version runs. The
-  terminals survive. The new version starts its own copy only when no server answers.
+  terminals survive until the notice "poimen-server <old> is running, <new> is installed" is
+  answered with **Restart server** (the confirmation names the terminals that end); **Later**
+  keeps the old server. The new version starts its own copy only when no server answers. No second
+  server starts against the taken pipe.
 - **Source:** #46, `docs/updater.md`.
 
 ### W-S-9 Breakaway denied inside a job
@@ -276,7 +285,8 @@ section.
 
 - **Steps:** as W-S-8, with the next `.msi` (or with the in-app update if it offers the `.msi`).
   Record which package the update installed.
-- **Expected:** as W-S-8. The terminals survive.
+- **Expected:** as W-S-8, including the outdated-server notice, **Restart server** with its
+  confirmation and **Later**. The terminals survive until the restart is confirmed.
 - **Source:** #46, `docs/updater.md`.
 
 ## Linux: `.deb`
@@ -331,8 +341,10 @@ section.
 
 - **Steps:** install the next `.deb` (or use the in-app update, if it offers the package), restart
   poimen.
-- **Expected:** poimen runs the new version. The server that still runs keeps the terminals. The hooks
-  report status again after the server restarts.
+- **Expected:** poimen runs the new version and shows "poimen-server <old> is running, <new> is
+  installed". The server that still runs keeps the terminals until **Restart server** is confirmed
+  (the confirmation names the terminals that end); **Later** keeps it. The hooks report status
+  again after the server restarts.
 - **Source:** #46, `docs/updater.md`.
 
 ## Linux: `.rpm`
@@ -387,7 +399,8 @@ section on the stable release once it is published.
 ### L-R-8 Update to the next version
 
 - **Steps:** as L-D-8, with the next `.rpm`.
-- **Expected:** as L-D-8.
+- **Expected:** as L-D-8, including the notice, **Restart server** with its confirmation and
+  **Later**.
 - **Source:** #46, `docs/updater.md`.
 
 ## Linux: `.AppImage`

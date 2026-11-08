@@ -1,0 +1,55 @@
+@if (restart.action(); as action) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Cancel"
+    (click)="restart.cancel()"
+  ></button>
+  <div
+    class="dialog"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Stop poimen-server"
+    (keydown.escape)="restart.cancel()"
+  >
+    <h2>
+      @if (action === "restart") {
+        Restart poimen-server?
+      } @else {
+        Quit poimen and stop poimen-server?
+      }
+    </h2>
+    @if (restart.terminals().length > 0) {
+      <p class="hint">
+        {{ restart.terminals().length }}
+        {{ restart.terminals().length === 1 ? "terminal ends" : "terminals end" }}:
+      </p>
+      <ul class="terminals" aria-label="Terminals that end">
+        @for (name of restart.terminals(); track $index) {
+          <li>{{ name }}</li>
+        }
+      </ul>
+    } @else {
+      <p class="hint">No terminal is running.</p>
+    }
+    <p class="hint">
+      @if (action === "restart") {
+        The bundled server starts afterwards.
+      } @else {
+        poimen quits after the server stopped.
+      }
+    </p>
+    @if (restart.error(); as error) {
+      <p class="error" role="alert">{{ error }}</p>
+    }
+    <div class="buttons">
+      <button type="button" class="cancel" [disabled]="restart.busy()" (click)="restart.cancel()">
+        Cancel
+      </button>
+      <button type="button" class="confirm" [disabled]="restart.busy()" (click)="restart.confirm()">
+        {{ action === "restart" ? "Restart server" : "Quit and stop server" }}
+      </button>
+    </div>
+  </div>
+}

@@ -142,6 +142,9 @@ struct Inner {
     terminals: Vec<TerminalEntry>,
 }
 
+/// How long `server.shutdown` waits so its answer reaches the client first.
+const SHUTDOWN_DELAY: Duration = Duration::from_millis(100);
+
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
     subscribers: Mutex<Vec<Sender<Event>>>,
@@ -151,6 +154,8 @@ pub(crate) struct Shared {
     scrollback: usize,
     /// The scheme colors for terminal queries, shared with every terminal's stream.
     colors: Arc<RwLock<Colors>>,
+    /// Run once the terminals are ended after `server.shutdown`; the binary exits the process.
+    on_shutdown: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl Shared {
@@ -283,6 +288,7 @@ impl Server {
             state_file: config.state_file,
             scrollback: config.scrollback,
             colors: Arc::default(),
+            on_shutdown: Mutex::new(None),
         };
         Ok(Self {
             listener,
@@ -293,6 +299,13 @@ impl Server {
 
     pub fn socket(&self) -> &Path {
         &self.shared.socket
+    }
+
+    /// Sets what runs after a `server.shutdown` ended the terminals and removed the socket; the
+    /// `poimen-server` binary exits the process there. Without it the server only stops serving
+    /// its terminals (tests use this to observe a shutdown without ending their process).
+    pub fn on_shutdown(&self, f: impl FnOnce() + Send + 'static) {
+        *lock(&self.shared.on_shutdown) = Some(Box::new(f));
     }
 
     /// Accepts connections forever, one thread each.
@@ -574,6 +587,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.create" => terminal_create(shared, parsed(request)?),
         "terminal.rename" => terminal_rename(shared, parsed(request)?),
         "terminal.close" => terminal_close(shared, parsed(request)?),
+        "server.shutdown" => server_shutdown(shared),
         "server.set_colors" => server_set_colors(shared, parsed(request)?),
         "terminal.report_agent" => terminal_report_agent(shared, parsed(request)?),
         "terminal.report_tokens" => terminal_report_tokens(shared, parsed(request)?),
@@ -582,6 +596,38 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.resize" => terminal_resize(shared, parsed(request)?, ctx),
         other => Err((ErrorCode::UnknownMethod, format!("unknown method {other}"))),
     }
+}
+
+/// Answers, then (after the answer had time to leave) ends every terminal, removes the socket
+/// and runs the hook of [`Server::on_shutdown`]. The app asks only after the user confirmed: this
+/// ends every terminal.
+fn server_shutdown(shared: &Arc<Shared>) -> ApiResult {
+    let shared = Arc::clone(shared);
+    thread::spawn(move || {
+        thread::sleep(SHUTDOWN_DELAY);
+        {
+            let mut inner = lock(&shared.inner);
+            let entries = std::mem::take(&mut inner.terminals);
+            for entry in entries {
+                entry.stream.closed();
+                if let Some(pty) = entry.pty {
+                    pty.kill();
+                }
+                shared.publish(Event::TerminalClosed {
+                    terminal_id: entry.info.id,
+                    space_id: entry.info.space_id,
+                });
+            }
+        }
+        // Not on Windows: a named pipe has no file, and it goes with the process.
+        if cfg!(unix) {
+            let _ = std::fs::remove_file(&shared.socket);
+        }
+        if let Some(hook) = lock(&shared.on_shutdown).take() {
+            hook();
+        }
+    });
+    Ok(json!({ "shutting_down": true }))
 }
 
 fn require_name(name: &str) -> Result<String, (ErrorCode, String)> {

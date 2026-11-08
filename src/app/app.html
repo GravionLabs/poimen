@@ -93,6 +93,9 @@
   [info]="store.info()"
   [backend]="store.backendKind()"
   [notice]="spaceActions.warning()"
+  [serverNotice]="serverRestart.notice()"
+  (restartServer)="serverRestart.askRestart()"
+  (laterServer)="serverRestart.later()"
   (jump)="jumpToWaiting()"
   [panelOpen]="ui.panelOpen()"
   [panelShortcut]="panelShortcut()"
@@ -107,6 +110,7 @@
 <app-result-dialog />
 <app-agent-picker />
 <app-hooks-dialog />
+<app-server-dialog />
 <app-task-dialog />
 <app-agent-action-dialog />
 <app-shortcuts-dialog />
