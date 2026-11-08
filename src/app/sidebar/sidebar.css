@@ -130,7 +130,8 @@
   flex: 1;
   min-width: 0;
   gap: 6px;
-  align-items: center;
+  /* Badge, gear, close and chevron sit at the end of line 1 (16px high), not centered on both lines. */
+  align-items: flex-start;
   min-height: 16px;
   line-height: 16px;
   color: var(--h-text-muted-color);
@@ -220,7 +221,8 @@
 }
 
 .space-name {
-  flex: 0 1 auto;
+  /* Shrinks first (weight 4): state text and the actions keep their width at the narrowest sidebar. */
+  flex: 0 4 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -270,6 +272,8 @@
 /* Expand/collapse state at the right edge of a workspace row; a click toggles (see Sidebar.toggle). */
 .chevron {
   flex: none;
+  align-self: flex-start;
+  margin-top: 4px;
   margin-left: auto;
   width: 6px;
   height: 6px;
@@ -488,7 +492,7 @@
 /* Unread: finished while not viewed; on a workspace row the count of its unread panes. */
 .badge {
   flex: none;
-  align-self: center;
+  align-self: flex-start;
   margin-left: auto;
   min-width: 16px;
   padding: 0 5px;
