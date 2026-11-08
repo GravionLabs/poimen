@@ -3,7 +3,8 @@
   <p class="hint">
     A template gives a new space an agent and, optionally, a pane layout. It applies to the
     directories under its directory, to the repositories of its remote, or to both. The best match
-    wins: directory and remote, then remote, then the longest directory.
+    wins: directory and remote, then remote, then the longest directory. A template with neither is
+    the default for every other directory.
   </p>
   @for (w of warnings(); track $index) {
     <p class="error" role="alert">{{ w }}</p>
@@ -133,9 +134,6 @@
         }
       </div>
       @if (errors().remote; as m) {
-        <p class="field-error">{{ m }}</p>
-      }
-      @if (errors().match; as m) {
         <p class="field-error">{{ m }}</p>
       }
       <div class="fields">

@@ -227,12 +227,11 @@ describe("SpaceTemplatesEditor", () => {
       expect(button("Save").disabled).toBe(false);
     });
 
-    it("requires a directory or a remote, and an absolute directory", async () => {
+    it("allows no match (the default template) and requires an absolute directory", async () => {
       const { host, button, input, type, choose, select, press } = await setup([WORK]);
       press("Edit Work");
       type(input("dir"), "");
-      expect(host.textContent).toContain("Set a directory, a remote, or both");
-      expect(button("Save").disabled).toBe(true);
+      expect(button("Save").disabled).toBe(false);
       type(input("dir"), "relative/path");
       expect(host.textContent).toContain("absolute directory");
       type(input("dir"), "C:\\src");
