@@ -402,6 +402,7 @@ export class App {
       return;
     }
     const githubPage = {
+      githubInbox: "inbox",
       githubPulls: "pulls",
       githubIssues: "issues",
       githubMilestones: "milestones",

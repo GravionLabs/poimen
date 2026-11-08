@@ -94,10 +94,10 @@ export function parseLineComments(value: unknown): Record<string, CommentSet> {
   return out;
 }
 
-export type GithubPage = "pulls" | "issues" | "milestones";
+export type GithubPage = "inbox" | "pulls" | "issues" | "milestones";
 
 export function isGithubPage(value: unknown): value is GithubPage {
-  return value === "pulls" || value === "issues" || value === "milestones";
+  return value === "inbox" || value === "pulls" || value === "issues" || value === "milestones";
 }
 
 export interface LayoutState {
@@ -296,7 +296,7 @@ export class UiState {
   );
   /** The selected sub-page of the GitHub tab. */
   readonly githubPage = signal<GithubPage>(
-    isGithubPage(this.initial.githubPage) ? this.initial.githubPage : "pulls",
+    isGithubPage(this.initial.githubPage) ? this.initial.githubPage : "inbox",
   );
   /** Whether the GitHub tab lists repositories without matches (hidden by default). */
   readonly githubShowEmpty = signal(this.initial.githubShowEmpty === true);
@@ -499,7 +499,7 @@ export class UiState {
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,
-      githubPage: this.githubPage() === "pulls" ? undefined : this.githubPage(),
+      githubPage: this.githubPage() === "inbox" ? undefined : this.githubPage(),
       githubShowEmpty: this.githubShowEmpty() ? true : undefined,
       changesLayout: this.changesLayout() === "inline" ? "inline" : undefined,
       lineComments: Object.keys(this.lineComments()).length ? this.lineComments() : undefined,

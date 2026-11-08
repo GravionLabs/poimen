@@ -27,7 +27,6 @@
         Show empty repositories
       </label>
       <nav aria-label="GitHub sub-pages" class="nav">
-        <!-- An Inbox entry (#344) goes here, above the sub-pages. -->
         @for (p of pages(); track p.id) {
           <button
             type="button"
@@ -48,6 +47,9 @@
     </aside>
     <main class="content">
       @switch (ui.githubPage()) {
+        @case ("inbox") {
+          <app-github-inbox />
+        }
         @case ("pulls") {
           @if (pulls.error(); as err) {
             <p class="problem" role="alert">Could not read the pull requests: {{ err }}</p>
