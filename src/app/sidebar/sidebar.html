@@ -230,6 +230,14 @@
       [class.active]="m.active"
       [class.attention]="rings(d.row.pane.terminal_id)"
       [title]="rowTitle(d.row)"
+      [attr.draggable]="canDragTab() ? 'true' : null"
+      [class.dragging]="tabDrag()?.pane === d.row.pane.terminal_id"
+      [class.drop-before]="tabMark()?.pane === d.row.pane.terminal_id && !tabMark()!.after"
+      [class.drop-after]="tabMark()?.pane === d.row.pane.terminal_id && tabMark()!.after"
+      (dragstart)="tabDragStart($event, d.row.pane)"
+      (dragover)="tabDragOver($event, d.row.pane)"
+      (drop)="tabDrop($event, d.row.pane)"
+      (dragend)="tabDragEnd()"
       (contextmenu)="openMenu($event, 'pane', d.row.pane.terminal_id)"
     >
       <span

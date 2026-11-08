@@ -14,14 +14,17 @@ import { Sidebar } from "./sidebar";
 
 const node = (id: string, n: number): SpaceNode => ({
   workspace: { space_id: id, label: `Space ${id}`, number: n, agent_status: "idle" },
-  rows: [
-    {
-      pane: { terminal_id: `${id}:p1`, tab_id: `${id}:t1`, space_id: id, agent_status: "idle" },
-      tab: "main",
-      name: "shell",
-      worktree: false,
+  rows: [1, 2].map((t) => ({
+    pane: {
+      terminal_id: `${id}:p${t}`,
+      tab_id: `${id}:t${t}`,
+      space_id: id,
+      agent_status: "idle" as const,
     },
-  ],
+    tab: "main",
+    name: `shell ${id}.${t}`,
+    worktree: false,
+  })),
 });
 
 async function setup() {
@@ -53,6 +56,9 @@ async function setup() {
     add: { imports: [SplitPaneStub] },
   });
   const reorder = vi.spyOn(TestBed.inject(SpaceActions), "reorder").mockImplementation(() => {});
+  const reorderTabs = vi
+    .spyOn(TestBed.inject(SpaceActions), "reorderTabs")
+    .mockImplementation(() => {});
   const fixture = TestBed.createComponent(Sidebar);
   const settle = async () => {
     for (let i = 0; i < 3; i++) {
@@ -73,7 +79,7 @@ async function setup() {
     await settle();
     return event;
   };
-  return { fixture, root, reorder, rowOf, fire, settle };
+  return { fixture, root, reorder, reorderTabs, rowOf, fire, settle };
 }
 
 describe("Sidebar space drag and drop", () => {
@@ -125,5 +131,46 @@ describe("Sidebar space drag and drop", () => {
     await fire(rowOf("w2"), "dragover", 5);
     await fire(rowOf("w2"), "drop");
     expect(reorder).not.toHaveBeenCalled();
+  });
+});
+
+describe("Sidebar tab drag and drop", () => {
+  const tabRow = (root: HTMLElement, id: string, t: number) =>
+    [...root.querySelectorAll<HTMLElement>(".row")].find((e) =>
+      e.textContent?.includes(`shell ${id}.${t}`),
+    )!;
+
+  it("shows a marker and reorders inside the same space", async () => {
+    const { root, fire, reorderTabs } = await setup();
+    expect(tabRow(root, "w1", 1).getAttribute("draggable")).toBe("true");
+    await fire(tabRow(root, "w1", 1), "dragstart");
+    await fire(tabRow(root, "w1", 2), "dragover", 5);
+    expect(tabRow(root, "w1", 2).classList).toContain("drop-after");
+    await fire(tabRow(root, "w1", 2), "drop");
+    expect(reorderTabs).toHaveBeenCalledExactlyOnceWith("w1", "w1:t1", "w1:t2", true);
+    expect(tabRow(root, "w1", 2).classList).not.toContain("drop-after");
+  });
+
+  it("refuses a drop on a tab of another space: no marker, nothing changes", async () => {
+    const { root, fire, reorderTabs } = await setup();
+    await fire(tabRow(root, "w1", 1), "dragstart");
+    const over = await fire(tabRow(root, "w2", 1), "dragover", 5);
+    expect(over.defaultPrevented).toBe(false);
+    expect(tabRow(root, "w2", 1).classList).not.toContain("drop-after");
+    await fire(tabRow(root, "w2", 1), "drop");
+    expect(reorderTabs).not.toHaveBeenCalled();
+  });
+
+  it("does not start a drag while a filter is active", async () => {
+    const { root, fire, reorderTabs, settle } = await setup();
+    const input = root.querySelector<HTMLInputElement>("input.filter")!;
+    input.value = "shell";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    expect(tabRow(root, "w1", 1).getAttribute("draggable")).toBeNull();
+    const start = await fire(tabRow(root, "w1", 1), "dragstart");
+    expect(start.defaultPrevented).toBe(true);
+    await fire(tabRow(root, "w1", 2), "drop");
+    expect(reorderTabs).not.toHaveBeenCalled();
   });
 });

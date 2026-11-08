@@ -121,9 +121,13 @@ export class HerdrStore {
   readonly spaceOrder = computed<readonly string[]>(() => this.ui?.spaceOrder() ?? []);
   /** The spaces in the user's order; every list, shortcut and neighbour lookup reads this. */
   readonly orderedSpaces = computed(() => orderSpaces(this._snapshot().spaces, this.spaceOrder()));
-  readonly tree = computed(() => buildTree(this._snapshot(), this.spaceOrder()));
+  /** The user's tab order per space (ids); tabs outside it follow by number. */
+  readonly tabOrder = computed<Readonly<Record<string, readonly string[]>>>(
+    () => this.ui?.tabOrder() ?? {},
+  );
+  readonly tree = computed(() => buildTree(this._snapshot(), this.spaceOrder(), this.tabOrder()));
   readonly spaces = computed(() =>
-    buildSpaces(this._snapshot(), this._repos(), this._pulls(), this.spaceOrder()),
+    buildSpaces(this._snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
   );
   readonly waiting = computed(() => waitingCount(this._snapshot().terminals));
   readonly panes = computed(
@@ -201,6 +205,13 @@ export class HerdrStore {
       this._snapshot.set(snapshot);
       // Closed spaces leave the stored order (not on an empty read, which may be transient).
       if (snapshot.spaces.length) this.ui?.pruneSpaceOrder(snapshot.spaces.map((s) => s.space_id));
+      if (snapshot.spaces.length) {
+        const alive = new Map<string, string[]>();
+        for (const tab of snapshot.tabs) {
+          alive.set(tab.space_id, [...(alive.get(tab.space_id) ?? []), tab.tab_id]);
+        }
+        this.ui?.pruneTabOrder(alive);
+      }
       this._loaded.set(true);
       if (!this._watchLost()) this._connectionError.set(null);
       if (!this._info()) await this.readInfo();

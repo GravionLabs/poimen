@@ -1,5 +1,12 @@
 import { Injectable, inject, signal } from "@angular/core";
-import { agentKind, orderSpaces, pathSegments, reorderIds, type Snapshot } from "./herdr";
+import {
+  agentKind,
+  orderSpaces,
+  orderTabs,
+  pathSegments,
+  reorderIds,
+  type Snapshot,
+} from "./herdr";
 import { HerdrStore } from "./herdr-store";
 import type { TemplateHint } from "./space-templates";
 import { TauriBridge } from "./tauri";
@@ -361,6 +368,17 @@ export class SpaceActions {
     const ids = this.store.orderedSpaces().map((s) => s.space_id);
     const next = reorderIds(ids, sourceId, targetId, after);
     if (next) this.ui.setSpaceOrder(next);
+  }
+
+  /**
+   * Drops tab `sourceTab` before or after `targetTab` inside space `spaceId`. Tabs of another space,
+   * unknown tabs, the same tab or a drop that leaves the order as it is change nothing.
+   */
+  reorderTabs(spaceId: string, sourceTab: string, targetTab: string, after: boolean): void {
+    const tabs = this.store.snapshot().tabs.filter((t) => t.space_id === spaceId);
+    const ids = orderTabs(tabs, this.store.tabOrder()[spaceId]).map((t) => t.tab_id);
+    const next = reorderIds(ids, sourceTab, targetTab, after);
+    if (next) this.ui.setTabOrder(spaceId, next);
   }
 
   /** Moves a space one step up (`-1`) or down (`1`); at either end nothing happens. */
