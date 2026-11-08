@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Tests scripts/release-checksums.sh: run `bash scripts/release-checksums.test.sh` (release.yml runs it before it uses the script).
+# The checks pass their values as positional arguments to bash -c, so the single quotes are intended.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 script="$(cd "$(dirname "$0")" && pwd)/release-checksums.sh"
