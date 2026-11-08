@@ -44,7 +44,7 @@ new one.
 ## Pre-releases
 
 `release.yml` dispatched on `release/next` with `prerelease: true` publishes a GitHub **pre-release**
-`v<x.y.z>-rc.<n>` with installers (no `.msi`) for the manual acceptance. Its `latest.json` is attached to
+`v<x.y.z>-rc.<n>` with installers (no `.msi` and no `.rpm`) for the manual acceptance. Its `latest.json` is attached to
 that pre-release only.
 
 - Stable installs never see it: the endpoint `releases/latest/download/latest.json` resolves through
