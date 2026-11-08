@@ -1,0 +1,65 @@
+@if (node(); as n) {
+  <header class="head">
+    <h2>Space: {{ n.workspace.label }}</h2>
+    <div class="space-actions" role="group" aria-label="Space actions">
+      <button type="button" class="act-new" (click)="newPane()">New pane</button>
+      <button
+        type="button"
+        class="act-explorer"
+        [disabled]="!directory()"
+        (click)="explorerRequested.emit(directory()!)"
+      >
+        Open in explorer
+      </button>
+      <button type="button" class="act-pr" [disabled]="!pullUrl()" (click)="openPull()">
+        Open PR
+      </button>
+      <button type="button" class="act-delete" (click)="deleteRequested.emit(n.workspace.space_id)">
+        Delete space
+      </button>
+    </div>
+  </header>
+  @if (rows().length === 0) {
+    <p class="empty">This space has no panes.</p>
+  } @else {
+    <table aria-label="Panes">
+      <thead>
+        <tr>
+          <th>Pane</th>
+          <th>Kind</th>
+          <th>Session</th>
+          <th>Last activity</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of rows(); track row.paneId) {
+          <tr class="pane">
+            <td class="label">{{ row.label }}</td>
+            <td class="kind">{{ row.kind === "agent" ? "Agent " + row.agent : "Terminal" }}</td>
+            <td class="status">
+              <span class="dot status-{{ row.status }}"></span>{{ row.status }}
+            </td>
+            <td class="activity">{{ activity(row.activityAt) }}</td>
+            <td class="actions">
+              <button type="button" class="act-focus" (click)="focus(row.paneId)">Focus</button>
+              @if (row.kind === "agent") {
+                <button type="button" class="act-restart" (click)="restart(row.paneId)">
+                  Restart
+                </button>
+                <button type="button" class="act-flow" (click)="flow(row.paneId)">Flow</button>
+                <button type="button" class="act-output" (click)="outputRequested.emit(row.paneId)">
+                  Output
+                </button>
+              }
+              <button type="button" class="act-rename" (click)="rename(row.paneId)">Rename</button>
+              <button type="button" class="act-close" (click)="close(row.paneId)">Close</button>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+} @else {
+  <p class="empty">This space no longer exists.</p>
+}

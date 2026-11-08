@@ -185,6 +185,18 @@ describe("Sidebar with the real hx-tree", () => {
     expect(workspace().getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("opens the overview of the space on a click on its row, not on a pane row", async () => {
+    const { fixture, workspace, settle, click, selected } = await setup();
+    const opened: string[] = [];
+    fixture.componentInstance.spaceOpened.subscribe((id) => opened.push(id));
+    workspace().querySelector<HTMLElement>(".space")!.click();
+    await settle();
+    expect(opened).toEqual(["w1"]);
+    await click("claude");
+    expect(opened).toEqual(["w1"]);
+    expect(selected).toEqual(["w1:p1"]);
+  });
+
   describe("inline rename", () => {
     const dbl = async (s: Awaited<ReturnType<typeof setup>>) => {
       const name = s.root.querySelector<HTMLElement>(".space-name")!;
