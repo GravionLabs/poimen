@@ -89,3 +89,13 @@ Any change to the file changes its hash and revokes the trust, so the question c
 both `.poimen/config.json` and the deprecated `.agents/herdr-layout.json` present, the hash covers
 both. The settings view section "Trusted projects" lists the roots with a "Revoke" button. The
 layout of `spaces.layout` in the user config and the built-in default need no trust.
+
+## Editing in the space overview
+
+The overview tab of a space has a Configuration section (opened by the gear icon on the space
+row): the name of the space, its directory (read-only) and the `setup`, `teardown` and `layout`
+keys of this file. Saving merges only those keys into the existing JSON object, so `commands`,
+`presets`, `tasks` and any unknown key stay as they are (a file that is not valid JSON is never
+overwritten). A layout must pass the same checks as above; errors show next to the field. Because
+a saved file has a new hash, poimen lists its commands and asks for trust first (see Trust);
+nothing is written until you confirm.

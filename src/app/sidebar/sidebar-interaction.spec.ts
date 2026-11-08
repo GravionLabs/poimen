@@ -174,6 +174,18 @@ describe("Sidebar with the real hx-tree", () => {
     expect(close.nextElementSibling?.classList.contains("chevron")).toBe(true);
   });
 
+  it("opens the configuration of the space from the gear without selecting the row", async () => {
+    const { fixture, workspace, settle, selected } = await setup();
+    const configured: string[] = [];
+    fixture.componentInstance.configOpened.subscribe((id) => configured.push(id));
+    const gear = workspace().querySelector<HTMLButtonElement>(".gear")!;
+    expect(gear.getAttribute("aria-label")).toBe("Configure space One");
+    gear.click();
+    await settle();
+    expect(configured).toEqual(["w1"]);
+    expect(selected).toEqual([]);
+  });
+
   it("closes through the menu action without selecting or toggling the row", async () => {
     const { fixture, workspace, settle, selected } = await setup();
     const actions: unknown[] = [];

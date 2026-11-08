@@ -26,6 +26,7 @@
           (pinned)="open($event, true)"
           (menuAction)="onSidebarMenu($event)"
           (spaceOpened)="openSpaceOverview($event)"
+          (configOpened)="openSpaceConfig($event)"
         />
       }
     </div>
@@ -200,6 +201,7 @@
           @if (spaceIdOfGroup) {
             <app-space-overview
               [space]="spaceIdOfGroup"
+              [configNonce]="configNonce()"
               (outputRequested)="openPaneOutput($event)"
               (explorerRequested)="openInExplorer($event)"
               (deleteRequested)="closeSpace($event)"
