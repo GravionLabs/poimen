@@ -16,7 +16,7 @@ default-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crate
 
 [workspace.package]
 # The one version of the app and the poimen-* crates; release.yml rewrites this line.
-version = "0.13.0"
+version = "0.14.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
