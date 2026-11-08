@@ -8,6 +8,7 @@ import {
 } from "@angular/core";
 import { UiState, type GithubPage } from "../core/ui-state";
 import { AgentActionMenu } from "./agent-action-menu/agent-action-menu";
+import { AgentRuns } from "./agent-runs";
 import { AgentActions, pullTarget } from "./agent-actions";
 import { GithubIssues } from "./issues";
 import { GithubMilestones } from "./milestones";
@@ -51,6 +52,7 @@ export class GithubView {
   protected readonly milestones = inject(GithubMilestones);
   protected readonly filter = inject(GithubFilter);
   private readonly agentActions = inject(AgentActions);
+  protected readonly runs = inject(AgentRuns);
   protected readonly ui = inject(UiState);
   /** The sub-pages of the navigation, the Inbox in front. */
   protected readonly pages = computed<{ id: GithubPage; label: string; count: number | null }[]>(

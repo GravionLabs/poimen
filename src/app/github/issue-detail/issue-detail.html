@@ -22,6 +22,17 @@
           }}</span>
         }
         <span class="mono" data-testid="detail-number">#{{ h.number }}</span>
+        @if (runs.badge(h.repo, h.number); as run) {
+          <button
+            type="button"
+            class="badge badge-{{ run.state === 'running' ? 'primary' : 'warning' }}"
+            data-testid="detail-run-badge"
+            title="Show the agent"
+            (click)="runs.focus(run.paneId)"
+          >
+            {{ run.text }}
+          </button>
+        }
         <button
           type="button"
           class="icon-btn"

@@ -149,6 +149,19 @@
                           <td>#{{ row.number }}</td>
                           <td>
                             {{ row.title }}
+                            @if (runs.badge(row.repo, row.number); as run) {
+                              <button
+                                type="button"
+                                class="badge badge-{{
+                                  run.state === 'running' ? 'primary' : 'warning'
+                                }}"
+                                data-testid="run-badge"
+                                title="Show the agent"
+                                (click)="runs.focus(run.paneId)"
+                              >
+                                {{ run.text }}
+                              </button>
+                            }
                             @if (row.isDraft) {
                               <span class="badge badge-neutral" data-testid="draft">Draft</span>
                             }

@@ -25,6 +25,7 @@ import {
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Attention, type StatusChange } from "./core/attention";
+import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { Notifier, type NotifyContext } from "./core/notifier";
 import { NotificationCenter } from "./core/notification-center";
@@ -174,6 +175,7 @@ export class App {
 
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
+  private readonly agentRuns = inject(AgentRuns);
   private readonly notifier = inject(Notifier);
   private readonly center = inject(NotificationCenter);
   /** Last known state of each open pane, kept when herdr drops the pane. */
@@ -269,6 +271,7 @@ export class App {
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
       untracked(() => {
         const changes = this.attention.observe(statuses, viewed);
+        this.agentRuns.observe(statuses);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
         this.notifyChanges(changes);
       });
