@@ -1721,6 +1721,36 @@ pub fn save_space_templates(home: &Path, templates: &Value) -> Result<(), String
     save_with(home, |text| set_space_templates_text(text, templates))
 }
 
+/// Whether the config text has `spaces.layout` or `spaceTemplates` (any value): the first-start
+/// defaults are never written over them.
+fn has_seeded_keys(text: &str) -> Result<bool, String> {
+    let root = root_open(text)?;
+    if find_value(text, root, "spaceTemplates").is_some() {
+        return Ok(true);
+    }
+    Ok(match find_value(text, root, "spaces") {
+        Some((start, _)) if text.as_bytes().get(start) == Some(&b'{') => {
+            find_value(text, start, "layout").is_some()
+        }
+        _ => false,
+    })
+}
+
+/// Writes the first-start defaults (`spaces.layout`, `spaceTemplates`) below `home` when the config
+/// has neither key (a missing file counts). Other keys and comments stay. `Ok(true)` when written.
+pub fn seed_defaults(home: &Path, layout: &Value, templates: &Value) -> Result<bool, String> {
+    let written = std::cell::Cell::new(false);
+    save_with(home, |text| {
+        if has_seeded_keys(text)? {
+            return Ok(text.to_owned());
+        }
+        written.set(true);
+        set_spaces_layout_text(text, layout)
+            .and_then(|next| set_space_templates_text(&next, templates))
+    })?;
+    Ok(written.get())
+}
+
 /// Removes `spaces.layout` below `home`; a missing file stays missing.
 pub fn remove_spaces_layout(home: &Path) -> Result<(), String> {
     if !config_path(home).exists() {
@@ -2509,6 +2539,130 @@ mod tests {
         let s = load(&home);
         assert_eq!(s.trusted_projects.keys().collect::<Vec<_>>(), ["/b"]);
         assert_eq!(s.theme, "dark");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    fn seed_home(name: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!("poimen-seed-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        home
+    }
+
+    fn seed_with(home: &Path, installed: &[&str]) -> Result<bool, String> {
+        let (layout, templates) = crate::templates::seed_values(|p| installed.contains(&p));
+        seed_defaults(home, &layout, &templates)
+    }
+
+    #[test]
+    fn first_start_seeds_a_missing_config_with_the_layout_and_the_default_template() {
+        let home = seed_home("missing");
+        assert_eq!(seed_with(&home, &["claude", "copilot"]), Ok(true));
+        let s = load(&home);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let names: Vec<_> = s
+            .spaces_layout
+            .as_ref()
+            .unwrap()
+            .panes
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, ["claude", "copilot", "shell"]);
+        assert_eq!(s.space_templates.len(), 1);
+        let t = &s.space_templates[0];
+        assert_eq!((t.name.as_str(), t.agent.as_str()), ("default", "claude"));
+        assert!(t.dir.is_none() && t.remote.is_none() && t.layout.is_none());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn seeding_follows_the_installed_agents() {
+        let home = seed_home("copilot-only");
+        assert_eq!(seed_with(&home, &["copilot"]), Ok(true));
+        let s = load(&home);
+        let names: Vec<_> = s
+            .spaces_layout
+            .as_ref()
+            .unwrap()
+            .panes
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        assert_eq!(names, ["copilot", "shell"]);
+        assert_eq!(s.space_templates[0].agent, "copilot");
+        let _ = std::fs::remove_dir_all(&home);
+
+        let home = seed_home("none");
+        assert_eq!(seed_with(&home, &[]), Ok(true));
+        let s = load(&home);
+        let names: Vec<_> = s
+            .spaces_layout
+            .as_ref()
+            .unwrap()
+            .panes
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        assert_eq!(names, ["shell"]);
+        assert_eq!(s.space_templates.len(), 1);
+        assert_eq!(s.space_templates[0].agent, "claude");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn seeding_adds_the_keys_to_an_existing_config_and_keeps_the_rest() {
+        let home = seed_home("existing");
+        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+        std::fs::write(
+            config_path(&home),
+            "{\n  // keep me\n  \"theme\": \"dark\",\n  \"spaces\": { \"other\": 1 }\n}\n",
+        )
+        .unwrap();
+        assert_eq!(seed_with(&home, &["claude"]), Ok(true));
+        let text = std::fs::read_to_string(config_path(&home)).unwrap();
+        assert!(text.contains("// keep me"), "{text}");
+        assert!(text.contains("\"theme\": \"dark\""), "{text}");
+        assert!(text.contains("\"other\": 1"), "{text}");
+        assert!(text.contains("\"layout\""), "{text}");
+        assert!(text.contains("\"spaceTemplates\""), "{text}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_config_with_either_key_is_never_touched() {
+        for body in [
+            "{\"spaces\": {\"layout\": {\"panes\": [{\"name\": \"solo\"}]}}}",
+            "{\"spaceTemplates\": []}",
+        ] {
+            let home = seed_home("keys");
+            std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+            std::fs::write(config_path(&home), body).unwrap();
+            assert_eq!(seed_with(&home, &["claude"]), Ok(false));
+            assert_eq!(std::fs::read_to_string(config_path(&home)).unwrap(), body);
+            let _ = std::fs::remove_dir_all(&home);
+        }
+    }
+
+    #[test]
+    fn seeding_runs_once_and_a_deleted_default_stays_deleted() {
+        let home = seed_home("once");
+        assert_eq!(seed_with(&home, &["claude"]), Ok(true));
+        save_space_templates(&home, &serde_json::json!([])).unwrap();
+        assert_eq!(seed_with(&home, &["claude"]), Ok(false));
+        assert!(load(&home).space_templates.is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn an_invalid_config_is_an_error_and_is_left_alone() {
+        let home = seed_home("invalid");
+        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+        std::fs::write(config_path(&home), "[1, 2]").unwrap();
+        assert!(seed_with(&home, &["claude"]).is_err());
+        assert_eq!(
+            std::fs::read_to_string(config_path(&home)).unwrap(),
+            "[1, 2]"
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 

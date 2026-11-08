@@ -42,6 +42,14 @@ const WORK: SpaceTemplate = {
   model: "opus",
   layout: null,
 };
+const DEFAULT_TEMPLATE: SpaceTemplate = {
+  name: "default",
+  dir: null,
+  remote: null,
+  agent: "claude",
+  model: null,
+  layout: null,
+};
 const AZ: SpaceTemplate = {
   name: "Azure",
   dir: null,
@@ -123,22 +131,70 @@ async function setup(
 describe("SpaceTemplatesEditor", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
 
-  it("says so when there are no templates", async () => {
-    const { host } = await setup();
-    expect(host.querySelector("ul[aria-label='Space templates']")).toBeNull();
-    expect(host.textContent).toContain("No templates yet");
+  it("says so when there are no templates, and offers the default", async () => {
+    const { host, button } = await setup();
+    expect(host.textContent).toContain("No templates yet: new spaces use no template");
+    expect(host.querySelector("[data-testid=default-template]")?.textContent).toContain(
+      "None: new spaces use no template",
+    );
+    expect(button("Add default")).toBeDefined();
+    expect(button("Edit default")).toBeUndefined();
   });
 
-  it("lists the templates with name, match and agent", async () => {
+  it("lists the default entry first, then the templates with name, match and agent", async () => {
     const { host } = await setup([WORK, AZ]);
     const rows = [...host.querySelectorAll("li.row-item")].map((r) =>
       r.textContent?.replace(/\s+/g, " ").trim(),
     );
-    expect(rows[0]).toContain("Work");
-    expect(rows[0]).toContain("~/src");
-    expect(rows[0]).toContain("claude · opus");
-    expect(rows[1]).toContain("azure acme/Flex");
-    expect(rows[1]).toContain("copilot");
+    expect(rows[0]).toContain("Default");
+    expect(rows[0]).toContain("None");
+    expect(rows[1]).toContain("Work");
+    expect(rows[1]).toContain("~/src");
+    expect(rows[1]).toContain("claude · opus");
+    expect(rows[2]).toContain("azure acme/Flex");
+    expect(rows[2]).toContain("copilot");
+  });
+
+  it("shows the default template in the Default entry, not in the list", async () => {
+    const { host } = await setup([WORK, DEFAULT_TEMPLATE]);
+    const rows = [...host.querySelectorAll("li.row-item")];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("default");
+    expect(rows[1].textContent).toContain("Work");
+  });
+
+  it("adds the default template from the Default entry, without directory and remote", async () => {
+    const { host, press, saved, input } = await setup([WORK]);
+    press("Add default");
+    expect(input("name").value).toBe("default");
+    expect(host.querySelector("[name=dir]")).toBeNull();
+    expect(host.querySelector("select[name=provider]")).toBeNull();
+    await saved();
+    expect(tauri.calls("set_space_templates")).toEqual([
+      {
+        templates: [
+          { name: "Work", match: { dir: "~/src" }, agent: "claude", model: "opus" },
+          { name: "default", match: {}, agent: "claude" },
+        ],
+      },
+    ]);
+  });
+
+  it("edits the default in the form without directory and remote", async () => {
+    const { host, press } = await setup([WORK, DEFAULT_TEMPLATE]);
+    press("Edit default");
+    expect(host.querySelector("[name=dir]")).toBeNull();
+    expect(host.querySelector("select[name=provider]")).toBeNull();
+    expect(host.querySelector("[name=name]")).not.toBeNull();
+  });
+
+  it("refuses a second default template from the form", async () => {
+    const { host, button, input, type, choose, select, press } = await setup([DEFAULT_TEMPLATE]);
+    press("Add template");
+    await choose(select("agent"), "claude");
+    type(input("name"), "Other");
+    expect(host.textContent).toContain("Another template is the default");
+    expect(button("Save").disabled).toBe(true);
   });
 
   it("adds a template and writes only spaceTemplates", async () => {
@@ -166,7 +222,7 @@ describe("SpaceTemplatesEditor", () => {
       },
     ]);
     expect(host.querySelector("form")).toBeNull();
-    expect(host.querySelectorAll("li.row-item")).toHaveLength(2);
+    expect(host.querySelectorAll("li.row-item")).toHaveLength(3);
   });
 
   it("edits a template in place", async () => {
@@ -197,7 +253,7 @@ describe("SpaceTemplatesEditor", () => {
         ],
       },
     ]);
-    expect(host.querySelectorAll("li.row-item")).toHaveLength(1);
+    expect(host.querySelectorAll("li.row-item")).toHaveLength(2);
   });
 
   it("shows the write error and keeps the form when the backend refuses", async () => {
@@ -211,7 +267,7 @@ describe("SpaceTemplatesEditor", () => {
     fixture.detectChanges();
     expect(host.querySelector("[role=alert]")?.textContent).toContain("duplicate name");
     expect(host.querySelector("form")).not.toBeNull();
-    expect(host.querySelector("li.row-item")?.textContent).toContain("Work");
+    expect(host.querySelectorAll("li.row-item")[1]?.textContent).toContain("Work");
   });
 
   describe("validation", () => {

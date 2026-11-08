@@ -574,12 +574,7 @@ export class SettingsStore {
     });
   }
 
-  /** Removes `spaces.layout`, so new spaces use the built-in default again. */
-  resetSpacesLayout(): Promise<boolean> {
-    return this.write({ spacesLayout: null }, "the new space layout", "remove_spaces_layout", {});
-  }
-
-  /** The built-in layout of a new space; `null` when the backend cannot be asked. */
+  /** The default layout of a new space (seeded for the installed agents); `null` when the backend cannot be asked. */
   async defaultSpacesLayout(): Promise<SpaceLayout | null> {
     try {
       return parseSpaceLayout(await this.bridge.invoke("default_spaces_layout"));

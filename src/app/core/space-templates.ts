@@ -30,6 +30,13 @@ export interface SpaceTemplate {
 export interface TemplateHint {
   name: string;
   agent: string;
+  /** The default template: no `match`, used when no other template matches. */
+  default: boolean;
+}
+
+/** Whether a template has no directory and no remote, so it is the default (`templates::resolve`). */
+export function isDefaultTemplate(t: Pick<SpaceTemplate, "dir" | "remote">): boolean {
+  return !t.dir?.trim() && !t.remote;
 }
 
 function parseRemote(raw: unknown): RemoteMatch | null {
@@ -106,6 +113,8 @@ export function isValidDir(dir: string): boolean {
 
 export interface TemplateErrors {
   name?: string;
+  /** Set on a second default template. */
+  default?: string;
   dir?: string;
   remote?: string;
   agent?: string;
@@ -114,17 +123,22 @@ export interface TemplateErrors {
 
 /**
  * Problems of the draft, per field. `others` are the names of the other templates (names are
- * unique), `harnessIds` the configured harnesses.
+ * unique), `harnessIds` the configured harnesses, `defaultTaken` whether another template is the
+ * default.
  */
 export function templateErrors(
   draft: SpaceTemplate,
   others: readonly string[],
   harnessIds: readonly string[],
+  defaultTaken = false,
 ): TemplateErrors {
   const errors: TemplateErrors = {};
   const name = draft.name.trim();
   if (!name) errors.name = "A name is required";
   else if (others.includes(name)) errors.name = `Another template is called "${name}"`;
+  if (defaultTaken && isDefaultTemplate(draft)) {
+    errors.default = "Another template is the default; a default without a directory is only one";
+  }
   const dir = draft.dir?.trim() ?? "";
   if (dir && !isValidDir(dir)) errors.dir = "Use an absolute directory or one starting with ~";
   if (draft.remote) {

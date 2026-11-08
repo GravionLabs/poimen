@@ -18,6 +18,7 @@ import {
 import {
   emptyTemplate,
   hasErrors,
+  isDefaultTemplate,
   matchLabel,
   templateErrors,
   type RemoteMatch,
@@ -32,6 +33,8 @@ interface Editing {
   /** Index in `spaceTemplates`; `null` for a new template. */
   index: number | null;
   draft: SpaceTemplate;
+  /** The default template: the form has no directory and no remote. */
+  asDefault: boolean;
 }
 
 /** `dir` with a leading `~` made absolute with `home`; other paths stay as they are. */
@@ -71,16 +74,27 @@ export class SpaceTemplatesEditor {
   private readonly builtIn = signal<SpaceLayout | null>(null);
   private readonly presets = signal<{ name: string; layout: SpaceLayout }[]>([]);
 
+  /** The default template (no directory and no remote), when there is one. */
+  protected readonly defaultTemplate = computed(
+    () => this.templates().find(isDefaultTemplate) ?? null,
+  );
+  /** The templates other than the default, with their index in `spaceTemplates`. */
+  protected readonly listed = computed(() =>
+    this.templates().flatMap((t, i) => (isDefaultTemplate(t) ? [] : [{ t, i }])),
+  );
+
   protected readonly errors = computed(() => {
     const e = this.editing();
     if (!e) return {};
     const others = this.templates()
       .filter((_, i) => i !== e.index)
       .map((t) => t.name);
+    const defaultTaken = this.templates().some((t, i) => i !== e.index && isDefaultTemplate(t));
     return templateErrors(
       e.draft,
       others,
       this.harnesses().map((h) => h.id),
+      defaultTaken,
     );
   });
   protected readonly valid = computed(() => !hasErrors(this.errors()));
@@ -104,17 +118,35 @@ export class SpaceTemplatesEditor {
 
   protected add(): void {
     const first = this.harnesses().find((h) => h.available) ?? this.harnesses()[0];
-    this.open(null, emptyTemplate(first?.id ?? ""));
+    this.open(null, emptyTemplate(first?.id ?? ""), false);
   }
 
   protected edit(index: number): void {
-    this.open(index, structuredClone(this.templates()[index]));
+    const draft = structuredClone(this.templates()[index]);
+    this.open(index, draft, isDefaultTemplate(draft));
   }
 
-  private open(index: number | null, draft: SpaceTemplate): void {
+  /** Edits the default template in the form without a directory and a remote. */
+  protected editDefault(): void {
+    const index = this.templates().findIndex(isDefaultTemplate);
+    if (index >= 0) this.edit(index);
+  }
+
+  /** Adds the default template: no match, named `default`. */
+  protected addDefault(): void {
+    const first = this.harnesses().find((h) => h.available) ?? this.harnesses()[0];
+    this.open(null, { ...emptyTemplate(first?.id ?? ""), name: "default" }, true);
+  }
+
+  protected removeDefault(): void {
+    const index = this.templates().findIndex(isDefaultTemplate);
+    if (index >= 0) void this.remove(index);
+  }
+
+  private open(index: number | null, draft: SpaceTemplate, asDefault = false): void {
     this.source.set(draft.layout ? "custom" : "none");
     this.presets.set([]);
-    this.editing.set({ index, draft });
+    this.editing.set({ index, draft, asDefault });
     void this.loadPresets();
   }
 

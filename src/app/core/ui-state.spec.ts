@@ -28,6 +28,14 @@ const stateOn = (storage: UiStorage | null) =>
     providers: [{ provide: UI_STORAGE, useValue: storage }, UiState],
   }).get(UiState);
 
+describe("defaultsSeeded", () => {
+  it("is remembered once the first-start defaults were written", () => {
+    expect(parseLayout(null).defaultsSeeded).toBeUndefined();
+    expect(parseLayout(JSON.stringify({ defaultsSeeded: true })).defaultsSeeded).toBe(true);
+    expect(parseLayout(JSON.stringify({ defaultsSeeded: "yes" })).defaultsSeeded).toBeUndefined();
+  });
+});
+
 describe("clampSidebarWidth", () => {
   it("keeps a width in range", () => expect(clampSidebarWidth(300)).toBe(300));
   it("raises to the minimum", () => expect(clampSidebarWidth(10)).toBe(SIDEBAR_MIN_WIDTH));

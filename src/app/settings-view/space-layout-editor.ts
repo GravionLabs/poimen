@@ -43,7 +43,11 @@ export class SpaceLayoutEditor {
   protected readonly saved = computed<PaneSpec[]>(
     () => this.store.settings().spacesLayout?.panes ?? this.fallback(),
   );
-  protected readonly isDefault = computed(() => this.store.settings().spacesLayout === null);
+  /** The layout is the default when unset or when it is the seeded default layout. */
+  protected readonly isDefault = computed(() => {
+    const layout = this.store.settings().spacesLayout;
+    return layout === null || sameLayout(layout.panes, this.fallback());
+  });
   protected readonly draft = signal<PaneSpec[]>([]);
   protected readonly errors = computed(() => layoutErrors(this.draft()));
   protected readonly dirty = computed(() => !sameLayout(this.draft(), this.saved()));
@@ -114,8 +118,11 @@ export class SpaceLayoutEditor {
     await this.store.setSpacesLayout({ panes }, toConfig(panes));
   }
 
+  /** Writes the default layout back, so the setting is the default again. */
   protected async reset(): Promise<void> {
-    if (await this.store.resetSpacesLayout()) this.draft.set(this.fallback());
+    const panes = this.fallback();
+    if (panes.length === 0) return;
+    if (await this.store.setSpacesLayout({ panes }, toConfig(panes))) this.draft.set(panes);
   }
 }
 

@@ -139,6 +139,8 @@ export interface LayoutState {
   hooksOfferDismissed?: boolean;
   /** Agents whose hooks were seen installed; a dismissed offer returns when one goes missing. */
   hooksSeen?: string[];
+  /** The first-start defaults (`spaces.layout`, default space template) were written once. */
+  defaultsSeeded?: boolean;
 }
 
 export function clampPanelHeight(height: number): number {
@@ -200,6 +202,7 @@ export function parseLayout(raw: string | null): LayoutState {
       settingsCollapsed,
       hooksOfferDismissed,
       hooksSeen,
+      defaultsSeeded,
     } = data as Record<string, unknown>;
     const comments = parseLineComments(lineComments);
     if (Object.keys(comments).length) state.lineComments = comments;
@@ -222,6 +225,7 @@ export function parseLayout(raw: string | null): LayoutState {
     if (isGithubPage(githubPage)) state.githubPage = githubPage;
     if (githubShowEmpty === true) state.githubShowEmpty = true;
     if (hooksOfferDismissed === true) state.hooksOfferDismissed = true;
+    if (defaultsSeeded === true) state.defaultsSeeded = true;
     if (Array.isArray(hooksSeen)) {
       const seen = hooksSeen.filter((d): d is string => typeof d === "string" && d !== "");
       if (seen.length) state.hooksSeen = [...new Set(seen)];
@@ -318,6 +322,9 @@ export class UiState {
   readonly hooksOfferDismissed = signal(this.initial.hooksOfferDismissed === true);
   /** Agents whose hooks were seen installed (persisted). */
   readonly hooksSeen = signal<readonly string[]>(this.initial.hooksSeen ?? []);
+
+  /** The first-start defaults were written; they are not written again (even when deleted later). */
+  readonly defaultsSeeded = signal(this.initial.defaultsSeeded === true);
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -369,6 +376,11 @@ export class UiState {
 
   dismissHooksOffer(): void {
     this.hooksOfferDismissed.set(true);
+    this.save();
+  }
+
+  markDefaultsSeeded(): void {
+    this.defaultsSeeded.set(true);
     this.save();
   }
 
@@ -507,6 +519,7 @@ export class UiState {
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
       hooksOfferDismissed: this.hooksOfferDismissed() ? true : undefined,
       hooksSeen: this.hooksSeen().length ? [...this.hooksSeen()] : undefined,
+      defaultsSeeded: this.defaultsSeeded() ? true : undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

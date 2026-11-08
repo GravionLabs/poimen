@@ -412,6 +412,8 @@ fn template_for<'a>(
 struct TemplateHint {
     name: String,
     agent: String,
+    /// The default template (no `match`), which the dialog says.
+    default: bool,
 }
 
 fn resolve_space_template_with(home: Option<&std::path::Path>, cwd: &str) -> Option<TemplateHint> {
@@ -420,6 +422,7 @@ fn resolve_space_template_with(home: Option<&std::path::Path>, cwd: &str) -> Opt
     template_for(&dir, &user, home).map(|t| TemplateHint {
         name: t.name.clone(),
         agent: t.agent.clone(),
+        default: t.dir.is_none() && t.remote.is_none(),
     })
 }
 
@@ -1268,10 +1271,24 @@ fn remove_spaces_layout() -> Result<(), String> {
     settings::remove_spaces_layout(&home)
 }
 
-/// The built-in pane layout of a new space, shown by the settings view when none is configured.
+/// The default pane layout of a new space (the first-start seeding for the installed agents),
+/// shown by the settings view as the "Default" layout.
 #[tauri::command]
 fn default_spaces_layout() -> layout::Layout {
-    layout::default_layout()
+    let path = gui_path::child_path();
+    templates::seeded(|p| gui_path::resolve_program(p, &path).is_some()).0
+}
+
+/// Writes the first-start defaults (`spaces.layout` and the default space template) when the
+/// config has neither key; `true` when it wrote them. Called once by the app (the UI state
+/// remembers that it ran).
+#[tauri::command]
+fn seed_space_defaults() -> Result<bool, String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    let path = gui_path::child_path();
+    let (layout, templates) =
+        templates::seed_values(|p| gui_path::resolve_program(p, &path).is_some());
+    settings::seed_defaults(&home, &layout, &templates)
 }
 
 /// The changed files of the worktree `dir` against its base or `HEAD` (read-only git).
@@ -1882,6 +1899,7 @@ pub fn run() {
             revoke_project,
             remove_spaces_layout,
             default_spaces_layout,
+            seed_space_defaults,
             project_config,
             project_file,
             project_save,
@@ -2209,7 +2227,8 @@ mod build_layout_tests {
             resolve_space_template_with(Some(&home), &dir),
             Some(TemplateHint {
                 name: "app".into(),
-                agent: "claude".into()
+                agent: "claude".into(),
+                default: false,
             })
         );
         let outside = home.to_string_lossy().into_owned();
@@ -2219,6 +2238,20 @@ mod build_layout_tests {
             None
         );
         assert_eq!(resolve_space_template_with(None, &dir), None);
+    }
+
+    #[test]
+    fn the_default_template_is_marked_as_the_default_in_the_hint() {
+        let (home, dir) =
+            home_with_templates(r#"{"spaceTemplates":[{"name":"default","agent":"copilot"}]}"#);
+        assert_eq!(
+            resolve_space_template_with(Some(&home), &dir),
+            Some(TemplateHint {
+                name: "default".into(),
+                agent: "copilot".into(),
+                default: true,
+            })
+        );
     }
 
     #[test]

@@ -13,36 +13,64 @@
     <p class="error" role="alert">{{ message }}</p>
   }
   @if (templates().length === 0) {
-    <p class="hint">No templates yet: every new space uses the default.</p>
-  } @else {
-    <ul class="rows" aria-label="Space templates">
-      @for (t of templates(); track t.name; let i = $index) {
-        <li class="row-item">
-          <strong>{{ t.name }}</strong>
-          <span class="path" [title]="matchLabel(t)">{{ matchLabel(t) }}</span>
-          <span class="agent">{{ t.agent }}{{ t.model ? " · " + t.model : "" }}</span>
-          <span class="actions">
-            <button
-              type="button"
-              class="btn"
-              [attr.aria-label]="'Edit ' + t.name"
-              (click)="edit(i)"
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Remove ' + t.name"
-              title="Remove"
-              (click)="remove(i)"
-            >
-              ×
-            </button>
-          </span>
-        </li>
+    <p class="hint">No templates yet: new spaces use no template.</p>
+  }
+  <ul class="rows" aria-label="Space templates">
+    <li class="row-item" data-testid="default-template">
+      <strong>Default</strong>
+      @if (defaultTemplate(); as d) {
+        <span class="path">{{ d.name }}</span>
+        <span class="agent">{{ d.agent }}{{ d.model ? " · " + d.model : "" }}</span>
+        <span class="actions">
+          <button type="button" class="btn" aria-label="Edit default" (click)="editDefault()">
+            Edit
+          </button>
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="Remove default"
+            title="Remove"
+            (click)="removeDefault()"
+          >
+            ×
+          </button>
+        </span>
+      } @else {
+        <span class="path">None: new spaces use no template</span>
+        <span class="actions">
+          <button type="button" class="btn" (click)="addDefault()">Add default</button>
+        </span>
       }
-    </ul>
+    </li>
+    @for (item of listed(); track item.t.name) {
+      <li class="row-item">
+        <strong>{{ item.t.name }}</strong>
+        <span class="path" [title]="matchLabel(item.t)">{{ matchLabel(item.t) }}</span>
+        <span class="agent">{{ item.t.agent }}{{ item.t.model ? " · " + item.t.model : "" }}</span>
+        <span class="actions">
+          <button
+            type="button"
+            class="btn"
+            [attr.aria-label]="'Edit ' + item.t.name"
+            (click)="edit(item.i)"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            class="icon-btn"
+            [attr.aria-label]="'Remove ' + item.t.name"
+            title="Remove"
+            (click)="remove(item.i)"
+          >
+            ×
+          </button>
+        </span>
+      </li>
+    }
+  </ul>
+  @if (defaultTemplate()) {
+    <p class="hint">Every new space that no other template matches uses the default.</p>
   }
   @if (editing(); as e) {
     <form
@@ -66,75 +94,80 @@
       @if (errors().name; as m) {
         <p class="field-error">{{ m }}</p>
       }
-      <div class="fields">
-        <label class="field grow">
-          <span>Directory</span>
-          <input
-            type="text"
-            name="dir"
-            placeholder="~/src/app"
-            autocomplete="off"
-            [value]="e.draft.dir ?? ''"
-            [attr.aria-invalid]="errors().dir ? true : null"
-            (input)="setDir($event)"
-          />
-        </label>
-        <button type="button" class="btn browse" (click)="browse()">Browse…</button>
-      </div>
-      @if (errors().dir; as m) {
+      @if (errors().default; as m) {
         <p class="field-error">{{ m }}</p>
       }
-      <div class="fields">
-        <label class="field">
-          <span>Remote</span>
-          <select name="provider" (change)="setProvider($event)">
-            <option value="" [selected]="!e.draft.remote">Any</option>
-            <option value="github" [selected]="e.draft.remote?.provider === 'github'">
-              GitHub
-            </option>
-            <option value="azure-devops" [selected]="e.draft.remote?.provider === 'azure-devops'">
-              Azure DevOps
-            </option>
-          </select>
-        </label>
-        @if (e.draft.remote; as r) {
-          @if (r.provider === "github") {
-            <label class="field">
-              <span>Owner</span>
-              <input
-                type="text"
-                name="owner"
-                autocomplete="off"
-                [value]="r.owner"
-                (input)="setRemoteField('owner', $event)"
-              />
-            </label>
-          } @else {
-            <label class="field">
-              <span>Organization</span>
-              <input
-                type="text"
-                name="organization"
-                autocomplete="off"
-                [value]="r.organization"
-                (input)="setRemoteField('organization', $event)"
-              />
-            </label>
-            <label class="field">
-              <span>Project</span>
-              <input
-                type="text"
-                name="project"
-                autocomplete="off"
-                [value]="r.project"
-                (input)="setRemoteField('project', $event)"
-              />
-            </label>
-          }
+      @if (!e.asDefault) {
+        <div class="fields">
+          <label class="field grow">
+            <span>Directory</span>
+            <input
+              type="text"
+              name="dir"
+              placeholder="~/src/app"
+              autocomplete="off"
+              [value]="e.draft.dir ?? ''"
+              [attr.aria-invalid]="errors().dir ? true : null"
+              (input)="setDir($event)"
+            />
+          </label>
+          <button type="button" class="btn browse" (click)="browse()">Browse…</button>
+        </div>
+        @if (errors().dir; as m) {
+          <p class="field-error">{{ m }}</p>
         }
-      </div>
-      @if (errors().remote; as m) {
-        <p class="field-error">{{ m }}</p>
+        <div class="fields">
+          <label class="field">
+            <span>Remote</span>
+            <select name="provider" (change)="setProvider($event)">
+              <option value="" [selected]="!e.draft.remote">Any</option>
+              <option value="github" [selected]="e.draft.remote?.provider === 'github'">
+                GitHub
+              </option>
+              <option value="azure-devops" [selected]="e.draft.remote?.provider === 'azure-devops'">
+                Azure DevOps
+              </option>
+            </select>
+          </label>
+          @if (e.draft.remote; as r) {
+            @if (r.provider === "github") {
+              <label class="field">
+                <span>Owner</span>
+                <input
+                  type="text"
+                  name="owner"
+                  autocomplete="off"
+                  [value]="r.owner"
+                  (input)="setRemoteField('owner', $event)"
+                />
+              </label>
+            } @else {
+              <label class="field">
+                <span>Organization</span>
+                <input
+                  type="text"
+                  name="organization"
+                  autocomplete="off"
+                  [value]="r.organization"
+                  (input)="setRemoteField('organization', $event)"
+                />
+              </label>
+              <label class="field">
+                <span>Project</span>
+                <input
+                  type="text"
+                  name="project"
+                  autocomplete="off"
+                  [value]="r.project"
+                  (input)="setRemoteField('project', $event)"
+                />
+              </label>
+            }
+          }
+        </div>
+        @if (errors().remote; as m) {
+          <p class="field-error">{{ m }}</p>
+        }
       }
       <div class="fields">
         <label class="field">

@@ -3,8 +3,9 @@
 //! agent line goes through the harness registry. A template matches by directory, by the remote of
 //! `origin` (GitHub owner or Azure DevOps project, see `remote.rs`) or by both.
 
+use crate::backend::SplitDirection;
 use crate::harness::{self, Harness};
-use crate::layout::Layout;
+use crate::layout::{Layout, PaneSpec, Split};
 use crate::remote::Remote;
 use crate::tasks::Cmd;
 
@@ -133,9 +134,60 @@ pub fn agent_command(
     Ok(Cmd::Argv(harness::build_argv(h, t.model.as_deref(), None)).line())
 }
 
+/// The agents of the first-start defaults, in order of preference (harness ids).
+const SEED_AGENTS: [&str; 2] = ["claude", "copilot"];
+
+/// The first-start defaults for a config without `spaces.layout` and `spaceTemplates`: the layout
+/// (an agent pane per installed agent of `SEED_AGENTS`, the first is the root pane, the others
+/// split right of it, and always a `shell` pane below the first agent, or the root when none is
+/// installed) and the agent of the default template (the first installed agent, else the first
+/// harness). `available` tells whether a program is on the PATH.
+pub fn seeded(available: impl Fn(&str) -> bool) -> (Layout, String) {
+    let harnesses = crate::harness::default_harnesses();
+    let agents: Vec<&Harness> = SEED_AGENTS
+        .iter()
+        .filter_map(|id| harnesses.iter().find(|h| h.id == *id))
+        .filter(|h| available(&h.command[0]))
+        .collect();
+    let mut panes: Vec<PaneSpec> = Vec::new();
+    for (i, h) in agents.iter().enumerate() {
+        panes.push(PaneSpec {
+            name: h.id.clone(),
+            command: Some(Cmd::Argv(harness::build_argv(h, None, None)).line()),
+            split: (i > 0).then(|| Split {
+                from: agents[0].id.clone(),
+                direction: SplitDirection::Right,
+                ratio: 0.5,
+            }),
+        });
+    }
+    panes.push(PaneSpec {
+        name: "shell".into(),
+        command: None,
+        split: agents.first().map(|first| Split {
+            from: first.id.clone(),
+            direction: SplitDirection::Down,
+            ratio: 0.7,
+        }),
+    });
+    let agent = agents
+        .first()
+        .map_or_else(|| harnesses[0].id.clone(), |h| h.id.clone());
+    (Layout { panes }, agent)
+}
+
+/// The JSON written to config.json on the first start: `spaces.layout` and the one default
+/// template (no `match`, so it is the default; it uses `spaces.layout`, which it does not repeat).
+pub fn seed_values(available: impl Fn(&str) -> bool) -> (serde_json::Value, serde_json::Value) {
+    let (layout, agent) = seeded(available);
+    let template = serde_json::json!([{ "name": "default", "agent": agent }]);
+    (crate::layout::to_config(&layout), template)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::SplitDirection;
     use crate::harness::default_harnesses;
     use std::path::Path;
 
@@ -307,6 +359,48 @@ mod tests {
             pick_remote("/home/jk/src/app/x", Some(gh("a")), &ts),
             Some("long")
         );
+    }
+
+    #[test]
+    fn the_seeded_layout_puts_claude_first_copilot_right_and_shell_below_claude() {
+        let (l, agent) = seeded(|p| p == "claude" || p == "copilot");
+        assert_eq!(agent, "claude");
+        let names: Vec<_> = l.panes.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["claude", "copilot", "shell"]);
+        assert_eq!(l.panes[0].command.as_deref(), Some("claude"));
+        assert_eq!(l.panes[1].command.as_deref(), Some("copilot"));
+        let copilot = l.panes[1].split.as_ref().unwrap();
+        assert_eq!(
+            (copilot.from.as_str(), copilot.direction),
+            ("claude", SplitDirection::Right)
+        );
+        let shell = l.panes[2].split.as_ref().unwrap();
+        assert_eq!(
+            (shell.from.as_str(), shell.direction),
+            ("claude", SplitDirection::Down)
+        );
+        assert_eq!(l.panes[2].command, None);
+    }
+
+    #[test]
+    fn the_seeded_layout_round_trips_through_the_config_schema() {
+        let (l, _) = seeded(|p| p == "claude");
+        let config = crate::layout::to_config(&l);
+        assert_eq!(crate::layout::parse_layout_value(&config).unwrap(), l);
+        let (_, templates) = seed_values(|_| false);
+        assert_eq!(
+            templates,
+            serde_json::json!([{"name": "default", "agent": "claude"}])
+        );
+    }
+
+    #[test]
+    fn without_an_installed_agent_the_seed_is_the_shell_pane_and_the_first_harness() {
+        let (l, agent) = seeded(|_| false);
+        assert_eq!(agent, "claude");
+        assert_eq!(l.panes.len(), 1);
+        assert_eq!(l.panes[0].name, "shell");
+        assert!(l.panes[0].split.is_none());
     }
 
     #[test]
