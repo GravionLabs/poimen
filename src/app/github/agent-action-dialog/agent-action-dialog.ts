@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
-import { AgentActions } from "../agent-actions";
+import { AgentActions, hasReviewExtras } from "../agent-actions";
 
 /**
  * Harness and model of an agent action, opened by Shift+click on the action. Prefilled with the
@@ -30,9 +30,17 @@ export class AgentActionDialog {
     this.actions.setDialog({ harness: (event.target as HTMLSelectElement).value, model: "" });
   }
 
+  protected readonly hasReviewExtras = hasReviewExtras;
+
   protected where(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
-    this.actions.setDialog({ where: value === "worktree" ? "worktree" : "root" });
+    this.actions.setDialog({
+      where: value === "worktree" ? "worktree" : value === "diff" ? "diff" : "root",
+    });
+  }
+
+  protected post(event: Event): void {
+    this.actions.setDialog({ post: (event.target as HTMLInputElement).checked });
   }
 
   protected model(event: Event): void {

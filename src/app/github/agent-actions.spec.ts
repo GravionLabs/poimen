@@ -8,6 +8,9 @@ import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE } from "../core/ui-state";
 import {
   AgentActions,
+  DIFF_ONLY_SUFFIX,
+  POST_REVIEW_SUFFIX,
+  reviewSuffix,
   issueTarget,
   matches,
   pullTarget,
@@ -127,6 +130,24 @@ describe("summaryText", () => {
 });
 
 const LAUNCH = (nr: number) => ({ kind: "claude", args: [`prompt ${nr}`] });
+
+describe("reviewSuffix", () => {
+  it("is empty without extras", () => {
+    expect(reviewSuffix(false, false)).toBe("");
+  });
+  it("diff only tells the agent to read gh pr diff and not to change files", () => {
+    expect(reviewSuffix(true, false)).toBe(DIFF_ONLY_SUFFIX);
+    expect(DIFF_ONLY_SUFFIX).toBe(
+      "Read the changes with `gh pr diff {nr}` and do not change any files.",
+    );
+  });
+  it("posting adds the gh pr review instruction, after the diff-only one", () => {
+    expect(reviewSuffix(false, true)).toBe(
+      "When you are done, post your review on GitHub with `gh pr review {nr} --comment`.",
+    );
+    expect(reviewSuffix(true, true)).toBe(`${DIFF_ONLY_SUFFIX}\n\n${POST_REVIEW_SUFFIX}`);
+  });
+});
 
 describe("worktreeLabel", () => {
   it("prefixes pull requests and cuts long titles to 40 characters", () => {
@@ -463,6 +484,68 @@ describe("AgentActions", () => {
       await actions.confirmDialog();
       expect(tauri.calls("task_worktree")).toHaveLength(1);
       expect(tauri.calls("create_space")[0]).toMatchObject({ cwd: "/src/n-1" });
+    });
+  });
+
+  describe("review extras", () => {
+    const rev = (): AgentAction => action({ id: "review", label: "Review", on: "pr", run: "ask" });
+    const rows = (...n: number[]): ActionTarget[] => n.map((x) => pullTarget(pull(x)));
+
+    it("the dialog defaults to diff only without posting", async () => {
+      await actions.request(rev(), rows(1), false);
+      expect(actions.dialog()).toMatchObject({ where: "diff", post: false });
+    });
+
+    it("diff only starts a tab review #<nr> at the root with the fixed suffix", async () => {
+      await actions.request(rev(), rows(5), false);
+      await actions.confirmDialog();
+      expect(tauri.calls("agent_action_plan")[0]).toMatchObject({ suffix: DIFF_ONLY_SUFFIX });
+      expect(tauri.calls("task_worktree")).toEqual([]);
+      expect(tauri.calls("pr_worktree")).toEqual([]);
+      expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w1", cwd: "/src/n" }]);
+      expect(tauri.calls("agent_start")[0]).toMatchObject({ name: "review #5" });
+    });
+
+    it("posting appends the gh pr review instruction", async () => {
+      await actions.request(rev(), rows(5), false);
+      actions.setDialog({ post: true });
+      await actions.confirmDialog();
+      expect(tauri.calls("agent_action_plan")[0]).toMatchObject({
+        suffix: reviewSuffix(true, true),
+      });
+    });
+
+    it("worktree mode has no diff-only suffix", async () => {
+      tauri.answer("pr_worktree", () => ({ path: "/src/n-pr5" }));
+      await actions.request(rev(), rows(5), false);
+      actions.setDialog({ where: "worktree" });
+      await actions.confirmDialog();
+      expect(tauri.calls("agent_action_plan")[0]?.["suffix"]).toBeUndefined();
+      expect(tauri.calls("pr_worktree")).toHaveLength(1);
+    });
+
+    it("a multi-select starts one agent per PR and one failure leaves the others", async () => {
+      tauri.answer("agent_start", (args) => {
+        if (args?.["paneId"] === "p2") throw "claude did not start";
+        return undefined;
+      });
+      await actions.request(rev(), rows(1, 2, 3), false);
+      const summary = await actions.confirmDialog();
+      expect(tauri.calls("agent_start").map((c) => c?.["name"])).toEqual([
+        "review #1",
+        "review #2",
+        "review #3",
+      ]);
+      expect(summary).toEqual({
+        started: [1, 3],
+        failed: [{ numbers: [2], reason: "claude did not start" }],
+      });
+      expect(spaces.warning()).toBe("Review: started #1, #3; failed #2 (claude did not start)");
+    });
+
+    it("other actions get no suffix", async () => {
+      await actions.run(review(), rows(1), { harness: "claude", model: "", where: "root" });
+      expect(tauri.calls("agent_action_plan")[0]?.["suffix"]).toBeUndefined();
     });
   });
 
