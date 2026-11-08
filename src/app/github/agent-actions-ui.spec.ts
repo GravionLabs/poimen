@@ -123,12 +123,12 @@ async function openDetail() {
 }
 
 describe("agent actions in the pull request views", () => {
-  it("shows the matching actions as buttons; worktree ones are disabled with the reason", async () => {
+  it("shows the matching actions as buttons; worktree ones are enabled", async () => {
     const { el } = await openDetail();
     const buttons = [...el.querySelectorAll<HTMLButtonElement>("[data-testid=agent-action]")];
     expect(buttons.map((b) => [b.textContent!.trim(), b.disabled, b.title])).toEqual([
       ["Review", false, "Shift+click: choose harness and model"],
-      ["In worktree", true, "needs worktree support"],
+      ["In worktree", false, "Shift+click: choose harness and model"],
     ]);
   });
 
@@ -182,11 +182,17 @@ describe("agent actions in the pull request views", () => {
   it("the palette offers the actions for the selection, titled with the numbers", async () => {
     const { fixture } = await openDetail();
     const actions = TestBed.inject(AgentActions);
-    expect(actions.entries().map((e) => e.title)).toEqual(["GitHub: Review #1"]);
+    expect(actions.entries().map((e) => e.title)).toEqual([
+      "GitHub: Review #1",
+      "GitHub: In worktree #1",
+    ]);
     const pulls = TestBed.inject(GithubPulls);
     pulls.select("o/n#1");
     pulls.select("o/n#2");
-    expect(actions.entries().map((e) => e.title)).toEqual(["GitHub: Review #1, #2"]);
+    expect(actions.entries().map((e) => e.title)).toEqual([
+      "GitHub: Review #1, #2",
+      "GitHub: In worktree #1, #2",
+    ]);
     await actions.runCurrent("review");
     fixture.detectChanges();
     expect(tauri.calls("agent_start")).toHaveLength(2);

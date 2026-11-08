@@ -8,11 +8,11 @@ import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE } from "../core/ui-state";
 import {
   AgentActions,
-  NEEDS_WORKTREE,
   issueTarget,
   matches,
   pullTarget,
   summaryText,
+  worktreeLabel,
   type ActionTarget,
 } from "./agent-actions";
 import type { Issue } from "./issues";
@@ -128,6 +128,17 @@ describe("summaryText", () => {
 
 const LAUNCH = (nr: number) => ({ kind: "claude", args: [`prompt ${nr}`] });
 
+describe("worktreeLabel", () => {
+  it("prefixes pull requests and cuts long titles to 40 characters", () => {
+    expect(worktreeLabel(ISSUE_T(5))).toBe("#5 title 5");
+    expect(worktreeLabel(pullTarget(pull(9)))).toBe("PR #9 pr 9");
+    const long = worktreeLabel(ISSUE_T(5, { title: "x".repeat(80) }));
+    expect([...long]).toHaveLength(40);
+    expect(long.endsWith("…")).toBe(true);
+    expect(worktreeLabel(ISSUE_T(5, { title: " " }))).toBe("#5");
+  });
+});
+
 describe("AgentActions", () => {
   let actions: AgentActions;
   let spaces: SpaceActions;
@@ -195,8 +206,8 @@ describe("AgentActions", () => {
     const offered = actions.offered([ISSUE_T(1, { labels: ["pbi"] })]);
     expect(offered.map((o) => [o.action.id, o.enabled, o.reason])).toEqual([
       ["plan", true, null],
-      ["wt", false, NEEDS_WORKTREE],
-      ["ask", false, NEEDS_WORKTREE],
+      ["wt", true, null],
+      ["ask", true, null],
     ]);
     expect(actions.offered([ISSUE_T(2, { labels: ["bug"] })])[0].action.id).toBe("refine");
     // A mixed selection of kinds has no common action.
@@ -294,12 +305,165 @@ describe("AgentActions", () => {
     expect(spaces.warning()).toBe('Review: unknown harness "x"');
   });
 
-  it("worktree and ask actions do not start", async () => {
-    const wt = action({ run: "worktree" });
-    expect(await actions.request(wt, [ISSUE_T(1)], false)).toBeNull();
-    expect(await actions.run(wt, [ISSUE_T(1)])).toBeNull();
-    expect(tauri.calls("agent_action_plan")).toEqual([]);
-    expect(spaces.warning()).toBe(`Refine: ${NEEDS_WORKTREE}`);
+  describe("worktree runs", () => {
+    const wt = (over: Record<string, unknown> = {}) =>
+      action({ run: "worktree", id: "wt", label: "Work", ...over });
+    const prWt = () => wt({ on: "pr" });
+
+    beforeEach(() => {
+      tauri.answer("get_task_modes", () => ({
+        worktreeDir: "..",
+        modes: [
+          { name: "plain", worktree: false, branch: "" },
+          { name: "agent", worktree: true, branch: "feat/{nr}" },
+        ],
+      }));
+      tauri.answer("task_worktree", () => ({ path: "/src/n-1", branch: "feat/1", created: true }));
+      tauri.answer("pr_worktree", () => ({ path: "/src/n-pr7", branch: "pr/7", created: true }));
+      tauri.answer("snapshot", () => ({
+        workspaces: [],
+        tabs: [],
+        panes: [{ pane_id: "root1", workspace_id: "w1" }],
+      }));
+    });
+
+    it("an issue gets the task worktree, a space on it and the agent in its root pane", async () => {
+      const summary = await actions.request(wt(), [ISSUE_T(1)], false);
+      expect(tauri.calls("task_worktree")).toEqual([
+        {
+          repoDir: "/src/n",
+          issue: { nr: 1, title: "title 1", url: "https://github.com/o/n/issues/1" },
+          mode: "agent",
+        },
+      ]);
+      expect(tauri.calls("create_space")).toEqual([
+        { cwd: "/src/n-1", label: "#1 title 1", decision: null, command: null },
+      ]);
+      expect(tauri.calls("terminal_create")).toEqual([]);
+      expect(tauri.calls("agent_start")).toEqual([
+        { paneId: "root1", kind: "claude", name: "Work #1", args: ["prompt 1"] },
+      ]);
+      expect(summary).toEqual({ started: [1], failed: [] });
+      expect(spaces.warning()).toBe("Work: started #1");
+    });
+
+    it("a pull request gets the PR worktree and the label PR #<nr> <title>", async () => {
+      const summary = await actions.request(prWt(), [pullTarget(pull(7))], false);
+      expect(tauri.calls("pr_worktree")).toEqual([
+        { repoDir: "/src/n", nr: 7, headRef: "feat/7-x" },
+      ]);
+      expect(tauri.calls("create_space")).toEqual([
+        { cwd: "/src/n-pr7", label: "PR #7 pr 7", decision: null, command: null },
+      ]);
+      expect(tauri.calls("agent_start")[0]).toMatchObject({ paneId: "root1" });
+      expect(summary).toEqual({ started: [7], failed: [] });
+    });
+
+    it("an existing space is focused and the agent starts in a new tab there", async () => {
+      tauri.answer("create_space", () => ({ workspace_id: "w9", created: false }));
+      const summary = await actions.request(wt(), [ISSUE_T(1)], false);
+      expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w9", cwd: "/src/n-1" }]);
+      expect(tauri.calls("agent_start")).toEqual([
+        { paneId: "p1", kind: "claude", name: "Work #1", args: ["prompt 1"] },
+      ]);
+      expect(summary?.started).toEqual([1]);
+    });
+
+    it("a failed worktree names the step and creates no space", async () => {
+      tauri.answer("task_worktree", () => {
+        throw "path exists";
+      });
+      const summary = await actions.request(wt(), [ISSUE_T(1)], false);
+      expect(tauri.calls("create_space")).toEqual([]);
+      expect(tauri.calls("agent_start")).toEqual([]);
+      expect(summary).toEqual({
+        started: [],
+        failed: [{ numbers: [1], reason: "worktree failed: path exists" }],
+      });
+      expect(spaces.warning()).toBe("Work: failed #1 (worktree failed: path exists)");
+    });
+
+    it("an issue without a worktree task mode fails in the worktree step", async () => {
+      tauri.answer("get_task_modes", () => ({ worktreeDir: "..", modes: [] }));
+      const summary = await actions.request(wt(), [ISSUE_T(1)], false);
+      expect(summary?.failed[0].reason).toContain("worktree failed: no task mode");
+      expect(tauri.calls("create_space")).toEqual([]);
+    });
+
+    it("a failed space names the step and starts no agent", async () => {
+      tauri.answer("create_space", () => {
+        throw "no repository";
+      });
+      const summary = await actions.request(prWt(), [pullTarget(pull(7))], false);
+      expect(summary?.failed).toEqual([{ numbers: [7], reason: "space failed: no repository" }]);
+      expect(tauri.calls("agent_start")).toEqual([]);
+    });
+
+    it("a failed agent start names the step", async () => {
+      tauri.answer("agent_start", () => {
+        throw "claude missing";
+      });
+      const summary = await actions.request(wt(), [ISSUE_T(1)], false);
+      expect(summary).toEqual({
+        started: [],
+        failed: [{ numbers: [1], reason: "agent failed: claude missing" }],
+      });
+    });
+
+    it("each target gets its own worktree and space; one failure leaves the others", async () => {
+      tauri.answer("task_worktree", (args) => {
+        const nr = (args?.["issue"] as { nr: number }).nr;
+        if (nr === 1) throw "boom";
+        return { path: `/src/n-${nr}`, branch: `feat/${nr}`, created: true };
+      });
+      const summary = await actions.request(wt(), [ISSUE_T(1), ISSUE_T(2)], false);
+      expect(tauri.calls("create_space")).toEqual([
+        { cwd: "/src/n-2", label: "#2 title 2", decision: null, command: null },
+      ]);
+      expect(summary).toEqual({
+        started: [2],
+        failed: [{ numbers: [1], reason: "worktree failed: boom" }],
+      });
+    });
+  });
+
+  describe("ask", () => {
+    const ask = (over: Record<string, unknown> = {}) =>
+      action({ run: "ask", id: "ask", label: "Ask", ...over });
+
+    beforeEach(() => {
+      tauri.answer("get_task_modes", () => ({
+        worktreeDir: "..",
+        modes: [{ name: "agent", worktree: true, branch: "feat/{nr}" }],
+      }));
+      tauri.answer("task_worktree", () => ({ path: "/src/n-1", branch: "feat/1", created: true }));
+    });
+
+    it("always opens the dialog, also without Shift, and starts nothing yet", async () => {
+      expect(await actions.request(ask(), [ISSUE_T(1)], false)).toBeNull();
+      expect(actions.dialog()?.action.id).toBe("ask");
+      expect(actions.dialog()?.where).toBe("root");
+      expect(tauri.calls("agent_action_plan")).toEqual([]);
+      expect(tauri.calls("agent_start")).toEqual([]);
+    });
+
+    it("choosing repository root starts at the root", async () => {
+      await actions.request(ask(), [ISSUE_T(1)], false);
+      await actions.confirmDialog();
+      expect(tauri.calls("task_worktree")).toEqual([]);
+      expect(tauri.calls("create_space")).toEqual([
+        { cwd: "/src/n", label: null, decision: null, command: null },
+      ]);
+      expect(tauri.calls("agent_start")).toHaveLength(1);
+    });
+
+    it("choosing worktree creates the worktree and its space", async () => {
+      await actions.request(ask(), [ISSUE_T(1)], false);
+      actions.setDialog({ where: "worktree" });
+      await actions.confirmDialog();
+      expect(tauri.calls("task_worktree")).toHaveLength(1);
+      expect(tauri.calls("create_space")[0]).toMatchObject({ cwd: "/src/n-1" });
+    });
   });
 
   it("Shift opens the dialog prefilled instead of starting", async () => {
