@@ -1,0 +1,55 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "number": 336,
+        "title": "feat(github): pull request detail pane",
+        "url": "https://github.com/GravionLabs/poimen/pull/336",
+        "body": "Adds the **detail pane**.\n\nCloses #336",
+        "state": "OPEN",
+        "isDraft": false,
+        "author": { "login": "jkaufmann" },
+        "headRefName": "feat/336-pull-request-detail-pane",
+        "baseRefName": "release/next",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "BLOCKED",
+        "viewerCanUpdate": true,
+        "viewerDidAuthor": true,
+        "viewerCanMergeAsAdmin": false,
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      { "__typename": "CheckRun", "name": "frontend", "status": "COMPLETED", "conclusion": "SUCCESS", "detailsUrl": "https://github.com/GravionLabs/poimen/actions/runs/1" },
+                      { "__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "https://github.com/GravionLabs/poimen/actions/runs/2" },
+                      { "__typename": "CheckRun", "name": "windows", "status": "IN_PROGRESS", "conclusion": null, "detailsUrl": "https://github.com/GravionLabs/poimen/actions/runs/3" },
+                      { "__typename": "CheckRun", "name": "docs", "status": "COMPLETED", "conclusion": "SKIPPED", "detailsUrl": null },
+                      { "__typename": "StatusContext", "context": "ci/legacy", "state": "PENDING", "targetUrl": "https://ci.example.com/7" },
+                      { "__typename": "StatusContext", "context": "ci/lint", "state": "SUCCESS", "targetUrl": null }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": [
+            { "author": { "login": "octocat" }, "state": "CHANGES_REQUESTED", "submittedAt": "2026-11-05T10:00:00Z" },
+            { "author": null, "state": "COMMENTED", "submittedAt": "2026-11-06T09:30:00Z" },
+            { "author": { "login": "octocat" }, "state": "PENDING", "submittedAt": null }
+          ]
+        },
+        "closingIssuesReferences": {
+          "nodes": [
+            { "number": 336, "title": "[PBI] feat(github): pull request detail pane", "url": "https://github.com/GravionLabs/poimen/issues/336", "state": "OPEN", "repository": { "nameWithOwner": "GravionLabs/poimen" } },
+            { "number": 12, "title": "Other repo issue", "url": "https://github.com/GravionLabs/other/issues/12", "state": "CLOSED", "repository": { "nameWithOwner": "GravionLabs/other" } }
+          ]
+        }
+      }
+    }
+  }
+}

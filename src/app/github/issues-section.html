@@ -58,7 +58,14 @@
       <ul class="tree" [attr.aria-label]="tree.repo + ' issues'">
         @for (row of issues.rows(tree); track row.key) {
           @let i = row.node.issue;
-          <li class="row" [style.padding-left.px]="row.depth * 20" [attr.data-number]="i.number">
+          <li
+            class="row"
+            [class.selected]="
+              issues.selected()?.repo === tree.repo && issues.selected()?.number === i.number
+            "
+            [style.padding-left.px]="row.depth * 20"
+            [attr.data-number]="i.number"
+          >
             @if (row.node.children.length) {
               <button
                 type="button"

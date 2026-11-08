@@ -4,6 +4,7 @@ import { GithubIssues } from "./issues";
 import { GithubMilestones } from "./milestones";
 import { IssuesSection } from "./issues-section";
 import { GithubFilter } from "./github-filter";
+import { PullDetailPane } from "./pull-detail/pull-detail";
 import { MilestonesSection } from "./milestones-section";
 import {
   GithubPulls,
@@ -20,7 +21,7 @@ import {
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
   selector: "app-github-view",
-  imports: [MilestonesSection, IssuesSection],
+  imports: [MilestonesSection, IssuesSection, PullDetailPane],
   templateUrl: "./github-view.html",
   styleUrl: "./github-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -66,6 +67,12 @@ export class GithubView {
 
   constructor() {
     this.loadAll(false);
+  }
+
+  /** Escape closes the detail pane of a pull request. */
+  @HostListener("keydown.escape")
+  protected onEscape(): void {
+    this.pulls.closeDetail();
   }
 
   /** The tab regained focus: read again, but never faster than the 30 s cache. */
@@ -133,6 +140,12 @@ export class GithubView {
     this.pulls.select(key, event.shiftKey ? "range" : "toggle");
   }
 
+  /** A click on a row (not on its checkbox or buttons) opens the detail pane. */
+  protected onRowClick(event: MouseEvent, row: PullRow): void {
+    if (event.target instanceof HTMLElement && event.target.closest("input, button")) return;
+    void this.pulls.openDetail(row);
+  }
+
   /** Up and Down move the cursor row, Space selects it (Shift+Space the range since the anchor). */
   protected onKey(event: KeyboardEvent): void {
     // Inside a checkbox or button the key keeps its own meaning.
@@ -140,6 +153,12 @@ export class GithubView {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       this.pulls.moveCursor(event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Enter" && this.pulls.cursor()) {
+      const row = this.pulls.rows().find((r) => r.key === this.pulls.cursor());
+      if (row) {
+        event.preventDefault();
+        void this.pulls.openDetail(row);
+      }
     } else if (event.key === " " && this.pulls.cursor()) {
       event.preventDefault();
       this.pulls.select(this.pulls.cursor()!, event.shiftKey ? "range" : "toggle");

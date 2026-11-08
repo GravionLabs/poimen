@@ -129,9 +129,11 @@
                       @for (row of group.rows; track row.key) {
                         <tr
                           class="row"
+                          tabindex="-1"
                           [class.selected]="pulls.selected().has(row.key)"
                           [class.cursor]="pulls.cursor() === row.key"
                           [attr.data-key]="row.key"
+                          (click)="onRowClick($event, row)"
                         >
                           <td>
                             <input
@@ -225,5 +227,8 @@
         }
       }
     </main>
+    @if (ui.githubPage() === "pulls") {
+      <app-pull-detail />
+    }
   </div>
 </div>
