@@ -7,6 +7,8 @@ import { GithubFilter } from "./github-filter";
 import { IssueDetailPane } from "./issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail/pull-detail";
 import { MilestonesSection } from "./milestones-section";
+import { InboxSection } from "./inbox-section";
+import { deriveInbox, inboxCount } from "./inbox";
 import {
   GithubPulls,
   SCOPES,
@@ -22,7 +24,7 @@ import {
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
   selector: "app-github-view",
-  imports: [MilestonesSection, IssuesSection, PullDetailPane, IssueDetailPane],
+  imports: [InboxSection, MilestonesSection, IssuesSection, PullDetailPane, IssueDetailPane],
   templateUrl: "./github-view.html",
   styleUrl: "./github-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -33,9 +35,16 @@ export class GithubView {
   protected readonly milestones = inject(GithubMilestones);
   protected readonly filter = inject(GithubFilter);
   protected readonly ui = inject(UiState);
-  /** The sub-pages of the navigation; an Inbox entry (#344) goes in front. */
+  /** The sub-pages of the navigation, the Inbox in front. */
   protected readonly pages = computed<{ id: GithubPage; label: string; count: number | null }[]>(
     () => [
+      {
+        id: "inbox",
+        label: "Inbox",
+        count: this.pulls.result()
+          ? inboxCount(deriveInbox(this.pulls.result(), this.issues.result()))
+          : null,
+      },
       {
         id: "pulls",
         label: "Pull requests",
@@ -93,18 +102,21 @@ export class GithubView {
   /** Reloads the active sub-page. */
   protected refresh(): void {
     const page = this.ui.githubPage();
-    if (page === "pulls") void this.pulls.load();
+    if (page === "inbox") this.loadAll(true);
+    else if (page === "pulls") void this.pulls.load();
     else if (page === "issues") void this.issues.load();
     else void this.milestones.load();
   }
 
   protected get loading(): boolean {
     const page = this.ui.githubPage();
-    return page === "pulls"
-      ? this.pulls.loading()
-      : page === "issues"
-        ? this.issues.loading()
-        : this.milestones.loading();
+    return page === "inbox"
+      ? this.pulls.loading() || this.issues.loading()
+      : page === "pulls"
+        ? this.pulls.loading()
+        : page === "issues"
+          ? this.issues.loading()
+          : this.milestones.loading();
   }
 
   protected setRepo(value: string): void {

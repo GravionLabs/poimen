@@ -8,6 +8,7 @@ import { tauri } from "../../core/tauri.mock";
 import { GithubView } from "../github-view";
 import { GithubIssues, type Issue, type IssueDetail, type RepoIssues } from "../issues";
 import { IssuesSection } from "../issues-section";
+import { InboxSection } from "../inbox-section";
 import { MilestonesSection } from "../milestones-section";
 import { GithubPulls } from "../pulls";
 import { PullDetailPane } from "../pull-detail/pull-detail";
@@ -121,6 +122,7 @@ async function render(detail: () => unknown = () => DETAIL) {
   tauri.answer("github_issue_detail", detail);
   withTemplate(GithubView, "github-view.html");
   withTemplate(IssuesSection, "issues-section.html");
+  withTemplate(InboxSection, "inbox-section.html");
   withTemplate(MilestonesSection, "milestones-section.html");
   withTemplate(PullDetailPane, "pull-detail/pull-detail.html");
   withTemplate(IssueDetailPane, "issue-detail/issue-detail.html");

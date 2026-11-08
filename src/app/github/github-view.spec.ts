@@ -6,13 +6,16 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ACTIVITY_VIEWS } from "../activity-bar/activity-bar";
 import { POIMEN_COMMANDS } from "../core/command-palette";
 import { EditorTabs, GITHUB_TAB, tabKind } from "../core/editor-tabs";
-import { UI_STORAGE, UiState } from "../core/ui-state";
+import { UI_STORAGE, UiState, type GithubPage } from "../core/ui-state";
 import { tauri } from "../core/tauri.mock";
 import { GithubView } from "./github-view";
 import { IssuesSection } from "./issues-section";
 import { IssueDetailPane } from "./issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail/pull-detail";
+import { GithubIssues } from "./issues";
 import { MilestonesSection } from "./milestones-section";
+import { InboxSection } from "./inbox-section";
+import { deriveInbox, inboxCount } from "./inbox";
 import {
   GithubPulls,
   ageText,
@@ -89,7 +92,7 @@ const RESULT: PullsResult = {
   ],
 };
 
-async function render(result: PullsResult = RESULT) {
+async function render(result: PullsResult = RESULT, page: GithubPage | null = "pulls") {
   tauri.answer("github_pulls", () => result);
   TestBed.overrideComponent(GithubView, {
     set: {
@@ -103,6 +106,13 @@ async function render(result: PullsResult = RESULT) {
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/github/issues-section.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(InboxSection, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/inbox-section.html", "utf8"),
     },
   });
   TestBed.overrideComponent(MilestonesSection, {
@@ -126,6 +136,7 @@ async function render(result: PullsResult = RESULT) {
       template: readFileSync("src/app/github/issue-detail/issue-detail.html", "utf8"),
     },
   });
+  if (page) TestBed.inject(UiState).selectGithubPage(page);
   const fixture = TestBed.createComponent(GithubView);
   await fixture.whenStable();
   fixture.detectChanges();
@@ -134,6 +145,72 @@ async function render(result: PullsResult = RESULT) {
 
 const rows = (el: HTMLElement) =>
   [...el.querySelectorAll("tbody tr.row")].map((r) => r.textContent!);
+
+describe("deriveInbox", () => {
+  const mk = (n: number, over: Partial<Pull>) => pull(n, over);
+  const pulls: PullsResult = {
+    viewer: "JK",
+    repos: [
+      {
+        root: "/a",
+        repo: "o/a",
+        status: "ok",
+        pulls: [
+          mk(1, { author: "x", reviewRequests: ["jk"] }),
+          mk(2, { checks: { state: "failing", passed: 0, failed: 1, pending: 0 } }),
+          mk(3, { reviewDecision: "CHANGES_REQUESTED" }),
+          mk(4, { checks: { state: "passing", passed: 1, failed: 0, pending: 0 } }),
+          mk(5, { author: "x", checks: { state: "failing", passed: 0, failed: 1, pending: 0 } }),
+        ],
+      },
+      { root: "/b", repo: "o/b", status: "error", error: { kind: "offline" } },
+    ],
+  };
+  const issue = (number: number, assignees: string[], state: "OPEN" | "CLOSED" = "OPEN") => ({
+    number,
+    title: `i${number}`,
+    url: "u",
+    state,
+    labels: [],
+    assignees,
+    milestone: null,
+    parent: null,
+    subTotal: 0,
+    subCompleted: 0,
+    prs: [],
+  });
+  const issues = [
+    {
+      root: "/a",
+      repo: "o/a",
+      status: "ok" as const,
+      truncated: false,
+      issues: [issue(7, ["jk"]), issue(8, ["x"]), issue(9, ["jk"], "CLOSED")],
+    },
+  ];
+
+  it("collects the three sections", () => {
+    const s = deriveInbox(pulls, issues);
+    expect(s.map((x) => [x.id, x.entries.map((e) => e.number)])).toEqual([
+      ["review", [1]],
+      ["mine", [2, 3]],
+      ["issues", [7]],
+    ]);
+    expect(s[1].entries.map((e) => e.reason)).toEqual(["Checks failed", "Changes requested"]);
+    expect(inboxCount(s)).toBe(4);
+  });
+
+  it("hides empty sections", () => {
+    const s = deriveInbox(pulls, []);
+    expect(s.map((x) => x.id)).toEqual(["review", "mine"]);
+  });
+
+  it("is empty without a viewer or without data", () => {
+    expect(deriveInbox({ ...pulls, viewer: null }, issues)).toEqual([]);
+    expect(deriveInbox(null, null)).toEqual([]);
+    expect(inboxCount([])).toBe(0);
+  });
+});
 
 describe("pull request helpers", () => {
   const all = flattenPulls(RESULT.repos);
@@ -579,7 +656,8 @@ describe("GithubView sub-pages", () => {
   });
   afterEach(() => TestBed.resetTestingModule());
 
-  const nav = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>("nav button")];
+  const navAll = (el: HTMLElement) => [...el.querySelectorAll<HTMLElement>("nav button")];
+  const nav = (el: HTMLElement) => navAll(el).filter((b) => b.dataset["page"] !== "inbox");
   const press = (b: HTMLElement, key: string) =>
     b.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 
@@ -619,7 +697,7 @@ describe("GithubView sub-pages", () => {
   });
 
   it("keeps the selected page across a reopen", async () => {
-    const first = await render();
+    const first = await render(RESULT, null);
     nav(first.nativeElement)[2].click();
     first.detectChanges();
     expect(JSON.parse(stored["poimen.ui"] ?? Object.values(stored)[0]).githubPage).toBe(
@@ -634,7 +712,7 @@ describe("GithubView sub-pages", () => {
         },
       ],
     });
-    const second = await render();
+    const second = await render(RESULT, null);
     expect(nav(second.nativeElement)[2].getAttribute("aria-current")).toBe("page");
     expect(second.nativeElement.querySelector("app-github-milestones")).not.toBeNull();
   });
@@ -692,7 +770,51 @@ describe("GithubView sub-pages", () => {
     expect(tauri.calls("github_milestones")).toHaveLength(before.milestones);
   });
 
+  it("starts on the Inbox when nothing is persisted and counts its entries", async () => {
+    const fixture = await render(RESULT, null);
+    const el: HTMLElement = fixture.nativeElement;
+    expect(TestBed.inject(UiState).githubPage()).toBe("inbox");
+    expect(navAll(el)[0].getAttribute("aria-current")).toBe("page");
+    expect(el.querySelector("[data-testid=count-inbox]")!.textContent).toBe("2");
+    expect(el.querySelector("[data-testid=inbox-review]")!.textContent).toContain(
+      "Review requested",
+    );
+    expect(el.querySelector("[data-testid=inbox-mine]")).not.toBeNull();
+    expect(el.querySelector("[data-testid=inbox-issues]")).toBeNull();
+    expect(stored["poimen.ui-state"]).toBeUndefined();
+  });
+
+  it("opens the pull request of an inbox entry on its page with the pane open", async () => {
+    const fixture = await render(RESULT, null);
+    const el: HTMLElement = fixture.nativeElement;
+    el.querySelector<HTMLElement>("app-github-inbox button.pick")!.click();
+    fixture.detectChanges();
+    expect(TestBed.inject(UiState).githubPage()).toBe("pulls");
+    expect(TestBed.inject(GithubPulls).detailKey()).toBe("o/n#1");
+  });
+
+  it("opens the issue of an inbox entry on the Issues page", async () => {
+    tauri.answer("github_issues", () => [
+      {
+        root: "/src/n",
+        repo: "o/n",
+        status: "ok",
+        truncated: false,
+        issues: [{ ...issueOf(10, null), assignees: ["JK"] }],
+      },
+    ]);
+    const fixture = await render(RESULT, null);
+    const el: HTMLElement = fixture.nativeElement;
+    const entries = [...el.querySelectorAll<HTMLElement>("app-github-inbox button.pick")];
+    expect(entries).toHaveLength(3);
+    entries[2].click();
+    fixture.detectChanges();
+    expect(TestBed.inject(UiState).githubPage()).toBe("issues");
+    expect(TestBed.inject(GithubIssues).detailKey()).toBe("o/n#10");
+  });
+
   it("offers the sub-pages in the command palette", () => {
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "githubInbox", title: "GitHub: Inbox" });
     expect(POIMEN_COMMANDS).toContainEqual({ id: "githubPulls", title: "GitHub: Pull requests" });
     expect(POIMEN_COMMANDS).toContainEqual({ id: "githubIssues", title: "GitHub: Issues" });
     expect(POIMEN_COMMANDS).toContainEqual({ id: "githubMilestones", title: "GitHub: Milestones" });

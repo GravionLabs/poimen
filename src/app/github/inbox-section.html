@@ -1,0 +1,25 @@
+<section class="inbox" aria-label="Inbox">
+  <header>
+    <h2>Inbox</h2>
+  </header>
+  @if (loaded()) {
+    @for (s of sections(); track s.id) {
+      <h3 [attr.data-testid]="'inbox-' + s.id">{{ s.label }}</h3>
+      <ul class="list" [attr.aria-label]="s.label">
+        @for (e of s.entries; track e.kind + e.repo + e.number) {
+          <li class="item">
+            <button type="button" class="pick" (click)="open(e)">
+              <span class="mono">{{ e.repo }}#{{ e.number }}</span>
+              <span class="title">{{ e.title }}</span>
+              <span class="reason">{{ e.reason }}</span>
+            </button>
+          </li>
+        }
+      </ul>
+    } @empty {
+      <p class="hint" data-testid="inbox-empty">Nothing waits for you.</p>
+    }
+  } @else {
+    <p class="hint">Loading...</p>
+  }
+</section>
