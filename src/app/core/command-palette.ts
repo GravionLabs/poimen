@@ -25,6 +25,7 @@ export interface PoimenCommand {
     | "openTerminalHere"
     | "cleanupTasks"
     | "projectTeardown"
+    | "quitAndStopServer"
     | "projectEntry"
     | "agentAction";
   title: string;
@@ -61,6 +62,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "openTerminalHere", title: "Open terminal in the selected folder" },
   { id: "cleanupTasks", title: "Clean up merged tasks" },
   { id: "projectTeardown", title: "Project: Run teardown" },
+  { id: "quitAndStopServer", title: "Quit poimen and stop server" },
 ];
 
 /** An entry of the palette: a poimen command; `shortcut` is the key binding label (empty when none). */
@@ -133,6 +135,7 @@ export class CommandPalette {
         c.id === "openTerminalHere" ||
         c.id === "cleanupTasks" ||
         c.id === "projectTeardown" ||
+        c.id === "quitAndStopServer" ||
         c.id === "projectEntry" ||
         c.id === "agentAction"
           ? ""

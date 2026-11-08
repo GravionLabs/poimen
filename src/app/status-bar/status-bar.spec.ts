@@ -4,6 +4,7 @@ import { Component } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
+import { SERVER_RESTART_NOTE, type UpdateState } from "../core/updater";
 import { figures, usageTitle, type UsageReport } from "../core/usage";
 import type { BarSummary } from "../deliver/deliver-status";
 import { connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
@@ -75,8 +76,11 @@ describe("mode button", () => {
     panelOpen = true,
     usage: UsageReport | null = null,
     deliver: BarSummary | null = null,
+    server: string | null = null,
+    update: UpdateState = { kind: "idle" },
   ) => {
     const emitted: boolean[] = [];
+    const serverClicks: string[] = [];
     let deliverClicks = 0;
     let shown = 0;
     let opened = 0;
@@ -92,8 +96,12 @@ describe("mode button", () => {
       blocked = () => blocked;
       size = () => undefined;
       appVersion = () => null;
-      update = () => ({ kind: "idle" }) as const;
-      detailsOpen = () => false;
+      update = () => update;
+      detailsOpen = () => update.kind === "available";
+      serverNotice = () => server;
+      restartServer = { emit: () => serverClicks.push("restart") };
+      laterServer = { emit: () => serverClicks.push("later") };
+      restartNote = SERVER_RESTART_NOTE;
       errTitle = () => "";
       checkUpdate = { emit: () => {} };
       installUpdate = { emit: () => {} };
@@ -129,6 +137,7 @@ describe("mode button", () => {
     return {
       button,
       emitted,
+      serverClicks,
       root: fixture.nativeElement as HTMLElement,
       shown: () => shown,
       opened: () => opened,
@@ -177,6 +186,29 @@ describe("mode button", () => {
     expect(help.title).toBe("Keyboard shortcuts (⌘/)");
     help.click();
     expect(opened()).toBe(1);
+  });
+
+  it("hides the server notice while the server is fine", () => {
+    expect(render("control", null).root.querySelector("[data-testid=server-notice]")).toBeNull();
+  });
+
+  it("shows the server notice with Restart server and Later", () => {
+    const text = "poimen-server 0.1.0 is running, 0.2.0 is installed";
+    const { root, serverClicks } = render("control", null, true, null, null, text);
+    expect(root.querySelector("[data-testid=server-notice]")?.textContent).toContain(text);
+    root.querySelector<HTMLButtonElement>("[data-testid=restart-server]")!.click();
+    root.querySelector<HTMLButtonElement>("[data-testid=later-server]")!.click();
+    expect(serverClicks).toEqual(["restart", "later"]);
+  });
+
+  it("says before the install that restarting the server ends the terminals", () => {
+    const info = { version: "9.9.9", currentVersion: "0.1.0", notes: null, date: null };
+    const { root } = render("control", null, true, null, null, null, {
+      kind: "available",
+      info,
+    });
+    const note = root.querySelector("[data-testid=restart-note]")?.textContent ?? "";
+    expect(note).toContain("restarting ends all terminals");
   });
 
   it("ends with the versions, the update link and the ? button, in this order", () => {

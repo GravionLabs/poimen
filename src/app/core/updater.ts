@@ -21,6 +21,13 @@ export type UpdateState =
   /** `info` is the update that stays available after a failed install; `null` after a failed check. */
   | { kind: "error"; step: UpdateStep; message: string; info: UpdateInfo | null };
 
+/**
+ * Shown with the update before it is installed: the update replaces the app, not the running
+ * server, but restarting the server (offered afterwards when it is older) ends every terminal.
+ */
+export const SERVER_RESTART_NOTE =
+  "poimen-server keeps your terminals running during the update. A newer server only starts when you restart it, and restarting ends all terminals.";
+
 /** The headline of a failed step. */
 export function errorTitle(step: UpdateStep): string {
   return step === "check" ? "Update check failed" : "Update failed";

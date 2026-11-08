@@ -1,4 +1,4 @@
-//! `poimen-server`: one per user, started by the app (or by hand), never stopped by the app.
+//! `poimen-server`: one per user, started by the app (or by hand), stopped by the app only on a confirmed restart or quit (`server.shutdown`).
 //!
 //! Subcommands: `report tokens|clear|agent` (see `report.rs`), `hook claude` / `hook copilot <event>` (run by Claude Code and Copilot CLI, see
 //! `claude.rs` and `copilot.rs`) and `integration install|uninstall|status claude|copilot
@@ -125,6 +125,8 @@ fn serve() -> ExitCode {
     match Server::bind(Config::from_env()) {
         Ok(server) => {
             eprintln!("poimen-server: listening on {}", server.socket().display());
+            // `server.shutdown`: the app asked after the user confirmed; the terminals are gone.
+            server.on_shutdown(|| std::process::exit(0));
             server.serve();
             ExitCode::SUCCESS
         }

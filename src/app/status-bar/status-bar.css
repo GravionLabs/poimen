@@ -28,6 +28,11 @@
   font-size: 12px;
 }
 
+.update-details .restart-note {
+  margin: 4px 0 8px;
+  opacity: 0.8;
+}
+
 .update-details .message {
   margin: 4px 0 8px;
   white-space: pre-wrap;

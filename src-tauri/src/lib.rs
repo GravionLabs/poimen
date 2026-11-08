@@ -825,6 +825,47 @@ async fn ensure_backend(
     .await
 }
 
+/// Stops the running server and starts the bundled one. Ends every terminal: the frontend calls it
+/// only after the user confirmed which terminals end. Serialized with `ensure_backend`.
+#[tauri::command]
+async fn restart_server(
+    backend: State<'_, Shared>,
+    lock: State<'_, StartLock>,
+    colors: State<'_, terminal_colors::TerminalColors>,
+    kind: State<'_, BackendKind>,
+) -> Result<backend::BackendStatus, String> {
+    let lock = lock.0.clone();
+    let colors = colors.inner().clone();
+    let poimen = kind.0 == "poimen";
+    on_backend(backend.inner(), move |b| {
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let status: backend::BackendStatus = b.restart_server().into();
+        if poimen && status.state == "started" {
+            let _ = colors.push(&poimen_client::Client::default());
+        }
+        Ok(status)
+    })
+    .await
+}
+
+/// The confirmed "Quit poimen and stop server": stops the server (ending every terminal), then
+/// quits the app. When the server cannot be stopped the app stays open and the error is returned.
+#[tauri::command]
+async fn quit_and_stop_server(
+    app: AppHandle,
+    backend: State<'_, Shared>,
+    lock: State<'_, StartLock>,
+) -> Result<(), String> {
+    let lock = lock.0.clone();
+    on_backend(backend.inner(), move |b| {
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        b.stop_server().map_err(|e| e.to_string())
+    })
+    .await?;
+    app.exit(0);
+    Ok(())
+}
+
 /// Whether Claude Code and Copilot CLI have the poimen hooks (`poimen-server integration status`).
 #[tauri::command]
 async fn hooks_status() -> Result<Vec<hooks::HookStatus>, String> {
@@ -1778,6 +1819,8 @@ pub fn run() {
             snapshot,
             herdr_info,
             ensure_backend,
+            restart_server,
+            quit_and_stop_server,
             backend_kind,
             set_terminal_colors,
             hooks_status,

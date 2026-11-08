@@ -4,7 +4,7 @@
 //!
 //! The server owns the PTYs and stores no layout: every terminal is its own tab, splits and tabs
 //! are the UI's business. A stream is emulated: it carries the snapshot and raw PTY bytes, so
-//! xterm.js tracks the modes itself (mouse, scrollback). poimen never stops the server.
+//! xterm.js tracks the modes itself (mouse, scrollback). poimen stops the server only after the user confirmed (`restart_server`, `stop_server`).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -251,6 +251,16 @@ fn controller_held() -> StreamRecord {
 impl Backend for PoimenBackend {
     fn ensure_running(&self, auto_start: bool) -> Result<Outcome, StartError> {
         poimen_server::ensure_running(&poimen_server::SystemRunner::new(), auto_start)
+            .map_err(|e| StartError::Other(e.to_string()))
+    }
+
+    fn restart_server(&self) -> Result<Outcome, StartError> {
+        poimen_server::restart(&poimen_server::SystemRunner::new())
+            .map_err(|e| StartError::Other(e.to_string()))
+    }
+
+    fn stop_server(&self) -> Result<(), StartError> {
+        poimen_server::stop(&poimen_server::SystemRunner::new())
             .map_err(|e| StartError::Other(e.to_string()))
     }
 

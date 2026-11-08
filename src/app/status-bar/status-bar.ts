@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
 import { figures, usageTitle, type UsageReport } from "../core/usage";
-import { errorTitle, type UpdateState } from "../core/updater";
+import { SERVER_RESTART_NOTE, errorTitle, type UpdateState } from "../core/updater";
 import type { BackendKind } from "../core/settings";
 import type { BarSummary } from "../deliver/deliver-status";
 import type { ConnectionState } from "../core/herdr-store";
@@ -64,6 +64,13 @@ export class StatusBar {
   readonly backend = input<BackendKind>("herdr");
   /** A notice such as a pane layout problem of a new space; empty hides it. */
   readonly notice = input<string | null>(null);
+  /** The running poimen-server is outdated or incompatible: the notice text; `null` hides it. */
+  readonly serverNotice = input<string | null>(null);
+  /** "Restart server" was clicked. */
+  readonly restartServer = output<void>();
+  /** "Later" was clicked. */
+  readonly laterServer = output<void>();
+  protected readonly restartNote = SERVER_RESTART_NOTE;
   /** Whether the bottom panel is shown; while it is closed a button shows it again. */
   readonly panelOpen = input(true);
   /** Shortcut label of `toggleOutput` for the button's tooltip; empty when unbound. */
