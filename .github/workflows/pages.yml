@@ -3,8 +3,8 @@ name: Pages
 # The public site on GitHub Pages (https://gravionlabs.github.io/poimen/): site/ (VitePress, self-contained with its
 # own package.json and npm lockfile). The decision records of docs/ stay in the repository and are not published.
 # Pull requests to main or release/** that touch the site build it as a dry run, so a dead link fails before
-# the merge; a push to main deploys it, and only while the repository variable DEPLOY_PAGES is "true"
-# (Settings -> Pages -> Source must be "GitHub Actions"). A manual run is a dry run too.
+# the merge; a push to main deploys it (Settings -> Pages -> Source must be "GitHub Actions"). A manual run is a
+# dry run too. Build, deploy and concurrency live in GravionLabs/ci; its input `deploy` (default true) is the switch.
 on:
   push:
     branches: [main]
@@ -17,54 +17,11 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  # Deployments queue behind each other and the last one wins; a pull request replaces its own earlier run.
-  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  pages: write
+  id-token: write
 
 jobs:
-  build:
-    name: Build the site
-    # Pull requests and manual runs build as a dry run; only a push to main needs the variable.
-    if: github.event_name != 'push' || vars.DEPLOY_PAGES == 'true'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: site
-    env:
-      # https://<owner>.github.io/<repository>/
-      SITE_BASE: /${{ github.event.repository.name }}/
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: site/package-lock.json
-      - run: npm ci
-      - name: Site tests
-        run: npm test
-      # Dead links fail this step.
-      - name: Build the site
-        run: npm run build
-      - name: Upload the site
-        if: github.event_name == 'push'
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
-        with:
-          path: site/.vitepress/dist
-
-  deploy:
-    name: Deploy
-    needs: build
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+  pages:
+    uses: GravionLabs/ci/.github/workflows/vitepress-pages.yml@v1
+    with:
+      site-path: site
