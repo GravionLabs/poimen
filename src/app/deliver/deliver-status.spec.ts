@@ -51,6 +51,7 @@ describe("a status file written between iterations (#537)", () => {
     expect(parsed.result).toBe("running");
     expect(runState(parsed, Date.parse(parsed.updatedAt) + 60_000)).toBe("running");
     expect(parsed.needsYou).toEqual([]);
+    expect(parsed.tone).not.toBe("warning");
     expect(parsed.release.prUrl).toBeNull();
   });
 

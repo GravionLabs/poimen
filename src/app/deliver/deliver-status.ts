@@ -281,6 +281,11 @@ export function parseStatus(value: unknown): DeliverStatus | string {
     blocked.length + paused.length === 0;
   const releaseRan = rel.reviewRound !== null || rel.rcUrl !== null || rel.rcVersion !== null;
   const hideRelease = premature && !releaseRan;
+  // Legacy status.json only: a premature "done" lists the release PR before any release step ran.
+  // testIssue is deliberately not part of releaseRan. Matched on the item text, as the item has no link to the PR.
+  const shownNeedsYou = hideRelease
+    ? needsYou.filter((i) => !/release pr/i.test(i.reason))
+    : needsYou;
   const finalResult = (premature ? "running" : result) as LoopResult;
   return {
     run: value["run"],
@@ -297,7 +302,7 @@ export function parseStatus(value: unknown): DeliverStatus | string {
     source: source === "loop" || source === "session" ? source : null,
     tone: isTone(value["tone"])
       ? value["tone"]
-      : legacyTone(finalResult, blocked.length + paused.length + needsYou.length > 0),
+      : legacyTone(finalResult, blocked.length + paused.length + shownNeedsYou.length > 0),
     poimenTerminal: isObject(value["host"]) ? optString(value["host"]["poimenTerminal"]) : null,
     events,
     closed: value["closed"],
@@ -306,7 +311,7 @@ export function parseStatus(value: unknown): DeliverStatus | string {
     delivered: done,
     blocked,
     paused,
-    needsYou: hideRelease ? needsYou.filter((i) => !/release pr/i.test(i.reason)) : needsYou,
+    needsYou: shownNeedsYou,
     release: hideRelease ? { ...rel, prUrl: null } : rel,
     startedAt: value["startedAt"],
     updatedAt: value["updatedAt"],
