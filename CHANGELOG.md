@@ -5,6 +5,49 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.13.0] — 2026-11-08
+
+### Bug Fixes
+- **github**: Contrast for every badge tone, role=img checks, ready-to-close needs closed issues (#335)
+- **backend**: Offer a confirmed restart of an outdated poimen-server (#500) (#560)
+- **sidebar**: Keep the space actions on line 1 (#521)
+- **deliver**: Panel shows a running loop as finished after one PBI session ended (#537) (#565)
+- **deliver**: Keep a running loop running when status.json says done with open items (#537)
+- **deliver**: Tone ignores the dropped release item of a premature done (#537)
+- **deliver**: Delivered entries link to the pull request, never the issue (#538) (#566)
+- **deliver**: Show no pull request link for a delivered entry whose prUrl is not a pull request (#538)
+- **deliver**: A delivered entry without a pull request event has no prUrl (#538)
+
+
+### Documentation
+- **release**: Run the RC test beside the release PR (#482) (#536)
+- **agents**: Name the changed default for existing installations (#526)
+
+
+### Features
+- **github**: Sub-pages with a left navigation and a shared repository filter (#529)
+- **github**: Readable density, status badges and grouped rows (#335) (#531)
+- **github**: Readable density, status badges and grouped rows (#335)
+- **github**: Pull request detail pane (#336) (#532)
+- **github**: Issue detail pane (#337) (#533)
+- **github**: Inbox sub-page with what needs me (#344) (#534)
+- **settings**: Agent actions for issues and pull requests in the config (#345) (#535)
+- **github**: Run agent actions at the repository root (#541)
+- **github**: Run agent actions in a worktree (#347) (#542)
+- **github**: Review agent action with diff-only mode and posting on GitHub (#545)
+- **github**: Badge for running agent actions on issues and PRs (#348) (#547)
+- **explorer**: Open a terminal in a folder (#489) (#552)
+- **explorer**: Fetch or pull a repository and fetch all repositories below a folder (#490) (#557)
+- **spaces**: Space overview as an editor tab from the space row (#492) (#558)
+- **spaces**: Configuration section in the space overview (#493) (#559)
+- **sidebar**: Split the space row into two lines (#521) (#561)
+- **sidebar**: Split the space row into two lines (#521)
+- **deliver**: Deliver panel reads progress events instead of status.json (#480) (#562)
+- **agents**: Events tab in the bottom panel (#481) (#563)
+- **templates**: Create the default space template and layout on the first start (#526) (#564)
+- **templates**: Seed the default space layout and template on the first start (#526)
+
+
 ## [0.12.0] — 2026-11-08
 
 ### Bug Fixes
@@ -23,6 +66,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - **adr**: Poimen console with herdr scope next to the app (#172) (#507)
+- Update CHANGELOG.md for v0.12.0 [skip ci]
 
 
 ### Features
