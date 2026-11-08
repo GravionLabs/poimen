@@ -77,3 +77,6 @@ h3 {
   align-items: center;
   gap: 6px;
 }
+.row.selected {
+  background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
+}

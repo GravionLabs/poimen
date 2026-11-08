@@ -207,12 +207,15 @@ export class GithubIssues {
   private readonly _result = signal<RepoIssues[] | null>(null);
   private readonly _loading = signal(false);
   private readonly _error = signal<string | null>(null);
+  private readonly _selected = signal<{ repo: string; number: number } | null>(null);
   private last = 0;
 
   readonly result = this._result.asReadonly();
   readonly loading = this._loading.asReadonly();
   readonly error = this._error.asReadonly();
 
+  /** The issue picked from elsewhere (a pull request's linked issue); highlighted in the tree. */
+  readonly selected = this._selected.asReadonly();
   readonly state = signal<StateFilter>("open");
   readonly label = signal<string | null>(null);
   readonly level = signal<Level | null>(null);
@@ -269,6 +272,10 @@ export class GithubIssues {
   /** The visible rows of one repository. */
   rows(tree: RepoTree): IssueRow[] {
     return flattenTree(tree.roots, (n) => this.isCollapsed(tree.repo, n));
+  }
+
+  select(repo: string, number: number): void {
+    this._selected.set({ repo, number });
   }
 
   isCollapsed(repo: string, number: number): boolean {

@@ -48,6 +48,49 @@ export interface PullsResult {
   repos: RepoPulls[];
 }
 
+/** One check context of the last commit (`CheckContext` of `github_pulls.rs`). */
+export interface DetailCheck {
+  name: string;
+  state: "passing" | "failing" | "pending" | "skipped";
+  url: string | null;
+}
+
+export interface DetailReview {
+  author: string | null;
+  state: string;
+  submittedAt: string | null;
+}
+
+export interface LinkedIssue {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  /** `owner/name`. */
+  repo: string;
+}
+
+/** A pull request in detail (`PullDetail` of `github_pulls.rs`). */
+export interface PullDetail {
+  number: number;
+  title: string;
+  url: string;
+  body: string;
+  state: string;
+  isDraft: boolean;
+  author: string | null;
+  headRef: string;
+  baseRef: string;
+  mergeable: string;
+  mergeStateStatus: string;
+  checks: DetailCheck[];
+  reviews: DetailReview[];
+  linkedIssues: LinkedIssue[];
+  viewerCanUpdate: boolean;
+  viewerDidAuthor: boolean;
+  viewerCanMergeAsAdmin: boolean;
+}
+
 /** A pull request in the table, with the repository it belongs to. */
 export interface PullRow extends Pull {
   repo: string;
@@ -251,6 +294,10 @@ export class GithubPulls {
   private readonly _error = signal<string | null>(null);
   private readonly _selected = signal<ReadonlySet<string>>(new Set());
   private readonly _cursor = signal<string | null>(null);
+  private readonly _detailKey = signal<string | null>(null);
+  private readonly _detail = signal<PullDetail | null>(null);
+  private readonly _detailError = signal<GhError | string | null>(null);
+  private readonly _detailLoading = signal(false);
   private last = 0;
   private anchor: string | null = null;
 
@@ -267,6 +314,13 @@ export class GithubPulls {
 
   /** Keys (`owner/name#number`) of the selected pull requests. */
   readonly selected = this._selected.asReadonly();
+  /** Key of the pull request whose detail pane is open. */
+  readonly detailKey = this._detailKey.asReadonly();
+  readonly detail = this._detail.asReadonly();
+  readonly detailError = this._detailError.asReadonly();
+  readonly detailLoading = this._detailLoading.asReadonly();
+  /** The row of the open detail pane (still known from the list), if any. */
+  readonly detailRow = computed(() => this.rows().find((r) => r.key === this._detailKey()) ?? null);
   /** The row the keyboard works on. */
   readonly cursor = this._cursor.asReadonly();
 
@@ -416,9 +470,41 @@ export class GithubPulls {
     this._cursor.set(keys[next]);
   }
 
+  /** Opens the detail pane of `row` and reads its detail (the backend caches for 30 s). */
+  async openDetail(row: PullRow): Promise<void> {
+    this._cursor.set(row.key);
+    this._detailKey.set(row.key);
+    this._detail.set(null);
+    this._detailError.set(null);
+    this._detailLoading.set(true);
+    try {
+      const detail = await this.bridge.invoke<PullDetail>("github_pull_detail", {
+        root: row.root,
+        number: row.number,
+      });
+      if (this._detailKey() === row.key) this._detail.set(detail);
+    } catch (err) {
+      if (this._detailKey() === row.key) this._detailError.set(ghErrorOf(err));
+    } finally {
+      if (this._detailKey() === row.key) this._detailLoading.set(false);
+    }
+  }
+
+  closeDetail(): void {
+    this._detailKey.set(null);
+    this._detail.set(null);
+    this._detailError.set(null);
+    this._detailLoading.set(false);
+  }
+
   clearSelection(): void {
     this._selected.set(new Set());
     this._cursor.set(null);
     this.anchor = null;
   }
+}
+
+/** A failed command carries a `GhError` object; anything else is shown as text. */
+function ghErrorOf(err: unknown): GhError | string {
+  return err && typeof err === "object" && "kind" in err ? (err as GhError) : String(err);
 }

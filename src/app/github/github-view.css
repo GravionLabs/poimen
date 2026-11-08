@@ -94,6 +94,7 @@ tbody:focus-visible {
   outline: none;
 }
 .layout {
+  position: relative;
   display: flex;
   gap: 24px;
   align-items: flex-start;

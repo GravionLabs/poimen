@@ -256,6 +256,23 @@ async fn github_pulls(
         .map_err(|e| e.to_string())
 }
 
+/// One pull request in detail (body, checks, reviews, linked issues) in the repository of `root`.
+/// Read-only; the GraphQL cache of the client holds it for 30 s.
+#[tauri::command]
+async fn github_pull_detail(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+) -> Result<github_pulls::PullDetail, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || github_pulls::load_detail(&client, &root, number))
+        .await
+        .map_err(|e| github::GhError::Other {
+            message: e.to_string(),
+        })?
+}
+
 /// The pull request (open or merged) of the branch of each directory, one GraphQL query per
 /// repository; directories without one are left out. Read-only; `gh` errors give an empty answer.
 #[tauri::command]
@@ -1638,6 +1655,7 @@ pub fn run() {
             space_rename,
             terminal_create,
             github_pulls,
+            github_pull_detail,
             branch_pulls,
             github_issues,
             github_milestones,

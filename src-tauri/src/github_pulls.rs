@@ -248,6 +248,171 @@ pub fn load<R: Runner + Sync>(client: &Client<R>, dirs: &[String]) -> Pulls {
     })
 }
 
+const DETAIL_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { \
+pullRequest(number: $number) { number title url body state isDraft author { login } headRefName baseRefName \
+mergeable mergeStateStatus viewerCanUpdate viewerDidAuthor viewerCanMergeAsAdmin \
+commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename \
+... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } } } } } \
+reviews(last: 50) { nodes { author { login } state submittedAt } } \
+closingIssuesReferences(first: 20) { nodes { number title url state repository { nameWithOwner } } } } } }";
+
+/// One check context of the last commit; `state` is `passing`, `failing`, `pending` or `skipped`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckContext {
+    pub name: String,
+    pub state: String,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Review {
+    pub author: Option<String>,
+    pub state: String,
+    pub submitted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedIssue {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub state: String,
+    /// `owner/name` of the issue's repository.
+    pub repo: String,
+}
+
+/// A pull request in detail (`github_pull_detail`); the `viewer_can_*` flags are for the actions
+/// of later pull requests.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullDetail {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub body: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub author: Option<String>,
+    pub head_ref: String,
+    pub base_ref: String,
+    /// `MERGEABLE`, `CONFLICTING` or `UNKNOWN`.
+    pub mergeable: String,
+    pub merge_state_status: String,
+    pub checks: Vec<CheckContext>,
+    pub reviews: Vec<Review>,
+    pub linked_issues: Vec<LinkedIssue>,
+    pub viewer_can_update: bool,
+    pub viewer_did_author: bool,
+    pub viewer_can_merge_as_admin: bool,
+}
+
+fn opt_text(v: &Value) -> Option<String> {
+    v.as_str().map(str::to_owned)
+}
+
+fn parse_context(node: &Value) -> Option<CheckContext> {
+    if node["__typename"] == "StatusContext" {
+        let state = match node["state"].as_str().unwrap_or_default() {
+            "SUCCESS" => "passing",
+            "FAILURE" | "ERROR" => "failing",
+            _ => "pending",
+        };
+        return Some(CheckContext {
+            name: node["context"].as_str()?.to_owned(),
+            state: state.into(),
+            url: opt_text(&node["targetUrl"]),
+        });
+    }
+    let state = if node["status"] != "COMPLETED" {
+        "pending"
+    } else {
+        match node["conclusion"].as_str().unwrap_or_default() {
+            "SUCCESS" => "passing",
+            "NEUTRAL" | "SKIPPED" => "skipped",
+            _ => "failing",
+        }
+    };
+    Some(CheckContext {
+        name: node["name"].as_str()?.to_owned(),
+        state: state.into(),
+        url: opt_text(&node["detailsUrl"]),
+    })
+}
+
+/// The `repository { pullRequest }` answer of [`DETAIL_QUERY`]; a missing pull request is an error.
+pub fn parse_detail(answer: &Value) -> Result<PullDetail, GhError> {
+    let node = &answer["data"]["repository"]["pullRequest"];
+    let Some(number) = node["number"].as_u64() else {
+        let message = answer["errors"][0]["message"]
+            .as_str()
+            .unwrap_or("unexpected GitHub answer");
+        return Err(GhError::Other {
+            message: message.to_owned(),
+        });
+    };
+    let list = |v: &Value| v.as_array().cloned().unwrap_or_default();
+    let flag = |k: &str| node[k].as_bool().unwrap_or(false);
+    Ok(PullDetail {
+        number,
+        title: text(&node["title"]),
+        url: text(&node["url"]),
+        body: text(&node["body"]),
+        state: text(&node["state"]),
+        is_draft: flag("isDraft"),
+        author: opt_text(&node["author"]["login"]),
+        head_ref: text(&node["headRefName"]),
+        base_ref: text(&node["baseRefName"]),
+        mergeable: node["mergeable"].as_str().unwrap_or("UNKNOWN").to_owned(),
+        merge_state_status: node["mergeStateStatus"]
+            .as_str()
+            .unwrap_or("UNKNOWN")
+            .to_owned(),
+        checks: list(
+            &node["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"],
+        )
+        .iter()
+        .filter_map(parse_context)
+        .collect(),
+        reviews: list(&node["reviews"]["nodes"])
+            .iter()
+            .map(|r| Review {
+                author: opt_text(&r["author"]["login"]),
+                state: text(&r["state"]),
+                submitted_at: opt_text(&r["submittedAt"]),
+            })
+            .collect(),
+        linked_issues: list(&node["closingIssuesReferences"]["nodes"])
+            .iter()
+            .filter_map(|i| {
+                Some(LinkedIssue {
+                    number: i["number"].as_u64()?,
+                    title: text(&i["title"]),
+                    url: text(&i["url"]),
+                    state: text(&i["state"]),
+                    repo: text(&i["repository"]["nameWithOwner"]),
+                })
+            })
+            .collect(),
+        viewer_can_update: flag("viewerCanUpdate"),
+        viewer_did_author: flag("viewerDidAuthor"),
+        viewer_can_merge_as_admin: flag("viewerCanMergeAsAdmin"),
+    })
+}
+
+/// Detail of pull request `number` in the GitHub repository of `root` (one GraphQL query, cached
+/// 30 s by the client).
+pub fn load_detail<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+) -> Result<PullDetail, GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let vars = json!({ "owner": repo.owner, "name": repo.name, "number": number });
+    parse_detail(&client.graphql(DETAIL_QUERY, &vars)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,5 +508,77 @@ mod tests {
         let pull = serde_json::to_value(&parse_pulls(&fixture()).unwrap()[0]).unwrap();
         assert_eq!(pull["isDraft"], false);
         assert_eq!(pull["reviewDecision"], "REVIEW_REQUIRED");
+    }
+
+    fn detail_fixture() -> Value {
+        serde_json::from_str(include_str!("../fixtures/github-pull-detail.json")).unwrap()
+    }
+
+    #[test]
+    fn parses_the_detail_fixture() {
+        let d = parse_detail(&detail_fixture()).unwrap();
+        assert_eq!(d.number, 336);
+        assert_eq!(d.author.as_deref(), Some("jkaufmann"));
+        assert_eq!(d.head_ref, "feat/336-pull-request-detail-pane");
+        assert_eq!(d.base_ref, "release/next");
+        assert_eq!(
+            (d.mergeable.as_str(), d.merge_state_status.as_str()),
+            ("MERGEABLE", "BLOCKED")
+        );
+        assert!(d.body.starts_with("Adds the **detail pane**"));
+        assert!(d.viewer_can_update && d.viewer_did_author && !d.viewer_can_merge_as_admin);
+        let checks: Vec<_> = d
+            .checks
+            .iter()
+            .map(|c| (c.name.as_str(), c.state.as_str()))
+            .collect();
+        assert_eq!(
+            checks,
+            vec![
+                ("frontend", "passing"),
+                ("rust", "failing"),
+                ("windows", "pending"),
+                ("docs", "skipped"),
+                ("ci/legacy", "pending"),
+                ("ci/lint", "passing"),
+            ]
+        );
+        assert_eq!(
+            d.checks[0].url.as_deref(),
+            Some("https://github.com/GravionLabs/poimen/actions/runs/1")
+        );
+        assert_eq!(d.checks[3].url, None);
+        assert_eq!(d.reviews.len(), 3);
+        assert_eq!(d.reviews[0].author.as_deref(), Some("octocat"));
+        assert_eq!(d.reviews[0].state, "CHANGES_REQUESTED");
+        assert_eq!(d.reviews[1].author, None);
+        assert_eq!(d.reviews[2].submitted_at, None);
+        assert_eq!(d.linked_issues.len(), 2);
+        assert_eq!(d.linked_issues[1].repo, "GravionLabs/other");
+        assert_eq!(d.linked_issues[1].state, "CLOSED");
+    }
+
+    #[test]
+    fn a_bare_pull_request_parses_with_defaults_and_a_missing_one_is_an_error() {
+        let bare = json!({"data":{"repository":{"pullRequest":{"number":5}}}});
+        let d = parse_detail(&bare).unwrap();
+        assert!(d.checks.is_empty() && d.reviews.is_empty() && d.linked_issues.is_empty());
+        assert_eq!(d.mergeable, "UNKNOWN");
+        assert!(!d.viewer_can_update);
+        let missing = json!({"data":{"repository":{"pullRequest":null}},"errors":[{"message":"Could not resolve to a PullRequest"}]});
+        assert_eq!(
+            parse_detail(&missing),
+            Err(GhError::Other {
+                message: "Could not resolve to a PullRequest".into()
+            })
+        );
+    }
+
+    #[test]
+    fn the_detail_wire_shape_is_camel_case() {
+        let v = serde_json::to_value(parse_detail(&detail_fixture()).unwrap()).unwrap();
+        assert_eq!(v["viewerCanMergeAsAdmin"], false);
+        assert_eq!(v["linkedIssues"][0]["repo"], "GravionLabs/poimen");
+        assert_eq!(v["reviews"][0]["submittedAt"], "2026-11-05T10:00:00Z");
     }
 }
