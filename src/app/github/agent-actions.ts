@@ -5,6 +5,7 @@ import {
   parseHarnesses,
   type AgentAction,
   type HarnessInfo,
+  type TaskModes,
 } from "../core/settings";
 import { SpaceActions, type SpaceOutcome } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
@@ -12,8 +13,22 @@ import { UiState } from "../core/ui-state";
 import { GithubIssues, issueLevel, type Issue } from "./issues";
 import { GithubPulls, type PullRow } from "./pulls";
 
-/** Why an action that is shown cannot run yet. */
-export const NEEDS_WORKTREE = "needs worktree support";
+/** Where the agent of an action runs: the repository root or a worktree of the issue or PR. */
+export type RunWhere = "root" | "worktree";
+
+const LABEL_MAX = 40;
+
+/** Space label of a worktree run: `#<nr> <title>` (issue) or `PR #<nr> <title>`, cut to 40 characters. */
+export function worktreeLabel(target: ActionTarget): string {
+  const head = `${target.kind === "pr" ? "PR " : ""}#${target.number}`;
+  const title = target.title.trim();
+  const full = title ? `${head} ${title}` : head;
+  if ([...full].length <= LABEL_MAX) return full;
+  return `${[...full]
+    .slice(0, LABEL_MAX - 1)
+    .join("")
+    .trimEnd()}…`;
+}
 
 /** An issue or pull request an action runs on, with what `when` looks at. */
 export interface ActionTarget {
@@ -107,6 +122,8 @@ export interface ActionDialog {
   targets: ActionTarget[];
   harness: string;
   model: string;
+  /** Chosen for an `ask` action; the others have it fixed by `run`. */
+  where: RunWhere;
 }
 
 /** The popup of a row: opened by the `⋯` button or the context menu. */
@@ -158,7 +175,11 @@ export function summaryText(label: string, summary: RunSummary): string {
  * to a row, and starting them at the repository root: a new terminal tab `<label> #<nr>` in the
  * space of the repository, where the harness of the action (or the dialog's choice) starts through
  * `agent_start`. `batch: each` starts one agent per item in parallel, `once` one for all; a failed
- * start does not stop the others. `worktree` and `ask` are shown but disabled until #347.
+ * start does not stop the others. `run: worktree` (#347) first creates or reuses the task worktree
+ * of an issue (`task_worktree`) or the PR worktree (`pr_worktree`), then a space on it labeled
+ * `#<nr> <title>` / `PR #<nr> <title>` with the agent in its root pane; an existing space is focused
+ * and the agent gets a new tab there. `run: ask` always opens the dialog, which asks root or
+ * worktree. Each target gets its own worktree and space (for `batch: once` the first target's).
  */
 @Injectable({ providedIn: "root" })
 export class AgentActions {
@@ -232,20 +253,13 @@ export class AgentActions {
     await Promise.all(roots.map((r) => this.load(r, true)));
   }
 
-  /**
-   * The actions that apply to every one of `targets` (one kind, one repository). A `worktree` or
-   * `ask` action is listed but disabled.
-   */
+  /** The actions that apply to every one of `targets` (one kind, one repository). */
   offered(targets: readonly ActionTarget[]): OfferedAction[] {
     const first = targets[0];
     if (!first || targets.some((t) => t.kind !== first.kind || t.root !== first.root)) return [];
     return (this.byRoot().get(first.root) ?? [])
       .filter((a) => targets.every((t) => matches(a, t)))
-      .map((action) =>
-        action.run === "repoRoot"
-          ? { action, enabled: true, reason: null }
-          : { action, enabled: false, reason: NEEDS_WORKTREE },
-      );
+      .map((action) => ({ action, enabled: true, reason: null }));
   }
 
   /** A click on an action: Shift opens the harness and model dialog, else it starts at once. */
@@ -255,22 +269,28 @@ export class AgentActions {
     shift: boolean,
   ): Promise<RunSummary | null> {
     this._menu.set(null);
-    if (action.run !== "repoRoot" || targets.length === 0) return null;
-    if (!shift) return this.run(action, targets);
+    if (targets.length === 0) return null;
+    if (!shift && action.run !== "ask") return this.run(action, targets);
     await this.loadHarnesses();
     const harnesses = this._harnesses();
     const harness = action.harness ?? harnesses[0]?.id ?? "";
-    this._dialog.set({ action, targets: [...targets], harness, model: action.model ?? "" });
+    this._dialog.set({
+      action,
+      targets: [...targets],
+      harness,
+      model: action.model ?? "",
+      where: action.run === "worktree" ? "worktree" : "root",
+    });
     return null;
   }
 
   /** Runs the action chosen in the palette on `current`. */
   async runCurrent(id: string): Promise<RunSummary | null> {
     const action = this.entries().find((e) => e.action.id === id)?.action;
-    return action ? this.run(action, this.current()) : null;
+    return action ? this.request(action, this.current(), false) : null;
   }
 
-  setDialog(patch: Partial<Pick<ActionDialog, "harness" | "model">>): void {
+  setDialog(patch: Partial<Pick<ActionDialog, "harness" | "model" | "where">>): void {
     this._dialog.update((d) => (d ? { ...d, ...patch } : d));
   }
 
@@ -283,7 +303,11 @@ export class AgentActions {
     const d = this._dialog();
     if (!d) return null;
     this._dialog.set(null);
-    return this.run(d.action, d.targets, { harness: d.harness, model: d.model });
+    return this.run(d.action, d.targets, {
+      harness: d.harness,
+      model: d.model,
+      where: d.where,
+    });
   }
 
   openMenu(targets: readonly ActionTarget[], x: number, y: number): void {
@@ -311,14 +335,14 @@ export class AgentActions {
   async run(
     action: AgentAction,
     targets: readonly ActionTarget[],
-    choice?: { harness: string; model: string },
+    choice?: { harness: string; model: string; where?: RunWhere },
   ): Promise<RunSummary | null> {
     const first = targets[0];
     if (!first) return null;
-    if (action.run !== "repoRoot") {
-      this.spaces.notify(`${action.label}: ${NEEDS_WORKTREE}`);
-      return null;
-    }
+    const where: RunWhere =
+      action.run === "worktree" || (action.run === "ask" && choice?.where === "worktree")
+        ? "worktree"
+        : "root";
     let launches: Launch[];
     try {
       launches = await this.bridge.invoke<Launch[]>("agent_action_plan", {
@@ -344,6 +368,7 @@ export class AgentActions {
       launches.length === targets.length && action.batch !== "once"
         ? launches.map((launch, i) => ({ launch, targets: [targets[i]] }))
         : launches.map((launch) => ({ launch, targets: [...targets] }));
+    if (where === "worktree") return this.runInWorktrees(action, first.root, groups);
     let summary: RunSummary | null = null;
     const after = async (outcome: SpaceOutcome): Promise<void> => {
       summary = await this.startAll(action, first.root, outcome.workspace_id, groups);
@@ -356,6 +381,125 @@ export class AgentActions {
     if (this.spaces.trust()) return null;
     this.spaces.notify(`${action.label}: ${this.spaces.error() ?? "the space was not created"}`);
     return null;
+  }
+
+  /** The task worktree of an issue or the PR worktree; throws with the reason. */
+  private async worktreePath(root: string, target: ActionTarget): Promise<string> {
+    if (target.kind === "pr") {
+      const wt = await this.bridge.invoke<{ path: string }>("pr_worktree", {
+        repoDir: root,
+        nr: target.number,
+        headRef: target.branch,
+      });
+      return wt.path;
+    }
+    const modes = await this.bridge.invoke<TaskModes>("get_task_modes", { dir: root });
+    const mode = (modes?.modes ?? []).find((m) => m.worktree);
+    if (!mode) throw new Error("no task mode with a worktree is configured");
+    const wt = await this.bridge.invoke<{ path: string }>("task_worktree", {
+      repoDir: root,
+      issue: { nr: target.number, title: target.title, url: target.url },
+      mode: mode.name,
+    });
+    return wt.path;
+  }
+
+  /**
+   * Per group (one after the other): worktree, then the space on it, then the agent. A failed
+   * step is named in the reason and a failed worktree creates no space.
+   */
+  private async runInWorktrees(
+    action: AgentAction,
+    root: string,
+    groups: { launch: Launch; targets: ActionTarget[] }[],
+  ): Promise<RunSummary | null> {
+    const summary: RunSummary = { started: [], failed: [] };
+    let detached = false;
+    for (const [i, group] of groups.entries()) {
+      const nrs = group.targets.map((t) => t.number);
+      const fail = (step: string, err: unknown): void => {
+        summary.failed.push({ numbers: nrs, reason: `${step} failed: ${text(err)}` });
+      };
+      let path: string;
+      try {
+        path = await this.worktreePath(root, group.targets[0]);
+      } catch (err) {
+        fail("worktree", err);
+        continue;
+      }
+      const after = async (outcome: SpaceOutcome): Promise<void> => {
+        try {
+          await this.startIn(action, group, path, outcome);
+          summary.started.push(...nrs);
+        } catch (err) {
+          fail("agent", err);
+        }
+        // After the trust answer nobody else reports: this group does.
+        if (detached) {
+          await this.store.refresh();
+          this.spaces.notify(
+            summaryText(action.label, {
+              started: summary.started.filter((n) => nrs.includes(n)),
+              failed: summary.failed.filter((f) => f.numbers === nrs),
+            }),
+          );
+        }
+      };
+      const outcome = await this.spaces.create(
+        path,
+        worktreeLabel(group.targets[0]),
+        null,
+        null,
+        after,
+      );
+      if (outcome) continue;
+      if (this.spaces.trust()) {
+        detached = true;
+        for (const rest of groups.slice(i + 1)) {
+          summary.failed.push({
+            numbers: rest.targets.map((t) => t.number),
+            reason: "not started: waiting for the trust answer",
+          });
+        }
+        break;
+      }
+      fail("space", this.spaces.error() ?? "the space was not created");
+    }
+    if (detached) {
+      this.spaces.notify(
+        summary.failed.length
+          ? summaryText(action.label, summary)
+          : `${action.label}: waiting for the trust answer`,
+      );
+      return null;
+    }
+    await this.store.refresh();
+    this.spaces.notify(summaryText(action.label, summary));
+    return summary;
+  }
+
+  /** The agent in the root pane of a new space, else in a new tab of the existing one. */
+  private async startIn(
+    action: AgentAction,
+    group: { launch: Launch; targets: ActionTarget[] },
+    path: string,
+    outcome: SpaceOutcome,
+  ): Promise<void> {
+    let paneId: string | null | undefined = outcome.created
+      ? this.store.snapshot().terminals.find((t) => t.space_id === outcome.workspace_id)
+          ?.terminal_id
+      : null;
+    paneId ??= await this.bridge.invoke<string | null>("terminal_create", {
+      workspaceId: outcome.workspace_id,
+      cwd: path,
+    });
+    if (!paneId) throw new Error("the terminal tab was not created");
+    await this.bridge.invoke("agent_start", {
+      paneId,
+      kind: group.launch.kind,
+      name: `${action.label} ${numbers(group.targets).replaceAll(",", "")}`,
+      args: group.launch.args,
+    });
   }
 
   private async startAll(

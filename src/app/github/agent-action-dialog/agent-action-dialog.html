@@ -16,6 +16,15 @@
     (keydown)="onKey($event)"
   >
     <h2>{{ d.action.label }} {{ targetsText() }}</h2>
+    @if (d.action.run === "ask") {
+      <label>
+        Run in
+        <select data-testid="dialog-where" (change)="where($event)">
+          <option value="root" [selected]="d.where === 'root'">Repository root</option>
+          <option value="worktree" [selected]="d.where === 'worktree'">Worktree</option>
+        </select>
+      </label>
+    }
     <label>
       Harness
       <select data-testid="dialog-harness" (change)="harness($event)">

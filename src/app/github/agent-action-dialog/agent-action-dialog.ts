@@ -30,6 +30,11 @@ export class AgentActionDialog {
     this.actions.setDialog({ harness: (event.target as HTMLSelectElement).value, model: "" });
   }
 
+  protected where(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    this.actions.setDialog({ where: value === "worktree" ? "worktree" : "root" });
+  }
+
   protected model(event: Event): void {
     this.actions.setDialog({ model: (event.target as HTMLSelectElement).value });
   }
