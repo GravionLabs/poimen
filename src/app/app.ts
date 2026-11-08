@@ -626,6 +626,15 @@ export class App {
     this.editor.openSpace(spaceId);
   }
 
+  /** Bumped by the gear icon so an open overview scrolls to its configuration section. */
+  protected readonly configNonce = signal(0);
+
+  /** The gear icon of a space row: the overview, scrolled to the configuration section. */
+  protected openSpaceConfig(spaceId: string): void {
+    this.editor.openSpace(spaceId);
+    this.configNonce.update((n) => n + 1);
+  }
+
   /** "Output" of the space overview: the pane's tab with the Output panel. */
   protected openPaneOutput(paneId: string): void {
     this.editor.open(paneId, true);

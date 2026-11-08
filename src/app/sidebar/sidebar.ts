@@ -337,6 +337,8 @@ export class Sidebar {
   readonly pinned = output<Terminal>();
   /** A space row was picked (click, Enter): the app opens its overview tab. */
   readonly spaceOpened = output<string>();
+  /** The gear icon of a space row: its overview at the configuration section. */
+  readonly configOpened = output<string>();
   /** An entry of a row's context menu was picked. */
   readonly menuAction = output<SidebarMenuAction>();
   private last: { key: string; at: number } | null = null;
@@ -444,6 +446,11 @@ export class Sidebar {
     }
     if (await this.spaceActions.rename(workspaceId, input.value)) this.editing.set(null);
     else input.focus();
+  }
+
+  protected configureSpace(workspaceId: string, event: Event): void {
+    event.stopPropagation();
+    this.configOpened.emit(workspaceId);
   }
 
   protected closeSpace(workspaceId: string, event: Event): void {

@@ -23,6 +23,7 @@ mod live;
 mod poimen_backend;
 mod poimen_server;
 mod project;
+mod project_edit;
 mod remote;
 mod schemes;
 mod settings;
@@ -657,6 +658,39 @@ async fn project_config(dir: String) -> Result<project::Loaded, String> {
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// The text of the project file of the repository containing `dir`, for the space overview.
+#[tauri::command]
+async fn project_file(dir: String) -> Result<project_edit::ProjectFile, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        project_edit::read(&root)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Merges `patch` (`layout`, `setup`, `teardown`) into the project file; the new content goes
+/// through `trust::gate` first (an untrusted hash answers with the request, nothing written).
+#[tauri::command]
+async fn project_save(
+    dir: String,
+    patch: serde_json::Value,
+    decision: Option<trust::Decision>,
+) -> Result<project_edit::SaveOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = git::toplevel(&dir).unwrap_or(dir);
+        let trusted = get_settings().trusted_projects;
+        let outcome = project_edit::save(&root, &patch, &trusted, decision.as_ref())?;
+        if let Some(hash) = &outcome.store {
+            let home = home_dir().ok_or("the home directory is not known")?;
+            settings::trust_project(&home, &root, hash)?;
+        }
+        Ok(outcome)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// The `commands[]` and `presets[]` of the project file of the repository of `dir`, for the
@@ -1814,6 +1848,8 @@ pub fn run() {
             remove_spaces_layout,
             default_spaces_layout,
             project_config,
+            project_file,
+            project_save,
             project_entries,
             project_run,
             repo_info,

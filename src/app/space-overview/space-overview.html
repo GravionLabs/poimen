@@ -60,6 +60,105 @@
       </tbody>
     </table>
   }
+  <section id="config" class="config" aria-labelledby="config-title">
+    <h3 id="config-title">Configuration</h3>
+    <div class="field">
+      <label for="cfg-name">Name</label>
+      <input
+        id="cfg-name"
+        class="cfg-name"
+        type="text"
+        autocomplete="off"
+        [value]="name() ?? n.workspace.label"
+        (input)="setName($event)"
+      />
+      <button type="button" class="cfg-rename" (click)="renameSpace()">Rename</button>
+      @if (nameError(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+    </div>
+    <div class="field">
+      <span class="label">Directory</span>
+      <code class="cfg-dir">{{ directory() ?? "none" }}</code>
+    </div>
+    @if (directory()) {
+      <p class="hint">
+        Project file <code>.poimen/config.json</code>{{ fileExists() ? "" : " (not created yet)" }}.
+        Other keys of the file are kept.
+      </p>
+      @if (fileError(); as message) {
+        <p class="error cfg-file-error" role="alert">{{ message }}</p>
+      }
+      @if (errorOf("file"); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+      <div class="field">
+        <label for="cfg-setup">Setup command</label>
+        <input
+          id="cfg-setup"
+          class="cfg-setup"
+          type="text"
+          autocomplete="off"
+          [value]="form().setup"
+          (input)="setField('setup', $event)"
+        />
+        @if (errorOf("setup"); as message) {
+          <p class="error" role="alert">{{ message }}</p>
+        }
+      </div>
+      <div class="field">
+        <label for="cfg-teardown">Teardown command</label>
+        <input
+          id="cfg-teardown"
+          class="cfg-teardown"
+          type="text"
+          autocomplete="off"
+          [value]="form().teardown"
+          (input)="setField('teardown', $event)"
+        />
+        @if (errorOf("teardown"); as message) {
+          <p class="error" role="alert">{{ message }}</p>
+        }
+      </div>
+      <div class="field">
+        <label for="cfg-layout">Layout (panes, JSON)</label>
+        <textarea
+          id="cfg-layout"
+          class="cfg-layout"
+          rows="8"
+          spellcheck="false"
+          [value]="form().layout"
+          (input)="setField('layout', $event)"
+        ></textarea>
+        @if (errorOf("layout"); as message) {
+          <p class="error" role="alert">{{ message }}</p>
+        }
+      </div>
+      @if (trust(); as request) {
+        <div class="trust" role="alert">
+          <p>The saved file would run these commands. Trust them for this repository?</p>
+          <ul>
+            @for (c of request.commands; track $index) {
+              <li>
+                <span>{{ c.what }}</span
+                >: <code>{{ c.command }}</code>
+              </li>
+            }
+          </ul>
+          <button type="button" class="cfg-trust" (click)="save(true)">Trust and save</button>
+          <button type="button" class="cfg-trust-cancel" (click)="cancelTrust()">Cancel</button>
+        </div>
+      }
+      <div class="field">
+        <button type="button" class="cfg-save" [disabled]="!!fileError()" (click)="save()">
+          Save
+        </button>
+        @if (status(); as message) {
+          <span class="status-note" role="status">{{ message }}</span>
+        }
+      </div>
+    }
+  </section>
 } @else {
   <p class="empty">This space no longer exists.</p>
 }
