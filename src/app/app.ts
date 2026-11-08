@@ -347,6 +347,22 @@ export class App {
     void this.prefs.start();
     void this.userSchemes.start();
     void this.store.start().then(() => this.dropMissing());
+    void this.seedDefaults();
+  }
+
+  /**
+   * The first start of this version writes the default layout and template into config.json when
+   * it has neither key (`seed_space_defaults`). The UI state remembers that it ran; a failure is
+   * retried at the next start.
+   */
+  private async seedDefaults(): Promise<void> {
+    if (this.ui.defaultsSeeded()) return;
+    try {
+      await this.bridge.invoke("seed_space_defaults");
+      this.ui.markDefaultsSeeded();
+    } catch {
+      // retried at the next start
+    }
   }
 
   /**

@@ -175,7 +175,7 @@ export class SpaceActions {
           { cwd },
         );
         if (raw && typeof raw.name === "string" && typeof raw.agent === "string") {
-          hint = { name: raw.name, agent: raw.agent };
+          hint = { name: raw.name, agent: raw.agent, default: raw.default === true };
         }
       } catch {
         hint = null;

@@ -50,9 +50,13 @@
     @if (path().trim()) {
       <p class="hint template" data-testid="template-hint">
         @if (actions.template(); as t) {
-          Template: {{ t.name }} · {{ agent(t.agent) }}
+          @if (t.default) {
+            Template: {{ t.name }} (default) · {{ agent(t.agent) }}
+          } @else {
+            Template: {{ t.name }} · {{ agent(t.agent) }}
+          }
         } @else {
-          Template: default
+          No template
         }
       </p>
     }

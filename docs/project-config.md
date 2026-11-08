@@ -70,7 +70,7 @@ the fallback. When neither exists, the entry is skipped with a warning.
 
 For a new space: `layout` of `.poimen/config.json`, else the deprecated
 `.agents/herdr-layout.json` (still read until 1.0; a warning is shown each time a space is
-created), else `spaces.layout` of the user config, else the built-in default. An invalid project
+created), else `spaces.layout` of the user config (seeded on the first start), else the built-in default. An invalid project
 layout shows a warning naming the file and the space gets a single pane.
 
 ## Trust

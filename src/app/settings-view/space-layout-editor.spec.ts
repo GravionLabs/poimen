@@ -123,14 +123,21 @@ describe("SpaceLayoutEditor", () => {
     expect(button("Save").disabled).toBe(true);
   });
 
-  it("resets a configured layout to the default", async () => {
+  it("marks a layout equal to the default as the default", async () => {
+    const { host, button } = await setup(structuredClone(DEFAULT_LAYOUT) as SpaceLayout);
+    expect(host.querySelector(".badge")?.textContent).toContain("Default");
+    expect(button("Reset to default").disabled).toBe(true);
+  });
+
+  it("resets a configured layout to the default by writing it back", async () => {
     const { fixture, host, button } = await setup({
       panes: [{ name: "solo", command: null, split: null }],
     });
     button("Reset to default").click();
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(tauri.calls("remove_spaces_layout")).toHaveLength(1);
+    expect(tauri.calls("set_spaces_layout")).toHaveLength(1);
+    expect(tauri.calls("remove_spaces_layout")).toHaveLength(0);
     expect(host.querySelectorAll(".pane-row")).toHaveLength(3);
     expect(host.querySelector(".badge")).not.toBeNull();
   });

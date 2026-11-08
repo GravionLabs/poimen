@@ -130,6 +130,33 @@ pub fn parse_layout_value(data: &Value) -> Result<Layout, String> {
     Ok(Layout { panes })
 }
 
+/// The `spaces.layout` JSON of a layout: the schema `parse_layout_value` reads.
+pub fn to_config(layout: &Layout) -> Value {
+    let panes: Vec<Value> = layout
+        .panes
+        .iter()
+        .map(|p| {
+            let mut pane = serde_json::json!({ "name": p.name });
+            if let Some(command) = &p.command {
+                pane["command"] = Value::from(command.as_str());
+            }
+            if let Some(s) = &p.split {
+                let direction = match s.direction {
+                    SplitDirection::Right => "right",
+                    SplitDirection::Down => "down",
+                };
+                pane["split"] = serde_json::json!({
+                    "from": s.from,
+                    "direction": direction,
+                    "ratio": s.ratio,
+                });
+            }
+            pane
+        })
+        .collect();
+    serde_json::json!({ "panes": panes })
+}
+
 /// Validates the text of a layout file.
 pub fn parse_layout(text: &str) -> Result<Layout, String> {
     let data: Value = serde_json::from_str(text).map_err(|_| "invalid JSON".to_owned())?;

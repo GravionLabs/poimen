@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   emptyTemplate,
+  isDefaultTemplate,
   isValidDir,
   matchLabel,
   parseSpaceTemplates,
@@ -66,6 +67,23 @@ describe("space templates", () => {
     for (const ok of ["~", "~/a", "/a", "C:\\a", "c:/a", "\\\\srv\\share"])
       expect(isValidDir(ok), ok).toBe(true);
     for (const bad of ["a/b", "~user", "C:", ""]) expect(isValidDir(bad), bad).toBe(false);
+  });
+
+  it("recognises the default template: neither a directory nor a remote", () => {
+    expect(isDefaultTemplate({ dir: null, remote: null })).toBe(true);
+    expect(isDefaultTemplate({ dir: " ", remote: null })).toBe(true);
+    expect(isDefaultTemplate({ dir: "~/src", remote: null })).toBe(false);
+    expect(isDefaultTemplate({ dir: null, remote: { provider: "github", owner: "acme" } })).toBe(
+      false,
+    );
+  });
+
+  it("refuses a second default template", () => {
+    const ids = ["claude"];
+    const draft = { ...base, dir: null, remote: null };
+    expect(templateErrors(draft, [], ids, false)).toEqual({});
+    expect(templateErrors(draft, [], ids, true).default).toContain("default");
+    expect(templateErrors(base, [], ids, true)).toEqual({});
   });
 
   it("mirrors the backend validation", () => {
