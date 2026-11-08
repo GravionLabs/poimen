@@ -1,9 +1,6 @@
 <section class="milestones">
   <header>
     <h2>Milestones</h2>
-    <button type="button" (click)="milestones.load()" [disabled]="milestones.loading()">
-      {{ milestones.loading() ? "Refreshing..." : "Refresh" }}
-    </button>
   </header>
   @if (milestones.error(); as err) {
     <p class="problem" role="alert">Could not read the milestones: {{ err }}</p>

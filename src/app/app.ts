@@ -38,7 +38,7 @@ import { Updater } from "./core/updater";
 import { Usage } from "./core/usage";
 import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState } from "./core/ui-state";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
 import { TerminalView } from "./terminal-view/terminal-view";
 import {
@@ -398,6 +398,16 @@ export class App {
       return;
     }
     if (id === "openGithub") {
+      this.editor.openGithub();
+      return;
+    }
+    const githubPage = {
+      githubPulls: "pulls",
+      githubIssues: "issues",
+      githubMilestones: "milestones",
+    }[id] as GithubPage | undefined;
+    if (githubPage) {
+      this.ui.selectGithubPage(githubPage);
       this.editor.openGithub();
       return;
     }

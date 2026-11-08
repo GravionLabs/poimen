@@ -4,6 +4,7 @@ import { HerdrStore } from "../core/herdr-store";
 import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
+import { GithubFilter } from "./github-filter";
 import { GithubMilestones } from "./milestones";
 import { REFRESH_MIN_MS, isGithubUrl, type Checks, type GhError } from "./pulls";
 
@@ -188,6 +189,7 @@ export class GithubIssues {
   private readonly settings = inject(SettingsStore);
   private readonly ui = inject(UiState);
   private readonly milestones = inject(GithubMilestones);
+  private readonly filter = inject(GithubFilter);
 
   private readonly _result = signal<RepoIssues[] | null>(null);
   private readonly _loading = signal(false);
@@ -228,19 +230,27 @@ export class GithubIssues {
       milestone: null,
       text: this.text(),
     };
-    return this.okRepos().map((r) => {
-      // The selected milestone filters the tree of its own repository.
-      const filter = { ...base, milestone: this.milestones.forRepo(r.repo) };
-      const roots = filterTree(buildTree(r.repo, r.issues), filter);
-      return {
-        root: r.root,
-        repo: r.repo,
-        truncated: r.truncated,
-        roots,
-        count: flattenTree(roots, () => false).length,
-      };
-    });
+    return this.okRepos()
+      .filter((r) => this.filter.allows(r.repo))
+      .map((r) => {
+        // The selected milestone filters the tree of its own repository.
+        const filter = { ...base, milestone: this.milestones.forRepo(r.repo) };
+        const roots = filterTree(buildTree(r.repo, r.issues), filter);
+        return {
+          root: r.root,
+          repo: r.repo,
+          truncated: r.truncated,
+          roots,
+          count: flattenTree(roots, () => false).length,
+        };
+      });
   });
+
+  /** Issues shown after all filters, over the repositories that pass the repository filter. */
+  readonly count = computed(() => this.trees().reduce((n, t) => n + t.count, 0));
+
+  /** Repositories that were read, for the shared repository filter. */
+  readonly repoNames = computed(() => (this._result() ?? []).map((r) => r.repo));
 
   /** The visible rows of one repository. */
   rows(tree: RepoTree): IssueRow[] {

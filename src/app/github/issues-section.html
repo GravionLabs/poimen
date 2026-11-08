@@ -1,9 +1,6 @@
 <section class="issues">
   <header>
     <h2>Issues</h2>
-    <button type="button" (click)="issues.load()" [disabled]="issues.loading()">
-      {{ issues.loading() ? "Refreshing..." : "Refresh" }}
-    </button>
   </header>
   @if (issues.error(); as err) {
     <p class="problem" role="alert">Could not read the issues: {{ err }}</p>
