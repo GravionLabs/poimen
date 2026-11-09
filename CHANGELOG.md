@@ -5,6 +5,45 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.15.0] — 2026-11-09
+
+### Bug Fixes
+- **server**: Print usage for --help and reject unknown arguments (#400) (#595)
+- **spaces**: Spaces keep their directory and layout after a server restart (#579) (#598)
+- **core**: Strip the verbatim prefix from the worktree test fixture path on Windows (#509)
+- **core**: Make the worktree tests portable to Windows (#509)
+- **terminal**: Claude Code's classic renderer overdraws its output (#502) (#617)
+- **terminal**: Load Unicode 11 widths so Claude's classic renderer stays readable
+- **agents**: Pane status stays working while a deliver loop it started is running (#540) (#619)
+- **agents**: Keep a pane working while a deliver loop it started runs (#540)
+- **agents**: Notify the end of a linked run once (#540)
+
+
+### Documentation
+- **adr**: Record the herdr maintenance rule in ADR 0006 (#591)
+- **adr**: Record remote machines over poimen-server via SSH (#277) (#594)
+- Renumber the PTY host ADR to 0009, update ROADMAP for M13 to M16
+- **adr**: Split_id and tab.move in ADR 0006 (#510)
+- ROADMAP after the refinement of #510
+- PTY host split into M014.1, decisions in ADR 0009 (#574)
+- ROADMAP after the refinement of #502 and #540
+- ROADMAP after merging #548 into #585 and rescoping #499
+- ROADMAP with the PBIs of #582 and #583
+
+
+### Features
+- **release**: RC builds install side by side as Poimen RC (#590) (#599)
+- **server**: Separate stable and rc installations by a build-time channel (#590)
+- **app**: Show RC in the title and the status bar of an rc build (#590)
+- **server**: Tabs and split tree per space (#510) (#618)
+
+
+### Refactoring
+- **core**: Add the poimen-core crate with project, trust, templates, remote and layout (#508) (#596)
+- **core**: Git, worktree, github and task start in poimen-core (#509) (#597)
+- **core**: Move git, worktree, github and task start into poimen-core (#509)
+
+
 ## [0.14.0] — 2026-11-08
 
 ### Bug Fixes
@@ -17,6 +56,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - **adr**: Plugin system with sandboxed worker and view contexts (#550) (#551)
 - **adr**: Terminal ownership in a stable PTY host (#573)
+- Update CHANGELOG.md for v0.14.0 [skip ci]
 
 
 ### Features
