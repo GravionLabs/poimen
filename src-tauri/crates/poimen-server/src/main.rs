@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use poimen_protocol::CHANNEL;
 use poimen_server::{Config, Server, StartError, claude, copilot, hook, report};
 
 const USAGE: &str =
@@ -82,7 +83,7 @@ fn subcommand(args: &[String]) -> ExitCode {
         Some("report") => ExitCode::from(report::run(
             &args[1..],
             claude::terminal_id_from_env(),
-            poimen_protocol::socket_path(),
+            poimen_protocol::terminal_socket_path(),
         )),
         Some("integration") => integration(&args[1..]),
         _ => ExitCode::from(2),
@@ -98,7 +99,7 @@ fn integration(args: &[String]) -> ExitCode {
     };
     let default = |home: &PathBuf| match agent {
         "claude" => claude::default_settings_path(home),
-        _ => copilot::default_hook_path(home),
+        _ => copilot::default_hook_path(home, CHANNEL),
     };
     let path = match args.get(2).map(String::as_str) {
         Some("--settings") => args.get(3).map(PathBuf::from),
@@ -117,16 +118,16 @@ fn integration(args: &[String]) -> ExitCode {
         )
         .and_then(|exe| {
             if copilot {
-                copilot::install(&path, &exe)
+                copilot::install(&path, &exe, CHANNEL)
             } else {
-                claude::install(&path, &exe)
+                claude::install(&path, &exe, CHANNEL)
             }
         })
         .map(|()| format!("installed in {}", path.display())),
         "uninstall" => if copilot {
-            copilot::uninstall(&path)
+            copilot::uninstall(&path, CHANNEL)
         } else {
-            claude::uninstall(&path)
+            claude::uninstall(&path, CHANNEL)
         }
         .map(|removed| {
             if removed {
@@ -136,9 +137,9 @@ fn integration(args: &[String]) -> ExitCode {
             }
         }),
         "status" => if copilot {
-            copilot::status(&path).map(|e| (e, copilot::EVENTS.len()))
+            copilot::status(&path, CHANNEL).map(|e| (e, copilot::EVENTS.len()))
         } else {
-            claude::status(&path).map(|e| (e, claude::EVENTS.len()))
+            claude::status(&path, CHANNEL).map(|e| (e, claude::EVENTS.len()))
         }
         .map(|(events, all)| {
             if events.is_empty() {

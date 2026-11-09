@@ -17,12 +17,17 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use poimen_client::protocol::{CHANNEL, Channel};
 use poimen_client::{Client, ClientError};
 
 use crate::backend::{Outcome, POLL_INTERVAL, START_TIMEOUT};
 use crate::gui_path;
 
-const PROGRAM: &str = "poimen-server";
+/// This build's server program: `poimen-server`, on rc `poimen-server-rc` (the sidecar of the rc
+/// bundle, `tauri.rc.conf.json`), so a stable and an rc installation never start each other's.
+fn program() -> String {
+    CHANNEL.named("poimen-server")
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StartError {
@@ -155,14 +160,11 @@ pub fn restart(runner: &impl Runner) -> Result<Outcome, StartError> {
     ensure_running(runner, true)
 }
 
-/// The file name of the bundled server next to the app executable: Tauri installs the sidecar
-/// as `poimen-server.exe` on Windows (not the first `PATHEXT` candidate, `.COM`).
-pub fn beside_name(windows: bool) -> String {
-    if windows {
-        format!("{PROGRAM}.exe")
-    } else {
-        PROGRAM.to_string()
-    }
+/// The file name of the bundled server of `channel` next to the app executable: Tauri installs
+/// the sidecar as `poimen-server.exe` on Windows (not the first `PATHEXT` candidate, `.COM`),
+/// `poimen-server-rc(.exe)` on rc.
+pub fn beside_name(windows: bool, channel: Channel) -> String {
+    channel.server_program(windows)
 }
 
 /// `CREATE_NEW_PROCESS_GROUP`: the server gets no Ctrl+C of the app's console group.
@@ -199,17 +201,22 @@ pub fn spawn_breaking_away<T>(mut spawn: impl FnMut(u32) -> io::Result<T>) -> io
 /// `env` on `os` (`std::env::consts::OS`). Windows: `%LOCALAPPDATA%\poimen-server\bin`. Linux
 /// only inside an AppImage (`APPIMAGE` or `APPDIR` set), whose mount ends with the app and moves
 /// on every run: `$XDG_DATA_HOME/poimen-server/bin`, else `$HOME/.local/share/poimen-server/bin`.
-/// Elsewhere (other Linux packages, macOS) `None`: the installed binary is started as it is.
-pub fn stage_root(env: impl Fn(&str) -> Option<OsString>, os: &str) -> Option<PathBuf> {
+/// On rc the directories are `poimen-server-rc`. Elsewhere (other Linux packages, macOS) `None`:
+/// the installed binary is started as it is.
+pub fn stage_root(
+    env: impl Fn(&str) -> Option<OsString>,
+    os: &str,
+    channel: Channel,
+) -> Option<PathBuf> {
     let set = |name: &str| env(name).filter(|v| !v.is_empty());
     let absolute = |name: &str| set(name).map(PathBuf::from).filter(|p| p.is_absolute());
     match os {
-        "windows" => poimen_client::protocol::windows_dir_from(env("LOCALAPPDATA"))
+        "windows" => poimen_client::protocol::windows_dir_from(env("LOCALAPPDATA"), channel)
             .map(|dir| dir.join("bin")),
         "linux" if set("APPIMAGE").is_some() || set("APPDIR").is_some() => {
             let data = absolute("XDG_DATA_HOME")
                 .or_else(|| absolute("HOME").map(|home| home.join(".local").join("share")))?;
-            Some(data.join(PROGRAM).join("bin"))
+            Some(data.join(channel.named("poimen-server")).join("bin"))
         }
         _ => None,
     }
@@ -234,9 +241,10 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
 pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathBuf> {
     let source = std::fs::metadata(bundled)?;
     let dir = bin_root.join(version);
-    let name = bundled
-        .file_name()
-        .map_or_else(|| beside_name(cfg!(windows)).into(), OsString::from);
+    let name = bundled.file_name().map_or_else(
+        || beside_name(cfg!(windows), CHANNEL).into(),
+        OsString::from,
+    );
     let target = dir.join(&name);
     let same = |m: &std::fs::Metadata| {
         m.len() == source.len() && m.modified().ok() == source.modified().ok()
@@ -277,12 +285,12 @@ pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathB
 /// move): the path the hooks call, which stays valid when a later version is staged (Unix).
 #[cfg(unix)]
 pub fn stable_link(bin_root: &Path, staged: &Path) -> io::Result<PathBuf> {
-    let link = bin_root.join(PROGRAM);
+    let link = bin_root.join(program());
     let target = staged.strip_prefix(bin_root).unwrap_or(staged);
     if std::fs::read_link(&link).is_ok_and(|current| current == target) {
         return Ok(link);
     }
-    let tmp = bin_root.join(format!(".{PROGRAM}.{}.link", std::process::id()));
+    let tmp = bin_root.join(format!(".{}.{}.link", program(), std::process::id()));
     let _ = std::fs::remove_file(&tmp);
     std::os::unix::fs::symlink(target, &tmp)?;
     std::fs::rename(&tmp, &link).inspect_err(|_| {
@@ -314,7 +322,7 @@ pub fn prepare(program: &Path, bin_root: &Path, version: &str) -> Option<Staged>
 
 /// [`prepare`] under the [`stage_root`] of this process, if it has one.
 pub fn prepare_here(program: &Path) -> Option<Staged> {
-    stage_root(|name| std::env::var_os(name), std::env::consts::OS)
+    stage_root(|name| std::env::var_os(name), std::env::consts::OS, CHANNEL)
         .and_then(|root| prepare(program, &root, env!("CARGO_PKG_VERSION")))
 }
 
@@ -396,9 +404,12 @@ impl Runner for SystemRunner {
     fn resolve(&self) -> Option<PathBuf> {
         let beside = std::env::current_exe()
             .ok()
-            .and_then(|exe| exe.parent().map(|dir| dir.join(beside_name(cfg!(windows)))))
+            .and_then(|exe| {
+                exe.parent()
+                    .map(|dir| dir.join(beside_name(cfg!(windows), CHANNEL)))
+            })
             .filter(|p| p.is_file());
-        beside.or_else(|| gui_path::resolve_program(PROGRAM, &gui_path::child_path()))
+        beside.or_else(|| gui_path::resolve_program(&program(), &gui_path::child_path()))
     }
 
     fn spawn(&self, program: &Path) -> io::Result<()> {
@@ -517,8 +528,10 @@ mod tests {
 
     #[test]
     fn the_bundled_server_has_the_exe_suffix_on_windows_only() {
-        assert_eq!(beside_name(true), "poimen-server.exe");
-        assert_eq!(beside_name(false), "poimen-server");
+        assert_eq!(beside_name(true, Channel::Stable), "poimen-server.exe");
+        assert_eq!(beside_name(false, Channel::Stable), "poimen-server");
+        assert_eq!(beside_name(true, Channel::Rc), "poimen-server-rc.exe");
+        assert_eq!(beside_name(false, Channel::Rc), "poimen-server-rc");
     }
 
     #[test]
@@ -627,7 +640,7 @@ mod tests {
             ("HOME", "/home/jo"),
         ];
         assert_eq!(
-            stage_root(env_of(&appimage), "linux"),
+            stage_root(env_of(&appimage), "linux", Channel::Stable),
             Some(PathBuf::from("/home/jo/.local/share/poimen-server/bin"))
         );
         let with_xdg = [
@@ -636,7 +649,7 @@ mod tests {
             ("HOME", "/home/jo"),
         ];
         assert_eq!(
-            stage_root(env_of(&with_xdg), "linux"),
+            stage_root(env_of(&with_xdg), "linux", Channel::Stable),
             Some(PathBuf::from("/data/poimen-server/bin"))
         );
         // A relative XDG_DATA_HOME is ignored (XDG base directory spec).
@@ -646,34 +659,59 @@ mod tests {
             ("HOME", "/h"),
         ];
         assert_eq!(
-            stage_root(env_of(&relative), "linux"),
+            stage_root(env_of(&relative), "linux", Channel::Stable),
             Some(PathBuf::from("/h/.local/share/poimen-server/bin"))
         );
-        assert_eq!(stage_root(env_of(&[("APPIMAGE", "/a")]), "linux"), None);
+        assert_eq!(
+            stage_root(env_of(&[("APPIMAGE", "/a")]), "linux", Channel::Stable),
+            None
+        );
     }
 
     #[test]
     fn other_linux_packages_and_macos_do_not_stage() {
         let plain = [("HOME", "/home/jo"), ("XDG_DATA_HOME", "/data")];
-        assert_eq!(stage_root(env_of(&plain), "linux"), None);
+        assert_eq!(stage_root(env_of(&plain), "linux", Channel::Stable), None);
         let empty = [("APPIMAGE", ""), ("APPDIR", ""), ("HOME", "/home/jo")];
-        assert_eq!(stage_root(env_of(&empty), "linux"), None);
+        assert_eq!(stage_root(env_of(&empty), "linux", Channel::Stable), None);
         let appimage = [("APPIMAGE", "/a"), ("HOME", "/Users/jo")];
-        assert_eq!(stage_root(env_of(&appimage), "macos"), None);
+        assert_eq!(
+            stage_root(env_of(&appimage), "macos", Channel::Stable),
+            None
+        );
     }
 
     #[test]
     fn windows_stages_under_local_app_data() {
         let env = [("LOCALAPPDATA", r"C:\Users\jo\AppData\Local")];
         assert_eq!(
-            stage_root(env_of(&env), "windows"),
+            stage_root(env_of(&env), "windows", Channel::Stable),
             Some(
                 PathBuf::from(r"C:\Users\jo\AppData\Local")
                     .join("poimen-server")
                     .join("bin")
             )
         );
-        assert_eq!(stage_root(env_of(&[]), "windows"), None);
+        assert_eq!(stage_root(env_of(&[]), "windows", Channel::Stable), None);
+    }
+
+    #[test]
+    fn the_rc_channel_stages_in_its_own_directories() {
+        let windows = [("LOCALAPPDATA", r"C:\Users\jo\AppData\Local")];
+        assert_eq!(
+            stage_root(env_of(&windows), "windows", Channel::Rc),
+            Some(
+                PathBuf::from(r"C:\Users\jo\AppData\Local")
+                    .join("poimen-server-rc")
+                    .join("bin")
+            )
+        );
+        let appimage = [("APPIMAGE", "/a"), ("HOME", "/home/jo")];
+        assert_eq!(
+            stage_root(env_of(&appimage), "linux", Channel::Rc),
+            Some(PathBuf::from("/home/jo/.local/share/poimen-server-rc/bin"))
+        );
+        assert_eq!(stage_root(env_of(&appimage), "macos", Channel::Rc), None);
     }
 
     #[cfg(unix)]

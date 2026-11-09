@@ -4,9 +4,19 @@
 
 use std::sync::Mutex;
 
+use poimen_client::protocol::{CHANNEL, Channel};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
+
+/// Whether a build of `channel` updates itself: stable only. An rc build has no updater artifacts
+/// and no endpoint (`tauri.rc.conf.json`), the plugin is not registered, and the release test
+/// checks updates on the stable app.
+pub fn enabled(channel: Channel) -> bool {
+    channel == Channel::Stable
+}
+
+const DISABLED: &str = "The RC build does not update itself; install the next RC by hand";
 
 /// The update found by the last check, waiting to be installed.
 #[derive(Default)]
@@ -28,6 +38,9 @@ pub async fn update_check(
     app: AppHandle,
     pending: State<'_, PendingUpdate>,
 ) -> Result<Option<UpdateInfo>, String> {
+    if !enabled(CHANNEL) {
+        return Err(DISABLED.into());
+    }
     let update = app
         .updater()
         .map_err(|e| e.to_string())?
@@ -51,6 +64,9 @@ pub async fn update_install(
     app: AppHandle,
     pending: State<'_, PendingUpdate>,
 ) -> Result<(), String> {
+    if !enabled(CHANNEL) {
+        return Err(DISABLED.into());
+    }
     let update = pending.0.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let Some(update) = update else {
         return Err("There is no update to install; check for updates first".into());
@@ -65,6 +81,12 @@ pub async fn update_install(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_stable_builds_update_themselves() {
+        assert!(enabled(Channel::Stable));
+        assert!(!enabled(Channel::Rc));
+    }
 
     #[test]
     fn the_info_serializes_camel_case() {

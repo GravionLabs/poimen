@@ -8,13 +8,20 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use poimen_protocol::{AgentStatus, ENV_TERMINAL_ID, TerminalReportAgent};
+use poimen_protocol::{AgentStatus, Channel, ENV_TERMINAL_ID, TerminalReportAgent};
 use serde_json::{Map, Value, json};
 
 use crate::hook::{HookEnv, Outcome};
 
 /// Marks the command of our entries in `settings.json`; install and uninstall find them by it.
-const MARKER: &str = "# poimen-agent-hook";
+/// One per channel, so the hooks of a stable and an rc installation live side by side: neither
+/// marker contains the other, and older stable installers look for the stable one only.
+pub const fn marker(channel: Channel) -> &'static str {
+    match channel {
+        Channel::Stable => "# poimen-agent-hook",
+        Channel::Rc => "# poimen-rc-agent-hook",
+    }
+}
 /// The hook events poimen registers.
 pub const EVENTS: [&str; 6] = [
     "SessionStart",
@@ -126,18 +133,19 @@ pub fn hook_exe(
     }
 }
 
-/// The shell command of the hook for the binary at `exe`.
-pub fn hook_command(exe: &Path) -> String {
+/// The shell command of the hook for the binary at `exe`, marked for `channel`.
+pub fn hook_command(exe: &Path, channel: Channel) -> String {
     let quoted = exe.display().to_string().replace('\'', r"'\''");
-    format!("'{quoted}' hook claude {MARKER}")
+    format!("'{quoted}' hook claude {}", marker(channel))
 }
 
 /// The PowerShell command of the hook: `& '<exe>' hook <args> # poimen-agent-hook` (the call
 /// operator runs a quoted path; `#` starts a comment there too, so the marker stays inert).
-pub fn powershell_command(exe: &Path, args: &str) -> String {
+pub fn powershell_command(exe: &Path, args: &str, channel: Channel) -> String {
     format!(
-        "& {} hook {args} {MARKER}",
-        powershell_quote(&exe.display().to_string())
+        "& {} hook {args} {}",
+        powershell_quote(&exe.display().to_string()),
+        marker(channel)
     )
 }
 
@@ -196,16 +204,16 @@ pub fn powershell_quote(text: &str) -> String {
 /// Our hook entry in `settings.json`. Unix: a shell command. Windows: the same in PowerShell
 /// (`"shell": "powershell"`; shell-form hooks would otherwise run in Git Bash when installed),
 /// with a longer timeout for the PowerShell start.
-pub fn hook_entry(exe: &Path, windows: bool) -> Value {
+pub fn hook_entry(exe: &Path, windows: bool, channel: Channel) -> Value {
     if windows {
         json!({
             "type": "command",
             "shell": "powershell",
-            "command": powershell_command(exe, "claude"),
+            "command": powershell_command(exe, "claude", channel),
             "timeout": WINDOWS_HOOK_TIMEOUT_SECS
         })
     } else {
-        json!({"type": "command", "command": hook_command(exe), "timeout": HOOK_TIMEOUT_SECS})
+        json!({"type": "command", "command": hook_command(exe, channel), "timeout": HOOK_TIMEOUT_SECS})
     }
 }
 
@@ -214,10 +222,10 @@ pub fn default_settings_path(home: &Path) -> PathBuf {
     home.join(".claude").join("settings.json")
 }
 
-fn is_ours(hook: &Value) -> bool {
+fn is_ours(hook: &Value, channel: Channel) -> bool {
     hook.get("command")
         .and_then(Value::as_str)
-        .is_some_and(|c| c.contains(MARKER))
+        .is_some_and(|c| c.contains(marker(channel)))
 }
 
 /// Whether a command of ours still has its binary: an entry whose binary is gone (moved, or the
@@ -228,8 +236,8 @@ pub(crate) fn binary_present(command: &str) -> bool {
 }
 
 /// One of ours whose binary is there.
-fn is_live(hook: &Value) -> bool {
-    is_ours(hook)
+fn is_live(hook: &Value, channel: Channel) -> bool {
+    is_ours(hook, channel)
         && hook
             .get("command")
             .and_then(Value::as_str)
@@ -270,12 +278,12 @@ fn write_atomic(path: &Path, settings: &Map<String, Value>) -> Result<(), String
 }
 
 /// Removes our hooks from one event's groups; returns whether anything was removed.
-fn strip(groups: &mut Vec<Value>) -> bool {
+fn strip(groups: &mut Vec<Value>, channel: Channel) -> bool {
     let mut removed = false;
     for group in groups.iter_mut() {
         if let Some(hooks) = group.get_mut("hooks").and_then(Value::as_array_mut) {
             let before = hooks.len();
-            hooks.retain(|h| !is_ours(h));
+            hooks.retain(|h| !is_ours(h, channel));
             removed |= hooks.len() != before;
         }
     }
@@ -288,22 +296,22 @@ fn strip(groups: &mut Vec<Value>) -> bool {
 }
 
 /// Registers the hook for every event in `settings_path`, replacing earlier entries of ours and
-/// keeping everything else. Idempotent.
-pub fn install(settings_path: &Path, exe: &Path) -> Result<(), String> {
+/// keeping everything else (the entries of the other channel too). Idempotent.
+pub fn install(settings_path: &Path, exe: &Path, channel: Channel) -> Result<(), String> {
     let mut settings = read_settings(settings_path)?;
     let hooks = settings
         .entry("hooks")
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or("\"hooks\" in settings.json is not an object; left untouched")?;
-    let entry = hook_entry(exe, cfg!(windows));
+    let entry = hook_entry(exe, cfg!(windows), channel);
     for event in EVENTS {
         let groups = hooks
             .entry(event)
             .or_insert_with(|| Value::Array(Vec::new()))
             .as_array_mut()
             .ok_or_else(|| format!("hooks.{event} is not an array; left untouched"))?;
-        strip(groups);
+        strip(groups, channel);
         groups.push(json!({ "hooks": [entry.clone()] }));
     }
     write_atomic(settings_path, &settings)
@@ -311,12 +319,12 @@ pub fn install(settings_path: &Path, exe: &Path) -> Result<(), String> {
 
 /// Removes only our entries (and the event arrays or `hooks` object that this leaves empty).
 /// Returns whether anything was removed. A missing file is left missing.
-pub fn uninstall(settings_path: &Path) -> Result<bool, String> {
+pub fn uninstall(settings_path: &Path, channel: Channel) -> Result<bool, String> {
     let mut settings = read_settings(settings_path)?;
     let mut removed = false;
     if let Some(hooks) = settings.get_mut("hooks").and_then(Value::as_object_mut) {
         for groups in hooks.values_mut().filter_map(Value::as_array_mut) {
-            removed |= strip(groups);
+            removed |= strip(groups, channel);
         }
         if removed {
             hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
@@ -336,7 +344,7 @@ pub fn uninstall(settings_path: &Path) -> Result<bool, String> {
 }
 
 /// The events of [`EVENTS`] that have our hook, with its binary present, in `settings_path`.
-pub fn status(settings_path: &Path) -> Result<Vec<&'static str>, String> {
+pub fn status(settings_path: &Path, channel: Channel) -> Result<Vec<&'static str>, String> {
     let settings = read_settings(settings_path)?;
     Ok(EVENTS
         .into_iter()
@@ -349,7 +357,7 @@ pub fn status(settings_path: &Path) -> Result<Vec<&'static str>, String> {
                     groups.iter().any(|g| {
                         g.get("hooks")
                             .and_then(Value::as_array)
-                            .is_some_and(|h| h.iter().any(is_live))
+                            .is_some_and(|h| h.iter().any(|hook| is_live(hook, channel)))
                     })
                 })
         })
@@ -457,6 +465,7 @@ mod tests {
         HookEnv {
             terminal_id: terminal_id.map(str::to_owned),
             in_poimen,
+            foreign: false,
             socket: PathBuf::from("/nonexistent/poimen/s.sock"),
             log: None,
         }
@@ -526,7 +535,7 @@ mod tests {
         let path = temp("install");
         std::fs::write(&path, herdr_settings().to_string()).unwrap();
         let exe = fake_exe(&path);
-        install(&path, &exe).unwrap();
+        install(&path, &exe, Channel::Stable).unwrap();
         let s = read(&path);
         assert_eq!(s["model"], "opus");
         assert_eq!(s["permissions"], herdr_settings()["permissions"]);
@@ -538,8 +547,11 @@ mod tests {
         assert_eq!(start.len(), 2);
         assert_eq!(start[0], herdr_settings()["hooks"]["SessionStart"][0]);
         // The entry of this platform (`hook_entry` is checked literally for both).
-        assert_eq!(start[1]["hooks"][0], hook_entry(&exe, cfg!(windows)));
-        assert_eq!(status(&path).unwrap(), EVENTS.to_vec());
+        assert_eq!(
+            start[1]["hooks"][0],
+            hook_entry(&exe, cfg!(windows), Channel::Stable)
+        );
+        assert_eq!(status(&path, Channel::Stable).unwrap(), EVENTS.to_vec());
         cleanup(&path);
     }
 
@@ -555,14 +567,14 @@ mod tests {
         // An AppImage mount of an earlier run: the marker is there, the binary is not.
         let path = temp("gone");
         let exe = path.with_file_name("mount").join("poimen-server");
-        install(&path, &exe).unwrap();
-        assert!(status(&path).unwrap().is_empty());
+        install(&path, &exe, Channel::Stable).unwrap();
+        assert!(status(&path, Channel::Stable).unwrap().is_empty());
         // Installing again with a binary that exists replaces the stale entries.
         let exe = fake_exe(&path);
-        install(&path, &exe).unwrap();
-        assert_eq!(status(&path).unwrap(), EVENTS.to_vec());
+        install(&path, &exe, Channel::Stable).unwrap();
+        assert_eq!(status(&path, Channel::Stable).unwrap(), EVENTS.to_vec());
         std::fs::remove_file(&exe).unwrap();
-        assert!(status(&path).unwrap().is_empty());
+        assert!(status(&path, Channel::Stable).unwrap().is_empty());
         cleanup(&path);
     }
 
@@ -590,10 +602,13 @@ mod tests {
     #[test]
     fn the_binary_of_a_hook_command_is_read_back() {
         let unix = Path::new("/b/it's/poimen-server");
-        assert_eq!(hook_target(&hook_command(unix)), Some(unix.to_path_buf()));
+        assert_eq!(
+            hook_target(&hook_command(unix, Channel::Stable)),
+            Some(unix.to_path_buf())
+        );
         let win = Path::new(r"C:\Users\Jo O'Neil\poimen-server.exe");
         assert_eq!(
-            hook_target(&powershell_command(win, "claude")),
+            hook_target(&powershell_command(win, "claude", Channel::Stable)),
             Some(win.to_path_buf())
         );
         assert_eq!(
@@ -610,16 +625,20 @@ mod tests {
     #[test]
     fn install_twice_changes_nothing_and_a_moved_binary_replaces_the_entry() {
         let path = temp("idempotent");
-        install(&path, Path::new("/a/poimen-server")).unwrap();
+        install(&path, Path::new("/a/poimen-server"), Channel::Stable).unwrap();
         let first = std::fs::read_to_string(&path).unwrap();
-        install(&path, Path::new("/a/poimen-server")).unwrap();
+        install(&path, Path::new("/a/poimen-server"), Channel::Stable).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), first);
-        install(&path, Path::new("/b/it's/poimen-server")).unwrap();
+        install(&path, Path::new("/b/it's/poimen-server"), Channel::Stable).unwrap();
         let s = read(&path);
         assert_eq!(s["hooks"]["Stop"].as_array().unwrap().len(), 1);
         assert_eq!(
             s["hooks"]["Stop"][0]["hooks"][0],
-            hook_entry(Path::new("/b/it's/poimen-server"), cfg!(windows))
+            hook_entry(
+                Path::new("/b/it's/poimen-server"),
+                cfg!(windows),
+                Channel::Stable
+            )
         );
         if !cfg!(windows) {
             assert_eq!(
@@ -631,14 +650,65 @@ mod tests {
     }
 
     #[test]
+    fn stable_and_rc_hooks_coexist_and_each_channel_manages_only_its_own() {
+        let path = temp("channels");
+        std::fs::write(&path, herdr_settings().to_string()).unwrap();
+        let stable = fake_exe(&path);
+        let rc = path.with_file_name("poimen-server-rc");
+        std::fs::write(&rc, "").unwrap();
+        install(&path, &stable, Channel::Stable).unwrap();
+        install(&path, &rc, Channel::Rc).unwrap();
+        // Installing either again replaces only its own entry.
+        install(&path, &stable, Channel::Stable).unwrap();
+        let s = read(&path);
+        let stop = s["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stop.len(), 2);
+        assert_eq!(
+            stop[0]["hooks"][0],
+            hook_entry(&rc, cfg!(windows), Channel::Rc)
+        );
+        assert_eq!(
+            stop[1]["hooks"][0],
+            hook_entry(&stable, cfg!(windows), Channel::Stable)
+        );
+        if !cfg!(windows) {
+            assert_eq!(
+                stop[0]["hooks"][0]["command"],
+                format!("'{}' hook claude # poimen-rc-agent-hook", rc.display())
+            );
+        }
+        assert_eq!(status(&path, Channel::Stable).unwrap(), EVENTS.to_vec());
+        assert_eq!(status(&path, Channel::Rc).unwrap(), EVENTS.to_vec());
+        // Removing the rc hooks leaves the stable ones, and the other way round.
+        assert!(uninstall(&path, Channel::Rc).unwrap());
+        assert!(status(&path, Channel::Rc).unwrap().is_empty());
+        assert_eq!(status(&path, Channel::Stable).unwrap(), EVENTS.to_vec());
+        install(&path, &rc, Channel::Rc).unwrap();
+        assert!(uninstall(&path, Channel::Stable).unwrap());
+        assert!(status(&path, Channel::Stable).unwrap().is_empty());
+        assert_eq!(status(&path, Channel::Rc).unwrap(), EVENTS.to_vec());
+        assert!(uninstall(&path, Channel::Rc).unwrap());
+        assert_eq!(read(&path), herdr_settings());
+        cleanup(&path);
+    }
+
+    #[test]
+    fn neither_channel_marker_contains_the_other() {
+        let (stable, rc) = (marker(Channel::Stable), marker(Channel::Rc));
+        assert_eq!(stable, "# poimen-agent-hook");
+        assert_eq!(rc, "# poimen-rc-agent-hook");
+        assert!(!stable.contains(rc) && !rc.contains(stable));
+    }
+
+    #[test]
     fn uninstall_removes_only_ours_and_restores_the_original() {
         let path = temp("uninstall");
         std::fs::write(&path, herdr_settings().to_string()).unwrap();
-        install(&path, Path::new("/x/poimen-server")).unwrap();
-        assert!(uninstall(&path).unwrap());
+        install(&path, Path::new("/x/poimen-server"), Channel::Stable).unwrap();
+        assert!(uninstall(&path, Channel::Stable).unwrap());
         assert_eq!(read(&path), herdr_settings());
-        assert!(!uninstall(&path).unwrap());
-        assert!(status(&path).unwrap().is_empty());
+        assert!(!uninstall(&path, Channel::Stable).unwrap());
+        assert!(status(&path, Channel::Stable).unwrap().is_empty());
         cleanup(&path);
     }
 
@@ -650,7 +720,7 @@ mod tests {
             {"type": "command", "command": "'/x/poimen-server' hook claude # poimen-agent-hook"}
         ]}]}});
         std::fs::write(&path, mixed.to_string()).unwrap();
-        assert!(uninstall(&path).unwrap());
+        assert!(uninstall(&path, Channel::Stable).unwrap());
         assert_eq!(
             read(&path),
             json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "mine.sh"}]}]}})
@@ -661,10 +731,10 @@ mod tests {
     #[test]
     fn a_missing_file_is_created_on_install_and_not_on_uninstall() {
         let path = temp("missing");
-        assert!(!uninstall(&path).unwrap());
+        assert!(!uninstall(&path, Channel::Stable).unwrap());
         assert!(!path.exists());
-        assert!(status(&path).unwrap().is_empty());
-        install(&path, Path::new("/x/poimen-server")).unwrap();
+        assert!(status(&path, Channel::Stable).unwrap().is_empty());
+        install(&path, Path::new("/x/poimen-server"), Channel::Stable).unwrap();
         assert!(path.exists());
         cleanup(&path);
     }
@@ -679,7 +749,10 @@ mod tests {
             r#"{"hooks": {"Stop": {}}}"#,
         ] {
             std::fs::write(&path, bad).unwrap();
-            assert!(install(&path, Path::new("/x/p")).is_err(), "{bad}");
+            assert!(
+                install(&path, Path::new("/x/p"), Channel::Stable).is_err(),
+                "{bad}"
+            );
             assert_eq!(std::fs::read_to_string(&path).unwrap(), bad);
         }
         cleanup(&path);
@@ -689,7 +762,7 @@ mod tests {
     fn the_windows_entry_runs_in_powershell_with_a_longer_timeout() {
         let exe = Path::new(r"C:\Users\Jo O'Neil\AppData\Local\poimen\poimen-server.exe");
         assert_eq!(
-            hook_entry(exe, true),
+            hook_entry(exe, true, Channel::Stable),
             json!({
                 "type": "command",
                 "shell": "powershell",
@@ -697,13 +770,16 @@ mod tests {
                 "timeout": 5
             })
         );
-        assert!(is_ours(&hook_entry(exe, true)));
+        assert!(is_ours(
+            &hook_entry(exe, true, Channel::Stable),
+            Channel::Stable
+        ));
     }
 
     #[test]
     fn the_unix_entry_is_unchanged() {
         assert_eq!(
-            hook_entry(Path::new("/opt/poimen-server"), false),
+            hook_entry(Path::new("/opt/poimen-server"), false, Channel::Stable),
             json!({
                 "type": "command",
                 "command": "'/opt/poimen-server' hook claude # poimen-agent-hook",
@@ -728,7 +804,7 @@ mod tests {
         let path = temp("mode");
         std::fs::write(&path, "{}").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        install(&path, Path::new("/x/p")).unwrap();
+        install(&path, Path::new("/x/p"), Channel::Stable).unwrap();
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600

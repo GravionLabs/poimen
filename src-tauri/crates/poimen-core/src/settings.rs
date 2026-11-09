@@ -296,9 +296,20 @@ pub fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> 
 }
 
 /// poimen's own files live under `<home>/.config/poimen` on every system, Windows included
-/// (deliberately not `%APPDATA%`: one documented location, like `~/.config/poimen/themes`).
+/// (deliberately not `%APPDATA%`: one documented location, like `~/.config/poimen/themes`). An
+/// rc build keeps them apart in `<home>/.config/poimen-rc` ([`poimen_protocol::CHANNEL`]).
+pub fn config_dir(home: &Path) -> PathBuf {
+    config_dir_for(home, poimen_protocol::CHANNEL)
+}
+
+/// [`config_dir`] of `channel`.
+pub fn config_dir_for(home: &Path, channel: poimen_protocol::Channel) -> PathBuf {
+    home.join(".config").join(channel.named("poimen"))
+}
+
+/// `config.json` in [`config_dir`].
 pub fn config_path(home: &Path) -> PathBuf {
-    home.join(".config").join("poimen").join("config.json")
+    config_dir(home).join("config.json")
 }
 
 /// Parses `spaceTemplates[]`: `name` (unique), `match.dir` and/or `match.remote`, `agent`, optional `model` and `layout`.
@@ -609,6 +620,20 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_rc_channel_has_its_own_config_dir() {
+        let home = Path::new("/home/jo");
+        assert_eq!(
+            config_dir_for(home, poimen_protocol::Channel::Stable),
+            PathBuf::from("/home/jo/.config/poimen")
+        );
+        assert_eq!(
+            config_dir_for(home, poimen_protocol::Channel::Rc),
+            PathBuf::from("/home/jo/.config/poimen-rc")
+        );
+        assert_eq!(config_path(home), config_dir(home).join("config.json"));
+    }
 
     #[test]
     fn set_trusted_projects_keeps_comments_and_other_keys() {

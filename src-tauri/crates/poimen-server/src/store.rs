@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use poimen_protocol::Space;
+use poimen_protocol::{Channel, Space};
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Serialize, Deserialize)]
@@ -16,18 +16,22 @@ struct File {
 /// Unix: `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else
 /// `~/.local/state/poimen/server.json`. Windows: `$POIMEN_STATE_DIR\server.json`, else
 /// `%LOCALAPPDATA%\poimen-server\server.json`, else `~\AppData\Local\poimen-server\server.json`.
+/// An rc build uses `poimen-rc` and `poimen-server-rc` ([`poimen_protocol::CHANNEL`]).
 pub fn state_file_path() -> PathBuf {
+    let channel = poimen_protocol::CHANNEL;
     if cfg!(windows) {
         windows_state_file_from(
             std::env::var_os("POIMEN_STATE_DIR"),
             std::env::var_os("LOCALAPPDATA"),
             std::env::home_dir(),
+            channel,
         )
     } else {
         state_file_from(
             std::env::var_os("POIMEN_STATE_DIR"),
             std::env::var_os("XDG_STATE_HOME"),
             std::env::var_os("HOME"),
+            channel,
         )
     }
 }
@@ -37,17 +41,18 @@ pub(crate) fn windows_state_file_from(
     state_dir: Option<std::ffi::OsString>,
     local_app_data: Option<std::ffi::OsString>,
     home: Option<PathBuf>,
+    channel: Channel,
 ) -> PathBuf {
     if let Some(dir) = state_dir.filter(|s| !s.is_empty()) {
         return PathBuf::from(dir).join("server.json");
     }
-    poimen_protocol::windows_dir_from(local_app_data)
+    poimen_protocol::windows_dir_from(local_app_data, channel)
         .unwrap_or_else(|| {
             home.filter(|h| !h.as_os_str().is_empty())
                 .unwrap_or_else(std::env::temp_dir)
                 .join("AppData")
                 .join("Local")
-                .join(poimen_protocol::WINDOWS_DIR)
+                .join(poimen_protocol::windows_dir_name(channel))
         })
         .join("server.json")
 }
@@ -56,17 +61,22 @@ pub(crate) fn state_file_from(
     state_dir: Option<std::ffi::OsString>,
     xdg_state: Option<std::ffi::OsString>,
     home: Option<std::ffi::OsString>,
+    channel: Channel,
 ) -> PathBuf {
     let set = |v: Option<std::ffi::OsString>| v.filter(|s| !s.is_empty()).map(PathBuf::from);
     if let Some(dir) = set(state_dir) {
         return dir.join("server.json");
     }
-    if let Some(dir) = set(xdg_state) {
-        return dir.join("poimen").join("server.json");
+    let dir = channel.named("poimen");
+    if let Some(state) = set(xdg_state) {
+        return state.join(dir).join("server.json");
     }
     set(home)
         .unwrap_or_else(std::env::temp_dir)
-        .join(".local/state/poimen/server.json")
+        .join(".local")
+        .join("state")
+        .join(dir)
+        .join("server.json")
 }
 
 /// Reads the spaces; a missing or unreadable file gives an empty list (a damaged file is
@@ -186,17 +196,41 @@ mod tests {
 
     #[test]
     fn state_file_precedence() {
+        let stable = Channel::Stable;
         assert_eq!(
-            state_file_from(Some("/d".into()), Some("/x".into()), Some("/h".into())),
+            state_file_from(
+                Some("/d".into()),
+                Some("/x".into()),
+                Some("/h".into()),
+                stable
+            ),
             PathBuf::from("/d/server.json")
         );
         assert_eq!(
-            state_file_from(None, Some("/x".into()), Some("/h".into())),
+            state_file_from(None, Some("/x".into()), Some("/h".into()), stable),
             PathBuf::from("/x/poimen/server.json")
         );
         assert_eq!(
-            state_file_from(None, Some("".into()), Some("/h".into())),
+            state_file_from(None, Some("".into()), Some("/h".into()), stable),
             PathBuf::from("/h/.local/state/poimen/server.json")
+        );
+    }
+
+    #[test]
+    fn the_rc_channel_keeps_its_own_state_file() {
+        let rc = Channel::Rc;
+        assert_eq!(
+            state_file_from(None, Some("/x".into()), Some("/h".into()), rc),
+            PathBuf::from("/x/poimen-rc/server.json")
+        );
+        assert_eq!(
+            state_file_from(None, None, Some("/h".into()), rc),
+            PathBuf::from("/h/.local/state/poimen-rc/server.json")
+        );
+        // An explicit state dir is taken as it is.
+        assert_eq!(
+            state_file_from(Some("/d".into()), None, None, rc),
+            PathBuf::from("/d/server.json")
         );
     }
 
@@ -204,11 +238,13 @@ mod tests {
     fn windows_state_file_precedence() {
         let local = PathBuf::from(r"C:\Users\u\AppData\Local");
         let home = PathBuf::from(r"C:\Users\u");
+        let stable = Channel::Stable;
         assert_eq!(
             windows_state_file_from(
                 Some(r"D:\s".into()),
                 Some(local.clone().into()),
-                Some(home.clone())
+                Some(home.clone()),
+                stable
             ),
             PathBuf::from(r"D:\s").join("server.json")
         );
@@ -216,15 +252,27 @@ mod tests {
             windows_state_file_from(
                 Some("".into()),
                 Some(local.clone().into()),
-                Some(home.clone())
+                Some(home.clone()),
+                stable
             ),
             local.join("poimen-server").join("server.json")
         );
         assert_eq!(
-            windows_state_file_from(None, None, Some(home.clone())),
+            windows_state_file_from(None, None, Some(home.clone()), stable),
             home.join("AppData")
                 .join("Local")
                 .join("poimen-server")
+                .join("server.json")
+        );
+        assert_eq!(
+            windows_state_file_from(None, Some(local.clone().into()), None, Channel::Rc),
+            local.join("poimen-server-rc").join("server.json")
+        );
+        assert_eq!(
+            windows_state_file_from(None, None, Some(home.clone()), Channel::Rc),
+            home.join("AppData")
+                .join("Local")
+                .join("poimen-server-rc")
                 .join("server.json")
         );
     }
