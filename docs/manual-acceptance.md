@@ -33,6 +33,43 @@ names a path, use the path the app shows, not a guess.
 Keep the exact error text. For an elevated-server denial or a hook failure, paste the message as it
 was shown.
 
+## The RC next to the stable app
+
+A pre-release (`v<version>-rc<nnn>`, a dispatch of `release.yml` on `release/next`) is built for
+the channel `rc` and installs as **Poimen RC** next to the stable poimen; the release test never
+replaces the working app. Install the RC next to the stable app and keep the stable app installed.
+Every name the RC uses has its own `-rc` form, so read the paths of the items below with it:
+
+| What                     | Stable                                         | RC                                                   |
+| ------------------------ | ---------------------------------------------- | ---------------------------------------------------- |
+| App                      | `poimen.app`, package `poimen`                 | `Poimen RC.app`, package `poimen-rc`                 |
+| Installer file           | `poimen_<version>_…`                           | `Poimen RC_<version>-rc<nnn>_…`                      |
+| Server binary            | `poimen-server`                                | `poimen-server-rc`                                   |
+| Settings                 | `~/.config/poimen/`                            | `~/.config/poimen-rc/`                               |
+| Server socket and state  | `poimen` (Windows `%LOCALAPPDATA%\poimen-server`) | `poimen-rc` (Windows `%LOCALAPPDATA%\poimen-server-rc`) |
+| AppImage server copies   | `$XDG_DATA_HOME/poimen-server/bin`             | `$XDG_DATA_HOME/poimen-server-rc/bin`                |
+| Claude Code hook marker  | `# poimen-agent-hook`                          | `# poimen-rc-agent-hook`                             |
+| Copilot CLI hook file    | `~/.copilot/hooks/poimen-agent-state.json`     | `~/.copilot/hooks/poimen-rc-agent-state.json`        |
+
+The RC shows `RC` in the window title and the status bar and never updates itself (no **Check for
+updates**). The update items (M-8, W-S-8, W-M-7, L-D-8, L-R-8, A-10, A-12) are therefore checked
+on the stable app only, when the release is published; mark them **not run** (reason: RC) in the RC
+test.
+
+### RC-1 Side by side with the stable app
+
+- **Steps:** with the stable poimen installed, its hooks installed and a terminal open in it,
+  install the RC and start it. Accept its hooks offer. Run `pgrep -fl poimen-server` (Windows: Task
+  Manager) and `grep -c agent-hook ~/.claude/settings.json`. Start Claude Code in a terminal of each
+  app and send a prompt in each.
+- **Expected:** the stable app is still installed and starts as before, with its spaces. Two
+  servers run, `poimen-server` and `poimen-server-rc`. `settings.json` holds the entries of both
+  (`# poimen-agent-hook` and `# poimen-rc-agent-hook`), and installing the RC hooks kept the stable
+  ones. Each agent's status shows only in the app whose terminal it runs in. The RC starts with its
+  own settings (`~/.config/poimen-rc/`), not the stable ones. Uninstalling the RC leaves the stable
+  app working.
+- **Source:** #590.
+
 ## macOS: `.dmg`
 
 ### M-1 Install from the disk image

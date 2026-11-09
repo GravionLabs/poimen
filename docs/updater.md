@@ -44,20 +44,22 @@ new one.
 ## Pre-releases
 
 `release.yml` dispatched on `release/next` (channel rc, from the branch) publishes a GitHub **pre-release**
-`v<x.y.z>-rc<nnn>` with installers (no `.msi` and no `.rpm`) for the RC test beside the release PR ([manual acceptance](manual-acceptance.md)). Its `latest.json` is attached to
-that pre-release only. A dispatch on any other branch builds `<x.y.z>-beta<nnn>` installers as workflow
-artifacts: no tag, no release and no `latest.json`, so a beta is never served either.
+`v<x.y.z>-rc<nnn>` with installers (no `.msi` and no `.rpm`) for the RC test beside the release PR ([manual acceptance](manual-acceptance.md)). A dispatch on any other branch builds `<x.y.z>-beta<nnn>` installers as workflow
+artifacts: no tag and no release.
 
-- Stable installs never see it: the endpoint `releases/latest/download/latest.json` resolves through
-  GitHub's "latest release", which is the most recent published release that is neither a pre-release
-  nor a draft. A pre-release is never "latest", so the endpoint keeps serving the last stable `latest.json`.
-- An installed pre-release updates to the final release: the stable `v<x.y.z>` is a higher SemVer than
-  `<x.y.z>-rc<nnn>` (a pre-release part sorts below the release), and the endpoint serves the stable
-  `latest.json` once the release is published. A pre-release install is not offered a newer pre-release;
-  install it by hand.
-- This follows from GitHub's documented semantics and is not yet observed live. Outstanding: check once on
-  the first pre-release that a stable install reports no update, and that the pre-release install updates to
-  the final release.
+Both are built for the build-time channel `rc` (`POIMEN_CHANNEL=rc`, overlay `src-tauri/tauri.rc.conf.json`):
+**Poimen RC**, which installs next to the stable app (own identifier `dev.gravionlabs.poimen.rc`, binaries,
+server socket, settings and hooks) and does not update itself:
+
+- No updater artifacts and no `latest.json` (`createUpdaterArtifacts: false`), no update endpoint, and the
+  updater plugin is not registered (`updater::enabled`); the status bar has no **Check for updates**. A newer
+  RC is installed by hand over the older one.
+- Stable installs never see a pre-release: the endpoint `releases/latest/download/latest.json` resolves
+  through GitHub's "latest release", which is the most recent published release that is neither a
+  pre-release nor a draft, and a pre-release has no `latest.json` anyway.
+- The update items of the RC test (M-8, W-S-8, A-12) are checked on the stable app, when the release is
+  published.
+- Shared update channels (an RC that updates to the next RC) are #499.
 
 ## Limits
 

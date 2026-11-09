@@ -14,8 +14,10 @@
 #   any other branch: <next stable>-beta<nnn>: the same installer matrix, uploaded as workflow artifacts (seven days);
 #   no tag, release or commit. A dispatch on main is refused (main releases through the push).
 #   A version with a suffix has no MSI (WiX needs a numeric version) and no RPM (an RPM version allows no '-').
-#   The latest.json of an rc is attached to its pre-release only and a beta has none, so neither is ever served from
-#   releases/latest, and stable installs do not update to them (docs/updater.md). Pull requests never build installers.
+#   rc and beta build the channel `rc` (POIMEN_CHANNEL, overlay src-tauri/tauri.rc.conf.json): "Poimen RC", which
+#   installs next to the stable app with its own identifier, binaries, server socket, settings and hooks, has no
+#   updater artifacts or latest.json and never updates itself; stable installs do not update to it either
+#   (docs/updater.md). Pull requests never build installers.
 #
 # The installers use the building block of GravionLabs/ci that tauri-app.yml is made of (tauri/installers@v1), not
 # the reusable workflow itself: tauri-app.yml determines the version, drafts and publishes the release and writes the
@@ -173,6 +175,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write # upload the assets to the release
+    env:
+      # The build-time channel (poimen-protocol `CHANNEL`): a pre-release (rc or beta) builds the side-by-side
+      # "Poimen RC" app and its poimen-server-rc sidecar with their own socket, settings, state and hooks.
+      POIMEN_CHANNEL: ${{ needs.prerelease.outputs.version && 'rc' || 'stable' }}
     strategy:
       fail-fast: false
       matrix:
@@ -194,7 +200,8 @@ jobs:
           ref: ${{ (needs.release.outputs.version || needs.prerelease.outputs.release-id) && format('v{0}', needs.release.outputs.version || needs.prerelease.outputs.version) || github.sha }}
 
       # poimen-server ships next to the app (bundle.externalBin in tauri.bundle.conf.json, which needs the
-      # target-suffixed file at build time); the app looks beside its own executable first.
+      # target-suffixed file at build time); the app looks beside its own executable first. On the rc channel the
+      # sidecar is poimen-server-rc (externalBin of tauri.rc.conf.json).
       - name: Build the poimen-server sidecar
         shell: bash
         run: |
@@ -210,8 +217,9 @@ jobs:
           release-id: ${{ needs.release.outputs.release-id || needs.prerelease.outputs.release-id }}
           cargo-toml: src-tauri/Cargo.toml
           # Signed update packages and latest.json (docs/updater.md); createUpdaterArtifacts lives in the
-          # release-only bundle config, so local builds need no key.
-          args: --config src-tauri/tauri.bundle.conf.json ${{ needs.prerelease.outputs.version && matrix.suffix-args || '' }}
+          # release-only bundle config, so local builds need no key. A pre-release adds tauri.rc.conf.json: the
+          # "Poimen RC" app (own identifier, product and binary name), no updater artifacts, no update endpoint.
+          args: --config src-tauri/tauri.bundle.conf.json ${{ needs.prerelease.outputs.version && format('--config src-tauri/tauri.rc.conf.json {0}', matrix.suffix-args) || '' }}
           signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           signing-private-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
