@@ -52,6 +52,8 @@ export interface TrustPending {
   after?: (outcome: SpaceOutcome) => Promise<void>;
   /** Set when no space is created: "trust" calls it with the answer instead of `create_space`. */
   resume?: (decision: TrustDecision) => Promise<void>;
+  /** "without" calls `resume` too (with the `without` decision). */
+  without?: boolean;
   request: TrustRequest;
 }
 
@@ -140,9 +142,16 @@ export class SpaceActions {
   /** Directories matching the typed path. */
   readonly dirs = this._dirs.asReadonly();
 
-  /** Asks for the trust of `request` (a palette entry); "trust" calls `resume`, the rest nothing. */
-  askTrust(request: TrustRequest, resume: (decision: TrustDecision) => Promise<void>): void {
-    this._trust.set({ cwd: request.root, label: "", command: null, request, resume });
+  /**
+   * Asks for the trust of `request` (a palette entry, a rebuild); "trust" calls `resume`, and so
+   * does "without" when `without` is set (a rebuild without project commands); the rest nothing.
+   */
+  askTrust(
+    request: TrustRequest,
+    resume: (decision: TrustDecision) => Promise<void>,
+    without = false,
+  ): void {
+    this._trust.set({ cwd: request.root, label: "", command: null, request, resume, without });
   }
 
   /** Shows `message` in the status bar like a layout warning (a failed step of a task). */
@@ -270,6 +279,7 @@ export class SpaceActions {
     this._trust.set(null);
     if (pending.resume) {
       if (answer === "trust") await pending.resume({ kind: "trust", hash: pending.request.hash });
+      else if (answer === "without" && pending.without) await pending.resume({ kind: "without" });
       return undefined;
     }
     if (answer === "cancel") return undefined;
