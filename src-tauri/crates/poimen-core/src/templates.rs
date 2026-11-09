@@ -3,8 +3,8 @@
 //! agent line goes through the harness registry. A template matches by directory, by the remote of
 //! `origin` (GitHub owner or Azure DevOps project, see `remote.rs`) or by both.
 
-use crate::backend::SplitDirection;
 use crate::harness::{self, Harness};
+use crate::layout::SplitDirection;
 use crate::layout::{Layout, PaneSpec, Split};
 use crate::remote::Remote;
 use crate::tasks::Cmd;
@@ -187,8 +187,8 @@ pub fn seed_values(available: impl Fn(&str) -> bool) -> (serde_json::Value, serd
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::SplitDirection;
     use crate::harness::default_harnesses;
+    use crate::layout::SplitDirection;
     use std::path::Path;
 
     fn t(name: &str, dir: &str) -> Template {
