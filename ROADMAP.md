@@ -351,14 +351,14 @@ Updated 2026-11-09. Last release `v0.14.0`.
 
 Progress: 50 % (6 of 12 issues closed).
 
-| Order | Issue | Title                                                                                | Size | Depends on / decision       |
-| ----- | ----- | ------------------------------------------------------------------------------------ | ---- | --------------------------- |
-| 1     | #502  | [Bug] fix(terminal): Claude Code's classic renderer overdraws its output             | M    | needs decision              |
-| 2     | #510  | [PBI] feat(server): tabs and split tree per space in the protocol                    | M    |                             |
-| 3     | #540  | [Bug] fix(agents): agent status goes idle while a deliver loop it started is running |      | needs refinement            |
-| 4     | #590  | [PBI] build(release): RC builds install side by side as Poimen RC                    | M    |                             |
-| 5     | #417  | [PBI] chore(release): manual check of the poimen backend on Windows                  | S    | release test, does not gate |
-| 6     | #600  | [PBI] test: release candidate test of M013 on macOS, Windows, Linux                  |      | release test, does not gate |
+| Order | Issue | Title                                                                                   | Size | Depends on / decision       |
+| ----- | ----- | --------------------------------------------------------------------------------------- | ---- | --------------------------- |
+| 1     | #502  | [Bug] fix(terminal): Claude Code's classic renderer overdraws its output                | M    |                             |
+| 2     | #510  | [PBI] feat(server): tabs and split tree per space in the protocol                       | M    |                             |
+| 3     | #540  | [Bug] fix(agents): pane status stays working while a deliver loop it started is running | S    |                             |
+| 4     | #590  | [PBI] build(release): RC builds install side by side as Poimen RC                       | M    |                             |
+| 5     | #417  | [PBI] chore(release): manual check of the poimen backend on Windows                     | S    | release test, does not gate |
+| 6     | #600  | [PBI] test: release candidate test of M013 on macOS, Windows, Linux                     |      | release test, does not gate |
 <!-- roadmap:end -->
 
 <!-- roadmap:begin plan M14 -->
