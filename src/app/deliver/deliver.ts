@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { agentKind, paneDir, type Terminal } from "../core/herdr";
+import { agentKind, paneDir, type AgentStatus, type Terminal } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
 import { SettingsStore } from "../core/settings";
 import { TaskStarter } from "../core/task-start";
@@ -16,6 +16,7 @@ import {
   type DeliverStatus,
   type Subject,
 } from "./deliver-status";
+import { effectiveStatus, runsByTerminal } from "./pane-status";
 
 /** The task mode `Start loop` runs; `{nr}` is the milestone number, `{title}` its title. */
 export const DELIVER_MODE = "deliver-loop";
@@ -79,6 +80,19 @@ export class Deliver {
   readonly summary = computed(() => barSummary(this.cards(), this.now()));
   /** Whether any card asks for the user. */
   readonly attention = computed(() => this.summary()?.warning ?? false);
+
+  /**
+   * The status poimen shows for a pane: its hook status combined with the runs that name the pane
+   * in `host["poimen.terminal"]` (see `effectiveStatus`). The store applies it to the snapshot.
+   */
+  readonly paneStatus = computed(() => {
+    const byTerminal = runsByTerminal(this.cards());
+    const now = this.now();
+    return (terminalId: string, hook: AgentStatus): AgentStatus => {
+      const runs = byTerminal.get(terminalId);
+      return runs ? effectiveStatus(hook, runs, now) : hook;
+    };
+  });
 
   private watchedKey: string | undefined;
   private listening: Promise<Unlisten> | undefined;

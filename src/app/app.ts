@@ -279,6 +279,8 @@ export class App {
       const pane = id ? this.pane(id) : undefined;
       this.projectEntries.setDir(pane ? paneDir(pane) : undefined);
     });
+    // Every view shows the hook status combined with the runs a pane started (#540).
+    effect(() => this.store.setStatusOf(this.deliver.paneStatus()));
     // Instantiated for its effect: the dock badge follows `Attention.count`.
     inject(DockBadge);
     const title = inject(Title);
