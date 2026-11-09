@@ -1,6 +1,6 @@
 # poimen-server protocol
 
-Protocol version: **3** (version 1 had no terminal output; version 2 adds `terminal.attach`, the stream records and the controller rules for `terminal.input` and `terminal.resize`; version 3 adds tokens per terminal: `terminal.report_tokens`, `terminal.clear_tokens`, `tokens` of Terminal and the `terminal.tokens_changed` event).
+Protocol version: **4** (version 1 had no terminal output; version 2 adds `terminal.attach`, the stream records and the controller rules for `terminal.input` and `terminal.resize`; version 3 adds tokens per terminal: `terminal.report_tokens`, `terminal.clear_tokens`, `tokens` of Terminal and the `terminal.tokens_changed` event; version 4 adds tabs and split trees per space: `tabs` and `active_tab` of Space, Tab and its nodes, the `tab.*` requests, the `tab.*` and `space.changed` events, see Tabs and splits).
 
 `poimen-server` is a headless daemon that owns the PTYs, so shells and agents keep running when the app closes. The protocol is client-neutral: no Tauri or app concept appears in it. The wire types live in `src-tauri/crates/poimen-protocol`, a client in `src-tauri/crates/poimen-client`.
 
@@ -25,28 +25,39 @@ Error codes: `parse_error`, `invalid_request`, `unknown_method`, `invalid_params
 
 ## Objects
 
-Space: `{"id": "s1", "name": "api", "cwd": "/home/me/api"}`.
+Space: `{"id": "s1", "name": "api", "cwd": "/home/me/api", "tabs": ["tab2", "tab5"], "active_tab": "tab5"}` (`tabs` in order; `active_tab` absent while the space has no tab; both absent from a protocol 3 server).
+
+Tab: `{"tab_id": "tab2", "space_id": "s1", "name": "zsh", "root": Node, "active_terminal": "t3"}`. `active_terminal` is the focused leaf of the tab.
+
+Node: `{"kind": "terminal", "terminal_id": "t3"}` or `{"kind": "split", "split_id": "split7", "direction": "right" | "down", "ratio": 0.5, "children": [Node, Node]}`. `right` puts the second child right of the first, `down` below it; `ratio` is the share of the first child, above 0 and below 1. `split_id` is assigned by the server, unique within it and stable for the life of the split; it is persisted with the tree and never given to another node, also across restarts.
 
 Terminal: `{"id": "t2", "space_id": "s1", "name": "zsh", "cwd": "...", "cols": 80, "rows": 24, "status": "running" | "exited", "exit_code": 0, "program": "/bin/zsh"}` (`exit_code` only when exited; `program` is the program the terminal runs, absent from older servers) `agent` (`{"status": "idle" | "working" | "blocked" | "done", "agent": "claude", "session_id": "..."}`; `agent` and `session_id` optional) is present while hooks report an agent in the terminal, and cleared when it ends or the process exits.
 
-The server stores no layout: groups, splits and tabs are the client's business. Terminal ids are unique per server run; ids of spaces survive restarts.
+The server owns the tabs and the split tree of each space, so every client shows the same layout (ADR 0006); editor groups and app-only tabs stay the client's business. Terminal ids are unique per server run; ids of spaces, tabs and splits survive restarts.
 
 ## Requests
 
 | Method            | Params                                                                  | Result                | Notes                                                                                           |
 | ----------------- | ----------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
-| `ping`            | none                                                                    | `{version, protocol, pid}` | `protocol` is the protocol version (3).                                                    |
+| `ping`            | none                                                                    | `{version, protocol, pid}` | `protocol` is the protocol version (4).                                                    |
 | `events.subscribe`| none                                                                    | `{subscribed: true}`  | The connection then carries events only. List after subscribing to avoid missing changes.       |
-| `space.list`      | none                                                                    | `{spaces: [Space]}`   |                                                                                                 |
+| `space.list`      | none                                                                    | `{spaces: [Space], tabs: [Tab]}` | The tabs of every space with their trees.                                            |
 | `space.create`    | `name`, `cwd`                                                           | `{space}`             | Non-empty `name` and `cwd`. Persisted.                                                          |
 | `space.rename`    | `space_id`, `name`                                                      | `{space}`             | Persisted.                                                                                      |
-| `space.close`     | `space_id`                                                              | `{}`                  | Closes its terminals first (`terminal.closed` each). Persisted.                                 |
-| `terminal.list`   | `space_id?`                                                             | `{terminals: [Terminal]}` | Exited terminals stay listed until closed.                                                  |
-| `terminal.create` | `space_id`, `cwd?`, `name?`, `command?` (argv), `cols?`, `rows?`        | `{terminal}`          | `cwd` defaults to the space's, `command` to `$SHELL` (else `/bin/sh`; Windows: `pwsh.exe`, else `powershell.exe` on `PATH`, else `%COMSPEC%`), size to 80x24. Never through a shell. |
+| `space.close`     | `space_id`                                                              | `{}`                  | Closes its terminals first (`terminal.closed` each), then its tabs (`tab.closed` each). Persisted. |
+| `terminal.list`   | `space_id?`                                                             | `{terminals: [Terminal]}` | Exited terminals stay listed until closed (they have no leaf).                              |
+| `terminal.create` | `space_id`, `cwd?`, `name?`, `command?` (argv), `cols?`, `rows?`        | `{terminal}`          | `cwd` defaults to the space's, `command` to `$SHELL` (else `/bin/sh`; Windows: `pwsh.exe`, else `powershell.exe` on `PATH`, else `%COMSPEC%`), size to 80x24. Never through a shell. The terminal gets a tab of its own at the end of the space, named like the terminal (see Tabs and splits). |
 | `server.set_colors` | `foreground`, `background`, `cursor?`, `palette?` (16)                | `{}`                  | `#rrggbb` colors the server answers color queries with while no controller is attached; see Terminal queries. `cursor` defaults to `foreground`, an absent `palette` keeps the previous one. |
 | `server.shutdown` | none                                                                    | `{shutting_down: true}` | Ends every terminal (as `terminal.close` each, `terminal.closed` events), removes the socket and exits the process shortly after the answer. Clients send it only after the user confirmed: poimen on "Restart server" (an outdated server) and "Quit poimen and stop server". A server that predates it answers `unknown_method`. |
 | `terminal.rename` | `terminal_id`, `name`                                                   | `{terminal}`          |                                                                                                 |
-| `terminal.close`  | `terminal_id`                                                           | `{}`                  | Kills the process (SIGHUP; Windows: TerminateProcess) and forgets the terminal.                                            |
+| `terminal.close`  | `terminal_id`                                                           | `{}`                  | Kills the process (SIGHUP; Windows: TerminateProcess), forgets the terminal and removes its leaf.                          |
+| `tab.create`      | `space_id`, `name?`, `terminal_id?`                                     | `{tab, terminal}`     | A new tab at the end of the space with a new terminal (the space's cwd, the default shell) or with `terminal_id`, which moves out of its tab. `name` defaults to the terminal's. `not_found` for an unknown space or terminal, `invalid_params` for a terminal of another space, `exited` for an exited one. |
+| `tab.rename`      | `tab_id`, `name`                                                        | `{tab}`               | Non-empty `name`.                                                                               |
+| `tab.close`       | `tab_id`                                                                | `{}`                  | Closes the terminals of the tab (`terminal.closed` each), then the tab.                         |
+| `tab.move`        | `tab_id`, `index`                                                       | `{tab, space}`        | Moves the tab to `index` of its space's `tabs`; an index past the end puts it last.             |
+| `tab.split`       | `terminal_id`, `direction` (`right` or `down`), `ratio?` (0.5), `cwd?`, `name?`, `command?` | `{tab, terminal}` | Creates a terminal (`cwd` defaults to the split terminal's, `command` as for `terminal.create`) and replaces the leaf of `terminal_id` with a split: the old leaf first, the new terminal second. The focus stays. `exited` for an exited terminal, `invalid_params` for a ratio outside (0, 1). |
+| `tab.resize_split`| `tab_id`, `split_id`, `ratio`                                           | `{tab}`               | `not_found` for a `split_id` that is not in the tab: a split is never guessed.                  |
+| `tab.focus`       | `tab_id`, `terminal_id?`                                                | `{tab, space}`        | Makes the tab its space's `active_tab` and, with `terminal_id` (a leaf of the tab, else `not_found`), that leaf its `active_terminal`. |
 | `terminal.input`  | `terminal_id`, `data`                                                   | `{}`                  | `data` is written as is; `exited` error when the process has ended. An observer, or a controller that was taken over, gets `not_controller`. |
 | `terminal.resize` | `terminal_id`, `cols`, `rows`                                           | `{}`                  | Both at least 1. Resizes the PTY and the grid, and is the only way to set the size. `not_controller` from an observer, and from a connection that is not attached while a controller exists (without one, any connection may resize). |
 | `terminal.attach` | `terminal_id`, `mode` (`observe` or `control`), `take_over?` (default false) | `AttachResult`   | See Attach. The connection becomes a stream connection. `not_found`, `conflict`. |
@@ -56,6 +67,17 @@ The server stores no layout: groups, splits and tabs are the client's business. 
 | `terminal.clear_tokens` | `terminal_id`, `source` | `{cleared}` | Removes every token the `source` set. |
 
 Terminals get `POIMEN_SOCKET` (the server's socket) and `POIMEN_TERMINAL_ID` in their environment, and `TERM=xterm-256color` when the server has none.
+
+## Tabs and splits
+
+Every space has its tabs in order (`Space.tabs`), each with a split tree of terminals. The tree and the terminal set never disagree: every leaf is a running terminal and every running terminal is in exactly one leaf. A change of the layout and its events are made under the same lock as the terminal change that caused it, so a subscriber sees `terminal.created` before the tab that holds it, and `terminal.closed` or `terminal.exited` before the tab without it.
+
+- `terminal.create` gives the terminal a tab of its own, so clients that know nothing of tabs keep working. A new tab goes last and becomes `active_tab` only when the space had none.
+- Closing or the exit of a terminal removes its leaf: the leaf's sibling takes the parent's place (the split goes with its `split_id`). When the leaf was the tab's `active_terminal`, the first leaf of the node that took the place becomes active. The last terminal of a tab closes the tab; when it was the `active_tab`, the tab that took its place (else the one before it) becomes active.
+- Splits are addressed by `split_id`, never by a path in the tree: clients change the same tree at the same time, and a path shifts when another client splits or closes a pane.
+- Focus is shared: `active_tab` and `active_terminal` change only through `tab.focus` (or when the focused tab or leaf goes away), and the last client that sends `tab.focus` wins. A client that only views a tab does not send it.
+
+Events: `tab.created {tab}`, `tab.changed {tab}` (the full tab after any change of its tree, name, place in the order or focus) and `tab.closed {tab_id, space_id}`; `space.changed {space}` carries the space whenever its `tabs` order or `active_tab` changed (a tab created, closed, moved or focused).
 
 ## Attach
 
@@ -99,6 +121,10 @@ Starting an agent and prompting it need no request of their own (`poimen_client:
 | `space.created`        | `{space}`                                    | after `space.create`                                  |
 | `space.renamed`        | `{space}`                                    | after `space.rename`                                  |
 | `space.closed`         | `{space_id}`                                 | after `space.close`                                   |
+| `space.changed`        | `{space}`                                    | the order of the space's tabs or its `active_tab` changed |
+| `tab.created`          | `{tab}`                                      | after `tab.create`, and for the tab `terminal.create` makes |
+| `tab.changed`          | `{tab}`                                      | the full tab after a split, resize, rename, move, focus or a leaf that went (closed, exited, moved to another tab) |
+| `tab.closed`           | `{tab_id, space_id}`                         | after `tab.close`, its last terminal closed or exited, `space.close` |
 | `terminal.created`     | `{terminal}`                                 | after `terminal.create`                               |
 | `terminal.renamed`     | `{terminal}`                                 | after `terminal.rename`                               |
 | `terminal.closed`      | `{terminal_id, space_id}`                    | after `terminal.close` or `space.close`               |
@@ -113,7 +139,7 @@ Starting an agent and prompting it need no request of their own (`poimen_client:
 
 ## Persistence
 
-The space list (id, name, cwd) is stored in `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else `~/.local/state/poimen/server.json` (Windows: `$POIMEN_STATE_DIR\server.json`, else `%LOCALAPPDATA%\poimen-server\server.json`, else `~\AppData\Local\poimen-server\server.json`), and read at start. On rc the directories are `poimen-rc` and `poimen-server-rc`. Terminals are not persisted: a restarted server starts without terminals.
+The layout (the spaces with id, name, cwd, tab order and active tab; the tabs with their trees; the id counter `next_id`) is stored in `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else `~/.local/state/poimen/server.json` (Windows: `$POIMEN_STATE_DIR\server.json`, else `%LOCALAPPDATA%\poimen-server\server.json`, else `~\AppData\Local\poimen-server\server.json`), and read at start. On rc the directories are `poimen-rc` and `poimen-server-rc`. Terminals are not persisted: a restarted server starts without terminals, drops the leaves whose terminal is gone, collapses their splits and drops the tabs left empty (once terminals survive a restart, #574, their leaves stay). Every running terminal without a leaf gets a tab of its own, which is how the spaces of a protocol 3 `server.json` (no `tabs`) get one tab per terminal. The id counter is persisted so no id, a dropped `split_id` included, is given twice.
 
 ## Lifecycle
 

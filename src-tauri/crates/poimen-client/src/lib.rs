@@ -17,7 +17,8 @@ pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
     AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, SetColors, Space,
-    SpaceClose, SpaceCreate, SpaceRename, Terminal, TerminalAttach, TerminalClose, TerminalCreate,
+    SpaceClose, SpaceCreate, SpaceList, SpaceRename, Tab, TabClose, TabCreate, TabFocus, TabMove,
+    TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClose, TerminalCreate,
     TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalResize,
 };
 use serde_json::{Value, json};
@@ -174,6 +175,85 @@ impl Client {
 
     pub fn list_spaces(&self) -> Result<Vec<Space>, ClientError> {
         self.typed("space.list", Value::Null, Some("spaces"))
+    }
+
+    /// The spaces with their tabs and split trees (`space.list`).
+    pub fn list_layout(&self) -> Result<SpaceList, ClientError> {
+        self.typed("space.list", Value::Null, None)
+    }
+
+    /// A new tab at the end of the space with `terminal_id` (moved out of its tab) or a new
+    /// terminal; returns the tab and its terminal.
+    pub fn create_tab(&self, params: &TabCreate) -> Result<(Tab, Terminal), ClientError> {
+        self.tab_and_terminal("tab.create", to_value(params))
+    }
+
+    pub fn rename_tab(&self, tab_id: &str, name: &str) -> Result<Tab, ClientError> {
+        let params = TabRename {
+            tab_id: tab_id.into(),
+            name: name.into(),
+        };
+        self.typed("tab.rename", to_value(&params), Some("tab"))
+    }
+
+    /// Closes the tab and its terminals.
+    pub fn close_tab(&self, tab_id: &str) -> Result<(), ClientError> {
+        let params = TabClose {
+            tab_id: tab_id.into(),
+        };
+        self.request("tab.close", to_value(&params)).map(drop)
+    }
+
+    /// Moves the tab to `index` of its space's order; returns the space with the new order.
+    pub fn move_tab(&self, tab_id: &str, index: usize) -> Result<Space, ClientError> {
+        let params = TabMove {
+            tab_id: tab_id.into(),
+            index,
+        };
+        self.typed("tab.move", to_value(&params), Some("space"))
+    }
+
+    /// Creates a terminal and splits the leaf of `params.terminal_id`; returns the tab and the
+    /// new terminal.
+    pub fn split(&self, params: &TabSplit) -> Result<(Tab, Terminal), ClientError> {
+        self.tab_and_terminal("tab.split", to_value(params))
+    }
+
+    /// Sets the ratio of the split `split_id` (an unknown one is `not_found`).
+    pub fn resize_split(
+        &self,
+        tab_id: &str,
+        split_id: &str,
+        ratio: f64,
+    ) -> Result<Tab, ClientError> {
+        let params = TabResizeSplit {
+            tab_id: tab_id.into(),
+            split_id: split_id.into(),
+            ratio,
+        };
+        self.typed("tab.resize_split", to_value(&params), Some("tab"))
+    }
+
+    /// Focuses the tab (and the leaf of `terminal_id` in it), for every client.
+    pub fn focus_tab(&self, tab_id: &str, terminal_id: Option<&str>) -> Result<Tab, ClientError> {
+        let params = TabFocus {
+            tab_id: tab_id.into(),
+            terminal_id: terminal_id.map(str::to_string),
+        };
+        self.typed("tab.focus", to_value(&params), Some("tab"))
+    }
+
+    fn tab_and_terminal(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<(Tab, Terminal), ClientError> {
+        let mut result = self.request(method, params)?;
+        let parse = |e: serde_json::Error| ClientError::Protocol(format!("{method}: {e}"));
+        Ok((
+            serde_json::from_value(result["tab"].take()).map_err(parse)?,
+            serde_json::from_value(result["terminal"].take()).map_err(parse)?,
+        ))
     }
 
     pub fn create_space(&self, name: &str, cwd: &str) -> Result<Space, ClientError> {
@@ -565,6 +645,61 @@ mod tests {
         let sent = server.join().unwrap();
         assert!(sent.ends_with('\n'));
         assert!(sent.contains(r#""method":"space.list""#));
+    }
+
+    #[test]
+    fn list_layout_reads_spaces_with_their_tabs() {
+        let path = temp_socket("layout");
+        let server =
+            fake_server(
+                &path,
+                vec![concat!(
+                r#"{"id":"$ID","result":{"spaces":[{"id":"s1","name":"a","cwd":"/x","#,
+                r#""tabs":["tab2"],"active_tab":"tab2"}],"tabs":[{"tab_id":"tab2","#,
+                r#""space_id":"s1","name":"sh","root":{"kind":"terminal","terminal_id":"t3"},"#,
+                r#""active_terminal":"t3"}]}}"#
+            )
+            .into()],
+            );
+        let layout = Client::new(&path).list_layout().unwrap();
+        assert_eq!(layout.spaces[0].active_tab.as_deref(), Some("tab2"));
+        assert_eq!(layout.tabs[0].root.terminal_ids(), ["t3"]);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn split_sends_its_params_and_returns_the_tab_and_the_new_terminal() {
+        let path = temp_socket("split");
+        let server =
+            fake_server(
+                &path,
+                vec![concat!(
+                r#"{"id":"$ID","result":{"tab":{"tab_id":"tab2","space_id":"s1","name":"sh","#,
+                r#""root":{"kind":"split","split_id":"split5","direction":"down","ratio":0.4,"#,
+                r#""children":[{"kind":"terminal","terminal_id":"t3"},"#,
+                r#"{"kind":"terminal","terminal_id":"t4"}]},"active_terminal":"t3"},"#,
+                r#""terminal":{"id":"t4","space_id":"s1","name":"sh","cwd":"/x","cols":80,"#,
+                r#""rows":24,"status":"running"}}}"#
+            )
+            .into()],
+            );
+        let (tab, terminal) = Client::new(&path)
+            .split(&TabSplit {
+                terminal_id: "t3".into(),
+                direction: protocol::SplitDirection::Down,
+                ratio: Some(0.4),
+                cwd: None,
+                name: None,
+                command: None,
+            })
+            .unwrap();
+        assert_eq!(tab.root.split_ids(), ["split5"]);
+        assert_eq!(terminal.id, "t4");
+        let sent = server.join().unwrap();
+        assert!(sent.contains(r#""method":"tab.split""#), "{sent}");
+        assert!(sent.contains(r#""direction":"down""#), "{sent}");
+        assert!(sent.contains(r#""ratio":0.4"#), "{sent}");
+        assert!(!sent.contains("cwd"), "{sent}");
     }
 
     #[test]

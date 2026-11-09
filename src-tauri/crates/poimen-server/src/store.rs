@@ -1,16 +1,34 @@
-//! The persisted space list (`server.json`): name and cwd per space. Terminals are not stored.
+//! The persisted layout (`server.json`): the spaces (name, cwd, tab order, active tab), their
+//! tabs with the split trees, and the id counter. Terminals are not stored.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use poimen_protocol::{Channel, Space};
+use poimen_protocol::{Channel, Space, Tab};
 use serde::{Deserialize, Serialize};
+
+use crate::tabs::Layout;
 
 #[derive(Default, Serialize, Deserialize)]
 struct File {
     #[serde(default)]
     spaces: Vec<Space>,
+    /// Absent from a protocol 3 file.
+    #[serde(default)]
+    tabs: Vec<Tab>,
+    /// The next value of the id counter, so no id (a `split_id` above all) is given twice, also
+    /// for nodes that were dropped since. Absent from a protocol 3 file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_id: Option<u64>,
+}
+
+/// What [`load`] read.
+#[derive(Debug, Default)]
+pub(crate) struct Stored {
+    pub(crate) layout: Layout,
+    /// The first id counter value that collides with nothing ever given out.
+    pub(crate) next_id: u64,
 }
 
 /// Unix: `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else
@@ -79,27 +97,30 @@ pub(crate) fn state_file_from(
         .join("server.json")
 }
 
-/// Reads the spaces; a missing or unreadable file gives an empty list (a damaged file is
-/// reported on stderr and replaced by the next save).
-pub(crate) fn load(path: &Path) -> Vec<Space> {
-    match fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str::<File>(&text)
-            .map(|f| f.spaces)
-            .unwrap_or_else(|e| {
-                eprintln!("poimen-server: ignoring {}: {e}", path.display());
-                Vec::new()
-            }),
-        Err(_) => Vec::new(),
-    }
+/// Reads the layout; a missing or unreadable file gives an empty one (a damaged file is reported
+/// on stderr and replaced by the next save).
+pub(crate) fn load(path: &Path) -> Stored {
+    let file = match fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str::<File>(&text).unwrap_or_else(|e| {
+            eprintln!("poimen-server: ignoring {}: {e}", path.display());
+            File::default()
+        }),
+        Err(_) => File::default(),
+    };
+    let layout = Layout::new(file.spaces, file.tabs);
+    let next_id = next_id(layout.ids()).max(file.next_id.unwrap_or(1));
+    Stored { layout, next_id }
 }
 
-/// Writes the spaces atomically (temp file, then rename).
-pub(crate) fn save(path: &Path, spaces: &[Space]) -> io::Result<()> {
+/// Writes the layout and the id counter atomically (temp file, then rename).
+pub(crate) fn save(path: &Path, layout: &Layout, next_id: u64) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         create_private_dir(dir)?;
     }
     let text = serde_json::to_string_pretty(&File {
-        spaces: spaces.to_vec(),
+        spaces: layout.spaces.clone(),
+        tabs: layout.tabs.clone(),
+        next_id: Some(next_id),
     })
     .map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
@@ -132,11 +153,15 @@ fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
     options.open(path)?.write_all(data)
 }
 
-/// The first id counter value that collides with no persisted `s<n>` id.
-pub(crate) fn next_id(spaces: &[Space]) -> u64 {
-    spaces
-        .iter()
-        .filter_map(|s| s.id.strip_prefix('s')?.parse::<u64>().ok())
+/// The first id counter value that collides with none of the ids (`<letters><number>`, e.g.
+/// `s3`, `tab4`, `split9`; others are ignored).
+pub(crate) fn next_id<'a>(ids: impl IntoIterator<Item = &'a str>) -> u64 {
+    ids.into_iter()
+        .filter_map(|id| {
+            id.trim_start_matches(|c: char| c.is_ascii_alphabetic())
+                .parse::<u64>()
+                .ok()
+        })
         .max()
         .map_or(1, |n| n + 1)
 }
@@ -145,12 +170,19 @@ pub(crate) fn next_id(spaces: &[Space]) -> u64 {
 mod tests {
     use super::*;
 
+    use poimen_protocol::{Node, SplitDirection};
+
     fn space(id: &str) -> Space {
         Space {
             id: id.into(),
             name: "n".into(),
             cwd: "/x".into(),
+            ..Default::default()
         }
+    }
+
+    fn layout(spaces: &[&str]) -> Layout {
+        Layout::new(spaces.iter().map(|id| space(id)).collect(), Vec::new())
     }
 
     fn temp(name: &str) -> PathBuf {
@@ -165,33 +197,76 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let base = temp("modes");
         let path = base.parent().unwrap().join("fresh").join("server.json");
-        save(&path, &[space("s1")]).unwrap();
+        save(&path, &layout(&["s1"]), 2).unwrap();
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o600);
         assert_eq!(mode(path.parent().unwrap()), 0o700);
     }
 
     #[test]
-    fn save_then_load_round_trips() {
+    fn save_then_load_round_trips_spaces_tabs_trees_and_the_counter() {
         let path = temp("rt");
-        save(&path, &[space("s1"), space("s4")]).unwrap();
+        let mut saved = layout(&["s1", "s4"]);
+        saved.spaces[0].tabs = vec!["tab5".into()];
+        saved.spaces[0].active_tab = Some("tab5".into());
+        saved.tabs.push(Tab {
+            tab_id: "tab5".into(),
+            space_id: "s1".into(),
+            name: "dev".into(),
+            root: Node::Split {
+                split_id: "split7".into(),
+                direction: SplitDirection::Down,
+                ratio: 0.3,
+                children: Box::new([Node::terminal("t2"), Node::terminal("t6")]),
+            },
+            active_terminal: "t6".into(),
+        });
+        save(&path, &saved, 40).unwrap();
         let loaded = load(&path);
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[1].id, "s4");
+        assert_eq!(loaded.layout, saved);
+        assert_eq!(loaded.next_id, 40);
+    }
+
+    #[test]
+    fn a_protocol_3_file_loads_its_spaces_without_tabs() {
+        let path = temp("v3");
+        fs::write(
+            &path,
+            r#"{"spaces":[{"id":"s1","name":"api","cwd":"/x"},{"id":"s3","name":"b","cwd":"/y"}]}"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert_eq!(loaded.layout.spaces.len(), 2);
+        assert!(loaded.layout.spaces.iter().all(|s| s.tabs.is_empty()));
+        assert!(loaded.layout.tabs.is_empty());
+        assert_eq!(loaded.next_id, 4);
     }
 
     #[test]
     fn missing_and_damaged_files_give_no_spaces() {
-        assert!(load(&temp("missing")).is_empty());
+        assert!(load(&temp("missing")).layout.spaces.is_empty());
         let path = temp("bad");
         fs::write(&path, "{ nope").unwrap();
-        assert!(load(&path).is_empty());
+        let loaded = load(&path);
+        assert!(loaded.layout.spaces.is_empty());
+        assert_eq!(loaded.next_id, 1);
     }
 
     #[test]
     fn ids_continue_after_the_highest_persisted() {
-        assert_eq!(next_id(&[]), 1);
-        assert_eq!(next_id(&[space("s2"), space("s9"), space("weird")]), 10);
+        assert_eq!(next_id([]), 1);
+        assert_eq!(next_id(["s2", "s9", "weird", "tab12x"]), 10);
+        assert_eq!(next_id(["s2", "tab11", "split14"]), 15);
+    }
+
+    #[test]
+    fn the_persisted_counter_wins_over_the_ids_left_in_the_file() {
+        // A split that was dropped took its id with it; the counter still remembers it.
+        let path = temp("counter");
+        save(&path, &layout(&["s1"]), 30).unwrap();
+        assert_eq!(load(&path).next_id, 30);
+        save(&path, &layout(&["s50"]), 30).unwrap();
+        assert_eq!(load(&path).next_id, 51);
     }
 
     #[test]
