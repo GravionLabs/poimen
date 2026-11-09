@@ -69,6 +69,7 @@ import { Toolbar } from "./toolbar/toolbar";
 import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
+import { SpaceRebuild } from "./core/space-rebuild";
 import { CommandPalette } from "./core/command-palette";
 import { ExplorerSelection } from "./core/explorer-selection";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
@@ -162,6 +163,7 @@ export class App {
   private readonly projectEntries = inject(ProjectEntries);
   protected readonly agentActions = inject(AgentActions);
   protected readonly deliver = inject(Deliver);
+  private readonly spaceRebuild = inject(SpaceRebuild);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -309,6 +311,8 @@ export class App {
     destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
     // The deliver loops of the repositories of the open spaces (status files, watched, no polling).
     destroyRef.onDestroy(this.deliver.start());
+    // Spaces back from a server restart without terminals get their layout again.
+    destroyRef.onDestroy(this.spaceRebuild.start());
     effect(() => {
       const dirs = this.store
         .snapshot()

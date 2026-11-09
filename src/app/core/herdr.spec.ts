@@ -18,6 +18,7 @@ import {
   waitingCount,
   agentKinds,
   closeWarning,
+  emptySpaces,
   spaceContaining,
   workspaceDirs,
   type Terminal,
@@ -218,6 +219,49 @@ describe("workspaceDirs", () => {
   it("is empty for a workspace without panes", () => {
     expect(workspaceDirs(snapshot, "w9")).toEqual([]);
   });
+
+  it("puts the space's own directory first and lists it once", () => {
+    const withCwd: Snapshot = {
+      ...snapshot,
+      spaces: [{ space_id: "w1", label: "a", number: 1, agent_status: "idle", cwd: "/work/b" }],
+    };
+    expect(workspaceDirs(withCwd, "w1")).toEqual(["/work/b", "/work/a/sub"]);
+  });
+
+  it("has the space's directory for an empty space and ignores a blank one", () => {
+    const space = (cwd: string) => ({
+      space_id: "w9",
+      label: "x",
+      number: 9,
+      agent_status: "unknown" as const,
+      cwd,
+    });
+    expect(workspaceDirs({ ...snapshot, spaces: [space("/work/x")] }, "w9")).toEqual(["/work/x"]);
+    expect(workspaceDirs({ ...snapshot, spaces: [space("  ")] }, "w9")).toEqual([]);
+  });
+});
+
+describe("emptySpaces", () => {
+  const space = (space_id: string, cwd?: string) => ({
+    space_id,
+    label: space_id,
+    number: 1,
+    agent_status: "unknown" as const,
+    ...(cwd === undefined ? {} : { cwd }),
+  });
+
+  it("lists spaces that have a directory but no terminal", () => {
+    const s: Snapshot = {
+      spaces: [space("s1", "/a"), space("s2", "/b"), space("s3"), space("s4", "")],
+      tabs: [],
+      terminals: [pane({ terminal_id: "t", space_id: "s2", cwd: "/b" })],
+    };
+    expect(emptySpaces(s).map((x) => x.space_id)).toEqual(["s1"]);
+  });
+
+  it("is empty without spaces", () => {
+    expect(emptySpaces({ spaces: [], tabs: [], terminals: [] })).toEqual([]);
+  });
 });
 
 describe("spaceContaining", () => {
@@ -341,6 +385,22 @@ describe("toSnapshot", () => {
         { terminal_id: "w1:p1", tab_id: "w1:t1", space_id: "w1", agent_status: "done", cwd: "/a" },
       ],
     });
+  });
+
+  it("keeps the directory of a space without terminals (after a server restart)", () => {
+    const snapshot = toSnapshot({
+      workspaces: [
+        { workspace_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/work/app" },
+      ],
+      tabs: [],
+      panes: [],
+    });
+    expect(snapshot.spaces).toEqual([
+      { space_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/work/app" },
+    ]);
+    expect(workspaceDirs(snapshot, "s1")).toEqual(["/work/app"]);
+    expect(spaceContaining(snapshot, "/work/app/src")).toBe("s1");
+    expect(emptySpaces(snapshot).map((s) => s.space_id)).toEqual(["s1"]);
   });
 
   it("maps an empty snapshot", () => {

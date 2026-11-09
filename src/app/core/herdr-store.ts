@@ -142,6 +142,9 @@ export class HerdrStore {
   private unlisten: Promise<Unlisten> | undefined;
   private reposKey: string | undefined;
   private reposStale = false;
+  /** Set until the first snapshot read of a backend session (start, reconnect, started server). */
+  private freshSession = true;
+  private readonly sessionListeners = new Set<(snapshot: Snapshot) => void>();
 
   constructor() {
     this.watchRepoTriggers();
@@ -174,11 +177,22 @@ export class HerdrStore {
     } catch (err) {
       this._backend.set({ state: "failed", reason: String(err) });
     }
+    // A server that was just started has its spaces back, but no terminals.
+    if (this._backend()?.state === "started") this.freshSession = true;
     // At start the first snapshot is already being read; only a started server needs another read.
     if (retry || this._backend()?.state === "started") {
       this._info.set(null);
       await this.refresh();
     }
+  }
+
+  /**
+   * Calls `listener` with the first snapshot read of every backend session: at start, after the
+   * event watcher reconnected and after `ensure_backend` started the server. Returns the unsubscribe.
+   */
+  onSessionStart(listener: (snapshot: Snapshot) => void): () => void {
+    this.sessionListeners.add(listener);
+    return () => this.sessionListeners.delete(listener);
   }
 
   /** The next blocked pane after `activeId`, wrapping around. */
@@ -213,6 +227,10 @@ export class HerdrStore {
         this.ui?.pruneTabOrder(alive);
       }
       this._loaded.set(true);
+      if (this.freshSession) {
+        this.freshSession = false;
+        for (const listener of this.sessionListeners) listener(snapshot);
+      }
       if (!this._watchLost()) this._connectionError.set(null);
       if (!this._info()) await this.readInfo();
       await this.readRepos(snapshot);
@@ -262,7 +280,13 @@ export class HerdrStore {
 
   /** Looks up branch and worktree of the pane directories. A failure only leaves them blank. */
   private async readRepos(snapshot: Snapshot): Promise<void> {
-    const dirs = [...new Set(snapshot.terminals.map(paneDir).filter((d): d is string => !!d))];
+    const dirs = [
+      ...new Set(
+        [...snapshot.spaces.map((s) => s.cwd), ...snapshot.terminals.map(paneDir)].filter(
+          (d): d is string => !!d,
+        ),
+      ),
+    ];
     const key = dirs.join("\n");
     // Git runs when the pane set (its directories) changed or a trigger asked for it.
     if (!this.reposStale && key === this.reposKey) return;
@@ -328,6 +352,8 @@ export class HerdrStore {
         this._watchLost.set(true);
         this._connectionError.set(event.data?.reason ?? "");
         this._info.set(null);
+        // The server may come back restarted: its spaces without their terminals.
+        this.freshSession = true;
         return;
       case "pane.agent_status_changed":
         if (event.data?.pane_id && event.data.agent_status) {

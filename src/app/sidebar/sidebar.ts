@@ -39,6 +39,7 @@ import { TauriBridge } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
 import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
+import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 
 /** What a tree node carries back to the template. */
@@ -185,12 +186,15 @@ export function splitSections(
   return { spaces: spaceList, agents, selectedId: selected?.workspace.space_id ?? null };
 }
 
-/** The directory of the first pane of space `id` when it is a repository, else `undefined`. */
+/**
+ * The directory of the first pane of space `id` when it is a repository, else the space's own
+ * directory when that is one (a space without terminals); `undefined` otherwise.
+ */
 export function spaceRepoDir(spaces: readonly SpaceNode[], id: string): string | undefined {
-  const row = spaces
-    .find((n) => n.workspace.space_id === id)
-    ?.rows.find((r) => r.dir !== undefined && r.branch !== undefined);
-  return row?.dir;
+  const node = spaces.find((n) => n.workspace.space_id === id);
+  const row = node?.rows.find((r) => r.dir !== undefined && r.branch !== undefined);
+  if (row) return row.dir;
+  return node?.repo?.branch != null ? node.workspace.cwd : undefined;
 }
 
 /** A row's context menu: `kind` says what was clicked, `action` what was picked. */
@@ -394,6 +398,21 @@ export class Sidebar {
   protected readonly spaceActions = inject(SpaceActions);
   private readonly attn = inject(Attention);
   private readonly bridge = inject(TauriBridge);
+  private readonly spaceRebuild = inject(SpaceRebuild);
+
+  /** The rebuild mark of a space that has no terminals; `undefined` for any other. */
+  protected rebuildMark(workspaceId: string): RebuildMark | undefined {
+    const mark = this.spaceRebuild.marks().get(workspaceId);
+    if (!mark) return undefined;
+    const space = this.store.spaces().find((s) => s.workspace.space_id === workspaceId);
+    return space?.rows.length === 0 ? mark : undefined;
+  }
+
+  /** The "Rebuild" of an empty space (agents and setup start, the project file is gated). */
+  protected rebuildSpace(workspaceId: string, event: Event): void {
+    event.stopPropagation();
+    void this.spaceRebuild.rebuild(workspaceId);
+  }
 
   protected rings(paneId: string): boolean {
     return this.attn.attention().has(paneId);
