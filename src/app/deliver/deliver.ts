@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { agentKind, paneDir, type AgentStatus, type Terminal } from "../core/herdr";
+import type { StatusChange } from "../core/attention";
 import { HerdrStore } from "../core/herdr-store";
 import { SettingsStore } from "../core/settings";
 import { TaskStarter } from "../core/task-start";
@@ -16,13 +17,16 @@ import {
   type DeliverStatus,
   type Subject,
 } from "./deliver-status";
-import { effectiveStatus, runsByTerminal } from "./pane-status";
+import { effectiveStatus, endedTerminal, runsByTerminal, withoutRunEnds } from "./pane-status";
 
 /** The task mode `Start loop` runs; `{nr}` is the milestone number, `{title}` its title. */
 export const DELIVER_MODE = "deliver-loop";
 
 /** How often the age texts and the stale rule are re-evaluated. */
 const CLOCK_MS = 30_000;
+
+/** How long the pane's `done` after its run ended counts as part of the run's end. */
+const RUN_END_MS = 10_000;
 
 interface DeliverEventPayload {
   root: string;
@@ -94,6 +98,18 @@ export class Deliver {
     };
   });
 
+  /** Terminals whose linked run just ended, with the time; see `withoutRunEnds`. */
+  private readonly endedAt = new Map<string, number>();
+
+  /**
+   * `changes` without the `done` of panes whose linked run just ended: the end of the run is
+   * notified once, by `transitions`.
+   */
+  withoutRunEnds(changes: readonly StatusChange[], now = Date.now()): StatusChange[] {
+    for (const [id, at] of this.endedAt) if (now - at > RUN_END_MS) this.endedAt.delete(id);
+    return withoutRunEnds(changes, new Set(this.endedAt.keys()));
+  }
+
   private watchedKey: string | undefined;
   private listening: Promise<Unlisten> | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -145,8 +161,11 @@ export class Deliver {
     });
     for (const card of next) {
       const old = before.find((c) => cardKey(c) === cardKey(card));
-      if (old?.state.kind === "ok" && card.state.kind === "ok")
+      if (old?.state.kind === "ok" && card.state.kind === "ok") {
+        const ended = endedTerminal(old.state.status, card.state.status);
+        if (ended) this.endedAt.set(ended, Date.now());
         this.notify(root, transitions(old.state.status, card.state.status));
+      }
     }
   }
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { STALE_MS, parseStatus, type DeliverCard, type DeliverStatus } from "./deliver-status";
-import { effectiveStatus, runsByTerminal } from "./pane-status";
+import { effectiveStatus, endedTerminal, runsByTerminal, withoutRunEnds } from "./pane-status";
 
 const load = (name: string): DeliverStatus => {
   const parsed = parseStatus(
@@ -65,5 +65,26 @@ describe("runsByTerminal", () => {
       state: { kind: "invalid", error: "x" } as never,
     };
     expect(runsByTerminal([bad]).size).toBe(0);
+  });
+});
+
+describe("run end without a second notification", () => {
+  it("names the terminal of a run that went from running to finished", () => {
+    expect(endedTerminal(quiet, finished)).toBe("t7");
+    expect(endedTerminal(quiet, quiet)).toBeUndefined();
+    expect(endedTerminal(undefined, finished)).toBeUndefined();
+  });
+
+  it("drops the done of that pane but keeps blocked and other panes", () => {
+    const changes = [
+      { paneId: "t7", status: "done" as const },
+      { paneId: "t7", status: "blocked" as const },
+      { paneId: "t8", status: "done" as const },
+    ];
+    expect(withoutRunEnds(changes, new Set(["t7"]))).toEqual([
+      { paneId: "t7", status: "blocked" },
+      { paneId: "t8", status: "done" },
+    ]);
+    expect(withoutRunEnds(changes, new Set())).toEqual(changes);
   });
 });

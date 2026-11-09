@@ -290,8 +290,10 @@ export class App {
       const viewed = this.viewedPanes();
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
       untracked(() => {
-        const changes = this.attention.observe(statuses, viewed);
+        const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
+        // A pane's `done` because its linked run ended is notified once, by the run (#540).
+        const changes = this.deliver.withoutRunEnds(observed);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
         this.notifyChanges(changes);
       });
