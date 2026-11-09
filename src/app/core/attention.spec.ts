@@ -116,4 +116,14 @@ describe("Attention changes", () => {
     a.observe(st({ p1: "done" }), none);
     expect(a.lastChanges()).not.toBe(first);
   });
+
+  it("does not notify done while a linked run keeps the pane working, then once it ends", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), none);
+    // Stop reports done, but the run it started still runs: the effective status stays working.
+    expect(a.observe(st({ p1: "working" }), none)).toEqual([]);
+    expect(a.unread().size).toBe(0);
+    expect(a.observe(st({ p1: "done" }), none)).toEqual([{ paneId: "p1", status: "done" }]);
+    expect([...a.unread()]).toEqual(["p1"]);
+  });
 });

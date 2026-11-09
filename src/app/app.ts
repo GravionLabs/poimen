@@ -279,6 +279,8 @@ export class App {
       const pane = id ? this.pane(id) : undefined;
       this.projectEntries.setDir(pane ? paneDir(pane) : undefined);
     });
+    // Every view shows the hook status combined with the runs a pane started (#540).
+    effect(() => this.store.setStatusOf(this.deliver.paneStatus()));
     // Instantiated for its effect: the dock badge follows `Attention.count`.
     inject(DockBadge);
     const title = inject(Title);
@@ -288,8 +290,10 @@ export class App {
       const viewed = this.viewedPanes();
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
       untracked(() => {
-        const changes = this.attention.observe(statuses, viewed);
+        const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
+        // A pane's `done` because its linked run ended is notified once, by the run (#540).
+        const changes = this.deliver.withoutRunEnds(observed);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
         this.notifyChanges(changes);
       });

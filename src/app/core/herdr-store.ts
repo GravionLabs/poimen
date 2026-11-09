@@ -10,6 +10,7 @@ import {
   type HerdrEvent,
   type HerdrInfo,
   type Terminal,
+  type AgentStatus,
   type RepoInfo,
   type Snapshot,
   type WireSnapshot,
@@ -75,7 +76,26 @@ export class HerdrStore {
   private readonly _backend = signal<BackendStatus | null>(null);
   private readonly _backendKind = signal<BackendKind>("poimen");
 
-  readonly snapshot = this._snapshot.asReadonly();
+  /**
+   * Combines a pane's status with what poimen knows besides the hook (running agent-events runs
+   * it started, `Deliver.paneStatus`); identity until set.
+   */
+  private readonly statusOf = signal<(terminalId: string, hook: AgentStatus) => AgentStatus>(
+    (_id, hook) => hook,
+  );
+  /** The snapshot with the effective status on every terminal; what all views read. */
+  readonly snapshot = computed(() => {
+    const raw = this._snapshot();
+    const statusOf = this.statusOf();
+    let changed = false;
+    const terminals = raw.terminals.map((t) => {
+      const status = statusOf(t.terminal_id, t.agent_status);
+      if (status === t.agent_status) return t;
+      changed = true;
+      return { ...t, agent_status: status };
+    });
+    return changed ? { ...raw, terminals } : raw;
+  });
   /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
   readonly loaded = this._loaded.asReadonly();
   /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
@@ -129,14 +149,19 @@ export class HerdrStore {
   readonly tabOrder = computed<Readonly<Record<string, readonly string[]>>>(
     () => this.ui?.tabOrder() ?? {},
   );
-  readonly tree = computed(() => buildTree(this._snapshot(), this.spaceOrder(), this.tabOrder()));
+  readonly tree = computed(() => buildTree(this.snapshot(), this.spaceOrder(), this.tabOrder()));
   readonly spaces = computed(() =>
-    buildSpaces(this._snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
+    buildSpaces(this.snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
   );
-  readonly waiting = computed(() => waitingCount(this._snapshot().terminals));
+  readonly waiting = computed(() => waitingCount(this.snapshot().terminals));
   readonly panes = computed(
-    () => new Map(this._snapshot().terminals.map((p) => [p.terminal_id, p])),
+    () => new Map(this.snapshot().terminals.map((p) => [p.terminal_id, p])),
   );
+
+  /** Sets how a pane's hook status is combined with its runs; `App` wires `Deliver.paneStatus`. */
+  setStatusOf(fn: (terminalId: string, hook: AgentStatus) => AgentStatus): void {
+    this.statusOf.set(fn);
+  }
 
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing = false;
@@ -202,7 +227,7 @@ export class HerdrStore {
 
   /** The next blocked pane after `activeId`, wrapping around. */
   nextWaiting(activeId: string | null): Terminal | undefined {
-    return nextWaiting(this._snapshot().terminals, activeId);
+    return nextWaiting(this.snapshot().terminals, activeId);
   }
 
   pane(paneId: string): Terminal | undefined {
