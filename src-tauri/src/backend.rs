@@ -93,13 +93,7 @@ impl fmt::Display for StartError {
     }
 }
 
-/// Where a split puts the new terminal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SplitDirection {
-    Right,
-    Down,
-}
+pub use poimen_core::layout::SplitDirection;
 
 /// How a terminal stream is attached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]

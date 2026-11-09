@@ -2957,6 +2957,7 @@ version = "0.14.0"
 dependencies = [
  "notify",
  "poimen-client",
+ "poimen-core",
  "serde",
  "serde_json",
  "sha2",
@@ -2979,6 +2980,15 @@ dependencies = [
  "serde",
  "serde_json",
  "widestring",
+]
+
+[[package]]
+name = "poimen-core"
+version = "0.14.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

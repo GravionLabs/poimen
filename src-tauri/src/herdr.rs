@@ -158,15 +158,6 @@ pub fn parse_ping(result: &Value) -> Option<ServerInfo> {
     })
 }
 
-impl SplitDirection {
-    fn as_str(self) -> &'static str {
-        match self {
-            SplitDirection::Right => "right",
-            SplitDirection::Down => "down",
-        }
-    }
-}
-
 fn non_empty(cwd: Option<&str>) -> Option<&str> {
     cwd.map(str::trim).filter(|c| !c.is_empty())
 }
