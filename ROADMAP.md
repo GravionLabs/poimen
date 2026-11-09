@@ -23,8 +23,8 @@ Updated 2026-11-09. Last release `v0.14.0`.
 | #186 [Feature] GitHub issues, milestones and pull requests in the app             | open: #238, #239, #338, #339, #340, #341, #342, #343                               | M16           |
 | #318 [Feature] Map directories to GitHub and Azure DevOps organizations           | no open children                                                                   | not scheduled |
 | #574 [Feature] PTY host: server updates and crashes keep the terminals (ADR 0009) | open: #602, #603, #604, #605, #606                                                 | M14.1         |
-| #582 [Feature] Named layouts with a visual editor, templates reference them       | no open children                                                                   | not scheduled |
-| #583 [Feature] MCP server for agent sessions                                      | no open children                                                                   | not scheduled |
+| #582 [Feature] Named layouts with a visual editor, templates reference them       | open: #608, #609, #610, #611                                                       | not scheduled |
+| #583 [Feature] MCP server for agent sessions                                      | open: #612, #613, #614, #615                                                       | not scheduled |
 <!-- roadmap:end -->
 
 <!-- Generated sections are inserted at the two slots below by `scripts/New-Roadmap.ps1`:
@@ -445,16 +445,22 @@ Progress: 6 % (1 of 16 issues closed).
 ## Later
 
 <!-- roadmap:begin later -->
-| Issue | Title                                                                                           | Why later                             |
-| ----- | ----------------------------------------------------------------------------------------------- | ------------------------------------- |
-| #174  | [PBI] refactor(backend): remove the herdr backend                                               | blocked by #515, #574                 |
-| #183  | [Feature] Detect listening ports and open them in the browser                                   | no milestone                          |
-| #184  | [Feature] Prompt editor with file mentions and drag and drop                                    | no milestone                          |
-| #185  | [Feature] One task to several agents and compare the results                                    | no milestone                          |
-| #318  | [Feature] Map directories to GitHub and Azure DevOps organizations                              | no milestone                          |
-| #499  | [PBI] feat(updater): RC app updates on its own rc channel (shared channel block for Tauri apps) | blocked by #590                       |
-| #582  | [Feature] Named layouts with a visual editor, templates reference them                          | needs decision; blocked by #513, #514 |
-| #583  | [Feature] MCP server for agent sessions                                                         | needs decision; blocked by #175       |
+| Issue | Title                                                                                           | Why later             |
+| ----- | ----------------------------------------------------------------------------------------------- | --------------------- |
+| #174  | [PBI] refactor(backend): remove the herdr backend                                               | blocked by #515, #574 |
+| #183  | [Feature] Detect listening ports and open them in the browser                                   | no milestone          |
+| #184  | [Feature] Prompt editor with file mentions and drag and drop                                    | no milestone          |
+| #185  | [Feature] One task to several agents and compare the results                                    | no milestone          |
+| #318  | [Feature] Map directories to GitHub and Azure DevOps organizations                              | no milestone          |
+| #499  | [PBI] feat(updater): RC app updates on its own rc channel (shared channel block for Tauri apps) | blocked by #590       |
+| #608  | [PBI] docs(adr): named layouts referenced by templates                                          | no milestone          |
+| #609  | [PBI] feat(settings): named layouts in the config, templates refer to them by name              | blocked by #510, #608 |
+| #610  | [PBI] feat(settings): Layouts and Templates pages with the visual layout editor                 | blocked by #514, #609 |
+| #611  | [PBI] feat(space-overview): edit the project layout and presets with the layout editor          | blocked by #610       |
+| #612  | [PBI] docs(adr): MCP server for agent sessions                                                  | no milestone          |
+| #613  | [PBI] feat(mcp): poimen mcp with read-only tools                                                | blocked by #175, #612 |
+| #614  | [PBI] feat(mcp): install poimen mcp next to the agent hooks                                     | blocked by #519, #613 |
+| #615  | [PBI] feat(mcp): start and prompt agents with confirmation outside the own space                | blocked by #613       |
 <!-- roadmap:end -->
 
 ## Risks
