@@ -774,7 +774,13 @@ mod tests {
             ));
             let _ = std::fs::remove_dir_all(&base);
             std::fs::create_dir_all(&base).unwrap();
-            let base = base.canonicalize().unwrap();
+            // Windows canonicalizes to `\\?\C:\...`, which git reads as a host name.
+            let base = PathBuf::from(
+                base.canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .trim_start_matches(r"\\?\"),
+            );
             let origin = base.join("origin.git");
             let seed = base.join("seed");
             std::fs::create_dir_all(&seed).unwrap();
