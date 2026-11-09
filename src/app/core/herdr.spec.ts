@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appVersionLabel,
+  windowTitle,
   herdrVersionLabel,
   protocolWarning,
   applyStatus,
@@ -169,6 +170,15 @@ describe("tabHeader", () => {
       title: "claude",
     });
     expect(tabHeader("  ", "claude").group).toBeUndefined();
+  });
+});
+
+describe("windowTitle", () => {
+  it("names the RC build and the waiting agents", () => {
+    expect(windowTitle("stable", 0)).toBe("poimen");
+    expect(windowTitle("stable", 2)).toBe("poimen (2 waiting)");
+    expect(windowTitle("rc", 0)).toBe("poimen RC");
+    expect(windowTitle("rc", 1)).toBe("poimen RC (1 waiting)");
   });
 });
 

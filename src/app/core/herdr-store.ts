@@ -15,6 +15,7 @@ import {
   type WireSnapshot,
   toSnapshot,
   type BranchPull,
+  type AppChannel,
 } from "./herdr";
 import type { BackendKind } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
@@ -70,6 +71,7 @@ export class HerdrStore {
   private readonly _loaded = signal(false);
   private readonly _info = signal<HerdrInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
+  private readonly _appChannel = signal<AppChannel>("stable");
   private readonly _backend = signal<BackendStatus | null>(null);
   private readonly _backendKind = signal<BackendKind>("poimen");
 
@@ -106,6 +108,8 @@ export class HerdrStore {
   });
   /** The version of this poimen build. */
   readonly appVersion = this._appVersion.asReadonly();
+  /** The release channel of this build: `rc` for the side-by-side "Poimen RC" app, else `stable`. */
+  readonly appChannel = this._appChannel.asReadonly();
   /** Why herdr is not reachable; `null` while connected. */
   readonly connectionError = this._connectionError.asReadonly();
   /** Branch and worktree flag per pane directory; poimen asks git, herdr does not know them. */
@@ -160,6 +164,7 @@ export class HerdrStore {
     this.unlisten = this.bridge.listen<HerdrEvent>("herdr", (event) => this.handle(event));
     await this.unlisten;
     void this.readAppVersion();
+    void this.readAppChannel();
     await this.readBackendKind();
     const started = this.ensureBackend(false);
     await this.refresh();
@@ -246,6 +251,15 @@ export class HerdrStore {
         this.refreshWaiters = [];
         void this.refresh().finally(() => waiters.forEach((resolve) => resolve()));
       }
+    }
+  }
+
+  private async readAppChannel(): Promise<void> {
+    try {
+      const channel = await this.bridge.invoke<string | undefined>("app_channel");
+      this._appChannel.set(channel === "rc" ? "rc" : "stable");
+    } catch {
+      // stays stable
     }
   }
 
