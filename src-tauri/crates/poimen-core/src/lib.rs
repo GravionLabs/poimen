@@ -4,12 +4,16 @@
 //! settings parsers and the in-place config editor).
 
 pub mod agent_actions;
+pub mod git;
+pub mod github;
 pub mod gui_path;
 pub mod harness;
 pub mod layout;
 pub mod project;
 pub mod remote;
 pub mod settings;
+pub mod task_start;
 pub mod tasks;
 pub mod templates;
 pub mod trust;
+pub mod worktree;
