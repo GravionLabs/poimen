@@ -9,21 +9,22 @@ Updated 2026-11-09. Last release `v0.14.0`.
 ## Where we are
 
 <!-- roadmap:begin where -->
-| Epic / Feature                                                              | State                                                                              | Milestone     |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------- |
-| #1 [Epic] Workbench: IDE-style shell for agent sessions                     | open: #183, #186, #318                                                             | not scheduled |
-| #2 [Epic] Agent coordination: see and steer agents from poimen              | open: #11, #170, #184, #185                                                        | not scheduled |
-| #4 [Epic] Delivery: CI, releases and distribution                           | open: #16                                                                          | not scheduled |
-| #11 [Feature] Remote spaces with tasks                                      | open: #278, #279, #280, #281, #282, #283, #284                                     | M14, M15      |
-| #16 [Feature] Distribution                                                  | open: #45                                                                          | M16           |
-| #170 [Feature] poimen console: TUI, CLI and attach                          | open: #175, #176, #177, #510, #511, #512, #513, #514, #515, #516, #517, #518, #519 | M13, M14      |
-| #183 [Feature] Detect listening ports and open them in the browser          | no open children                                                                   | not scheduled |
-| #184 [Feature] Prompt editor with file mentions and drag and drop           | no open children                                                                   | not scheduled |
-| #185 [Feature] One task to several agents and compare the results           | no open children                                                                   | not scheduled |
-| #186 [Feature] GitHub issues, milestones and pull requests in the app       | open: #238, #239, #338, #339, #340, #341, #342, #343                               | M16           |
-| #318 [Feature] Map directories to GitHub and Azure DevOps organizations     | no open children                                                                   | not scheduled |
-| #582 [Feature] Named layouts with a visual editor, templates reference them | no open children                                                                   | not scheduled |
-| #583 [Feature] MCP server for agent sessions                                | no open children                                                                   | not scheduled |
+| Epic / Feature                                                                    | State                                                                              | Milestone     |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------- |
+| #1 [Epic] Workbench: IDE-style shell for agent sessions                           | open: #183, #186, #318                                                             | not scheduled |
+| #2 [Epic] Agent coordination: see and steer agents from poimen                    | open: #11, #170, #184, #185                                                        | not scheduled |
+| #4 [Epic] Delivery: CI, releases and distribution                                 | open: #16                                                                          | not scheduled |
+| #11 [Feature] Remote spaces with tasks                                            | open: #278, #279, #280, #281, #282, #283, #284                                     | M14, M15      |
+| #16 [Feature] Distribution                                                        | open: #45                                                                          | M16           |
+| #170 [Feature] poimen console: TUI, CLI and attach                                | open: #175, #176, #177, #510, #511, #512, #513, #514, #515, #516, #517, #518, #519 | M13, M14      |
+| #183 [Feature] Detect listening ports and open them in the browser                | no open children                                                                   | not scheduled |
+| #184 [Feature] Prompt editor with file mentions and drag and drop                 | no open children                                                                   | not scheduled |
+| #185 [Feature] One task to several agents and compare the results                 | no open children                                                                   | not scheduled |
+| #186 [Feature] GitHub issues, milestones and pull requests in the app             | open: #238, #239, #338, #339, #340, #341, #342, #343                               | M16           |
+| #318 [Feature] Map directories to GitHub and Azure DevOps organizations           | no open children                                                                   | not scheduled |
+| #574 [Feature] PTY host: server updates and crashes keep the terminals (ADR 0009) | open: #602, #603, #604, #605, #606                                                 | M14.1         |
+| #582 [Feature] Named layouts with a visual editor, templates reference them       | no open children                                                                   | not scheduled |
+| #583 [Feature] MCP server for agent sessions                                      | no open children                                                                   | not scheduled |
 <!-- roadmap:end -->
 
 <!-- Generated sections are inserted at the two slots below by `scripts/New-Roadmap.ps1`:
@@ -348,17 +349,16 @@ Updated 2026-11-09. Last release `v0.14.0`.
 <!-- roadmap:begin plan M13 -->
 ## M13
 
-Progress: 46 % (6 of 13 issues closed).
+Progress: 50 % (6 of 12 issues closed).
 
 | Order | Issue | Title                                                                                | Size | Depends on / decision       |
 | ----- | ----- | ------------------------------------------------------------------------------------ | ---- | --------------------------- |
 | 1     | #502  | [Bug] fix(terminal): Claude Code's classic renderer overdraws its output             | M    | needs decision              |
 | 2     | #510  | [PBI] feat(server): tabs and split tree per space in the protocol                    | M    |                             |
 | 3     | #540  | [Bug] fix(agents): agent status goes idle while a deliver loop it started is running |      | needs refinement            |
-| 4     | #574  | [PBI] feat(server): PTY host so a server update keeps the terminals (ADR 0009)       | L    | needs decision              |
-| 5     | #590  | [PBI] build(release): RC builds install side by side as Poimen RC                    | M    |                             |
-| 6     | #417  | [PBI] chore(release): manual check of the poimen backend on Windows                  | S    | release test, does not gate |
-| 7     | #600  | [PBI] test: release candidate test of M013 on macOS, Windows, Linux                  |      | release test, does not gate |
+| 4     | #590  | [PBI] build(release): RC builds install side by side as Poimen RC                    | M    |                             |
+| 5     | #417  | [PBI] chore(release): manual check of the poimen backend on Windows                  | S    | release test, does not gate |
+| 6     | #600  | [PBI] test: release candidate test of M013 on macOS, Windows, Linux                  |      | release test, does not gate |
 <!-- roadmap:end -->
 
 <!-- roadmap:begin plan M14 -->
@@ -382,6 +382,21 @@ Progress: 0 % (0 of 14 issues closed).
 | 12    | #518  | [PBI] feat(tui): attention marks and notifications, app has priority                | M    | blocked by #512, #515       |
 | 13    | #519  | [PBI] build: ship the poimen binary in the installers and on the PATH               | S    | blocked by #175, #177       |
 | 14    | #588  | [PBI] test: release candidate test of M014 on macOS, Windows, Linux                 |      | release test, does not gate |
+<!-- roadmap:end -->
+
+<!-- roadmap:begin plan M14.1 -->
+## M14.1
+
+Progress: 0 % (0 of 6 issues closed).
+
+| Order | Issue | Title                                                                               | Size | Depends on / decision       |
+| ----- | ----- | ----------------------------------------------------------------------------------- | ---- | --------------------------- |
+| 1     | #602  | [PBI] feat(pty-host): poimen-pty-host binary with the host protocol and output ring | M    |                             |
+| 2     | #603  | [PBI] feat(server): start terminals in PTY hosts and read them as a client          | M    | blocked by #602             |
+| 3     | #604  | [PBI] feat(server): adopt running PTY hosts after a server update or crash          | M    | blocked by #603             |
+| 4     | #605  | [PBI] build(release): ship poimen-pty-host and run it from per-version copies       | M    | blocked by #602             |
+| 5     | #606  | [PBI] feat(app): show terminals on an older host version with a restart             | S    | blocked by #604, #605       |
+| 6     | #607  | [PBI] test: release candidate test of M014.1 on macOS, Windows, Linux               |      | release test, does not gate |
 <!-- roadmap:end -->
 
 <!-- roadmap:begin plan M15 -->
@@ -446,7 +461,7 @@ Progress: 0 % (0 of 16 issues closed).
 ## Risks
 
 - **#510 blocks most of M14** (#511, #513, #514, #515 and everything after the TUI start). It is refined (2026-11-09) and should go first.
-- **#574 (PTY host) is size L** with a new process type, a host protocol and Windows ConPTY. Split it into PBIs before it starts; #174 (herdr removal) waits for it.
+- **The PTY host (#574, M14.1)** adds a process type and a host protocol that is not updated with the server; Windows behaviour when a host ends is still to be checked (#602). #174 (herdr removal) waits for it.
 - **Protocol 4 is a breaking change** (ADR 0006): a server left running from an older version needs the confirmed restart until #574 lands.
 - **Overlaps to resolve in refinement:** #548 and #585 (two milestone panels), #499 and #590 (RC update channel vs. RC without updater).
 - Write further risks here by hand; the script never touches this section.

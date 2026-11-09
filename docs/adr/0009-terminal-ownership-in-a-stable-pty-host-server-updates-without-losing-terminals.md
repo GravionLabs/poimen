@@ -34,9 +34,13 @@ Terminal ownership moves out of `poimen-server` into a small, stable process, `p
 - No platform-specific descriptor passing and no `exec` trick; the Windows ConPTY limit is respected.
 - More processes (one small host per terminal) and a second protocol with a compatibility duty. The host must stay small and conservative, since it is the part that is not updated with the server.
 - Output now crosses one more local hop. The host keeps only a bounded ring, so a server that is down for long loses what scrolled past it; the grid and scrollback of the server are rebuilt from the ring, not from full history.
-- Terminal state that the server does not persist today (agent status, tokens) must be saved with the list or re-reported by the hooks after the adoption. Stale `seq` rules apply as now.
+- Terminal state that the server does not persist today (agent status, tokens) is saved with the terminal list and restored on adoption; hooks overwrite it as now (decided 2026-11-09, #604). Stale `seq` rules apply as now.
 - Tests need a fake host and an adoption test per platform; tests never start or stop a real session.
 - The first update to this version ends terminals, once.
+
+## Windows check (2026-11-09)
+
+`ReleasePseudoConsole` (Windows 11 24H2 and Windows Server 2025) lets a pseudoconsole outlive its owner until its last client disconnects. It does not remove the need for a host: `ResizePseudoConsole` still needs the owner's `HPCON`, and Windows 10 does not have the call. The documentation does not say what happens when an owner ends without releasing; #602 checks it with a test on `windows-latest` and records the result here.
 
 ## Alternatives
 
