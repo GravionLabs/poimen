@@ -2953,7 +2953,7 @@ dependencies = [
 
 [[package]]
 name = "poimen"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "notify",
  "poimen-client",
@@ -2973,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-client"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "interprocess",
  "poimen-protocol",
@@ -2994,7 +2994,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-protocol"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -3003,7 +3003,7 @@ dependencies = [
 
 [[package]]
 name = "poimen-server"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "alacritty_terminal",
  "poimen-client",
