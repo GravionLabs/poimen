@@ -353,7 +353,7 @@ Progress: 46 % (6 of 13 issues closed).
 | Order | Issue | Title                                                                                | Size | Depends on / decision       |
 | ----- | ----- | ------------------------------------------------------------------------------------ | ---- | --------------------------- |
 | 1     | #502  | [Bug] fix(terminal): Claude Code's classic renderer overdraws its output             | M    | needs decision              |
-| 2     | #510  | [PBI] feat(server): tabs and split tree per space in the protocol                    | M    | needs decision              |
+| 2     | #510  | [PBI] feat(server): tabs and split tree per space in the protocol                    | M    |                             |
 | 3     | #540  | [Bug] fix(agents): agent status goes idle while a deliver loop it started is running |      | needs refinement            |
 | 4     | #574  | [PBI] feat(server): PTY host so a server update keeps the terminals (ADR 0009)       | L    | needs decision              |
 | 5     | #590  | [PBI] build(release): RC builds install side by side as Poimen RC                    | M    |                             |
@@ -445,7 +445,7 @@ Progress: 0 % (0 of 16 issues closed).
 
 ## Risks
 
-- **#510 is open for a decision** and blocks most of M14 (#511, #513, #514, #515 and everything after the TUI start). Deciding it unblocks the most work.
+- **#510 blocks most of M14** (#511, #513, #514, #515 and everything after the TUI start). It is refined (2026-11-09) and should go first.
 - **#574 (PTY host) is size L** with a new process type, a host protocol and Windows ConPTY. Split it into PBIs before it starts; #174 (herdr removal) waits for it.
 - **Protocol 4 is a breaking change** (ADR 0006): a server left running from an older version needs the confirmed restart until #574 lands.
 - **Overlaps to resolve in refinement:** #548 and #585 (two milestone panels), #499 and #590 (RC update channel vs. RC without updater).
