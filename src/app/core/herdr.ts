@@ -473,6 +473,15 @@ export function herdrVersionLabel(info: HerdrInfo | null | undefined, backend = 
   return info?.version ? `backend ${backend} ${info.version}` : `backend ${backend} ?`;
 }
 
+/** The release channel of the build (`app_channel`): `rc` is the "Poimen RC" app installed beside the stable one. */
+export type AppChannel = "stable" | "rc";
+
+/** The window title: `poimen`, `poimen RC` on rc, with ` (<n> waiting)` while agents wait. */
+export function windowTitle(channel: AppChannel, waiting: number): string {
+  const name = channel === "rc" ? "poimen RC" : "poimen";
+  return waiting > 0 ? `${name} (${waiting} waiting)` : name;
+}
+
 /** `frontend poimen <version>`, or `frontend poimen ?` until the build version is known. */
 export function appVersionLabel(version: string | null | undefined): string {
   return version ? `frontend poimen ${version}` : "frontend poimen ?";

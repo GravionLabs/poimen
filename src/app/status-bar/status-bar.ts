@@ -8,9 +8,14 @@ import {
   appVersionLabel,
   herdrVersionLabel,
   protocolWarning,
+  type AppChannel,
   type HerdrInfo,
   type Mode,
 } from "../core/herdr";
+
+/** Tooltip of the RC badge. */
+export const CHANNEL_TITLE =
+  "Release candidate: installed next to the stable poimen, with its own server, settings and hooks; it does not update itself";
 
 /** The connection as one line of text. */
 export function connectionLabel(c: ConnectionState, backend = "herdr"): string {
@@ -59,6 +64,9 @@ export class StatusBar {
   readonly blocked = input<string | null>(null);
   readonly size = input<{ cols: number; rows: number }>();
   readonly appVersion = input<string | null>(null);
+  /** The release channel of this build; `rc` shows the RC badge and hides the self-update (an RC never updates itself). */
+  readonly channel = input<AppChannel>("stable");
+  protected readonly channelTitle = CHANNEL_TITLE;
   readonly info = input<HerdrInfo | null>(null);
   /** The backend this run talks to; names the connection and the server version. */
   readonly backend = input<BackendKind>("herdr");

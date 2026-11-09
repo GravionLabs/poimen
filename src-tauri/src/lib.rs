@@ -1089,6 +1089,21 @@ fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// The release channel of this build (`stable` or `rc`, `POIMEN_CHANNEL` at build time); the
+/// frontend shows `RC` in the title and the status bar.
+#[tauri::command]
+fn app_channel() -> poimen_client::protocol::Channel {
+    poimen_client::protocol::CHANNEL
+}
+
+/// The native window title: `Poimen`, `Poimen RC` on rc.
+fn window_title(channel: poimen_client::protocol::Channel) -> String {
+    match channel {
+        poimen_client::protocol::Channel::Stable => "Poimen".into(),
+        poimen_client::protocol::Channel::Rc => "Poimen RC".into(),
+    }
+}
+
 /// The user's home directory: `HOME` on Unix, the profile (`%USERPROFILE%`) on Windows, where a
 /// GUI app has no `HOME`.
 fn home_dir() -> Option<PathBuf> {
@@ -1952,23 +1967,31 @@ pub fn run() {
         .unwrap_or_else(|| "poimen".into());
     let (backend, kind) = make_backend(&kind);
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init());
+    // An rc build never updates itself (no updater artifacts, no endpoint in tauri.rc.conf.json).
+    let builder = if updater::enabled(poimen_client::protocol::CHANNEL) {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    } else {
+        builder
+    };
+    builder
         .manage(updater::PendingUpdate::default())
         .manage(backend.clone())
         .manage(BackendKind(kind))
         .manage::<GithubClient>(std::sync::Arc::new(github::Client::system(
             home_dir()
                 .map(|h| {
-                    h.join(".config")
-                        .join("poimen")
+                    poimen_core::settings::config_dir(&h)
                         .join("cache")
                         .join("github")
                 })
-                .unwrap_or_else(|| std::env::temp_dir().join("poimen-github")),
+                .unwrap_or_else(|| {
+                    std::env::temp_dir()
+                        .join(poimen_client::protocol::CHANNEL.named("poimen-github"))
+                }),
         )))
         .manage(SubagentWatch::default())
         .manage(DeliverWatch::default())
@@ -1976,6 +1999,9 @@ pub fn run() {
         .manage(terminal_colors::TerminalColors::default())
         .setup(move |app| {
             let handle = app.handle().clone();
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title(&window_title(poimen_client::protocol::CHANNEL));
+            }
             let shortcuts = home_dir()
                 .map(|h| settings::load(&h).shortcuts)
                 .unwrap_or_else(settings::default_shortcuts);
@@ -2060,6 +2086,7 @@ pub fn run() {
             list_dirs,
             list_child_dirs,
             app_version,
+            app_channel,
             updater::update_check,
             updater::update_install,
             get_usage,
@@ -2847,6 +2874,47 @@ mod build_layout_tests {
         let messages = channel_messages(&frame, false);
         let value: serde_json::Value = serde_json::from_str(text(&messages[0]).unwrap()).unwrap();
         assert_eq!(value, json!({"type": "output", "bytes": "aGk="}));
+    }
+
+    #[test]
+    fn the_rc_overlay_installs_beside_the_stable_app_without_updates() {
+        use poimen_client::protocol::Channel;
+        let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let bundle: Value =
+            serde_json::from_str(include_str!("../tauri.bundle.conf.json")).unwrap();
+        let rc: Value = serde_json::from_str(include_str!("../tauri.rc.conf.json")).unwrap();
+        assert_eq!(rc["identifier"], "dev.gravionlabs.poimen.rc");
+        assert_ne!(rc["identifier"], base["identifier"]);
+        assert_eq!(rc["productName"], "Poimen RC");
+        assert_eq!(rc["productName"], window_title(Channel::Rc));
+        // Its own binary (Linux: /usr/bin/poimen-rc next to /usr/bin/poimen).
+        assert_eq!(rc["mainBinaryName"], "poimen-rc");
+        assert_eq!(rc["bundle"]["createUpdaterArtifacts"], false);
+        assert_eq!(rc["plugins"]["updater"]["endpoints"], json!([]));
+        // The sidecar is the name the app of each channel looks for beside itself.
+        assert_eq!(
+            bundle["bundle"]["externalBin"],
+            json!([format!(
+                "binaries/{}",
+                Channel::Stable.server_program(false)
+            )])
+        );
+        assert_eq!(
+            rc["bundle"]["externalBin"],
+            json!([format!("binaries/{}", Channel::Rc.server_program(false))])
+        );
+    }
+
+    #[test]
+    fn the_window_title_names_the_rc_channel() {
+        use poimen_client::protocol::Channel;
+        assert_eq!(window_title(Channel::Stable), "Poimen");
+        assert_eq!(window_title(Channel::Rc), "Poimen RC");
+        let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            base["app"]["windows"][0]["title"],
+            window_title(Channel::Stable)
+        );
     }
 
     #[test]

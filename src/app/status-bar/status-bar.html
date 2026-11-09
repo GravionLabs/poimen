@@ -127,6 +127,9 @@
       <span class="item">{{ sizeText(size()) }}</span>
     }
   }
+  @if (channel() === "rc") {
+    <span class="item channel" data-testid="channel" [title]="channelTitle">RC</span>
+  }
   <span class="item version">{{ appLabel(appVersion()) }}</span>
   <span
     class="item version"
@@ -134,40 +137,42 @@
     [title]="warning(info(), backend()) || herdrLabel(info(), backend())"
     >{{ herdrLabel(info(), backend()) }}</span
   >
-  @switch (update().kind) {
-    @case ("checking") {
-      <span class="item update">Checking for updates…</span>
-    }
-    @case ("current") {
-      <button type="button" class="item update-button" (click)="checkUpdate.emit()">
-        Up to date
-      </button>
-    }
-    @case ("available") {
-      <button
-        type="button"
-        class="item update-button available"
-        (click)="detailsOpen.set(!detailsOpen())"
-      >
-        Update available
-      </button>
-    }
-    @case ("installing") {
-      <span class="item update">Installing the update…</span>
-    }
-    @case ("error") {
-      <button
-        type="button"
-        class="item update-button failed"
-        (click)="detailsOpen.set(!detailsOpen())"
-      >
-        {{ errTitle($any(update()).step) }}
-      </button>
-    }
-    @default {
-      <button type="button" class="item update-button" (click)="checkUpdate.emit()">
-        Check for updates
-      </button>
+  @if (channel() !== "rc") {
+    @switch (update().kind) {
+      @case ("checking") {
+        <span class="item update">Checking for updates…</span>
+      }
+      @case ("current") {
+        <button type="button" class="item update-button" (click)="checkUpdate.emit()">
+          Up to date
+        </button>
+      }
+      @case ("available") {
+        <button
+          type="button"
+          class="item update-button available"
+          (click)="detailsOpen.set(!detailsOpen())"
+        >
+          Update available
+        </button>
+      }
+      @case ("installing") {
+        <span class="item update">Installing the update…</span>
+      }
+      @case ("error") {
+        <button
+          type="button"
+          class="item update-button failed"
+          (click)="detailsOpen.set(!detailsOpen())"
+        >
+          {{ errTitle($any(update()).step) }}
+        </button>
+      }
+      @default {
+        <button type="button" class="item update-button" (click)="checkUpdate.emit()">
+          Check for updates
+        </button>
+      }
     }
   }
   <button

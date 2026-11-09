@@ -19,6 +19,7 @@ import {
   rowName,
   supportsFlow,
   tabHeader,
+  windowTitle,
   type Mode,
   type Terminal,
 } from "./core/herdr";
@@ -294,8 +295,7 @@ export class App {
       });
     });
     effect(() => {
-      const waiting = this.store.waiting();
-      title.setTitle(waiting > 0 ? `poimen (${waiting} waiting)` : "poimen");
+      title.setTitle(windowTitle(this.store.appChannel(), this.store.waiting()));
     });
 
     const destroyRef = inject(DestroyRef);

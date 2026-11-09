@@ -23,76 +23,203 @@ pub const ENV_TERMINAL_ID: &str = "POIMEN_TERMINAL_ID";
 /// stable (inside an AppImage), pointing at the stable link of its staged copy.
 pub const ENV_HOOK_EXE: &str = "POIMEN_HOOK_EXE";
 
+/// The release channel a binary is built for, fixed at build time by `POIMEN_CHANNEL` (`rc` for
+/// the pre-release builds of `release.yml`, unset or `stable` otherwise). Every path a stable
+/// and an rc installation could share is named per channel, so the two run side by side, each
+/// with its own server, settings and hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Channel {
+    Stable,
+    Rc,
+}
+
+impl Channel {
+    pub const ALL: [Channel; 2] = [Channel::Stable, Channel::Rc];
+
+    /// The channel of a `POIMEN_CHANNEL` value: unset, empty or `stable` is stable, `rc` is rc,
+    /// anything else `None`.
+    pub const fn parse(value: Option<&str>) -> Option<Channel> {
+        match value {
+            None => Some(Channel::Stable),
+            Some(v) if v.is_empty() || const_eq(v, "stable") => Some(Channel::Stable),
+            Some(v) if const_eq(v, "rc") => Some(Channel::Rc),
+            Some(_) => None,
+        }
+    }
+
+    /// `stable` or `rc`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Channel::Stable => "stable",
+            Channel::Rc => "rc",
+        }
+    }
+
+    /// What names of this channel end with: nothing on stable, `-rc` on rc.
+    pub const fn suffix(self) -> &'static str {
+        match self {
+            Channel::Stable => "",
+            Channel::Rc => "-rc",
+        }
+    }
+
+    /// `base` with the channel suffix: `poimen` stays `poimen` on stable and is `poimen-rc` on rc.
+    pub fn named(self, base: &str) -> String {
+        format!("{base}{}", self.suffix())
+    }
+
+    /// The file name of this channel's `poimen-server` binary (`poimen-server-rc` on rc; `.exe`
+    /// on Windows).
+    pub fn server_program(self, windows: bool) -> String {
+        let name = self.named("poimen-server");
+        if windows { format!("{name}.exe") } else { name }
+    }
+}
+
+const fn const_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// The channel of this build (`POIMEN_CHANNEL` at build time). An unknown value fails the build.
+pub const CHANNEL: Channel = match Channel::parse(option_env!("POIMEN_CHANNEL")) {
+    Some(channel) => channel,
+    None => panic!("POIMEN_CHANNEL must be `stable` or `rc`"),
+};
+
 /// The directory under `%LOCALAPPDATA%` that holds the socket marker, `server.lock`,
-/// `server.json` and the started server copies on Windows (not the install directory).
-pub const WINDOWS_DIR: &str = "poimen-server";
+/// `server.json` and the started server copies on Windows (not the install directory):
+/// `poimen-server`, on rc `poimen-server-rc`.
+pub fn windows_dir_name(channel: Channel) -> String {
+    channel.named("poimen-server")
+}
 
-/// The socket path. Unix: `$POIMEN_SOCKET`, else `$XDG_RUNTIME_DIR/poimen/server.sock`, else
-/// `<temp dir>/poimen-<user>/server.sock`. Windows: `$POIMEN_SOCKET`, else
-/// `%LOCALAPPDATA%\poimen-server\server.sock` (a marker file; the server listens on the named
-/// pipe of that path), else `<temp dir>\poimen-<user>\server.sock`. One server per user.
+/// The socket this build's app and server use: `$POIMEN_SOCKET`, unless it is the default socket
+/// of another channel (a terminal of the other installation passes it on to what it starts),
+/// else the default of [`CHANNEL`] ([`SocketEnv::default_path`]). One server per user and channel.
 pub fn socket_path() -> PathBuf {
-    if cfg!(windows) {
-        windows_socket_path_from(
-            std::env::var_os(ENV_SOCKET),
-            std::env::var_os("LOCALAPPDATA"),
-            std::env::var("USERNAME").ok(),
-            std::env::temp_dir(),
-        )
-    } else {
-        socket_path_from(
-            std::env::var_os(ENV_SOCKET),
-            std::env::var_os("XDG_RUNTIME_DIR"),
-            std::env::var("USER").ok(),
-            std::env::temp_dir(),
-        )
+    SocketEnv::from_process().path(CHANNEL)
+}
+
+/// The socket of the terminal this process runs in: `$POIMEN_SOCKET` as it is (whichever
+/// channel's server owns the terminal), else [`socket_path`]. For commands run inside a terminal
+/// (`poimen-server report`).
+pub fn terminal_socket_path() -> PathBuf {
+    let env = SocketEnv::from_process();
+    env.override_path().unwrap_or_else(|| env.path(CHANNEL))
+}
+
+/// Whether `$POIMEN_SOCKET` names the default socket of another channel than [`CHANNEL`]: this
+/// process runs in a terminal of the other installation, whose own hooks report for it.
+pub fn foreign_socket() -> bool {
+    SocketEnv::from_process().is_foreign(CHANNEL)
+}
+
+/// What the socket path is made of; empty values count as unset.
+#[derive(Debug, Clone, Default)]
+pub struct SocketEnv {
+    /// `$POIMEN_SOCKET`.
+    pub socket: Option<std::ffi::OsString>,
+    /// Unix: `$XDG_RUNTIME_DIR`. Windows: `%LOCALAPPDATA%`.
+    pub base: Option<std::ffi::OsString>,
+    /// `$USER`, on Windows `%USERNAME%`.
+    pub user: Option<String>,
+    pub temp_dir: PathBuf,
+    pub windows: bool,
+}
+
+impl SocketEnv {
+    /// The environment of this process.
+    pub fn from_process() -> Self {
+        let windows = cfg!(windows);
+        let (base, user) = if windows {
+            ("LOCALAPPDATA", "USERNAME")
+        } else {
+            ("XDG_RUNTIME_DIR", "USER")
+        };
+        Self {
+            socket: std::env::var_os(ENV_SOCKET),
+            base: std::env::var_os(base),
+            user: std::env::var(user).ok(),
+            temp_dir: std::env::temp_dir(),
+            windows,
+        }
+    }
+
+    /// `$POIMEN_SOCKET`, when set and not empty.
+    pub fn override_path(&self) -> Option<PathBuf> {
+        self.socket
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+    }
+
+    /// The default socket of `channel`, ignoring `$POIMEN_SOCKET`. Unix:
+    /// `$XDG_RUNTIME_DIR/poimen/server.sock`, else `<temp dir>/poimen-<user>/server.sock`.
+    /// Windows: `%LOCALAPPDATA%\poimen-server\server.sock` (a marker file; the server listens on
+    /// the named pipe of that path), else `<temp dir>\poimen-<user>\server.sock`. On rc the
+    /// directories are `poimen-rc`, `poimen-server-rc` and `poimen-rc-<user>`.
+    pub fn default_path(&self, channel: Channel) -> PathBuf {
+        if self.windows {
+            if let Some(dir) = windows_dir_from(self.base.clone(), channel) {
+                return dir.join("server.sock");
+            }
+        } else if let Some(dir) = self.base.as_ref().filter(|s| !s.is_empty()) {
+            return PathBuf::from(dir)
+                .join(channel.named("poimen"))
+                .join("server.sock");
+        }
+        self.temp_dir
+            .join(user_dir_name(self.user.clone(), channel))
+            .join("server.sock")
+    }
+
+    /// Whether `$POIMEN_SOCKET` is the default socket of another channel than `channel`.
+    pub fn is_foreign(&self, channel: Channel) -> bool {
+        self.override_path().is_some_and(|socket| {
+            Channel::ALL
+                .into_iter()
+                .any(|other| other != channel && self.default_path(other) == socket)
+        })
+    }
+
+    /// The socket of `channel`: `$POIMEN_SOCKET` unless it is [foreign](Self::is_foreign), else
+    /// the [default](Self::default_path).
+    pub fn path(&self, channel: Channel) -> PathBuf {
+        match self.override_path() {
+            Some(socket) if !self.is_foreign(channel) => socket,
+            _ => self.default_path(channel),
+        }
     }
 }
 
-/// The Windows [`socket_path`] with the environment passed in; empty values count as unset.
-pub fn windows_socket_path_from(
-    socket: Option<std::ffi::OsString>,
+/// `%LOCALAPPDATA%\poimen-server` (on rc `poimen-server-rc`) when `LOCALAPPDATA` is set and not
+/// empty.
+pub fn windows_dir_from(
     local_app_data: Option<std::ffi::OsString>,
-    user: Option<String>,
-    temp_dir: PathBuf,
-) -> PathBuf {
-    if let Some(socket) = socket.filter(|s| !s.is_empty()) {
-        return PathBuf::from(socket);
-    }
-    if let Some(dir) = windows_dir_from(local_app_data) {
-        return dir.join("server.sock");
-    }
-    temp_dir.join(user_dir_name(user)).join("server.sock")
-}
-
-/// `%LOCALAPPDATA%\poimen-server` when `LOCALAPPDATA` is set and not empty.
-pub fn windows_dir_from(local_app_data: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    channel: Channel,
+) -> Option<PathBuf> {
     local_app_data
         .filter(|s| !s.is_empty())
-        .map(|dir| PathBuf::from(dir).join(WINDOWS_DIR))
+        .map(|dir| PathBuf::from(dir).join(windows_dir_name(channel)))
 }
 
-fn user_dir_name(user: Option<String>) -> String {
+fn user_dir_name(user: Option<String>, channel: Channel) -> String {
     let user = user
         .filter(|u| !u.is_empty())
         .unwrap_or_else(|| "user".into());
-    format!("poimen-{user}")
-}
-
-/// [`socket_path`] with the environment passed in; empty values count as unset.
-pub fn socket_path_from(
-    socket: Option<std::ffi::OsString>,
-    runtime_dir: Option<std::ffi::OsString>,
-    user: Option<String>,
-    temp_dir: PathBuf,
-) -> PathBuf {
-    if let Some(socket) = socket.filter(|s| !s.is_empty()) {
-        return PathBuf::from(socket);
-    }
-    if let Some(dir) = runtime_dir.filter(|s| !s.is_empty()) {
-        return PathBuf::from(dir).join("poimen").join("server.sock");
-    }
-    temp_dir.join(user_dir_name(user)).join("server.sock")
+    format!("{}-{user}", channel.named("poimen"))
 }
 
 /// The effective user id of this process, read as the owner of a file created now (std has no
@@ -851,73 +978,166 @@ mod tests {
         }
     }
 
+    fn unix_env(socket: Option<&str>, runtime: Option<&str>, user: Option<&str>) -> SocketEnv {
+        SocketEnv {
+            socket: socket.map(Into::into),
+            base: runtime.map(Into::into),
+            user: user.map(Into::into),
+            temp_dir: PathBuf::from("/tmp"),
+            windows: false,
+        }
+    }
+
     #[test]
     fn socket_path_precedence() {
-        let tmp = PathBuf::from("/tmp");
+        let stable = Channel::Stable;
         assert_eq!(
-            socket_path_from(
-                Some("/a.sock".into()),
-                Some("/run/user/1".into()),
-                None,
-                tmp.clone()
-            ),
+            unix_env(Some("/a.sock"), Some("/run/user/1"), None).path(stable),
             PathBuf::from("/a.sock")
         );
         assert_eq!(
-            socket_path_from(
-                Some("".into()),
-                Some("/run/user/1".into()),
-                None,
-                tmp.clone()
-            ),
+            unix_env(Some(""), Some("/run/user/1"), None).path(stable),
             PathBuf::from("/run/user/1/poimen/server.sock")
         );
         assert_eq!(
-            socket_path_from(None, None, Some("jk".into()), tmp),
+            unix_env(None, None, Some("jk")).path(stable),
             PathBuf::from("/tmp/poimen-jk/server.sock")
         );
+    }
+
+    #[test]
+    fn the_rc_channel_has_its_own_socket() {
+        assert_eq!(
+            unix_env(None, Some("/run/user/1"), None).path(Channel::Rc),
+            PathBuf::from("/run/user/1/poimen-rc/server.sock")
+        );
+        assert_eq!(
+            unix_env(None, None, Some("jk")).path(Channel::Rc),
+            PathBuf::from("/tmp/poimen-rc-jk/server.sock")
+        );
+        assert_eq!(
+            unix_env(None, None, None).path(Channel::Rc),
+            PathBuf::from("/tmp/poimen-rc-user/server.sock")
+        );
+    }
+
+    #[test]
+    fn the_default_socket_of_the_other_channel_is_foreign_and_ignored() {
+        // A stable app started from a terminal of the rc server, and the other way round.
+        let rc_terminal = unix_env(
+            Some("/run/user/1/poimen-rc/server.sock"),
+            Some("/run/user/1"),
+            None,
+        );
+        assert!(rc_terminal.is_foreign(Channel::Stable));
+        assert!(!rc_terminal.is_foreign(Channel::Rc));
+        assert_eq!(
+            rc_terminal.path(Channel::Stable),
+            PathBuf::from("/run/user/1/poimen/server.sock")
+        );
+        assert_eq!(
+            rc_terminal.path(Channel::Rc),
+            PathBuf::from("/run/user/1/poimen-rc/server.sock")
+        );
+        let stable_terminal = unix_env(Some("/tmp/poimen-jk/server.sock"), None, Some("jk"));
+        assert!(stable_terminal.is_foreign(Channel::Rc));
+        assert!(!stable_terminal.is_foreign(Channel::Stable));
+        // Any other path is an explicit choice, honored by both.
+        let custom = unix_env(Some("/a.sock"), Some("/run/user/1"), None);
+        assert!(!custom.is_foreign(Channel::Stable));
+        assert!(!custom.is_foreign(Channel::Rc));
+        assert_eq!(custom.path(Channel::Rc), PathBuf::from("/a.sock"));
+        assert!(!unix_env(None, Some("/run/user/1"), None).is_foreign(Channel::Rc));
+    }
+
+    fn windows_env(socket: Option<&str>, local: Option<&str>, user: Option<&str>) -> SocketEnv {
+        SocketEnv {
+            socket: socket.map(Into::into),
+            base: local.map(Into::into),
+            user: user.map(Into::into),
+            temp_dir: PathBuf::from(r"C:\Temp"),
+            windows: true,
+        }
     }
 
     #[test]
     fn windows_socket_path_precedence() {
         let tmp = PathBuf::from(r"C:\Temp");
         let local = PathBuf::from(r"C:\Users\u\AppData\Local");
+        let local_str = r"C:\Users\u\AppData\Local";
+        let stable = Channel::Stable;
         assert_eq!(
-            windows_socket_path_from(
-                Some(r"D:\x.sock".into()),
-                Some(local.clone().into()),
-                None,
-                tmp.clone()
-            ),
+            windows_env(Some(r"D:\x.sock"), Some(local_str), None).path(stable),
             PathBuf::from(r"D:\x.sock")
         );
         assert_eq!(
-            windows_socket_path_from(
-                Some("".into()),
-                Some(local.clone().into()),
-                None,
-                tmp.clone()
-            ),
+            windows_env(Some(""), Some(local_str), None).path(stable),
             local.join("poimen-server").join("server.sock")
         );
         assert_eq!(
-            windows_socket_path_from(None, Some("".into()), Some("jk".into()), tmp.clone()),
+            windows_env(None, Some(""), Some("jk")).path(stable),
             tmp.join("poimen-jk").join("server.sock")
         );
         assert_eq!(
-            windows_socket_path_from(None, None, None, tmp.clone()),
+            windows_env(None, None, None).path(stable),
             tmp.join("poimen-user").join("server.sock")
+        );
+        assert_eq!(
+            windows_env(None, Some(local_str), None).path(Channel::Rc),
+            local.join("poimen-server-rc").join("server.sock")
+        );
+        assert_eq!(
+            windows_env(None, None, Some("jk")).path(Channel::Rc),
+            tmp.join("poimen-rc-jk").join("server.sock")
+        );
+        let stable_terminal = windows_env(
+            Some(
+                &local
+                    .join("poimen-server")
+                    .join("server.sock")
+                    .to_string_lossy(),
+            ),
+            Some(local_str),
+            None,
+        );
+        assert!(stable_terminal.is_foreign(Channel::Rc));
+        assert_eq!(
+            stable_terminal.path(Channel::Rc),
+            local.join("poimen-server-rc").join("server.sock")
         );
     }
 
     #[test]
     fn the_windows_dir_needs_local_app_data() {
         assert_eq!(
-            windows_dir_from(Some(r"C:\L".into())),
+            windows_dir_from(Some(r"C:\L".into()), Channel::Stable),
             Some(PathBuf::from(r"C:\L").join("poimen-server"))
         );
-        assert_eq!(windows_dir_from(Some("".into())), None);
-        assert_eq!(windows_dir_from(None), None);
+        assert_eq!(
+            windows_dir_from(Some(r"C:\L".into()), Channel::Rc),
+            Some(PathBuf::from(r"C:\L").join("poimen-server-rc"))
+        );
+        assert_eq!(windows_dir_from(Some("".into()), Channel::Stable), None);
+        assert_eq!(windows_dir_from(None, Channel::Rc), None);
+    }
+
+    #[test]
+    fn channel_values_parse_and_name_things() {
+        assert_eq!(Channel::parse(None), Some(Channel::Stable));
+        assert_eq!(Channel::parse(Some("")), Some(Channel::Stable));
+        assert_eq!(Channel::parse(Some("stable")), Some(Channel::Stable));
+        assert_eq!(Channel::parse(Some("rc")), Some(Channel::Rc));
+        assert_eq!(Channel::parse(Some("RC")), None);
+        assert_eq!(Channel::parse(Some("beta")), None);
+        assert_eq!(Channel::parse(Some("rcx")), None);
+        assert_eq!(Channel::Stable.named("poimen"), "poimen");
+        assert_eq!(Channel::Rc.named("poimen"), "poimen-rc");
+        assert_eq!(Channel::Stable.server_program(false), "poimen-server");
+        assert_eq!(Channel::Rc.server_program(false), "poimen-server-rc");
+        assert_eq!(Channel::Rc.server_program(true), "poimen-server-rc.exe");
+        assert_eq!(Channel::Rc.name(), "rc");
+        assert_eq!(serde_json::to_value(Channel::Rc).unwrap(), "rc");
+        assert_eq!(serde_json::to_value(Channel::Stable).unwrap(), "stable");
     }
 }
 

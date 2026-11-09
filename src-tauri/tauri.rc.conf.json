@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Poimen RC",
+  "mainBinaryName": "poimen-rc",
+  "identifier": "dev.gravionlabs.poimen.rc",
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "externalBin": ["binaries/poimen-server-rc"]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": []
+    }
+  }
+}
