@@ -107,7 +107,7 @@ New Tauri-free crate `src-tauri/crates/poimen-core`, used by the app, the consol
 
 ### Unchanged
 
-- The herdr backend is not affected by this ADR. Its removal is decided separately.
+- The herdr backend is not affected by this ADR. It stays selectable but is in maintenance only: bugfixes, no feature parity with the poimen backend. It is removed with #174 once the PTY host (#574) and the TUI (#515) are released and poimen was the default for one release without problems (decision 2026-11-09, see #169).
 - `poimen-server` is never stopped by a client. Closing the TUI, or detaching, closes only the view; terminals and agents keep running.
 - Tests stay read-only toward the user's server; console tests run against a fake server on a temporary socket.
 
