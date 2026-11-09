@@ -56,6 +56,9 @@ Guidance for humans and coding agents working in this repository. Generated text
 - Own terminal backend `poimen-server`, the default; herdr is the alternative until removed; agent status from Claude Code and Copilot hooks (proposed, [ADR 0003](docs/adr/0003-own-terminal-backend-without-herdr.md)).
 - GitHub views and agent harnesses native in poimen; the herdr plugin integration (ADR 0004) is removed (accepted, [ADR 0005](docs/adr/0005-github-views-and-agent-harnesses.md)).
 - poimen console with herdr scope: one `poimen` binary (TUI and CLI), tabs and splits owned by poimen-server, shared code in `poimen-core`; supersedes ADR 0003's TUI/CLI exclusion and "the app owns layout" (proposed, [ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)).
+- Plugin system with a sandboxed worker and view contexts; supersedes ADR 0005's "no plugin system now" in part (proposed, [ADR 0007](docs/adr/0007-plugin-system-with-sandboxed-worker-and-view-contexts.md)).
+- Remote machines over `poimen-server stdio` through SSH, no open port and no stored secret (proposed, [ADR 0008](docs/adr/0008-remote-machines-over-ssh.md)).
+- Terminals owned by a stable `poimen-pty-host` per terminal, so a server update or crash keeps them (accepted, [ADR 0009](docs/adr/0009-terminal-ownership-in-a-stable-pty-host-server-updates-without-losing-terminals.md)). Numbered 0007 until 2026-11-09, when it collided with the plugin ADR.
 
 ## Verification
 
