@@ -2409,6 +2409,7 @@ mod build_layout_tests {
             id: "s3".into(),
             name: "#12 Add picker".into(),
             cwd: dir.clone(),
+            ..Default::default()
         };
         *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
         let outcome =
@@ -2600,6 +2601,7 @@ mod build_layout_tests {
             id: "s1".into(),
             name: "app".into(),
             cwd: cwd.into(),
+            ..Default::default()
         };
         *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
         fake
