@@ -12,13 +12,58 @@ use poimen_server::{Config, Server, StartError, claude, copilot, hook, report};
 const USAGE: &str =
     "usage: poimen-server integration install|uninstall|status claude|copilot [--settings <path>]";
 
+const HELP: &str = "\
+usage:
+  poimen-server                      start the server (one per user; no argument)
+  poimen-server --version            print the version
+  poimen-server --help, -h           print this usage
+  poimen-server report tokens|clear|agent
+  poimen-server hook claude
+  poimen-server hook copilot <event>
+  poimen-server integration install|uninstall|status claude|copilot [--settings <path>]";
+
+/// What the first argument asks for. Pure: no process is started by deciding it.
+#[derive(Debug, PartialEq, Eq)]
+enum Mode {
+    Serve,
+    Version,
+    Help,
+    Subcommand,
+    Unknown,
+}
+
+fn mode(args: &[String]) -> Mode {
+    match args.first().map(String::as_str) {
+        None => Mode::Serve,
+        Some("--version") => Mode::Version,
+        Some("--help" | "-h") => Mode::Help,
+        Some("hook" | "report" | "integration") => Mode::Subcommand,
+        Some(_) => Mode::Unknown,
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.first().map(String::as_str) {
-        Some("--version") => {
+    match mode(&args) {
+        Mode::Serve => serve(),
+        Mode::Version => {
             println!("poimen-server {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        Mode::Help => {
+            println!("{HELP}");
+            ExitCode::SUCCESS
+        }
+        Mode::Unknown => {
+            eprintln!("poimen-server: unknown argument\n{HELP}");
+            ExitCode::from(2)
+        }
+        Mode::Subcommand => subcommand(&args),
+    }
+}
+
+fn subcommand(args: &[String]) -> ExitCode {
+    match args.first().map(String::as_str) {
         Some("hook") => {
             // Never fails and never blocks the agent, whatever happens; a report that does not
             // get through is a line in the hook log (`hook.rs`).
@@ -40,7 +85,7 @@ fn main() -> ExitCode {
             poimen_protocol::socket_path(),
         )),
         Some("integration") => integration(&args[1..]),
-        _ => serve(),
+        _ => ExitCode::from(2),
     }
 }
 
@@ -139,5 +184,55 @@ fn serve() -> ExitCode {
             eprintln!("poimen-server: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn no_argument_serves() {
+        assert_eq!(mode(&args(&[])), Mode::Serve);
+    }
+
+    #[test]
+    fn help_flags_print_help() {
+        assert_eq!(mode(&args(&["--help"])), Mode::Help);
+        assert_eq!(mode(&args(&["-h"])), Mode::Help);
+    }
+
+    #[test]
+    fn version_flag_prints_version() {
+        assert_eq!(mode(&args(&["--version"])), Mode::Version);
+    }
+
+    #[test]
+    fn known_subcommands_are_dispatched() {
+        for sub in ["hook", "report", "integration"] {
+            assert_eq!(mode(&args(&[sub, "x"])), Mode::Subcommand, "{sub}");
+        }
+    }
+
+    #[test]
+    fn unknown_argument_is_unknown_and_never_serves() {
+        assert_eq!(mode(&args(&["--bogus"])), Mode::Unknown);
+        assert_eq!(mode(&args(&["serve"])), Mode::Unknown);
+        assert_eq!(mode(&args(&["-"])), Mode::Unknown);
+    }
+
+    #[test]
+    fn help_lists_the_integration_usage() {
+        assert!(
+            HELP.contains(
+                "integration install|uninstall|status claude|copilot [--settings <path>]"
+            )
+        );
+        assert!(HELP.contains("hook claude"));
+        assert!(HELP.contains("report tokens|clear|agent"));
     }
 }
