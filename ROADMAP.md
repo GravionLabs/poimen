@@ -3,32 +3,27 @@
 Order of work and release assignment for the open issues. A bare `#<n>` is an issue of this repository.
 
 <!-- roadmap:begin intro -->
-Updated 2026-11-05. Last release `v0.9.0`.
+Updated 2026-11-09. Last release `v0.14.0`.
 <!-- roadmap:end -->
 
 ## Where we are
 
 <!-- roadmap:begin where -->
-| Epic / Feature                                                                     | State                                                                                                            | Milestone     |
-| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------- |
-| #1 [Epic] Workbench: IDE-style shell for herdr sessions                            | open: #64, #148, #169, #180, #182, #183, #186, #318                                                              | not scheduled |
-| #2 [Epic] Agent coordination: see and steer agents from poimen                     | open: #11, #170, #179, #181, #184, #185                                                                          | not scheduled |
-| #4 [Epic] Delivery: CI, releases and distribution                                  | open: #16                                                                                                        | not scheduled |
-| #11 [Feature] Remote spaces with tasks                                             | open: #277, #278, #279, #280, #281, #282, #283, #284                                                             | M13           |
-| #16 [Feature] Distribution                                                         | open: #45                                                                                                        | not scheduled |
-| #64 [Feature] Usage budget from tamias in poimen                                   | open: #359                                                                                                       | not scheduled |
-| #148 [Feature] Own terminal backend without herdr                                  | no open children                                                                                                 | not scheduled |
-| #169 [Feature] Switch to the poimen backend and remove herdr                       | open: #173, #174                                                                                                 | not scheduled |
-| #170 [Feature] poimen console: CLI and attach                                      | open: #172, #175, #176, #177                                                                                     | not scheduled |
-| #179 [Feature] Start a task from a GitHub issue                                    | open: #349                                                                                                       | not scheduled |
-| #180 [Feature] Space details in the sidebar: branch, PR, ports, last notification  | open: #251                                                                                                       | not scheduled |
-| #181 [Feature] Review agent changes with comments to the agent                     | open: #246, #247                                                                                                 | not scheduled |
-| #182 [Feature] Project config: setup scripts, custom commands and terminal presets | open: #257, #258                                                                                                 | not scheduled |
-| #183 [Feature] Detect listening ports and open them in the browser                 | no open children                                                                                                 | not scheduled |
-| #184 [Feature] Prompt editor with file mentions and drag and drop                  | no open children                                                                                                 | not scheduled |
-| #185 [Feature] One task to several agents and compare the results                  | no open children                                                                                                 | not scheduled |
-| #186 [Feature] GitHub issues, milestones and pull requests in the app              | open: #237, #238, #239, #334, #335, #336, #337, #338, #339, #340, #341, #342, #343, #344, #345, #346, #347, #348 | not scheduled |
-| #318 [Feature] Map directories to GitHub and Azure DevOps organizations            | no open children                                                                                                 | not scheduled |
+| Epic / Feature                                                              | State                                                                              | Milestone     |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------- |
+| #1 [Epic] Workbench: IDE-style shell for agent sessions                     | open: #183, #186, #318                                                             | not scheduled |
+| #2 [Epic] Agent coordination: see and steer agents from poimen              | open: #11, #170, #184, #185                                                        | not scheduled |
+| #4 [Epic] Delivery: CI, releases and distribution                           | open: #16                                                                          | not scheduled |
+| #11 [Feature] Remote spaces with tasks                                      | open: #278, #279, #280, #281, #282, #283, #284                                     | M14, M15      |
+| #16 [Feature] Distribution                                                  | open: #45                                                                          | M16           |
+| #170 [Feature] poimen console: TUI, CLI and attach                          | open: #175, #176, #177, #510, #511, #512, #513, #514, #515, #516, #517, #518, #519 | M13, M14      |
+| #183 [Feature] Detect listening ports and open them in the browser          | no open children                                                                   | not scheduled |
+| #184 [Feature] Prompt editor with file mentions and drag and drop           | no open children                                                                   | not scheduled |
+| #185 [Feature] One task to several agents and compare the results           | no open children                                                                   | not scheduled |
+| #186 [Feature] GitHub issues, milestones and pull requests in the app       | open: #238, #239, #338, #339, #340, #341, #342, #343                               | M16           |
+| #318 [Feature] Map directories to GitHub and Azure DevOps organizations     | no open children                                                                   | not scheduled |
+| #582 [Feature] Named layouts with a visual editor, templates reference them | no open children                                                                   | not scheduled |
+| #583 [Feature] MCP server for agent sessions                                | no open children                                                                   | not scheduled |
 <!-- roadmap:end -->
 
 <!-- Generated sections are inserted at the two slots below by `scripts/New-Roadmap.ps1`:
@@ -203,102 +198,232 @@ Updated 2026-11-05. Last release `v0.9.0`.
 | #330  | [PBI] chore: back-merge main into release/next after v0.8.0                          |
 <!-- roadmap:end -->
 
+<!-- roadmap:begin done M10 -->
+## Done in M10 (0.10.0)
+
+| Issue | Title                                                                                              |
+| ----- | -------------------------------------------------------------------------------------------------- |
+| #150  | [PBI] refactor(backend): Backend trait over the herdr client                                       |
+| #151  | [PBI] feat(server): poimen-server with PTY sessions and socket API                                 |
+| #152  | [PBI] feat(server): headless terminal state and attach snapshot                                    |
+| #153  | [PBI] feat(backend): poimen backend in the app                                                     |
+| #154  | [PBI] feat(agents): agent status from Claude Code hooks                                            |
+| #155  | [PBI] feat(agents): agent status from GitHub Copilot CLI hooks                                     |
+| #156  | [PBI] feat(agents): start an agent and send a prompt on the poimen backend                         |
+| #171  | [PBI] feat(server): answer terminal queries while no app is attached                               |
+| #173  | [PBI] feat(backend): poimen as the default backend                                                 |
+| #189  | [PBI] feat(tasks): issue picker dialog                                                             |
+| #190  | [PBI] feat(tasks): create the worktree for an issue                                                |
+| #191  | [PBI] feat(tasks): start a task in a new space                                                     |
+| #192  | [PBI] feat(tasks): clean up merged task worktrees                                                  |
+| #193  | [PBI] feat(tasks): start a task from an issue link in a terminal                                   |
+| #236  | [PBI] feat(github): worktree for a pull request                                                    |
+| #242  | [PBI] feat(changes): diff of a worktree against its base                                           |
+| #243  | [PBI] feat(changes): Changes tab with file list and CodeMirror merge view                          |
+| #244  | [PBI] feat(changes): syntax highlighting in the diff                                               |
+| #332  | [PBI] ci: allow squash and merge on release/**                                                     |
+| #350  | [PBI] feat(settings): color scheme on the Appearance page                                          |
+| #351  | [PBI] docs(roadmap): add ROADMAP.md with the plan for M10 to M13                                   |
+| #354  | [Bug] fix(github): branch pull request query has an unbalanced brace                               |
+| #355  | [Bug] fix(spaces): creating a space silently focuses an existing one                               |
+| #356  | [Bug] fix(spaces): closing a space gives no feedback and flashes a disconnect                      |
+| #357  | [PBI] chore(skills): install the stack skills per project                                          |
+| #360  | [Bug] fix(settings): notification checkboxes are cramped on one line                               |
+| #371  | [Bug] fix(notify): taskbar icon notification count keeps growing                                   |
+| #373  | [PBI] docs(roadmap): update ROADMAP.md for M10 to M14                                              |
+| #376  | [Bug] fix(tabs): overflowing tabs cannot be reached with the mouse                                 |
+| #392  | [Bug] fix(build): pnpm tauri dev cannot determine which binary to run                              |
+| #397  | [Bug] fix(spaces): a space in a parent directory swallows new spaces of its repositories           |
+| #401  | [Bug] fix(backend): poimen backend does not report the agent and its session (icons, Output, Flow) |
+| #403  | [PBI] feat(icon): terminal panel around the crook in the app icon                                  |
+| #406  | [Bug] fix(agents): the poimen backend never reports done                                           |
+| #407  | [Bug] fix(ui): herdr wording on the poimen backend                                                 |
+| #408  | [Bug] fix(docs): stale statements about the poimen backend                                         |
+| #409  | [Bug] fix(backend): ensure_poimen_server is registered but never used                              |
+| #410  | [Bug] fix(agents): the pane dialog offers agent kinds the poimen backend cannot track              |
+| #411  | [Bug] fix(spaces): a task space without terminals is not found on the poimen backend               |
+| #412  | [PBI] feat(server): local sockets via interprocess (named pipes on Windows)                        |
+| #416  | [PBI] feat(server): run the poimen backend on Windows                                              |
+| #423  | [Bug] fix(backend): poimen-server and its hooks use the transient AppImage mount path              |
+| #425  | [PBI] chore: back-merge main into release/next after v0.9.0                                        |
+| #426  | [Bug] fix(agents): agent arguments are quoted for sh on Windows shells                             |
+| #427  | [Bug] fix(backend): the hooks offer never returns after Not now, even for dead hooks               |
+| #428  | [Bug] fix(docs): README still describes shared behavior for herdr or macOS only                    |
+| #429  | [Bug] fix(backend): the hooks status check stages the server on the AppImage                       |
+<!-- roadmap:end -->
+
+<!-- roadmap:begin done M11 -->
+## Done in M11 (0.11.0)
+
+| Issue | Title                                                                               |
+| ----- | ----------------------------------------------------------------------------------- |
+| #245  | [PBI] feat(changes): line comments sent to the agent as one prompt                  |
+| #246  | [PBI] feat(changes): show review findings as comments in the diff                   |
+| #247  | [PBI] feat(changes): stage, commit and push from the Changes tab                    |
+| #251  | [PBI] feat(sidebar): latest agent notification text per space                       |
+| #257  | [PBI] feat(project): teardown before worktree cleanup and on demand                 |
+| #258  | [PBI] feat(project): custom commands and presets in the command palette             |
+| #264  | [PBI] docs(site): screenshots of the Flow tab and the deliver board                 |
+| #349  | [PBI] refactor(tasks): task modes start agents through the harness registry         |
+| #359  | [PBI] feat(status-bar): Claude usage 5h, 7d, 1d and 1m from tamias                  |
+| #361  | [PBI] feat(settings): terminal and UI font family and size on the Appearance page   |
+| #370  | [PBI] feat(spaces): rename a space                                                  |
+| #430  | [PBI] ci: check the server crates without the Tauri libraries and run jobs per area |
+| #432  | [PBI] docs: manual acceptance checklist per OS and package                          |
+| #433  | [PBI] ci(release): pre-release from release/next for the manual acceptance          |
+| #438  | [PBI] feat(server): tokens per terminal via terminal.report_tokens and a report CLI |
+| #443  | [Feature] Space templates per directory and remote                                  |
+| #444  | [PBI] feat(spaces): space templates per directory with agent and layout             |
+| #445  | [PBI] feat(spaces): match space templates by GitHub owner or Azure DevOps project   |
+| #446  | [PBI] feat(settings): Spaces page to edit space templates                           |
+| #450  | [PBI] feat(explorer): filter the directories by name                                |
+| #454  | [PBI] feat(agents): token usage per node in the flow view                           |
+| #456  | [PBI] feat(terminal): larger default terminal font on Windows                       |
+| #471  | [PBI] chore: back-merge main into release/next after v0.10.0                        |
+| #473  | [Bug] fix(settings): row token notification is missing from the Rust ROW_TOKENS     |
+<!-- roadmap:end -->
+
+<!-- roadmap:begin done M11.1 -->
+## Done in M11.1 (0.13.0)
+
+| Issue | Title                                                                                                       |
+| ----- | ----------------------------------------------------------------------------------------------------------- |
+| #439  | [PBI] feat(deliver): Deliver panel with live progress of running deliver loops                              |
+| #455  | [Bug] fix(terminal): mouse clicks are ignored by Copilot CLI on Windows with the poimen backend             |
+| #477  | [Bug] fix(release): poimen-server reports 0.1.0 after the release and the status bar versions are unlabeled |
+| #485  | [Bug] fix(agents): Copilot status of some spaces is never updated on Windows                                |
+| #486  | [Bug] fix(agents): Flow and Output keep the previous session after /clear                                   |
+| #487  | [Bug] fix(panel): Flow and Output empty states still say Claude Code only                                   |
+| #497  | [Bug] fix(build): initial bundle exceeds the 1.5 MB warning budget                                          |
+| #504  | [Bug] fix: terminal does not scroll with the wheel without a selection                                      |
+| #524  | [Bug] fix(templates): no default space template for spaces without a matching template                      |
+| #527  | [Bug] fix(server): hook test fails with a broken pipe when the hook exits early                             |
+<!-- roadmap:end -->
+
+<!-- roadmap:begin done M12 -->
+## Done in M12 (0.14.0)
+
+| Issue | Title                                                                                      |
+| ----- | ------------------------------------------------------------------------------------------ |
+| #172  | [PBI] docs(adr): poimen console with herdr scope next to the app                           |
+| #237  | [PBI] feat(github): review agent action with diff-only mode and posting on GitHub          |
+| #334  | [PBI] feat(github): sub-pages with a left navigation and a shared repository filter        |
+| #335  | [PBI] feat(github): readable density, status badges and grouped rows                       |
+| #336  | [PBI] feat(github): pull request detail pane                                               |
+| #337  | [PBI] feat(github): issue detail pane                                                      |
+| #344  | [PBI] feat(github): Inbox sub-page with what needs me                                      |
+| #345  | [PBI] feat(settings): agent actions for issues and pull requests in the config             |
+| #346  | [PBI] feat(github): run agent actions at the repository root                               |
+| #347  | [PBI] feat(github): run agent actions in a worktree                                        |
+| #348  | [PBI] feat(github): badge for running agent actions on issues and PRs                      |
+| #480  | [PBI] feat(deliver): Deliver panel reads progress events instead of status.json            |
+| #481  | [PBI] feat(agents): Events tab in the bottom panel next to Output, colored by tone         |
+| #482  | [PBI] docs(release): the RC test runs beside the release PR instead of gating it           |
+| #483  | [PBI] ci(release): channel from the branch, rc on release/next and beta elsewhere          |
+| #488  | [PBI] chore(deps): update helix-ui and Angular to the latest 22.x                          |
+| #489  | [PBI] feat(explorer): open a terminal in a folder                                          |
+| #490  | [PBI] feat(explorer): fetch or pull a repository and fetch all repositories below a folder |
+| #491  | [Feature] Space overview with panes, sessions and configuration                            |
+| #492  | [PBI] feat(spaces): space overview as an editor tab from the space row                     |
+| #493  | [PBI] feat(spaces): configuration section in the space overview                            |
+| #500  | [Bug] fix(backend): an outdated poimen-server keeps running after an update                |
+| #505  | [Bug] fix(release): Linux pre-release installers fail on the rpm version                   |
+| #521  | [PBI] feat(spaces): split the space row into two lines                                     |
+| #522  | [PBI] feat(release): SHA256SUMS and build provenance for the installers                    |
+| #526  | [PBI] feat(templates): create the default space template and layout on the first start     |
+| #537  | [Bug] fix(deliver): panel shows a running loop as finished after one PBI session ended     |
+| #538  | [Bug] fix(deliver): delivered entries link to the issue instead of the pull request        |
+| #539  | [Bug] fix(panes): renaming a pane does not work reliably                                   |
+| #544  | [PBI] feat(deliver): reducer and panel read the agent-events core                          |
+| #554  | [Feature] Reorder spaces and tabs by drag and drop in the sidebar                          |
+| #555  | [PBI] feat(sidebar): reorder spaces by drag and drop                                       |
+| #556  | [PBI] feat(sidebar): reorder tabs of a space by drag and drop                              |
+| #567  | [PBI] ci: run the Rust jobs only on Rust changes, auto-merge                               |
+| #568  | [PBI] refactor: pages.yml uses the ci VitePress workflow                                   |
+| #575  | [PBI] docs(adr): terminal ownership in a stable PTY host                                   |
+<!-- roadmap:end -->
+
 <!-- roadmap:slot done -->
-
-<!-- roadmap:begin plan M10 -->
-## M10
-
-Progress: 74 % (20 of 27 issues closed).
-
-| Order | Issue | Title                                                                         | Size | Depends on / decision |
-| ----- | ----- | ----------------------------------------------------------------------------- | ---- | --------------------- |
-| 1     | #354  | [Bug] fix(github): branch pull request query has an unbalanced brace          | S    |                       |
-| 2     | #355  | [Bug] fix(spaces): creating a space silently focuses an existing one          | M    |                       |
-| 3     | #356  | [Bug] fix(spaces): closing a space gives no feedback and flashes a disconnect | M    |                       |
-| 4     | #360  | [Bug] fix(settings): notification checkboxes are cramped on one line          | S    |                       |
-| 5     | #371  | [Bug] fix(notify): taskbar icon notification count keeps growing              | M    |                       |
-| 6     | #373  | [PBI] docs(roadmap): update ROADMAP.md for M10 to M14                         | S    |                       |
-| 7     | #376  | [Bug] fix(tabs): overflowing tabs cannot be reached with the mouse            | M    |                       |
-<!-- roadmap:end -->
-
-<!-- roadmap:begin plan M11 -->
-## M11
-
-Progress: 8 % (1 of 12 issues closed).
-
-| Order | Issue | Title                                                                             | Size | Depends on / decision |
-| ----- | ----- | --------------------------------------------------------------------------------- | ---- | --------------------- |
-| 1     | #246  | [PBI] feat(changes): show review findings as comments in the diff                 | M    |                       |
-| 2     | #247  | [PBI] feat(changes): stage, commit and push from the Changes tab                  | M    |                       |
-| 3     | #251  | [PBI] feat(sidebar): latest agent notification text per space                     | M    |                       |
-| 4     | #257  | [PBI] feat(project): teardown before worktree cleanup and on demand               | M    |                       |
-| 5     | #258  | [PBI] feat(project): custom commands and presets in the command palette           | M    |                       |
-| 6     | #264  | [PBI] docs(site): screenshots of the Flow tab and the deliver board               | S    |                       |
-| 7     | #349  | [PBI] refactor(tasks): task modes start agents through the harness registry       | M    |                       |
-| 8     | #350  | [PBI] feat(settings): color scheme on the Appearance page                         | S    |                       |
-| 9     | #359  | [PBI] feat(status-bar): Claude usage 5h, 7d, 1d and 1m from tamias                | M    |                       |
-| 10    | #361  | [PBI] feat(settings): terminal and UI font family and size on the Appearance page | M    |                       |
-| 11    | #370  | [PBI] feat(spaces): rename a space                                                | S    |                       |
-<!-- roadmap:end -->
-
-<!-- roadmap:begin plan M12 -->
-## M12
-
-Progress: 0 % (0 of 15 issues closed).
-
-| Order | Issue | Title                                                                               | Size | Depends on / decision       |
-| ----- | ----- | ----------------------------------------------------------------------------------- | ---- | --------------------------- |
-| 1     | #172  | [PBI] docs(adr): poimen console next to the app                                     | S    |                             |
-| 2     | #173  | [PBI] feat(backend): poimen as the default backend                                  | S    |                             |
-| 3     | #176  | [PBI] feat(cli): poimen attach for one terminal full screen                         | M    | blocked by #172             |
-| 4     | #177  | [PBI] build: rename the app binary to poimen-app                                    | S    | blocked by #172             |
-| 5     | #175  | [PBI] feat(cli): poimen CLI to list and steer terminals and agents                  | M    | blocked by #172, #177       |
-| 6     | #334  | [PBI] feat(github): sub-pages with a left navigation and a shared repository filter | M    |                             |
-| 7     | #335  | [PBI] feat(github): readable density, status badges and grouped rows                | M    | blocked by #334             |
-| 8     | #336  | [PBI] feat(github): pull request detail pane                                        | M    | blocked by #334             |
-| 9     | #337  | [PBI] feat(github): issue detail pane                                               | M    | blocked by #336             |
-| 10    | #344  | [PBI] feat(github): Inbox sub-page with what needs me                               | S    | blocked by #335             |
-| 11    | #345  | [PBI] feat(settings): agent actions for issues and pull requests in the config      | M    |                             |
-| 12    | #346  | [PBI] feat(github): run agent actions at the repository root                        | M    | blocked by #345, #337, #336 |
-| 13    | #347  | [PBI] feat(github): run agent actions in a worktree                                 | S    | blocked by #346             |
-| 14    | #237  | [PBI] feat(github): review agent action with diff-only mode and posting on GitHub   | S    | blocked by #347             |
-| 15    | #348  | [PBI] feat(github): badge for running agent actions on issues and PRs               | S    | blocked by #346             |
-<!-- roadmap:end -->
 
 <!-- roadmap:begin plan M13 -->
 ## M13
 
-Progress: 0 % (0 of 9 issues closed).
+Progress: 46 % (6 of 13 issues closed).
 
-| Order | Issue | Title                                                                              | Size | Depends on / decision |
-| ----- | ----- | ---------------------------------------------------------------------------------- | ---- | --------------------- |
-| 1     | #277  | [PBI] docs(adr): remote machines over poimen-server via SSH                        | S    |                       |
-| 2     | #278  | [PBI] feat(server): stdio mode and Linux release builds of poimen-server           | M    | blocked by #277       |
-| 3     | #279  | [PBI] feat(remote): machines in the settings and an SSH connection per machine     | M    | blocked by #278       |
-| 4     | #280  | [PBI] feat(sidebar): remote machines and their spaces in the sidebar               | M    | blocked by #279       |
-| 5     | #281  | [PBI] feat(remote): machine check for prerequisites                                | S    | blocked by #279       |
-| 6     | #282  | [PBI] refactor(tasks): move worktree logic into a shared crate the server can call | M    | blocked by #278       |
-| 7     | #283  | [PBI] feat(tasks): start a task on a remote machine                                | M    | blocked by #280, #282 |
-| 8     | #284  | [PBI] feat(tasks): clean up merged task worktrees on a remote machine              | S    | blocked by #283       |
+| Order | Issue | Title                                                                                | Size | Depends on / decision       |
+| ----- | ----- | ------------------------------------------------------------------------------------ | ---- | --------------------------- |
+| 1     | #502  | [Bug] fix(terminal): Claude Code's classic renderer overdraws its output             | M    | needs decision              |
+| 2     | #510  | [PBI] feat(server): tabs and split tree per space in the protocol                    | M    | needs decision              |
+| 3     | #540  | [Bug] fix(agents): agent status goes idle while a deliver loop it started is running |      | needs refinement            |
+| 4     | #574  | [PBI] feat(server): PTY host so a server update keeps the terminals (ADR 0009)       | L    | needs decision              |
+| 5     | #590  | [PBI] build(release): RC builds install side by side as Poimen RC                    | M    |                             |
+| 6     | #417  | [PBI] chore(release): manual check of the poimen backend on Windows                  | S    | release test, does not gate |
+| 7     | #600  | [PBI] test: release candidate test of M013 on macOS, Windows, Linux                  |      | release test, does not gate |
 <!-- roadmap:end -->
 
 <!-- roadmap:begin plan M14 -->
 ## M14
 
-Progress: 0 % (0 of 10 issues closed).
+Progress: 0 % (0 of 14 issues closed).
 
-| Order | Issue | Title                                                                                                  | Size | Depends on / decision |
-| ----- | ----- | ------------------------------------------------------------------------------------------------------ | ---- | --------------------- |
-| 1     | #45   | [PBI] feat(bundle): signed and notarized macOS bundle on release                                       | M    |                       |
-| 2     | #174  | [PBI] refactor(backend): remove the herdr backend                                                      | M    | blocked by #173, #277 |
-| 3     | #239  | [PBI] feat(github): start a task from the issues tree                                                  | S    | blocked by #346       |
-| 4     | #338  | [PBI] feat(github): review, draft and close actions on a pull request                                  | M    | blocked by #336       |
-| 5     | #339  | [PBI] feat(github): merge a pull request, re-run failed checks and set reviewers, labels and assignees | M    | blocked by #338       |
-| 6     | #238  | [PBI] feat(github): fix failing checks of a pull request with an agent                                 | M    | blocked by #347, #339 |
-| 7     | #340  | [PBI] feat(github): edit an issue from its detail pane                                                 | M    | blocked by #337, #339 |
-| 8     | #341  | [PBI] feat(github): create issues and sub-issues and change the parent                                 | M    | blocked by #340       |
-| 9     | #342  | [PBI] feat(github): multi-select and bulk actions in the issues tree                                   | M    | blocked by #340       |
-| 10    | #343  | [PBI] feat(github): create, edit and close milestones                                                  | S    | blocked by #335, #338 |
+| Order | Issue | Title                                                                               | Size | Depends on / decision       |
+| ----- | ----- | ----------------------------------------------------------------------------------- | ---- | --------------------------- |
+| 1     | #176  | [PBI] feat(cli): poimen attach for one terminal full screen                         | M    |                             |
+| 2     | #177  | [PBI] build: rename the app binary to poimen-app                                    | S    |                             |
+| 3     | #175  | [PBI] feat(cli): poimen CLI to list and steer terminals and agents                  | M    | blocked by #177             |
+| 4     | #278  | [PBI] feat(server): stdio mode and Linux release builds of poimen-server            | M    |                             |
+| 5     | #511  | [PBI] feat(server): space.create applies the resolved layout with a trust handshake | M    | blocked by #510             |
+| 6     | #512  | [PBI] feat(protocol): client kinds on the event subscription                        | S    |                             |
+| 7     | #513  | [PBI] feat(app): tabs and layout from the server                                    | M    | blocked by #510, #511       |
+| 8     | #514  | [PBI] feat(app): split panes in a terminal tab                                      | M    | blocked by #513             |
+| 9     | #515  | [PBI] feat(tui): poimen opens the TUI with sidebar, one pane and a prefix key       | L    | blocked by #176, #177, #510 |
+| 10    | #516  | [PBI] feat(tui): tabs and splits with prefix keys                                   | M    | blocked by #515             |
+| 11    | #517  | [PBI] feat(tui): command palette, project entries and task start                    | M    | blocked by #511, #515       |
+| 12    | #518  | [PBI] feat(tui): attention marks and notifications, app has priority                | M    | blocked by #512, #515       |
+| 13    | #519  | [PBI] build: ship the poimen binary in the installers and on the PATH               | S    | blocked by #175, #177       |
+| 14    | #588  | [PBI] test: release candidate test of M014 on macOS, Windows, Linux                 |      | release test, does not gate |
+<!-- roadmap:end -->
+
+<!-- roadmap:begin plan M15 -->
+## M15
+
+Progress: 0 % (0 of 8 issues closed).
+
+| Order | Issue | Title                                                                              | Size | Depends on / decision       |
+| ----- | ----- | ---------------------------------------------------------------------------------- | ---- | --------------------------- |
+| 1     | #279  | [PBI] feat(remote): machines in the settings and an SSH connection per machine     | M    | blocked by #278             |
+| 2     | #280  | [PBI] feat(sidebar): remote machines and their spaces in the sidebar               | M    | blocked by #279             |
+| 3     | #281  | [PBI] feat(remote): machine check for prerequisites                                | S    | blocked by #279             |
+| 4     | #282  | [PBI] refactor(tasks): move worktree logic into a shared crate the server can call | S    | blocked by #278             |
+| 5     | #283  | [PBI] feat(tasks): start a task on a remote machine                                | M    | blocked by #280, #282       |
+| 6     | #284  | [PBI] feat(tasks): clean up merged task worktrees on a remote machine              | S    | blocked by #283             |
+| 7     | #586  | [PBI] refactor(app): backend-neutral snapshot wire shape and model                 | M    | blocked by #513             |
+| 8     | #589  | [PBI] test: release candidate test of M015 on macOS, Windows, Linux                |      | release test, does not gate |
+<!-- roadmap:end -->
+
+<!-- roadmap:begin plan M16 -->
+## M16
+
+Progress: 0 % (0 of 16 issues closed).
+
+| Order | Issue | Title                                                                                                  | Size | Depends on / decision       |
+| ----- | ----- | ------------------------------------------------------------------------------------------------------ | ---- | --------------------------- |
+| 1     | #45   | [PBI] feat(bundle): signed and notarized macOS bundle on release                                       | M    |                             |
+| 2     | #239  | [PBI] feat(github): start a task from the issues tree                                                  | S    |                             |
+| 3     | #338  | [PBI] feat(github): review, draft and close actions on a pull request                                  | M    |                             |
+| 4     | #339  | [PBI] feat(github): merge a pull request, re-run failed checks and set reviewers, labels and assignees | M    | blocked by #338             |
+| 5     | #238  | [PBI] feat(github): fix failing checks of a pull request with an agent                                 | M    | blocked by #339             |
+| 6     | #340  | [PBI] feat(github): edit an issue from its detail pane                                                 | M    | blocked by #339             |
+| 7     | #341  | [PBI] feat(github): create issues and sub-issues and change the parent                                 | M    | blocked by #340             |
+| 8     | #342  | [PBI] feat(github): multi-select and bulk actions in the issues tree                                   | M    | blocked by #340             |
+| 9     | #343  | [PBI] feat(github): create, edit and close milestones                                                  | S    | blocked by #338             |
+| 10    | #501  | [PBI] feat(agents): opt-in classic Claude Code renderer in poimen terminals                            | S    | blocked by #502             |
+| 11    | #548  | [PBI] feat(deliver): milestone panel for runs on a GitHub milestone                                    |      |                             |
+| 12    | #580  | [PBI] feat(settings): polish of the Spaces page                                                        | S    |                             |
+| 13    | #581  | [PBI] feat(settings): export and import settings as JSON                                               | M    |                             |
+| 14    | #584  | [PBI] feat(deliver): Runs view with filters and event timeline                                         | M    |                             |
+| 15    | #585  | [PBI] feat(deliver): expandable milestone overview with issue states                                   | M    | blocked by #584             |
+| 16    | #587  | [PBI] test: release candidate test of M016 on macOS, Windows, Linux                                    |      | release test, does not gate |
 <!-- roadmap:end -->
 
 <!-- roadmap:slot plan -->
@@ -306,15 +431,22 @@ Progress: 0 % (0 of 10 issues closed).
 ## Later
 
 <!-- roadmap:begin later -->
-| Issue | Title                                                              | Why later             |
-| ----- | ------------------------------------------------------------------ | --------------------- |
-| #148  | [Feature] Own terminal backend without herdr                       | no milestone          |
-| #183  | [Feature] Detect listening ports and open them in the browser      | no milestone          |
-| #184  | [Feature] Prompt editor with file mentions and drag and drop       | no milestone          |
-| #185  | [Feature] One task to several agents and compare the results       | blocked by #179, #181 |
-| #318  | [Feature] Map directories to GitHub and Azure DevOps organizations | no milestone          |
+| Issue | Title                                                                  | Why later                             |
+| ----- | ---------------------------------------------------------------------- | ------------------------------------- |
+| #174  | [PBI] refactor(backend): remove the herdr backend                      | blocked by #515, #574                 |
+| #183  | [Feature] Detect listening ports and open them in the browser          | no milestone                          |
+| #184  | [Feature] Prompt editor with file mentions and drag and drop           | no milestone                          |
+| #185  | [Feature] One task to several agents and compare the results           | no milestone                          |
+| #318  | [Feature] Map directories to GitHub and Azure DevOps organizations     | no milestone                          |
+| #499  | [PBI] feat(updater): shared update channels (stable/rc) for Tauri apps | needs decision                        |
+| #582  | [Feature] Named layouts with a visual editor, templates reference them | needs decision; blocked by #513, #514 |
+| #583  | [Feature] MCP server for agent sessions                                | needs decision; blocked by #175       |
 <!-- roadmap:end -->
 
 ## Risks
 
-- None known yet. Write the risks here by hand; the script never touches this section.
+- **#510 is open for a decision** and blocks most of M14 (#511, #513, #514, #515 and everything after the TUI start). Deciding it unblocks the most work.
+- **#574 (PTY host) is size L** with a new process type, a host protocol and Windows ConPTY. Split it into PBIs before it starts; #174 (herdr removal) waits for it.
+- **Protocol 4 is a breaking change** (ADR 0006): a server left running from an older version needs the confirmed restart until #574 lands.
+- **Overlaps to resolve in refinement:** #548 and #585 (two milestone panels), #499 and #590 (RC update channel vs. RC without updater).
+- Write further risks here by hand; the script never touches this section.

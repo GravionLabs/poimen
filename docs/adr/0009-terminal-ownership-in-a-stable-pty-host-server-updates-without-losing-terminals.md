@@ -1,4 +1,4 @@
-# ADR 0007: Terminal ownership in a stable PTY host, server updates without losing terminals
+# ADR 0009: Terminal ownership in a stable PTY host, server updates without losing terminals
 
 - Status: Accepted
 - Date: 2026-11-08

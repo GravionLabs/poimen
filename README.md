@@ -6,7 +6,7 @@ A desktop app for AI coding agent sessions: watch and steer your terminals and a
 
 Site, downloads and installation guide: <https://gravionlabs.github.io/poimen/>.
 
-> **Status: spike.** This validates the architecture. Expect rough edges.
+> **Status: early.** poimen is in daily use and released regularly, but it still changes quickly. Expect rough edges.
 
 ## How it works
 
