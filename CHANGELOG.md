@@ -5,6 +5,12 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.15.1] — 2026-11-09
+
+### Bug Fixes
+- **release**: Set the released version for every poimen crate in Cargo.lock (#620)
+
+
 ## [0.15.0] — 2026-11-09
 
 ### Bug Fixes
@@ -29,6 +35,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - ROADMAP after the refinement of #502 and #540
 - ROADMAP after merging #548 into #585 and rescoping #499
 - ROADMAP with the PBIs of #582 and #583
+- Update CHANGELOG.md for v0.15.0 [skip ci]
 
 
 ### Features
