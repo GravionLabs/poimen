@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { SpaceNode } from "../core/herdr";
-import { filterValues, isDoubleClick, menuTarget, sidebarMenuItems, spaceNodes } from "./sidebar";
+import {
+  filterValues,
+  isDoubleClick,
+  menuTarget,
+  sidebarMenuItems,
+  spaceNodes,
+  spaceRepoDir,
+} from "./sidebar";
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
 
 const space: SpaceNode = {
@@ -15,6 +22,32 @@ const space: SpaceNode = {
     },
   ],
 };
+
+describe("spaceRepoDir", () => {
+  const empty = (repo?: SpaceNode["repo"]): SpaceNode => ({
+    workspace: { space_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/w/app" },
+    rows: [],
+    ...(repo ? { repo } : {}),
+  });
+
+  it("is the space's own directory for an empty space in a repository", () => {
+    expect(spaceRepoDir([empty({ branch: "main", worktree: false })], "s1")).toBe("/w/app");
+  });
+
+  it("is undefined when the space's directory is no repository or unknown", () => {
+    expect(spaceRepoDir([empty({ branch: null, worktree: false })], "s1")).toBeUndefined();
+    expect(spaceRepoDir([empty()], "s1")).toBeUndefined();
+    expect(spaceRepoDir([empty()], "s9")).toBeUndefined();
+  });
+
+  it("prefers a pane in a repository", () => {
+    const node: SpaceNode = {
+      ...empty({ branch: "main", worktree: false }),
+      rows: [{ ...space.rows[0], dir: "/w/app/sub", branch: "feat" }],
+    };
+    expect(spaceRepoDir([node], "s1")).toBe("/w/app/sub");
+  });
+});
 
 describe("spaceNodes", () => {
   it("maps workspaces to expanded parents and panes to leaves keyed by pane id", () => {

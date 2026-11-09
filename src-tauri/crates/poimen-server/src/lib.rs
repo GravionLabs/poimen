@@ -2,8 +2,9 @@
 //! the app closes. One server per user listens on a local socket (a Unix socket, a named pipe on
 //! Windows; `docs/protocol.md`).
 //!
-//! The server keeps a flat model: spaces (name, cwd) with terminals. Spaces persist across
-//! restarts, terminals do not. Layout (groups, splits, tabs) is the client's business.
+//! The server keeps spaces (name, cwd) with terminals, and per space the tabs in order with a
+//! split tree of terminals each (`tabs.rs`). Spaces and tabs persist across restarts, terminals
+//! do not; leaves whose terminal is gone are dropped at start.
 
 pub mod claude;
 pub mod copilot;
@@ -13,6 +14,7 @@ mod pty;
 pub mod report;
 mod store;
 mod stream;
+mod tabs;
 
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
@@ -29,7 +31,8 @@ use emulator::Colors;
 use poimen_protocol::{
     self as proto, AgentInfo, AgentStatus, AttachMode, DetachReason, ErrorCode, Event,
     PROTOCOL_VERSION, PingResult, Request, Response, SetColors, Space, SpaceClose, SpaceCreate,
-    SpaceRename, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose, TerminalCreate,
+    SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabRename, TabResizeSplit,
+    TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose, TerminalCreate,
     TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalReportAgent,
     TerminalReportTokens, TerminalResize, TerminalStatus,
 };
@@ -138,7 +141,8 @@ impl TerminalEntry {
 
 #[derive(Default)]
 struct Inner {
-    spaces: Vec<Space>,
+    /// The spaces with their tabs and split trees.
+    layout: tabs::Layout,
     terminals: Vec<TerminalEntry>,
 }
 
@@ -165,12 +169,24 @@ impl Shared {
         lock(&self.subscribers).retain(|tx| tx.send(event.clone()).is_ok());
     }
 
+    /// Publishes the events of a layout change and saves the layout when there were any.
+    fn apply(&self, inner: &Inner, events: Vec<Event>) {
+        if events.is_empty() {
+            return;
+        }
+        for event in events {
+            self.publish(event);
+        }
+        self.persist(inner);
+    }
+
     fn new_id(&self, prefix: &str) -> String {
         format!("{prefix}{}", self.next_id.fetch_add(1, Ordering::Relaxed))
     }
 
     fn persist(&self, inner: &Inner) {
-        if let Err(e) = store::save(&self.state_file, &inner.spaces) {
+        let next_id = self.next_id.load(Ordering::Relaxed);
+        if let Err(e) = store::save(&self.state_file, &inner.layout, next_id) {
             eprintln!(
                 "poimen-server: could not save {}: {e}",
                 self.state_file.display()
@@ -222,6 +238,9 @@ impl Shared {
             terminal_id: terminal_id.to_string(),
             exit_code,
         });
+        // An exited terminal is no longer in the tree.
+        let events = inner.layout.remove_terminal(terminal_id);
+        self.apply(&inner, events);
     }
 }
 
@@ -275,21 +294,32 @@ impl Server {
             }
         })?;
 
-        let spaces = store::load(&config.state_file);
-        let next = store::next_id(&spaces);
+        let store::Stored {
+            mut layout,
+            next_id,
+        } = store::load(&config.state_file);
+        let next_id = AtomicU64::new(next_id);
+        // No terminal survives a restart (yet): their leaves, the splits they leave behind and
+        // the empty tabs go.
+        let changed = layout.reconcile(&[], &mut |prefix| {
+            format!("{prefix}{}", next_id.fetch_add(1, Ordering::Relaxed))
+        });
         let shared = Shared {
             inner: Mutex::new(Inner {
-                spaces,
+                layout,
                 terminals: Vec::new(),
             }),
             subscribers: Mutex::new(Vec::new()),
-            next_id: AtomicU64::new(next),
+            next_id,
             socket: config.socket,
             state_file: config.state_file,
             scrollback: config.scrollback,
             colors: Arc::default(),
             on_shutdown: Mutex::new(None),
         };
+        if changed {
+            shared.persist(&lock(&shared.inner));
+        }
         Ok(Self {
             listener,
             _lock: lock_file,
@@ -579,7 +609,13 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             protocol: PROTOCOL_VERSION,
             pid: std::process::id(),
         })),
-        "space.list" => Ok(json!({ "spaces": lock(&shared.inner).spaces })),
+        "space.list" => {
+            let inner = lock(&shared.inner);
+            Ok(json!(SpaceList {
+                spaces: inner.layout.spaces.clone(),
+                tabs: inner.layout.tabs.clone(),
+            }))
+        }
         "space.create" => space_create(shared, parsed(request)?),
         "space.rename" => space_rename(shared, parsed(request)?),
         "space.close" => space_close(shared, parsed(request)?),
@@ -587,6 +623,13 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "terminal.create" => terminal_create(shared, parsed(request)?),
         "terminal.rename" => terminal_rename(shared, parsed(request)?),
         "terminal.close" => terminal_close(shared, parsed(request)?),
+        "tab.create" => tab_create(shared, parsed(request)?),
+        "tab.rename" => tab_rename(shared, parsed(request)?),
+        "tab.close" => tab_close(shared, parsed(request)?),
+        "tab.move" => tab_move(shared, parsed(request)?),
+        "tab.split" => tab_split(shared, parsed(request)?),
+        "tab.resize_split" => tab_resize_split(shared, parsed(request)?),
+        "tab.focus" => tab_focus(shared, parsed(request)?),
         "server.shutdown" => server_shutdown(shared),
         "server.set_colors" => server_set_colors(shared, parsed(request)?),
         "terminal.report_agent" => terminal_report_agent(shared, parsed(request)?),
@@ -608,16 +651,13 @@ fn server_shutdown(shared: &Arc<Shared>) -> ApiResult {
         {
             let mut inner = lock(&shared.inner);
             let entries = std::mem::take(&mut inner.terminals);
+            let mut events = Vec::new();
             for entry in entries {
-                entry.stream.closed();
-                if let Some(pty) = entry.pty {
-                    pty.kill();
-                }
-                shared.publish(Event::TerminalClosed {
-                    terminal_id: entry.info.id,
-                    space_id: entry.info.space_id,
-                });
+                let id = entry.info.id.clone();
+                close_entry(&shared, entry);
+                events.extend(inner.layout.remove_terminal(&id));
             }
+            shared.apply(&inner, events);
         }
         // Not on Windows: a named pipe has no file, and it goes with the process.
         if cfg!(unix) {
@@ -649,8 +689,9 @@ fn space_create(shared: &Shared, p: SpaceCreate) -> ApiResult {
         id: shared.new_id("s"),
         name,
         cwd: p.cwd,
+        ..Default::default()
     };
-    inner.spaces.push(space.clone());
+    inner.layout.spaces.push(space.clone());
     shared.persist(&inner);
     shared.publish(Event::SpaceCreated {
         space: space.clone(),
@@ -662,6 +703,7 @@ fn space_rename(shared: &Shared, p: SpaceRename) -> ApiResult {
     let name = require_name(&p.name)?;
     let mut inner = lock(&shared.inner);
     let space = inner
+        .layout
         .spaces
         .iter_mut()
         .find(|s| s.id == p.space_id)
@@ -677,26 +719,17 @@ fn space_rename(shared: &Shared, p: SpaceRename) -> ApiResult {
 
 fn space_close(shared: &Shared, p: SpaceClose) -> ApiResult {
     let mut inner = lock(&shared.inner);
-    let index = inner
-        .spaces
-        .iter()
-        .position(|s| s.id == p.space_id)
-        .ok_or_else(|| not_found("space", &p.space_id))?;
+    inner.layout.space(&p.space_id)?;
     let (closing, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut inner.terminals)
         .into_iter()
         .partition(|t| t.info.space_id == p.space_id);
     inner.terminals = keep;
     for entry in closing {
-        entry.stream.closed();
-        if let Some(pty) = entry.pty {
-            pty.kill();
-        }
-        shared.publish(Event::TerminalClosed {
-            terminal_id: entry.info.id,
-            space_id: p.space_id.clone(),
-        });
+        close_entry(shared, entry);
     }
-    inner.spaces.remove(index);
+    for event in inner.layout.remove_space(&p.space_id)? {
+        shared.publish(event);
+    }
     shared.persist(&inner);
     shared.publish(Event::SpaceClosed {
         space_id: p.space_id,
@@ -763,13 +796,29 @@ fn server_set_colors(shared: &Shared, p: SetColors) -> ApiResult {
     Ok(json!({}))
 }
 
+/// `terminal.create`: the terminal gets a tab of its own at the end of its space (named like
+/// the terminal), so callers that know nothing of tabs keep working.
 fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
     let mut inner = lock(&shared.inner);
-    let space = inner
-        .spaces
-        .iter()
-        .find(|s| s.id == p.space_id)
-        .ok_or_else(|| not_found("space", &p.space_id))?;
+    let terminal = spawn_terminal(shared, &mut inner, p)?;
+    let events = inner.layout.add_tab(
+        &terminal.space_id,
+        shared.new_id("tab"),
+        terminal.name.clone(),
+        &terminal.id,
+    )?;
+    shared.apply(&inner, events);
+    Ok(json!({ "terminal": terminal }))
+}
+
+/// Starts a terminal in its space and publishes `terminal.created`; the caller puts it into a
+/// leaf under the same lock.
+fn spawn_terminal(
+    shared: &Arc<Shared>,
+    inner: &mut Inner,
+    p: TerminalCreate,
+) -> Result<Terminal, (ErrorCode, String)> {
+    let space = inner.layout.space(&p.space_id)?;
     let cwd = p.cwd.clone().unwrap_or_else(|| space.cwd.clone());
     let command = match p.command {
         Some(c) if c.is_empty() || c[0].is_empty() => {
@@ -848,7 +897,7 @@ fn terminal_create(shared: &Arc<Shared>, p: TerminalCreate) -> ApiResult {
     shared.publish(Event::TerminalCreated {
         terminal: info.clone(),
     });
-    Ok(json!({ "terminal": info }))
+    Ok(info)
 }
 
 fn terminal_mut<'a>(
@@ -1012,6 +1061,15 @@ fn terminal_close(shared: &Shared, p: TerminalClose) -> ApiResult {
         .position(|t| t.info.id == p.terminal_id)
         .ok_or_else(|| not_found("terminal", &p.terminal_id))?;
     let entry = inner.terminals.remove(index);
+    close_entry(shared, entry);
+    let events = inner.layout.remove_terminal(&p.terminal_id);
+    shared.apply(&inner, events);
+    Ok(json!({}))
+}
+
+/// Ends a terminal taken out of the list: its attachments, its process, `terminal.closed`. The
+/// caller removes its leaf.
+fn close_entry(shared: &Shared, entry: TerminalEntry) {
     entry.stream.closed();
     if let Some(pty) = entry.pty {
         pty.kill();
@@ -1020,7 +1078,164 @@ fn terminal_close(shared: &Shared, p: TerminalClose) -> ApiResult {
         terminal_id: entry.info.id,
         space_id: entry.info.space_id,
     });
+}
+
+/// The running terminal `terminal_id`: `not_found`, or `exited` (an exited terminal has no leaf).
+fn running_terminal<'a>(
+    inner: &'a Inner,
+    terminal_id: &str,
+) -> Result<&'a Terminal, (ErrorCode, String)> {
+    let entry = inner
+        .terminals
+        .iter()
+        .find(|t| t.info.id == terminal_id)
+        .ok_or_else(|| not_found("terminal", terminal_id))?;
+    if entry.info.status == TerminalStatus::Exited {
+        return Err((
+            ErrorCode::Exited,
+            format!("terminal {terminal_id} has exited"),
+        ));
+    }
+    Ok(&entry.info)
+}
+
+fn tab_json(inner: &Inner, tab_id: &str) -> Value {
+    json!(inner.layout.tab(tab_id).ok())
+}
+
+/// `tab.create`: a new tab at the end of the space, with the given terminal (moved out of its
+/// tab) or a new one.
+fn tab_create(shared: &Arc<Shared>, p: TabCreate) -> ApiResult {
+    let name = p.name.as_deref().map(require_name).transpose()?;
+    let mut inner = lock(&shared.inner);
+    inner.layout.space(&p.space_id)?;
+    let mut events = Vec::new();
+    let terminal = match &p.terminal_id {
+        Some(id) => {
+            let terminal = running_terminal(&inner, id)?.clone();
+            if terminal.space_id != p.space_id {
+                return Err(invalid(format!(
+                    "terminal {id} belongs to space {}",
+                    terminal.space_id
+                )));
+            }
+            events.extend(inner.layout.remove_terminal(id));
+            terminal
+        }
+        None => spawn_terminal(
+            shared,
+            &mut inner,
+            TerminalCreate {
+                space_id: p.space_id.clone(),
+                ..Default::default()
+            },
+        )?,
+    };
+    let tab_id = shared.new_id("tab");
+    let name = name.unwrap_or_else(|| terminal.name.clone());
+    events.extend(
+        inner
+            .layout
+            .add_tab(&p.space_id, tab_id.clone(), name, &terminal.id)?,
+    );
+    shared.apply(&inner, events);
+    Ok(json!({ "tab": tab_json(&inner, &tab_id), "terminal": terminal }))
+}
+
+fn tab_rename(shared: &Shared, p: TabRename) -> ApiResult {
+    let name = require_name(&p.name)?;
+    let mut inner = lock(&shared.inner);
+    let events = inner.layout.rename(&p.tab_id, name)?;
+    shared.apply(&inner, events);
+    Ok(json!({ "tab": tab_json(&inner, &p.tab_id) }))
+}
+
+/// `tab.close`: closes the terminals of the tab (`terminal.closed` each), then the tab.
+fn tab_close(shared: &Shared, p: TabClose) -> ApiResult {
+    let mut inner = lock(&shared.inner);
+    let terminals: Vec<String> = inner
+        .layout
+        .tab(&p.tab_id)?
+        .root
+        .terminal_ids()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    let (closing, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut inner.terminals)
+        .into_iter()
+        .partition(|t| terminals.contains(&t.info.id));
+    inner.terminals = keep;
+    for entry in closing {
+        close_entry(shared, entry);
+    }
+    let (_, events) = inner.layout.remove_tab(&p.tab_id)?;
+    shared.apply(&inner, events);
     Ok(json!({}))
+}
+
+fn tab_move(shared: &Shared, p: TabMove) -> ApiResult {
+    let mut inner = lock(&shared.inner);
+    let events = inner.layout.move_tab(&p.tab_id, p.index)?;
+    shared.apply(&inner, events);
+    let tab = inner.layout.tab(&p.tab_id)?;
+    Ok(json!({ "tab": tab, "space": inner.layout.space(&tab.space_id)? }))
+}
+
+/// `tab.split`: a new terminal (cwd of the split one by default) as the second child of a split
+/// that takes the place of the leaf.
+fn tab_split(shared: &Arc<Shared>, p: TabSplit) -> ApiResult {
+    let ratio = p.ratio.unwrap_or(proto::DEFAULT_SPLIT_RATIO);
+    if !proto::valid_ratio(ratio) {
+        return Err(invalid(format!(
+            "ratio {ratio} must be above 0 and below 1"
+        )));
+    }
+    let mut inner = lock(&shared.inner);
+    let target = running_terminal(&inner, &p.terminal_id)?.clone();
+    let tab_id = inner
+        .layout
+        .tab_of(&p.terminal_id)
+        .map(|t| t.tab_id.clone())
+        .ok_or_else(|| {
+            (
+                ErrorCode::Internal,
+                format!("terminal {} has no leaf", p.terminal_id),
+            )
+        })?;
+    let terminal = spawn_terminal(
+        shared,
+        &mut inner,
+        TerminalCreate {
+            space_id: target.space_id.clone(),
+            cwd: Some(p.cwd.unwrap_or(target.cwd)),
+            name: p.name,
+            command: p.command,
+            cols: None,
+            rows: None,
+        },
+    )?;
+    let split_id = shared.new_id("split");
+    let events = inner
+        .layout
+        .split(&p.terminal_id, &terminal.id, p.direction, ratio, split_id)?;
+    shared.apply(&inner, events);
+    Ok(json!({ "tab": tab_json(&inner, &tab_id), "terminal": terminal }))
+}
+
+fn tab_resize_split(shared: &Shared, p: TabResizeSplit) -> ApiResult {
+    let mut inner = lock(&shared.inner);
+    let events = inner.layout.resize_split(&p.tab_id, &p.split_id, p.ratio)?;
+    shared.apply(&inner, events);
+    Ok(json!({ "tab": tab_json(&inner, &p.tab_id) }))
+}
+
+/// `tab.focus`: shared by every client, the last one wins.
+fn tab_focus(shared: &Shared, p: TabFocus) -> ApiResult {
+    let mut inner = lock(&shared.inner);
+    let events = inner.layout.focus(&p.tab_id, p.terminal_id.as_deref())?;
+    shared.apply(&inner, events);
+    let tab = inner.layout.tab(&p.tab_id)?;
+    Ok(json!({ "tab": tab, "space": inner.layout.space(&tab.space_id)? }))
 }
 
 fn running_pty<'a>(

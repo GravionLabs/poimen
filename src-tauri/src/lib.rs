@@ -1,4 +1,4 @@
-mod agent_actions;
+use poimen_core::agent_actions;
 mod agent_events;
 mod backend;
 #[cfg(test)]
@@ -7,15 +7,15 @@ mod changes;
 mod changes_git;
 mod copilot;
 mod deliver;
-mod git;
+use poimen_core::git;
 mod git_sync;
-mod github;
+use poimen_core::github;
 mod github_branches;
 mod github_issues;
 mod github_milestones;
 mod github_pulls;
-mod gui_path;
-mod harness;
+use poimen_core::gui_path;
+use poimen_core::harness;
 mod herdr;
 mod hooks;
 mod layout;
@@ -25,17 +25,17 @@ mod poimen_backend;
 mod poimen_server;
 mod project;
 mod project_edit;
-mod remote;
+use poimen_core::remote;
 mod schemes;
 mod settings;
 mod spaces;
 mod stream;
 mod task_start;
-mod tasks;
-mod templates;
+use poimen_core::tasks;
+use poimen_core::templates;
 mod terminal_colors;
 mod transcripts;
-mod trust;
+use poimen_core::trust;
 mod updater;
 mod usage;
 mod watch;
@@ -526,22 +526,7 @@ fn create_space_with(
     let created = backend.create_space(&dir, &label)?;
     let workspace_id = created.space_id.clone();
     backend.focus_space(&workspace_id)?;
-    let template = user
-        .as_ref()
-        .and_then(|s| template_for(&dir, s, home).map(|t| (t, &s.harnesses)));
-    let mut template_warnings = Vec::new();
-    let agent_command = template.and_then(|(t, harnesses)| {
-        let path = gui_path::child_path();
-        templates::agent_command(t, harnesses, |p| {
-            gui_path::resolve_program(p, &path).is_some()
-        })
-        .map_err(|w| template_warnings.push(w))
-        .ok()
-    });
-    let user_layout = template
-        .and_then(|(t, _)| t.layout.clone())
-        .or_else(|| user.as_ref().and_then(|s| s.spaces_layout.clone()));
-    let mut warnings = template_warnings;
+    let (agent_command, user_layout, mut warnings) = layout_inputs(&dir, user.as_ref(), home);
     warnings.extend(build_layout(
         backend,
         &dir,
@@ -580,12 +565,70 @@ fn build_layout(
     root_command: Option<&str>,
     agent_command: Option<&str>,
 ) -> Vec<String> {
+    let planned = plan_layout(
+        sources,
+        user_layout,
+        allow_project_commands,
+        root_command,
+        agent_command,
+    );
+    apply_planned(backend, planned, dir, root_pane)
+}
+
+/// Applies a layout of [`plan_layout`] from `root_pane`; every problem is a warning.
+fn apply_planned(
+    backend: &dyn Backend,
+    planned: Result<(layout::Layout, Vec<String>), String>,
+    dir: &str,
+    root_pane: Option<&str>,
+) -> Vec<String> {
+    let (layout, mut warnings) = match planned {
+        Ok(planned) => planned,
+        Err(warning) => return vec![warning],
+    };
+    let Some(root_pane) = root_pane else {
+        return vec!["the backend did not report the root pane; no layout applied".into()];
+    };
+    if let Err(e) = layout::apply(backend, &layout, dir, root_pane) {
+        warnings.push(format!("layout not fully applied: {e}"));
+    }
+    warnings
+}
+
+/// The template's agent command and the user layout (the template's, else `spaces.layout`) for a
+/// space of `dir`, with the template's warnings. Shared by `create_space` and `rebuild_space`.
+fn layout_inputs(
+    dir: &str,
+    user: Option<&settings::Settings>,
+    home: Option<&std::path::Path>,
+) -> (Option<String>, Option<layout::Layout>, Vec<String>) {
+    let template = user.and_then(|s| template_for(dir, s, home).map(|t| (t, &s.harnesses)));
+    let mut warnings = Vec::new();
+    let agent_command = template.and_then(|(t, harnesses)| {
+        let path = gui_path::child_path();
+        templates::agent_command(t, harnesses, |p| {
+            gui_path::resolve_program(p, &path).is_some()
+        })
+        .map_err(|w| warnings.push(w))
+        .ok()
+    });
+    let user_layout = template
+        .and_then(|(t, _)| t.layout.clone())
+        .or_else(|| user.and_then(|s| s.spaces_layout.clone()));
+    (agent_command, user_layout, warnings)
+}
+
+/// The layout a new space gets from the already read project `sources` (the precedence of
+/// [`build_layout`]) with the resolution warnings; `Err` when none could be resolved.
+fn plan_layout(
+    sources: &trust::Sources,
+    user_layout: Option<&layout::Layout>,
+    allow_project_commands: bool,
+    root_command: Option<&str>,
+    agent_command: Option<&str>,
+) -> Result<(layout::Layout, Vec<String>), String> {
     let (project, legacy) = sources.refs();
-    let (layout, mut warnings, from_project) =
-        match layout::resolve_origin(project, legacy, user_layout) {
-            Ok(r) => r,
-            Err(warning) => return vec![warning],
-        };
+    let (layout, warnings, from_project) = layout::resolve_origin(project, legacy, user_layout)?;
     let layout = if from_project && !allow_project_commands {
         layout.without_commands()
     } else {
@@ -604,13 +647,167 @@ fn build_layout(
         (None, Some(agent)) if root_free => layout.with_root_command(agent),
         _ => layout,
     };
-    let Some(root_pane) = root_pane else {
-        return vec!["the backend did not report the root pane; no layout applied".into()];
-    };
-    if let Err(e) = layout::apply(backend, &layout, dir, root_pane) {
-        warnings.push(format!("layout not fully applied: {e}"));
+    Ok((layout, warnings))
+}
+
+/// What `rebuild_space` did with a space (wire shape, tagged by `state`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum RebuildOutcome {
+    /// The layout was built again (and the setup started, when allowed).
+    Rebuilt {
+        warnings: Vec<String>,
+        setup_started: bool,
+    },
+    /// Something needs the user's go first (an agent pane, the setup, an untrusted project file);
+    /// nothing was created.
+    Consent { reasons: Vec<String> },
+    /// A confirmed rebuild found the project file untrusted; nothing was created.
+    Trust { request: trust::TrustRequest },
+    /// The space has no directory or the directory is gone; nothing was created.
+    Missing { reason: String },
+    /// The space has terminals or no longer exists; nothing to do.
+    NotEmpty,
+}
+
+/// Whether `command` starts one of the agent `harnesses`: its program (first word, without path
+/// and `.exe`) is a harness id or the program of a harness command.
+fn is_agent_command(command: &str, harnesses: &[harness::Harness]) -> bool {
+    fn program(word: &str) -> String {
+        let word = word.trim_matches(|c| c == '\'' || c == '"');
+        let base = word.rsplit(['/', '\\']).next().unwrap_or(word);
+        let lower = base.to_ascii_lowercase();
+        lower.strip_suffix(".exe").unwrap_or(&lower).to_owned()
     }
-    warnings
+    let Some(first) = command.split_whitespace().next() else {
+        return false;
+    };
+    let wanted = program(first);
+    harnesses.iter().any(|h| {
+        program(&h.id) == wanted || h.command.first().is_some_and(|c| program(c) == wanted)
+    })
+}
+
+/// Why rebuilding needs the user's go: every pane of `layout` that starts an agent, and `setup`.
+fn consent_reasons(
+    layout: Option<&layout::Layout>,
+    harnesses: &[harness::Harness],
+    setup: Option<&str>,
+) -> Vec<String> {
+    let mut reasons: Vec<String> = layout
+        .into_iter()
+        .flat_map(|l| &l.panes)
+        .filter_map(|p| {
+            let command = p.command.as_deref()?;
+            is_agent_command(command, harnesses)
+                .then(|| format!("pane \"{}\" starts an agent: {command}", p.name))
+        })
+        .collect();
+    if let Some(setup) = setup {
+        reasons.push(format!("setup runs: {setup}"));
+    }
+    reasons
+}
+
+/// Rebuilds the layout of a space without terminals (after a server restart: spaces persist,
+/// terminals do not) in the space's own directory, through the path of `create_space`: the
+/// layout is resolved again (project file > template > `spaces.layout` > default), the project
+/// file goes through `trust::gate` and the setup runs only when allowed. Unconfirmed, it builds
+/// only when nothing needs consent (no agent pane, no setup, nothing to trust); otherwise it
+/// answers `Consent` and creates nothing. A space with terminals is left alone.
+fn rebuild_space_with(
+    backend: &dyn Backend,
+    home: Option<&std::path::Path>,
+    space_id: &str,
+    decision: Option<trust::Decision>,
+    confirmed: bool,
+) -> Result<RebuildOutcome, String> {
+    let snapshot = backend.snapshot()?;
+    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
+    let of_space = |v: &Value| v["workspace_id"].as_str() == Some(space_id);
+    let Some(space) = list(&snapshot.workspaces).into_iter().find(of_space) else {
+        return Ok(RebuildOutcome::NotEmpty);
+    };
+    if list(&snapshot.panes).iter().any(of_space) {
+        return Ok(RebuildOutcome::NotEmpty);
+    }
+    let cwd = space["cwd"].as_str().unwrap_or_default().trim();
+    if cwd.is_empty() {
+        return Ok(RebuildOutcome::Missing {
+            reason: "the space has no directory".into(),
+        });
+    }
+    let Ok(dir) = spaces::resolve_dir(cwd, home) else {
+        return Ok(RebuildOutcome::Missing {
+            reason: format!("the directory {cwd} no longer exists"),
+        });
+    };
+    let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
+    let sources = trust::Sources::read(&root);
+    let user = home.map(settings::load);
+    let trusted = user
+        .as_ref()
+        .map(|s| s.trusted_projects.clone())
+        .unwrap_or_default();
+    let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
+        trust::Gate::Ask(request) if confirmed => return Ok(RebuildOutcome::Trust { request }),
+        trust::Gate::Ask(_) => {
+            return Ok(RebuildOutcome::Consent {
+                reasons: vec!["the project file is not trusted yet".into()],
+            });
+        }
+        trust::Gate::Strip => false,
+        trust::Gate::Run { store } => {
+            if let Some(hash) = store {
+                let home = home.ok_or("the home directory is not known")?;
+                settings::trust_project(home, &sources.root, &hash)?;
+            }
+            true
+        }
+    };
+    let (agent_command, user_layout, mut warnings) = layout_inputs(&dir, user.as_ref(), home);
+    let planned = plan_layout(
+        &sources,
+        user_layout.as_ref(),
+        allow,
+        None,
+        agent_command.as_deref(),
+    );
+    if !confirmed {
+        let harnesses = user
+            .as_ref()
+            .map(|s| s.harnesses.clone())
+            .unwrap_or_else(harness::default_harnesses);
+        let setup = allow.then(|| project::setup_of(sources.refs().0)).flatten();
+        let layout = planned.as_ref().ok().map(|(l, _)| l);
+        let reasons = consent_reasons(layout, &harnesses, setup.as_deref());
+        if !reasons.is_empty() {
+            return Ok(RebuildOutcome::Consent { reasons });
+        }
+    }
+    let root_pane = backend.create_terminal(space_id, Some(&dir))?;
+    warnings.extend(apply_planned(backend, planned, &dir, root_pane.as_deref()));
+    let (setup_started, warning) = run_setup(backend, space_id, &dir, &sources, allow);
+    warnings.extend(warning);
+    Ok(RebuildOutcome::Rebuilt {
+        warnings,
+        setup_started,
+    })
+}
+
+/// Rebuilds the layout of a space without terminals (see [`rebuild_space_with`]); `confirmed` is
+/// the user's "Rebuild", `decision` the answer of the trust dialog.
+#[tauri::command]
+async fn rebuild_space(
+    backend: State<'_, Shared>,
+    workspace_id: String,
+    decision: Option<trust::Decision>,
+    confirmed: bool,
+) -> Result<RebuildOutcome, String> {
+    on_backend(backend.inner(), move |b| {
+        rebuild_space_with(b, home_dir().as_deref(), &workspace_id, decision, confirmed)
+    })
+    .await
 }
 
 /// Starts the `setup` command of the project file in a `setup` tab of a just-created space. Only
@@ -890,6 +1087,21 @@ async fn hooks_install(agent: String) -> Result<(), String> {
 #[tauri::command]
 fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
+}
+
+/// The release channel of this build (`stable` or `rc`, `POIMEN_CHANNEL` at build time); the
+/// frontend shows `RC` in the title and the status bar.
+#[tauri::command]
+fn app_channel() -> poimen_client::protocol::Channel {
+    poimen_client::protocol::CHANNEL
+}
+
+/// The native window title: `Poimen`, `Poimen RC` on rc.
+fn window_title(channel: poimen_client::protocol::Channel) -> String {
+    match channel {
+        poimen_client::protocol::Channel::Stable => "Poimen".into(),
+        poimen_client::protocol::Channel::Rc => "Poimen RC".into(),
+    }
 }
 
 /// The user's home directory: `HOME` on Unix, the profile (`%USERPROFILE%`) on Windows, where a
@@ -1755,23 +1967,31 @@ pub fn run() {
         .unwrap_or_else(|| "poimen".into());
     let (backend, kind) = make_backend(&kind);
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init());
+    // An rc build never updates itself (no updater artifacts, no endpoint in tauri.rc.conf.json).
+    let builder = if updater::enabled(poimen_client::protocol::CHANNEL) {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    } else {
+        builder
+    };
+    builder
         .manage(updater::PendingUpdate::default())
         .manage(backend.clone())
         .manage(BackendKind(kind))
         .manage::<GithubClient>(std::sync::Arc::new(github::Client::system(
             home_dir()
                 .map(|h| {
-                    h.join(".config")
-                        .join("poimen")
+                    poimen_core::settings::config_dir(&h)
                         .join("cache")
                         .join("github")
                 })
-                .unwrap_or_else(|| std::env::temp_dir().join("poimen-github")),
+                .unwrap_or_else(|| {
+                    std::env::temp_dir()
+                        .join(poimen_client::protocol::CHANNEL.named("poimen-github"))
+                }),
         )))
         .manage(SubagentWatch::default())
         .manage(DeliverWatch::default())
@@ -1779,6 +1999,9 @@ pub fn run() {
         .manage(terminal_colors::TerminalColors::default())
         .setup(move |app| {
             let handle = app.handle().clone();
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title(&window_title(poimen_client::protocol::CHANNEL));
+            }
             let shortcuts = home_dir()
                 .map(|h| settings::load(&h).shortcuts)
                 .unwrap_or_else(settings::default_shortcuts);
@@ -1859,9 +2082,11 @@ pub fn run() {
             task_issues,
             github_repo,
             create_space,
+            rebuild_space,
             list_dirs,
             list_child_dirs,
             app_version,
+            app_channel,
             updater::update_check,
             updater::update_install,
             get_usage,
@@ -2184,6 +2409,7 @@ mod build_layout_tests {
             id: "s3".into(),
             name: "#12 Add picker".into(),
             cwd: dir.clone(),
+            ..Default::default()
         };
         *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
         let outcome =
@@ -2365,6 +2591,191 @@ mod build_layout_tests {
         assert!(fake.calls().is_empty());
     }
 
+    // Rebuilding a space that came back without terminals after a server restart (#579).
+
+    /// A fake whose snapshot has the persisted space `s1` in `cwd` and no terminals, as the
+    /// poimen backend reports it right after a restart.
+    fn restarted(cwd: &str) -> FakeBackend {
+        let fake = FakeBackend::default();
+        let space = poimen_client::protocol::Space {
+            id: "s1".into(),
+            name: "app".into(),
+            cwd: cwd.into(),
+            ..Default::default()
+        };
+        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
+        fake
+    }
+
+    const SHELLS: &str = r#"{"spaces":{"layout":{"panes":[{"name":"main"},
+        {"name":"logs","split":{"from":"main","direction":"down","ratio":0.5}}]}}}"#;
+
+    #[test]
+    fn an_empty_space_without_agents_is_rebuilt_in_its_directory() {
+        let (home, dir) = home_with_templates(SHELLS);
+        let fake = restarted(&dir);
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Rebuilt {
+                warnings: vec![],
+                setup_started: false
+            }
+        );
+        assert_eq!(
+            fake.calls(),
+            [
+                "snapshot".to_owned(),
+                format!("create_terminal s1 {dir}"),
+                "rename s1:t1 main".to_owned(),
+                format!("split s1:t1 down {dir} 0.5"),
+                "rename w1:p13 logs".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_agent_pane_needs_consent_and_nothing_is_created() {
+        // No user config: the built-in default with `claude` in the root pane.
+        let fake = restarted(&tmp_dir());
+        let out = rebuild_space_with(&fake, None, "s1", None, false).unwrap();
+        let RebuildOutcome::Consent { reasons } = out else {
+            panic!("expected consent, got {out:?}");
+        };
+        assert_eq!(reasons, ["pane \"agent\" starts an agent: claude"]);
+        assert_eq!(fake.calls(), ["snapshot"]);
+    }
+
+    #[test]
+    fn a_confirmed_rebuild_starts_the_agent_like_create_space() {
+        let dir = tmp_dir();
+        let fake = restarted(&dir);
+        let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
+        assert!(matches!(out, RebuildOutcome::Rebuilt { .. }), "{out:?}");
+        let calls = fake.calls();
+        assert_eq!(calls[1], format!("create_terminal s1 {dir}"));
+        assert!(
+            calls.contains(&"input s1:t1 claude".to_owned()),
+            "{calls:?}"
+        );
+        assert_eq!(calls.iter().filter(|c| c.starts_with("split ")).count(), 2);
+    }
+
+    #[test]
+    fn a_template_agent_needs_consent() {
+        let (home, dir) = home_with_templates(
+            r#"{"harnesses":{"sh1":{"command":["sh"]}},
+            "spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"sh1",
+              "layout":{"panes":[{"name":"main"}]}}]}"#,
+        );
+        let fake = restarted(&dir);
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
+        assert!(matches!(out, RebuildOutcome::Consent { .. }), "{out:?}");
+        assert_eq!(fake.calls(), ["snapshot"]);
+    }
+
+    #[test]
+    fn a_space_with_terminals_is_left_alone() {
+        let dir = tmp_dir();
+        let fake = FakeBackend::default();
+        *fake.snapshot.lock().unwrap() = Snapshot {
+            workspaces: json!([{ "workspace_id": "s1", "label": "app", "number": 1, "cwd": dir }]),
+            tabs: json!([]),
+            panes: json!([{ "pane_id": "t1", "workspace_id": "s1", "cwd": dir }]),
+        };
+        let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
+        assert_eq!(out, RebuildOutcome::NotEmpty);
+        assert_eq!(fake.calls(), ["snapshot"]);
+        // A space that is gone is nothing to do either.
+        let out = rebuild_space_with(&fake, None, "s9", None, true).unwrap();
+        assert_eq!(out, RebuildOutcome::NotEmpty);
+    }
+
+    #[test]
+    fn a_space_whose_directory_is_gone_stays_empty_with_a_hint() {
+        let fake = restarted("/no/such/dir/at/all");
+        let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Missing {
+                reason: "the directory /no/such/dir/at/all no longer exists".into()
+            }
+        );
+        let fake = restarted("");
+        let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
+        assert!(matches!(out, RebuildOutcome::Missing { .. }));
+        assert_eq!(fake.calls(), ["snapshot"]);
+    }
+
+    #[test]
+    fn an_untrusted_project_file_asks_through_the_trust_gate() {
+        let (home, dir) = home_with_templates(SHELLS);
+        let poimen_dir = std::path::Path::new(&dir).join(".poimen");
+        std::fs::create_dir_all(&poimen_dir).unwrap();
+        std::fs::write(
+            poimen_dir.join("config.json"),
+            r#"{"layout":{"panes":[{"name":"dev","command":"pnpm dev"}]},"setup":"pnpm i"}"#,
+        )
+        .unwrap();
+        let fake = restarted(&dir);
+        // Automatic: consent needed, nothing created.
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Consent {
+                reasons: vec!["the project file is not trusted yet".into()]
+            }
+        );
+        // Confirmed without an answer: the trust request, still nothing created.
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap();
+        assert!(matches!(out, RebuildOutcome::Trust { .. }), "{out:?}");
+        assert_eq!(fake.calls(), ["snapshot", "snapshot"]);
+        // "Run without project commands": the panes, but neither the command nor the setup.
+        let decision = Some(trust::Decision::Without);
+        let out = rebuild_space_with(&fake, Some(&home), "s1", decision, true).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Rebuilt {
+                warnings: vec![],
+                setup_started: false
+            }
+        );
+        assert!(!fake.calls().iter().any(|c| c.starts_with("input ")));
+        // Trusted: the setup needs consent, unconfirmed nothing more is created.
+        let RebuildOutcome::Trust { request } =
+            rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap()
+        else {
+            panic!("expected the trust request");
+        };
+        settings::trust_project(&home, &request.root, &request.hash).unwrap();
+        let before = fake.calls().len();
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Consent {
+                reasons: vec!["setup runs: pnpm i".into()]
+            }
+        );
+        assert_eq!(fake.calls().len(), before + 1);
+    }
+
+    #[test]
+    fn agent_commands_are_recognized_by_their_program() {
+        let harnesses = harness::default_harnesses();
+        for command in [
+            "claude",
+            "claude --resume x",
+            "/usr/bin/claude",
+            "'copilot'",
+        ] {
+            assert!(is_agent_command(command, &harnesses), "{command}");
+        }
+        assert!(is_agent_command(r"C:\bin\Copilot.EXE -p x", &harnesses));
+        for command in ["", "  ", "vim", "pnpm dev", "claudette"] {
+            assert!(!is_agent_command(command, &harnesses), "{command}");
+        }
+    }
+
     #[test]
     fn a_fake_stream_delivers_neutral_records_and_says_if_it_is_emulated() {
         let mut fake = FakeBackend::default();
@@ -2465,6 +2876,47 @@ mod build_layout_tests {
         let messages = channel_messages(&frame, false);
         let value: serde_json::Value = serde_json::from_str(text(&messages[0]).unwrap()).unwrap();
         assert_eq!(value, json!({"type": "output", "bytes": "aGk="}));
+    }
+
+    #[test]
+    fn the_rc_overlay_installs_beside_the_stable_app_without_updates() {
+        use poimen_client::protocol::Channel;
+        let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let bundle: Value =
+            serde_json::from_str(include_str!("../tauri.bundle.conf.json")).unwrap();
+        let rc: Value = serde_json::from_str(include_str!("../tauri.rc.conf.json")).unwrap();
+        assert_eq!(rc["identifier"], "dev.gravionlabs.poimen.rc");
+        assert_ne!(rc["identifier"], base["identifier"]);
+        assert_eq!(rc["productName"], "Poimen RC");
+        assert_eq!(rc["productName"], window_title(Channel::Rc));
+        // Its own binary (Linux: /usr/bin/poimen-rc next to /usr/bin/poimen).
+        assert_eq!(rc["mainBinaryName"], "poimen-rc");
+        assert_eq!(rc["bundle"]["createUpdaterArtifacts"], false);
+        assert_eq!(rc["plugins"]["updater"]["endpoints"], json!([]));
+        // The sidecar is the name the app of each channel looks for beside itself.
+        assert_eq!(
+            bundle["bundle"]["externalBin"],
+            json!([format!(
+                "binaries/{}",
+                Channel::Stable.server_program(false)
+            )])
+        );
+        assert_eq!(
+            rc["bundle"]["externalBin"],
+            json!([format!("binaries/{}", Channel::Rc.server_program(false))])
+        );
+    }
+
+    #[test]
+    fn the_window_title_names_the_rc_channel() {
+        use poimen_client::protocol::Channel;
+        assert_eq!(window_title(Channel::Stable), "Poimen");
+        assert_eq!(window_title(Channel::Rc), "Poimen RC");
+        let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            base["app"]["windows"][0]["title"],
+            window_title(Channel::Stable)
+        );
     }
 
     #[test]

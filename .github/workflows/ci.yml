@@ -89,7 +89,7 @@ jobs:
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri
-          packages: "poimen-protocol poimen-client poimen-server"
+          packages: "poimen-protocol poimen-client poimen-server poimen-core"
 
   # The app crate needs the Tauri Linux libraries and the built frontend (the Tauri macros embed frontendDist). The
   # frontend build here only satisfies those macros. This job also runs for changes to the root package.json (read by
@@ -146,7 +146,7 @@ jobs:
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri
-          packages: "poimen-protocol poimen-client poimen-server"
+          packages: "poimen-protocol poimen-client poimen-server poimen-core"
           run-fmt: "false"
       - name: App crate (clippy)
         shell: bash

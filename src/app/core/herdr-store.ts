@@ -10,11 +10,13 @@ import {
   type HerdrEvent,
   type HerdrInfo,
   type Terminal,
+  type AgentStatus,
   type RepoInfo,
   type Snapshot,
   type WireSnapshot,
   toSnapshot,
   type BranchPull,
+  type AppChannel,
 } from "./herdr";
 import type { BackendKind } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
@@ -70,10 +72,30 @@ export class HerdrStore {
   private readonly _loaded = signal(false);
   private readonly _info = signal<HerdrInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
+  private readonly _appChannel = signal<AppChannel>("stable");
   private readonly _backend = signal<BackendStatus | null>(null);
   private readonly _backendKind = signal<BackendKind>("poimen");
 
-  readonly snapshot = this._snapshot.asReadonly();
+  /**
+   * Combines a pane's status with what poimen knows besides the hook (running agent-events runs
+   * it started, `Deliver.paneStatus`); identity until set.
+   */
+  private readonly statusOf = signal<(terminalId: string, hook: AgentStatus) => AgentStatus>(
+    (_id, hook) => hook,
+  );
+  /** The snapshot with the effective status on every terminal; what all views read. */
+  readonly snapshot = computed(() => {
+    const raw = this._snapshot();
+    const statusOf = this.statusOf();
+    let changed = false;
+    const terminals = raw.terminals.map((t) => {
+      const status = statusOf(t.terminal_id, t.agent_status);
+      if (status === t.agent_status) return t;
+      changed = true;
+      return { ...t, agent_status: status };
+    });
+    return changed ? { ...raw, terminals } : raw;
+  });
   /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
   readonly loaded = this._loaded.asReadonly();
   /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
@@ -106,6 +128,8 @@ export class HerdrStore {
   });
   /** The version of this poimen build. */
   readonly appVersion = this._appVersion.asReadonly();
+  /** The release channel of this build: `rc` for the side-by-side "Poimen RC" app, else `stable`. */
+  readonly appChannel = this._appChannel.asReadonly();
   /** Why herdr is not reachable; `null` while connected. */
   readonly connectionError = this._connectionError.asReadonly();
   /** Branch and worktree flag per pane directory; poimen asks git, herdr does not know them. */
@@ -125,14 +149,19 @@ export class HerdrStore {
   readonly tabOrder = computed<Readonly<Record<string, readonly string[]>>>(
     () => this.ui?.tabOrder() ?? {},
   );
-  readonly tree = computed(() => buildTree(this._snapshot(), this.spaceOrder(), this.tabOrder()));
+  readonly tree = computed(() => buildTree(this.snapshot(), this.spaceOrder(), this.tabOrder()));
   readonly spaces = computed(() =>
-    buildSpaces(this._snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
+    buildSpaces(this.snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
   );
-  readonly waiting = computed(() => waitingCount(this._snapshot().terminals));
+  readonly waiting = computed(() => waitingCount(this.snapshot().terminals));
   readonly panes = computed(
-    () => new Map(this._snapshot().terminals.map((p) => [p.terminal_id, p])),
+    () => new Map(this.snapshot().terminals.map((p) => [p.terminal_id, p])),
   );
+
+  /** Sets how a pane's hook status is combined with its runs; `App` wires `Deliver.paneStatus`. */
+  setStatusOf(fn: (terminalId: string, hook: AgentStatus) => AgentStatus): void {
+    this.statusOf.set(fn);
+  }
 
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private refreshing = false;
@@ -142,6 +171,9 @@ export class HerdrStore {
   private unlisten: Promise<Unlisten> | undefined;
   private reposKey: string | undefined;
   private reposStale = false;
+  /** Set until the first snapshot read of a backend session (start, reconnect, started server). */
+  private freshSession = true;
+  private readonly sessionListeners = new Set<(snapshot: Snapshot) => void>();
 
   constructor() {
     this.watchRepoTriggers();
@@ -157,6 +189,7 @@ export class HerdrStore {
     this.unlisten = this.bridge.listen<HerdrEvent>("herdr", (event) => this.handle(event));
     await this.unlisten;
     void this.readAppVersion();
+    void this.readAppChannel();
     await this.readBackendKind();
     const started = this.ensureBackend(false);
     await this.refresh();
@@ -174,6 +207,8 @@ export class HerdrStore {
     } catch (err) {
       this._backend.set({ state: "failed", reason: String(err) });
     }
+    // A server that was just started has its spaces back, but no terminals.
+    if (this._backend()?.state === "started") this.freshSession = true;
     // At start the first snapshot is already being read; only a started server needs another read.
     if (retry || this._backend()?.state === "started") {
       this._info.set(null);
@@ -181,9 +216,18 @@ export class HerdrStore {
     }
   }
 
+  /**
+   * Calls `listener` with the first snapshot read of every backend session: at start, after the
+   * event watcher reconnected and after `ensure_backend` started the server. Returns the unsubscribe.
+   */
+  onSessionStart(listener: (snapshot: Snapshot) => void): () => void {
+    this.sessionListeners.add(listener);
+    return () => this.sessionListeners.delete(listener);
+  }
+
   /** The next blocked pane after `activeId`, wrapping around. */
   nextWaiting(activeId: string | null): Terminal | undefined {
-    return nextWaiting(this._snapshot().terminals, activeId);
+    return nextWaiting(this.snapshot().terminals, activeId);
   }
 
   pane(paneId: string): Terminal | undefined {
@@ -213,6 +257,10 @@ export class HerdrStore {
         this.ui?.pruneTabOrder(alive);
       }
       this._loaded.set(true);
+      if (this.freshSession) {
+        this.freshSession = false;
+        for (const listener of this.sessionListeners) listener(snapshot);
+      }
       if (!this._watchLost()) this._connectionError.set(null);
       if (!this._info()) await this.readInfo();
       await this.readRepos(snapshot);
@@ -228,6 +276,15 @@ export class HerdrStore {
         this.refreshWaiters = [];
         void this.refresh().finally(() => waiters.forEach((resolve) => resolve()));
       }
+    }
+  }
+
+  private async readAppChannel(): Promise<void> {
+    try {
+      const channel = await this.bridge.invoke<string | undefined>("app_channel");
+      this._appChannel.set(channel === "rc" ? "rc" : "stable");
+    } catch {
+      // stays stable
     }
   }
 
@@ -262,7 +319,13 @@ export class HerdrStore {
 
   /** Looks up branch and worktree of the pane directories. A failure only leaves them blank. */
   private async readRepos(snapshot: Snapshot): Promise<void> {
-    const dirs = [...new Set(snapshot.terminals.map(paneDir).filter((d): d is string => !!d))];
+    const dirs = [
+      ...new Set(
+        [...snapshot.spaces.map((s) => s.cwd), ...snapshot.terminals.map(paneDir)].filter(
+          (d): d is string => !!d,
+        ),
+      ),
+    ];
     const key = dirs.join("\n");
     // Git runs when the pane set (its directories) changed or a trigger asked for it.
     if (!this.reposStale && key === this.reposKey) return;
@@ -328,6 +391,8 @@ export class HerdrStore {
         this._watchLost.set(true);
         this._connectionError.set(event.data?.reason ?? "");
         this._info.set(null);
+        // The server may come back restarted: its spaces without their terminals.
+        this.freshSession = true;
         return;
       case "pane.agent_status_changed":
         if (event.data?.pane_id && event.data.agent_status) {

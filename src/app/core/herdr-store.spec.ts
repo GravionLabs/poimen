@@ -93,6 +93,21 @@ describe("HerdrStore", () => {
     expect(tauri.calls("herdr_info")).toHaveLength(1);
   });
 
+  it("reads the release channel of the build, stable when it cannot say", async () => {
+    tauri.answer("app_channel", () => "rc");
+    await store.start();
+    await vi.waitFor(() => expect(store.appChannel()).toBe("rc"));
+  });
+
+  it("keeps the stable channel for an unknown or failing answer", async () => {
+    tauri.answer("app_channel", () => {
+      throw new Error("no command");
+    });
+    await store.start();
+    await store.refresh();
+    expect(store.appChannel()).toBe("stable");
+  });
+
   it("leaves the version unknown without an error when herdr cannot say", async () => {
     tauri.answer("herdr_info", () => {
       throw new Error("no socket");

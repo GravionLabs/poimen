@@ -341,6 +341,30 @@
   display: none;
 }
 
+/* An empty space after a server restart: its Rebuild action or why it stays empty. */
+.rebuild,
+.rebuild-label,
+.rebuild-hint {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.85em;
+}
+
+.rebuild {
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.rebuild-label,
+.rebuild-hint {
+  font-style: italic;
+  opacity: 0.7;
+}
+
 .gear + .close {
   margin-left: 0;
 }

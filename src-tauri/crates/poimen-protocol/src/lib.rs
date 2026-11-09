@@ -12,7 +12,7 @@ use serde_json::Value;
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
@@ -23,76 +23,203 @@ pub const ENV_TERMINAL_ID: &str = "POIMEN_TERMINAL_ID";
 /// stable (inside an AppImage), pointing at the stable link of its staged copy.
 pub const ENV_HOOK_EXE: &str = "POIMEN_HOOK_EXE";
 
+/// The release channel a binary is built for, fixed at build time by `POIMEN_CHANNEL` (`rc` for
+/// the pre-release builds of `release.yml`, unset or `stable` otherwise). Every path a stable
+/// and an rc installation could share is named per channel, so the two run side by side, each
+/// with its own server, settings and hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Channel {
+    Stable,
+    Rc,
+}
+
+impl Channel {
+    pub const ALL: [Channel; 2] = [Channel::Stable, Channel::Rc];
+
+    /// The channel of a `POIMEN_CHANNEL` value: unset, empty or `stable` is stable, `rc` is rc,
+    /// anything else `None`.
+    pub const fn parse(value: Option<&str>) -> Option<Channel> {
+        match value {
+            None => Some(Channel::Stable),
+            Some(v) if v.is_empty() || const_eq(v, "stable") => Some(Channel::Stable),
+            Some(v) if const_eq(v, "rc") => Some(Channel::Rc),
+            Some(_) => None,
+        }
+    }
+
+    /// `stable` or `rc`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Channel::Stable => "stable",
+            Channel::Rc => "rc",
+        }
+    }
+
+    /// What names of this channel end with: nothing on stable, `-rc` on rc.
+    pub const fn suffix(self) -> &'static str {
+        match self {
+            Channel::Stable => "",
+            Channel::Rc => "-rc",
+        }
+    }
+
+    /// `base` with the channel suffix: `poimen` stays `poimen` on stable and is `poimen-rc` on rc.
+    pub fn named(self, base: &str) -> String {
+        format!("{base}{}", self.suffix())
+    }
+
+    /// The file name of this channel's `poimen-server` binary (`poimen-server-rc` on rc; `.exe`
+    /// on Windows).
+    pub fn server_program(self, windows: bool) -> String {
+        let name = self.named("poimen-server");
+        if windows { format!("{name}.exe") } else { name }
+    }
+}
+
+const fn const_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// The channel of this build (`POIMEN_CHANNEL` at build time). An unknown value fails the build.
+pub const CHANNEL: Channel = match Channel::parse(option_env!("POIMEN_CHANNEL")) {
+    Some(channel) => channel,
+    None => panic!("POIMEN_CHANNEL must be `stable` or `rc`"),
+};
+
 /// The directory under `%LOCALAPPDATA%` that holds the socket marker, `server.lock`,
-/// `server.json` and the started server copies on Windows (not the install directory).
-pub const WINDOWS_DIR: &str = "poimen-server";
+/// `server.json` and the started server copies on Windows (not the install directory):
+/// `poimen-server`, on rc `poimen-server-rc`.
+pub fn windows_dir_name(channel: Channel) -> String {
+    channel.named("poimen-server")
+}
 
-/// The socket path. Unix: `$POIMEN_SOCKET`, else `$XDG_RUNTIME_DIR/poimen/server.sock`, else
-/// `<temp dir>/poimen-<user>/server.sock`. Windows: `$POIMEN_SOCKET`, else
-/// `%LOCALAPPDATA%\poimen-server\server.sock` (a marker file; the server listens on the named
-/// pipe of that path), else `<temp dir>\poimen-<user>\server.sock`. One server per user.
+/// The socket this build's app and server use: `$POIMEN_SOCKET`, unless it is the default socket
+/// of another channel (a terminal of the other installation passes it on to what it starts),
+/// else the default of [`CHANNEL`] ([`SocketEnv::default_path`]). One server per user and channel.
 pub fn socket_path() -> PathBuf {
-    if cfg!(windows) {
-        windows_socket_path_from(
-            std::env::var_os(ENV_SOCKET),
-            std::env::var_os("LOCALAPPDATA"),
-            std::env::var("USERNAME").ok(),
-            std::env::temp_dir(),
-        )
-    } else {
-        socket_path_from(
-            std::env::var_os(ENV_SOCKET),
-            std::env::var_os("XDG_RUNTIME_DIR"),
-            std::env::var("USER").ok(),
-            std::env::temp_dir(),
-        )
+    SocketEnv::from_process().path(CHANNEL)
+}
+
+/// The socket of the terminal this process runs in: `$POIMEN_SOCKET` as it is (whichever
+/// channel's server owns the terminal), else [`socket_path`]. For commands run inside a terminal
+/// (`poimen-server report`).
+pub fn terminal_socket_path() -> PathBuf {
+    let env = SocketEnv::from_process();
+    env.override_path().unwrap_or_else(|| env.path(CHANNEL))
+}
+
+/// Whether `$POIMEN_SOCKET` names the default socket of another channel than [`CHANNEL`]: this
+/// process runs in a terminal of the other installation, whose own hooks report for it.
+pub fn foreign_socket() -> bool {
+    SocketEnv::from_process().is_foreign(CHANNEL)
+}
+
+/// What the socket path is made of; empty values count as unset.
+#[derive(Debug, Clone, Default)]
+pub struct SocketEnv {
+    /// `$POIMEN_SOCKET`.
+    pub socket: Option<std::ffi::OsString>,
+    /// Unix: `$XDG_RUNTIME_DIR`. Windows: `%LOCALAPPDATA%`.
+    pub base: Option<std::ffi::OsString>,
+    /// `$USER`, on Windows `%USERNAME%`.
+    pub user: Option<String>,
+    pub temp_dir: PathBuf,
+    pub windows: bool,
+}
+
+impl SocketEnv {
+    /// The environment of this process.
+    pub fn from_process() -> Self {
+        let windows = cfg!(windows);
+        let (base, user) = if windows {
+            ("LOCALAPPDATA", "USERNAME")
+        } else {
+            ("XDG_RUNTIME_DIR", "USER")
+        };
+        Self {
+            socket: std::env::var_os(ENV_SOCKET),
+            base: std::env::var_os(base),
+            user: std::env::var(user).ok(),
+            temp_dir: std::env::temp_dir(),
+            windows,
+        }
+    }
+
+    /// `$POIMEN_SOCKET`, when set and not empty.
+    pub fn override_path(&self) -> Option<PathBuf> {
+        self.socket
+            .as_ref()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+    }
+
+    /// The default socket of `channel`, ignoring `$POIMEN_SOCKET`. Unix:
+    /// `$XDG_RUNTIME_DIR/poimen/server.sock`, else `<temp dir>/poimen-<user>/server.sock`.
+    /// Windows: `%LOCALAPPDATA%\poimen-server\server.sock` (a marker file; the server listens on
+    /// the named pipe of that path), else `<temp dir>\poimen-<user>\server.sock`. On rc the
+    /// directories are `poimen-rc`, `poimen-server-rc` and `poimen-rc-<user>`.
+    pub fn default_path(&self, channel: Channel) -> PathBuf {
+        if self.windows {
+            if let Some(dir) = windows_dir_from(self.base.clone(), channel) {
+                return dir.join("server.sock");
+            }
+        } else if let Some(dir) = self.base.as_ref().filter(|s| !s.is_empty()) {
+            return PathBuf::from(dir)
+                .join(channel.named("poimen"))
+                .join("server.sock");
+        }
+        self.temp_dir
+            .join(user_dir_name(self.user.clone(), channel))
+            .join("server.sock")
+    }
+
+    /// Whether `$POIMEN_SOCKET` is the default socket of another channel than `channel`.
+    pub fn is_foreign(&self, channel: Channel) -> bool {
+        self.override_path().is_some_and(|socket| {
+            Channel::ALL
+                .into_iter()
+                .any(|other| other != channel && self.default_path(other) == socket)
+        })
+    }
+
+    /// The socket of `channel`: `$POIMEN_SOCKET` unless it is [foreign](Self::is_foreign), else
+    /// the [default](Self::default_path).
+    pub fn path(&self, channel: Channel) -> PathBuf {
+        match self.override_path() {
+            Some(socket) if !self.is_foreign(channel) => socket,
+            _ => self.default_path(channel),
+        }
     }
 }
 
-/// The Windows [`socket_path`] with the environment passed in; empty values count as unset.
-pub fn windows_socket_path_from(
-    socket: Option<std::ffi::OsString>,
+/// `%LOCALAPPDATA%\poimen-server` (on rc `poimen-server-rc`) when `LOCALAPPDATA` is set and not
+/// empty.
+pub fn windows_dir_from(
     local_app_data: Option<std::ffi::OsString>,
-    user: Option<String>,
-    temp_dir: PathBuf,
-) -> PathBuf {
-    if let Some(socket) = socket.filter(|s| !s.is_empty()) {
-        return PathBuf::from(socket);
-    }
-    if let Some(dir) = windows_dir_from(local_app_data) {
-        return dir.join("server.sock");
-    }
-    temp_dir.join(user_dir_name(user)).join("server.sock")
-}
-
-/// `%LOCALAPPDATA%\poimen-server` when `LOCALAPPDATA` is set and not empty.
-pub fn windows_dir_from(local_app_data: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    channel: Channel,
+) -> Option<PathBuf> {
     local_app_data
         .filter(|s| !s.is_empty())
-        .map(|dir| PathBuf::from(dir).join(WINDOWS_DIR))
+        .map(|dir| PathBuf::from(dir).join(windows_dir_name(channel)))
 }
 
-fn user_dir_name(user: Option<String>) -> String {
+fn user_dir_name(user: Option<String>, channel: Channel) -> String {
     let user = user
         .filter(|u| !u.is_empty())
         .unwrap_or_else(|| "user".into());
-    format!("poimen-{user}")
-}
-
-/// [`socket_path`] with the environment passed in; empty values count as unset.
-pub fn socket_path_from(
-    socket: Option<std::ffi::OsString>,
-    runtime_dir: Option<std::ffi::OsString>,
-    user: Option<String>,
-    temp_dir: PathBuf,
-) -> PathBuf {
-    if let Some(socket) = socket.filter(|s| !s.is_empty()) {
-        return PathBuf::from(socket);
-    }
-    if let Some(dir) = runtime_dir.filter(|s| !s.is_empty()) {
-        return PathBuf::from(dir).join("poimen").join("server.sock");
-    }
-    temp_dir.join(user_dir_name(user)).join("server.sock")
+    format!("{}-{user}", channel.named("poimen"))
 }
 
 /// The effective user id of this process, read as the owner of a file created now (std has no
@@ -263,11 +390,124 @@ pub fn params<T: for<'de> Deserialize<'de>>(request: &Request) -> Result<T, Resp
 
 // --- model -------------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Space {
     pub id: String,
     pub name: String,
     pub cwd: String,
+    /// The `tab_id`s of the space in order (empty from a protocol 3 server).
+    #[serde(default)]
+    pub tabs: Vec<String>,
+    /// The focused tab, shared by every client (the last `tab.focus` wins); `None` without tabs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_tab: Option<String>,
+}
+
+/// How a split arranges its two children: `right` puts the second one right of the first,
+/// `down` below it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitDirection {
+    Right,
+    Down,
+}
+
+/// The ratio a split gets when `tab.split` names none.
+pub const DEFAULT_SPLIT_RATIO: f64 = 0.5;
+
+/// Whether `ratio` is a share the first child of a split can take: above 0, below 1.
+pub fn valid_ratio(ratio: f64) -> bool {
+    ratio.is_finite() && ratio > 0.0 && ratio < 1.0
+}
+
+/// A node of a tab's split tree: a terminal, or a split of two nodes. Every leaf is a running
+/// terminal and every running terminal is in exactly one leaf.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Node {
+    Terminal {
+        terminal_id: String,
+    },
+    Split {
+        /// Assigned by the server, unique within it and stable for the life of the split (also
+        /// across restarts); `tab.resize_split` addresses the split by it.
+        split_id: String,
+        direction: SplitDirection,
+        /// The share of the first child, above 0 and below 1.
+        ratio: f64,
+        children: Box<[Node; 2]>,
+    },
+}
+
+impl Node {
+    pub fn terminal(terminal_id: impl Into<String>) -> Self {
+        Node::Terminal {
+            terminal_id: terminal_id.into(),
+        }
+    }
+
+    /// The terminals of the leaves, depth first (first child before second).
+    pub fn terminal_ids(&self) -> Vec<&str> {
+        let mut ids = Vec::new();
+        self.walk(&mut |node| {
+            if let Node::Terminal { terminal_id } = node {
+                ids.push(terminal_id.as_str());
+            }
+        });
+        ids
+    }
+
+    /// The `split_id`s of the tree, depth first.
+    pub fn split_ids(&self) -> Vec<&str> {
+        let mut ids = Vec::new();
+        self.walk(&mut |node| {
+            if let Node::Split { split_id, .. } = node {
+                ids.push(split_id.as_str());
+            }
+        });
+        ids
+    }
+
+    pub fn contains_terminal(&self, terminal_id: &str) -> bool {
+        self.terminal_ids().contains(&terminal_id)
+    }
+
+    /// The first leaf (depth first).
+    pub fn first_terminal(&self) -> &str {
+        match self {
+            Node::Terminal { terminal_id } => terminal_id,
+            Node::Split { children, .. } => children[0].first_terminal(),
+        }
+    }
+
+    fn walk<'a>(&'a self, f: &mut dyn FnMut(&'a Node)) {
+        f(self);
+        if let Node::Split { children, .. } = self {
+            children[0].walk(f);
+            children[1].walk(f);
+        }
+    }
+}
+
+/// A tab of a space: a name and a split tree of terminals.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Tab {
+    pub tab_id: String,
+    pub space_id: String,
+    pub name: String,
+    pub root: Node,
+    /// The focused leaf of the tab, shared by every client (the last `tab.focus` wins).
+    #[serde(default)]
+    pub active_terminal: String,
+}
+
+/// Result of `space.list`: the spaces with the tabs of all of them.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpaceList {
+    pub spaces: Vec<Space>,
+    /// Absent from a protocol 3 server.
+    #[serde(default)]
+    pub tabs: Vec<Tab>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -463,6 +703,73 @@ pub struct TerminalCreate {
     pub rows: Option<u16>,
 }
 
+/// `tab.create`: a new tab at the end of the space, with `terminal_id` (moved out of its tab) or
+/// a new terminal (the space's cwd, the default shell).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabCreate {
+    pub space_id: String,
+    /// Defaults to the name of the terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabRename {
+    pub tab_id: String,
+    pub name: String,
+}
+
+/// `tab.close`: closes the tab and its terminals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabClose {
+    pub tab_id: String,
+}
+
+/// `tab.move`: moves the tab to `index` of its space's order (past the end: the last place).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabMove {
+    pub tab_id: String,
+    pub index: usize,
+}
+
+/// `tab.split`: creates a terminal and splits the leaf of `terminal_id` into the old leaf (first
+/// child) and the new terminal (second child).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TabSplit {
+    pub terminal_id: String,
+    pub direction: SplitDirection,
+    /// The share of the old leaf; [`DEFAULT_SPLIT_RATIO`] when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ratio: Option<f64>,
+    /// Defaults to the cwd of the split terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Program and arguments, never through a shell; defaults to the user's `$SHELL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+}
+
+/// `tab.resize_split`: sets the ratio of one split; an unknown `split_id` is `not_found`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TabResizeSplit {
+    pub tab_id: String,
+    pub split_id: String,
+    pub ratio: f64,
+}
+
+/// `tab.focus`: makes the tab the space's active tab and, with `terminal_id`, that leaf the
+/// tab's active terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabFocus {
+    pub tab_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalRename {
     pub terminal_id: String,
@@ -565,6 +872,16 @@ pub enum Event {
     SpaceRenamed { space: Space },
     #[serde(rename = "space.closed")]
     SpaceClosed { space_id: String },
+    /// The order of the space's tabs or its `active_tab` changed.
+    #[serde(rename = "space.changed")]
+    SpaceChanged { space: Space },
+    #[serde(rename = "tab.created")]
+    TabCreated { tab: Tab },
+    /// The tab after any change of its tree, name, place in the order or focus.
+    #[serde(rename = "tab.changed")]
+    TabChanged { tab: Tab },
+    #[serde(rename = "tab.closed")]
+    TabClosed { tab_id: String, space_id: String },
     #[serde(rename = "terminal.created")]
     TerminalCreated { terminal: Terminal },
     #[serde(rename = "terminal.renamed")]
@@ -826,6 +1143,183 @@ mod tests {
     }
 
     #[test]
+    fn a_protocol_3_space_has_no_tabs_and_a_protocol_4_space_lists_them() {
+        let old: Space = serde_json::from_value(json!({"id":"s1","name":"a","cwd":"/x"})).unwrap();
+        assert_eq!((old.tabs.len(), old.active_tab), (0, None));
+        let space: Space = serde_json::from_value(
+            json!({"id":"s1","name":"a","cwd":"/x","tabs":["tab2","tab3"],"active_tab":"tab3"}),
+        )
+        .unwrap();
+        assert_eq!(space.tabs, ["tab2", "tab3"]);
+        assert_eq!(space.active_tab.as_deref(), Some("tab3"));
+        assert_eq!(
+            serde_json::to_value(Space {
+                id: "s1".into(),
+                name: "a".into(),
+                cwd: "/x".into(),
+                ..Default::default()
+            })
+            .unwrap(),
+            json!({"id":"s1","name":"a","cwd":"/x","tabs":[]})
+        );
+    }
+
+    fn tree() -> Value {
+        json!({"kind":"split","split_id":"split5","direction":"right","ratio":0.25,"children":[
+            {"kind":"terminal","terminal_id":"t1"},
+            {"kind":"split","split_id":"split7","direction":"down","ratio":0.5,"children":[
+                {"kind":"terminal","terminal_id":"t4"},
+                {"kind":"terminal","terminal_id":"t6"}
+            ]}
+        ]})
+    }
+
+    #[test]
+    fn a_tab_and_its_split_tree_round_trip() {
+        let wire = json!({"tab_id":"tab2","space_id":"s1","name":"dev","root":tree(),
+            "active_terminal":"t4"});
+        let tab: Tab = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(tab.root.terminal_ids(), ["t1", "t4", "t6"]);
+        assert_eq!(tab.root.split_ids(), ["split5", "split7"]);
+        assert_eq!(tab.root.first_terminal(), "t1");
+        assert!(tab.root.contains_terminal("t6"));
+        assert!(!tab.root.contains_terminal("t9"));
+        match &tab.root {
+            Node::Split {
+                direction, ratio, ..
+            } => assert_eq!((*direction, *ratio), (SplitDirection::Right, 0.25)),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(serde_json::to_value(&tab).unwrap(), wire);
+        let leaf: Node =
+            serde_json::from_value(json!({"kind":"terminal","terminal_id":"t1"})).unwrap();
+        assert_eq!(leaf, Node::terminal("t1"));
+    }
+
+    #[test]
+    fn a_split_needs_exactly_two_children_and_a_known_kind_and_direction() {
+        let leaf = json!({"kind":"terminal","terminal_id":"t1"});
+        let split = |children: Value, direction: &str| {
+            json!({"kind":"split","split_id":"split1","direction":direction,"ratio":0.5,
+                "children":children})
+        };
+        assert!(serde_json::from_value::<Node>(split(json!([leaf, leaf]), "down")).is_ok());
+        assert!(serde_json::from_value::<Node>(split(json!([leaf]), "down")).is_err());
+        assert!(serde_json::from_value::<Node>(split(json!([leaf, leaf, leaf]), "down")).is_err());
+        assert!(serde_json::from_value::<Node>(split(json!([leaf, leaf]), "left")).is_err());
+        assert!(serde_json::from_value::<Node>(json!({"kind":"pane","terminal_id":"t1"})).is_err());
+        assert!(serde_json::from_value::<Node>(json!({"kind":"split","split_id":"x"})).is_err());
+    }
+
+    #[test]
+    fn ratios_are_strictly_between_0_and_1() {
+        assert!(valid_ratio(0.5));
+        assert!(valid_ratio(0.01));
+        assert!(!valid_ratio(0.0));
+        assert!(!valid_ratio(1.0));
+        assert!(!valid_ratio(-0.2));
+        assert!(!valid_ratio(f64::NAN));
+        assert!(!valid_ratio(f64::INFINITY));
+    }
+
+    #[test]
+    fn the_space_list_carries_tabs_and_defaults_them_for_protocol_3() {
+        let list: SpaceList = serde_json::from_value(json!({"spaces":[{"id":"s1","name":"a",
+            "cwd":"/x","tabs":["tab2"],"active_tab":"tab2"}],"tabs":[{"tab_id":"tab2",
+            "space_id":"s1","name":"zsh","root":{"kind":"terminal","terminal_id":"t3"},
+            "active_terminal":"t3"}]}))
+        .unwrap();
+        assert_eq!(list.tabs[0].root, Node::terminal("t3"));
+        let old: SpaceList =
+            serde_json::from_value(json!({"spaces":[{"id":"s1","name":"a","cwd":"/x"}]})).unwrap();
+        assert!(old.tabs.is_empty());
+    }
+
+    #[test]
+    fn tab_request_params() {
+        let p: TabCreate = serde_json::from_value(json!({"space_id":"s1"})).unwrap();
+        assert_eq!((p.name, p.terminal_id), (None, None));
+        let p: TabCreate =
+            serde_json::from_value(json!({"space_id":"s1","name":"logs","terminal_id":"t2"}))
+                .unwrap();
+        assert_eq!(
+            (p.name.as_deref(), p.terminal_id.as_deref()),
+            (Some("logs"), Some("t2"))
+        );
+        assert!(serde_json::from_value::<TabCreate>(json!({})).is_err());
+
+        let p: TabRename = serde_json::from_value(json!({"tab_id":"tab2","name":"x"})).unwrap();
+        assert_eq!(p.name, "x");
+        let p: TabClose = serde_json::from_value(json!({"tab_id":"tab2"})).unwrap();
+        assert_eq!(p.tab_id, "tab2");
+        let p: TabMove = serde_json::from_value(json!({"tab_id":"tab2","index":0})).unwrap();
+        assert_eq!(p.index, 0);
+        assert!(serde_json::from_value::<TabMove>(json!({"tab_id":"tab2","index":-1})).is_err());
+
+        let p: TabSplit =
+            serde_json::from_value(json!({"terminal_id":"t1","direction":"down"})).unwrap();
+        assert_eq!(p.direction, SplitDirection::Down);
+        assert_eq!(
+            (p.ratio, p.cwd, p.name, p.command),
+            (None, None, None, None)
+        );
+        let p: TabSplit = serde_json::from_value(json!({"terminal_id":"t1","direction":"right",
+            "ratio":0.3,"cwd":"/w","name":"logs","command":["tail","-f","x"]}))
+        .unwrap();
+        assert_eq!(p.ratio, Some(0.3));
+        assert_eq!(p.command.unwrap(), ["tail", "-f", "x"]);
+        assert!(serde_json::from_value::<TabSplit>(json!({"terminal_id":"t1"})).is_err());
+
+        let p: TabResizeSplit =
+            serde_json::from_value(json!({"tab_id":"tab2","split_id":"split3","ratio":0.7}))
+                .unwrap();
+        assert_eq!((p.split_id.as_str(), p.ratio), ("split3", 0.7));
+        assert!(
+            serde_json::from_value::<TabResizeSplit>(json!({"tab_id":"tab2","ratio":0.7})).is_err()
+        );
+
+        let p: TabFocus = serde_json::from_value(json!({"tab_id":"tab2"})).unwrap();
+        assert_eq!(p.terminal_id, None);
+        let p: TabFocus =
+            serde_json::from_value(json!({"tab_id":"tab2","terminal_id":"t4"})).unwrap();
+        assert_eq!(p.terminal_id.as_deref(), Some("t4"));
+    }
+
+    #[test]
+    fn tab_event_wire_shapes() {
+        let tab = json!({"tab_id":"tab2","space_id":"s1","name":"dev","root":tree(),
+            "active_terminal":"t1"});
+        for name in ["tab.created", "tab.changed"] {
+            let event: Event =
+                serde_json::from_value(json!({"event":name,"data":{"tab":tab}})).unwrap();
+            let parsed = match &event {
+                Event::TabCreated { tab } | Event::TabChanged { tab } => tab,
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(parsed.tab_id, "tab2");
+            assert_eq!(
+                serde_json::to_value(&event).unwrap(),
+                json!({"event":name,"data":{"tab":tab}})
+            );
+        }
+        let closed = Event::TabClosed {
+            tab_id: "tab2".into(),
+            space_id: "s1".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&closed).unwrap(),
+            json!({"event":"tab.closed","data":{"tab_id":"tab2","space_id":"s1"}})
+        );
+        let changed: Event = serde_json::from_value(json!({"event":"space.changed","data":{
+            "space":{"id":"s1","name":"a","cwd":"/x","tabs":["tab3","tab2"],"active_tab":"tab2"}}}))
+        .unwrap();
+        match changed {
+            Event::SpaceChanged { space } => assert_eq!(space.tabs, ["tab3", "tab2"]),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
     fn bytes_round_trip_including_non_utf8() {
         let raw = [0u8, 0xff, 0x1b, b'[', 0xc3];
         assert_eq!(decode_bytes(&encode_bytes(&raw)).unwrap(), raw);
@@ -851,73 +1345,166 @@ mod tests {
         }
     }
 
+    fn unix_env(socket: Option<&str>, runtime: Option<&str>, user: Option<&str>) -> SocketEnv {
+        SocketEnv {
+            socket: socket.map(Into::into),
+            base: runtime.map(Into::into),
+            user: user.map(Into::into),
+            temp_dir: PathBuf::from("/tmp"),
+            windows: false,
+        }
+    }
+
     #[test]
     fn socket_path_precedence() {
-        let tmp = PathBuf::from("/tmp");
+        let stable = Channel::Stable;
         assert_eq!(
-            socket_path_from(
-                Some("/a.sock".into()),
-                Some("/run/user/1".into()),
-                None,
-                tmp.clone()
-            ),
+            unix_env(Some("/a.sock"), Some("/run/user/1"), None).path(stable),
             PathBuf::from("/a.sock")
         );
         assert_eq!(
-            socket_path_from(
-                Some("".into()),
-                Some("/run/user/1".into()),
-                None,
-                tmp.clone()
-            ),
+            unix_env(Some(""), Some("/run/user/1"), None).path(stable),
             PathBuf::from("/run/user/1/poimen/server.sock")
         );
         assert_eq!(
-            socket_path_from(None, None, Some("jk".into()), tmp),
+            unix_env(None, None, Some("jk")).path(stable),
             PathBuf::from("/tmp/poimen-jk/server.sock")
         );
+    }
+
+    #[test]
+    fn the_rc_channel_has_its_own_socket() {
+        assert_eq!(
+            unix_env(None, Some("/run/user/1"), None).path(Channel::Rc),
+            PathBuf::from("/run/user/1/poimen-rc/server.sock")
+        );
+        assert_eq!(
+            unix_env(None, None, Some("jk")).path(Channel::Rc),
+            PathBuf::from("/tmp/poimen-rc-jk/server.sock")
+        );
+        assert_eq!(
+            unix_env(None, None, None).path(Channel::Rc),
+            PathBuf::from("/tmp/poimen-rc-user/server.sock")
+        );
+    }
+
+    #[test]
+    fn the_default_socket_of_the_other_channel_is_foreign_and_ignored() {
+        // A stable app started from a terminal of the rc server, and the other way round.
+        let rc_terminal = unix_env(
+            Some("/run/user/1/poimen-rc/server.sock"),
+            Some("/run/user/1"),
+            None,
+        );
+        assert!(rc_terminal.is_foreign(Channel::Stable));
+        assert!(!rc_terminal.is_foreign(Channel::Rc));
+        assert_eq!(
+            rc_terminal.path(Channel::Stable),
+            PathBuf::from("/run/user/1/poimen/server.sock")
+        );
+        assert_eq!(
+            rc_terminal.path(Channel::Rc),
+            PathBuf::from("/run/user/1/poimen-rc/server.sock")
+        );
+        let stable_terminal = unix_env(Some("/tmp/poimen-jk/server.sock"), None, Some("jk"));
+        assert!(stable_terminal.is_foreign(Channel::Rc));
+        assert!(!stable_terminal.is_foreign(Channel::Stable));
+        // Any other path is an explicit choice, honored by both.
+        let custom = unix_env(Some("/a.sock"), Some("/run/user/1"), None);
+        assert!(!custom.is_foreign(Channel::Stable));
+        assert!(!custom.is_foreign(Channel::Rc));
+        assert_eq!(custom.path(Channel::Rc), PathBuf::from("/a.sock"));
+        assert!(!unix_env(None, Some("/run/user/1"), None).is_foreign(Channel::Rc));
+    }
+
+    fn windows_env(socket: Option<&str>, local: Option<&str>, user: Option<&str>) -> SocketEnv {
+        SocketEnv {
+            socket: socket.map(Into::into),
+            base: local.map(Into::into),
+            user: user.map(Into::into),
+            temp_dir: PathBuf::from(r"C:\Temp"),
+            windows: true,
+        }
     }
 
     #[test]
     fn windows_socket_path_precedence() {
         let tmp = PathBuf::from(r"C:\Temp");
         let local = PathBuf::from(r"C:\Users\u\AppData\Local");
+        let local_str = r"C:\Users\u\AppData\Local";
+        let stable = Channel::Stable;
         assert_eq!(
-            windows_socket_path_from(
-                Some(r"D:\x.sock".into()),
-                Some(local.clone().into()),
-                None,
-                tmp.clone()
-            ),
+            windows_env(Some(r"D:\x.sock"), Some(local_str), None).path(stable),
             PathBuf::from(r"D:\x.sock")
         );
         assert_eq!(
-            windows_socket_path_from(
-                Some("".into()),
-                Some(local.clone().into()),
-                None,
-                tmp.clone()
-            ),
+            windows_env(Some(""), Some(local_str), None).path(stable),
             local.join("poimen-server").join("server.sock")
         );
         assert_eq!(
-            windows_socket_path_from(None, Some("".into()), Some("jk".into()), tmp.clone()),
+            windows_env(None, Some(""), Some("jk")).path(stable),
             tmp.join("poimen-jk").join("server.sock")
         );
         assert_eq!(
-            windows_socket_path_from(None, None, None, tmp.clone()),
+            windows_env(None, None, None).path(stable),
             tmp.join("poimen-user").join("server.sock")
+        );
+        assert_eq!(
+            windows_env(None, Some(local_str), None).path(Channel::Rc),
+            local.join("poimen-server-rc").join("server.sock")
+        );
+        assert_eq!(
+            windows_env(None, None, Some("jk")).path(Channel::Rc),
+            tmp.join("poimen-rc-jk").join("server.sock")
+        );
+        let stable_terminal = windows_env(
+            Some(
+                &local
+                    .join("poimen-server")
+                    .join("server.sock")
+                    .to_string_lossy(),
+            ),
+            Some(local_str),
+            None,
+        );
+        assert!(stable_terminal.is_foreign(Channel::Rc));
+        assert_eq!(
+            stable_terminal.path(Channel::Rc),
+            local.join("poimen-server-rc").join("server.sock")
         );
     }
 
     #[test]
     fn the_windows_dir_needs_local_app_data() {
         assert_eq!(
-            windows_dir_from(Some(r"C:\L".into())),
+            windows_dir_from(Some(r"C:\L".into()), Channel::Stable),
             Some(PathBuf::from(r"C:\L").join("poimen-server"))
         );
-        assert_eq!(windows_dir_from(Some("".into())), None);
-        assert_eq!(windows_dir_from(None), None);
+        assert_eq!(
+            windows_dir_from(Some(r"C:\L".into()), Channel::Rc),
+            Some(PathBuf::from(r"C:\L").join("poimen-server-rc"))
+        );
+        assert_eq!(windows_dir_from(Some("".into()), Channel::Stable), None);
+        assert_eq!(windows_dir_from(None, Channel::Rc), None);
+    }
+
+    #[test]
+    fn channel_values_parse_and_name_things() {
+        assert_eq!(Channel::parse(None), Some(Channel::Stable));
+        assert_eq!(Channel::parse(Some("")), Some(Channel::Stable));
+        assert_eq!(Channel::parse(Some("stable")), Some(Channel::Stable));
+        assert_eq!(Channel::parse(Some("rc")), Some(Channel::Rc));
+        assert_eq!(Channel::parse(Some("RC")), None);
+        assert_eq!(Channel::parse(Some("beta")), None);
+        assert_eq!(Channel::parse(Some("rcx")), None);
+        assert_eq!(Channel::Stable.named("poimen"), "poimen");
+        assert_eq!(Channel::Rc.named("poimen"), "poimen-rc");
+        assert_eq!(Channel::Stable.server_program(false), "poimen-server");
+        assert_eq!(Channel::Rc.server_program(false), "poimen-server-rc");
+        assert_eq!(Channel::Rc.server_program(true), "poimen-server-rc.exe");
+        assert_eq!(Channel::Rc.name(), "rc");
+        assert_eq!(serde_json::to_value(Channel::Rc).unwrap(), "rc");
+        assert_eq!(serde_json::to_value(Channel::Stable).unwrap(), "stable");
     }
 }
 

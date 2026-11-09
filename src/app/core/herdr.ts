@@ -10,6 +10,11 @@ export interface Space {
   label: string;
   number: number;
   agent_status: AgentStatus;
+  /**
+   * The space's own directory (poimen backend: persisted in `server.json`, so it outlives the
+   * terminals across a server restart); herdr workspaces have none.
+   */
+  cwd?: string;
 }
 
 export interface Tab {
@@ -382,6 +387,8 @@ export interface PaneRow {
 export interface SpaceNode {
   workspace: Space;
   rows: PaneRow[];
+  /** Branch and worktree of the space's own directory (`workspace.cwd`), when known. */
+  repo?: RepoInfo;
 }
 
 /** Workspaces with their pane rows (tab label as secondary text), enriched with repo info. */
@@ -394,6 +401,7 @@ export function buildSpaces(
 ): SpaceNode[] {
   return buildTree(snapshot, order, tabOrder).map(({ workspace, tabs }) => ({
     workspace,
+    ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
     rows: tabs.flatMap(({ tab, panes }) =>
       panes.map((pane): PaneRow => {
         const dir = paneDir(pane);
@@ -465,6 +473,15 @@ export function herdrVersionLabel(info: HerdrInfo | null | undefined, backend = 
   return info?.version ? `backend ${backend} ${info.version}` : `backend ${backend} ?`;
 }
 
+/** The release channel of the build (`app_channel`): `rc` is the "Poimen RC" app installed beside the stable one. */
+export type AppChannel = "stable" | "rc";
+
+/** The window title: `poimen`, `poimen RC` on rc, with ` (<n> waiting)` while agents wait. */
+export function windowTitle(channel: AppChannel, waiting: number): string {
+  const name = channel === "rc" ? "poimen RC" : "poimen";
+  return waiting > 0 ? `${name} (${waiting} waiting)` : name;
+}
+
 /** `frontend poimen <version>`, or `frontend poimen ?` until the build version is known. */
 export function appVersionLabel(version: string | null | undefined): string {
   return version ? `frontend poimen ${version}` : "frontend poimen ?";
@@ -479,13 +496,23 @@ export function protocolWarning(info: HerdrInfo | null | undefined, backend = "h
 /** Where a split puts the new pane (`pane.split` direction). */
 export type SplitDirection = "right" | "down";
 
-/** The distinct directories of a workspace's panes, in pane order: the choices for a new terminal. */
+/**
+ * The distinct directories of a workspace: its own `cwd` first (a space without terminals still
+ * has it), then its panes' in pane order. The choices for a new terminal.
+ */
 export function workspaceDirs(snapshot: Snapshot, workspaceId: string): string[] {
+  const own = snapshot.spaces.find((s) => s.space_id === workspaceId)?.cwd?.trim();
   const dirs = snapshot.terminals
     .filter((pane) => pane.space_id === workspaceId)
     .map(paneDir)
     .filter((dir): dir is string => !!dir);
-  return [...new Set(dirs)];
+  return [...new Set(own ? [own, ...dirs] : dirs)];
+}
+
+/** Spaces with a directory of their own and no terminals: what a server restart leaves behind. */
+export function emptySpaces(snapshot: Snapshot): Space[] {
+  const used = new Set(snapshot.terminals.map((t) => t.space_id));
+  return snapshot.spaces.filter((s) => !!s.cwd?.trim() && !used.has(s.space_id));
 }
 
 /** Path segments for comparing directories; Windows paths (drive letter or UNC) ignore case. */
@@ -496,7 +523,8 @@ function comparableSegments(path: string): string[] {
 }
 
 /**
- * The space whose root contains `dir`: a pane of the space works in `dir` or above it. The deepest
+ * The space whose root contains `dir`: the space's own directory or one of its panes' is `dir` or
+ * above it. The deepest
  * such directory wins, then the lowest space number; `undefined` when no space contains it.
  */
 export function spaceContaining(snapshot: Snapshot, dir: string): string | undefined {

@@ -2,8 +2,9 @@
 //! tree the frontend builds (`workspaces`, `tabs`, `panes`), live terminals through
 //! `terminal.attach`.
 //!
-//! The server owns the PTYs and stores no layout: every terminal is its own tab, splits and tabs
-//! are the UI's business. A stream is emulated: it carries the snapshot and raw PTY bytes, so
+//! The server owns the PTYs and, since protocol 4, the tabs and split trees of each space; this
+//! backend does not read them yet (#513): every terminal is its own tab, splits and tabs are the
+//! UI's business. A stream is emulated: it carries the snapshot and raw PTY bytes, so
 //! xterm.js tracks the modes itself (mouse, scrollback). poimen stops the server only after the user confirmed (`restart_server`, `stop_server`).
 
 use std::collections::HashMap;
@@ -595,6 +596,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             cwd: format!("/work/{name}"),
+            ..Default::default()
         }
     }
 
@@ -1056,7 +1058,7 @@ mod tests {
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
-            ("0.9.0", Some(3), 3)
+            ("0.9.0", Some(4), 4)
         );
     }
 

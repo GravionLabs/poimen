@@ -19,6 +19,7 @@ import {
   rowName,
   supportsFlow,
   tabHeader,
+  windowTitle,
   type Mode,
   type Terminal,
 } from "./core/herdr";
@@ -69,6 +70,7 @@ import { Toolbar } from "./toolbar/toolbar";
 import { PaneActions } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
+import { SpaceRebuild } from "./core/space-rebuild";
 import { CommandPalette } from "./core/command-palette";
 import { ExplorerSelection } from "./core/explorer-selection";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
@@ -162,6 +164,7 @@ export class App {
   private readonly projectEntries = inject(ProjectEntries);
   protected readonly agentActions = inject(AgentActions);
   protected readonly deliver = inject(Deliver);
+  private readonly spaceRebuild = inject(SpaceRebuild);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
@@ -276,6 +279,8 @@ export class App {
       const pane = id ? this.pane(id) : undefined;
       this.projectEntries.setDir(pane ? paneDir(pane) : undefined);
     });
+    // Every view shows the hook status combined with the runs a pane started (#540).
+    effect(() => this.store.setStatusOf(this.deliver.paneStatus()));
     // Instantiated for its effect: the dock badge follows `Attention.count`.
     inject(DockBadge);
     const title = inject(Title);
@@ -285,15 +290,16 @@ export class App {
       const viewed = this.viewedPanes();
       const statuses = new Map([...panes].map(([id, pane]) => [id, pane.agent_status] as const));
       untracked(() => {
-        const changes = this.attention.observe(statuses, viewed);
+        const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
+        // A pane's `done` because its linked run ended is notified once, by the run (#540).
+        const changes = this.deliver.withoutRunEnds(observed);
         this.center.record(changes, (id) => this.tabTitle(id), Date.now());
         this.notifyChanges(changes);
       });
     });
     effect(() => {
-      const waiting = this.store.waiting();
-      title.setTitle(waiting > 0 ? `poimen (${waiting} waiting)` : "poimen");
+      title.setTitle(windowTitle(this.store.appChannel(), this.store.waiting()));
     });
 
     const destroyRef = inject(DestroyRef);
@@ -309,6 +315,8 @@ export class App {
     destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
     // The deliver loops of the repositories of the open spaces (status files, watched, no polling).
     destroyRef.onDestroy(this.deliver.start());
+    // Spaces back from a server restart without terminals get their layout again.
+    destroyRef.onDestroy(this.spaceRebuild.start());
     effect(() => {
       const dirs = this.store
         .snapshot()

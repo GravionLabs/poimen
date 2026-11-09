@@ -115,6 +115,12 @@
   font-weight: 600;
 }
 
+/* The release-candidate badge: this is the side-by-side "Poimen RC" app. */
+.channel {
+  color: #d29922;
+  font-weight: 700;
+}
+
 button.item {
   font: inherit;
   color: inherit;

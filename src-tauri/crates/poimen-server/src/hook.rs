@@ -6,7 +6,8 @@
 //! terminal (no terminal id in a poimen terminal, a payload that is not JSON or never arrives, no
 //! server, an unknown terminal, a stale report, no answer in time) is one line in `hooks.log`
 //! next to `server.json` (see [`crate::state_file_path`]) and on stderr. A run outside a poimen
-//! terminal, and an event poimen does not map, are not failures and leave no line.
+//! terminal, in a terminal of the other channel (stable or rc), and an event poimen does not map,
+//! are not failures and leave no line.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -35,6 +36,10 @@ pub struct HookEnv {
     pub terminal_id: Option<String>,
     /// Whether `$POIMEN_SOCKET` is set, which every poimen terminal has: the hook runs inside one.
     pub in_poimen: bool,
+    /// Whether `$POIMEN_SOCKET` is the default socket of the other channel (stable or rc,
+    /// [`poimen_protocol::foreign_socket`]): the terminal belongs to the other installation,
+    /// whose own hook reports for it.
+    pub foreign: bool,
     pub socket: PathBuf,
     /// The hook log; `None` keeps no log.
     pub log: Option<PathBuf>,
@@ -46,7 +51,8 @@ impl HookEnv {
         Self {
             terminal_id: std::env::var(ENV_TERMINAL_ID).ok(),
             in_poimen: std::env::var_os(ENV_SOCKET).is_some_and(|s| !s.is_empty()),
-            socket: poimen_protocol::socket_path(),
+            foreign: poimen_protocol::foreign_socket(),
+            socket: poimen_protocol::terminal_socket_path(),
             log: Some(log_path(&crate::state_file_path())),
         }
     }
@@ -96,6 +102,9 @@ fn report(
     env: &HookEnv,
     build: impl FnOnce(&str, u64, &Value) -> Option<TerminalReportAgent> + Send + 'static,
 ) -> Outcome {
+    if env.foreign {
+        return Outcome::Outside;
+    }
     let Some(terminal_id) = env.terminal_id.clone().filter(|t| !t.is_empty()) else {
         return if env.in_poimen {
             Outcome::Failed(format!(
@@ -243,9 +252,27 @@ mod tests {
         HookEnv {
             terminal_id: terminal.map(str::to_owned),
             in_poimen,
+            foreign: false,
             socket: PathBuf::from("/nonexistent/poimen/s.sock"),
             log,
         }
+    }
+
+    #[test]
+    fn a_terminal_of_the_other_channel_is_left_to_its_own_hook() {
+        let dir = temp("foreign");
+        let log = dir.join(LOG_NAME);
+        let foreign = HookEnv {
+            foreign: true,
+            ..env(Some("t1"), true, Some(log.clone()))
+        };
+        // Neither sent (the server is unreachable, which would fail) nor logged.
+        assert_eq!(
+            run(payload("{}"), &foreign, "hook claude", build),
+            Outcome::Outside
+        );
+        assert!(!log.exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn build(t: &str, seq: u64, _: &Value) -> Option<TerminalReportAgent> {

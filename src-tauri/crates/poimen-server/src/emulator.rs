@@ -826,4 +826,22 @@ mod tests {
         assert_eq!(e.take_replies(&Colors::default()), b"\x1b[?6c");
         assert!(e.take_replies(&Colors::default()).is_empty());
     }
+
+    /// The input of `src/app/terminal-view/unicode.spec.ts` (#502): wide characters without
+    /// their spacer cells, a row that relies on autowrap, the cursor last. A change here must
+    /// be copied there, so xterm.js stays tested against what the server sends.
+    #[test]
+    fn snapshot_of_wide_characters_and_a_wrapped_row() {
+        let mut e = fresh(8, 4);
+        e.feed("✅⚠🚀ab\r\n0123456789\x1b[1;6H".as_bytes());
+        assert_eq!(
+            String::from_utf8(e.dump_screen()).unwrap(),
+            "✅⚠🚀ab\r\n0123456789\r\n\x1b[1;6H"
+        );
+        let copy = replay(&e);
+        assert_eq!(row_text(&copy, 0), "✅ ⚠🚀 ab");
+        assert_eq!(row_text(&copy, 1), "01234567");
+        assert_eq!(row_text(&copy, 2), "89");
+        assert_eq!(copy.cursor(), (0, 5));
+    }
 }

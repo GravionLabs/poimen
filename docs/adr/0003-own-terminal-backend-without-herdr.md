@@ -55,7 +55,7 @@ poimen gets its own terminal backend. herdr stays as a second backend until the 
 
 ### Out of scope
 
-Remote machines (#11), herdr plugins (Epic #3), a TUI, a CLI and skill for agents to steer other agents, agents other than Claude Code and Copilot. Each needs its own decision when it comes up.
+Remote machines (#11, decided in [ADR 0008](0008-remote-machines-over-ssh.md)), herdr plugins (Epic #3), a TUI, a CLI and skill for agents to steer other agents, agents other than Claude Code and Copilot. Each needs its own decision when it comes up.
 
 ## Consequences
 

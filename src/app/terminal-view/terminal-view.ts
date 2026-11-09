@@ -19,6 +19,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
+import { useUnicode11 } from "./unicode";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge } from "../core/tauri";
 import {
@@ -241,6 +242,7 @@ export class TerminalView implements OnDestroy {
       allowProposedApi: true,
       ...this.look(),
     });
+    useUnicode11(term);
     const fit = new FitAddon();
     term.loadAddon(fit);
     // xterm marks a hovered link itself (underline, pointer); the view only needs to know about it.

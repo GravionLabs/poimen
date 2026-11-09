@@ -164,6 +164,31 @@
       @if (isClosing(d.workspace.space_id)) {
         <span class="closing-label" role="status">Closing…</span>
       }
+      @if (rebuildMark(d.workspace.space_id); as mark) {
+        @switch (mark.kind) {
+          @case ("consent") {
+            <button
+              type="button"
+              class="rebuild"
+              [attr.aria-label]="'Rebuild space ' + d.workspace.label"
+              [title]="'Rebuild the layout: ' + mark.reasons.join('; ')"
+              (click)="rebuildSpace(d.workspace.space_id, $event)"
+              (keydown)="$event.stopPropagation()"
+            >
+              Rebuild
+            </button>
+          }
+          @case ("busy") {
+            <span class="rebuild-label" role="status">Rebuilding…</span>
+          }
+          @case ("missing") {
+            <span class="rebuild-hint" [title]="mark.reason">Directory gone</span>
+          }
+          @case ("failed") {
+            <span class="rebuild-hint" [title]="mark.reason">Not rebuilt</span>
+          }
+        }
+      }
       @if (unreadOf(d.workspace.space_id); as n) {
         <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
       }

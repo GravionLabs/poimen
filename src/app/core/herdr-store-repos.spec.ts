@@ -60,6 +60,21 @@ describe("HerdrStore repos", () => {
     expect(store.spaces()[0].rows.map((r) => r.branch)).toEqual(["main", "main"]);
   });
 
+  it("asks for the directory of a space without terminals and keeps it on the space", async () => {
+    tauri.answer("snapshot", () => ({
+      spaces: [{ space_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/src/b" }],
+      tabs: [],
+      terminals: [],
+    }));
+    tauri.answer("repo_info", () => ({ "/src/b": { branch: "main", worktree: false } }));
+
+    await store.start();
+
+    expect(tauri.calls("repo_info")).toEqual([{ dirs: ["/src/b"] }]);
+    expect(store.spaces()[0].repo).toEqual({ branch: "main", worktree: false });
+    expect(store.spaces()[0].workspace.cwd).toBe("/src/b");
+  });
+
   it("carries dirty state and ahead/behind into the rows, null as unknown", async () => {
     tauri.answer("snapshot", () => snapshot(pane("w1:p1", { cwd: "/src/a" })));
     tauri.answer("repo_info", () => ({

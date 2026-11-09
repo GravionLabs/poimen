@@ -7,7 +7,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { SERVER_RESTART_NOTE, type UpdateState } from "../core/updater";
 import { figures, usageTitle, type UsageReport } from "../core/usage";
 import type { BarSummary } from "../deliver/deliver-status";
-import { connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
+import { CHANNEL_TITLE, connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
 
 beforeAll(() => {
   try {
@@ -78,6 +78,7 @@ describe("mode button", () => {
     deliver: BarSummary | null = null,
     server: string | null = null,
     update: UpdateState = { kind: "idle" },
+    channel: "stable" | "rc" = "stable",
   ) => {
     const emitted: boolean[] = [];
     const serverClicks: string[] = [];
@@ -96,6 +97,8 @@ describe("mode button", () => {
       blocked = () => blocked;
       size = () => undefined;
       appVersion = () => null;
+      channel = () => channel;
+      channelTitle = CHANNEL_TITLE;
       update = () => update;
       detailsOpen = () => update.kind === "available";
       serverNotice = () => server;
@@ -226,6 +229,21 @@ describe("mode button", () => {
     expect(kinds.slice(-4)).toEqual(["version", "version", "update", "help"]);
     expect(items.at(-1)?.classList.contains("help-button")).toBe(true);
     expect(items.at(-2)?.textContent?.trim()).toBe("Check for updates");
+  });
+
+  it("shows the RC badge and no self-update in an RC build", () => {
+    const { root } = render("control", null, true, null, null, null, { kind: "idle" }, "rc");
+    const badge = root.querySelector<HTMLElement>("[data-testid=channel]")!;
+    expect(badge.textContent?.trim()).toBe("RC");
+    expect(badge.title).toContain("does not update itself");
+    expect(root.querySelector(".update-button")).toBeNull();
+    expect(root.textContent).not.toContain("Check for updates");
+  });
+
+  it("has no RC badge in a stable build", () => {
+    const { root } = render("control", null);
+    expect(root.querySelector("[data-testid=channel]")).toBeNull();
+    expect(root.querySelector(".update-button")?.textContent?.trim()).toBe("Check for updates");
   });
 
   it("puts the pane id, mode and size before the versions", () => {
