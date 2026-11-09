@@ -56,6 +56,7 @@
     "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2",
     "@types/node": "^26.6.6",
+    "@xterm/headless": "6.0.0",
     "angular-eslint": "^22.6.0",
     "eslint": "^10.11.0",
     "jsdom": "^30.1.3",
