@@ -868,7 +868,7 @@ mod tests {
         std::fs::write(f.base.join("app-7/wip.txt"), "wip").unwrap();
         let head = run(&f.base.join("app-7"), &["rev-parse", "HEAD"]);
         let again = f.ensure(&f.repo).unwrap();
-        assert_eq!(again.path, first.path);
+        assert_eq!(again.path.replace('\\', "/"), first.path.replace('\\', "/"));
         assert!(!again.created);
         assert!(f.base.join("app-7/wip.txt").exists());
         assert_eq!(run(&f.base.join("app-7"), &["rev-parse", "HEAD"]), head);
@@ -1351,6 +1351,8 @@ mod tests {
         assert!(!ran.get());
     }
 
+    // POSIX shell command lines.
+    #[cfg(unix)]
     #[test]
     fn a_cleanup_command_replaces_the_built_in_removal() {
         let f = Fixture::new(true);
@@ -1408,6 +1410,8 @@ mod tests {
         );
     }
 
+    // POSIX shell command lines.
+    #[cfg(unix)]
     #[test]
     fn a_failing_cleanup_command_leaves_the_worktree_with_its_command() {
         let f = Fixture::new(true);
@@ -1668,7 +1672,7 @@ mod tests {
         let head = run(&wt_dir, &["rev-parse", "HEAD"]);
         let again = f.pr(&f.repo, 1, None).unwrap();
         assert!(!again.created);
-        assert_eq!(again.path, first.path);
+        assert_eq!(again.path.replace('\\', "/"), first.path.replace('\\', "/"));
         assert_eq!(again.branch, "pr/1");
         assert_eq!(run(&wt_dir, &["rev-parse", "HEAD"]), head);
         assert_eq!(
