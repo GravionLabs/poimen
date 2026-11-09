@@ -34,6 +34,7 @@ vi.mock("@xterm/xterm", () => ({
       fake.term = this;
     }
     buffer = { active: { viewportY: 0 } };
+    unicode = { activeVersion: "6" };
     get cols() {
       return fake.cols;
     }
@@ -76,6 +77,7 @@ vi.mock("@xterm/xterm", () => ({
     dispose() {}
   },
 }));
+vi.mock("@xterm/addon-unicode11", () => ({ Unicode11Addon: class {} }));
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
     fit() {
