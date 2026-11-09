@@ -419,7 +419,7 @@ Progress: 0 % (0 of 8 issues closed).
 <!-- roadmap:begin plan M16 -->
 ## M16
 
-Progress: 0 % (0 of 16 issues closed).
+Progress: 6 % (1 of 16 issues closed).
 
 | Order | Issue | Title                                                                                                  | Size | Depends on / decision       |
 | ----- | ----- | ------------------------------------------------------------------------------------------------------ | ---- | --------------------------- |
@@ -433,12 +433,11 @@ Progress: 0 % (0 of 16 issues closed).
 | 8     | #342  | [PBI] feat(github): multi-select and bulk actions in the issues tree                                   | M    | blocked by #340             |
 | 9     | #343  | [PBI] feat(github): create, edit and close milestones                                                  | S    | blocked by #338             |
 | 10    | #501  | [PBI] feat(agents): opt-in classic Claude Code renderer in poimen terminals                            | S    | blocked by #502             |
-| 11    | #548  | [PBI] feat(deliver): milestone panel for runs on a GitHub milestone                                    |      |                             |
-| 12    | #580  | [PBI] feat(settings): polish of the Spaces page                                                        | S    |                             |
-| 13    | #581  | [PBI] feat(settings): export and import settings as JSON                                               | M    |                             |
-| 14    | #584  | [PBI] feat(deliver): Runs view with filters and event timeline                                         | M    |                             |
-| 15    | #585  | [PBI] feat(deliver): expandable milestone overview with issue states                                   | M    | blocked by #584             |
-| 16    | #587  | [PBI] test: release candidate test of M016 on macOS, Windows, Linux                                    |      | release test, does not gate |
+| 11    | #580  | [PBI] feat(settings): polish of the Spaces page                                                        | S    |                             |
+| 12    | #581  | [PBI] feat(settings): export and import settings as JSON                                               | M    |                             |
+| 13    | #584  | [PBI] feat(deliver): Runs view with filters and event timeline                                         | M    |                             |
+| 14    | #585  | [PBI] feat(deliver): expandable milestone overview with issue states                                   | M    | blocked by #584             |
+| 15    | #587  | [PBI] test: release candidate test of M016 on macOS, Windows, Linux                                    |      | release test, does not gate |
 <!-- roadmap:end -->
 
 <!-- roadmap:slot plan -->
@@ -446,16 +445,16 @@ Progress: 0 % (0 of 16 issues closed).
 ## Later
 
 <!-- roadmap:begin later -->
-| Issue | Title                                                                  | Why later                             |
-| ----- | ---------------------------------------------------------------------- | ------------------------------------- |
-| #174  | [PBI] refactor(backend): remove the herdr backend                      | blocked by #515, #574                 |
-| #183  | [Feature] Detect listening ports and open them in the browser          | no milestone                          |
-| #184  | [Feature] Prompt editor with file mentions and drag and drop           | no milestone                          |
-| #185  | [Feature] One task to several agents and compare the results           | no milestone                          |
-| #318  | [Feature] Map directories to GitHub and Azure DevOps organizations     | no milestone                          |
-| #499  | [PBI] feat(updater): shared update channels (stable/rc) for Tauri apps | needs decision                        |
-| #582  | [Feature] Named layouts with a visual editor, templates reference them | needs decision; blocked by #513, #514 |
-| #583  | [Feature] MCP server for agent sessions                                | needs decision; blocked by #175       |
+| Issue | Title                                                                                           | Why later                             |
+| ----- | ----------------------------------------------------------------------------------------------- | ------------------------------------- |
+| #174  | [PBI] refactor(backend): remove the herdr backend                                               | blocked by #515, #574                 |
+| #183  | [Feature] Detect listening ports and open them in the browser                                   | no milestone                          |
+| #184  | [Feature] Prompt editor with file mentions and drag and drop                                    | no milestone                          |
+| #185  | [Feature] One task to several agents and compare the results                                    | no milestone                          |
+| #318  | [Feature] Map directories to GitHub and Azure DevOps organizations                              | no milestone                          |
+| #499  | [PBI] feat(updater): RC app updates on its own rc channel (shared channel block for Tauri apps) | blocked by #590                       |
+| #582  | [Feature] Named layouts with a visual editor, templates reference them                          | needs decision; blocked by #513, #514 |
+| #583  | [Feature] MCP server for agent sessions                                                         | needs decision; blocked by #175       |
 <!-- roadmap:end -->
 
 ## Risks
@@ -463,5 +462,5 @@ Progress: 0 % (0 of 16 issues closed).
 - **#510 blocks most of M14** (#511, #513, #514, #515 and everything after the TUI start). It is refined (2026-11-09) and should go first.
 - **The PTY host (#574, M14.1)** adds a process type and a host protocol that is not updated with the server; Windows behaviour when a host ends is still to be checked (#602). #174 (herdr removal) waits for it.
 - **Protocol 4 is a breaking change** (ADR 0006): a server left running from an older version needs the confirmed restart until #574 lands.
-- **Overlaps to resolve in refinement:** #548 and #585 (two milestone panels), #499 and #590 (RC update channel vs. RC without updater).
+- **RC channel (#590, #499):** the RC app installs side by side without an updater first; updates on its own `rc` channel follow with #499. Until then each RC is installed by hand.
 - Write further risks here by hand; the script never touches this section.
