@@ -88,3 +88,30 @@ fn ping_lists_connected_kinds_and_events_follow_connect_and_disconnect() {
     assert_eq!(client.ping().unwrap().clients, vec![ClientKind::Tui]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn undeclared_subscribers_get_no_clients_changed() {
+    let (client, dir) = start("undeclared");
+    // An old client: no `client`. It must stay connected and never see the new event.
+    let old = listen(client.subscribe().unwrap());
+    let declared = listen(client.subscribe_as(info(ClientKind::Tui)).unwrap());
+
+    let app = client.subscribe_as(info(ClientKind::App)).unwrap();
+    assert_eq!(
+        next_clients(&declared),
+        vec![ClientKind::App, ClientKind::Tui, ClientKind::Unknown]
+    );
+    drop(app);
+    assert_eq!(
+        next_clients(&declared),
+        vec![ClientKind::Tui, ClientKind::Unknown]
+    );
+
+    assert!(old.recv_timeout(Duration::from_millis(500)).is_err());
+    // Still subscribed and counted as unknown.
+    assert_eq!(
+        client.ping().unwrap().clients,
+        vec![ClientKind::Tui, ClientKind::Unknown]
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

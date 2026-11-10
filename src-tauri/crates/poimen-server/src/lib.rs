@@ -163,7 +163,15 @@ static NEXT_SUBSCRIBER: AtomicU64 = AtomicU64::new(1);
 struct Subscriber {
     id: u64,
     kind: ClientKind,
+    /// The client said what it is. Only these get `server.clients_changed`: an older client
+    /// cannot parse the event and would resync in a loop.
+    declared: bool,
     tx: Sender<Event>,
+}
+
+/// Sends the event to the subscribers that declared a client, dropping the ones that went away.
+fn notify_declared(subs: &mut Vec<Subscriber>, event: &Event) {
+    subs.retain(|s| !s.declared || s.tx.send(event.clone()).is_ok());
 }
 
 pub(crate) struct Shared {
@@ -195,7 +203,7 @@ impl Shared {
     }
 
     /// Registers a subscription and tells the others; the new one learns from `ping`.
-    fn add_subscriber(&self, kind: ClientKind, tx: Sender<Event>) -> u64 {
+    fn add_subscriber(&self, kind: ClientKind, declared: bool, tx: Sender<Event>) -> u64 {
         let id = NEXT_SUBSCRIBER.fetch_add(1, Ordering::Relaxed);
         let mut subs = lock(&self.subscribers);
         let event = Event::ServerClientsChanged {
@@ -206,8 +214,13 @@ impl Shared {
                 k
             },
         };
-        subs.retain(|s| s.tx.send(event.clone()).is_ok());
-        subs.push(Subscriber { id, kind, tx });
+        notify_declared(&mut subs, &event);
+        subs.push(Subscriber {
+            id,
+            kind,
+            declared,
+            tx,
+        });
         id
     }
 
@@ -222,7 +235,7 @@ impl Shared {
         let mut clients: Vec<_> = subs.iter().map(|s| s.kind).collect();
         clients.sort();
         let event = Event::ServerClientsChanged { clients };
-        subs.retain(|s| s.tx.send(event.clone()).is_ok());
+        notify_declared(&mut subs, &event);
     }
 
     /// Publishes the events of a layout change and saves the layout when there were any.
@@ -482,9 +495,10 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
                     continue;
                 }
             };
+            let declared = info.client.is_some();
             let kind = info.client.map_or(ClientKind::Unknown, |c| c.kind);
             let (tx, rx) = mpsc::channel();
-            let id = shared.add_subscriber(kind, tx);
+            let id = shared.add_subscriber(kind, declared, tx);
             // The client sends nothing more; the end of its side of the connection removes
             // the subscription, which also ends the loop below.
             let reader = stream.clone();

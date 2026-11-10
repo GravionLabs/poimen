@@ -673,7 +673,8 @@ pub enum ClientKind {
     App,
     Tui,
     Cli,
-    /// A subscription without `client`.
+    /// A subscription without `client`, or a kind this version does not know.
+    #[serde(other)]
     Unknown,
 }
 
@@ -1120,7 +1121,9 @@ mod tests {
             r#"{"id":"1","method":"events.subscribe","params":{"client":{"kind":"bogus","pid":1}}}"#,
         )
         .unwrap();
-        assert!(params::<EventsSubscribe>(&r).is_err());
+        // A kind of a newer client is read as unknown, not refused.
+        let p: EventsSubscribe = params(&r).unwrap();
+        assert_eq!(p.client.unwrap().kind, ClientKind::Unknown);
     }
 
     #[test]
