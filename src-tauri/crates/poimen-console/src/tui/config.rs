@@ -163,35 +163,128 @@ pub struct Keys {
     pub next: KeySpec,
     /// Selects the previous terminal.
     pub previous: KeySpec,
+    /// A new tab with a new terminal in the focused space.
+    pub new_tab: KeySpec,
+    pub next_tab: KeySpec,
+    pub previous_tab: KeySpec,
+    /// Closes the focused tab and its terminals.
+    pub close_tab: KeySpec,
+    pub split_right: KeySpec,
+    pub split_down: KeySpec,
+    /// Closes the focused pane's terminal.
+    pub close_pane: KeySpec,
+    pub focus_left: KeySpec,
+    pub focus_down: KeySpec,
+    pub focus_up: KeySpec,
+    pub focus_right: KeySpec,
+    /// Moves the border of the focused pane.
+    pub resize_left: KeySpec,
+    pub resize_down: KeySpec,
+    pub resize_up: KeySpec,
+    pub resize_right: KeySpec,
+}
+
+fn chr(c: char) -> KeySpec {
+    KeySpec::plain(KeyCode::Char(c))
 }
 
 impl Default for Keys {
     fn default() -> Self {
         Self {
-            detach: KeySpec::plain(KeyCode::Char('d')),
-            sidebar: KeySpec::plain(KeyCode::Char('b')),
+            detach: chr('d'),
+            sidebar: chr('b'),
             next: KeySpec::plain(KeyCode::Down),
             previous: KeySpec::plain(KeyCode::Up),
+            new_tab: chr('c'),
+            next_tab: chr('n'),
+            previous_tab: chr('p'),
+            close_tab: chr('&'),
+            split_right: chr('%'),
+            split_down: chr('"'),
+            close_pane: chr('x'),
+            focus_left: chr('h'),
+            focus_down: chr('j'),
+            focus_up: chr('k'),
+            focus_right: chr('l'),
+            resize_left: chr('H'),
+            resize_down: chr('J'),
+            resize_up: chr('K'),
+            resize_right: chr('L'),
         }
     }
 }
 
 /// The action names of `console.keys`.
-pub const KEY_ACTIONS: [&str; 4] = ["detach", "sidebar", "next", "previous"];
+pub const KEY_ACTIONS: [&str; 19] = [
+    "detach",
+    "sidebar",
+    "next",
+    "previous",
+    "new_tab",
+    "next_tab",
+    "previous_tab",
+    "close_tab",
+    "split_right",
+    "split_down",
+    "close_pane",
+    "focus_left",
+    "focus_down",
+    "focus_up",
+    "focus_right",
+    "resize_left",
+    "resize_down",
+    "resize_up",
+    "resize_right",
+];
 
 impl Keys {
     fn slot(&mut self, action: &str) -> Option<&mut KeySpec> {
-        match action {
-            "detach" => Some(&mut self.detach),
-            "sidebar" => Some(&mut self.sidebar),
-            "next" => Some(&mut self.next),
-            "previous" => Some(&mut self.previous),
-            _ => None,
-        }
+        Some(match action {
+            "detach" => &mut self.detach,
+            "sidebar" => &mut self.sidebar,
+            "next" => &mut self.next,
+            "previous" => &mut self.previous,
+            "new_tab" => &mut self.new_tab,
+            "next_tab" => &mut self.next_tab,
+            "previous_tab" => &mut self.previous_tab,
+            "close_tab" => &mut self.close_tab,
+            "split_right" => &mut self.split_right,
+            "split_down" => &mut self.split_down,
+            "close_pane" => &mut self.close_pane,
+            "focus_left" => &mut self.focus_left,
+            "focus_down" => &mut self.focus_down,
+            "focus_up" => &mut self.focus_up,
+            "focus_right" => &mut self.focus_right,
+            "resize_left" => &mut self.resize_left,
+            "resize_down" => &mut self.resize_down,
+            "resize_up" => &mut self.resize_up,
+            "resize_right" => &mut self.resize_right,
+            _ => return None,
+        })
     }
 
-    fn all(&self) -> [KeySpec; 4] {
-        [self.detach, self.sidebar, self.next, self.previous]
+    fn all(&self) -> Vec<KeySpec> {
+        vec![
+            self.detach,
+            self.sidebar,
+            self.next,
+            self.previous,
+            self.new_tab,
+            self.next_tab,
+            self.previous_tab,
+            self.close_tab,
+            self.split_right,
+            self.split_down,
+            self.close_pane,
+            self.focus_left,
+            self.focus_down,
+            self.focus_up,
+            self.focus_right,
+            self.resize_left,
+            self.resize_down,
+            self.resize_up,
+            self.resize_right,
+        ]
     }
 }
 
@@ -434,14 +527,40 @@ mod tests {
     }
 
     #[test]
+    fn tab_and_split_keys_default_and_can_be_changed() {
+        let d = Keys::default();
+        assert_eq!(d.new_tab, KeySpec::plain(KeyCode::Char('c')));
+        assert_eq!(d.split_right, KeySpec::plain(KeyCode::Char('%')));
+        assert_eq!(d.split_down, KeySpec::plain(KeyCode::Char('"')));
+        assert_eq!(d.resize_left, KeySpec::plain(KeyCode::Char('H')));
+        // The defaults never share a key, or the config would warn for nothing.
+        let all = d.all();
+        assert_eq!(all.len(), KEY_ACTIONS.len());
+        for (i, k) in all.iter().enumerate() {
+            assert!(!all[i + 1..].contains(k), "{k:?} is bound twice");
+        }
+        let c = parse(
+            &json!({"console": {"keys": {"new_tab": "t", "close_pane": "q"}}}),
+            &[],
+        );
+        assert_eq!(c.keys.new_tab, KeySpec::plain(KeyCode::Char('t')));
+        assert_eq!(c.keys.close_pane, KeySpec::plain(KeyCode::Char('q')));
+        assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+        // A key an earlier action already has is a clash.
+        let clash = parse(&json!({"console": {"keys": {"new_tab": "x"}}}), &[]);
+        assert_eq!(clash.keys, Keys::default());
+        assert_eq!(clash.warnings.len(), 1);
+    }
+
+    #[test]
     fn console_prefix_and_keys_are_read() {
         let c = parse(
-            &json!({"console": {"prefix": "C-a", "keys": {"detach": "q", "next": "j"}}}),
+            &json!({"console": {"prefix": "C-a", "keys": {"detach": "q", "next": "w"}}}),
             &[],
         );
         assert_eq!(c.prefix, KeySpec::ctrl('a'));
         assert_eq!(c.keys.detach, KeySpec::plain(KeyCode::Char('q')));
-        assert_eq!(c.keys.next, KeySpec::plain(KeyCode::Char('j')));
+        assert_eq!(c.keys.next, KeySpec::plain(KeyCode::Char('w')));
         assert_eq!(c.keys.previous, KeySpec::plain(KeyCode::Up));
         assert!(c.warnings.is_empty(), "{:?}", c.warnings);
     }

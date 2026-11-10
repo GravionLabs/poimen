@@ -8,7 +8,10 @@ use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 
+use poimen_client::protocol::SplitDirection;
+
 use super::config::{Config, KeySpec, Keys};
+use super::tree::Dir;
 
 /// The modes of the focused terminal that change what a key or the wheel sends.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -34,6 +37,18 @@ pub enum Routed {
     ToggleSidebar,
     /// Move the sidebar selection by this many terminals.
     Select(isize),
+    /// A new tab with a new terminal in the focused space.
+    NewTab,
+    /// Show the tab this many places on in the space's order (wrapping).
+    SwitchTab(isize),
+    CloseTab,
+    /// Split the focused pane; the new terminal goes right of or below it.
+    Split(SplitDirection),
+    ClosePane,
+    /// Focus the neighboring pane.
+    Focus(Dir),
+    /// Move the border of the focused pane.
+    ResizePane(Dir),
     /// The wheel at a screen position: `up` scrolls back.
     Wheel {
         up: bool,
@@ -89,22 +104,46 @@ impl Router {
             return non_empty(encode_key(key, modes.app_cursor));
         }
         self.pending = false;
-        let k = &self.keys;
         if self.prefix.matches(key) {
             non_empty(encode_key(key, modes.app_cursor))
-        } else if k.detach.matches(key) {
-            Some(Routed::Detach)
-        } else if k.sidebar.matches(key) {
-            Some(Routed::ToggleSidebar)
-        } else if k.next.matches(key) {
-            Some(Routed::Select(1))
-        } else if k.previous.matches(key) {
-            Some(Routed::Select(-1))
+        } else if let Some(routed) = self.keys.action(key) {
+            Some(routed)
         } else {
             let mut bytes = encode_spec(self.prefix, modes.app_cursor);
             bytes.extend(encode_key(key, modes.app_cursor));
             non_empty(bytes)
         }
+    }
+}
+
+impl Keys {
+    /// What the key after the prefix asks for, if it is bound.
+    fn action(&self, key: &KeyEvent) -> Option<Routed> {
+        let table = [
+            (self.detach, Routed::Detach),
+            (self.sidebar, Routed::ToggleSidebar),
+            (self.next, Routed::Select(1)),
+            (self.previous, Routed::Select(-1)),
+            (self.new_tab, Routed::NewTab),
+            (self.next_tab, Routed::SwitchTab(1)),
+            (self.previous_tab, Routed::SwitchTab(-1)),
+            (self.close_tab, Routed::CloseTab),
+            (self.split_right, Routed::Split(SplitDirection::Right)),
+            (self.split_down, Routed::Split(SplitDirection::Down)),
+            (self.close_pane, Routed::ClosePane),
+            (self.focus_left, Routed::Focus(Dir::Left)),
+            (self.focus_down, Routed::Focus(Dir::Down)),
+            (self.focus_up, Routed::Focus(Dir::Up)),
+            (self.focus_right, Routed::Focus(Dir::Right)),
+            (self.resize_left, Routed::ResizePane(Dir::Left)),
+            (self.resize_down, Routed::ResizePane(Dir::Down)),
+            (self.resize_up, Routed::ResizePane(Dir::Up)),
+            (self.resize_right, Routed::ResizePane(Dir::Right)),
+        ];
+        table
+            .into_iter()
+            .find(|(spec, _)| spec.matches(key))
+            .map(|(_, routed)| routed)
     }
 }
 
@@ -329,6 +368,84 @@ mod tests {
         );
     }
 
+    fn after_prefix(r: &mut Router, e: Event) -> Option<Routed> {
+        r.route(&prefix(), Modes::default());
+        r.route(&e, Modes::default())
+    }
+
+    #[test]
+    fn prefix_keys_for_tabs() {
+        let mut r = router();
+        assert_eq!(after_prefix(&mut r, ch('c')), Some(Routed::NewTab));
+        assert_eq!(after_prefix(&mut r, ch('n')), Some(Routed::SwitchTab(1)));
+        assert_eq!(after_prefix(&mut r, ch('p')), Some(Routed::SwitchTab(-1)));
+        assert_eq!(after_prefix(&mut r, ch('&')), Some(Routed::CloseTab));
+        assert!(!r.pending());
+        // Without the prefix they are letters for the terminal.
+        assert_eq!(r.route(&ch('c'), Modes::default()), send(b"c"));
+    }
+
+    #[test]
+    fn prefix_keys_for_splits_and_panes() {
+        let mut r = router();
+        assert_eq!(
+            after_prefix(&mut r, ch('%')),
+            Some(Routed::Split(SplitDirection::Right))
+        );
+        assert_eq!(
+            after_prefix(&mut r, ch('"')),
+            Some(Routed::Split(SplitDirection::Down))
+        );
+        assert_eq!(after_prefix(&mut r, ch('x')), Some(Routed::ClosePane));
+        assert_eq!(
+            after_prefix(&mut r, ch('h')),
+            Some(Routed::Focus(Dir::Left))
+        );
+        assert_eq!(
+            after_prefix(&mut r, ch('j')),
+            Some(Routed::Focus(Dir::Down))
+        );
+        assert_eq!(after_prefix(&mut r, ch('k')), Some(Routed::Focus(Dir::Up)));
+        assert_eq!(
+            after_prefix(&mut r, ch('l')),
+            Some(Routed::Focus(Dir::Right))
+        );
+        // Shift gives the resize keys; crossterm reports the capital letter with SHIFT.
+        let shifted = |c| press(KeyCode::Char(c), KeyModifiers::SHIFT);
+        assert_eq!(
+            after_prefix(&mut r, shifted('H')),
+            Some(Routed::ResizePane(Dir::Left))
+        );
+        assert_eq!(
+            after_prefix(&mut r, shifted('L')),
+            Some(Routed::ResizePane(Dir::Right))
+        );
+        assert_eq!(
+            after_prefix(&mut r, ch('K')),
+            Some(Routed::ResizePane(Dir::Up))
+        );
+        assert_eq!(
+            after_prefix(&mut r, ch('J')),
+            Some(Routed::ResizePane(Dir::Down))
+        );
+    }
+
+    #[test]
+    fn configured_tab_keys_replace_the_defaults() {
+        let c = config::parse(
+            &json!({"console": {"keys": {"new_tab": "t", "split_right": "|"}}}),
+            &[],
+        );
+        let mut r = Router::new(&c);
+        assert_eq!(after_prefix(&mut r, ch('t')), Some(Routed::NewTab));
+        assert_eq!(
+            after_prefix(&mut r, ch('|')),
+            Some(Routed::Split(SplitDirection::Right))
+        );
+        // The old key is no action now: it goes through with the prefix.
+        assert_eq!(after_prefix(&mut r, ch('c')), send(&[0x02, b'c']));
+    }
+
     #[test]
     fn prefix_twice_sends_the_prefix() {
         let mut r = router();
@@ -343,7 +460,7 @@ mod tests {
         let mut r = router();
         let m = Modes::default();
         r.route(&prefix(), m);
-        assert_eq!(r.route(&ch('x'), m), send(&[0x02, b'x']));
+        assert_eq!(r.route(&ch('z'), m), send(&[0x02, b'z']));
     }
 
     #[test]
