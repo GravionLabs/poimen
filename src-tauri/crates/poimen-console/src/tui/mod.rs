@@ -13,13 +13,21 @@
 //! `d`) ends the attachments with `terminal.detach`: no terminal is closed, the server is never
 //! stopped.
 //!
+//! The command palette (prefix, then `:`) lists what prefix keys do not cover: new, rename and
+//! close of spaces and terminals, the entries of the project file and starting a task from an
+//! issue; `palette` is its state and drawing, `actions` what it does against the server, the
+//! disk and `gh`. A project file that is not trusted yet is asked about in the palette (hash and
+//! commands) and the request is sent again with the answer.
+//!
 //! `config` reads the prefix and keys, `input` routes keys, `grid` is a pane's emulator,
 //! `sidebar` the row model, `tree` the rectangles of a split tree, `screen` the local terminal
 //! modes, `view` draws a frame.
 
+pub mod actions;
 pub mod config;
 pub mod grid;
 pub mod input;
+pub mod palette;
 pub mod screen;
 pub mod sidebar;
 pub mod tree;
@@ -33,10 +41,13 @@ use std::time::Duration;
 
 use crossterm::event::{Event as InputEvent, KeyCode, KeyEventKind};
 use poimen_client::protocol::{
-    AttachMode, ClientInfo, ClientKind, DetachReason, ErrorCode, Event, SplitDirection, TabCreate,
-    TabSplit, TerminalStatus, decode_bytes,
+    AttachMode, ClientInfo, ClientKind, DetachReason, ErrorCode, Event, SpaceCreate,
+    SplitDirection, TabCreate, TabSplit, TerminalStatus, decode_bytes,
 };
 use poimen_client::{AttachmentWriter, Client, ClientError};
+use poimen_core::github::OpenIssue;
+use poimen_core::project::Entry;
+use poimen_core::trust::Decision;
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 use ratatui::buffer::Buffer;
@@ -60,6 +71,8 @@ pub struct Options {
     pub own_terminal: Option<String>,
     /// Receives a copy of every drawn frame (tests read the screen through it).
     pub mirror: Option<Arc<Mutex<Buffer>>>,
+    /// Where the task picker reads issues from; `None`: `gh` (cached under the home directory).
+    pub issues: Option<actions::IssueSource>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -79,6 +92,21 @@ enum Msg {
     ServerGone(String),
     /// A stream record of the attachment with this generation.
     Record(u64, Box<Result<Event, String>>),
+    /// The open issues and the names of the task modes (or why they could not be read).
+    Issues(Result<(Vec<OpenIssue>, Vec<String>), String>),
+    /// A task was prepared and started on the server.
+    Task(Box<Result<(actions::Prepared, actions::Started), String>>),
+}
+
+/// What the trust question in the palette is about; the answer sends it again.
+enum Pending {
+    Space(SpaceCreate),
+    Task(actions::Prepared),
+    Entry {
+        space_id: String,
+        dir: String,
+        entry: Entry,
+    },
 }
 
 /// The attached terminal.
@@ -127,6 +155,10 @@ pub struct App {
     /// A message for the status line (errors, what happened).
     pub notice: Option<String>,
     pub prefix_pending: bool,
+    /// The command palette, while it is open.
+    pub command_palette: Option<palette::Palette>,
+    pending: Option<(Pending, String)>,
+    issues: Option<actions::IssueSource>,
     generation: u64,
 }
 
@@ -145,6 +177,9 @@ impl App {
             take_over: None,
             notice: opts.config.warnings.first().map(|w| format!("config: {w}")),
             prefix_pending: false,
+            command_palette: None,
+            pending: None,
+            issues: opts.issues.clone(),
             generation: 0,
         }
     }
@@ -283,6 +318,8 @@ pub fn run<B: Backend>(
                 Msg::Changed => changed = true,
                 Msg::ServerGone(e) => return Ok(Outcome::ServerGone(e)),
                 Msg::Record(generation, rec) => record(&mut app, client, &tx, generation, *rec),
+                Msg::Issues(result) => palette_issues(&mut app, result),
+                Msg::Task(result) => task_started(&mut app, client, &tx, *result),
                 Msg::Input(ev) => {
                     if let Some(outcome) =
                         on_input(&mut app, &mut router, client, &tx, terminal, &ev)?
@@ -582,6 +619,26 @@ fn on_input<B: Backend>(
     terminal: &Terminal<B>,
     ev: &InputEvent,
 ) -> Result<Option<Outcome>, Error> {
+    // The palette takes every key while it is open.
+    if app.command_palette.is_some() {
+        match ev {
+            InputEvent::Key(key) => {
+                let out = app.command_palette.as_mut().and_then(|p| p.key(key));
+                match out {
+                    Some(palette::Out::Close) => app.command_palette = None,
+                    Some(palette::Out::Run(command)) => run_command(app, client, tx, command),
+                    None => {}
+                }
+            }
+            InputEvent::Paste(text) => {
+                if let Some(p) = app.command_palette.as_mut() {
+                    p.paste(text);
+                }
+            }
+            _ => {}
+        }
+        return Ok(None);
+    }
     // The take-over question answers to y/n/Esc; the prefix keys keep working meanwhile.
     if let (Some(id), InputEvent::Key(key)) = (app.take_over.clone(), ev)
         && key.kind != KeyEventKind::Release
@@ -629,6 +686,7 @@ fn on_input<B: Backend>(
             }
         }
         Routed::Split(direction) => split(app, client, tx, direction),
+        Routed::Palette => open_palette(app),
         Routed::ClosePane => {
             if let Some(id) = app.selected.clone()
                 && let Err(e) = client.close_terminal(&id)
@@ -767,5 +825,353 @@ fn resize(app: &mut App, client: &Client, dir: Dir) {
     match client.resize_split(&tab_id, &split_id, ratio) {
         Ok(_) => reload(app, client),
         Err(e) => app.notice = Some(format!("cannot resize: {e}")),
+    }
+}
+
+fn home_path(app: &App) -> Option<std::path::PathBuf> {
+    app.home.as_deref().map(std::path::PathBuf::from)
+}
+
+/// The focused space: id, directory and name.
+fn focused_space(app: &App) -> Option<(String, String, String)> {
+    let id = app.current_space()?;
+    let space = app.model.spaces.iter().find(|s| s.id == id)?;
+    Some((id, space.cwd.clone(), space.name.clone()))
+}
+
+fn open_palette(app: &mut App) {
+    let space = focused_space(app);
+    let ctx = palette::Context {
+        space: space.is_some(),
+        terminal: app.selected.is_some(),
+        project: space
+            .as_ref()
+            .map(|(_, cwd, _)| actions::project_entries(cwd, home_path(app).as_deref()))
+            .unwrap_or_default(),
+    };
+    let (cwd, name) = space.map(|(_, cwd, name)| (cwd, name)).unwrap_or_default();
+    app.command_palette = Some(palette::Palette::open(
+        &ctx,
+        home_path(app).as_deref(),
+        (&cwd, &name),
+        app.selected_name().unwrap_or_default(),
+    ));
+}
+
+/// Closes the palette and shows `text` in the status line.
+fn finish(app: &mut App, text: impl Into<String>) {
+    app.command_palette = None;
+    app.pending = None;
+    app.notice = Some(text.into());
+}
+
+/// Reads the model again and focuses `terminal`, when there is one.
+fn show_terminal(app: &mut App, client: &Client, tx: &Sender<Msg>, terminal: Option<String>) {
+    reload(app, client);
+    if let Some(id) = terminal.filter(|id| app.model.terminal(id).is_some()) {
+        focus_terminal(app, client, tx, &id);
+    }
+}
+
+fn run_command(app: &mut App, client: &Client, tx: &Sender<Msg>, command: palette::Command) {
+    use palette::Command;
+    match command {
+        Command::NewSpace { cwd } => {
+            let cwd = if cwd.len() > 1 {
+                cwd.trim_end_matches('/').to_owned()
+            } else {
+                cwd
+            };
+            let params = SpaceCreate::with_layout(palette::space_name_of(&cwd), cwd);
+            create_space(app, client, tx, params);
+        }
+        Command::RenameSpace(name) => {
+            let Some((id, _, _)) = focused_space(app) else {
+                return finish(app, "no space to rename");
+            };
+            match client.rename_space(&id, &name) {
+                Ok(_) => finish(app, format!("space renamed to {name}")),
+                Err(e) => finish(app, format!("cannot rename the space: {e}")),
+            }
+            reload(app, client);
+        }
+        Command::CloseSpace => {
+            let Some((id, _, name)) = focused_space(app) else {
+                return finish(app, "no space to close");
+            };
+            match client.close_space(&id) {
+                Ok(()) => finish(app, format!("space {name} closed")),
+                Err(e) => finish(app, format!("cannot close the space: {e}")),
+            }
+        }
+        Command::NewTab => {
+            app.command_palette = None;
+            new_tab(app, client, tx);
+        }
+        Command::RenameTerminal(name) => {
+            let Some(id) = app.selected.clone() else {
+                return finish(app, "no terminal to rename");
+            };
+            match client.rename_terminal(&id, &name) {
+                Ok(_) => finish(app, format!("terminal renamed to {name}")),
+                Err(e) => finish(app, format!("cannot rename the terminal: {e}")),
+            }
+            reload(app, client);
+        }
+        Command::CloseTerminal => {
+            let Some(id) = app.selected.clone() else {
+                return finish(app, "no terminal to close");
+            };
+            match client.close_terminal(&id) {
+                Ok(()) => finish(app, "terminal closed"),
+                Err(e) => finish(app, format!("cannot close the terminal: {e}")),
+            }
+        }
+        Command::Project(entry) => {
+            let Some((space_id, dir, _)) = focused_space(app) else {
+                return finish(app, "no space for the entry");
+            };
+            run_entry(app, client, tx, space_id, dir, entry, None, String::new());
+        }
+        Command::LoadIssues => load_issues(app, client, tx),
+        Command::StartTask { issue, mode } => start_task(app, client, tx, issue, mode),
+        Command::Answer(choice) => answer(app, client, tx, choice),
+    }
+}
+
+fn create_space(app: &mut App, client: &Client, tx: &Sender<Msg>, params: SpaceCreate) {
+    match actions::create_space(client, &params) {
+        Ok(actions::Created::Space(c)) => {
+            let first = c.tabs.first().map(|t| t.active_terminal.clone());
+            let warning = c.warnings.first().map(|w| format!(" ({w})"));
+            finish(
+                app,
+                format!(
+                    "space {} created{}",
+                    c.space.name,
+                    warning.unwrap_or_default()
+                ),
+            );
+            show_terminal(app, client, tx, first);
+        }
+        Ok(actions::Created::Trust(t)) => ask_trust(app, Pending::Space(params), &t),
+        Err(e) => finish(app, format!("cannot create the space: {e}")),
+    }
+}
+
+fn ask_trust(app: &mut App, pending: Pending, t: &poimen_client::protocol::TrustRequired) {
+    app.pending = Some((pending, t.hash.clone()));
+    match app.command_palette.as_mut() {
+        Some(p) => p.show_trust(actions::prompt_of(t)),
+        None => finish(
+            app,
+            "the project file needs your trust; open the palette and try again",
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_entry(
+    app: &mut App,
+    client: &Client,
+    tx: &Sender<Msg>,
+    space_id: String,
+    dir: String,
+    entry: Entry,
+    decision: Option<Decision>,
+    hash: String,
+) {
+    let home = home_path(app);
+    let result = actions::run_entry(
+        client,
+        home.as_deref(),
+        &space_id,
+        &dir,
+        &entry,
+        decision.as_ref(),
+    );
+    match result {
+        Ok(actions::EntryResult::Done { terminal }) => {
+            finish(app, "done");
+            show_terminal(app, client, tx, terminal);
+        }
+        Ok(actions::EntryResult::Agent(command)) => {
+            let Some(id) = app.selected.clone() else {
+                return finish(app, "no terminal for the agent command");
+            };
+            let note = match client.prompt_agent(&id, &command, Duration::from_millis(1500)) {
+                Ok(poimen_client::agent::PromptResult::Started(_)) => format!("sent {command}"),
+                Ok(poimen_client::agent::PromptResult::Stalled) => {
+                    format!("sent {command}; the agent has not reacted yet")
+                }
+                Ok(poimen_client::agent::PromptResult::Blocked) => {
+                    "the agent waits for you; nothing was sent".into()
+                }
+                Ok(poimen_client::agent::PromptResult::Working) => {
+                    "the agent is working; nothing was sent".into()
+                }
+                Ok(poimen_client::agent::PromptResult::NoAgent) => {
+                    "no agent in the focused terminal; nothing was sent".into()
+                }
+                Err(e) => format!("cannot send to the agent: {e}"),
+            };
+            finish(app, note);
+        }
+        Ok(actions::EntryResult::Trust(prompt)) => {
+            app.pending = Some((
+                Pending::Entry {
+                    space_id,
+                    dir,
+                    entry,
+                },
+                prompt.hash.clone(),
+            ));
+            match app.command_palette.as_mut() {
+                Some(p) => p.show_trust(prompt),
+                None => finish(app, "the project file needs your trust"),
+            }
+        }
+        Ok(actions::EntryResult::Declined) => finish(app, "not run: project commands are declined"),
+        Ok(actions::EntryResult::Missing) => finish(app, "the project file no longer lists it"),
+        Err(e) => finish(app, format!("project entry failed: {e}")),
+    }
+    let _ = hash;
+}
+
+/// The user answered the trust question: send the held request again with the answer.
+fn answer(app: &mut App, client: &Client, tx: &Sender<Msg>, choice: palette::TrustChoice) {
+    let Some((pending, hash)) = app.pending.take() else {
+        return finish(app, "nothing to answer");
+    };
+    match pending {
+        Pending::Space(params) => {
+            let params = actions::answered(&params, &hash, choice);
+            create_space(app, client, tx, params);
+        }
+        Pending::Task(mut prepared) => {
+            prepared.create = actions::answered(&prepared.create, &hash, choice);
+            spawn_start(app, client, tx, prepared);
+        }
+        Pending::Entry {
+            space_id,
+            dir,
+            entry,
+        } => {
+            let decision = match choice {
+                palette::TrustChoice::Trust => Decision::Trust { hash: hash.clone() },
+                palette::TrustChoice::Without => Decision::Without,
+            };
+            run_entry(app, client, tx, space_id, dir, entry, Some(decision), hash);
+        }
+    }
+}
+
+/// Reads the issues and the task modes in the background.
+fn load_issues(app: &mut App, client: &Client, tx: &Sender<Msg>) {
+    let _ = client;
+    let Some((_, dir, _)) = focused_space(app) else {
+        return finish(app, "no space for a task");
+    };
+    let home = home_path(app);
+    let source = app.issues.clone().unwrap_or_else(|| {
+        let cache = home
+            .clone()
+            .unwrap_or_else(std::env::temp_dir)
+            .join(".cache")
+            .join("poimen-console");
+        actions::system_issues(cache)
+    });
+    let tx = tx.clone();
+    thread::spawn(move || {
+        let result = source(&dir).map(|issues| {
+            let (resolved, _) = actions::task_setup(&dir, home.as_deref());
+            let modes = resolved
+                .modes
+                .modes
+                .iter()
+                .map(|m| m.name.clone())
+                .collect();
+            (issues, modes)
+        });
+        let _ = tx.send(Msg::Issues(result));
+    });
+}
+
+fn palette_issues(app: &mut App, result: Result<(Vec<OpenIssue>, Vec<String>), String>) {
+    let Some(p) = app.command_palette.as_mut() else {
+        return;
+    };
+    match result {
+        Ok((issues, _)) if issues.is_empty() => finish(app, "no open issues"),
+        Ok((issues, modes)) => p.show_issues(issues, modes),
+        Err(e) => finish(app, format!("cannot read the issues: {e}")),
+    }
+}
+
+/// Plans the task, creates its worktree and starts it on the server, in the background.
+fn start_task(
+    app: &mut App,
+    client: &Client,
+    tx: &Sender<Msg>,
+    issue: poimen_core::worktree::Issue,
+    mode: String,
+) {
+    let Some((_, dir, _)) = focused_space(app) else {
+        return finish(app, "no space for a task");
+    };
+    if let Some(p) = app.command_palette.as_mut() {
+        p.show_busy(&format!("Starting #{} ({mode})…", issue.nr));
+    }
+    let home = home_path(app);
+    let client = Client::new(client.socket());
+    let tx = tx.clone();
+    thread::spawn(move || {
+        let result = (|| {
+            let existing: Vec<(String, String)> = client
+                .list_spaces()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|s| (s.id, s.cwd))
+                .collect();
+            let prepared = actions::prepare_task(&dir, home.as_deref(), &issue, &mode, &existing)?;
+            let started = actions::start_prepared(&client, &prepared)?;
+            Ok((prepared, started))
+        })();
+        let _ = tx.send(Msg::Task(Box::new(result)));
+    });
+}
+
+/// Starts a prepared task again after the trust answer.
+fn spawn_start(app: &mut App, client: &Client, tx: &Sender<Msg>, prepared: actions::Prepared) {
+    if let Some(p) = app.command_palette.as_mut() {
+        p.show_busy("Starting the task…");
+    }
+    let client = Client::new(client.socket());
+    let tx = tx.clone();
+    thread::spawn(move || {
+        let result = actions::start_prepared(&client, &prepared).map(|s| (prepared, s));
+        let _ = tx.send(Msg::Task(Box::new(result)));
+    });
+}
+
+fn task_started(
+    app: &mut App,
+    client: &Client,
+    tx: &Sender<Msg>,
+    result: Result<(actions::Prepared, actions::Started), String>,
+) {
+    match result {
+        Ok((
+            _,
+            actions::Started::Done {
+                terminal, warnings, ..
+            },
+        )) => {
+            let warning = warnings.first().map(|w| format!(" ({w})"));
+            finish(app, format!("task started{}", warning.unwrap_or_default()));
+            show_terminal(app, client, tx, terminal);
+        }
+        Ok((prepared, actions::Started::Trust(t))) => ask_trust(app, Pending::Task(prepared), &t),
+        Err(e) => finish(app, format!("start task failed: {e}")),
     }
 }

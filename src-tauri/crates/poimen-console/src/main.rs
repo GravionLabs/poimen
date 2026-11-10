@@ -125,6 +125,7 @@ fn tui() -> ExitCode {
             .ok()
             .filter(|id| !id.is_empty()),
         mirror: None,
+        issues: None,
     };
     let stop = Arc::new(AtomicBool::new(false));
     // Raw mode turns Ctrl+C into a key for the terminal; these arrive from outside (kill, a

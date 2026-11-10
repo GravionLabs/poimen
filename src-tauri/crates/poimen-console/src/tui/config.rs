@@ -173,6 +173,8 @@ pub struct Keys {
     pub split_down: KeySpec,
     /// Closes the focused pane's terminal.
     pub close_pane: KeySpec,
+    /// Opens the command palette.
+    pub palette: KeySpec,
     pub focus_left: KeySpec,
     pub focus_down: KeySpec,
     pub focus_up: KeySpec,
@@ -202,6 +204,7 @@ impl Default for Keys {
             split_right: chr('%'),
             split_down: chr('"'),
             close_pane: chr('x'),
+            palette: chr(':'),
             focus_left: chr('h'),
             focus_down: chr('j'),
             focus_up: chr('k'),
@@ -215,7 +218,7 @@ impl Default for Keys {
 }
 
 /// The action names of `console.keys`.
-pub const KEY_ACTIONS: [&str; 19] = [
+pub const KEY_ACTIONS: [&str; 20] = [
     "detach",
     "sidebar",
     "next",
@@ -227,6 +230,7 @@ pub const KEY_ACTIONS: [&str; 19] = [
     "split_right",
     "split_down",
     "close_pane",
+    "palette",
     "focus_left",
     "focus_down",
     "focus_up",
@@ -251,6 +255,7 @@ impl Keys {
             "split_right" => &mut self.split_right,
             "split_down" => &mut self.split_down,
             "close_pane" => &mut self.close_pane,
+            "palette" => &mut self.palette,
             "focus_left" => &mut self.focus_left,
             "focus_down" => &mut self.focus_down,
             "focus_up" => &mut self.focus_up,
@@ -276,6 +281,7 @@ impl Keys {
             self.split_right,
             self.split_down,
             self.close_pane,
+            self.palette,
             self.focus_left,
             self.focus_down,
             self.focus_up,

@@ -114,6 +114,7 @@ fn start(f: &Fixture, own_terminal: Option<String>) -> Running {
         home: None,
         own_terminal,
         mirror: Some(screen.clone()),
+        issues: None,
     };
     let s = stop.clone();
     let handle = thread::spawn(move || {
