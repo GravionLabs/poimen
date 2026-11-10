@@ -1,5 +1,5 @@
 [package]
-name = "poimen"
+name = "poimen-app"
 version.workspace = true
 description = "Desktop GUI for herdr: coordinate AI coding agent sessions"
 authors = ["Jerome Kaufmann"]
@@ -8,7 +8,7 @@ repository = "https://github.com/GravionLabs/poimen"
 rust-version = "1.98"
 publish = false
 edition = "2024"
-default-run = "poimen"
+default-run = "poimen-app"
 
 [workspace]
 members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core"]

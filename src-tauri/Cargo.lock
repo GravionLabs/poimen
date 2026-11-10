@@ -2952,7 +2952,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "poimen"
+name = "poimen-app"
 version = "0.15.1"
 dependencies = [
  "notify",
