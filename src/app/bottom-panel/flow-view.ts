@@ -16,6 +16,7 @@ import {
 } from "@foblex/flow";
 import { flowAgentName } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
+import { UiState } from "../core/ui-state";
 import { buildFlowGraph, flowDuration, flowTooltip, type FlowNode } from "../core/flow-graph";
 import { FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH, layoutFlow } from "../core/flow-layout";
 import { Subagents, formatDuration } from "../core/transcripts";
@@ -39,6 +40,7 @@ const FIT_PADDING = 24;
 export class FlowView {
   private readonly subagents = inject(Subagents);
   private readonly store = inject(HerdrStore);
+  private readonly ui = inject(UiState);
   /** Clock for the durations of running nodes. */
   readonly now = input.required<number>();
   /** A subagent node was clicked: show its transcript. */
@@ -46,8 +48,13 @@ export class FlowView {
 
   protected readonly width = FLOW_NODE_WIDTH;
   protected readonly height = FLOW_NODE_HEIGHT;
-  protected readonly left = EFConnectableSide.LEFT;
-  protected readonly right = EFConnectableSide.RIGHT;
+  protected readonly direction = this.ui.flowDirection;
+  protected readonly inSide = computed(() =>
+    this.direction() === "LR" ? EFConnectableSide.LEFT : EFConnectableSide.TOP,
+  );
+  protected readonly outSide = computed(() =>
+    this.direction() === "LR" ? EFConnectableSide.RIGHT : EFConnectableSide.BOTTOM,
+  );
   private readonly canvas = viewChild(FCanvasComponent);
   private readonly zoom = viewChild(FZoomDirective);
 
@@ -59,7 +66,7 @@ export class FlowView {
       flowAgentName(this.store.panes().get(this.subagents.paneId() ?? "")),
     ),
   );
-  protected readonly positions = computed(() => layoutFlow(this.graph()));
+  protected readonly positions = computed(() => layoutFlow(this.graph(), this.direction()));
   protected readonly nodes = computed(() => {
     const positions = this.positions();
     return this.graph().nodes.map((node) => ({
@@ -88,6 +95,12 @@ export class FlowView {
   protected fit(animated = true): void {
     // Never zoom in past 100%: a lone main node would fill the panel.
     this.canvas()?.fitToScreen({ x: FIT_PADDING, y: FIT_PADDING }, animated, true, 1);
+  }
+
+  protected toggleDirection(): void {
+    this.ui.setFlowDirection(this.direction() === "LR" ? "TB" : "LR");
+    // Positions change with the direction; refit once the nodes have moved.
+    setTimeout(() => this.fit(false));
   }
 
   protected zoomIn(): void {

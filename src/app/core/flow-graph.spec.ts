@@ -8,7 +8,7 @@ import {
   flowTooltip,
   inputField,
 } from "./flow-graph";
-import { layoutFlow, FLOW_NODE_WIDTH } from "./flow-layout";
+import { layoutFlow, FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH } from "./flow-layout";
 import type {
   MainCall,
   SubagentInfo,
@@ -422,5 +422,24 @@ describe("layoutFlow", () => {
     expect(p.size).toBe(3);
     expect(p.get("s1")!.x).toBeGreaterThanOrEqual(p.get(MAIN_NODE_ID)!.x + FLOW_NODE_WIDTH);
     expect(p.get("s2")!.x).toBeGreaterThan(p.get("s1")!.x);
+  });
+});
+
+describe("layoutFlow direction", () => {
+  const g = buildFlowGraph([], noEntries, {
+    calls: [mainCall("s1", "Skill", { started: at(1), ended: at(2) })],
+    tools: 0,
+  });
+
+  it("goes down the page, not across, from top to bottom", () => {
+    const p = layoutFlow(g, "TB");
+    expect(p.get("s1")!.y).toBeGreaterThanOrEqual(p.get(MAIN_NODE_ID)!.y + FLOW_NODE_HEIGHT);
+    expect(p.get("s1")!.x).toBe(p.get(MAIN_NODE_ID)!.x);
+  });
+
+  it("keeps left to right as the default", () => {
+    const p = layoutFlow(g);
+    expect(p.get("s1")!.y).toBe(p.get(MAIN_NODE_ID)!.y);
+    expect(p.get("s1")!.x).toBeGreaterThan(p.get(MAIN_NODE_ID)!.x);
   });
 });
