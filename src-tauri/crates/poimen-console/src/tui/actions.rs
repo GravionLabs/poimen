@@ -120,6 +120,16 @@ fn config_json(home: Option<&Path>) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// Whether two directory strings name the same place: git prints `/`, the server may store `\`
+/// (Windows), and a canonical path carries the `\\?\` prefix.
+fn same_dir(a: &str, b: &str) -> bool {
+    fn norm(p: &str) -> String {
+        let p = p.strip_prefix(r"\\?\").unwrap_or(p).replace('\\', "/");
+        p.trim_end_matches('/').to_owned()
+    }
+    norm(a) == norm(b)
+}
+
 /// The repository root of `dir`, else `dir`.
 fn root_of(dir: &str) -> String {
     poimen_core::git::toplevel(dir).unwrap_or_else(|| dir.to_owned())
@@ -323,7 +333,7 @@ pub fn prepare_task(
             create: SpaceCreate::with_layout(super::palette::space_name_of(&root), root.clone()),
             reuse_space: existing
                 .iter()
-                .find(|(_, cwd)| cwd.trim_end_matches('/') == root.trim_end_matches('/'))
+                .find(|(_, cwd)| same_dir(cwd, &root))
                 .map(|(id, _)| id.clone()),
             tab: Some(TabPlan {
                 name: plan.tab,
@@ -408,7 +418,10 @@ mod tests {
                 std::env::temp_dir().join(format!("poimen-actions-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&d);
             std::fs::create_dir_all(&d).unwrap();
-            Self(d.canonicalize().unwrap())
+            let c = d.canonicalize().unwrap();
+            // Windows: no `\\?\` prefix, git and the code under test print plain paths.
+            let plain = c.display().to_string();
+            Self(PathBuf::from(plain.strip_prefix(r"\\?\").unwrap_or(&plain)))
         }
         fn s(&self) -> String {
             self.0.display().to_string()
