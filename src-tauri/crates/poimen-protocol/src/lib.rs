@@ -660,6 +660,36 @@ pub struct PingResult {
     pub version: String,
     pub protocol: u32,
     pub pid: u32,
+    /// The kinds of the clients with an open event subscription, one entry per connection,
+    /// sorted. Absent from older servers.
+    #[serde(default)]
+    pub clients: Vec<ClientKind>,
+}
+
+/// What a client is, said on `events.subscribe` (ADR 0006).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClientKind {
+    App,
+    Tui,
+    Cli,
+    /// A subscription without `client`, or a kind this version does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+/// `client` of `events.subscribe`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientInfo {
+    pub kind: ClientKind,
+    pub pid: u32,
+}
+
+/// Params of `events.subscribe`; `client` is optional so old clients keep working.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventsSubscribe {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<ClientInfo>,
 }
 
 /// `space.create`. With `layout` (the default) the server resolves the layout of `cwd` (project
@@ -1046,6 +1076,10 @@ pub enum Event {
         terminal_id: String,
         tokens: BTreeMap<String, String>,
     },
+    /// A subscribed client connected or went away (subscribers, except the one that joined);
+    /// carries the kinds now connected, sorted.
+    #[serde(rename = "server.clients_changed")]
+    ServerClientsChanged { clients: Vec<ClientKind> },
     #[serde(rename = "agent.status_changed")]
     AgentStatusChanged {
         terminal_id: String,
@@ -1065,6 +1099,49 @@ pub enum Event {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn subscribe_params_with_and_without_client() {
+        let r = parse_request(
+            r#"{"id":"1","method":"events.subscribe","params":{"client":{"kind":"tui","pid":7}}}"#,
+        )
+        .unwrap();
+        let p: EventsSubscribe = params(&r).unwrap();
+        assert_eq!(
+            p.client,
+            Some(ClientInfo {
+                kind: ClientKind::Tui,
+                pid: 7
+            })
+        );
+        let r = parse_request(r#"{"id":"1","method":"events.subscribe"}"#).unwrap();
+        let p: EventsSubscribe = params(&r).unwrap();
+        assert_eq!(p.client, None);
+        let r = parse_request(
+            r#"{"id":"1","method":"events.subscribe","params":{"client":{"kind":"bogus","pid":1}}}"#,
+        )
+        .unwrap();
+        // A kind of a newer client is read as unknown, not refused.
+        let p: EventsSubscribe = params(&r).unwrap();
+        assert_eq!(p.client.unwrap().kind, ClientKind::Unknown);
+    }
+
+    #[test]
+    fn ping_result_without_clients_and_the_clients_event() {
+        let p: PingResult =
+            serde_json::from_value(json!({"version":"1","protocol":4,"pid":2})).unwrap();
+        assert!(p.clients.is_empty());
+        let e: Event = serde_json::from_value(
+            json!({"event":"server.clients_changed","data":{"clients":["app","unknown"]}}),
+        )
+        .unwrap();
+        assert_eq!(
+            e,
+            Event::ServerClientsChanged {
+                clients: vec![ClientKind::App, ClientKind::Unknown]
+            }
+        );
+    }
 
     #[test]
     fn parses_a_request_with_and_without_params() {

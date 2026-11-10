@@ -39,8 +39,8 @@ The server owns the tabs and the split tree of each space, so every client shows
 
 | Method            | Params                                                                  | Result                | Notes                                                                                           |
 | ----------------- | ----------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
-| `ping`            | none                                                                    | `{version, protocol, pid}` | `protocol` is the protocol version (4).                                                    |
-| `events.subscribe`| none                                                                    | `{subscribed: true}`  | The connection then carries events only. List after subscribing to avoid missing changes.       |
+| `ping`            | none                                                                    | `{version, protocol, pid, clients}` | `protocol` is the protocol version (4). `clients` lists the kinds (`app`, `tui`, `cli`, `unknown`) of the open event subscriptions, one per connection, sorted; absent from older servers. |
+| `events.subscribe`| `{client?: {kind, pid}}`                                                | `{subscribed: true}`  | The connection then carries events only. List after subscribing to avoid missing changes. `client.kind` is `app`, `tui` or `cli`; the server keeps it while the connection lives. A subscription without `client` counts as `unknown` in `ping` and gets no `server.clients_changed`, so old clients keep working. `client.pid` is informational and not stored; an unknown `kind` is read as `unknown`. Additive, so the protocol version stays 4. |
 | `space.list`      | none                                                                    | `{spaces: [Space], tabs: [Tab]}` | The tabs of every space with their trees.                                            |
 | `space.create`    | `name`, `cwd`, `layout?` (default true), `trust?`, `command?`          | `{space, tabs, warnings, setup_started}` or `{trust_required}` | Non-empty `name` and `cwd`. Persisted. With `layout` the server resolves and builds the space's layout and may ask for trust first, see Space layout and trust; `layout: false` creates an empty space and answers `{space}`. |
 | `space.rename`    | `space_id`, `name`                                                      | `{space}`             | Persisted.                                                                                      |
@@ -150,6 +150,7 @@ Starting an agent and prompting it need no request of their own (`poimen_client:
 | `terminal.controller_attached` | `{terminal_id}`                      | subscribers: a controller attached                    |
 | `terminal.controller_detached` | `{terminal_id}`                      | subscribers: the controller detached or was dropped   |
 | `terminal.tokens_changed` | `{terminal_id, tokens}` | the tokens of a terminal changed (after `terminal.report_tokens` / `terminal.clear_tokens`, or a TTL ran out); `tokens` is the full map. |
+| `server.clients_changed` | `{clients}` | a subscription opened or closed (sent only to the other subscribers that declared a `client`, never to the one that joined and never to subscriptions without `client`, which cannot parse it); `clients` is the sorted list of kinds now connected, as in `ping`. |
 | `agent.status_changed` | `{terminal_id, status, agent?, session_id?, message?, message_at?}` | the agent state of a terminal changed (after `terminal.report_agent`); `status` is `idle`, `working`, `blocked`, `done` or `gone`. |
 
 ## Persistence

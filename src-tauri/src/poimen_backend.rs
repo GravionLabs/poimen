@@ -518,7 +518,12 @@ impl Backend for PoimenBackend {
         };
         let mut connected = None;
         loop {
-            match self.client.subscribe() {
+            match self
+                .client
+                .subscribe_as(Some(poimen_client::protocol::ClientInfo {
+                    kind: poimen_client::protocol::ClientKind::App,
+                    pid: std::process::id(),
+                })) {
                 Ok(events) => {
                     if connected != Some(true) {
                         emit(&synthetic("poimen.connected", Value::Null));
