@@ -38,7 +38,10 @@ impl KeySpec {
         if text.is_empty() {
             return Err("empty key".into());
         }
-        let sep = if text.len() > 1 && text[..text.len() - 1].contains('+') {
+        // Everything before the last character (on a char boundary, the key may be non-ASCII).
+        let mut head = text.chars();
+        head.next_back();
+        let sep = if head.as_str().contains('+') {
             '+'
         } else {
             '-'
@@ -348,6 +351,45 @@ mod tests {
                 mods: KeyModifiers::SHIFT
             })
         );
+    }
+
+    #[test]
+    fn non_ascii_keys_parse_without_panicking() {
+        assert_eq!(KeySpec::parse("é"), Ok(KeySpec::plain(KeyCode::Char('é'))));
+        assert_eq!(KeySpec::parse("C-é"), Ok(KeySpec::ctrl('é')));
+        assert_eq!(KeySpec::parse("Ctrl+é"), Ok(KeySpec::ctrl('é')));
+        assert_eq!(
+            KeySpec::parse("M-ü"),
+            Ok(KeySpec {
+                code: KeyCode::Char('ü'),
+                mods: KeyModifiers::ALT
+            })
+        );
+        assert_eq!(KeySpec::parse("C-+"), Ok(KeySpec::ctrl('+')));
+        assert_eq!(KeySpec::parse("Ctrl++"), Ok(KeySpec::ctrl('+')));
+        assert_eq!(KeySpec::parse("+"), Ok(KeySpec::plain(KeyCode::Char('+'))));
+        assert!(KeySpec::parse("C-éé").unwrap_err().contains("unknown key"));
+        assert!(KeySpec::parse("é+").unwrap_err().contains("unknown key"));
+        assert!(KeySpec::parse("Hyper-é").unwrap_err().contains("modifier"));
+    }
+
+    #[test]
+    fn non_ascii_console_entries_parse_or_warn() {
+        let c = parse(
+            &json!({"console": {"prefix": "C-é", "keys": {"detach": "ü"}}}),
+            &[],
+        );
+        assert_eq!(c.prefix, KeySpec::ctrl('é'));
+        assert_eq!(c.keys.detach, KeySpec::plain(KeyCode::Char('ü')));
+        assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+
+        let bad = parse(
+            &json!({"console": {"prefix": "é-é", "keys": {"detach": "C-éé"}}}),
+            &[],
+        );
+        assert_eq!(bad.prefix, DEFAULT_PREFIX);
+        assert_eq!(bad.keys, Keys::default());
+        assert_eq!(bad.warnings.len(), 2, "{:?}", bad.warnings);
     }
 
     #[test]
