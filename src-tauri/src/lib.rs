@@ -151,6 +151,26 @@ async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), S
     on_backend(backend.inner(), move |b| b.close_terminal(&pane_id)).await
 }
 
+/// Closes a tab with all its terminals (`tab.close` on the poimen backend). The UI confirms first.
+#[tauri::command]
+async fn tab_close(backend: State<'_, Shared>, tab_id: String) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| b.close_tab(&tab_id)).await
+}
+
+/// Renames a tab (`tab.rename` on the poimen backend); a blank name is rejected.
+#[tauri::command]
+async fn tab_rename(
+    backend: State<'_, Shared>,
+    tab_id: String,
+    name: String,
+) -> Result<(), String> {
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err("The name of a tab cannot be empty.".into());
+    }
+    on_backend(backend.inner(), move |b| b.rename_tab(&tab_id, &name)).await
+}
+
 /// Closes a space with all its panes; only on an explicit user action (the UI confirms first when
 /// it has panes). Afterwards `focus`, the neighbouring space, is focused on a best-effort basis; a
 /// failing close leaves the space untouched and returns the backend's error.
@@ -463,7 +483,10 @@ async fn create_space(
 }
 
 /// The body of `create_space`, against any backend. `root_command` replaces the command of the
-/// layout's root pane in a new space (a task's command); an existing space runs nothing.
+/// layout's root pane in a new space (a task's command); an existing space runs nothing. A backend
+/// that builds layouts itself (poimen-server) gets the request as it is and answers the trust
+/// question; for the others (herdr) the app gates the project file, creates the space and applies
+/// the layout (`layout::apply`).
 fn create_space_with(
     backend: &dyn Backend,
     home: Option<&std::path::Path>,
@@ -486,6 +509,39 @@ fn create_space_with(
             setup_started: false,
             trust: None,
         });
+    }
+    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &workspaces);
+    // poimen-server resolves and builds the layout itself and asks for trust first.
+    let request = backend::LayoutRequest {
+        cwd: &dir,
+        label: &label,
+        decision: decision.as_ref(),
+        command: root_command,
+    };
+    if let Some(result) = backend.create_space_with_layout(request) {
+        return match result? {
+            backend::LaidOut::Trust(request) => Ok(spaces::SpaceOutcome {
+                workspace_id: String::new(),
+                created: false,
+                warnings: Vec::new(),
+                setup_started: false,
+                trust: Some(request),
+            }),
+            backend::LaidOut::Created {
+                space_id,
+                warnings,
+                setup_started,
+            } => {
+                backend.focus_space(&space_id)?;
+                Ok(spaces::SpaceOutcome {
+                    workspace_id: space_id,
+                    created: true,
+                    warnings,
+                    setup_started,
+                    trust: None,
+                })
+            }
+        };
     }
     // The project files are read once; the trust check, the listed commands and the layout all
     // use this read.
@@ -515,7 +571,6 @@ fn create_space_with(
             true
         }
     };
-    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &workspaces);
     let created = backend.create_space(&dir, &label)?;
     let workspace_id = created.space_id.clone();
     backend.focus_space(&workspace_id)?;
@@ -2043,6 +2098,8 @@ pub fn run() {
             set_ui_font_size,
             pane_split,
             pane_close,
+            tab_close,
+            tab_rename,
             space_close,
             agent_start,
             agent_rename,
@@ -2388,7 +2445,13 @@ mod build_layout_tests {
             cwd: dir.clone(),
             ..Default::default()
         };
-        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
+        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(
+            &poimen_client::protocol::SpaceList {
+                spaces: vec![space],
+                tabs: Vec::new(),
+            },
+            &[],
+        );
         let outcome =
             create_space_with(&fake, None, &dir, Some("#12 Add picker"), None, Some("c")).unwrap();
         assert!(!outcome.created);
@@ -2568,6 +2631,148 @@ mod build_layout_tests {
         assert!(fake.calls().is_empty());
     }
 
+    // A backend that builds the layout itself (poimen-server's `space.create`).
+
+    fn layout_backend(answer: backend::LaidOut) -> FakeBackend {
+        let fake = FakeBackend::default();
+        *fake.laid_out.lock().unwrap() = Some(answer);
+        fake
+    }
+
+    fn built(space_id: &str) -> backend::LaidOut {
+        backend::LaidOut::Created {
+            space_id: space_id.into(),
+            warnings: vec!["layout: pane x could not be split".into()],
+            setup_started: true,
+        }
+    }
+
+    /// A directory with a project file whose `setup` is not trusted by anyone.
+    fn untrusted_project() -> String {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("poimen-513-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".poimen")).unwrap();
+        std::fs::write(dir.join(".poimen/config.json"), r#"{"setup": "make"}"#).unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_layout_backend_builds_the_new_space_and_the_app_only_focuses_it() {
+        let fake = layout_backend(built("s9"));
+        let dir = tmp_dir();
+        let outcome = create_space_with(&fake, None, &dir, Some("demo"), None, None).unwrap();
+        assert_eq!(
+            outcome,
+            spaces::SpaceOutcome {
+                workspace_id: "s9".into(),
+                created: true,
+                warnings: vec!["layout: pane x could not be split".into()],
+                setup_started: true,
+                trust: None,
+            }
+        );
+        // No terminal, split, rename or input from the app: `layout::apply` is herdr's only.
+        assert_eq!(
+            fake.calls(),
+            [
+                "snapshot".to_owned(),
+                format!("create_space_with_layout {dir} demo - -"),
+                "focus s9".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_layout_backend_gets_the_task_command_and_the_trust_answer() {
+        let fake = layout_backend(built("s9"));
+        let dir = untrusted_project();
+        let decision = trust::Decision::Trust { hash: "abc".into() };
+        create_space_with(
+            &fake,
+            None,
+            &dir,
+            Some("#12 x"),
+            Some(decision),
+            Some("claude 'x'"),
+        )
+        .unwrap();
+        assert_eq!(
+            fake.calls()[1],
+            format!("create_space_with_layout {dir} #12 x trust:abc claude 'x'")
+        );
+        let fake = layout_backend(built("s9"));
+        create_space_with(
+            &fake,
+            None,
+            &dir,
+            None,
+            Some(trust::Decision::Without),
+            None,
+        )
+        .unwrap();
+        assert!(
+            fake.calls()[1].ends_with(" without -"),
+            "{:?}",
+            fake.calls()
+        );
+    }
+
+    #[test]
+    fn the_trust_question_of_a_layout_backend_reaches_the_dialog_and_nothing_is_focused() {
+        let request = trust::TrustRequest {
+            root: "/work/app".into(),
+            files: vec!["/work/app/.poimen/config.json".into()],
+            hash: "abc".into(),
+            commands: vec![trust::ListedCommand {
+                what: "setup".into(),
+                command: "make".into(),
+            }],
+        };
+        let fake = layout_backend(backend::LaidOut::Trust(request.clone()));
+        let dir = tmp_dir();
+        let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
+        assert!(!outcome.created);
+        assert_eq!(outcome.workspace_id, "");
+        assert_eq!(outcome.trust, Some(request));
+        assert_eq!(fake.calls().len(), 2, "no focus: {:?}", fake.calls());
+    }
+
+    #[test]
+    fn the_app_does_not_gate_the_project_file_of_a_layout_backend() {
+        // On herdr this directory asks for trust first; on poimen-server the server asks.
+        let dir = untrusted_project();
+        let herdr = FakeBackend::default();
+        let asked = create_space_with(&herdr, None, &dir, None, None, None).unwrap();
+        assert!(asked.trust.is_some());
+        let fake = layout_backend(built("s9"));
+        let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
+        assert!(outcome.created && outcome.trust.is_none());
+    }
+
+    #[test]
+    fn an_existing_space_is_focused_without_asking_a_layout_backend() {
+        let fake = layout_backend(built("s9"));
+        let dir = tmp_dir();
+        *fake.snapshot.lock().unwrap() = Snapshot {
+            workspaces: json!([{ "workspace_id": "s2", "label": "demo", "number": 1 }]),
+            tabs: json!([]),
+            panes: json!([{ "pane_id": "t1", "workspace_id": "s2", "cwd": dir }]),
+        };
+        let outcome = create_space_with(&fake, None, &dir, None, None, Some("c")).unwrap();
+        assert!(!outcome.created);
+        assert_eq!(fake.calls(), ["snapshot", "focus s2"]);
+    }
+
+    #[test]
+    fn a_failing_layout_create_is_an_error_and_focuses_nothing() {
+        let fake = layout_backend(built("s9"));
+        fake.fail_on("create_space_with_layout");
+        let err = create_space_with(&fake, None, &tmp_dir(), None, None, None).unwrap_err();
+        assert_eq!(err, "boom");
+        assert_eq!(fake.calls(), ["snapshot"]);
+    }
+
     // Rebuilding a space that came back without terminals after a server restart (#579).
 
     /// A fake whose snapshot has the persisted space `s1` in `cwd` and no terminals, as the
@@ -2580,7 +2785,13 @@ mod build_layout_tests {
             cwd: cwd.into(),
             ..Default::default()
         };
-        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
+        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(
+            &poimen_client::protocol::SpaceList {
+                spaces: vec![space],
+                tabs: Vec::new(),
+            },
+            &[],
+        );
         fake
     }
 

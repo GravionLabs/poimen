@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { HerdrStore } from "../core/herdr-store";
+import { spaceRoot } from "../core/herdr";
 import {
   parseAgentActions,
   parseHarnesses,
@@ -517,8 +518,7 @@ export class AgentActions {
     outcome: SpaceOutcome,
   ): Promise<void> {
     let paneId: string | null | undefined = outcome.created
-      ? this.store.snapshot().terminals.find((t) => t.space_id === outcome.workspace_id)
-          ?.terminal_id
+      ? spaceRoot(this.store.snapshot(), outcome.workspace_id)?.terminal_id
       : null;
     paneId ??= await this.bridge.invoke<string | null>("terminal_create", {
       workspaceId: outcome.workspace_id,
