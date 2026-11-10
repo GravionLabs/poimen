@@ -2,6 +2,7 @@ import {
   cardKey,
   ageText,
   runTitle,
+  stepText,
   type DeliverCard,
   type DeliverStatus,
   type Tone,
@@ -49,9 +50,34 @@ export function selectRun(
   return [...runs].sort((a, b) => Date.parse(b.status.updated) - Date.parse(a.status.updated))[0];
 }
 
-/** Label of a run in the picker. */
+/** `text` cut to `max` characters with an ellipsis. */
+export const shorten = (text: string, max: number): string =>
+  text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+
+/**
+ * The first open task of a run: `#177 review 4/7` (subject title, shortened, and its step with
+ * `n/total` when both are known); empty without an open task.
+ */
+export function currentTaskText(status: DeliverStatus): string {
+  const task = status.tasks[0];
+  if (!task) return "";
+  const step = task.step ? stepText(task.step) : "";
+  return [shorten(task.subject.title, 40), step].filter((p) => p !== "").join(" ");
+}
+
+/**
+ * The line of a run: `M014 3/18 · #177 review 4/7 (running, 2 min ago)`: title, run progress,
+ * the current task and the state with its age. Parts without data are left out.
+ */
 export function runLabel(run: RunChoice, now: number): string {
-  return `${runTitle(run.status)} (${run.status.status}, ${ageText(run.status.updated, now)})`;
+  const s = run.status;
+  const head = [runTitle(s, run.root), s.progress ? `${s.progress.done}/${s.progress.total}` : ""]
+    .filter((p) => p !== "")
+    .join(" ");
+  const task = currentTaskText(s);
+  const age = ageText(s.updated, now);
+  const state = [s.status, age].filter((p) => p !== "").join(", ");
+  return `${[head, task].filter((p) => p !== "").join(" · ")} (${state})`;
 }
 
 /** Style of a row, from the tone alone: a CSS class and an icon. */

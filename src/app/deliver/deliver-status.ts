@@ -549,8 +549,42 @@ export function needsAttention(status: DeliverStatus): boolean {
   return status.tone === "warning" || status.tone === "danger";
 }
 
-/** What a run is called: its subject, else its id. */
-export const runTitle = (status: DeliverStatus): string => status.subject?.title ?? status.run;
+/** "implement 2/3", "review": the step name with its position when the writer gave one. */
+export function stepText(step: Step): string {
+  return step.n !== null && step.total !== null
+    ? `${step.name} ${step.n}/${step.total}`
+    : step.name;
+}
+
+/** `HH:MM` of an ISO timestamp in local time; empty when it is missing or not a date. */
+export function clockText(ts: string | null | undefined): string {
+  const date = ts ? new Date(ts) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+/** The last segment of a path (either separator), without a trailing separator. */
+const folderName = (root: string): string =>
+  root
+    .replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .pop() ?? "";
+
+/**
+ * What a run is called: its subject title, else `<repository folder> · <harness> · <start HH:MM>`
+ * (the known parts; the start is the `ts` of the first event), the run id only as the last
+ * fallback.
+ */
+export function runTitle(status: DeliverStatus, root?: string): string {
+  if (status.subject?.title) return status.subject.title;
+  const parts = [
+    root ? folderName(root) : "",
+    status.harness ?? "",
+    clockText(status.events.find((e) => e.ts)?.ts),
+  ].filter((p) => p !== "");
+  return parts.length > 0 ? parts.join(" · ") : status.run;
+}
 
 /** The compact status bar item. */
 export interface BarSummary {
