@@ -1,9 +1,12 @@
-//! Arguments of `poimen attach`.
+//! Arguments of `poimen`: none for the TUI, else a command.
 
 use poimen_protocol::AttachMode;
 
-pub const USAGE: &str = "usage: poimen <command>\n\
+pub const USAGE: &str = "usage: poimen [<command>]\n\
 \n\
+  (none)                              the TUI: spaces and terminals, the selected one attached.\n\
+                                      Ctrl+B d detaches, Ctrl+B Up/Down selects, Ctrl+B b\n\
+                                      toggles the sidebar (console.prefix, console.keys)\n\
   ls [--json]                         spaces, terminals and agent status\n\
   status <terminal> [--json]          one terminal: state and agent status\n\
   new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id\n\
@@ -54,6 +57,8 @@ pub enum Request {
 pub enum Command {
     Attach(AttachArgs),
     Request(Request),
+    /// No arguments: the TUI.
+    Tui,
     Help,
     Version,
 }
@@ -61,7 +66,7 @@ pub enum Command {
 /// Parses the arguments after the program name. `Err` is a usage message (exit code 2).
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let Some((name, rest)) = args.split_first() else {
-        return Ok(Command::Help);
+        return Ok(Command::Tui);
     };
     if wants_help(name, rest) {
         return Ok(Command::Help);
@@ -324,7 +329,7 @@ mod tests {
         assert!(p(&["attach", "a", "b"]).is_err());
         assert!(p(&["attach", "--nope", "a"]).is_err());
         assert!(p(&["bogus"]).is_err());
-        assert_eq!(p(&[]), Ok(Command::Help));
+        assert_eq!(p(&[]), Ok(Command::Tui));
     }
 
     fn req(args: &[&str]) -> Request {

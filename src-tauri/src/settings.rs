@@ -12,8 +12,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use poimen_core::settings::{
-    config_path, parse_space_templates, parse_tasks, parse_trusted_projects, revoke_project,
-    trust_project,
+    SidebarRows, config_path, parse_space_templates, parse_tasks, parse_trusted_projects,
+    resolve_sidebar_rows, revoke_project, trust_project,
 };
 use poimen_core::settings::{
     find_value, remove_path_text, root_open, save_with, set_key_text, set_path_text,
@@ -36,120 +36,6 @@ pub struct Colors {
     pub selection_foreground: Option<String>,
     /// ANSI colors 0-15 (`palette = N=#rrggbb`); empty when Ghostty sets none, else 16 entries.
     pub palette: Vec<Option<String>>,
-}
-
-/// A token on a sidebar row line (`sidebar.rows`).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct RowToken {
-    pub token: String,
-    pub bold: bool,
-    pub dim: bool,
-}
-
-/// Lines of tokens per row type; `None` keeps the frontend default of that row type.
-#[derive(Debug, Clone, Default, PartialEq, Serialize)]
-pub struct SidebarRows {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace: Option<Vec<Vec<RowToken>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent: Option<Vec<Vec<RowToken>>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub terminal: Option<Vec<Vec<RowToken>>>,
-}
-
-/// Built-in row tokens; `$<name>` shows the herdr token `<name>`.
-pub const ROW_TOKENS: &[&str] = &[
-    "state_icon",
-    "name",
-    "state_text",
-    "agent",
-    "title",
-    "branch",
-    "dirty",
-    "sync",
-    "pr",
-    "notification",
-    "dir",
-    "tab",
-];
-
-fn parse_row_token(value: &Value) -> Result<RowToken, String> {
-    let (name, bold, dim) = match value {
-        Value::String(s) => (s.as_str(), false, false),
-        Value::Object(o) => {
-            let Some(Value::String(name)) = o.get("token") else {
-                return Err("an object token needs a string \"token\"".into());
-            };
-            let flag = |key: &str| match o.get(key) {
-                None => Ok(false),
-                Some(Value::Bool(b)) => Ok(*b),
-                Some(other) => Err(format!("{key} {other} must be true or false")),
-            };
-            (name.as_str(), flag("bold")?, flag("dim")?)
-        }
-        other => return Err(format!("token {other} must be a string or an object")),
-    };
-    let known = ROW_TOKENS.contains(&name)
-        || name
-            .strip_prefix('$')
-            .is_some_and(|n| !n.is_empty() && !n.contains(char::is_whitespace));
-    if !known {
-        return Err(format!("unknown token \"{name}\""));
-    }
-    Ok(RowToken {
-        token: name.to_owned(),
-        bold,
-        dim,
-    })
-}
-
-fn parse_row_lines(value: &Value) -> Result<Vec<Vec<RowToken>>, String> {
-    let Some(lines) = value.as_array().filter(|l| !l.is_empty()) else {
-        return Err("must be a non-empty list of lines".into());
-    };
-    lines
-        .iter()
-        .map(|line| {
-            let Some(tokens) = line.as_array().filter(|t| !t.is_empty()) else {
-                return Err("each line must be a non-empty list of tokens".into());
-            };
-            tokens.iter().map(parse_row_token).collect()
-        })
-        .collect()
-}
-
-/// The valid row types of `sidebar.rows`; an invalid one warns and stays `None` (the default).
-fn resolve_sidebar_rows(sidebar: &Value, warnings: &mut Vec<String>) -> SidebarRows {
-    let mut out = SidebarRows::default();
-    let Some(sidebar) = sidebar.as_object() else {
-        warnings.push("sidebar must be an object".into());
-        return out;
-    };
-    let Some(rows) = sidebar.get("rows") else {
-        return out;
-    };
-    let Some(rows) = rows.as_object() else {
-        warnings.push("sidebar.rows must be an object".into());
-        return out;
-    };
-    for (kind, value) in rows {
-        let slot = match kind.as_str() {
-            "workspace" => &mut out.workspace,
-            "agent" => &mut out.agent,
-            "terminal" => &mut out.terminal,
-            _ => {
-                warnings.push(format!(
-                    "sidebar.rows.{kind} is not a known row type; ignored"
-                ));
-                continue;
-            }
-        };
-        match parse_row_lines(value) {
-            Ok(lines) => *slot = Some(lines),
-            Err(e) => warnings.push(format!("sidebar.rows.{kind}: {e}; using the default")),
-        }
-    }
-    out
 }
 
 /// The `colorSchema` setting: one scheme name, or a light/dark pair picked by `theme`.
@@ -1737,7 +1623,7 @@ mod tests {
             r#"{"sidebar":{"rows":{"agent":[["state_icon",{"token":"name","bold":true}],["$deliver_step","dir"]]}}}"#,
         );
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
-        let tok = |t: &str, bold| RowToken {
+        let tok = |t: &str, bold| poimen_core::settings::RowToken {
             token: t.into(),
             bold,
             dim: false,

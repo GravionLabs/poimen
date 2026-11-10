@@ -11,6 +11,7 @@ pub mod harness;
 pub mod layout;
 pub mod project;
 pub mod remote;
+pub mod schemes;
 pub mod settings;
 pub mod space_layout;
 pub mod task_start;
