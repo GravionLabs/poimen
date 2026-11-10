@@ -218,7 +218,7 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 | Part   | macOS                                  | Windows             | Linux                     |
 | ------ | -------------------------------------- | ------------------- | ------------------------- |
 | App    | `poimen.app/Contents/MacOS/poimen-app` | `poimen-app.exe`    | `/usr/bin/poimen-app`     |
-| CLI    | `poimen` (later, [ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)) | `poimen.exe` (later) | `/usr/bin/poimen` (later) |
+| CLI    | `poimen` ([ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)) | `poimen.exe` (later) | `/usr/bin/poimen` (later) |
 | Server | `poimen-server`                        | `poimen-server.exe` | `/usr/bin/poimen-server`  |
 
 The Cargo package of the app is `poimen-app` (library `poimen_lib`). The product name, the identifier `dev.gravionlabs.poimen` and with them the config directory stay `poimen`. The RC overlay builds `poimen-rc` and `poimen-server-rc`.

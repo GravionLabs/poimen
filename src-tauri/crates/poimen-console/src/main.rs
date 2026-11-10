@@ -7,6 +7,7 @@ use std::thread;
 
 use poimen_client::Client;
 use poimen_console::cli::{self, Command, USAGE};
+use poimen_console::commands;
 use poimen_console::keys::DEFAULT_PREFIX;
 use poimen_console::session::{self, Options, Outcome};
 use poimen_console::tty::{LocalTerminal, RawGuard};
@@ -19,8 +20,18 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Command::Attach(a)) => attach(a),
+        Ok(Command::Request(r)) => {
+            let client = Client::new(poimen_protocol::terminal_socket_path());
+            match commands::run(&client, &r, commands::PROMPT_WAIT, &mut std::io::stdout()) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(commands::Failure(m)) => {
+                    eprintln!("poimen: {m}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Err(e) => {
-            eprintln!("poimen-console: {e}\n{USAGE}");
+            eprintln!("poimen: {e}\n{USAGE}");
             ExitCode::from(2)
         }
     }
@@ -60,7 +71,7 @@ fn attach(a: cli::AttachArgs) -> ExitCode {
         let guard = match RawGuard::new(&mut tty) {
             Ok(g) => g,
             Err(e) => {
-                eprintln!("poimen-console: this is not a terminal: {e}");
+                eprintln!("poimen: this is not a terminal: {e}");
                 return ExitCode::FAILURE;
             }
         };
@@ -92,7 +103,7 @@ fn attach(a: cli::AttachArgs) -> ExitCode {
             ExitCode::FAILURE
         }
         Err(e) => {
-            eprintln!("poimen-console: {e}");
+            eprintln!("poimen: {e}");
             ExitCode::FAILURE
         }
     }
