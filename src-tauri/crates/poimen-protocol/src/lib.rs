@@ -12,7 +12,7 @@ use serde_json::Value;
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
@@ -813,6 +813,54 @@ pub struct SpaceCreated {
 pub enum SpaceCreateResult {
     TrustRequired { trust_required: TrustRequired },
     Created(SpaceCreated),
+}
+
+/// `space.apply_layout` (protocol 6): builds a layout into an existing space as new tabs, after
+/// the same trust handshake as `space.create`. Without `preset` the layout is the one the server
+/// resolves for `cwd` like `space.create` does (rebuilding a space whose terminals are gone),
+/// with the project's `setup` tab; with `preset` it is that preset of the project file (one new
+/// tab, no setup).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpaceApplyLayout {
+    pub space_id: String,
+    /// Defaults to the space's `cwd`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// The name of a preset of the project file; absent: the resolved layout of the space.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    /// The user's answer to a `trust_required` result; absent on the first send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust: Option<TrustAnswer>,
+}
+
+impl SpaceApplyLayout {
+    /// The resolved layout of the space, in its own directory, without a trust answer yet.
+    pub fn resolved(space_id: impl Into<String>) -> Self {
+        Self {
+            space_id: space_id.into(),
+            cwd: None,
+            preset: None,
+            trust: None,
+        }
+    }
+
+    /// The preset `name` of the project file, without a trust answer yet.
+    pub fn preset(space_id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            preset: Some(name.into()),
+            ..Self::resolved(space_id)
+        }
+    }
+}
+
+/// Result of `space.apply_layout`: the space with the tabs it built (only the new ones, in
+/// order), or the trust question (nothing created).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SpaceApplyLayoutResult {
+    TrustRequired { trust_required: TrustRequired },
+    Applied(SpaceCreated),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1778,6 +1826,59 @@ mod tests {
         assert!(
             matches!(old, SpaceCreateResult::Created(c) if c.tabs.is_empty() && !c.setup_started)
         );
+    }
+
+    #[test]
+    fn space_apply_layout_params_carry_space_cwd_preset_and_trust() {
+        let r = parse_request(
+            r#"{"id":"1","method":"space.apply_layout","params":{"space_id":"s1","cwd":"/x",
+                "preset":"duo","trust":{"kind":"without"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.method, "space.apply_layout");
+        let p: SpaceApplyLayout = params(&r).unwrap();
+        assert_eq!(p.space_id, "s1");
+        assert_eq!(p.cwd.as_deref(), Some("/x"));
+        assert_eq!(p.preset.as_deref(), Some("duo"));
+        assert_eq!(p.trust, Some(TrustAnswer::Without));
+
+        // Only `space_id` is required; the defaults stay off the wire.
+        let bare: SpaceApplyLayout = serde_json::from_value(json!({"space_id": "s2"})).unwrap();
+        assert_eq!(bare, SpaceApplyLayout::resolved("s2"));
+        assert_eq!(
+            serde_json::to_value(SpaceApplyLayout::preset("s2", "duo")).unwrap(),
+            json!({"space_id": "s2", "preset": "duo"})
+        );
+        assert!(serde_json::from_value::<SpaceApplyLayout>(json!({"preset": "duo"})).is_err());
+    }
+
+    #[test]
+    fn space_apply_layout_result_is_the_trust_question_or_the_new_tabs() {
+        let asked: SpaceApplyLayoutResult = serde_json::from_value(json!({"trust_required": {
+            "root": "/x", "files": ["/x/.poimen/config.json"], "hash": "h",
+            "commands": [{"what": "preset \"duo\": pane \"a\"", "command": "vim"}],
+            "layout": [{"name": "a", "command": "vim"}]
+        }}))
+        .unwrap();
+        let SpaceApplyLayoutResult::TrustRequired { trust_required } = asked else {
+            panic!("{asked:?}")
+        };
+        assert_eq!(trust_required.hash, "h");
+        assert_eq!(trust_required.commands[0].command, "vim");
+
+        let applied: SpaceApplyLayoutResult = serde_json::from_value(json!({
+            "space": {"id": "s1", "name": "a", "cwd": "/x", "tabs": ["tab2", "tab4"]},
+            "tabs": [{"tab_id": "tab4", "space_id": "s1", "name": "a",
+                      "root": {"kind": "terminal", "terminal_id": "t5"}, "active_terminal": "t5"}],
+            "warnings": [], "setup_started": false
+        }))
+        .unwrap();
+        let SpaceApplyLayoutResult::Applied(applied) = applied else {
+            panic!("{applied:?}")
+        };
+        assert_eq!(applied.space.tabs, ["tab2", "tab4"]);
+        assert_eq!(applied.tabs.len(), 1);
+        assert_eq!(applied.tabs[0].root, Node::terminal("t5"));
     }
 }
 

@@ -1,4 +1,4 @@
-//! What `space.create` with `layout` builds, decided before anything is created: the project
+//! What `space.create` with `layout` and `space.apply_layout` build, decided before anything is created: the project
 //! files of the repository are read once into [`Sources`] (the trust hash, the listed commands and
 //! the layout all come from that read), the user config is read again for every request
 //! (`trustedProjects` is the only source of trust), and `trust::gate` decides `Run`, `Strip` or
@@ -21,7 +21,7 @@ use crate::tabs::Failure;
 /// file right before each write (`settings::save_with`).
 static TRUST_WRITE: Mutex<()> = Mutex::new(());
 
-/// What a new space gets once the gate allowed it.
+/// What a new space (or `space.apply_layout` in an existing one) gets once the gate allowed it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Build {
     pub(crate) dir: String,
@@ -70,14 +70,37 @@ fn wire_layout(layout: &Layout) -> Vec<LayoutPane> {
         .collect()
 }
 
-/// Decides what `space.create` builds in `cwd` (an existing directory). `home` holds the user
-/// config (`None`: no config, nothing trusted and no trust can be stored); `available` says
-/// whether a template's agent program is on the `PATH`.
+/// Which layout [`prepare`] plans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Wanted<'a> {
+    /// The resolved layout of the directory (project file > deprecated file > template >
+    /// `spaces.layout` > default) with the project's `setup`; `root_command` replaces the
+    /// command of its root pane.
+    Resolved { root_command: Option<&'a str> },
+    /// The named preset of the project file, without `setup`.
+    Preset(&'a str),
+}
+
+/// The preset `name` of the project file in `sources`.
+fn preset_of(sources: &Sources, name: &str) -> Option<Layout> {
+    let (path, text) = sources.project.as_ref()?;
+    project::parse(path, text, project::platform())
+        .config
+        .presets
+        .into_iter()
+        .find(|p| p.name == name)
+        .map(|p| p.layout)
+}
+
+/// Decides what `space.create` or `space.apply_layout` builds in `cwd` (an existing directory).
+/// `home` holds the user config (`None`: no config, nothing trusted and no trust can be stored);
+/// `available` says whether a template's agent program is on the `PATH`. A preset that the
+/// project file does not have is `not_found`, before anything is asked or stored.
 pub(crate) fn prepare(
     home: Option<&Path>,
     cwd: &str,
     answer: Option<&TrustAnswer>,
-    root_command: Option<&str>,
+    wanted: Wanted<'_>,
     available: &dyn Fn(&str) -> bool,
 ) -> Result<Prepared, Failure> {
     if !Path::new(cwd).is_dir() {
@@ -97,14 +120,30 @@ pub(crate) fn prepare(
         home,
         available,
     );
-    let plan = |allow: bool| {
-        space_layout::plan(
+    let preset = match wanted {
+        Wanted::Preset(name) => Some(preset_of(&sources, name).ok_or((
+            ErrorCode::NotFound,
+            format!("the project file has no preset {name}"),
+        ))?),
+        Wanted::Resolved { .. } => None,
+    };
+    let plan = |allow: bool| match (&preset, wanted) {
+        (Some(layout), _) => Ok((
+            if allow {
+                layout.clone()
+            } else {
+                layout.without_commands()
+            },
+            Vec::new(),
+        )),
+        (None, Wanted::Resolved { root_command }) => space_layout::plan(
             &sources,
             user_layout.as_ref(),
             allow,
             root_command,
             agent.as_deref(),
-        )
+        ),
+        (None, Wanted::Preset(_)) => unreachable!("a preset is looked up above"),
     };
     let allow = match trust::gate(&sources, &user.trusted, answer.map(decision).as_ref()) {
         Gate::Ask(request) => {
@@ -151,7 +190,9 @@ pub(crate) fn prepare(
             None
         }
     };
-    let setup = allow.then(|| project::setup_of(sources.refs().0)).flatten();
+    let setup = (allow && preset.is_none())
+        .then(|| project::setup_of(sources.refs().0))
+        .flatten();
     Ok(Prepared::Build(Build {
         dir: cwd.to_owned(),
         layout,
@@ -209,8 +250,16 @@ mod tests {
         }
     }
 
+    const RESOLVED: Wanted<'static> = Wanted::Resolved { root_command: None };
+
+    fn task(command: &str) -> Wanted<'_> {
+        Wanted::Resolved {
+            root_command: Some(command),
+        }
+    }
+
     fn prepare_in(d: &Dirs, answer: Option<&TrustAnswer>) -> Prepared {
-        prepare(Some(&d.home()), &d.repo(), answer, None, &|_| false).unwrap()
+        prepare(Some(&d.home()), &d.repo(), answer, RESOLVED, &|_| false).unwrap()
     }
 
     fn build(p: Prepared) -> Build {
@@ -316,7 +365,7 @@ mod tests {
         let d = Dirs::new("task");
         d.config(r#"{"spaces": {"layout": {"panes": [{"name": "solo", "command": "htop"}]}}}"#);
         let b =
-            build(prepare(Some(&d.home()), &d.repo(), None, Some("fix 7"), &|_| false).unwrap());
+            build(prepare(Some(&d.home()), &d.repo(), None, task("fix 7"), &|_| false).unwrap());
         assert_eq!(b.layout.unwrap().panes[0].command.as_deref(), Some("fix 7"));
     }
 
@@ -333,8 +382,98 @@ mod tests {
     fn a_missing_directory_is_invalid_params() {
         let d = Dirs::new("missing");
         let missing = d.base.join("nope").display().to_string();
-        let err = prepare(Some(&d.home()), &missing, None, None, &|_| true).unwrap_err();
+        let err = prepare(Some(&d.home()), &missing, None, RESOLVED, &|_| true).unwrap_err();
         assert_eq!(err.0, ErrorCode::InvalidParams);
+    }
+
+    const WITH_PRESET: &str = r#"{
+        "setup": "make deps",
+        "presets": [{"name": "duo", "panes": [{"name": "a", "command": "vim"},
+                                              {"name": "b", "split": {"direction": "down"}}]}]
+    }"#;
+
+    #[test]
+    fn a_trusted_preset_builds_its_panes_with_commands_and_no_setup() {
+        let d = Dirs::new("preset");
+        d.project(WITH_PRESET);
+        let answer = TrustAnswer::Trust {
+            hash: trust::sha256_hex(WITH_PRESET),
+        };
+        let p = prepare(
+            Some(&d.home()),
+            &d.repo(),
+            Some(&answer),
+            Wanted::Preset("duo"),
+            &|_| false,
+        )
+        .unwrap();
+        let b = build(p);
+        assert_eq!(b.setup, None);
+        let layout = b.layout.unwrap();
+        let names: Vec<_> = layout.panes.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
+        assert_eq!(layout.panes[0].command.as_deref(), Some("vim"));
+    }
+
+    #[test]
+    fn an_untrusted_preset_asks_with_the_preset_layout() {
+        let d = Dirs::new("preset-ask");
+        d.project(WITH_PRESET);
+        let p = prepare(
+            Some(&d.home()),
+            &d.repo(),
+            None,
+            Wanted::Preset("duo"),
+            &|_| false,
+        );
+        let Ok(Prepared::Ask(asked)) = p else {
+            panic!("expected a trust question, got {p:?}")
+        };
+        let layout = asked.layout.unwrap();
+        assert_eq!(layout[0].name, "a");
+        assert_eq!(layout[1].split.as_ref().unwrap().from, "a");
+        assert_eq!(d.config_text(), "");
+    }
+
+    #[test]
+    fn a_preset_without_commands_keeps_the_panes() {
+        let d = Dirs::new("preset-without");
+        d.project(WITH_PRESET);
+        let p = prepare(
+            Some(&d.home()),
+            &d.repo(),
+            Some(&TrustAnswer::Without),
+            Wanted::Preset("duo"),
+            &|_| false,
+        );
+        let layout = build(p.unwrap()).layout.unwrap();
+        assert_eq!(layout.panes.len(), 2);
+        assert!(layout.panes.iter().all(|p| p.command.is_none()));
+    }
+
+    #[test]
+    fn an_unknown_preset_is_not_found_and_asks_nothing() {
+        let d = Dirs::new("preset-missing");
+        d.project(WITH_PRESET);
+        let err = prepare(
+            Some(&d.home()),
+            &d.repo(),
+            None,
+            Wanted::Preset("solo"),
+            &|_| false,
+        )
+        .unwrap_err();
+        assert_eq!(err.0, ErrorCode::NotFound);
+        let d2 = Dirs::new("preset-nofile");
+        let err = prepare(
+            Some(&d2.home()),
+            &d2.repo(),
+            None,
+            Wanted::Preset("duo"),
+            &|_| false,
+        )
+        .unwrap_err();
+        assert_eq!(err.0, ErrorCode::NotFound);
     }
 
     #[test]
@@ -344,7 +483,7 @@ mod tests {
         let answer = TrustAnswer::Trust {
             hash: trust::sha256_hex(PROJECT),
         };
-        let err = prepare(None, &d.repo(), Some(&answer), None, &|_| true).unwrap_err();
+        let err = prepare(None, &d.repo(), Some(&answer), RESOLVED, &|_| true).unwrap_err();
         assert_eq!(err.0, ErrorCode::Internal);
     }
 }

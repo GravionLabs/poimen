@@ -136,10 +136,25 @@ pub struct LayoutRequest<'a> {
     pub command: Option<&'a str>,
 }
 
-/// What [`Backend::create_space_with_layout`] did.
+/// A layout the backend builds into an existing space itself (poimen-server's
+/// `space.apply_layout`): the resolved layout of the space (rebuild) or a preset of its project
+/// file, as new tabs.
+#[derive(Debug, Clone, Copy)]
+pub struct ApplyRequest<'a> {
+    pub space_id: &'a str,
+    /// The directory whose project file and layout count (the space's own for a rebuild).
+    pub cwd: &'a str,
+    /// A preset of the project file; `None`: the resolved layout with the project's `setup`.
+    pub preset: Option<&'a str>,
+    /// The user's answer to an earlier [`LaidOut::Trust`]; `None` on the first send.
+    pub decision: Option<&'a crate::trust::Decision>,
+}
+
+/// What [`Backend::create_space_with_layout`] and [`Backend::apply_layout`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaidOut {
-    /// The space exists with its layout (and the setup tab, when `setup_started`).
+    /// The space exists with its layout (and the setup tab, when `setup_started`); for
+    /// `apply_layout` the space it was built into.
     Created {
         space_id: String,
         warnings: Vec<String>,
@@ -240,6 +255,12 @@ pub trait Backend: Send + Sync {
         &self,
         _request: LayoutRequest<'_>,
     ) -> Option<Result<LaidOut, String>> {
+        None
+    }
+    /// Builds a layout into an existing space as new tabs, asking for trust in the project file
+    /// first; `None` when the backend does not build layouts (herdr: the app creates the
+    /// terminal and applies the layout with `layout::apply`).
+    fn apply_layout(&self, _request: ApplyRequest<'_>) -> Option<Result<LaidOut, String>> {
         None
     }
     fn focus_space(&self, space_id: &str) -> Result<(), String>;
