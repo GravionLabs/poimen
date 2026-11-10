@@ -342,7 +342,7 @@ jobs:
           bash scripts/package-cli.sh "${VERSION:-$GITHUB_SHA}" "${{ matrix.target }}" "$bin" dist
           if [[ "${{ matrix.target }}" == *linux* ]]; then
             file "$bin"
-            "$bin" --version || true
+            "$bin" --version
             curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_Linux_$([ "${{ matrix.arch }}" = amd64 ] && echo x86_64 || echo arm64).tar.gz | tar -xz nfpm
             export ARCH="${{ matrix.arch }}" BINARY="$PWD/$bin" VERSION="${VERSION:-0.0.0}"
             ./nfpm package -f packaging/nfpm-poimen-cli.yaml -p deb -t dist

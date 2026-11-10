@@ -12,9 +12,7 @@ pub const USAGE: &str = "usage: poimen <command>\n\
   attach [--control [--takeover]] <terminal>\n\
                                       shows a terminal; observes by default, --control sends your\n\
                                       input and sets the size, --takeover replaces a controller.\n\
-                                      Detach with Ctrl+B d (Ctrl+B Ctrl+B sends Ctrl+B)\n\
-\n\
-Inside a poimen terminal the server comes from POIMEN_SOCKET, else the default socket.";
+                                      XInside a poimen terminal the server comes from POIMEN_SOCKET, else the default socket.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AttachArgs {
@@ -54,6 +52,7 @@ pub enum Command {
     Attach(AttachArgs),
     Request(Request),
     Help,
+    Version,
 }
 
 /// Parses the arguments after the program name. `Err` is a usage message (exit code 2).
@@ -66,6 +65,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     }
     match name.as_str() {
         "-h" | "--help" | "help" => Ok(Command::Help),
+        "-V" | "--version" => Ok(Command::Version),
         "attach" => parse_attach(rest),
         "ls" => {
             let (json, pos) = switch(rest, "--json")?;
@@ -307,6 +307,12 @@ mod tests {
     #[test]
     fn takeover_alone_is_refused() {
         assert!(p(&["attach", "--takeover", "t1"]).is_err());
+    }
+
+    #[test]
+    fn version_flags() {
+        assert_eq!(p(&["--version"]), Ok(Command::Version));
+        assert_eq!(p(&["-V"]), Ok(Command::Version));
     }
 
     #[test]

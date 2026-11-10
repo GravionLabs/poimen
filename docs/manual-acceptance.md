@@ -158,6 +158,7 @@ test.
   `sudo ln -sf /Applications/poimen.app/Contents/MacOS/poimen /usr/local/bin/poimen` and, in a new terminal, `poimen --version`.
 - **Expected:** both print the version of the app. After the link `poimen` resolves from the PATH.
 - **Source:** #519.
+
 ## Windows: `-setup.exe`
 
 The open M10 checks (W-S-9 to W-S-14) run once, here. The `.msi` section repeats the core flows.
@@ -288,6 +289,7 @@ The open M10 checks (W-S-9 to W-S-14) run once, here. The `.msi` section repeats
 - **Expected:** `poimen.exe` is found in the install directory and prints the app version. After the uninstall the
   install directory is gone from the user PATH (Settings > Environment Variables) and `where poimen` finds nothing.
 - **Source:** #519.
+
 ## Windows: `.msi`
 
 The core flows run again on the `.msi` package. The open M10 checks are covered in the `-setup.exe`
@@ -345,6 +347,7 @@ section.
   check again.
 - **Expected:** `poimen.exe` is found and prints the app version. The uninstall removes the directory from the user PATH.
 - **Source:** #519.
+
 ## Linux: `.deb`
 
 ### L-D-1 Install
@@ -411,6 +414,7 @@ section.
 - **Expected:** `/usr/bin/poimen` comes with the app package and with `poimen-cli` alone; both print the version. The two
   packages conflict, so apt refuses to install both.
 - **Source:** #519.
+
 ## Linux: `.rpm`
 
 A pre-release (rc) has no `.rpm` (an RPM version allows no `-`, so `0.12.0-rc009` cannot be bundled). Run this
@@ -473,6 +477,7 @@ section on the stable release once it is published.
   run `sudo dnf install ./poimen-cli-<version>-1.x86_64.rpm`, `rpm -ql poimen-cli` and `poimen --version`.
 - **Expected:** `/usr/bin/poimen` comes with the app package and with `poimen-cli` alone; both print the version.
 - **Source:** #519.
+
 ## Linux: `.AppImage`
 
 The AppImage runs its program from a temporary FUSE mount (`/tmp/.mount_poimen…`) that is gone after
