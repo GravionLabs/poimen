@@ -142,7 +142,7 @@ describe("Deliver panel", () => {
     deliver.apply("/r", events("session"));
     await show();
     const card = el.querySelector("[data-testid=card]")!;
-    expect(text(card.querySelector("h2"))).toBe("20261108-110000-sess");
+    expect(text(card.querySelector("h2"))).toBe("r");
     expect(card.querySelector("[data-testid=progress]")).toBeNull();
     expect(card.querySelector("[data-testid=start]")).toBeNull();
     expect(card.querySelector("[data-testid=open-subject]")).toBeNull();

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { parseStatus, type DeliverCard } from "../deliver/deliver-status";
-import { eventTime, runsOfSpace, selectRun, toneStyle } from "./run-events";
+import { clockText, parseStatus, runTitle, type DeliverCard } from "../deliver/deliver-status";
+import {
+  eventTime,
+  runLabel,
+  runsOfSpace,
+  selectRun,
+  shorten,
+  toneStyle,
+  type RunChoice,
+} from "./run-events";
 
 function card(run: string, updated: string, terminal?: string, root = "/repo"): DeliverCard {
   const status = parseStatus({
@@ -85,5 +93,78 @@ describe("event time", () => {
     expect(eventTime(null)).toBe("");
     expect(eventTime("nope")).toBe("");
     expect(eventTime("2026-11-07T10:01:02")).toBe("10:01:02");
+  });
+});
+
+describe("run label", () => {
+  const NOW = Date.parse("2026-11-07T10:02:00.000Z");
+  const UPDATED = "2026-11-07T10:00:00.000Z";
+  const choice = (extra: Record<string, unknown>, root = "/src/poimen"): RunChoice => {
+    const status = parseStatus({
+      v: 1,
+      run: "20261110-042412-3a7a",
+      status: "running",
+      tasks: [],
+      finished: {},
+      attentions: [],
+      needsYou: false,
+      links: [],
+      updated: UPDATED,
+      tone: "neutral",
+      host: {},
+      events: [],
+      ...extra,
+    });
+    if (typeof status === "string") throw new Error(status);
+    return { key: "k", root, status };
+  };
+  const task = (step: unknown) => ({
+    task: "t177",
+    subject: { kind: "github.issue", id: "177", title: "#177" },
+    step,
+  });
+
+  it("shows subject, progress, current task with step, state and age", () => {
+    const run = choice({
+      subject: { kind: "github.milestone", id: "M014", title: "M014" },
+      progress: { done: 3, total: 18 },
+      tasks: [task({ name: "review", n: 4, total: 7 })],
+    });
+    expect(runLabel(run, NOW)).toBe("M014 3/18 · #177 review 4/7 (running, 2 min ago)");
+  });
+
+  it("leaves out progress and task when the run has none", () => {
+    const run = choice({ subject: { kind: "x", id: "1", title: "M014" } });
+    expect(runLabel(run, NOW)).toBe("M014 (running, 2 min ago)");
+  });
+
+  it("shows the step name alone without n and total", () => {
+    const run = choice({
+      subject: { kind: "x", id: "1", title: "M014" },
+      tasks: [task({ name: "review" })],
+    });
+    expect(runLabel(run, NOW)).toBe("M014 · #177 review (running, 2 min ago)");
+  });
+
+  it("shortens a long task subject", () => {
+    expect(shorten("a".repeat(50), 10)).toBe("aaaaaaaaa…");
+    expect(shorten("short", 10)).toBe("short");
+  });
+
+  it("titles a run without subject by folder, harness and start time, not the id", () => {
+    const ts = "2026-11-07T10:00:00.000Z";
+    const clock = clockText(ts);
+    const run = choice({
+      agent: { harness: "claude" },
+      events: [{ type: "run.started", tone: "info", ts }],
+    });
+    expect(runTitle(run.status, run.root)).toBe(`poimen · claude · ${clock}`);
+    expect(runLabel(run, NOW)).toContain(`poimen · claude · ${clock} (running`);
+  });
+
+  it("falls back to the run id when nothing else is known", () => {
+    const run = choice({});
+    expect(runTitle(run.status)).toBe("20261110-042412-3a7a");
+    expect(runTitle(run.status, "/src/poimen\\")).toBe("poimen");
   });
 });

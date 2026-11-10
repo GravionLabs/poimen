@@ -140,6 +140,9 @@
         No run in this space yet. An agent run (agent-events) reports its progress here.
       </p>
     } @else {
+      @if (run(); as current) {
+        <div class="run-line" data-testid="run-line">{{ runLabel(current, now()) }}</div>
+      }
       @for (row of rows(); track $index) {
         <div
           class="event"

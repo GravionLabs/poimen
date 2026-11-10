@@ -234,3 +234,11 @@ pre {
   font-weight: 600;
   background: color-mix(in srgb, currentColor 8%, transparent);
 }
+
+.run-line {
+  padding: 2px 8px;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
