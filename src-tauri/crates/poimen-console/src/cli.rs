@@ -61,7 +61,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     let Some((name, rest)) = args.split_first() else {
         return Ok(Command::Help);
     };
-    if rest.iter().any(|a| a == "-h" || a == "--help") {
+    if wants_help(name, rest) {
         return Ok(Command::Help);
     }
     match name.as_str() {
@@ -79,7 +79,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         }
         "new" => parse_new(rest),
         "send" => {
-            let (enter, pos) = switch(rest, "--enter")?;
+            let (opts, tail) = split_dashdash(rest);
+            let (enter, mut pos) = switch(opts, "--enter")?;
+            pos.extend(tail.iter().cloned());
             let (terminal, text) = terminal_and_text(pos)?;
             Ok(Command::Request(Request::Send {
                 terminal,
@@ -88,10 +90,39 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             }))
         }
         "prompt" => {
-            let (terminal, text) = terminal_and_text(rest.to_vec())?;
+            let (opts, tail) = split_dashdash(rest);
+            let mut pos = opts.to_vec();
+            pos.extend(tail.iter().cloned());
+            let (terminal, text) = terminal_and_text(pos)?;
             Ok(Command::Request(Request::Prompt { terminal, text }))
         }
         other => Err(format!("unknown command `{other}`")),
+    }
+}
+
+/// `-h`/`--help` asks for help only where it is an option: never after `--`, and for `send` and
+/// `prompt` (free text) only before the first positional argument.
+fn wants_help(name: &str, rest: &[String]) -> bool {
+    let free_text = matches!(name, "send" | "prompt");
+    for a in rest {
+        if a == "--" {
+            return false;
+        }
+        if a == "-h" || a == "--help" {
+            return true;
+        }
+        if free_text && !a.starts_with('-') {
+            return false;
+        }
+    }
+    false
+}
+
+/// Splits at the first `--`: the options part and the words after it (taken as they are).
+fn split_dashdash(args: &[String]) -> (&[String], &[String]) {
+    match args.iter().position(|a| a == "--") {
+        Some(i) => (&args[..i], &args[i + 1..]),
+        None => (args, &[]),
     }
 }
 
@@ -196,6 +227,60 @@ mod tests {
 
     fn p(args: &[&str]) -> Result<Command, String> {
         parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn help_after_dashdash_is_the_command() {
+        let Ok(Command::Request(Request::New { command, .. })) =
+            p(&["new", "work", "--", "grep", "--help"])
+        else {
+            panic!()
+        };
+        assert_eq!(
+            command,
+            Some(vec!["grep".to_string(), "--help".to_string()])
+        );
+        assert_eq!(p(&["new", "work", "-h"]), Ok(Command::Help));
+    }
+
+    #[test]
+    fn help_inside_text_is_text() {
+        assert_eq!(
+            p(&["send", "t1", "-h"]),
+            Ok(Command::Request(Request::Send {
+                terminal: "t1".into(),
+                text: "-h".into(),
+                enter: false
+            }))
+        );
+        assert_eq!(
+            p(&["prompt", "t1", "explain", "--help"]),
+            Ok(Command::Request(Request::Prompt {
+                terminal: "t1".into(),
+                text: "explain --help".into()
+            }))
+        );
+        assert_eq!(p(&["send", "--help"]), Ok(Command::Help));
+        assert_eq!(p(&["prompt", "-h", "t1"]), Ok(Command::Help));
+    }
+
+    #[test]
+    fn dashdash_ends_options_for_send_and_prompt() {
+        assert_eq!(
+            p(&["send", "--enter", "t1", "--", "--version"]),
+            Ok(Command::Request(Request::Send {
+                terminal: "t1".into(),
+                text: "--version".into(),
+                enter: true
+            }))
+        );
+        assert_eq!(
+            p(&["prompt", "t1", "--", "--help", "me"]),
+            Ok(Command::Request(Request::Prompt {
+                terminal: "t1".into(),
+                text: "--help me".into()
+            }))
+        );
     }
 
     #[test]
