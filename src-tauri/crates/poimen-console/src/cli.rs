@@ -9,10 +9,13 @@ pub const USAGE: &str = "usage: poimen <command>\n\
   new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id\n\
   send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)\n\
   prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked\n\
+  -V, --version                       prints the version\n\
   attach [--control [--takeover]] <terminal>\n\
                                       shows a terminal; observes by default, --control sends your\n\
                                       input and sets the size, --takeover replaces a controller.\n\
-                                      XInside a poimen terminal the server comes from POIMEN_SOCKET, else the default socket.";
+                                      Detach with Ctrl+B d (Ctrl+B Ctrl+B sends Ctrl+B)\n\
+\n\
+Inside a poimen terminal the server comes from POIMEN_SOCKET, else the default socket.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AttachArgs {
