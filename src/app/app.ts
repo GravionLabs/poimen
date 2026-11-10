@@ -19,6 +19,7 @@ import {
   rowName,
   supportsFlow,
   tabHeader,
+  survivingLeaf,
   treeTerminals,
   windowTitle,
   type Mode,
@@ -720,9 +721,19 @@ export class App {
     }
   }
 
-  /** A pane closed in herdr: its tab and its flow tab go with it. */
+  /**
+   * A pane closed in herdr: its tab and its flow tab go with it, but when the pane's split tab still
+   * has other leaves its editor tab passes to one of them, so the split layout stays visible.
+   */
   protected onPaneClosed(paneId: string): void {
-    this.editor.close(paneId);
+    const snap = this.store.snapshot();
+    const tabId = snap.terminals.find((t) => t.terminal_id === paneId)?.tab_id;
+    const next = survivingLeaf(
+      snap.tabs.find((t) => t.tab_id === tabId),
+      paneId,
+    );
+    if (next && !this.editor.groupOf(next)) this.editor.replace(paneId, next);
+    else this.editor.close(paneId);
     this.editor.close(flowTab(paneId));
   }
 

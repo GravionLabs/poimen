@@ -55,6 +55,16 @@ export function treeTerminals(tree: TabTree | undefined): string[] {
 }
 
 /**
+ * The terminal that takes over the tab of a closed pane: the tab's server-active terminal, else
+ * its first leaf, never `closedId` itself; `undefined` when the tab has no other leaf.
+ */
+export function survivingLeaf(tab: Tab | undefined, closedId: string): string | undefined {
+  const leaves = treeTerminals(tab?.root).filter((id) => id !== closedId);
+  const active = tab?.active_terminal;
+  return active && leaves.includes(active) ? active : leaves[0];
+}
+
+/**
  * The panes of `tab` in the order of its split tree (the first leaf first), then the panes of
  * the tab the tree does not name, in snapshot order; so no terminal of the tab is left out.
  */

@@ -25,6 +25,7 @@ import {
   spaceRoot,
   tabPanes,
   tabTerminal,
+  survivingLeaf,
   treeTerminals,
   workspaceDirs,
   type Tab,
@@ -567,5 +568,37 @@ describe("transcript empty states", () => {
         "The flow",
       ),
     ).toBe("Waiting for the agent's transcript to appear.");
+  });
+});
+
+describe("survivingLeaf", () => {
+  const split = (): Tab =>
+    ({
+      tab_id: "tb",
+      root: {
+        kind: "split",
+        split_id: "s",
+        direction: "right",
+        ratio: 0.5,
+        children: [
+          { kind: "terminal", terminal_id: "t1" },
+          { kind: "terminal", terminal_id: "t2" },
+        ],
+      },
+      active_terminal: "t1",
+    }) as Tab;
+
+  it("takes the first other leaf when the active one is closed", () => {
+    expect(survivingLeaf(split(), "t1")).toBe("t2");
+  });
+
+  it("prefers the active terminal when it is not the closed one", () => {
+    expect(survivingLeaf({ ...split(), active_terminal: "t2" }, "t1")).toBe("t2");
+  });
+
+  it("is undefined for a single leaf or an unknown tab", () => {
+    const single = { tab_id: "tb", root: { kind: "terminal", terminal_id: "t1" } } as Tab;
+    expect(survivingLeaf(single, "t1")).toBeUndefined();
+    expect(survivingLeaf(undefined, "t1")).toBeUndefined();
   });
 });

@@ -351,6 +351,25 @@ export class EditorTabs {
     if (this.detach(paneId)) this.forget(paneId);
   }
 
+  /**
+   * Swaps the tab of `oldId` for one of `newId` at the same place, keeping its pinned state and
+   * its active state. Only `oldId` is forgotten; without a tab of `oldId` it does nothing, and
+   * when `newId` is open already `oldId` is just closed.
+   */
+  replace(oldId: string, newId: string): void {
+    const group = this.groupOf(oldId);
+    if (!group) return;
+    if (this.groupOf(newId)) {
+      this.close(oldId);
+      return;
+    }
+    this.patch(group.id, {
+      tabs: group.tabs.map((t) => (t.paneId === oldId ? { ...t, paneId: newId } : t)),
+      activeId: group.activeId === oldId ? newId : group.activeId,
+    });
+    this.forget(oldId);
+  }
+
   closeAll(): void {
     this.groups.set([{ id: 1, tabs: [], activeId: null }]);
     this.layout.set({ kind: "group", id: 1 });
