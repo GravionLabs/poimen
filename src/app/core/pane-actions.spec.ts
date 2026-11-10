@@ -231,3 +231,63 @@ describe("PaneActions", () => {
     });
   });
 });
+
+describe("PaneActions split tabs", () => {
+  async function actions(): Promise<PaneActions> {
+    tauri.reset();
+    tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
+    const injector = Injector.create({
+      providers: [
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        TauriBridge,
+        HerdrStore,
+        SpaceActions,
+        PaneActions,
+      ],
+    });
+    return injector.get(PaneActions);
+  }
+
+  it("sends the ratio of a divider with the tab and split id", async () => {
+    const a = await actions();
+    tauri.answer("tab_resize_split", () => null);
+    await a.resizeSplit("tab1", "split2", 0.4);
+    expect(tauri.calls("tab_resize_split")).toEqual([
+      { tabId: "tab1", splitId: "split2", ratio: 0.4 },
+    ]);
+  });
+
+  it("keeps only the latest ratio while a request is in flight", async () => {
+    const a = await actions();
+    let release!: () => void;
+    tauri.answer("tab_resize_split", () => new Promise<void>((r) => (release = r)));
+    const first = a.resizeSplit("tab1", "split2", 0.4);
+    void a.resizeSplit("tab1", "split2", 0.5);
+    void a.resizeSplit("tab1", "split2", 0.6);
+    await Promise.resolve();
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await first;
+    expect(tauri.calls("tab_resize_split").map((c) => (c as { ratio: number }).ratio)).toEqual([
+      0.4, 0.6,
+    ]);
+  });
+
+  it("reports a refused resize", async () => {
+    const a = await actions();
+    tauri.answer("tab_resize_split", () => {
+      throw "split nope not found";
+    });
+    await a.resizeSplit("tab1", "nope", 0.5);
+    expect(a.error()).toContain("not found");
+  });
+
+  it("focuses a pane of a tab on the server", async () => {
+    const a = await actions();
+    tauri.answer("tab_focus", () => null);
+    await a.focusPane("tab1", "t2");
+    expect(tauri.calls("tab_focus")).toEqual([{ tabId: "tab1", terminalId: "t2" }]);
+  });
+});

@@ -31,6 +31,8 @@ export class PaneActions {
   private readonly store = inject(HerdrStore);
   private readonly spaces = inject(SpaceActions);
 
+  /** Ratios waiting behind a request in flight, per `tab/split`; `null` = nothing waiting. */
+  private readonly resizing = new Map<string, number | null>();
   private readonly _dialog = signal<PaneDialogState | null>(null);
   private readonly _error = signal<string | null>(null);
   /** The question waiting for an answer; `null` when none. */
@@ -134,6 +136,41 @@ export class PaneActions {
         cwd: (pane && paneDir(pane)) ?? null,
       }),
     );
+  }
+
+  /**
+   * Sets the ratio of a split of a tab. A drag calls this on every move: while a request is in
+   * flight only the latest ratio per split is kept and sent after it, so the server sees the last
+   * position. Failures set `error`; the snapshot is re-read afterwards either way.
+   */
+  async resizeSplit(tabId: string, splitId: string, ratio: number): Promise<void> {
+    const key = `${tabId}/${splitId}`;
+    if (this.resizing.has(key)) {
+      this.resizing.set(key, ratio);
+      return;
+    }
+    this.resizing.set(key, null);
+    let next: number | null = ratio;
+    while (next !== null) {
+      try {
+        await this.bridge.invoke("tab_resize_split", { tabId, splitId, ratio: next });
+      } catch (err) {
+        this._error.set(String(err));
+      }
+      next = this.resizing.get(key) ?? null;
+      this.resizing.set(key, null);
+    }
+    this.resizing.delete(key);
+    await this.store.refresh();
+  }
+
+  /** Focuses a pane of a tab on the server (shared by every client). Fire and forget. */
+  async focusPane(tabId: string, terminalId: string): Promise<void> {
+    try {
+      await this.bridge.invoke("tab_focus", { tabId, terminalId });
+    } catch (err) {
+      this._error.set(String(err));
+    }
   }
 
   /** Closes the pane of the open dialog; resolves to its id once herdr closed it. */

@@ -171,6 +171,30 @@ async fn tab_rename(
     on_backend(backend.inner(), move |b| b.rename_tab(&tab_id, &name)).await
 }
 
+/// Sets the ratio of a split of a tab (`tab.resize_split` on the poimen backend).
+#[tauri::command]
+async fn tab_resize_split(
+    backend: State<'_, Shared>,
+    tab_id: String,
+    split_id: String,
+    ratio: f64,
+) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| {
+        b.resize_split(&tab_id, &split_id, ratio)
+    })
+    .await
+}
+
+/// Focuses a pane of a tab for every client (`tab.focus` on the poimen backend).
+#[tauri::command]
+async fn tab_focus(
+    backend: State<'_, Shared>,
+    tab_id: String,
+    terminal_id: String,
+) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| b.focus_tab(&tab_id, &terminal_id)).await
+}
+
 /// Closes a space with all its panes; only on an explicit user action (the UI confirms first when
 /// it has panes). Afterwards `focus`, the neighbouring space, is focused on a best-effort basis; a
 /// failing close leaves the space untouched and returns the backend's error.
@@ -2097,6 +2121,8 @@ pub fn run() {
             set_ui_font_family,
             set_ui_font_size,
             pane_split,
+            tab_resize_split,
+            tab_focus,
             pane_close,
             tab_close,
             tab_rename,

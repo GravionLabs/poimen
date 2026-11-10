@@ -218,7 +218,23 @@
             <app-changes-view [dir]="changesDirOfGroup" />
           }
         }
-        @for (p of [groupPane(g)]; track p?.terminal_id) {
+        @for (layout of [groupLayout(g)]; track layout?.tab_id) {
+          @if (layout) {
+            <app-tab-layout
+              [tabId]="layout.tab_id"
+              [root]="layout.root!"
+              [panes]="store.panes()"
+              [focused]="layoutFocus(layout)"
+              [wanted]="wanted(g.activeId!)"
+              (focusChange)="focusLeaf(layout.tab_id, $event)"
+              (ratioChange)="resizeSplit(layout.tab_id, $event)"
+              (paneAction)="paneAction($event.terminalId, $event.action)"
+              (modeChange)="editor.report($event.terminalId, $event.mode, $event.blocked)"
+              (sized)="onSized($event.terminalId, $event.size)"
+            />
+          }
+        }
+        @for (p of [groupLayout(g) ? undefined : groupPane(g)]; track p?.terminal_id) {
           @if (p) {
             <app-terminal-view
               [pane]="p"

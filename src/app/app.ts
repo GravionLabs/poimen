@@ -19,8 +19,10 @@ import {
   rowName,
   supportsFlow,
   tabHeader,
+  treeTerminals,
   windowTitle,
   type Mode,
+  type Tab,
   type Terminal,
 } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
@@ -42,6 +44,7 @@ import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
+import { TabLayout } from "./tab-layout/tab-layout";
 import { TerminalView } from "./terminal-view/terminal-view";
 import {
   EditorTabs,
@@ -111,6 +114,7 @@ const ZOOM_STEP = 1;
     Explorer,
     Notifications,
     TerminalView,
+    TabLayout,
     SettingsView,
     GithubView,
     DeliverView,
@@ -261,6 +265,8 @@ export class App {
       ]),
     );
   });
+  /** The leaf the user focused last per split tab; the server's focus is the fallback. */
+  private readonly leafFocus = signal<ReadonlyMap<string, string>>(new Map());
   /** Size of each terminal that reported one; the status bar shows the focused group's. */
   private readonly sizes = signal<ReadonlyMap<string, { cols: number; rows: number }>>(new Map());
   protected readonly termSize = computed(() => {
@@ -701,7 +707,7 @@ export class App {
     for (const id of paneIds) this.onPaneClosed(id);
   }
 
-  private paneAction(paneId: string, action: string): void {
+  protected paneAction(paneId: string, action: string): void {
     if (action === "split-right" || action === "split-down") {
       const direction = action === "split-right" ? "right" : "down";
       void this.paneActions.split(paneId, direction).then((pane) => pane && this.open(pane, true));
@@ -763,6 +769,30 @@ export class App {
     return group.activeId && tabKind(group.activeId) === "pane"
       ? this.pane(group.activeId)
       : undefined;
+  }
+
+  /** The tab of the group's active pane when it is split (more than one leaf), else `undefined`. */
+  protected groupLayout(group: EditorGroup): Tab | undefined {
+    const pane = this.groupPane(group);
+    const tab = pane && this.store.snapshot().tabs.find((t) => t.tab_id === pane.tab_id);
+    return tab?.root?.kind === "split" ? tab : undefined;
+  }
+
+  /** The focused leaf of a split tab: the last click here, else the server's, else the first leaf. */
+  protected layoutFocus(tab: Tab): string | null {
+    return (
+      this.leafFocus().get(tab.tab_id) ?? tab.active_terminal ?? treeTerminals(tab.root)[0] ?? null
+    );
+  }
+
+  protected focusLeaf(tabId: string, terminalId: string): void {
+    if (this.leafFocus().get(tabId) === terminalId) return;
+    this.leafFocus.update((m) => new Map(m).set(tabId, terminalId));
+    void this.paneActions.focusPane(tabId, terminalId);
+  }
+
+  protected resizeSplit(tabId: string, change: { splitId: string; ratio: number }): void {
+    void this.paneActions.resizeSplit(tabId, change.splitId, change.ratio);
   }
 
   protected group(id: number): EditorGroup | undefined {

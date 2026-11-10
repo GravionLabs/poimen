@@ -267,6 +267,15 @@ pub trait Backend: Send + Sync {
     fn rename_tab(&self, _tab_id: &str, _name: &str) -> Result<(), String> {
         Err("this backend cannot rename a tab".into())
     }
+    /// Sets the ratio (share of the first child) of a split of a tab. Not supported by every
+    /// backend.
+    fn resize_split(&self, _tab_id: &str, _split_id: &str, _ratio: f64) -> Result<(), String> {
+        Err("this backend cannot resize a split".into())
+    }
+    /// Focuses a terminal of a tab for every client. Not supported by every backend.
+    fn focus_tab(&self, _tab_id: &str, _terminal_id: &str) -> Result<(), String> {
+        Err("this backend cannot focus a pane of a tab".into())
+    }
     /// Types `text` into the terminal and presses Enter.
     fn send_input(&self, terminal_id: &str, text: &str) -> Result<(), String>;
     fn agent_start(
