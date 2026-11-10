@@ -42,7 +42,7 @@ Every name the RC uses has its own `-rc` form, so read the paths of the items be
 
 | What                     | Stable                                         | RC                                                   |
 | ------------------------ | ---------------------------------------------- | ---------------------------------------------------- |
-| App                      | `poimen.app`, package `poimen`                 | `Poimen RC.app`, package `poimen-rc`                 |
+| App                      | `poimen.app`, package `poimen-app`               | `Poimen RC.app`, package `poimen-rc`                 |
 | Installer file           | `poimen_<version>_…`                           | `Poimen RC_<version>-rc<nnn>_…`                      |
 | Server binary            | `poimen-server`                                | `poimen-server-rc`                                   |
 | Settings                 | `~/.config/poimen/`                            | `~/.config/poimen-rc/`                               |

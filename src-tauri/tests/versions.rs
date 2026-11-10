@@ -38,7 +38,7 @@ fn lockfile_and_frontend_manifests_match() {
     let version = env!("CARGO_PKG_VERSION");
     let lock: toml::Value = read("Cargo.lock").parse().unwrap();
     for name in [
-        "poimen",
+        "poimen-app",
         "poimen-protocol",
         "poimen-client",
         "poimen-server",

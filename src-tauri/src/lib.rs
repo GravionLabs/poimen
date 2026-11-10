@@ -2879,6 +2879,17 @@ mod build_layout_tests {
     }
 
     #[test]
+    fn the_app_package_is_poimen_app_and_the_identity_is_unchanged() {
+        let cargo: toml::Value = include_str!("../Cargo.toml").parse().unwrap();
+        assert_eq!(cargo["package"]["name"].as_str(), Some("poimen-app"));
+        assert_eq!(cargo["package"]["default-run"].as_str(), Some("poimen-app"));
+        assert_eq!(cargo["lib"]["name"].as_str(), Some("poimen_lib"));
+        let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(base["productName"], "poimen");
+        assert_eq!(base["identifier"], "dev.gravionlabs.poimen");
+    }
+
+    #[test]
     fn the_rc_overlay_installs_beside_the_stable_app_without_updates() {
         use poimen_client::protocol::Channel;
         let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
