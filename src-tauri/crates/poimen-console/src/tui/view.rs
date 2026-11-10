@@ -488,6 +488,9 @@ pub fn draw(f: &mut Frame, app: &App) {
             bar,
         );
     }
+    if let Some(p) = &app.command_palette {
+        super::palette::draw(f, f.area(), p);
+    }
 }
 
 #[cfg(test)]

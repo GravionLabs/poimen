@@ -136,6 +136,7 @@ fn start_with(f: &Fixture, own_terminal: Option<String>, sink: Option<Arc<Record
         home: None,
         own_terminal,
         mirror: Some(screen.clone()),
+        issues: None,
         notify: sink.map(|s| s as Arc<dyn Sink>),
     };
     let s = stop.clone();

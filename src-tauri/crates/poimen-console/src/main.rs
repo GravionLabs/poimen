@@ -129,6 +129,7 @@ fn tui() -> ExitCode {
             .ok()
             .filter(|id| !id.is_empty()),
         mirror: None,
+        issues: None,
         notify: Some(std::sync::Arc::new(tui::system::SystemSink)),
     };
     let stop = Arc::new(AtomicBool::new(false));

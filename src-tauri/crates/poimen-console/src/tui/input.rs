@@ -47,6 +47,8 @@ pub enum Routed {
     /// Split the focused pane; the new terminal goes right of or below it.
     Split(SplitDirection),
     ClosePane,
+    /// Open the command palette.
+    Palette,
     /// Focus the neighboring pane.
     Focus(Dir),
     /// Move the border of the focused pane.
@@ -134,6 +136,7 @@ impl Keys {
             (self.split_right, Routed::Split(SplitDirection::Right)),
             (self.split_down, Routed::Split(SplitDirection::Down)),
             (self.close_pane, Routed::ClosePane),
+            (self.palette, Routed::Palette),
             (self.focus_left, Routed::Focus(Dir::Left)),
             (self.focus_down, Routed::Focus(Dir::Down)),
             (self.focus_up, Routed::Focus(Dir::Up)),
