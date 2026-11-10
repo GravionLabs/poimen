@@ -12,6 +12,7 @@ pub const USAGE: &str = "usage: poimen [<command>]\n\
   new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id\n\
   send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)\n\
   prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked\n\
+  -V, --version                       prints the version\n\
   attach [--control [--takeover]] <terminal>\n\
                                       shows a terminal; observes by default, --control sends your\n\
                                       input and sets the size, --takeover replaces a controller.\n\
@@ -59,6 +60,7 @@ pub enum Command {
     /// No arguments: the TUI.
     Tui,
     Help,
+    Version,
 }
 
 /// Parses the arguments after the program name. `Err` is a usage message (exit code 2).
@@ -71,6 +73,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     }
     match name.as_str() {
         "-h" | "--help" | "help" => Ok(Command::Help),
+        "-V" | "--version" => Ok(Command::Version),
         "attach" => parse_attach(rest),
         "ls" => {
             let (json, pos) = switch(rest, "--json")?;
@@ -312,6 +315,12 @@ mod tests {
     #[test]
     fn takeover_alone_is_refused() {
         assert!(p(&["attach", "--takeover", "t1"]).is_err());
+    }
+
+    #[test]
+    fn version_flags() {
+        assert_eq!(p(&["--version"]), Ok(Command::Version));
+        assert_eq!(p(&["-V"]), Ok(Command::Version));
     }
 
     #[test]

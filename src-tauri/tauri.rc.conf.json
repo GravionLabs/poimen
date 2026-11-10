@@ -5,7 +5,7 @@
   "identifier": "dev.gravionlabs.poimen.rc",
   "bundle": {
     "createUpdaterArtifacts": false,
-    "externalBin": ["binaries/poimen-server-rc"]
+    "externalBin": ["binaries/poimen-server-rc", "binaries/poimen-cli-rc"]
   },
   "plugins": {
     "updater": {

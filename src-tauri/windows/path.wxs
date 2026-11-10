@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Puts the install directory (poimen.exe, the CLI) on the user PATH of the MSI (#519); removed on uninstall. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="PoimenCliPath" Guid="6f2c4b0e-8d3a-4f5b-9a71-3c5d2e8b1a40" KeyPath="yes">
+        <Environment Id="PoimenCliPathEntry" Name="PATH" Value="[INSTALLDIR]" Permanent="no" Part="last" Action="set" System="no" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

@@ -121,6 +121,7 @@ fn start(f: &Fixture, issues: Option<poimen_console::tui::actions::IssueSource>)
         own_terminal: None,
         mirror: Some(screen.clone()),
         issues,
+        notify: None,
     };
     let stop = Arc::new(AtomicBool::new(false));
     let handle = thread::spawn(move || {

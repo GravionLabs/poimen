@@ -19,6 +19,10 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Ok(Command::Version) => {
+            println!("poimen {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
         Ok(Command::Tui) => tui(),
         Ok(Command::Attach(a)) => attach(a),
         Ok(Command::Request(r)) => {
@@ -126,6 +130,7 @@ fn tui() -> ExitCode {
             .filter(|id| !id.is_empty()),
         mirror: None,
         issues: None,
+        notify: Some(std::sync::Arc::new(tui::system::SystemSink)),
     };
     let stop = Arc::new(AtomicBool::new(false));
     // Raw mode turns Ctrl+C into a key for the terminal; these arrive from outside (kill, a

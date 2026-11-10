@@ -19,40 +19,50 @@
 //! disk and `gh`. A project file that is not trusted yet is asked about in the palette (hash and
 //! commands) and the request is sent again with the answer.
 //!
+//! Attention (`attention`, the rules of the app's `core/attention.ts`): a terminal that turns
+//! blocked while not on screen rings in the sidebar, one that turns done counts as unread,
+//! showing the tab clears both; the prefix key `N` lists the notifications and Enter focuses the
+//! terminal of one. System notifications (`notifications.blocked`/`done`, done after 5 s) go out
+//! only while `server.clients` has no `app`: an app notifies by itself.
+//!
 //! `config` reads the prefix and keys, `input` routes keys, `grid` is a pane's emulator,
 //! `sidebar` the row model, `tree` the rectangles of a split tree, `screen` the local terminal
 //! modes, `view` draws a frame.
 
 pub mod actions;
+pub mod attention;
 pub mod config;
 pub mod grid;
 pub mod input;
 pub mod palette;
 pub mod screen;
 pub mod sidebar;
+pub mod system;
 pub mod tree;
 pub mod view;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event as InputEvent, KeyCode, KeyEventKind};
 use poimen_client::protocol::{
-    AttachMode, ClientInfo, ClientKind, DetachReason, ErrorCode, Event, SpaceCreate,
+    AgentStatus, AttachMode, ClientInfo, ClientKind, DetachReason, ErrorCode, Event, SpaceCreate,
     SplitDirection, TabCreate, TabSplit, TerminalStatus, decode_bytes,
 };
 use poimen_client::{AttachmentWriter, Client, ClientError};
 use poimen_core::github::OpenIssue;
-use poimen_core::project::Entry;
+use poimen_core::project::Entry as ProjectEntry;
 use poimen_core::trust::Decision;
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 use ratatui::buffer::Buffer;
 
 use crate::session::Error;
+use attention::{Attention, Change, Entry, Kind, Log, Notifier, Sink};
 use config::Config;
 use grid::{Grid, Palette};
 use input::{Routed, Router, Wheel};
@@ -73,6 +83,8 @@ pub struct Options {
     pub mirror: Option<Arc<Mutex<Buffer>>>,
     /// Where the task picker reads issues from; `None`: `gh` (cached under the home directory).
     pub issues: Option<actions::IssueSource>,
+    /// Where system notifications go; `None` sends none.
+    pub notify: Option<Arc<dyn Sink>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -89,6 +101,8 @@ enum Msg {
     Input(InputEvent),
     /// Something changed on the server: read the model again.
     Changed,
+    /// The clients connected to the server changed.
+    Clients(Vec<ClientKind>),
     ServerGone(String),
     /// A stream record of the attachment with this generation.
     Record(u64, Box<Result<Event, String>>),
@@ -105,7 +119,7 @@ enum Pending {
     Entry {
         space_id: String,
         dir: String,
-        entry: Entry,
+        entry: ProjectEntry,
     },
 }
 
@@ -159,6 +173,18 @@ pub struct App {
     pub command_palette: Option<palette::Palette>,
     pending: Option<(Pending, String)>,
     issues: Option<actions::IssueSource>,
+    /// Ringing and unread marks of the agent terminals.
+    pub attention: Attention,
+    /// The notification list, newest first.
+    pub log: Log,
+    /// The notification list is open, with this entry selected.
+    pub list: Option<usize>,
+    /// The clients connected to the server (an `app` among them silences system notifications).
+    pub clients: Vec<ClientKind>,
+    /// Milliseconds since the epoch at the last pass of the loop.
+    pub now_ms: u64,
+    notifier: Notifier,
+    sink: Option<Arc<dyn Sink>>,
     generation: u64,
 }
 
@@ -180,6 +206,13 @@ impl App {
             command_palette: None,
             pending: None,
             issues: opts.issues.clone(),
+            attention: Attention::default(),
+            log: Log::default(),
+            list: None,
+            clients: Vec::new(),
+            now_ms: epoch_ms(),
+            notifier: Notifier::default(),
+            sink: opts.notify.clone(),
             generation: 0,
         }
     }
@@ -193,6 +226,103 @@ impl App {
     fn selected_name(&self) -> Option<&str> {
         let id = self.selected.as_deref()?;
         self.model.terminal(id).map(|t| t.name.as_str())
+    }
+
+    /// The terminals on screen: the leaves of the selected terminal's tab.
+    fn viewed(&self) -> HashSet<String> {
+        match (&self.selected, self.current_tab()) {
+            (_, Some(tab)) => tab
+                .root
+                .terminal_ids()
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            (Some(id), None) => HashSet::from([id.clone()]),
+            (None, _) => HashSet::new(),
+        }
+    }
+
+    fn statuses(&self) -> HashMap<String, AgentStatus> {
+        self.model
+            .terminals
+            .iter()
+            .filter_map(|t| {
+                let status = t.agent.as_ref()?.status;
+                (status != AgentStatus::Gone).then(|| (t.id.clone(), status))
+            })
+            .collect()
+    }
+
+    /// Folds the server's statuses into the marks, the list and the system notifications. Cheap
+    /// and repeatable: also run after the view changed, which is what clears a mark.
+    fn observe(&mut self) {
+        self.now_ms = epoch_ms();
+        let viewed = self.viewed();
+        let changes = self.attention.observe(&self.statuses(), &viewed);
+        let model = &self.model;
+        self.log.retain_terminals(|id| model.terminal(id).is_some());
+        for c in &changes {
+            let Some(entry) = self.entry(c) else { continue };
+            self.log.push(entry);
+        }
+        let seen = |id: &str| viewed.contains(id);
+        let blocked = self
+            .notifier
+            .changes(&changes, &seen, self.config.notify, Instant::now());
+        self.send(&blocked, Kind::Blocked);
+    }
+
+    /// Sends the done notifications whose delay has passed.
+    fn tick(&mut self) {
+        if !self.notifier.waiting() {
+            return;
+        }
+        let viewed = self.viewed();
+        let model = &self.model;
+        let status = |id: &str| model.terminal(id)?.agent.as_ref().map(|a| a.status);
+        let due = self
+            .notifier
+            .due(Instant::now(), &status, &|id: &str| viewed.contains(id));
+        self.send(&due, Kind::Done);
+    }
+
+    /// One system notification per terminal, unless an app is connected.
+    fn send(&self, ids: &[String], kind: Kind) {
+        let Some(sink) = self
+            .sink
+            .as_ref()
+            .filter(|_| !attention::app_connected(&self.clients))
+        else {
+            return;
+        };
+        for id in ids {
+            let Some(t) = self.model.terminal(id) else {
+                continue;
+            };
+            let text = t.agent.as_ref().and_then(|a| a.message.clone());
+            sink.send(
+                &format!("{} is {}", t.name, kind.label()),
+                text.as_deref().unwrap_or(""),
+            );
+        }
+    }
+
+    fn entry(&self, c: &Change) -> Option<Entry> {
+        let t = self.model.terminal(&c.terminal_id)?;
+        let agent = t.agent.as_ref();
+        Some(Entry {
+            terminal_id: t.id.clone(),
+            name: t.name.clone(),
+            agent: agent.and_then(|a| a.agent.clone()),
+            kind: c.kind,
+            text: agent
+                .and_then(|a| a.message.clone())
+                .unwrap_or_else(|| format!("{} is {}", t.name, c.kind.label())),
+            at_ms: agent
+                .filter(|_| c.kind == Kind::Blocked)
+                .and_then(|a| a.message_at)
+                .unwrap_or_else(epoch_ms),
+        })
     }
 
     /// The focused pane: the selected terminal's.
@@ -242,6 +372,12 @@ impl App {
     }
 }
 
+fn epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
 /// Runs the TUI on `terminal` until detach, `stop` or the server going away. `input` yields the
 /// local terminal's events.
 pub fn run<B: Backend>(
@@ -261,7 +397,12 @@ pub fn run<B: Backend>(
         thread::spawn(move || {
             for event in events.by_ref() {
                 match event {
-                    Ok(_) => {
+                    Ok(ev) => {
+                        if let Event::ServerClientsChanged { clients } = ev
+                            && tx.send(Msg::Clients(clients)).is_err()
+                        {
+                            return;
+                        }
                         if tx.send(Msg::Changed).is_err() {
                             return;
                         }
@@ -289,6 +430,7 @@ pub fn run<B: Backend>(
     let mut app = App::new(opts);
     let mut router = Router::new(&opts.config);
     app.refresh(client)?;
+    app.clients = client.ping().map(|p| p.clients).unwrap_or_default();
     let first = app.model.initial(app.own_terminal.as_deref());
     select(&mut app, client, &tx, first, How::Control);
 
@@ -296,6 +438,8 @@ pub fn run<B: Backend>(
         if stop.load(Ordering::SeqCst) {
             return Ok(Outcome::Interrupted);
         }
+        app.observe();
+        app.tick();
         sync_size(&mut app, terminal)?;
         let completed = terminal
             .draw(|f| view::draw(f, &app))
@@ -316,6 +460,7 @@ pub fn run<B: Backend>(
         for msg in std::iter::once(first).chain(rx.try_iter()) {
             match msg {
                 Msg::Changed => changed = true,
+                Msg::Clients(clients) => app.clients = clients,
                 Msg::ServerGone(e) => return Ok(Outcome::ServerGone(e)),
                 Msg::Record(generation, rec) => record(&mut app, client, &tx, generation, *rec),
                 Msg::Issues(result) => palette_issues(&mut app, result),
@@ -639,6 +784,9 @@ fn on_input<B: Backend>(
         }
         return Ok(None);
     }
+    if app.list.is_some() {
+        return Ok(on_list_input(app, client, tx, ev));
+    }
     // The take-over question answers to y/n/Esc; the prefix keys keep working meanwhile.
     if let (Some(id), InputEvent::Key(key)) = (app.take_over.clone(), ev)
         && key.kind != KeyEventKind::Release
@@ -665,6 +813,7 @@ fn on_input<B: Backend>(
     match routed {
         Routed::Detach => return Ok(Some(Outcome::Detached)),
         Routed::ToggleSidebar => app.sidebar = !app.sidebar,
+        Routed::Notifications => app.list = Some(0),
         Routed::Select(delta) => {
             let next = sidebar::step(
                 &app.rows,
@@ -753,6 +902,41 @@ fn on_input<B: Backend>(
         Routed::Resize => {}
     }
     Ok(None)
+}
+
+/// Keys while the notification list is open: Up/Down (or k/j) move, Enter focuses the terminal of
+/// the entry, Esc or q close; everything else is swallowed.
+fn on_list_input(
+    app: &mut App,
+    client: &Client,
+    tx: &Sender<Msg>,
+    ev: &InputEvent,
+) -> Option<Outcome> {
+    let InputEvent::Key(key) = ev else {
+        return None;
+    };
+    if key.kind == KeyEventKind::Release {
+        return None;
+    }
+    let len = app.log.entries().len();
+    let at = app.list.unwrap_or(0);
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => app.list = Some(at.saturating_sub(1)),
+        KeyCode::Down | KeyCode::Char('j') => app.list = Some((at + 1).min(len.saturating_sub(1))),
+        KeyCode::Esc | KeyCode::Char('q') => app.list = None,
+        KeyCode::Enter => {
+            app.list = None;
+            if let Some(id) = app.log.entries().get(at).map(|e| e.terminal_id.clone()) {
+                if app.model.terminal(&id).is_none() || app.own_terminal.as_deref() == Some(&id) {
+                    app.notice = Some("that terminal cannot be shown".into());
+                } else {
+                    focus_terminal(app, client, tx, &id);
+                }
+            }
+        }
+        _ => {}
+    }
+    None
 }
 
 fn new_tab(app: &mut App, client: &Client, tx: &Sender<Msg>) {
@@ -976,7 +1160,7 @@ fn run_entry(
     tx: &Sender<Msg>,
     space_id: String,
     dir: String,
-    entry: Entry,
+    entry: ProjectEntry,
     decision: Option<Decision>,
 ) {
     let home = home_path(app);
