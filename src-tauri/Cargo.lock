@@ -3200,6 +3200,7 @@ version = "0.15.1"
 dependencies = [
  "alacritty_terminal",
  "crossterm",
+ "notify-rust",
  "poimen-client",
  "poimen-core",
  "poimen-protocol",

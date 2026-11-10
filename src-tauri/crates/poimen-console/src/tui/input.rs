@@ -35,6 +35,8 @@ pub enum Routed {
     Send(Vec<u8>),
     Detach,
     ToggleSidebar,
+    /// Open the notification list.
+    Notifications,
     /// Move the sidebar selection by this many terminals.
     Select(isize),
     /// A new tab with a new terminal in the focused space.
@@ -122,6 +124,7 @@ impl Keys {
         let table = [
             (self.detach, Routed::Detach),
             (self.sidebar, Routed::ToggleSidebar),
+            (self.notifications, Routed::Notifications),
             (self.next, Routed::Select(1)),
             (self.previous, Routed::Select(-1)),
             (self.new_tab, Routed::NewTab),
@@ -356,6 +359,8 @@ mod tests {
         let m = Modes::default();
         r.route(&prefix(), m);
         assert_eq!(r.route(&ch('b'), m), Some(Routed::ToggleSidebar));
+        r.route(&prefix(), m);
+        assert_eq!(r.route(&ch('N'), m), Some(Routed::Notifications));
         r.route(&prefix(), m);
         assert_eq!(
             r.route(&press(KeyCode::Down, KeyModifiers::NONE), m),
