@@ -44,8 +44,9 @@
             fConnector
             fConnectorType="target"
             class="dot in"
+            [class.vertical]="direction() === 'TB'"
             [fConnectorId]="'in:' + item.node.id"
-            [fConnectorConnectableSide]="left"
+            [fConnectorConnectableSide]="inSide()"
             [fConnectorDisabled]="true"
           ></span>
         }
@@ -70,8 +71,9 @@
           fConnector
           fConnectorType="source"
           class="dot out"
+          [class.vertical]="direction() === 'TB'"
           [fConnectorId]="'out:' + item.node.id"
-          [fConnectorConnectableSide]="right"
+          [fConnectorConnectableSide]="outSide()"
           [fConnectorDisabled]="true"
         ></span>
       </div>
@@ -80,9 +82,6 @@
   <f-minimap class="minimap" [fMinSize]="600" />
 </f-flow>
 <div class="tools" role="toolbar" aria-label="Flow view">
-  <button type="button" class="icon-button" aria-label="Zoom in" title="Zoom in" (click)="zoomIn()">
-    <app-icon name="zoomIn" />
-  </button>
   <button
     type="button"
     class="icon-button"
@@ -91,6 +90,9 @@
     (click)="zoomOut()"
   >
     <app-icon name="zoomOut" />
+  </button>
+  <button type="button" class="icon-button" aria-label="Zoom in" title="Zoom in" (click)="zoomIn()">
+    <app-icon name="zoomIn" />
   </button>
   <span class="divider" aria-hidden="true"></span>
   <button
@@ -101,5 +103,15 @@
     (click)="fit()"
   >
     <app-icon name="fitScreen" />
+  </button>
+  <button
+    type="button"
+    class="icon-button direction"
+    [attr.aria-label]="direction() === 'LR' ? 'Layout top to bottom' : 'Layout left to right'"
+    [attr.title]="direction() === 'LR' ? 'Layout top to bottom' : 'Layout left to right'"
+    [attr.aria-pressed]="direction() === 'TB'"
+    (click)="toggleDirection()"
+  >
+    <app-icon [name]="direction() === 'LR' ? 'directionDown' : 'directionRight'" />
   </button>
 </div>

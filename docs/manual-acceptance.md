@@ -42,7 +42,7 @@ Every name the RC uses has its own `-rc` form, so read the paths of the items be
 
 | What                     | Stable                                         | RC                                                   |
 | ------------------------ | ---------------------------------------------- | ---------------------------------------------------- |
-| App                      | `poimen.app`, package `poimen`                 | `Poimen RC.app`, package `poimen-rc`                 |
+| App                      | `poimen.app`, package `poimen-app`               | `Poimen RC.app`, package `poimen-rc`                 |
 | Installer file           | `poimen_<version>_…`                           | `Poimen RC_<version>-rc<nnn>_…`                      |
 | Server binary            | `poimen-server`                                | `poimen-server-rc`                                   |
 | Settings                 | `~/.config/poimen/`                            | `~/.config/poimen-rc/`                               |
@@ -151,6 +151,13 @@ test.
   (`/private/var/folders/.../AppTranslocation/`), or poimen asks to be moved to Applications. Record
   which one happens. A translocated path that breaks after a restart is a bug.
 - **Source:** #432 (no issue yet; file a bug on failure).
+
+### M-10 CLI inside the bundle and link
+
+- **Steps:** run `/Applications/poimen.app/Contents/MacOS/poimen --version`. Then run
+  `sudo ln -sf /Applications/poimen.app/Contents/MacOS/poimen /usr/local/bin/poimen` and, in a new terminal, `poimen --version`.
+- **Expected:** both print the version of the app. After the link `poimen` resolves from the PATH.
+- **Source:** #519.
 
 ## Windows: `-setup.exe`
 
@@ -275,6 +282,14 @@ The open M10 checks (W-S-9 to W-S-14) run once, here. The `.msi` section repeats
   each difference from them.
 - **Source:** #416 (open check, PR #422).
 
+### W-S-15 CLI on the user PATH
+
+- **Steps:** after W-S-1 open a new terminal (cmd or PowerShell) and run `poimen --version` and `where poimen`. Uninstall
+  poimen, open a new terminal and run `where poimen`.
+- **Expected:** `poimen.exe` is found in the install directory and prints the app version. After the uninstall the
+  install directory is gone from the user PATH (Settings > Environment Variables) and `where poimen` finds nothing.
+- **Source:** #519.
+
 ## Windows: `.msi`
 
 The core flows run again on the `.msi` package. The open M10 checks are covered in the `-setup.exe`
@@ -325,6 +340,13 @@ section.
 - **Expected:** as W-S-8, including the outdated-server notice, **Restart server** with its
   confirmation and **Later**. The terminals survive until the restart is confirmed.
 - **Source:** #46, `docs/updater.md`.
+
+### W-M-8 CLI on the user PATH
+
+- **Steps:** after W-M-1 open a new terminal and run `poimen --version` and `where poimen`. Uninstall the package and
+  check again.
+- **Expected:** `poimen.exe` is found and prints the app version. The uninstall removes the directory from the user PATH.
+- **Source:** #519.
 
 ## Linux: `.deb`
 
@@ -384,6 +406,15 @@ section.
   again after the server restarts.
 - **Source:** #46, `docs/updater.md`.
 
+### L-D-9 CLI in the app package and as `poimen-cli`
+
+- **Steps:** after L-D-1 run `dpkg -L poimen | grep /usr/bin/poimen$` and `poimen --version`. On a host without the app
+  run `sudo apt install ./poimen-cli_<version>_amd64.deb`, `dpkg -L poimen-cli` and `poimen --version`. Try to install
+  `poimen-cli` next to the app.
+- **Expected:** `/usr/bin/poimen` comes with the app package and with `poimen-cli` alone; both print the version. The two
+  packages conflict, so apt refuses to install both.
+- **Source:** #519.
+
 ## Linux: `.rpm`
 
 A pre-release (rc) has no `.rpm` (an RPM version allows no `-`, so `0.12.0-rc009` cannot be bundled). Run this
@@ -439,6 +470,13 @@ section on the stable release once it is published.
 - **Expected:** as L-D-8, including the notice, **Restart server** with its confirmation and
   **Later**.
 - **Source:** #46, `docs/updater.md`.
+
+### L-R-9 CLI in the app package and as `poimen-cli`
+
+- **Steps:** after L-R-1 run `rpm -ql poimen | grep /usr/bin/poimen$` and `poimen --version`. On a host without the app
+  run `sudo dnf install ./poimen-cli-<version>-1.x86_64.rpm`, `rpm -ql poimen-cli` and `poimen --version`.
+- **Expected:** `/usr/bin/poimen` comes with the app package and with `poimen-cli` alone; both print the version.
+- **Source:** #519.
 
 ## Linux: `.AppImage`
 
@@ -533,3 +571,18 @@ checks A-7 to A-9 verify that staging.
 - **Steps:** as M-8 with the next AppImage.
 - **Expected:** as M-8. The hooks still work (A-9).
 - **Source:** #46, #423.
+
+### A-13 CLI path in the AppImage
+
+- **Steps:** run `./poimen_<version>_amd64.AppImage --appimage-extract`, then `squashfs-root/usr/bin/poimen --version`.
+- **Expected:** the extracted `squashfs-root/usr/bin/poimen` prints the app version. README "Console" names this path.
+- **Source:** #519.
+
+## CLI archives (all platforms)
+
+### C-1 Standalone archive
+
+- **Steps:** download `poimen-<version>-<target>.tar.gz` (Linux musl, macOS) or `.zip` (Windows) from the release, check
+  it against `SHA256SUMS`, extract it and run `poimen --version`.
+- **Expected:** the archive holds only `poimen` (`poimen.exe`), which runs without the app installed.
+- **Source:** #519.

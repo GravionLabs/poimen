@@ -1,0 +1,56 @@
+<ng-template #nodeTpl let-node>
+  @if (node.kind === "split") {
+    <app-split-pane
+      [direction]="node.direction === 'right' ? 'row' : 'column'"
+      [count]="2"
+      [sizes]="sizesOf(node)"
+      (sizesChange)="resize(node, $event)"
+    >
+      <ng-template #pane let-i>
+        <ng-container
+          [ngTemplateOutlet]="nodeTpl"
+          [ngTemplateOutletContext]="{ $implicit: node.children[i] }"
+        />
+      </ng-template>
+    </app-split-pane>
+  } @else {
+    @if (pane(node.terminal_id); as p) {
+      <div
+        class="leaf"
+        [class.focused]="node.terminal_id === focused"
+        [attr.data-terminal]="node.terminal_id"
+        (pointerdown)="focusChange.emit(node.terminal_id)"
+        (focusin)="focusChange.emit(node.terminal_id)"
+        (contextmenu)="openMenu($event, node.terminal_id)"
+      >
+        <app-terminal-view
+          [pane]="p"
+          [wanted]="modeOf(node.terminal_id)"
+          (modeChange)="
+            modeChange.emit({
+              terminalId: node.terminal_id,
+              mode: $event.mode,
+              blocked: $event.blocked,
+            })
+          "
+          (sized)="sized.emit({ terminalId: node.terminal_id, size: $event })"
+        />
+      </div>
+    }
+  }
+</ng-template>
+
+<ng-container [ngTemplateOutlet]="nodeTpl" [ngTemplateOutletContext]="{ $implicit: root }" />
+
+@if (menu(); as m) {
+  <div
+    class="backdrop"
+    (pointerdown)="closeMenu()"
+    (contextmenu)="$event.preventDefault(); closeMenu()"
+  ></div>
+  <div class="menu" role="menu" [style.left.px]="m.x" [style.top.px]="m.y">
+    <button type="button" role="menuitem" (click)="choose('split-right')">Split right</button>
+    <button type="button" role="menuitem" (click)="choose('split-down')">Split down</button>
+    <button type="button" role="menuitem" (click)="choose('close')">Close pane</button>
+  </div>
+}

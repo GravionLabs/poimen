@@ -185,8 +185,38 @@ describe("PaneActions", () => {
       };
     });
     actions.askClose("w1:p1");
-    expect(await actions.confirmClose()).toBe("w1:p1");
+    expect(await actions.confirmClose()).toEqual({ paneId: "w1:p1" });
     expect(tauri.calls("pane_close")).toEqual([{ paneId: "w1:p1" }]);
+    expect(store.pane("w1:p1")).toBeUndefined();
+  });
+
+  it("resolves the successor in the split tab from the snapshot before the close", async () => {
+    const leaf = (terminal_id: string) => ({ kind: "terminal" as const, terminal_id });
+    current = {
+      ...current,
+      tabs: [
+        {
+          ...current.tabs[0],
+          root: {
+            kind: "split",
+            split_id: "s1",
+            direction: "right",
+            ratio: 0.5,
+            children: [leaf("w1:p1"), leaf("w1:p2")],
+          },
+        },
+      ],
+    };
+    await store.refresh();
+    tauri.answer("pane_close", () => {
+      current = {
+        ...current,
+        tabs: [{ ...current.tabs[0], root: leaf("w1:p2") }],
+        terminals: current.terminals.filter((p) => p.terminal_id !== "w1:p1"),
+      };
+    });
+    actions.askClose("w1:p1");
+    expect(await actions.confirmClose()).toEqual({ paneId: "w1:p1", successor: "w1:p2" });
     expect(store.pane("w1:p1")).toBeUndefined();
   });
 
@@ -229,5 +259,65 @@ describe("PaneActions", () => {
       expect(await actions.openTerminalIn("  ")).toBeUndefined();
       expect(tauri.calls("terminal_create")).toEqual([]);
     });
+  });
+});
+
+describe("PaneActions split tabs", () => {
+  async function actions(): Promise<PaneActions> {
+    tauri.reset();
+    tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
+    const injector = Injector.create({
+      providers: [
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        TauriBridge,
+        HerdrStore,
+        SpaceActions,
+        PaneActions,
+      ],
+    });
+    return injector.get(PaneActions);
+  }
+
+  it("sends the ratio of a divider with the tab and split id", async () => {
+    const a = await actions();
+    tauri.answer("tab_resize_split", () => null);
+    await a.resizeSplit("tab1", "split2", 0.4);
+    expect(tauri.calls("tab_resize_split")).toEqual([
+      { tabId: "tab1", splitId: "split2", ratio: 0.4 },
+    ]);
+  });
+
+  it("keeps only the latest ratio while a request is in flight", async () => {
+    const a = await actions();
+    let release!: () => void;
+    tauri.answer("tab_resize_split", () => new Promise<void>((r) => (release = r)));
+    const first = a.resizeSplit("tab1", "split2", 0.4);
+    void a.resizeSplit("tab1", "split2", 0.5);
+    void a.resizeSplit("tab1", "split2", 0.6);
+    await Promise.resolve();
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await first;
+    expect(tauri.calls("tab_resize_split").map((c) => (c as { ratio: number }).ratio)).toEqual([
+      0.4, 0.6,
+    ]);
+  });
+
+  it("reports a refused resize", async () => {
+    const a = await actions();
+    tauri.answer("tab_resize_split", () => {
+      throw "split nope not found";
+    });
+    await a.resizeSplit("tab1", "nope", 0.5);
+    expect(a.error()).toContain("not found");
+  });
+
+  it("focuses a pane of a tab on the server", async () => {
+    const a = await actions();
+    tauri.answer("tab_focus", () => null);
+    await a.focusPane("tab1", "t2");
+    expect(tauri.calls("tab_focus")).toEqual([{ tabId: "tab1", terminalId: "t2" }]);
   });
 });

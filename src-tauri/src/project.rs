@@ -32,7 +32,9 @@ pub fn start_tab(
 
 /// Runs a palette entry of the project file in `sources` through `trust::gate`. A `terminal`
 /// command opens a tab named after it in `dir` and types the command; a preset opens a tab built
-/// with `layout::apply`; an `agent` command is handed back. `persist(hash)` stores a fresh trust.
+/// by the backend (`Backend::apply_layout`, which then gates and stores the trust itself) or,
+/// when the backend does not build layouts (herdr), with `layout::apply`; an `agent` command is
+/// handed back. `persist(hash)` stores a fresh trust.
 #[allow(clippy::too_many_arguments)]
 pub fn run_entry(
     backend: &dyn crate::backend::Backend,
@@ -67,7 +69,24 @@ pub fn run_entry(
     let Some(found) = found else {
         return Ok(EntryOutcome::Missing);
     };
-    match crate::trust::gate(sources, trusted, decision) {
+    let gate = crate::trust::gate(sources, trusted, decision);
+    // A backend that builds layouts itself (poimen-server) gates the preset, stores the trust and
+    // builds the tab; a declined trust runs nothing on either backend.
+    if let (Found::Preset(p), false) = (&found, matches!(gate, crate::trust::Gate::Strip)) {
+        let request = crate::backend::ApplyRequest {
+            space_id: workspace_id,
+            cwd: dir,
+            preset: Some(&p.name),
+            decision,
+        };
+        if let Some(result) = backend.apply_layout(request) {
+            return Ok(match result? {
+                crate::backend::LaidOut::Trust(request) => EntryOutcome::Ask { request },
+                crate::backend::LaidOut::Created { .. } => EntryOutcome::Done,
+            });
+        }
+    }
+    match gate {
         crate::trust::Gate::Ask(request) => return Ok(EntryOutcome::Ask { request }),
         crate::trust::Gate::Strip => return Ok(EntryOutcome::Declined),
         crate::trust::Gate::Run { store } => {
@@ -228,6 +247,105 @@ mod palette {
         );
         assert!(calls.iter().any(|c| c.ends_with(" vim")));
         assert_eq!(calls.iter().filter(|c| c.starts_with("rename ")).count(), 2);
+    }
+
+    // Presets on a backend that builds layouts itself (poimen-server, #645).
+
+    fn layout_fake(answer: crate::backend::LaidOut) -> FakeBackend {
+        let fake = FakeBackend::default();
+        *fake.laid_out.lock().unwrap() = Some(answer);
+        fake
+    }
+
+    fn applied() -> crate::backend::LaidOut {
+        crate::backend::LaidOut::Created {
+            space_id: "w1".into(),
+            warnings: vec![],
+            setup_started: false,
+        }
+    }
+
+    /// `run_entry` of the preset `duo` that fails the test when the app stores a trust.
+    fn run_preset(
+        fake: &FakeBackend,
+        trusted: &BTreeMap<String, String>,
+        decision: Option<&Decision>,
+    ) -> Result<EntryOutcome, String> {
+        run_entry(
+            fake,
+            &sources(Some(FILE)),
+            trusted,
+            decision,
+            &|_| panic!("the app must not store the trust"),
+            "w1",
+            ROOT,
+            &Entry::Preset { name: "duo".into() },
+        )
+    }
+
+    #[test]
+    fn a_layout_backend_builds_the_preset_itself() {
+        let fake = layout_fake(applied());
+        assert_eq!(run_preset(&fake, &trusted(), None), Ok(EntryOutcome::Done));
+        // No terminal, split, rename or input from the app: `layout::apply` is herdr's only.
+        assert_eq!(fake.calls(), ["apply_layout w1 /work/app duo -"]);
+    }
+
+    #[test]
+    fn a_layout_backend_asks_through_the_server_and_gets_the_answer() {
+        let question = crate::trust::TrustRequest {
+            root: ROOT.into(),
+            files: vec![],
+            hash: sha256_hex(FILE),
+            commands: vec![],
+        };
+        let fake = layout_fake(crate::backend::LaidOut::Trust(question.clone()));
+        assert_eq!(
+            run_preset(&fake, &BTreeMap::new(), None),
+            Ok(EntryOutcome::Ask { request: question })
+        );
+        let fake = layout_fake(applied());
+        let d = Decision::Trust {
+            hash: sha256_hex(FILE),
+        };
+        assert_eq!(
+            run_preset(&fake, &BTreeMap::new(), Some(&d)),
+            Ok(EntryOutcome::Done)
+        );
+        assert_eq!(
+            fake.calls(),
+            [format!(
+                "apply_layout w1 /work/app duo trust:{}",
+                sha256_hex(FILE)
+            )]
+        );
+    }
+
+    #[test]
+    fn a_declined_preset_runs_nothing_on_a_layout_backend() {
+        let fake = layout_fake(applied());
+        assert_eq!(
+            run_preset(&fake, &BTreeMap::new(), Some(&Decision::Without)),
+            Ok(EntryOutcome::Declined)
+        );
+        assert!(fake.calls().is_empty());
+    }
+
+    #[test]
+    fn a_failing_apply_layout_is_an_error() {
+        let fake = layout_fake(applied());
+        fake.fail_on("apply_layout");
+        assert_eq!(run_preset(&fake, &trusted(), None), Err("boom".into()));
+    }
+
+    #[test]
+    fn a_layout_backend_still_runs_terminal_commands_through_the_app() {
+        let fake = layout_fake(applied());
+        assert_eq!(
+            run(&fake, &trusted(), None, &command("test")),
+            Ok(EntryOutcome::Done)
+        );
+        assert_eq!(fake.calls()[0], "create_terminal w1 /work/app");
     }
 
     #[test]

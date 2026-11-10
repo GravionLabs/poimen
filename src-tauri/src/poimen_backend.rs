@@ -2,30 +2,34 @@
 //! tree the frontend builds (`workspaces`, `tabs`, `panes`), live terminals through
 //! `terminal.attach`.
 //!
-//! The server owns the PTYs and, since protocol 4, the tabs and split trees of each space; this
-//! backend does not read them yet (#513): every terminal is its own tab, splits and tabs are the
-//! UI's business. A stream is emulated: it carries the snapshot and raw PTY bytes, so
+//! The server owns the PTYs and, since protocol 4, the tabs and split trees of each space (#513):
+//! the snapshot maps its tabs with their trees, a split is `tab.split`, a new space is
+//! `space.create` with the layout the server resolves and builds (and its trust question).
+//! A stream is emulated: it carries the snapshot and raw PTY bytes, so
 //! xterm.js tracks the modes itself (mouse, scrollback). poimen stops the server only after the user confirmed (`restart_server`, `stop_server`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use poimen_client::agent::{self, PromptResult};
 use poimen_client::protocol::{
-    AgentStatus, AttachMode, DetachReason, ErrorCode, Event, PROTOCOL_VERSION, Space, Terminal,
-    TerminalCreate,
+    self as wire, AgentStatus, AttachMode, DetachReason, ErrorCode, Event, Node, PROTOCOL_VERSION,
+    Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceCreate, SpaceCreateResult, SpaceCreated,
+    SpaceList, Tab, TabSplit, Terminal, TerminalCreate, TrustAnswer, TrustRequired,
 };
 use poimen_client::{AttachmentWriter, Client, ClientError};
 use serde_json::{Value, json};
 
 use crate::backend::{
-    Backend, BackendEvent, BackendInfo, CloseCode, Mode, NewSpace, OnRecord, OpenedStream, Outcome,
-    Snapshot, SplitDirection, StartError, StreamRecord, StreamRequest,
+    ApplyRequest, Backend, BackendEvent, BackendInfo, CloseCode, LaidOut, LayoutRequest, Mode,
+    NewSpace, OnRecord, OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord,
+    StreamRequest,
 };
 use crate::herdr::{AgentSession, PromptOutcome, ServerInfo};
 use crate::poimen_server;
+use crate::trust;
 
 const NO_RENDERED_INPUT: &str = "xterm.js handles the mouse and the scrollback on this backend";
 
@@ -41,6 +45,16 @@ pub struct PoimenBackend {
 }
 
 impl PoimenBackend {
+    /// Gives the tab whose only terminal is `terminal_id` the name `name`; no such tab is Ok.
+    fn rename_lone_tab(&self, terminal_id: &str, name: &str) -> Result<(), String> {
+        let alone = Node::terminal(terminal_id);
+        let layout = self.client.list_layout().map_err(text)?;
+        match layout.tabs.iter().find(|t| t.root == alone) {
+            Some(tab) => self.rename_tab(&tab.tab_id, name),
+            None => Ok(()),
+        }
+    }
+
     pub fn new(client: Client) -> Self {
         Self {
             client,
@@ -84,45 +98,75 @@ fn text(err: ClientError) -> String {
     err.to_string()
 }
 
-/// The tree the frontend builds from: a space is a workspace, a terminal is a tab with one pane
-/// (the server has no tabs). Numbers follow the server's order. Agent status is what the agent's
-/// hooks reported (`unknown` without an agent); a workspace shows its most urgent terminal and
-/// carries the space's `cwd` (herdr workspaces have none).
-pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
+/// The tree the frontend builds from: a space is a workspace, a server tab is a tab with its
+/// terminals as panes (in the order of the tab's split tree, so the first leaf comes first) and
+/// its tree as `root`. A terminal without a leaf (an exited one, or every terminal of a protocol 3
+/// server) is a tab of its own with the terminal's id, so no terminal is lost. Tabs follow the
+/// space's `tabs` order and are numbered by it. Agent status is what the agent's hooks reported
+/// (`unknown` without an agent); a tab and a workspace show their most urgent terminal, and a
+/// workspace carries the space's `cwd` (herdr workspaces have none).
+pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
     let mut workspaces = Vec::new();
     let mut tabs = Vec::new();
     let mut panes = Vec::new();
-    for (i, space) in spaces.iter().enumerate() {
-        let space_status = terminals
+    for (i, space) in layout.spaces.iter().enumerate() {
+        let own: Vec<&Terminal> = terminals
             .iter()
             .filter(|t| t.space_id == space.id)
-            .map(wire_status)
-            .max_by_key(|s| urgency(s))
-            .unwrap_or("unknown");
+            .collect();
         let mut workspace = json!({
             "workspace_id": space.id,
             "label": space.name,
             "number": i + 1,
-            "agent_status": space_status,
+            "agent_status": most_urgent(own.iter().copied()),
         });
         // The space's own directory, so a space without terminals is still found by it.
         if !space.cwd.is_empty() {
             workspace["cwd"] = json!(space.cwd);
         }
         workspaces.push(workspace);
-        for (n, terminal) in terminals
-            .iter()
-            .filter(|t| t.space_id == space.id)
-            .enumerate()
-        {
+        let mut placed = HashSet::new();
+        let mut number = 0;
+        for tab in tabs_of(layout, space) {
+            let members: Vec<&Terminal> = tab
+                .root
+                .terminal_ids()
+                .into_iter()
+                .filter_map(|id| own.iter().copied().find(|t| t.id == id))
+                .collect();
+            // None of its leaves is in the terminal list (they closed between the two reads):
+            // the tab is gone by the next snapshot.
+            if members.is_empty() {
+                continue;
+            }
+            number += 1;
+            let mut wire_tab = json!({
+                "tab_id": tab.tab_id,
+                "workspace_id": space.id,
+                "label": tab.name,
+                "number": number,
+                "agent_status": most_urgent(members.iter().copied()),
+                "root": serde_json::to_value(&tab.root).unwrap_or(Value::Null),
+            });
+            if !tab.active_terminal.is_empty() {
+                wire_tab["active_terminal"] = json!(tab.active_terminal);
+            }
+            tabs.push(wire_tab);
+            for terminal in members {
+                placed.insert(terminal.id.as_str());
+                panes.push(wire_pane(terminal, &space.id, &tab.tab_id));
+            }
+        }
+        for terminal in own.into_iter().filter(|t| !placed.contains(t.id.as_str())) {
+            number += 1;
             tabs.push(json!({
                 "tab_id": terminal.id,
                 "workspace_id": space.id,
                 "label": terminal.name,
-                "number": n + 1,
+                "number": number,
                 "agent_status": wire_status(terminal),
             }));
-            panes.push(wire_pane(terminal, &space.id));
+            panes.push(wire_pane(terminal, &space.id, &terminal.id));
         }
     }
     Snapshot {
@@ -132,12 +176,36 @@ pub fn map_snapshot(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
     }
 }
 
+/// The tabs of `space`: those of its `tabs` order first, then any other tab of the space.
+fn tabs_of<'a>(layout: &'a SpaceList, space: &Space) -> Vec<&'a Tab> {
+    let mine = |t: &&Tab| t.space_id == space.id;
+    let mut ordered: Vec<&Tab> = space
+        .tabs
+        .iter()
+        .filter_map(|id| layout.tabs.iter().filter(mine).find(|t| &t.tab_id == id))
+        .collect();
+    for tab in layout.tabs.iter().filter(mine) {
+        if !ordered.iter().any(|t| t.tab_id == tab.tab_id) {
+            ordered.push(tab);
+        }
+    }
+    ordered
+}
+
+/// The status of the most urgent terminal, `unknown` for none.
+fn most_urgent<'a>(terminals: impl Iterator<Item = &'a Terminal>) -> &'static str {
+    terminals
+        .map(wire_status)
+        .max_by_key(|s| urgency(s))
+        .unwrap_or("unknown")
+}
+
 /// The pane of a terminal in the shape of herdr's `pane.list`: `agent` (the name the hooks
 /// report, `claude` or `copilot`) and `agent_session.value` are set only when known.
-fn wire_pane(terminal: &Terminal, space_id: &str) -> Value {
+fn wire_pane(terminal: &Terminal, space_id: &str, tab_id: &str) -> Value {
     let mut pane = json!({
         "pane_id": terminal.id,
-        "tab_id": terminal.id,
+        "tab_id": tab_id,
         "workspace_id": space_id,
         "cwd": terminal.cwd,
         "agent_status": wire_status(terminal),
@@ -203,6 +271,54 @@ fn default_name(cwd: &str) -> String {
         .find(|s| !s.is_empty())
         .unwrap_or("terminal")
         .to_owned()
+}
+
+/// The trust question of the server, for the dialog.
+fn trust_request(t: TrustRequired) -> LaidOut {
+    LaidOut::Trust(trust::TrustRequest {
+        root: t.root,
+        files: t.files,
+        hash: t.hash,
+        commands: t
+            .commands
+            .into_iter()
+            .map(|c| trust::ListedCommand {
+                what: c.what,
+                command: c.command,
+            })
+            .collect(),
+    })
+}
+
+fn built(created: SpaceCreated) -> LaidOut {
+    LaidOut::Created {
+        space_id: created.space.id,
+        warnings: created.warnings,
+        setup_started: created.setup_started,
+    }
+}
+
+/// The neutral answer of `space.create`: the space, or the trust question for the dialog.
+fn laid_out(result: SpaceCreateResult) -> LaidOut {
+    match result {
+        SpaceCreateResult::TrustRequired { trust_required } => trust_request(trust_required),
+        SpaceCreateResult::Created(created) => built(created),
+    }
+}
+
+/// The neutral answer of `space.apply_layout`: the space it built into, or the trust question.
+fn applied(result: SpaceApplyLayoutResult) -> LaidOut {
+    match result {
+        SpaceApplyLayoutResult::TrustRequired { trust_required } => trust_request(trust_required),
+        SpaceApplyLayoutResult::Applied(created) => built(created),
+    }
+}
+
+fn trust_answer(decision: &trust::Decision) -> TrustAnswer {
+    match decision {
+        trust::Decision::Trust { hash } => TrustAnswer::Trust { hash: hash.clone() },
+        trust::Decision::Without => TrustAnswer::Without,
+    }
 }
 
 /// A stream record for an event of an attached connection; `None` for events that are not
@@ -279,9 +395,9 @@ impl Backend for PoimenBackend {
     }
 
     fn snapshot(&self) -> Result<Snapshot, String> {
-        let spaces = self.client.list_spaces().map_err(text)?;
+        let layout = self.client.list_layout().map_err(text)?;
         let terminals = self.client.list_terminals(None).map_err(text)?;
-        Ok(map_snapshot(&spaces, &terminals))
+        Ok(map_snapshot(&layout, &terminals))
     }
 
     fn create_space(&self, cwd: &str, label: &str) -> Result<NewSpace, String> {
@@ -293,7 +409,39 @@ impl Backend for PoimenBackend {
         })
     }
 
-    /// The server has no focus; the UI keeps the selection.
+    /// `space.create` with `layout`: the server resolves the layout of `cwd`, builds its tabs and
+    /// splits, starts the setup and asks for trust in the project file first.
+    fn create_space_with_layout(
+        &self,
+        request: LayoutRequest<'_>,
+    ) -> Option<Result<LaidOut, String>> {
+        let params = SpaceCreate {
+            trust: request.decision.map(trust_answer),
+            command: request.command.map(str::to_owned),
+            ..SpaceCreate::with_layout(request.label, request.cwd)
+        };
+        Some(
+            self.client
+                .create_space_with(&params)
+                .map(laid_out)
+                .map_err(text),
+        )
+    }
+
+    /// `space.apply_layout`: the server builds the space's resolved layout (or the preset) into
+    /// it as new tabs and asks for trust in the project file first.
+    fn apply_layout(&self, request: ApplyRequest<'_>) -> Option<Result<LaidOut, String>> {
+        let params = SpaceApplyLayout {
+            space_id: request.space_id.to_owned(),
+            cwd: Some(request.cwd.to_owned()),
+            preset: request.preset.map(str::to_owned),
+            trust: request.decision.map(trust_answer),
+        };
+        Some(self.client.apply_layout(&params).map(applied).map_err(text))
+    }
+
+    /// The server's focus is shared by every client and changes only through `tab.focus`; the UI
+    /// keeps its own selection.
     fn focus_space(&self, _space_id: &str) -> Result<(), String> {
         Ok(())
     }
@@ -313,16 +461,29 @@ impl Backend for PoimenBackend {
         Ok(Some(self.new_terminal(space_id, cwd)?.id))
     }
 
-    /// A split is a new terminal in the space of `target`; direction and ratio are the UI's.
+    /// `tab.split`: the leaf of `target` becomes a split of it (first) and the new terminal.
     fn split(
         &self,
         target: &str,
-        _direction: SplitDirection,
+        direction: SplitDirection,
         cwd: Option<&str>,
-        _ratio: Option<f64>,
+        ratio: Option<f64>,
     ) -> Result<Option<String>, String> {
-        let space_id = self.terminal(target)?.space_id;
-        Ok(Some(self.new_terminal(&space_id, cwd)?.id))
+        let (_, terminal) = self
+            .client
+            .split(&TabSplit {
+                terminal_id: target.into(),
+                direction: match direction {
+                    SplitDirection::Right => wire::SplitDirection::Right,
+                    SplitDirection::Down => wire::SplitDirection::Down,
+                },
+                ratio,
+                cwd: cwd.map(str::to_owned),
+                name: None,
+                command: None,
+            })
+            .map_err(text)?;
+        Ok(Some(terminal.id))
     }
 
     fn close_terminal(&self, terminal_id: &str) -> Result<(), String> {
@@ -336,6 +497,41 @@ impl Backend for PoimenBackend {
         };
         self.client
             .rename_terminal(terminal_id, &name)
+            .map_err(text)?;
+        // A tab that holds only this terminal is the terminal to the user: it takes the name
+        // too, so every client shows the same. The terminal is renamed at this point, so a
+        // failure here is logged and never fails the call.
+        if let Err(err) = self.rename_lone_tab(terminal_id, &name) {
+            eprintln!("poimen: terminal {terminal_id} renamed, its tab not: {err}");
+        }
+        Ok(())
+    }
+
+    fn close_tab(&self, tab_id: &str) -> Result<(), String> {
+        self.client.close_tab(tab_id).map_err(text)
+    }
+
+    fn rename_tab(&self, tab_id: &str, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("The name of a tab cannot be empty.".into());
+        }
+        self.client.rename_tab(tab_id, name).map(drop).map_err(text)
+    }
+
+    fn resize_split(&self, tab_id: &str, split_id: &str, ratio: f64) -> Result<(), String> {
+        if !(ratio.is_finite() && ratio > 0.0 && ratio < 1.0) {
+            return Err("The ratio of a split must be between 0 and 1.".into());
+        }
+        self.client
+            .resize_split(tab_id, split_id, ratio)
+            .map(drop)
+            .map_err(text)
+    }
+
+    fn focus_tab(&self, tab_id: &str, terminal_id: &str) -> Result<(), String> {
+        self.client
+            .focus_tab(tab_id, Some(terminal_id))
             .map(drop)
             .map_err(text)
     }
@@ -389,7 +585,7 @@ impl Backend for PoimenBackend {
         let terminals = self.client.list_terminals(None).map_err(text)?;
         let panes: Vec<Value> = terminals
             .iter()
-            .map(|t| wire_pane(t, &t.space_id))
+            .map(|t| wire_pane(t, &t.space_id, &t.id))
             .collect();
         Ok(crate::herdr::parse_agent_session(
             &json!({"panes": panes}),
@@ -518,7 +714,12 @@ impl Backend for PoimenBackend {
         };
         let mut connected = None;
         loop {
-            match self.client.subscribe() {
+            match self
+                .client
+                .subscribe_as(Some(poimen_client::protocol::ClientInfo {
+                    kind: poimen_client::protocol::ClientKind::App,
+                    pid: std::process::id(),
+                })) {
                 Ok(events) => {
                     if connected != Some(true) {
                         emit(&synthetic("poimen.connected", Value::Null));
@@ -600,6 +801,17 @@ mod tests {
         }
     }
 
+    /// The snapshot of a server without tabs (protocol 3): every terminal is a tab of its own.
+    fn snap(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
+        map_snapshot(
+            &SpaceList {
+                spaces: spaces.to_vec(),
+                tabs: Vec::new(),
+            },
+            terminals,
+        )
+    }
+
     fn terminal(id: &str, space_id: &str, name: &str) -> Terminal {
         Terminal {
             id: id.into(),
@@ -618,7 +830,7 @@ mod tests {
 
     #[test]
     fn the_snapshot_maps_spaces_to_workspaces_and_terminals_to_tabs_with_one_pane() {
-        let snapshot = map_snapshot(
+        let snapshot = snap(
             &[space("s1", "api"), space("s2", "web")],
             &[
                 terminal("t1", "s1", "zsh"),
@@ -650,16 +862,257 @@ mod tests {
         );
     }
 
+    fn leaf(id: &str) -> Node {
+        Node::terminal(id)
+    }
+
+    fn split(id: &str, direction: wire::SplitDirection, first: Node, second: Node) -> Node {
+        Node::Split {
+            split_id: id.into(),
+            direction,
+            ratio: 0.6,
+            children: Box::new([first, second]),
+        }
+    }
+
+    fn tab(id: &str, space_id: &str, name: &str, root: Node) -> Tab {
+        Tab {
+            tab_id: id.into(),
+            space_id: space_id.into(),
+            name: name.into(),
+            active_terminal: root.first_terminal().to_owned(),
+            root,
+        }
+    }
+
+    /// Space s1 with the tabs `tab1` (agent right of tests above shell) and `tab2` (logs), in the
+    /// order tab2, tab1.
+    fn split_layout() -> SpaceList {
+        let mut s1 = space("s1", "api");
+        s1.tabs = vec!["tab2".into(), "tab1".into()];
+        s1.active_tab = Some("tab1".into());
+        SpaceList {
+            spaces: vec![s1],
+            tabs: vec![
+                tab(
+                    "tab1",
+                    "s1",
+                    "agent",
+                    split(
+                        "split1",
+                        wire::SplitDirection::Right,
+                        leaf("t1"),
+                        split("split2", wire::SplitDirection::Down, leaf("t3"), leaf("t2")),
+                    ),
+                ),
+                tab("tab2", "s1", "logs", leaf("t4")),
+            ],
+        }
+    }
+
+    #[test]
+    fn server_tabs_become_tabs_with_their_terminals_as_panes_in_tree_order() {
+        let terminals = [
+            terminal("t1", "s1", "agent"),
+            terminal("t2", "s1", "shell"),
+            terminal("t3", "s1", "tests"),
+            terminal("t4", "s1", "logs"),
+        ];
+        let snapshot = map_snapshot(&split_layout(), &terminals);
+        let ids = |v: &Value, key: &str| {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x[key].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        // The space's order, numbered by it.
+        assert_eq!(ids(&snapshot.tabs, "tab_id"), ["tab2", "tab1"]);
+        assert_eq!(snapshot.tabs[0]["number"], 1);
+        assert_eq!(snapshot.tabs[1]["number"], 2);
+        assert_eq!(snapshot.tabs[1]["label"], "agent");
+        // The panes of a split tab follow its leaves, first leaf first.
+        assert_eq!(ids(&snapshot.panes, "pane_id"), ["t4", "t1", "t3", "t2"]);
+        assert_eq!(
+            ids(&snapshot.panes, "tab_id"),
+            ["tab2", "tab1", "tab1", "tab1"]
+        );
+        // The tree and the focused leaf reach the frontend as the server sent them.
+        assert_eq!(snapshot.tabs[1]["active_terminal"], "t1");
+        assert_eq!(
+            snapshot.tabs[1]["root"],
+            json!({"kind": "split", "split_id": "split1", "direction": "right", "ratio": 0.6,
+            "children": [
+                {"kind": "terminal", "terminal_id": "t1"},
+                {"kind": "split", "split_id": "split2", "direction": "down", "ratio": 0.6,
+                    "children": [
+                        {"kind": "terminal", "terminal_id": "t3"},
+                        {"kind": "terminal", "terminal_id": "t2"},
+                    ]},
+            ]})
+        );
+    }
+
+    /// The fixture the frontend specs read (`core/herdr.spec.ts`): a split tab, a plain tab and an
+    /// exited terminal without a leaf.
+    const SPLIT_SNAPSHOT: &str =
+        include_str!("../../src/app/core/fixtures/poimen-snapshot-split-tab.json");
+
+    #[test]
+    fn the_snapshot_of_a_split_tab_matches_the_frontend_fixture() {
+        let mut agent = terminal("t1", "s1", "agent");
+        agent.agent = Some(AgentInfo {
+            status: AgentStatus::Working,
+            agent: Some("claude".into()),
+            session_id: Some("abc-1".into()),
+            message: None,
+            message_at: None,
+        });
+        let mut exited = terminal("t5", "s1", "build");
+        exited.status = TerminalStatus::Exited;
+        exited.exit_code = Some(1);
+        let terminals = [
+            agent,
+            terminal("t2", "s1", "shell"),
+            terminal("t3", "s1", "tests"),
+            terminal("t4", "s1", "logs"),
+            exited,
+        ];
+        let snapshot = map_snapshot(&split_layout(), &terminals);
+        let expected: Value = serde_json::from_str(SPLIT_SNAPSHOT).unwrap();
+        assert_eq!(serde_json::to_value(&snapshot).unwrap(), expected);
+    }
+
+    #[test]
+    fn a_split_tab_shows_its_most_urgent_terminal() {
+        let mut blocked = terminal("t2", "s1", "shell");
+        blocked.agent = Some(AgentInfo {
+            status: AgentStatus::Blocked,
+            agent: Some("claude".into()),
+            session_id: None,
+            message: None,
+            message_at: None,
+        });
+        let terminals = [
+            terminal("t1", "s1", "agent"),
+            blocked,
+            terminal("t3", "s1", "tests"),
+            terminal("t4", "s1", "logs"),
+        ];
+        let snapshot = map_snapshot(&split_layout(), &terminals);
+        assert_eq!(snapshot.tabs[0]["agent_status"], "unknown");
+        assert_eq!(snapshot.tabs[1]["agent_status"], "blocked");
+        assert_eq!(snapshot.workspaces[0]["agent_status"], "blocked");
+    }
+
+    #[test]
+    fn a_terminal_without_a_leaf_keeps_a_tab_of_its_own() {
+        let mut exited = terminal("t5", "s1", "build");
+        exited.status = TerminalStatus::Exited;
+        exited.exit_code = Some(1);
+        let terminals = [
+            terminal("t1", "s1", "agent"),
+            terminal("t2", "s1", "shell"),
+            terminal("t3", "s1", "tests"),
+            terminal("t4", "s1", "logs"),
+            exited,
+        ];
+        let snapshot = map_snapshot(&split_layout(), &terminals);
+        assert_eq!(
+            snapshot.tabs[2],
+            json!({"tab_id": "t5", "workspace_id": "s1", "label": "build", "number": 3,
+                "agent_status": "unknown"})
+        );
+        assert_eq!(snapshot.panes[4]["pane_id"], "t5");
+        assert_eq!(snapshot.panes[4]["tab_id"], "t5");
+    }
+
+    #[test]
+    fn leaves_of_terminals_that_are_gone_are_skipped_and_an_empty_tab_is_left_out() {
+        // t3 and t4 closed between `space.list` and `terminal.list`.
+        let terminals = [terminal("t1", "s1", "agent"), terminal("t2", "s1", "shell")];
+        let snapshot = map_snapshot(&split_layout(), &terminals);
+        assert_eq!(snapshot.tabs.as_array().unwrap().len(), 1);
+        assert_eq!(snapshot.tabs[0]["tab_id"], "tab1");
+        assert_eq!(snapshot.tabs[0]["number"], 1);
+        let panes: Vec<_> = snapshot
+            .panes
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["pane_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(panes, ["t1", "t2"]);
+    }
+
+    #[test]
+    fn a_tab_missing_from_the_space_order_still_comes_after_the_ordered_ones() {
+        let mut layout = split_layout();
+        layout.spaces[0].tabs = vec!["tab1".into()];
+        let terminals = [
+            terminal("t1", "s1", "agent"),
+            terminal("t2", "s1", "shell"),
+            terminal("t3", "s1", "tests"),
+            terminal("t4", "s1", "logs"),
+        ];
+        let snapshot = map_snapshot(&layout, &terminals);
+        assert_eq!(snapshot.tabs[0]["tab_id"], "tab1");
+        assert_eq!(snapshot.tabs[1]["tab_id"], "tab2");
+    }
+
+    #[test]
+    fn a_tab_of_another_space_is_not_listed_in_this_one() {
+        let mut layout = split_layout();
+        layout.spaces.push(space("s2", "web"));
+        layout.tabs[1].space_id = "s2".into();
+        let mut logs = terminal("t4", "s2", "logs");
+        logs.space_id = "s2".into();
+        let terminals = [
+            terminal("t1", "s1", "agent"),
+            terminal("t2", "s1", "shell"),
+            terminal("t3", "s1", "tests"),
+            logs,
+        ];
+        let snapshot = map_snapshot(&layout, &terminals);
+        let of = |tab: &Value| tab["workspace_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            snapshot
+                .tabs
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(of)
+                .collect::<Vec<_>>(),
+            ["s1", "s2"]
+        );
+        assert_eq!(snapshot.panes[3]["tab_id"], "tab2");
+        assert_eq!(snapshot.panes[3]["workspace_id"], "s2");
+    }
+
+    #[test]
+    fn a_tab_change_event_reaches_the_frontend_by_its_kind() {
+        let event = backend_event(&Event::TabChanged {
+            tab: tab("tab1", "s1", "agent", leaf("t1")),
+        });
+        assert_eq!(event.kind, "tab.changed");
+        assert_eq!(event.data["tab"]["tab_id"], "tab1");
+        let closed = backend_event(&Event::TabClosed {
+            tab_id: "tab1".into(),
+            space_id: "s1".into(),
+        });
+        assert_eq!(closed.kind, "tab.closed");
+    }
+
     #[test]
     fn an_empty_server_gives_an_empty_snapshot() {
-        let snapshot = map_snapshot(&[], &[]);
+        let snapshot = snap(&[], &[]);
         assert_eq!(snapshot.workspaces, json!([]));
         assert_eq!(snapshot.panes, json!([]));
     }
 
     #[test]
     fn a_space_without_terminals_keeps_its_directory() {
-        let snapshot = map_snapshot(&[space("s1", "app-7")], &[]);
+        let snapshot = snap(&[space("s1", "app-7")], &[]);
         assert_eq!(snapshot.workspaces[0]["cwd"], "/work/app-7");
         assert_eq!(snapshot.panes, json!([]));
     }
@@ -668,13 +1121,13 @@ mod tests {
     fn a_space_without_a_directory_has_no_cwd() {
         let mut s = space("s1", "a");
         s.cwd = String::new();
-        let snapshot = map_snapshot(&[s], &[]);
+        let snapshot = snap(&[s], &[]);
         assert!(snapshot.workspaces[0].get("cwd").is_none());
     }
 
     #[test]
     fn a_terminal_of_an_unknown_space_is_left_out() {
-        let snapshot = map_snapshot(&[space("s1", "a")], &[terminal("t1", "gone", "x")]);
+        let snapshot = snap(&[space("s1", "a")], &[terminal("t1", "gone", "x")]);
         assert_eq!(snapshot.tabs, json!([]));
     }
 
@@ -683,10 +1136,7 @@ mod tests {
         let mut t = terminal("t1", "s1", "zsh");
         t.status = TerminalStatus::Exited;
         t.exit_code = Some(1);
-        assert_eq!(
-            map_snapshot(&[space("s1", "a")], &[t]).panes[0]["pane_id"],
-            "t1"
-        );
+        assert_eq!(snap(&[space("s1", "a")], &[t]).panes[0]["pane_id"], "t1");
     }
 
     #[test]
@@ -817,7 +1267,7 @@ mod tests {
             message: None,
             message_at: None,
         });
-        let snapshot = map_snapshot(
+        let snapshot = snap(
             &[space("s1", "api"), space("s2", "web")],
             &[working, blocked, terminal("t3", "s2", "c")],
         );
@@ -877,7 +1327,7 @@ mod tests {
             message: Some("Allow Bash?".into()),
             message_at: Some(1700),
         });
-        let snapshot = map_snapshot(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
         assert_eq!(snapshot.panes[0]["agent_message"], "Allow Bash?");
         assert_eq!(snapshot.panes[0]["agent_message_at"], 1700);
         assert!(snapshot.panes[1].get("agent_message").is_none());
@@ -887,7 +1337,7 @@ mod tests {
     fn tokens_reach_the_pane_as_herdr_tokens_and_their_event_passes_through() {
         let mut t = terminal("t1", "s1", "a");
         t.tokens = [("deliver_step".to_owned(), "build".to_owned())].into();
-        let snapshot = map_snapshot(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
         assert_eq!(
             snapshot.panes[0]["tokens"],
             json!({"deliver_step": "build"})
@@ -967,6 +1417,17 @@ mod tests {
         });
     }
 
+    fn tab_json(tab_id: &str, space: &str, root: Value) -> Value {
+        json!({"tab_id": tab_id, "space_id": space, "name": "zsh", "root": root, "active_terminal": "t1"})
+    }
+
+    fn split_json(first: &str, second: &str) -> Value {
+        json!({"kind": "split", "split_id": "split7", "direction": "right", "ratio": 0.5, "children": [
+            {"kind": "terminal", "terminal_id": first},
+            {"kind": "terminal", "terminal_id": second},
+        ]})
+    }
+
     fn term_json(id: &str, space: &str) -> Value {
         json!({"id": id, "space_id": space, "name": "zsh", "cwd": "/work/api", "cols": 80, "rows": 24, "status": "running"})
     }
@@ -982,9 +1443,57 @@ mod tests {
             &path,
             log.clone(),
             move |method, params| match method {
-                "space.create" => {
+                "space.create" if params["layout"] == false => {
                     Ok(json!({"space": {"id": "s9", "name": params["name"], "cwd": params["cwd"]}}))
                 }
+                "space.create"
+                    if params["cwd"] == "/work/untrusted" && params["trust"].is_null() =>
+                {
+                    Ok(json!({"trust_required": {
+                        "root": "/work/untrusted", "files": ["/work/untrusted/.poimen/config.json"],
+                        "hash": "abc", "commands": [{"what": "setup", "command": "make"}],
+                        "layout": [{"name": "agent", "command": "claude"}],
+                    }}))
+                }
+                "space.create" => Ok(json!({
+                    "space": {"id": "s9", "name": params["name"], "cwd": params["cwd"], "tabs": ["tab4"], "active_tab": "tab4"},
+                    "tabs": [tab_json("tab4", "s9", json!({"kind": "terminal", "terminal_id": "t9"}))],
+                    "warnings": ["template app: harness codex is not installed"],
+                    "setup_started": true,
+                })),
+                "space.apply_layout" if params["trust"].is_null() && params["preset"] == "duo" => {
+                    Ok(json!({"trust_required": {
+                        "root": "/work/api", "files": [], "hash": "abc", "commands": [],
+                    }}))
+                }
+                "space.apply_layout" => Ok(json!({
+                    "space": {"id": params["space_id"], "name": "api", "cwd": "/work/api", "tabs": ["tab1", "tab5"]},
+                    "tabs": [tab_json("tab5", "s1", json!({"kind": "terminal", "terminal_id": "t9"}))],
+                    "warnings": ["w"],
+                    "setup_started": true,
+                })),
+                "space.list" => Ok(json!({
+                    "spaces": [{"id": "s1", "name": "api", "cwd": "/work/api", "tabs": ["tab1", "tab2"], "active_tab": "tab1"}],
+                    "tabs": [
+                        tab_json("tab1", "s1", json!({"kind": "terminal", "terminal_id": "t1"})),
+                        tab_json("tab2", "s1", split_json("t2", "t3")),
+                    ],
+                })),
+                "tab.split" if params["terminal_id"] == "t1" => Ok(json!({
+                    "tab": tab_json("tab1", "s1", split_json("t1", "t9")),
+                    "terminal": term_json("t9", "s1"),
+                })),
+                "tab.split" => Err(("not_found", "terminal nope not found")),
+                "tab.rename" => Ok(json!({"tab": tab_json(
+                    params["tab_id"].as_str().unwrap(), "s1",
+                    json!({"kind": "terminal", "terminal_id": "t1"}),
+                )})),
+                "tab.close" => Ok(json!({})),
+                "tab.resize_split" | "tab.focus" => Ok(json!({"tab": tab_json(
+                    "tab1",
+                    "s1",
+                    json!({"kind": "terminal", "terminal_id": "t1"})
+                )})),
                 "terminal.create" => {
                     Ok(json!({"terminal": term_json("t9", params["space_id"].as_str().unwrap())}))
                 }
@@ -1022,19 +1531,33 @@ mod tests {
     }
 
     #[test]
-    fn a_split_creates_a_terminal_in_the_space_of_the_target() {
+    fn a_split_goes_to_the_server_as_tab_split_and_returns_the_new_terminal() {
         let (backend, log) = backend_for("split", vec![], false);
         let id = backend
-            .split("t1", SplitDirection::Right, Some("/work/api"), Some(0.5))
+            .split("t1", SplitDirection::Down, Some("/work/api"), Some(0.6))
             .unwrap();
         assert_eq!(id.as_deref(), Some("t9"));
-        let params = params_of(&log, "terminal.create");
-        assert_eq!(params["space_id"], "s1");
-        assert_eq!(params["cwd"], "/work/api");
+        assert_eq!(
+            params_of(&log, "tab.split"),
+            json!({"terminal_id": "t1", "direction": "down", "ratio": 0.6, "cwd": "/work/api"})
+        );
+        assert!(!lock(&log).iter().any(|l| l.starts_with("terminal.create")));
     }
 
     #[test]
-    fn a_split_of_an_unknown_terminal_fails_without_creating() {
+    fn a_split_without_ratio_or_directory_leaves_both_to_the_server() {
+        let (backend, log) = backend_for("split-defaults", vec![], false);
+        backend
+            .split("t1", SplitDirection::Right, None, None)
+            .unwrap();
+        assert_eq!(
+            params_of(&log, "tab.split"),
+            json!({"terminal_id": "t1", "direction": "right"})
+        );
+    }
+
+    #[test]
+    fn a_split_of_an_unknown_terminal_reports_the_server_error() {
         let (backend, log) = backend_for("split-missing", vec![], false);
         let err = backend
             .split("nope", SplitDirection::Down, None, None)
@@ -1053,12 +1576,276 @@ mod tests {
     }
 
     #[test]
+    fn renaming_the_only_terminal_of_a_tab_renames_the_tab_too() {
+        let (backend, log) = backend_for("rename-alone", vec![], false);
+        backend.rename_terminal("t1", Some(" build ")).unwrap();
+        assert_eq!(
+            params_of(&log, "tab.rename"),
+            json!({"tab_id": "tab1", "name": "build"})
+        );
+    }
+
+    /// A backend whose server renames terminals but fails `failing` (`space.list` or
+    /// `tab.rename`).
+    fn backend_failing(
+        name: &str,
+        failing: &'static str,
+    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>) {
+        let path = temp_socket(name);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        serve(
+            &path,
+            log.clone(),
+            move |method, _| match method {
+                m if m == failing => Err(("internal", "server hiccup")),
+                "terminal.rename" => Ok(json!({"terminal": term_json("t1", "s1")})),
+                "space.list" => Ok(json!({
+                    "spaces": [{"id": "s1", "name": "api", "cwd": "/work/api", "tabs": ["tab1"], "active_tab": "tab1"}],
+                    "tabs": [tab_json("tab1", "s1", json!({"kind": "terminal", "terminal_id": "t1"}))],
+                })),
+                _ => Err(("unknown_method", "no")),
+            },
+            vec![],
+        );
+        (PoimenBackend::new(Client::new(path)), log)
+    }
+
+    #[test]
+    fn a_failed_tab_lookup_after_the_terminal_rename_does_not_fail_the_rename() {
+        let (backend, log) = backend_failing("rename-list-fails", "space.list");
+        assert_eq!(backend.rename_terminal("t1", Some("build")), Ok(()));
+        assert_eq!(params_of(&log, "terminal.rename")["name"], "build");
+        assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
+    }
+
+    #[test]
+    fn a_failed_tab_rename_after_the_terminal_rename_does_not_fail_the_rename() {
+        let (backend, log) = backend_failing("rename-tab-fails", "tab.rename");
+        assert_eq!(backend.rename_terminal("t1", Some("build")), Ok(()));
+        assert_eq!(params_of(&log, "terminal.rename")["name"], "build");
+        assert_eq!(
+            params_of(&log, "tab.rename"),
+            json!({"tab_id": "tab1", "name": "build"})
+        );
+    }
+
+    #[test]
+    fn renaming_a_terminal_of_a_split_tab_leaves_the_tab_name() {
+        let (backend, log) = backend_for("rename-split", vec![], false);
+        backend.rename_terminal("t2", Some("tests")).unwrap();
+        assert_eq!(params_of(&log, "terminal.rename")["name"], "tests");
+        assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
+    }
+
+    #[test]
+    fn a_tab_is_closed_and_renamed_through_the_tab_requests() {
+        let (backend, log) = backend_for("tab-ops", vec![], false);
+        backend.close_tab("tab2").unwrap();
+        assert_eq!(params_of(&log, "tab.close"), json!({"tab_id": "tab2"}));
+        backend.rename_tab("tab1", " logs ").unwrap();
+        assert_eq!(
+            params_of(&log, "tab.rename"),
+            json!({"tab_id": "tab1", "name": "logs"})
+        );
+    }
+
+    #[test]
+    fn a_divider_drag_goes_to_the_server_as_tab_resize_split() {
+        let (backend, log) = backend_for("resize", vec![], false);
+        backend.resize_split("tab1", "split5", 0.7).unwrap();
+        assert_eq!(
+            params_of(&log, "tab.resize_split"),
+            json!({"tab_id": "tab1", "split_id": "split5", "ratio": 0.7})
+        );
+    }
+
+    #[test]
+    fn a_ratio_outside_zero_and_one_is_refused_before_the_server() {
+        let (backend, log) = backend_for("resize-bad", vec![], false);
+        for ratio in [0.0, 1.0, -0.2, f64::NAN] {
+            assert!(backend.resize_split("tab1", "split5", ratio).is_err());
+        }
+        assert!(!lock(&log).iter().any(|l| l.starts_with("tab.resize_split")));
+    }
+
+    #[test]
+    fn focusing_a_pane_goes_to_the_server_as_tab_focus() {
+        let (backend, log) = backend_for("focus", vec![], false);
+        backend.focus_tab("tab1", "t2").unwrap();
+        assert_eq!(
+            params_of(&log, "tab.focus"),
+            json!({"tab_id": "tab1", "terminal_id": "t2"})
+        );
+    }
+
+    #[test]
+    fn a_blank_tab_name_is_refused_before_the_server() {
+        let (backend, log) = backend_for("tab-blank", vec![], false);
+        assert!(backend.rename_tab("tab1", "  ").is_err());
+        assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
+    }
+
+    fn layout_request<'a>(
+        cwd: &'a str,
+        decision: Option<&'a trust::Decision>,
+        command: Option<&'a str>,
+    ) -> LayoutRequest<'a> {
+        LayoutRequest {
+            cwd,
+            label: "api",
+            decision,
+            command,
+        }
+    }
+
+    #[test]
+    fn a_new_space_with_layout_is_built_by_the_server() {
+        let (backend, log) = backend_for("space-layout", vec![], false);
+        let request = layout_request("/work/api", None, Some("claude 'x'"));
+        let outcome = backend.create_space_with_layout(request).unwrap().unwrap();
+        assert_eq!(
+            outcome,
+            LaidOut::Created {
+                space_id: "s9".into(),
+                warnings: vec!["template app: harness codex is not installed".into()],
+                setup_started: true,
+            }
+        );
+        assert_eq!(
+            params_of(&log, "space.create"),
+            json!({"name": "api", "cwd": "/work/api", "layout": true, "command": "claude 'x'"})
+        );
+        // The server built the space: no terminal, split or input from the app.
+        assert_eq!(lock(&log).len(), 1);
+    }
+
+    #[test]
+    fn an_untrusted_project_is_the_trust_question_and_creates_nothing() {
+        let (backend, log) = backend_for("space-trust", vec![], false);
+        let request = layout_request("/work/untrusted", None, None);
+        let outcome = backend.create_space_with_layout(request).unwrap().unwrap();
+        assert_eq!(
+            outcome,
+            LaidOut::Trust(trust::TrustRequest {
+                root: "/work/untrusted".into(),
+                files: vec!["/work/untrusted/.poimen/config.json".into()],
+                hash: "abc".into(),
+                commands: vec![trust::ListedCommand {
+                    what: "setup".into(),
+                    command: "make".into(),
+                }],
+            })
+        );
+        assert_eq!(lock(&log).len(), 1);
+    }
+
+    #[test]
+    fn the_trust_answer_goes_to_the_server_with_the_next_create() {
+        for (n, (decision, wire)) in [
+            (
+                trust::Decision::Trust { hash: "abc".into() },
+                json!({"kind": "trust", "hash": "abc"}),
+            ),
+            (trust::Decision::Without, json!({"kind": "without"})),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (backend, log) = backend_for(&format!("space-answer-{n}"), vec![], false);
+            let request = layout_request("/work/untrusted", Some(&decision), None);
+            let outcome = backend.create_space_with_layout(request).unwrap().unwrap();
+            assert!(matches!(outcome, LaidOut::Created { .. }));
+            assert_eq!(params_of(&log, "space.create")["trust"], wire);
+        }
+    }
+
+    #[test]
+    fn apply_layout_goes_to_the_server_with_space_cwd_preset_and_answer() {
+        let (backend, log) = backend_for("apply", vec![], false);
+        let request = ApplyRequest {
+            space_id: "s1",
+            cwd: "/work/api",
+            preset: None,
+            decision: None,
+        };
+        assert_eq!(
+            backend.apply_layout(request).unwrap().unwrap(),
+            LaidOut::Created {
+                space_id: "s1".into(),
+                warnings: vec!["w".into()],
+                setup_started: true,
+            }
+        );
+        assert_eq!(
+            params_of(&log, "space.apply_layout"),
+            json!({"space_id": "s1", "cwd": "/work/api"})
+        );
+        // The server built the tabs: nothing else was sent.
+        assert_eq!(lock(&log).len(), 1);
+
+        let (backend, log) = backend_for("apply-preset", vec![], false);
+        let preset = ApplyRequest {
+            preset: Some("duo"),
+            ..request
+        };
+        let LaidOut::Trust(asked) = backend.apply_layout(preset).unwrap().unwrap() else {
+            panic!("expected the trust question")
+        };
+        assert_eq!(asked.hash, "abc");
+        let decision = trust::Decision::Trust { hash: "abc".into() };
+        let answered = ApplyRequest {
+            decision: Some(&decision),
+            ..preset
+        };
+        assert!(matches!(
+            backend.apply_layout(answered).unwrap().unwrap(),
+            LaidOut::Created { .. }
+        ));
+        let sent: Vec<Value> = lock(&log)
+            .iter()
+            .map(|l| serde_json::from_str(&l["space.apply_layout ".len()..]).unwrap())
+            .collect();
+        assert_eq!(
+            sent[1],
+            json!({"space_id": "s1", "cwd": "/work/api", "preset": "duo",
+                   "trust": {"kind": "trust", "hash": "abc"}})
+        );
+    }
+
+    #[test]
+    fn a_failing_space_create_is_an_error() {
+        let path = temp_socket("space-fail");
+        serve(
+            &path,
+            Arc::default(),
+            |_, _| Err(("invalid_params", "cwd /gone is not a directory")),
+            vec![],
+        );
+        let backend = PoimenBackend::new(Client::new(path));
+        let err = backend
+            .create_space_with_layout(layout_request("/gone", None, None))
+            .unwrap()
+            .unwrap_err();
+        assert!(err.contains("/gone"), "{err}");
+    }
+
+    #[test]
+    fn the_snapshot_reads_the_server_tabs() {
+        let (backend, _) = backend_for("snapshot-tabs", vec![], false);
+        let snapshot = backend.snapshot().unwrap();
+        // tab1 holds t1; the leaves t2 and t3 of tab2 are not in the terminal list (closed).
+        assert_eq!(snapshot.tabs.as_array().unwrap().len(), 1);
+        assert_eq!(snapshot.tabs[0]["tab_id"], "tab1");
+        assert_eq!(snapshot.panes[0]["tab_id"], "tab1");
+    }
+
+    #[test]
     fn info_reports_the_server_version_and_protocol() {
         let (backend, _) = backend_for("info", vec![], false);
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
-            ("0.9.0", Some(4), 4)
+            ("0.9.0", Some(6), 6)
         );
     }
 
@@ -1073,6 +1860,7 @@ mod tests {
             &path,
             log.clone(),
             move |method, _| match method {
+                "space.list" => Ok(json!({"spaces": [], "tabs": []})),
                 "terminal.list" => {
                     let mut t = term_json("t1", "s1");
                     if let Some(status) = status {
@@ -1241,7 +2029,7 @@ mod tests {
             message_at: None,
         });
         let plain = terminal("t2", "s1", "zsh");
-        let panes = map_snapshot(&[space("s1", "api")], &[with, plain]).panes;
+        let panes = snap(&[space("s1", "api")], &[with, plain]).panes;
         assert_eq!(panes[0]["agent"], "copilot");
         assert_eq!(panes[0]["agent_session"]["value"], "s-9");
         assert!(panes[1].get("agent").is_none());

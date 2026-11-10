@@ -8,10 +8,12 @@
 
 pub mod claude;
 pub mod copilot;
+mod create;
 mod emulator;
 pub mod hook;
 mod pty;
 pub mod report;
+pub mod stdio;
 mod store;
 mod stream;
 mod tabs;
@@ -29,12 +31,13 @@ use std::time::{Duration, Instant};
 use alacritty_terminal::vte::ansi::Rgb;
 use emulator::Colors;
 use poimen_protocol::{
-    self as proto, AgentInfo, AgentStatus, AttachMode, DetachReason, ErrorCode, Event,
-    PROTOCOL_VERSION, PingResult, Request, Response, SetColors, Space, SpaceClose, SpaceCreate,
-    SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabRename, TabResizeSplit,
-    TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose, TerminalCreate,
-    TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalReportAgent,
-    TerminalReportTokens, TerminalResize, TerminalStatus,
+    self as proto, AgentInfo, AgentStatus, AttachMode, ClientKind, DetachReason, ErrorCode, Event,
+    EventsSubscribe, PROTOCOL_VERSION, PingResult, Request, Response, SetColors, Space,
+    SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
+    SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabRename,
+    TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose,
+    TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
+    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus,
 };
 use serde_json::{Value, json};
 
@@ -58,6 +61,10 @@ pub struct Config {
     pub state_file: PathBuf,
     /// Lines of scrollback kept per terminal for the attach snapshot.
     pub scrollback: usize,
+    /// The user's home, whose `~/.config/poimen/config.json` gives `trustedProjects`,
+    /// `spaceTemplates`, `spaces.layout` and `harnesses` to `space.create` (which also writes
+    /// `trustedProjects`); `None`: no user config.
+    pub home: Option<PathBuf>,
 }
 
 impl Config {
@@ -71,6 +78,7 @@ impl Config {
                 .ok()
                 .and_then(|v| v.trim().parse().ok())
                 .unwrap_or(DEFAULT_SCROLLBACK),
+            home: std::env::home_dir().filter(|h| !h.as_os_str().is_empty()),
         }
     }
 }
@@ -149,13 +157,31 @@ struct Inner {
 /// How long `server.shutdown` waits so its answer reaches the client first.
 const SHUTDOWN_DELAY: Duration = Duration::from_millis(100);
 
+static NEXT_SUBSCRIBER: AtomicU64 = AtomicU64::new(1);
+
+/// An open event subscription and what its client said it is.
+struct Subscriber {
+    id: u64,
+    kind: ClientKind,
+    /// The client said what it is. Only these get `server.clients_changed`: an older client
+    /// cannot parse the event and would resync in a loop.
+    declared: bool,
+    tx: Sender<Event>,
+}
+
+/// Sends the event to the subscribers that declared a client, dropping the ones that went away.
+fn notify_declared(subs: &mut Vec<Subscriber>, event: &Event) {
+    subs.retain(|s| !s.declared || s.tx.send(event.clone()).is_ok());
+}
+
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
-    subscribers: Mutex<Vec<Sender<Event>>>,
+    subscribers: Mutex<Vec<Subscriber>>,
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
     scrollback: usize,
+    home: Option<PathBuf>,
     /// The scheme colors for terminal queries, shared with every terminal's stream.
     colors: Arc<RwLock<Colors>>,
     /// Run once the terminals are ended after `server.shutdown`; the binary exits the process.
@@ -166,7 +192,50 @@ impl Shared {
     /// Sends the event to every subscriber, dropping the ones that went away. Called with the
     /// `inner` lock held, so events arrive in the order the changes happened.
     fn publish(&self, event: Event) {
-        lock(&self.subscribers).retain(|tx| tx.send(event.clone()).is_ok());
+        lock(&self.subscribers).retain(|s| s.tx.send(event.clone()).is_ok());
+    }
+
+    /// The kinds of the subscribed clients, sorted.
+    fn client_kinds(&self) -> Vec<ClientKind> {
+        let mut kinds: Vec<_> = lock(&self.subscribers).iter().map(|s| s.kind).collect();
+        kinds.sort();
+        kinds
+    }
+
+    /// Registers a subscription and tells the others; the new one learns from `ping`.
+    fn add_subscriber(&self, kind: ClientKind, declared: bool, tx: Sender<Event>) -> u64 {
+        let id = NEXT_SUBSCRIBER.fetch_add(1, Ordering::Relaxed);
+        let mut subs = lock(&self.subscribers);
+        let event = Event::ServerClientsChanged {
+            clients: {
+                let mut k: Vec<_> = subs.iter().map(|s| s.kind).collect();
+                k.push(kind);
+                k.sort();
+                k
+            },
+        };
+        notify_declared(&mut subs, &event);
+        subs.push(Subscriber {
+            id,
+            kind,
+            declared,
+            tx,
+        });
+        id
+    }
+
+    /// Drops a subscription (ending its event loop) and tells the rest.
+    fn remove_subscriber(&self, id: u64) {
+        let mut subs = lock(&self.subscribers);
+        let before = subs.len();
+        subs.retain(|s| s.id != id);
+        if subs.len() == before {
+            return;
+        }
+        let mut clients: Vec<_> = subs.iter().map(|s| s.kind).collect();
+        clients.sort();
+        let event = Event::ServerClientsChanged { clients };
+        notify_declared(&mut subs, &event);
     }
 
     /// Publishes the events of a layout change and saves the layout when there were any.
@@ -314,6 +383,7 @@ impl Server {
             socket: config.socket,
             state_file: config.state_file,
             scrollback: config.scrollback,
+            home: config.home,
             colors: Arc::default(),
             on_shutdown: Mutex::new(None),
         };
@@ -415,8 +485,30 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
         if request.method == "events.subscribe" && attachment.is_none() {
             // The subscription is registered before the response is sent, so an event caused by
             // the next request on another connection is never missed.
+            let info: EventsSubscribe = match parsed(&request) {
+                Ok(p) => p,
+                Err((code, message)) => {
+                    let response = Response::err(Some(&request.id), code, message);
+                    if out.send(&response).is_err() {
+                        return;
+                    }
+                    continue;
+                }
+            };
+            let declared = info.client.is_some();
+            let kind = info.client.map_or(ClientKind::Unknown, |c| c.kind);
             let (tx, rx) = mpsc::channel();
-            lock(&shared.subscribers).push(tx);
+            let id = shared.add_subscriber(kind, declared, tx);
+            // The client sends nothing more; the end of its side of the connection removes
+            // the subscription, which also ends the loop below.
+            let reader = stream.clone();
+            let watcher = Arc::clone(shared);
+            thread::spawn(move || {
+                let mut sink = [0u8; 256];
+                let mut reader = reader;
+                while matches!(std::io::Read::read(&mut reader, &mut sink), Ok(n) if n > 0) {}
+                watcher.remove_subscriber(id);
+            });
             let ok = Response::ok(&request.id, json!({ "subscribed": true }));
             if out.send(&ok).is_err() {
                 return;
@@ -425,9 +517,10 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
             let mut writer = stream;
             for event in rx {
                 if send(&mut writer, &event).is_err() {
-                    return;
+                    break;
                 }
             }
+            shared.remove_subscriber(id);
             return;
         }
         if request.method == "terminal.attach" {
@@ -608,6 +701,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             version: env!("CARGO_PKG_VERSION").to_string(),
             protocol: PROTOCOL_VERSION,
             pid: std::process::id(),
+            clients: shared.client_kinds(),
         })),
         "space.list" => {
             let inner = lock(&shared.inner);
@@ -617,6 +711,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             }))
         }
         "space.create" => space_create(shared, parsed(request)?),
+        "space.apply_layout" => space_apply_layout(shared, parsed(request)?),
         "space.rename" => space_rename(shared, parsed(request)?),
         "space.close" => space_close(shared, parsed(request)?),
         "terminal.list" => terminal_list(shared, parsed(request)?),
@@ -679,24 +774,362 @@ fn require_name(name: &str) -> Result<String, (ErrorCode, String)> {
     }
 }
 
-fn space_create(shared: &Shared, p: SpaceCreate) -> ApiResult {
+/// Whether a program is on the `PATH` of the server's children, for a template's agent.
+fn program_available() -> impl Fn(&str) -> bool {
+    let path = std::sync::OnceLock::new();
+    move |program: &str| {
+        let path = path.get_or_init(poimen_core::gui_path::child_path);
+        poimen_core::gui_path::resolve_program(program, path).is_some()
+    }
+}
+
+/// `space.create`: an empty space (`layout: false`), or the space with the resolved layout built
+/// in it, or the trust question with nothing created (see `create.rs`).
+fn space_create(shared: &Arc<Shared>, p: SpaceCreate) -> ApiResult {
     let name = require_name(&p.name)?;
-    if p.cwd.trim().is_empty() {
+    let cwd = p.cwd.trim();
+    if cwd.is_empty() {
         return Err((ErrorCode::InvalidParams, "cwd must not be empty".into()));
     }
+    if !p.layout {
+        let mut inner = lock(&shared.inner);
+        let space = Space {
+            id: shared.new_id("s"),
+            name,
+            cwd: p.cwd.clone(),
+            ..Default::default()
+        };
+        inner.layout.spaces.push(space.clone());
+        shared.persist(&inner);
+        shared.publish(Event::SpaceCreated {
+            space: space.clone(),
+        });
+        return Ok(json!({ "space": space }));
+    }
+    let build = match create::prepare(
+        shared.home.as_deref(),
+        cwd,
+        p.trust.as_ref(),
+        create::Wanted::Resolved {
+            root_command: p.command.as_deref(),
+        },
+        &program_available(),
+    )? {
+        create::Prepared::Ask(trust_required) => {
+            return Ok(json!(SpaceCreateResult::TrustRequired { trust_required }));
+        }
+        create::Prepared::Build(build) => build,
+    };
+    let (mut created, typing) = build_space(shared, name, build)?;
+    type_commands(typing, &mut created);
+    Ok(json!(SpaceCreateResult::Created(created)))
+}
+
+/// `space.apply_layout`: the resolved layout of the space (or a preset of its project file)
+/// built into the existing space as new tabs, or the trust question with nothing created.
+fn space_apply_layout(shared: &Arc<Shared>, p: SpaceApplyLayout) -> ApiResult {
+    let space_cwd = lock(&shared.inner).layout.space(&p.space_id)?.cwd.clone();
+    let cwd = p
+        .cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .unwrap_or(space_cwd.trim())
+        .to_owned();
+    if cwd.is_empty() {
+        return Err((ErrorCode::InvalidParams, "the space has no cwd".into()));
+    }
+    let wanted = match p.preset.as_deref() {
+        Some(name) => create::Wanted::Preset(name),
+        None => create::Wanted::Resolved { root_command: None },
+    };
+    let build = match create::prepare(
+        shared.home.as_deref(),
+        &cwd,
+        p.trust.as_ref(),
+        wanted,
+        &program_available(),
+    )? {
+        create::Prepared::Ask(trust_required) => {
+            return Ok(json!(SpaceApplyLayoutResult::TrustRequired {
+                trust_required
+            }));
+        }
+        create::Prepared::Build(build) => build,
+    };
+    let (mut applied, typing) = {
+        let mut inner = lock(&shared.inner);
+        // The space may have gone between the lookup and the build.
+        inner.layout.space(&p.space_id)?;
+        let built = build_tabs(shared, &mut inner, &p.space_id, build);
+        shared.persist(&inner);
+        let built = built?;
+        let space = inner.layout.space(&p.space_id)?.clone();
+        (
+            SpaceCreated {
+                space,
+                tabs: built.tabs(&inner),
+                warnings: built.warnings,
+                setup_started: built.setup_started,
+            },
+            built.typing,
+        )
+    };
+    type_commands(typing, &mut applied);
+    Ok(json!(SpaceApplyLayoutResult::Applied(applied)))
+}
+
+/// Types the commands of a built layout once the lock is released (a write may block on a full
+/// PTY); one that cannot be typed is a warning.
+fn type_commands(typing: Vec<Typing>, created: &mut SpaceCreated) {
+    for typed in typing {
+        if let Err(e) = typed
+            .writer
+            .write(format!("{}\r", typed.command).as_bytes())
+        {
+            created.warnings.push(format!(
+                "pane \"{}\": the command was not typed: {e}",
+                typed.pane
+            ));
+            if typed.setup {
+                created.setup_started = false;
+            }
+        }
+    }
+}
+
+/// A command to type into a pane of a new space.
+struct Typing {
+    pane: String,
+    writer: pty::PtyWriter,
+    command: String,
+    setup: bool,
+}
+
+/// What [`build_tabs`] built.
+struct Built {
+    tab_ids: Vec<String>,
+    warnings: Vec<String>,
+    setup_started: bool,
+    typing: Vec<Typing>,
+}
+
+impl Built {
+    fn tabs(&self, inner: &Inner) -> Vec<proto::Tab> {
+        self.tab_ids
+            .iter()
+            .filter_map(|id| inner.layout.tab(id).ok().cloned())
+            .collect()
+    }
+}
+
+/// Creates the space and builds the panes of `build` in it under one lock (see [`build_tabs`]).
+/// When not even the root pane can be made, nothing of the space is left behind.
+fn build_space(
+    shared: &Arc<Shared>,
+    name: String,
+    build: create::Build,
+) -> Result<(SpaceCreated, Vec<Typing>), (ErrorCode, String)> {
     let mut inner = lock(&shared.inner);
+    let space_id = shared.new_id("s");
     let space = Space {
-        id: shared.new_id("s"),
+        id: space_id.clone(),
         name,
-        cwd: p.cwd,
+        cwd: build.dir.clone(),
         ..Default::default()
     };
     inner.layout.spaces.push(space.clone());
+    shared.publish(Event::SpaceCreated { space });
+    let built = match build_tabs(shared, &mut inner, &space_id, build) {
+        Ok(built) => built,
+        Err(e) => {
+            inner.layout.spaces.retain(|s| s.id != space_id);
+            shared.persist(&inner);
+            shared.publish(Event::SpaceClosed { space_id });
+            return Err(e);
+        }
+    };
     shared.persist(&inner);
-    shared.publish(Event::SpaceCreated {
-        space: space.clone(),
-    });
-    Ok(json!({ "space": space }))
+    let space = inner.layout.space(&space_id)?.clone();
+    let tabs = space
+        .tabs
+        .iter()
+        .filter_map(|id| inner.layout.tab(id).ok().cloned())
+        .collect();
+    Ok((
+        SpaceCreated {
+            space,
+            tabs,
+            warnings: built.warnings,
+            setup_started: built.setup_started,
+        },
+        built.typing,
+    ))
+}
+
+/// Builds the panes of `build` into the space `space_id`, under the caller's lock: the root pane
+/// in a new tab at the end of the space, every later pane as a split of its `from`, then the
+/// `setup` tab. A pane after the root that cannot be made stops the layout with a warning; the
+/// space keeps what was built. `Err` only when the root pane (or its tab) cannot be made; nothing
+/// was built then. The caller persists.
+fn build_tabs(
+    shared: &Arc<Shared>,
+    inner: &mut Inner,
+    space_id: &str,
+    build: create::Build,
+) -> Result<Built, (ErrorCode, String)> {
+    let shell = |name: &str| TerminalCreate {
+        space_id: space_id.to_owned(),
+        cwd: Some(build.dir.clone()),
+        name: Some(name.to_string()).filter(|n| !n.is_empty()),
+        ..Default::default()
+    };
+    let mut warnings = build.warnings;
+    let mut typing = Vec::new();
+    let mut tab_ids = Vec::new();
+    let writer = |inner: &Inner, id: &str| {
+        inner
+            .terminals
+            .iter()
+            .find(|t| t.info.id == id)
+            .and_then(|t| t.pty.as_ref())
+            .map(pty::Pty::writer)
+    };
+    let mut queue = |inner: &Inner, pane: &str, id: &str, command: Option<&String>, setup| {
+        if let (Some(command), Some(writer)) = (command, writer(inner, id)) {
+            typing.push(Typing {
+                pane: pane.to_string(),
+                writer,
+                command: command.clone(),
+                setup,
+            });
+        }
+    };
+    let panes = build.layout.map(|l| l.panes).unwrap_or_default();
+    let root_name = panes.first().map(|p| p.name.clone()).unwrap_or_default();
+    let root = spawn_terminal(shared, inner, shell(&root_name))?;
+    let root_tab = shared.new_id("tab");
+    let events = match inner
+        .layout
+        .add_tab(space_id, root_tab.clone(), root.name.clone(), &root.id)
+    {
+        Ok(events) => events,
+        Err(e) => {
+            // A terminal is never left without a leaf.
+            drop_terminal(shared, inner, &root.id);
+            return Err(e);
+        }
+    };
+    publish_all(shared, events);
+    tab_ids.push(root_tab);
+    queue(
+        inner,
+        &root.name,
+        &root.id,
+        panes.first().and_then(|p| p.command.as_ref()),
+        false,
+    );
+    let mut ids = vec![(root_name, root.id)];
+    for spec in panes.iter().skip(1) {
+        let Some(split) = &spec.split else { continue };
+        let Some(from) = ids
+            .iter()
+            .find(|(n, _)| *n == split.from)
+            .map(|(_, id)| id.clone())
+        else {
+            warnings.push(format!(
+                "layout not fully applied: pane \"{}\": unknown split.from \"{}\"",
+                spec.name, split.from
+            ));
+            break;
+        };
+        let terminal = match spawn_terminal(shared, inner, shell(&spec.name)) {
+            Ok(t) => t,
+            Err((_, e)) => {
+                warnings.push(format!(
+                    "layout not fully applied: pane \"{}\": {e}",
+                    spec.name
+                ));
+                break;
+            }
+        };
+        let split_id = shared.new_id("split");
+        match inner.layout.split(
+            &from,
+            &terminal.id,
+            create::direction(split.direction),
+            split.ratio,
+            split_id,
+        ) {
+            Ok(events) => publish_all(shared, events),
+            Err((_, e)) => {
+                // A terminal is never left without a leaf.
+                drop_terminal(shared, inner, &terminal.id);
+                warnings.push(format!(
+                    "layout not fully applied: pane \"{}\": {e}",
+                    spec.name
+                ));
+                break;
+            }
+        }
+        queue(
+            inner,
+            &spec.name,
+            &terminal.id,
+            spec.command.as_ref(),
+            false,
+        );
+        ids.push((spec.name.clone(), terminal.id));
+    }
+    let mut setup_started = false;
+    if let Some(setup) = &build.setup {
+        let label = poimen_core::project::SETUP_LABEL;
+        match spawn_terminal(shared, inner, shell(label)) {
+            Ok(t) => {
+                let tab_id = shared.new_id("tab");
+                match inner
+                    .layout
+                    .add_tab(space_id, tab_id.clone(), label.to_string(), &t.id)
+                {
+                    Ok(events) => {
+                        publish_all(shared, events);
+                        tab_ids.push(tab_id);
+                        queue(inner, label, &t.id, Some(setup), true);
+                        setup_started = true;
+                    }
+                    Err((_, e)) => {
+                        drop_terminal(shared, inner, &t.id);
+                        warnings.push(format!("setup not started: {e}"));
+                    }
+                }
+            }
+            Err((_, e)) => warnings.push(format!("setup not started: {e}")),
+        }
+    }
+    Ok(Built {
+        tab_ids,
+        warnings,
+        setup_started,
+        typing,
+    })
+}
+
+fn publish_all(shared: &Shared, events: Vec<Event>) {
+    for event in events {
+        shared.publish(event);
+    }
+}
+
+/// Closes a terminal that is not in any leaf yet (`terminal.closed`).
+fn drop_terminal(shared: &Shared, inner: &mut Inner, terminal_id: &str) {
+    if let Some(i) = inner
+        .terminals
+        .iter()
+        .position(|t| t.info.id == terminal_id)
+    {
+        let entry = inner.terminals.remove(i);
+        close_entry(shared, entry);
+    }
 }
 
 fn space_rename(shared: &Shared, p: SpaceRename) -> ApiResult {

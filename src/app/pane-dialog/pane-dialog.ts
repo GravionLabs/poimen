@@ -8,7 +8,7 @@ import {
 } from "@angular/core";
 import { agentKinds, type Terminal } from "../core/herdr";
 import { HerdrStore } from "../core/herdr-store";
-import { PaneActions } from "../core/pane-actions";
+import { PaneActions, type PaneClosed } from "../core/pane-actions";
 
 /** The question for a new terminal (directory) or a pane close (confirmation), and action errors. */
 @Component({
@@ -21,8 +21,8 @@ export class PaneDialog {
   protected readonly actions = inject(PaneActions);
   /** A terminal was created; the host opens it. */
   readonly created = output<Terminal>();
-  /** A pane was closed; the host drops its tab. */
-  readonly closed = output<string>();
+  /** A pane was closed; the host drops its tab or hands it to the successor. */
+  readonly closed = output<PaneClosed>();
   private readonly store = inject(HerdrStore);
   /** Only the kinds that can report on the active backend (#410). */
   protected readonly kinds = computed(() => agentKinds(this.store.backendKind()));
@@ -44,8 +44,8 @@ export class PaneDialog {
   }
 
   protected async close(): Promise<void> {
-    const id = await this.actions.confirmClose();
-    if (id) this.closed.emit(id);
+    const closed = await this.actions.confirmClose();
+    if (closed) this.closed.emit(closed);
   }
 
   protected async startAgent(form: HTMLFormElement): Promise<void> {

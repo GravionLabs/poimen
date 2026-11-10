@@ -1,0 +1,19 @@
+# The poimen-cli package (#519): /usr/bin/poimen alone, for Linux hosts without the app. Built by release.yml with
+# nfpm; VERSION, ARCH (nfpm arch) and BINARY come from the environment. The app package ships /usr/bin/poimen too,
+# so the two conflict.
+name: poimen-cli
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: utils
+maintainer: GravionLabs
+description: The poimen console (TUI and CLI) for poimen-server.
+homepage: https://github.com/GravionLabs/poimen
+license: MIT
+conflicts:
+  - poimen
+contents:
+  - src: ${BINARY}
+    dst: /usr/bin/poimen
+    file_info:
+      mode: 0755

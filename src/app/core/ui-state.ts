@@ -127,6 +127,8 @@ export interface LayoutState {
   tabOrder?: Record<string, string[]>;
   /** How the Changes tab shows a diff: `inline` (unified) or `split` (side by side). */
   changesLayout?: string;
+  /** Layout direction of the Flow tab: `TB` (top to bottom); left to right when absent. */
+  flowDirection?: string;
   /** Review comments of the Changes tab per worktree, kept until sent to the agent. */
   lineComments?: Record<string, CommentSet>;
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
@@ -200,6 +202,7 @@ export function parseLayout(raw: string | null): LayoutState {
       spaceOrder,
       tabOrder,
       changesLayout,
+      flowDirection,
       lineComments,
       collapsedIssues,
       githubPage,
@@ -214,6 +217,7 @@ export function parseLayout(raw: string | null): LayoutState {
     if (Object.keys(comments).length) state.lineComments = comments;
     if (changesLayout === "inline" || changesLayout === "split")
       state.changesLayout = changesLayout;
+    if (flowDirection === "TB" || flowDirection === "LR") state.flowDirection = flowDirection;
     if (
       typeof collapsedIssues === "object" &&
       collapsedIssues !== null &&
@@ -333,6 +337,8 @@ export class UiState {
   readonly changesLayout = signal<"inline" | "split">(
     this.initial.changesLayout === "inline" ? "inline" : "split",
   );
+  /** Layout direction of the Flow tab (left to right by default). */
+  readonly flowDirection = signal<"LR" | "TB">(this.initial.flowDirection === "TB" ? "TB" : "LR");
   /** Review comments of the Changes tab per worktree (pending until the agent got them). */
   readonly lineComments = signal<Readonly<Record<string, CommentSet>>>(
     this.initial.lineComments ?? {},
@@ -364,6 +370,11 @@ export class UiState {
 
   setChangesLayout(layout: "inline" | "split"): void {
     this.changesLayout.set(layout);
+    this.save();
+  }
+
+  setFlowDirection(direction: "LR" | "TB"): void {
+    this.flowDirection.set(direction);
     this.save();
   }
 
@@ -581,6 +592,7 @@ export class UiState {
       githubPage: this.githubPage() === "inbox" ? undefined : this.githubPage(),
       githubShowEmpty: this.githubShowEmpty() ? true : undefined,
       changesLayout: this.changesLayout() === "inline" ? "inline" : undefined,
+      flowDirection: this.flowDirection() === "TB" ? "TB" : undefined,
       lineComments: Object.keys(this.lineComments()).length ? this.lineComments() : undefined,
       settingsPage: this.settingsPage() ?? undefined,
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,

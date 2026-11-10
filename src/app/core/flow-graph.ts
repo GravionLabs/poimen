@@ -176,13 +176,22 @@ function callsOf(entries: readonly TranscriptEntry[]): { calls: Call[]; tools: n
   return { calls, tools };
 }
 
-/** Groups calls that overlap in time (parallel subagents) in call order. */
+/**
+ * Groups calls that overlap in time (parallel subagents) in call order. Only subagent calls run in
+ * parallel: a skill runs inside its owner, so it always follows the calls before it, also while an
+ * earlier subagent still runs (otherwise sequential skills lose the arrows between them, #626).
+ */
 function groupCalls(calls: readonly Call[], endOf: (call: Call) => number | null): Call[][] {
   const groups: Call[][] = [];
   let reach = -Infinity;
   for (const call of [...calls].sort((a, b) => (a.start ?? 0) - (b.start ?? 0))) {
     const group = groups.at(-1);
-    if (group && (call.start ?? 0) < reach) {
+    const parallel =
+      group &&
+      call.name === "Agent" &&
+      group.every((c) => c.name === "Agent") &&
+      (call.start ?? 0) < reach;
+    if (group && parallel) {
       group.push(call);
     } else {
       groups.push([call]);

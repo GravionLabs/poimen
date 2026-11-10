@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   appVersionLabel,
@@ -21,10 +22,23 @@ import {
   closeWarning,
   emptySpaces,
   spaceContaining,
+  spaceRoot,
+  tabPanes,
+  tabTerminal,
+  survivingLeaf,
+  paneSuccessor,
+  treeTerminals,
   workspaceDirs,
+  type Tab,
+  type TabTree,
   type Terminal,
   type Snapshot,
+  type WireSnapshot,
 } from "./herdr";
+
+/** The poimen backend's snapshot of a split tab (`map_snapshot` checks it on the Rust side). */
+const splitWire = (): WireSnapshot =>
+  JSON.parse(readFileSync("src/app/core/fixtures/poimen-snapshot-split-tab.json", "utf8"));
 
 const pane = (over: Partial<Terminal>): Terminal => ({
   terminal_id: "w1:p1",
@@ -58,6 +72,105 @@ describe("buildTree", () => {
     expect(tree[0].tabs.map((t) => t.tab.tab_id)).toEqual(["w1:t1", "w1:t2"]);
     expect(tree[0].tabs[0].panes.map((p) => p.terminal_id)).toEqual(["w1:p1", "w1:p3"]);
     expect(tree[1].tabs[0].panes).toEqual([]);
+  });
+});
+
+describe("server tabs (poimen backend)", () => {
+  const leaf = (id: string): TabTree => ({ kind: "terminal", terminal_id: id });
+  const tab = (over: Partial<Tab>): Tab => ({
+    tab_id: "tab1",
+    space_id: "s1",
+    label: "agent",
+    number: 1,
+    agent_status: "unknown",
+    ...over,
+  });
+
+  it("lists the leaves of a tree depth first, none without one", () => {
+    const tree: TabTree = {
+      kind: "split",
+      split_id: "split1",
+      direction: "right",
+      ratio: 0.6,
+      children: [
+        leaf("t1"),
+        {
+          kind: "split",
+          split_id: "split2",
+          direction: "down",
+          ratio: 0.5,
+          children: [leaf("t3"), leaf("t2")],
+        },
+      ],
+    };
+    expect(treeTerminals(tree)).toEqual(["t1", "t3", "t2"]);
+    expect(treeTerminals(leaf("t9"))).toEqual(["t9"]);
+    expect(treeTerminals(undefined)).toEqual([]);
+  });
+
+  it("keeps the tree and the focused leaf of a tab through toSnapshot", () => {
+    const snapshot = toSnapshot(splitWire());
+    const split = snapshot.tabs.find((t) => t.tab_id === "tab1")!;
+    expect(split.space_id).toBe("s1");
+    expect(split.active_terminal).toBe("t1");
+    expect(treeTerminals(split.root)).toEqual(["t1", "t3", "t2"]);
+    expect(snapshot.terminals.filter((t) => t.tab_id === "tab1").map((t) => t.terminal_id)).toEqual(
+      ["t1", "t3", "t2"],
+    );
+  });
+
+  it("shows the first leaf of a split tab and keeps every terminal reachable", () => {
+    const snapshot = toSnapshot(splitWire());
+    const tree = buildTree(snapshot);
+    expect(tree[0].tabs.map((t) => t.tab.tab_id)).toEqual(["tab2", "tab1", "t5"]);
+    const split = tree[0].tabs[1];
+    expect(split.panes.map((p) => p.terminal_id)).toEqual(["t1", "t3", "t2"]);
+    expect(tabTerminal(split.tab, snapshot.terminals)?.terminal_id).toBe("t1");
+    // The exited terminal without a leaf is a tab of its own.
+    expect(tree[0].tabs[2].panes.map((p) => p.terminal_id)).toEqual(["t5"]);
+    const rows = tree[0].tabs.flatMap((t) => t.panes.map((p) => p.terminal_id));
+    expect(rows.sort()).toEqual(["t1", "t2", "t3", "t4", "t5"]);
+  });
+
+  it("orders the panes of a tab by its tree and keeps the ones the tree does not name", () => {
+    const panes = [
+      pane({ terminal_id: "t2", tab_id: "tab1" }),
+      pane({ terminal_id: "t9", tab_id: "tab1" }),
+      pane({ terminal_id: "t1", tab_id: "tab1" }),
+      pane({ terminal_id: "t4", tab_id: "tab2" }),
+    ];
+    const root: TabTree = {
+      kind: "split",
+      split_id: "split1",
+      direction: "right",
+      ratio: 0.5,
+      children: [leaf("t1"), leaf("t2")],
+    };
+    expect(tabPanes(tab({ root }), panes).map((p) => p.terminal_id)).toEqual(["t1", "t2", "t9"]);
+    // A herdr tab has no tree: its panes keep the snapshot order.
+    expect(tabPanes(tab({}), panes).map((p) => p.terminal_id)).toEqual(["t2", "t9", "t1"]);
+    expect(tabTerminal(tab({ tab_id: "tab7" }), panes)).toBeUndefined();
+  });
+
+  it("finds the root terminal of a space in its first tab", () => {
+    const snapshot = toSnapshot(splitWire());
+    // tab2 (logs) is the first tab of the space; its only terminal is the root.
+    expect(spaceRoot(snapshot, "s1")?.terminal_id).toBe("t4");
+    const reordered: Snapshot = {
+      ...snapshot,
+      tabs: snapshot.tabs.map((t) => ({ ...t, number: t.tab_id === "tab1" ? 0 : t.number })),
+    };
+    expect(spaceRoot(reordered, "s1")?.terminal_id).toBe("t1");
+    expect(spaceRoot(snapshot, "nope")).toBeUndefined();
+  });
+
+  it("falls back to the first terminal of a space whose tabs have none", () => {
+    const snapshot: Snapshot = {
+      spaces: [{ space_id: "w1", label: "a", number: 1, agent_status: "unknown" }],
+      tabs: [],
+      terminals: [pane({ terminal_id: "w1:p7" })],
+    };
+    expect(spaceRoot(snapshot, "w1")?.terminal_id).toBe("w1:p7");
   });
 });
 
@@ -456,5 +569,83 @@ describe("transcript empty states", () => {
         "The flow",
       ),
     ).toBe("Waiting for the agent's transcript to appear.");
+  });
+});
+
+describe("survivingLeaf", () => {
+  const split = (): Tab =>
+    ({
+      tab_id: "tb",
+      root: {
+        kind: "split",
+        split_id: "s",
+        direction: "right",
+        ratio: 0.5,
+        children: [
+          { kind: "terminal", terminal_id: "t1" },
+          { kind: "terminal", terminal_id: "t2" },
+        ],
+      },
+      active_terminal: "t1",
+    }) as Tab;
+
+  it("takes the first other leaf when the active one is closed", () => {
+    expect(survivingLeaf(split(), "t1")).toBe("t2");
+  });
+
+  it("prefers the active terminal when it is not the closed one", () => {
+    expect(survivingLeaf({ ...split(), active_terminal: "t2" }, "t1")).toBe("t2");
+  });
+
+  it("is undefined for a single leaf or an unknown tab", () => {
+    const single = { tab_id: "tb", root: { kind: "terminal", terminal_id: "t1" } } as Tab;
+    expect(survivingLeaf(single, "t1")).toBeUndefined();
+    expect(survivingLeaf(undefined, "t1")).toBeUndefined();
+  });
+});
+
+describe("paneSuccessor", () => {
+  const leaf = (terminal_id: string) => ({ kind: "terminal" as const, terminal_id });
+  const snap: Snapshot = {
+    spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+    tabs: [
+      {
+        tab_id: "w1:t1",
+        space_id: "w1",
+        label: "a",
+        number: 1,
+        agent_status: "idle",
+        root: {
+          kind: "split",
+          split_id: "s",
+          direction: "down",
+          ratio: 0.5,
+          children: [leaf("w1:p1"), leaf("w1:p2")],
+        },
+      },
+      {
+        tab_id: "w1:t2",
+        space_id: "w1",
+        label: "b",
+        number: 2,
+        agent_status: "idle",
+        root: leaf("w1:p3"),
+      },
+    ],
+    terminals: [
+      pane({ terminal_id: "w1:p1" }),
+      pane({ terminal_id: "w1:p2" }),
+      pane({ terminal_id: "w1:p3", tab_id: "w1:t2" }),
+    ],
+  };
+
+  it("names the other leaf of the pane's split tab", () => {
+    expect(paneSuccessor(snap, "w1:p1")).toBe("w1:p2");
+    expect(paneSuccessor(snap, "w1:p2")).toBe("w1:p1");
+  });
+
+  it("has none for the last leaf of a tab or a pane the snapshot does not have", () => {
+    expect(paneSuccessor(snap, "w1:p3")).toBeUndefined();
+    expect(paneSuccessor(snap, "w1:p9")).toBeUndefined();
   });
 });

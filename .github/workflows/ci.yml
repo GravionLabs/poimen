@@ -89,7 +89,7 @@ jobs:
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri
-          packages: "poimen-protocol poimen-client poimen-server poimen-core"
+          packages: "poimen-protocol poimen-client poimen-server poimen-core poimen-console"
 
   # The app crate needs the Tauri Linux libraries and the built frontend (the Tauri macros embed frontendDist). The
   # frontend build here only satisfies those macros. This job also runs for changes to the root package.json (read by
@@ -117,7 +117,7 @@ jobs:
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri
-          packages: "poimen"
+          packages: "poimen-app"
           run-fmt: "false"
           tauri-linux-deps: "true"
 
@@ -146,12 +146,12 @@ jobs:
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri
-          packages: "poimen-protocol poimen-client poimen-server poimen-core"
+          packages: "poimen-protocol poimen-client poimen-server poimen-core poimen-console"
           run-fmt: "false"
       - name: App crate (clippy)
         shell: bash
         working-directory: src-tauri
-        run: cargo clippy -p poimen --locked -- -D warnings
+        run: cargo clippy -p poimen-app --locked -- -D warnings
 
   # The one check to require: green when frontend, rust-server, rust and windows passed or were skipped because their
   # area did not change; red when any of them (or `changes`) failed or was cancelled.

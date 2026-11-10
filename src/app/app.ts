@@ -19,8 +19,10 @@ import {
   rowName,
   supportsFlow,
   tabHeader,
+  treeTerminals,
   windowTitle,
   type Mode,
+  type Tab,
   type Terminal,
 } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
@@ -42,12 +44,12 @@ import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
+import { TabLayout } from "./tab-layout/tab-layout";
 import { TerminalView } from "./terminal-view/terminal-view";
 import {
   EditorTabs,
   changesDir,
   flowPane,
-  flowTab,
   spaceOfTab,
   spaceTab,
   tabKind,
@@ -67,7 +69,7 @@ import { SpaceOverview } from "./space-overview/space-overview";
 import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
-import { PaneActions } from "./core/pane-actions";
+import { PaneActions, type PaneClosed } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { SpaceRebuild } from "./core/space-rebuild";
@@ -111,6 +113,7 @@ const ZOOM_STEP = 1;
     Explorer,
     Notifications,
     TerminalView,
+    TabLayout,
     SettingsView,
     GithubView,
     DeliverView,
@@ -261,6 +264,8 @@ export class App {
       ]),
     );
   });
+  /** The leaf the user focused last per split tab; the server's focus is the fallback. */
+  private readonly leafFocus = signal<ReadonlyMap<string, string>>(new Map());
   /** Size of each terminal that reported one; the status bar shows the focused group's. */
   private readonly sizes = signal<ReadonlyMap<string, { cols: number; rows: number }>>(new Map());
   protected readonly termSize = computed(() => {
@@ -696,12 +701,12 @@ export class App {
     return tabKind(id) === "space";
   }
 
-  /** A space closed in herdr: the tabs of its panes go with it. */
+  /** A space closed in herdr: all its panes go, so their tabs close without a successor. */
   protected onSpaceClosed(paneIds: string[]): void {
-    for (const id of paneIds) this.onPaneClosed(id);
+    for (const id of paneIds) this.editor.closePane(id);
   }
 
-  private paneAction(paneId: string, action: string): void {
+  protected paneAction(paneId: string, action: string): void {
     if (action === "split-right" || action === "split-down") {
       const direction = action === "split-right" ? "right" : "down";
       void this.paneActions.split(paneId, direction).then((pane) => pane && this.open(pane, true));
@@ -714,10 +719,13 @@ export class App {
     }
   }
 
-  /** A pane closed in herdr: its tab and its flow tab go with it. */
-  protected onPaneClosed(paneId: string): void {
-    this.editor.close(paneId);
-    this.editor.close(flowTab(paneId));
+  /**
+   * A pane closed in herdr: its tab and its flow tab go with it, but when the pane's split tab still
+   * has other leaves its editor tab passes to the successor resolved before the close, so the
+   * split layout stays visible.
+   */
+  protected onPaneClosed(closed: PaneClosed): void {
+    this.editor.closePane(closed.paneId, closed.successor);
   }
 
   /** Context menu of a group's tabs; splitting needs a second tab in the group. */
@@ -763,6 +771,30 @@ export class App {
     return group.activeId && tabKind(group.activeId) === "pane"
       ? this.pane(group.activeId)
       : undefined;
+  }
+
+  /** The tab of the group's active pane when it is split (more than one leaf), else `undefined`. */
+  protected groupLayout(group: EditorGroup): Tab | undefined {
+    const pane = this.groupPane(group);
+    const tab = pane && this.store.snapshot().tabs.find((t) => t.tab_id === pane.tab_id);
+    return tab?.root?.kind === "split" ? tab : undefined;
+  }
+
+  /** The focused leaf of a split tab: the last click here, else the server's, else the first leaf. */
+  protected layoutFocus(tab: Tab): string | null {
+    return (
+      this.leafFocus().get(tab.tab_id) ?? tab.active_terminal ?? treeTerminals(tab.root)[0] ?? null
+    );
+  }
+
+  protected focusLeaf(tabId: string, terminalId: string): void {
+    if (this.leafFocus().get(tabId) === terminalId) return;
+    this.leafFocus.update((m) => new Map(m).set(tabId, terminalId));
+    void this.paneActions.focusPane(tabId, terminalId);
+  }
+
+  protected resizeSplit(tabId: string, change: { splitId: string; ratio: number }): void {
+    void this.paneActions.resizeSplit(tabId, change.splitId, change.ratio);
   }
 
   protected group(id: number): EditorGroup | undefined {

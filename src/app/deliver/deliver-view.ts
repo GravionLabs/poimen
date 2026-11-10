@@ -8,11 +8,11 @@ import {
   progressText,
   runState,
   runTitle,
+  stepText,
   stateText,
   type Attention,
   type DeliverStatus,
   type Link,
-  type Step,
 } from "./deliver-status";
 
 /** "PR #343" for a pull request URL, the URL itself when it has no number at the end. */
@@ -27,12 +27,7 @@ export function linkLabel(link: Link): string {
   return /\/pull\/\d+\/?$/.test(link.url) ? prLabel(link.url) : link.rel;
 }
 
-/** "implement 2/3", "review": the step name with its position when the writer gave one. */
-export function stepText(step: Step): string {
-  return step.n !== null && step.total !== null
-    ? `${step.name} ${step.n}/${step.total}`
-    : step.name;
-}
+export { stepText };
 
 /** The Deliver panel as an editor tab: one card per run (any writer of agent-events). */
 @Component({

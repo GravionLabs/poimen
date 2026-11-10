@@ -1,0 +1,38 @@
+[package]
+name = "poimen-console"
+version.workspace = true
+description = "Console client of poimen-server: the poimen binary (ADR 0006)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "poimen_console"
+
+[[bin]]
+name = "poimen"
+path = "src/main.rs"
+
+[dependencies]
+alacritty_terminal = "0.26.0"
+crossterm = { version = "0.29", default-features = false, features = ["bracketed-paste", "events", "windows"] }
+poimen-client = { path = "../poimen-client" }
+poimen-core = { path = "../poimen-core" }
+poimen-protocol = { path = "../poimen-protocol" }
+ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"] }
+notify-rust = "4"
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
+[dev-dependencies]
+poimen-server = { path = "../poimen-server" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

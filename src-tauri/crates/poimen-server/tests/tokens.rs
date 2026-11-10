@@ -30,6 +30,7 @@ impl Env {
             socket: dir.join("run").join("server.sock"),
             state_file: dir.join("state").join("server.json"),
             scrollback: 1000,
+            home: None,
         };
         let server = Server::bind(config.clone()).unwrap();
         thread::spawn(move || server.serve());

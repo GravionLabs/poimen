@@ -29,6 +29,7 @@ impl Env {
             socket: self.dir.join("run").join("server.sock"),
             state_file: self.dir.join("state").join("server.json"),
             scrollback: 1000,
+            home: None,
         }
     }
 
@@ -142,7 +143,7 @@ fn ping_reports_the_protocol_version() {
     let env = Env::new("ping");
     let client = start(&env.config());
     let ping = client.ping().unwrap();
-    assert_eq!(ping.protocol, 4);
+    assert_eq!(ping.protocol, 6);
     assert_eq!(ping.pid, std::process::id());
 }
 

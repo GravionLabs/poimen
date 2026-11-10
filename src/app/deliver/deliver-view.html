@@ -49,7 +49,7 @@
                 {{ s.subject.title }}
               </button>
             } @else {
-              <span>{{ title(s) }}</span>
+              <span>{{ title(s, card.root) }}</span>
             }
           </h2>
           <span class="state" data-testid="state">{{ stateText(s) }}</span>

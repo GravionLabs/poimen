@@ -129,6 +129,12 @@ impl Conn {
     pub fn shutdown(&self) -> io::Result<()> {
         sys::shutdown(&self.0)
     }
+
+    /// Shuts only the sending direction down: the peer reads end of file, what it still sends can
+    /// be read. No effect on Windows.
+    pub fn shutdown_write(&self) -> io::Result<()> {
+        sys::shutdown_write(&self.0)
+    }
 }
 
 impl Read for &Conn {
@@ -230,6 +236,10 @@ mod sys {
     pub fn shutdown(raw: &Raw) -> io::Result<()> {
         inner(raw).shutdown(std::net::Shutdown::Both)
     }
+
+    pub fn shutdown_write(raw: &Raw) -> io::Result<()> {
+        inner(raw).shutdown(std::net::Shutdown::Write)
+    }
 }
 
 #[cfg(windows)]
@@ -307,6 +317,10 @@ mod sys {
     }
 
     pub fn set_write_timeout(_: &Raw, _: Option<Duration>) -> io::Result<()> {
+        Ok(())
+    }
+
+    pub fn shutdown_write(_: &Raw) -> io::Result<()> {
         Ok(())
     }
 

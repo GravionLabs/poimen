@@ -25,7 +25,6 @@ mod poimen_backend;
 mod poimen_server;
 mod project;
 mod project_edit;
-use poimen_core::remote;
 mod schemes;
 mod settings;
 mod spaces;
@@ -150,6 +149,50 @@ async fn pane_split(
 #[tauri::command]
 async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), String> {
     on_backend(backend.inner(), move |b| b.close_terminal(&pane_id)).await
+}
+
+/// Closes a tab with all its terminals (`tab.close` on the poimen backend). The UI confirms first.
+#[tauri::command]
+async fn tab_close(backend: State<'_, Shared>, tab_id: String) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| b.close_tab(&tab_id)).await
+}
+
+/// Renames a tab (`tab.rename` on the poimen backend); a blank name is rejected.
+#[tauri::command]
+async fn tab_rename(
+    backend: State<'_, Shared>,
+    tab_id: String,
+    name: String,
+) -> Result<(), String> {
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err("The name of a tab cannot be empty.".into());
+    }
+    on_backend(backend.inner(), move |b| b.rename_tab(&tab_id, &name)).await
+}
+
+/// Sets the ratio of a split of a tab (`tab.resize_split` on the poimen backend).
+#[tauri::command]
+async fn tab_resize_split(
+    backend: State<'_, Shared>,
+    tab_id: String,
+    split_id: String,
+    ratio: f64,
+) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| {
+        b.resize_split(&tab_id, &split_id, ratio)
+    })
+    .await
+}
+
+/// Focuses a pane of a tab for every client (`tab.focus` on the poimen backend).
+#[tauri::command]
+async fn tab_focus(
+    backend: State<'_, Shared>,
+    tab_id: String,
+    terminal_id: String,
+) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| b.focus_tab(&tab_id, &terminal_id)).await
 }
 
 /// Closes a space with all its panes; only on an explicit user action (the UI confirms first when
@@ -398,13 +441,7 @@ fn template_for<'a>(
     user: &'a settings::Settings,
     home: Option<&std::path::Path>,
 ) -> Option<&'a templates::Template> {
-    let remote = user
-        .space_templates
-        .iter()
-        .any(|t| t.remote.is_some())
-        .then(|| git::origin_url(dir).and_then(|u| remote::parse(&u)))
-        .flatten();
-    templates::resolve(dir, remote.as_ref(), &user.space_templates, home)
+    poimen_core::space_layout::template_for(dir, &user.space_templates, home)
 }
 
 /// The template a new space for a directory would use, for the new-space dialog.
@@ -470,7 +507,10 @@ async fn create_space(
 }
 
 /// The body of `create_space`, against any backend. `root_command` replaces the command of the
-/// layout's root pane in a new space (a task's command); an existing space runs nothing.
+/// layout's root pane in a new space (a task's command); an existing space runs nothing. A backend
+/// that builds layouts itself (poimen-server) gets the request as it is and answers the trust
+/// question; for the others (herdr) the app gates the project file, creates the space and applies
+/// the layout (`layout::apply`).
 fn create_space_with(
     backend: &dyn Backend,
     home: Option<&std::path::Path>,
@@ -493,6 +533,39 @@ fn create_space_with(
             setup_started: false,
             trust: None,
         });
+    }
+    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &workspaces);
+    // poimen-server resolves and builds the layout itself and asks for trust first.
+    let request = backend::LayoutRequest {
+        cwd: &dir,
+        label: &label,
+        decision: decision.as_ref(),
+        command: root_command,
+    };
+    if let Some(result) = backend.create_space_with_layout(request) {
+        return match result? {
+            backend::LaidOut::Trust(request) => Ok(spaces::SpaceOutcome {
+                workspace_id: String::new(),
+                created: false,
+                warnings: Vec::new(),
+                setup_started: false,
+                trust: Some(request),
+            }),
+            backend::LaidOut::Created {
+                space_id,
+                warnings,
+                setup_started,
+            } => {
+                backend.focus_space(&space_id)?;
+                Ok(spaces::SpaceOutcome {
+                    workspace_id: space_id,
+                    created: true,
+                    warnings,
+                    setup_started,
+                    trust: None,
+                })
+            }
+        };
     }
     // The project files are read once; the trust check, the listed commands and the layout all
     // use this read.
@@ -522,7 +595,6 @@ fn create_space_with(
             true
         }
     };
-    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &workspaces);
     let created = backend.create_space(&dir, &label)?;
     let workspace_id = created.space_id.clone();
     backend.focus_space(&workspace_id)?;
@@ -602,20 +674,18 @@ fn layout_inputs(
     user: Option<&settings::Settings>,
     home: Option<&std::path::Path>,
 ) -> (Option<String>, Option<layout::Layout>, Vec<String>) {
-    let template = user.and_then(|s| template_for(dir, s, home).map(|t| (t, &s.harnesses)));
-    let mut warnings = Vec::new();
-    let agent_command = template.and_then(|(t, harnesses)| {
-        let path = gui_path::child_path();
-        templates::agent_command(t, harnesses, |p| {
-            gui_path::resolve_program(p, &path).is_some()
-        })
-        .map_err(|w| warnings.push(w))
-        .ok()
-    });
-    let user_layout = template
-        .and_then(|(t, _)| t.layout.clone())
-        .or_else(|| user.and_then(|s| s.spaces_layout.clone()));
-    (agent_command, user_layout, warnings)
+    let Some(user) = user else {
+        return (None, None, Vec::new());
+    };
+    let path = std::sync::OnceLock::new();
+    poimen_core::space_layout::inputs(
+        dir,
+        &user.space_templates,
+        &user.harnesses,
+        user.spaces_layout.as_ref(),
+        home,
+        |p| gui_path::resolve_program(p, path.get_or_init(gui_path::child_path)).is_some(),
+    )
 }
 
 /// The layout a new space gets from the already read project `sources` (the precedence of
@@ -627,27 +697,13 @@ fn plan_layout(
     root_command: Option<&str>,
     agent_command: Option<&str>,
 ) -> Result<(layout::Layout, Vec<String>), String> {
-    let (project, legacy) = sources.refs();
-    let (layout, warnings, from_project) = layout::resolve_origin(project, legacy, user_layout)?;
-    let layout = if from_project && !allow_project_commands {
-        layout.without_commands()
-    } else {
-        layout
-    };
-    // A task's command wins; then the template's agent, which fills a root pane without a command
-    // of its own (the built-in default's `claude` is not one).
-    let explicit = from_project || user_layout.is_some();
-    let root_free = layout
-        .panes
-        .iter()
-        .find(|p| p.split.is_none())
-        .is_none_or(|p| p.command.is_none() || !explicit);
-    let layout = match (root_command, agent_command) {
-        (Some(command), _) => layout.with_root_command(command),
-        (None, Some(agent)) if root_free => layout.with_root_command(agent),
-        _ => layout,
-    };
-    Ok((layout, warnings))
+    poimen_core::space_layout::plan(
+        sources,
+        user_layout,
+        allow_project_commands,
+        root_command,
+        agent_command,
+    )
 }
 
 /// What `rebuild_space` did with a space (wire shape, tagged by `state`).
@@ -712,7 +768,10 @@ fn consent_reasons(
 /// Rebuilds the layout of a space without terminals (after a server restart: spaces persist,
 /// terminals do not) in the space's own directory, through the path of `create_space`: the
 /// layout is resolved again (project file > template > `spaces.layout` > default), the project
-/// file goes through `trust::gate` and the setup runs only when allowed. Unconfirmed, it builds
+/// file goes through `trust::gate` and the setup runs only when allowed. A backend that builds
+/// layouts itself (poimen-server, `Backend::apply_layout`) gets the confirmed rebuild and the
+/// trust answer and stores the trust; for the others (herdr) the app stores it and applies the
+/// layout (`layout::apply`). Unconfirmed, it builds
 /// only when nothing needs consent (no agent pane, no setup, nothing to trust); otherwise it
 /// answers `Consent` and creates nothing. A space with terminals is left alone.
 fn rebuild_space_with(
@@ -749,42 +808,70 @@ fn rebuild_space_with(
         .as_ref()
         .map(|s| s.trusted_projects.clone())
         .unwrap_or_default();
-    let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
-        trust::Gate::Ask(request) if confirmed => return Ok(RebuildOutcome::Trust { request }),
-        trust::Gate::Ask(_) => {
+    // Nothing is stored yet: a backend that builds layouts itself stores the trust on its own.
+    let (allow, store, asked) = match trust::gate(&sources, &trusted, decision.as_ref()) {
+        trust::Gate::Ask(_) if !confirmed => {
             return Ok(RebuildOutcome::Consent {
                 reasons: vec!["the project file is not trusted yet".into()],
             });
         }
-        trust::Gate::Strip => false,
-        trust::Gate::Run { store } => {
-            if let Some(hash) = store {
-                let home = home.ok_or("the home directory is not known")?;
-                settings::trust_project(home, &sources.root, &hash)?;
-            }
-            true
-        }
+        trust::Gate::Ask(request) => (false, None, Some(request)),
+        trust::Gate::Strip => (false, None, None),
+        trust::Gate::Run { store } => (true, store, None),
     };
-    let (agent_command, user_layout, mut warnings) = layout_inputs(&dir, user.as_ref(), home);
-    let planned = plan_layout(
-        &sources,
-        user_layout.as_ref(),
-        allow,
-        None,
-        agent_command.as_deref(),
-    );
+    let plan = || {
+        let (agent_command, user_layout, warnings) = layout_inputs(&dir, user.as_ref(), home);
+        let planned = plan_layout(
+            &sources,
+            user_layout.as_ref(),
+            allow,
+            None,
+            agent_command.as_deref(),
+        );
+        (planned, warnings)
+    };
     if !confirmed {
         let harnesses = user
             .as_ref()
             .map(|s| s.harnesses.clone())
             .unwrap_or_else(harness::default_harnesses);
         let setup = allow.then(|| project::setup_of(sources.refs().0)).flatten();
+        let (planned, _) = plan();
         let layout = planned.as_ref().ok().map(|(l, _)| l);
         let reasons = consent_reasons(layout, &harnesses, setup.as_deref());
         if !reasons.is_empty() {
             return Ok(RebuildOutcome::Consent { reasons });
         }
     }
+    // poimen-server resolves the layout again, answers the trust question itself and builds the
+    // tabs into the space (`space.apply_layout`).
+    let request = backend::ApplyRequest {
+        space_id,
+        cwd: &dir,
+        preset: None,
+        decision: decision.as_ref(),
+    };
+    if let Some(result) = backend.apply_layout(request) {
+        return Ok(match result? {
+            backend::LaidOut::Trust(request) => RebuildOutcome::Trust { request },
+            backend::LaidOut::Created {
+                warnings,
+                setup_started,
+                ..
+            } => RebuildOutcome::Rebuilt {
+                warnings,
+                setup_started,
+            },
+        });
+    }
+    if let Some(request) = asked {
+        return Ok(RebuildOutcome::Trust { request });
+    }
+    if let Some(hash) = store {
+        let home = home.ok_or("the home directory is not known")?;
+        settings::trust_project(home, &sources.root, &hash)?;
+    }
+    let (planned, mut warnings) = plan();
     let root_pane = backend.create_terminal(space_id, Some(&dir))?;
     warnings.extend(apply_planned(backend, planned, &dir, root_pane.as_deref()));
     let (setup_started, warning) = run_setup(backend, space_id, &dir, &sources, allow);
@@ -2065,7 +2152,11 @@ pub fn run() {
             set_ui_font_family,
             set_ui_font_size,
             pane_split,
+            tab_resize_split,
+            tab_focus,
             pane_close,
+            tab_close,
+            tab_rename,
             space_close,
             agent_start,
             agent_rename,
@@ -2411,7 +2502,13 @@ mod build_layout_tests {
             cwd: dir.clone(),
             ..Default::default()
         };
-        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
+        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(
+            &poimen_client::protocol::SpaceList {
+                spaces: vec![space],
+                tabs: Vec::new(),
+            },
+            &[],
+        );
         let outcome =
             create_space_with(&fake, None, &dir, Some("#12 Add picker"), None, Some("c")).unwrap();
         assert!(!outcome.created);
@@ -2591,6 +2688,148 @@ mod build_layout_tests {
         assert!(fake.calls().is_empty());
     }
 
+    // A backend that builds the layout itself (poimen-server's `space.create`).
+
+    fn layout_backend(answer: backend::LaidOut) -> FakeBackend {
+        let fake = FakeBackend::default();
+        *fake.laid_out.lock().unwrap() = Some(answer);
+        fake
+    }
+
+    fn built(space_id: &str) -> backend::LaidOut {
+        backend::LaidOut::Created {
+            space_id: space_id.into(),
+            warnings: vec!["layout: pane x could not be split".into()],
+            setup_started: true,
+        }
+    }
+
+    /// A directory with a project file whose `setup` is not trusted by anyone.
+    fn untrusted_project() -> String {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("poimen-513-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(dir.join(".poimen")).unwrap();
+        std::fs::write(dir.join(".poimen/config.json"), r#"{"setup": "make"}"#).unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_layout_backend_builds_the_new_space_and_the_app_only_focuses_it() {
+        let fake = layout_backend(built("s9"));
+        let dir = tmp_dir();
+        let outcome = create_space_with(&fake, None, &dir, Some("demo"), None, None).unwrap();
+        assert_eq!(
+            outcome,
+            spaces::SpaceOutcome {
+                workspace_id: "s9".into(),
+                created: true,
+                warnings: vec!["layout: pane x could not be split".into()],
+                setup_started: true,
+                trust: None,
+            }
+        );
+        // No terminal, split, rename or input from the app: `layout::apply` is herdr's only.
+        assert_eq!(
+            fake.calls(),
+            [
+                "snapshot".to_owned(),
+                format!("create_space_with_layout {dir} demo - -"),
+                "focus s9".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_layout_backend_gets_the_task_command_and_the_trust_answer() {
+        let fake = layout_backend(built("s9"));
+        let dir = untrusted_project();
+        let decision = trust::Decision::Trust { hash: "abc".into() };
+        create_space_with(
+            &fake,
+            None,
+            &dir,
+            Some("#12 x"),
+            Some(decision),
+            Some("claude 'x'"),
+        )
+        .unwrap();
+        assert_eq!(
+            fake.calls()[1],
+            format!("create_space_with_layout {dir} #12 x trust:abc claude 'x'")
+        );
+        let fake = layout_backend(built("s9"));
+        create_space_with(
+            &fake,
+            None,
+            &dir,
+            None,
+            Some(trust::Decision::Without),
+            None,
+        )
+        .unwrap();
+        assert!(
+            fake.calls()[1].ends_with(" without -"),
+            "{:?}",
+            fake.calls()
+        );
+    }
+
+    #[test]
+    fn the_trust_question_of_a_layout_backend_reaches_the_dialog_and_nothing_is_focused() {
+        let request = trust::TrustRequest {
+            root: "/work/app".into(),
+            files: vec!["/work/app/.poimen/config.json".into()],
+            hash: "abc".into(),
+            commands: vec![trust::ListedCommand {
+                what: "setup".into(),
+                command: "make".into(),
+            }],
+        };
+        let fake = layout_backend(backend::LaidOut::Trust(request.clone()));
+        let dir = tmp_dir();
+        let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
+        assert!(!outcome.created);
+        assert_eq!(outcome.workspace_id, "");
+        assert_eq!(outcome.trust, Some(request));
+        assert_eq!(fake.calls().len(), 2, "no focus: {:?}", fake.calls());
+    }
+
+    #[test]
+    fn the_app_does_not_gate_the_project_file_of_a_layout_backend() {
+        // On herdr this directory asks for trust first; on poimen-server the server asks.
+        let dir = untrusted_project();
+        let herdr = FakeBackend::default();
+        let asked = create_space_with(&herdr, None, &dir, None, None, None).unwrap();
+        assert!(asked.trust.is_some());
+        let fake = layout_backend(built("s9"));
+        let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
+        assert!(outcome.created && outcome.trust.is_none());
+    }
+
+    #[test]
+    fn an_existing_space_is_focused_without_asking_a_layout_backend() {
+        let fake = layout_backend(built("s9"));
+        let dir = tmp_dir();
+        *fake.snapshot.lock().unwrap() = Snapshot {
+            workspaces: json!([{ "workspace_id": "s2", "label": "demo", "number": 1 }]),
+            tabs: json!([]),
+            panes: json!([{ "pane_id": "t1", "workspace_id": "s2", "cwd": dir }]),
+        };
+        let outcome = create_space_with(&fake, None, &dir, None, None, Some("c")).unwrap();
+        assert!(!outcome.created);
+        assert_eq!(fake.calls(), ["snapshot", "focus s2"]);
+    }
+
+    #[test]
+    fn a_failing_layout_create_is_an_error_and_focuses_nothing() {
+        let fake = layout_backend(built("s9"));
+        fake.fail_on("create_space_with_layout");
+        let err = create_space_with(&fake, None, &tmp_dir(), None, None, None).unwrap_err();
+        assert_eq!(err, "boom");
+        assert_eq!(fake.calls(), ["snapshot"]);
+    }
+
     // Rebuilding a space that came back without terminals after a server restart (#579).
 
     /// A fake whose snapshot has the persisted space `s1` in `cwd` and no terminals, as the
@@ -2603,7 +2842,13 @@ mod build_layout_tests {
             cwd: cwd.into(),
             ..Default::default()
         };
-        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(&[space], &[]);
+        *fake.snapshot.lock().unwrap() = poimen_backend::map_snapshot(
+            &poimen_client::protocol::SpaceList {
+                spaces: vec![space],
+                tabs: Vec::new(),
+            },
+            &[],
+        );
         fake
     }
 
@@ -2759,6 +3004,114 @@ mod build_layout_tests {
         assert_eq!(fake.calls().len(), before + 1);
     }
 
+    // The same rebuilds on a backend that builds layouts itself (poimen-server, #645).
+
+    /// [`restarted`] on a fake that answers `apply_layout` with `answer`.
+    fn restarted_layout(cwd: &str, answer: backend::LaidOut) -> FakeBackend {
+        let fake = restarted(cwd);
+        *fake.laid_out.lock().unwrap() = Some(answer);
+        fake
+    }
+
+    fn trust_question(dir: &str) -> trust::TrustRequest {
+        trust::TrustRequest {
+            root: dir.into(),
+            files: vec![format!("{dir}/.poimen/config.json")],
+            hash: "abc".into(),
+            commands: vec![],
+        }
+    }
+
+    #[test]
+    fn a_layout_backend_rebuilds_the_space_itself_and_the_app_creates_nothing() {
+        let (home, dir) = home_with_templates(SHELLS);
+        let fake = restarted_layout(&dir, built("s1"));
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Rebuilt {
+                warnings: vec!["layout: pane x could not be split".into()],
+                setup_started: true
+            }
+        );
+        // No terminal, split, rename or input from the app: `layout::apply` is herdr's only.
+        assert_eq!(
+            fake.calls(),
+            ["snapshot".to_owned(), format!("apply_layout s1 {dir} - -")]
+        );
+    }
+
+    #[test]
+    fn a_layout_backend_still_needs_consent_for_an_agent_pane_before_anything_is_sent() {
+        let fake = restarted_layout(&tmp_dir(), built("s1"));
+        let out = rebuild_space_with(&fake, None, "s1", None, false).unwrap();
+        assert!(matches!(out, RebuildOutcome::Consent { .. }), "{out:?}");
+        assert_eq!(fake.calls(), ["snapshot"]);
+        // Confirmed, the server builds it.
+        let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
+        assert!(matches!(out, RebuildOutcome::Rebuilt { .. }), "{out:?}");
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &format!("apply_layout s1 {} - -", tmp_dir())
+        );
+    }
+
+    #[test]
+    fn a_layout_backend_answers_the_trust_question_and_stores_the_trust_itself() {
+        let (home, dir) = home_with_templates(SHELLS);
+        let poimen_dir = std::path::Path::new(&dir).join(".poimen");
+        std::fs::create_dir_all(&poimen_dir).unwrap();
+        let file = r#"{"layout":{"panes":[{"name":"dev","command":"pnpm dev"}]}}"#;
+        std::fs::write(poimen_dir.join("config.json"), file).unwrap();
+        let config = home.join(".config/poimen/config.json");
+
+        // Unconfirmed: consent, nothing sent.
+        let fake = restarted_layout(&dir, backend::LaidOut::Trust(trust_question(&dir)));
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
+        assert!(matches!(out, RebuildOutcome::Consent { .. }), "{out:?}");
+        assert_eq!(fake.calls(), ["snapshot"]);
+        // Confirmed: the server's question goes to the trust dialog.
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Trust {
+                request: trust_question(&dir)
+            }
+        );
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &format!("apply_layout s1 {dir} - -")
+        );
+
+        // The answer goes to the server; the app writes nothing to the user config.
+        let fake = restarted_layout(&dir, built("s1"));
+        let hash = trust::sha256_hex(file);
+        let decision = Some(trust::Decision::Trust { hash: hash.clone() });
+        let out = rebuild_space_with(&fake, Some(&home), "s1", decision, true).unwrap();
+        assert!(matches!(out, RebuildOutcome::Rebuilt { .. }), "{out:?}");
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &format!("apply_layout s1 {dir} - trust:{hash}")
+        );
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), SHELLS);
+        let decision = Some(trust::Decision::Without);
+        rebuild_space_with(&fake, Some(&home), "s1", decision, true).unwrap();
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &format!("apply_layout s1 {dir} - without")
+        );
+    }
+
+    #[test]
+    fn a_failing_apply_layout_is_an_error() {
+        let (home, dir) = home_with_templates(SHELLS);
+        let fake = restarted_layout(&dir, built("s1"));
+        fake.fail_on("apply_layout");
+        let err = rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap_err();
+        assert_eq!(err, "boom");
+        assert_eq!(fake.calls(), ["snapshot"]);
+    }
+
     #[test]
     fn agent_commands_are_recognized_by_their_program() {
         let harnesses = harness::default_harnesses();
@@ -2879,6 +3232,17 @@ mod build_layout_tests {
     }
 
     #[test]
+    fn the_app_package_is_poimen_app_and_the_identity_is_unchanged() {
+        let cargo: toml::Value = include_str!("../Cargo.toml").parse().unwrap();
+        assert_eq!(cargo["package"]["name"].as_str(), Some("poimen-app"));
+        assert_eq!(cargo["package"]["default-run"].as_str(), Some("poimen-app"));
+        assert_eq!(cargo["lib"]["name"].as_str(), Some("poimen_lib"));
+        let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(base["productName"], "poimen");
+        assert_eq!(base["identifier"], "dev.gravionlabs.poimen");
+    }
+
+    #[test]
     fn the_rc_overlay_installs_beside_the_stable_app_without_updates() {
         use poimen_client::protocol::Channel;
         let base: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
@@ -2893,17 +3257,21 @@ mod build_layout_tests {
         assert_eq!(rc["mainBinaryName"], "poimen-rc");
         assert_eq!(rc["bundle"]["createUpdaterArtifacts"], false);
         assert_eq!(rc["plugins"]["updater"]["endpoints"], json!([]));
-        // The sidecar is the name the app of each channel looks for beside itself.
+        // The sidecars are the names the app of each channel looks for beside itself: the server
+        // and the console (`poimen`, `poimen-cli-rc` on rc so it can sit beside the stable one).
         assert_eq!(
             bundle["bundle"]["externalBin"],
-            json!([format!(
-                "binaries/{}",
-                Channel::Stable.server_program(false)
-            )])
+            json!([
+                format!("binaries/{}", Channel::Stable.server_program(false)),
+                "binaries/poimen"
+            ])
         );
         assert_eq!(
             rc["bundle"]["externalBin"],
-            json!([format!("binaries/{}", Channel::Rc.server_program(false))])
+            json!([
+                format!("binaries/{}", Channel::Rc.server_program(false)),
+                "binaries/poimen-cli-rc"
+            ])
         );
     }
 

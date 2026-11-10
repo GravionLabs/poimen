@@ -17,9 +17,10 @@ pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
     AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, SetColors, Space,
-    SpaceClose, SpaceCreate, SpaceList, SpaceRename, Tab, TabClose, TabCreate, TabFocus, TabMove,
-    TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClose, TerminalCreate,
-    TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalResize,
+    SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
+    SpaceList, SpaceRename, Tab, TabClose, TabCreate, TabFocus, TabMove, TabRename, TabResizeSplit,
+    TabSplit, Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalDetach,
+    TerminalInput, TerminalList, TerminalRename, TerminalResize,
 };
 use serde_json::{Value, json};
 
@@ -150,8 +151,18 @@ impl Client {
 
     /// Opens a connection that receives every event after the call returns.
     pub fn subscribe(&self) -> Result<EventStream, ClientError> {
+        self.subscribe_as(None)
+    }
+
+    /// Like [`Client::subscribe`], saying what the client is (counted as `unknown` without).
+    pub fn subscribe_as(
+        &self,
+        client: Option<poimen_protocol::ClientInfo>,
+    ) -> Result<EventStream, ClientError> {
         let mut conn = Connection::open(&self.path, None)?;
-        conn.call("events.subscribe", Value::Null)?;
+        let params = serde_json::to_value(poimen_protocol::EventsSubscribe { client })
+            .unwrap_or(Value::Null);
+        conn.call("events.subscribe", params)?;
         Ok(EventStream { conn })
     }
 
@@ -256,15 +267,31 @@ impl Client {
         ))
     }
 
+    /// A space without terminals (`space.create` with `layout: false`).
     pub fn create_space(&self, name: &str, cwd: &str) -> Result<Space, ClientError> {
         self.typed(
             "space.create",
-            to_value(&SpaceCreate {
-                name: name.into(),
-                cwd: cwd.into(),
-            }),
+            to_value(&SpaceCreate::empty(name, cwd)),
             Some("space"),
         )
+    }
+
+    /// `space.create` as given: with `layout` the server builds the resolved layout, or answers
+    /// `trust_required` and creates nothing.
+    pub fn create_space_with(
+        &self,
+        params: &SpaceCreate,
+    ) -> Result<SpaceCreateResult, ClientError> {
+        self.typed("space.create", to_value(params), None)
+    }
+
+    /// `space.apply_layout`: the server builds the resolved layout of the space (or the preset
+    /// of `params`) into it as new tabs, or answers `trust_required` and creates nothing.
+    pub fn apply_layout(
+        &self,
+        params: &SpaceApplyLayout,
+    ) -> Result<SpaceApplyLayoutResult, ClientError> {
+        self.typed("space.apply_layout", to_value(params), None)
     }
 
     pub fn rename_space(&self, space_id: &str, name: &str) -> Result<Space, ClientError> {
@@ -700,6 +727,33 @@ mod tests {
         assert!(sent.contains(r#""direction":"down""#), "{sent}");
         assert!(sent.contains(r#""ratio":0.4"#), "{sent}");
         assert!(!sent.contains("cwd"), "{sent}");
+    }
+
+    #[test]
+    fn apply_layout_sends_space_and_preset_and_reads_the_trust_question() {
+        let path = temp_socket("apply");
+        let server = fake_server(
+            &path,
+            vec![
+                concat!(
+                    r#"{"id":"$ID","result":{"trust_required":{"root":"/x","files":[],"#,
+                    r#""hash":"h","commands":[]}}}"#
+                )
+                .into(),
+            ],
+        );
+        let result = Client::new(&path)
+            .apply_layout(&SpaceApplyLayout::preset("s1", "duo"))
+            .unwrap();
+        assert!(matches!(
+            result,
+            SpaceApplyLayoutResult::TrustRequired { trust_required } if trust_required.hash == "h"
+        ));
+        let sent = server.join().unwrap();
+        assert!(sent.contains(r#""method":"space.apply_layout""#), "{sent}");
+        assert!(sent.contains(r#""space_id":"s1""#), "{sent}");
+        assert!(sent.contains(r#""preset":"duo""#), "{sent}");
+        assert!(!sent.contains("trust"), "{sent}");
     }
 
     #[test]

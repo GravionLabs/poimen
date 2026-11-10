@@ -6,8 +6,8 @@ use std::sync::Mutex;
 use serde_json::json;
 
 use crate::backend::{
-    Backend, BackendEvent, BackendInfo, NewSpace, OnRecord, OpenedStream, Outcome, Snapshot,
-    SplitDirection, StartError, StreamRecord, StreamRequest,
+    ApplyRequest, Backend, BackendEvent, BackendInfo, LaidOut, LayoutRequest, NewSpace, OnRecord,
+    OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord, StreamRequest,
 };
 use crate::herdr::{AgentSession, PromptOutcome};
 
@@ -20,6 +20,9 @@ pub struct FakeBackend {
     pub records: Mutex<Vec<StreamRecord>>,
     /// Whether opened streams are emulated.
     pub emulated: bool,
+    /// What `create_space_with_layout` and `apply_layout` answer; `None`: the fake does not
+    /// build layouts (herdr).
+    pub laid_out: Mutex<Option<LaidOut>>,
 }
 
 impl Default for FakeBackend {
@@ -34,6 +37,7 @@ impl Default for FakeBackend {
             }),
             records: Mutex::default(),
             emulated: false,
+            laid_out: Mutex::default(),
         }
     }
 }
@@ -66,6 +70,14 @@ impl FakeBackend {
     }
 }
 
+fn decision_text(decision: Option<&crate::trust::Decision>) -> String {
+    match decision {
+        None => "-".to_owned(),
+        Some(crate::trust::Decision::Trust { hash }) => format!("trust:{hash}"),
+        Some(crate::trust::Decision::Without) => "without".to_owned(),
+    }
+}
+
 fn dir(direction: SplitDirection) -> &'static str {
     match direction {
         SplitDirection::Right => "right",
@@ -95,6 +107,33 @@ impl Backend for FakeBackend {
             space_id: "w9".into(),
             root_terminal: Some("w9:root".into()),
         })
+    }
+
+    fn create_space_with_layout(
+        &self,
+        request: LayoutRequest<'_>,
+    ) -> Option<Result<LaidOut, String>> {
+        let answer = self.laid_out.lock().unwrap().clone()?;
+        let decision = decision_text(request.decision);
+        let line = format!(
+            "create_space_with_layout {} {} {decision} {}",
+            request.cwd,
+            request.label,
+            request.command.unwrap_or("-")
+        );
+        Some(self.record(line).map(|_| answer))
+    }
+
+    fn apply_layout(&self, request: ApplyRequest<'_>) -> Option<Result<LaidOut, String>> {
+        let answer = self.laid_out.lock().unwrap().clone()?;
+        let line = format!(
+            "apply_layout {} {} {} {}",
+            request.space_id,
+            request.cwd,
+            request.preset.unwrap_or("-"),
+            decision_text(request.decision)
+        );
+        Some(self.record(line).map(|_| answer))
     }
 
     fn focus_space(&self, space_id: &str) -> Result<(), String> {
@@ -139,6 +178,24 @@ impl Backend for FakeBackend {
 
     fn rename_terminal(&self, terminal_id: &str, label: Option<&str>) -> Result<(), String> {
         self.record(format!("rename {terminal_id} {}", label.unwrap_or("-")))
+            .map(drop)
+    }
+
+    fn close_tab(&self, tab_id: &str) -> Result<(), String> {
+        self.record(format!("close_tab {tab_id}")).map(drop)
+    }
+
+    fn rename_tab(&self, tab_id: &str, name: &str) -> Result<(), String> {
+        self.record(format!("rename_tab {tab_id} {name}")).map(drop)
+    }
+
+    fn resize_split(&self, tab_id: &str, split_id: &str, ratio: f64) -> Result<(), String> {
+        self.record(format!("resize_split {tab_id} {split_id} {ratio}"))
+            .map(drop)
+    }
+
+    fn focus_tab(&self, tab_id: &str, terminal_id: &str) -> Result<(), String> {
+        self.record(format!("focus_tab {tab_id} {terminal_id}"))
             .map(drop)
     }
 

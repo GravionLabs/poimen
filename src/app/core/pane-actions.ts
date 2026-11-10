@@ -3,8 +3,10 @@ import {
   agentKind,
   closeWarning,
   paneDir,
+  paneSuccessor,
   rowName,
   spaceContaining,
+  spaceRoot,
   workspaceDirs,
   type Terminal,
   type SplitDirection,
@@ -21,6 +23,15 @@ export type PaneDialogState =
   | { kind: "rename"; paneId: string; agent: boolean; current: string };
 
 /**
+ * A pane that was closed, and the leaf of its split tab that takes over its editor tab (resolved
+ * before the close, since the snapshot read after it no longer has the pane); none for the last leaf.
+ */
+export interface PaneClosed {
+  paneId: string;
+  successor?: string;
+}
+
+/**
  * Creates, splits and closes herdr panes. herdr owns the result: each call only asks herdr, then
  * re-reads the snapshot (the events do the same, debounced). Closing always asks first.
  */
@@ -30,6 +41,8 @@ export class PaneActions {
   private readonly store = inject(HerdrStore);
   private readonly spaces = inject(SpaceActions);
 
+  /** Ratios waiting behind a request in flight, per `tab/split`; `null` = nothing waiting. */
+  private readonly resizing = new Map<string, number | null>();
   private readonly _dialog = signal<PaneDialogState | null>(null);
   private readonly _error = signal<string | null>(null);
   /** The question waiting for an answer; `null` when none. */
@@ -120,7 +133,7 @@ export class PaneActions {
     }
     const outcome = await this.spaces.create(cwd, "");
     if (!outcome) return undefined;
-    return this.store.snapshot().terminals.find((t) => t.space_id === outcome.workspace_id);
+    return spaceRoot(this.store.snapshot(), outcome.workspace_id);
   }
 
   /** Splits `paneId`; the new shell starts in the pane's directory. Resolves to the new pane. */
@@ -135,12 +148,48 @@ export class PaneActions {
     );
   }
 
-  /** Closes the pane of the open dialog; resolves to its id once herdr closed it. */
-  async confirmClose(): Promise<string | undefined> {
+  /**
+   * Sets the ratio of a split of a tab. A drag calls this on every move: while a request is in
+   * flight only the latest ratio per split is kept and sent after it, so the server sees the last
+   * position. Failures set `error`; the snapshot is re-read afterwards either way.
+   */
+  async resizeSplit(tabId: string, splitId: string, ratio: number): Promise<void> {
+    const key = `${tabId}/${splitId}`;
+    if (this.resizing.has(key)) {
+      this.resizing.set(key, ratio);
+      return;
+    }
+    this.resizing.set(key, null);
+    let next: number | null = ratio;
+    while (next !== null) {
+      try {
+        await this.bridge.invoke("tab_resize_split", { tabId, splitId, ratio: next });
+      } catch (err) {
+        this._error.set(String(err));
+      }
+      next = this.resizing.get(key) ?? null;
+      this.resizing.set(key, null);
+    }
+    this.resizing.delete(key);
+    await this.store.refresh();
+  }
+
+  /** Focuses a pane of a tab on the server (shared by every client). Fire and forget. */
+  async focusPane(tabId: string, terminalId: string): Promise<void> {
+    try {
+      await this.bridge.invoke("tab_focus", { tabId, terminalId });
+    } catch (err) {
+      this._error.set(String(err));
+    }
+  }
+
+  /** Closes the pane of the open dialog; resolves to it and its successor once herdr closed it. */
+  async confirmClose(): Promise<PaneClosed | undefined> {
     const dialog = this._dialog();
     if (dialog?.kind !== "close") return undefined;
     this._dialog.set(null);
     this._error.set(null);
+    const successor = paneSuccessor(this.store.snapshot(), dialog.paneId);
     try {
       await this.bridge.invoke("pane_close", { paneId: dialog.paneId });
     } catch (err) {
@@ -148,7 +197,7 @@ export class PaneActions {
       return undefined;
     }
     await this.store.refresh();
-    return dialog.paneId;
+    return successor ? { paneId: dialog.paneId, successor } : { paneId: dialog.paneId };
   }
 
   /** Starts `kind` in the pane of the open agent dialog; the `args` field is split on whitespace into argv elements. */
