@@ -117,7 +117,7 @@ jobs:
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri
-          packages: "poimen"
+          packages: "poimen-app"
           run-fmt: "false"
           tauri-linux-deps: "true"
 
