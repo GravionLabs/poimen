@@ -88,6 +88,50 @@ pub fn skip_trivia(b: &[u8], mut i: usize) -> usize {
     }
 }
 
+/// Index after the JSON value that starts at `start`: a string, an object or array up to its
+/// matching close (strings and comments inside skipped), else a scalar up to the next delimiter.
+/// A comment after the value is not part of it.
+fn value_end(b: &[u8], start: usize) -> usize {
+    match b.get(start) {
+        Some(b'"') => skip_string(b, start),
+        Some(b'{' | b'[') => {
+            let (mut e, mut nest) = (start, 0usize);
+            while e < b.len() {
+                match b[e] {
+                    b'"' => {
+                        e = skip_string(b, e);
+                        continue;
+                    }
+                    b'/' if matches!(b.get(e + 1), Some(b'/' | b'*')) => {
+                        e = skip_trivia(b, e);
+                        continue;
+                    }
+                    b'{' | b'[' => nest += 1,
+                    b'}' | b']' => {
+                        nest -= 1;
+                        if nest == 0 {
+                            return e + 1;
+                        }
+                    }
+                    _ => {}
+                }
+                e += 1;
+            }
+            e
+        }
+        _ => {
+            let mut e = start;
+            while e < b.len()
+                && !matches!(b[e], b',' | b'}' | b']' | b'/')
+                && !b[e].is_ascii_whitespace()
+            {
+                e += 1;
+            }
+            e
+        }
+    }
+}
+
 /// Byte range of the value of `key` in the object that opens at `open` (a `{`), if present.
 pub fn find_value(text: &str, open: usize, key: &str) -> Option<(usize, usize)> {
     find_entry(text, open, key).map(|(_, start, stop)| (start, stop))
@@ -111,27 +155,7 @@ pub fn find_entry(text: &str, open: usize, key: &str) -> Option<(usize, usize, u
                     let colon = skip_trivia(b, i);
                     if b.get(colon) == Some(&b':') {
                         let start = skip_trivia(b, colon + 1);
-                        let stop = if b.get(start) == Some(&b'"') {
-                            skip_string(b, start)
-                        } else {
-                            let (mut e, mut nest) = (start, 0usize);
-                            while e < b.len() {
-                                match b[e] {
-                                    b'"' => {
-                                        e = skip_string(b, e);
-                                        continue;
-                                    }
-                                    b'{' | b'[' => nest += 1,
-                                    b'}' | b']' if nest == 0 => break,
-                                    b'}' | b']' => nest -= 1,
-                                    b',' | b'\n' if nest == 0 => break,
-                                    _ => {}
-                                }
-                                e += 1;
-                            }
-                            e
-                        };
-                        return Some((key_start, start, stop));
+                        return Some((key_start, start, value_end(b, start)));
                     }
                 }
             }
@@ -264,23 +288,58 @@ pub fn set_trusted_projects_text(
     set_key_text(text, "trustedProjects", &value)
 }
 
-/// Stores `hash` as the trusted content of the project file of `root`.
+/// The `trustedProjects` of the config `text`, read from that value alone (comments elsewhere in
+/// the file do not matter). An entry that is not valid JSON is an error, so a write never drops
+/// the entries it could not read.
+pub fn trusted_projects_text(text: &str) -> Result<BTreeMap<String, String>, String> {
+    let Some((start, _)) = find_value(text, root_open(text)?, "trustedProjects") else {
+        return Ok(BTreeMap::new());
+    };
+    let value = serde_json::Deserializer::from_str(&text[start..])
+        .into_iter::<Value>()
+        .next()
+        .and_then(Result::ok)
+        .ok_or("trustedProjects in config.json is not valid JSON; it was not changed")?;
+    if !value.is_object() {
+        return Err("trustedProjects in config.json is not an object; it was not changed".into());
+    }
+    Ok(parse_trusted_projects(&value, &mut Vec::new()))
+}
+
+/// Stores `hash` as the trusted content of the project file of `root`. The file is read right
+/// before it is written and only `trustedProjects` changes, so a concurrent edit of another key
+/// (the app, the server, the user) is kept.
 pub fn trust_project(home: &Path, root: &str, hash: &str) -> Result<(), String> {
-    let mut projects = trusted_projects(home);
-    projects.insert(root.to_owned(), hash.to_owned());
-    save_with(home, |text| set_trusted_projects_text(text, &projects))
+    save_with(home, |text| {
+        let mut projects = trusted_projects_text(text)?;
+        projects.insert(root.to_owned(), hash.to_owned());
+        set_trusted_projects_text(text, &projects)
+    })
 }
 
 /// Drops the trust of `root`; an unknown root or a missing file changes nothing.
 pub fn revoke_project(home: &Path, root: &str) -> Result<(), String> {
-    let mut projects = trusted_projects(home);
-    if projects.remove(root).is_none() {
-        return Ok(());
+    match std::fs::read_to_string(config_path(home)) {
+        Ok(text) if trusted_projects_text(&text)?.contains_key(root) => {}
+        Ok(_) => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("cannot read config.json: {e}")),
     }
-    save_with(home, |text| set_trusted_projects_text(text, &projects))
+    save_with(home, |text| {
+        let mut projects = trusted_projects_text(text)?;
+        if projects.remove(root).is_none() {
+            return Ok(text.to_owned());
+        }
+        set_trusted_projects_text(text, &projects)
+    })
 }
 
+/// Reads `config.json` under `home`, applies `edit` to its text and writes the result through a
+/// temporary file of its own (the app and the server both write the file). Every writer of the
+/// file goes through here: the text is read right before the write and `edit` changes one key,
+/// so keys and comments it does not touch stay.
 pub fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> Result<(), String> {
+    static NEXT_TMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let path = config_path(home);
     let next = match std::fs::read_to_string(&path) {
         Ok(text) => edit(&text)?,
@@ -290,9 +349,13 @@ pub fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> 
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let tmp = path.with_extension("json.tmp");
+    let n = NEXT_TMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}-{n}.tmp", std::process::id()));
     std::fs::write(&tmp, next).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 /// poimen's own files live under `<home>/.config/poimen` on every system, Windows included
@@ -674,6 +737,84 @@ mod tests {
         assert!(text.contains("\"trustedProjects\""));
         revoke_project(&home, "/a").unwrap();
         assert!(trusted_projects(&home).is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    fn temp_home(name: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!("poimen-core-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(config_dir(&home)).unwrap();
+        home
+    }
+
+    #[test]
+    fn trust_keeps_comments_other_keys_and_entries_in_a_commented_file() {
+        let home = temp_home("trust-comments");
+        let text = "{\n  // my settings\n  \"theme\": \"dark\", /* inline */\n  \"trustedProjects\": {\"/old\": \"h0\"} // trailing\n}\n";
+        std::fs::write(config_path(&home), text).unwrap();
+        trust_project(&home, "/new", "h1").unwrap();
+        let out = std::fs::read_to_string(config_path(&home)).unwrap();
+        for kept in [
+            "// my settings",
+            "\"theme\": \"dark\"",
+            "/* inline */",
+            "// trailing",
+        ] {
+            assert!(out.contains(kept), "{kept} lost: {out}");
+        }
+        let map = trusted_projects_text(&out).unwrap();
+        assert_eq!(map.get("/old").map(String::as_str), Some("h0"));
+        assert_eq!(map.get("/new").map(String::as_str), Some("h1"));
+        revoke_project(&home, "/old").unwrap();
+        let out = std::fs::read_to_string(config_path(&home)).unwrap();
+        assert!(out.contains("// my settings") && out.contains("// trailing"));
+        assert_eq!(trusted_projects_text(&out).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_trusted_projects_value_that_cannot_be_read_is_never_overwritten() {
+        let home = temp_home("trust-broken");
+        let text = "{\"trustedProjects\": {\"/a\": \"h\", // note\n}}";
+        std::fs::write(config_path(&home), text).unwrap();
+        let err = trust_project(&home, "/b", "h2").unwrap_err();
+        assert!(err.contains("not changed"), "{err}");
+        assert_eq!(std::fs::read_to_string(config_path(&home)).unwrap(), text);
+        std::fs::write(config_path(&home), "{\"trustedProjects\": [1]}").unwrap();
+        assert!(trust_project(&home, "/b", "h2").is_err());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn two_writers_in_turn_keep_both_changes() {
+        // The app writes its keys (`theme`, `sidebar.layout`) and the server `trustedProjects`,
+        // each reading the file right before the write.
+        let home = temp_home("two-writers");
+        std::fs::write(
+            config_path(&home),
+            "{\n  // mine\n  \"theme\": \"light\"\n}\n",
+        )
+        .unwrap();
+        trust_project(&home, "/a", "h1").unwrap();
+        save_with(&home, |t| set_key_text(t, "theme", "\"dark\"")).unwrap();
+        trust_project(&home, "/b", "h2").unwrap();
+        save_with(&home, |t| {
+            set_path_text(t, &["sidebar", "layout"], "\"split\"")
+        })
+        .unwrap();
+        let out = std::fs::read_to_string(config_path(&home)).unwrap();
+        assert!(out.contains("// mine"), "{out}");
+        let parsed: Value = serde_json::from_str(&out.replace("  // mine\n", "")).unwrap();
+        assert_eq!(parsed["theme"], "dark");
+        assert_eq!(parsed["sidebar"]["layout"], "split");
+        assert_eq!(parsed["trustedProjects"]["/a"], "h1");
+        assert_eq!(parsed["trustedProjects"]["/b"], "h2");
+        let leftovers: Vec<_> = std::fs::read_dir(config_dir(&home))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
         let _ = std::fs::remove_dir_all(&home);
     }
 

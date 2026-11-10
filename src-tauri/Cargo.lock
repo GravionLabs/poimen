@@ -3056,6 +3056,7 @@ version = "0.15.1"
 dependencies = [
  "alacritty_terminal",
  "poimen-client",
+ "poimen-core",
  "poimen-protocol",
  "portable-pty",
  "serde",

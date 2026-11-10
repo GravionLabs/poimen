@@ -1,6 +1,6 @@
 # poimen-server protocol
 
-Protocol version: **4** (version 1 had no terminal output; version 2 adds `terminal.attach`, the stream records and the controller rules for `terminal.input` and `terminal.resize`; version 3 adds tokens per terminal: `terminal.report_tokens`, `terminal.clear_tokens`, `tokens` of Terminal and the `terminal.tokens_changed` event; version 4 adds tabs and split trees per space: `tabs` and `active_tab` of Space, Tab and its nodes, the `tab.*` requests, the `tab.*` and `space.changed` events, see Tabs and splits).
+Protocol version: **4** (version 1 had no terminal output; version 2 adds `terminal.attach`, the stream records and the controller rules for `terminal.input` and `terminal.resize`; version 3 adds tokens per terminal: `terminal.report_tokens`, `terminal.clear_tokens`, `tokens` of Terminal and the `terminal.tokens_changed` event; version 4 adds tabs and split trees per space: `tabs` and `active_tab` of Space, Tab and its nodes, the `tab.*` requests, the `tab.*` and `space.changed` events, see Tabs and splits; within version 4, `space.create` gained `layout`, `trust` and `command` and the `trust_required` result, see Space layout and trust, and `layout: false` keeps the earlier empty space).
 
 `poimen-server` is a headless daemon that owns the PTYs, so shells and agents keep running when the app closes. The protocol is client-neutral: no Tauri or app concept appears in it. The wire types live in `src-tauri/crates/poimen-protocol`, a client in `src-tauri/crates/poimen-client`.
 
@@ -42,7 +42,7 @@ The server owns the tabs and the split tree of each space, so every client shows
 | `ping`            | none                                                                    | `{version, protocol, pid}` | `protocol` is the protocol version (4).                                                    |
 | `events.subscribe`| none                                                                    | `{subscribed: true}`  | The connection then carries events only. List after subscribing to avoid missing changes.       |
 | `space.list`      | none                                                                    | `{spaces: [Space], tabs: [Tab]}` | The tabs of every space with their trees.                                            |
-| `space.create`    | `name`, `cwd`                                                           | `{space}`             | Non-empty `name` and `cwd`. Persisted.                                                          |
+| `space.create`    | `name`, `cwd`, `layout?` (default true), `trust?`, `command?`          | `{space, tabs, warnings, setup_started}` or `{trust_required}` | Non-empty `name` and `cwd`. Persisted. With `layout` the server resolves and builds the space's layout and may ask for trust first, see Space layout and trust; `layout: false` creates an empty space and answers `{space}`. |
 | `space.rename`    | `space_id`, `name`                                                      | `{space}`             | Persisted.                                                                                      |
 | `space.close`     | `space_id`                                                              | `{}`                  | Closes its terminals first (`terminal.closed` each), then its tabs (`tab.closed` each). Persisted. |
 | `terminal.list`   | `space_id?`                                                             | `{terminals: [Terminal]}` | Exited terminals stay listed until closed (they have no leaf).                              |
@@ -78,6 +78,20 @@ Every space has its tabs in order (`Space.tabs`), each with a split tree of term
 - Focus is shared: `active_tab` and `active_terminal` change only through `tab.focus` (or when the focused tab or leaf goes away), and the last client that sends `tab.focus` wins. A client that only views a tab does not send it.
 
 Events: `tab.created {tab}`, `tab.changed {tab}` (the full tab after any change of its tree, name, place in the order or focus) and `tab.closed {tab_id, space_id}`; `space.changed {space}` carries the space whenever its `tabs` order or `active_tab` changed (a tab created, closed, moved or focused).
+
+## Space layout and trust
+
+`space.create` with `layout` (the default) builds the new space in the server, so every client gets the same layout. `cwd` must be an existing directory (else `invalid_params`).
+
+- The layout comes from, in order: the `layout` of the project file `.poimen/config.json` of the repository root of `cwd` (`git rev-parse --show-toplevel`, else `cwd`), the deprecated `.agents/herdr-layout.json`, the `layout` of the matching space template (`spaceTemplates` of the user config), `spaces.layout` of the user config, the built-in default (`poimen_core::layout::resolve`). `command` replaces the command of the root pane (a task's command); else the matching template's agent fills a root pane without a command of its own.
+- The first pane is the root of the space's first tab (named like the pane, the space's `active_tab`); every later pane splits its `split.from` with its `direction` and `ratio` (the split pane keeps `ratio`). Each pane is a terminal with the default shell in `cwd`, named like the pane; its `command` is typed into the shell followed by Enter (`\r`). The project's `setup` gets a tab of its own named `setup` after the layout, its command typed the same way (`setup_started`).
+- An invalid project layout is a warning, and the space gets one pane; a pane that cannot be made stops the layout with a warning, and the space keeps what was built. `warnings` lists them.
+- The user config is `~/.config/poimen/config.json` (rc: `~/.config/poimen-rc/config.json`), read again for every `space.create`: `trustedProjects`, `spaceTemplates`, `spaces.layout`, `harnesses`.
+
+Trust handshake: the project files are read once; the trust hash (SHA-256 of their content), the listed commands and the layout all come from that read. When they contain commands and `trustedProjects` of the user config (the only source of trust) has another hash for the root, the result is `{trust_required: {root, files, hash, commands: [{what, command}], layout?}}` (`layout`: the panes that would be built, `[{name, command?, split?: {from, direction, ratio}}]`, absent when the project layout is invalid), and nothing is created, run or stored. The client asks the user and sends `space.create` again with `trust`:
+
+- `{"kind": "trust", "hash": "..."}` (the `hash` of the question): when it is still the hash of the files as read now, the server stores it in `trustedProjects` (writing only that key of `config.json`, keeping every other key and comment) and builds the space with the commands; a hash that no longer matches gets a new `trust_required`.
+- `{"kind": "without"}`: the space gets the panes and splits of the project layout without its commands, and no `setup`; nothing is stored, and the next `space.create` asks again.
 
 ## Attach
 

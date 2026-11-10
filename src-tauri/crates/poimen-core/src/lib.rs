@@ -12,6 +12,7 @@ pub mod layout;
 pub mod project;
 pub mod remote;
 pub mod settings;
+pub mod space_layout;
 pub mod task_start;
 pub mod tasks;
 pub mod templates;

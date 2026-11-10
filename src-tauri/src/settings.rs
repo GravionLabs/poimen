@@ -1277,7 +1277,7 @@ mod tests {
 
     #[test]
     fn space_template_remote_match_parses_and_validates() {
-        use crate::remote::Remote;
+        use poimen_core::remote::Remote;
         let s = rows(
             r#"{"spaceTemplates":[
             {"name":"gh","match":{"remote":{"provider":"github","owner":"GravionLabs"}},"agent":"claude"},
@@ -1706,7 +1706,7 @@ mod tests {
     fn set_herdr_auto_start_keeps_comments_and_other_keys() {
         let text = "{\n  // keep\n  \"herdr\": { \"autoStart\": true }\n}";
         let out = set_herdr_auto_start_text(text, false).unwrap();
-        assert_eq!(out, "{\n  // keep\n  \"herdr\": { \"autoStart\": false}\n}");
+        assert_eq!(out, "{\n  // keep\n  \"herdr\": { \"autoStart\": false }\n}");
         let created = set_herdr_auto_start_text("{\"theme\":\"dark\"}", false).unwrap();
         let r = resolve(Some(&created), || None);
         assert!(!r.herdr_auto_start);
