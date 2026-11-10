@@ -154,6 +154,22 @@ describe("buildFlowGraph", () => {
     expect(layout.get("ta")!.y).not.toBe(layout.get("tb")!.y);
   });
 
+  it("keeps the arrows between sequential skills while a subagent still runs (#626)", () => {
+    const g = buildFlowGraph(
+      [agent("a", { tool_use_id: "ta", started: at(10), status: "running", last: at(20) })],
+      noEntries,
+      {
+        calls: [
+          mainCall("ta", "Agent", { started: at(10) }),
+          mainCall("s1", "Skill", { started: at(30), ended: at(31) }),
+          mainCall("s2", "Skill", { started: at(40), ended: at(41) }),
+        ],
+        tools: 0,
+      },
+    );
+    expect(g.edges.map((e) => e.id)).toEqual([`${MAIN_NODE_ID}->ta`, "ta->s1", "s1->s2"]);
+  });
+
   it("nests a subagent under the subagent that called it", () => {
     const g = buildFlowGraph(
       [
