@@ -31,12 +31,13 @@ use std::time::{Duration, Instant};
 use alacritty_terminal::vte::ansi::Rgb;
 use emulator::Colors;
 use poimen_protocol::{
-    self as proto, AgentInfo, AgentStatus, AttachMode, DetachReason, ErrorCode, Event,
-    PROTOCOL_VERSION, PingResult, Request, Response, SetColors, Space, SpaceClose, SpaceCreate,
-    SpaceCreateResult, SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus,
-    TabMove, TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens,
-    TerminalClose, TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
-    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus,
+    self as proto, AgentInfo, AgentStatus, AttachMode, ClientKind, DetachReason, ErrorCode, Event,
+    EventsSubscribe, PROTOCOL_VERSION, PingResult, Request, Response, SetColors, Space, SpaceClose,
+    SpaceCreate, SpaceCreateResult, SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate,
+    TabFocus, TabMove, TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach,
+    TerminalClearTokens, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
+    TerminalList, TerminalRename, TerminalReportAgent, TerminalReportTokens, TerminalResize,
+    TerminalStatus,
 };
 use serde_json::{Value, json};
 
@@ -156,9 +157,18 @@ struct Inner {
 /// How long `server.shutdown` waits so its answer reaches the client first.
 const SHUTDOWN_DELAY: Duration = Duration::from_millis(100);
 
+static NEXT_SUBSCRIBER: AtomicU64 = AtomicU64::new(1);
+
+/// An open event subscription and what its client said it is.
+struct Subscriber {
+    id: u64,
+    kind: ClientKind,
+    tx: Sender<Event>,
+}
+
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
-    subscribers: Mutex<Vec<Sender<Event>>>,
+    subscribers: Mutex<Vec<Subscriber>>,
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
@@ -174,7 +184,45 @@ impl Shared {
     /// Sends the event to every subscriber, dropping the ones that went away. Called with the
     /// `inner` lock held, so events arrive in the order the changes happened.
     fn publish(&self, event: Event) {
-        lock(&self.subscribers).retain(|tx| tx.send(event.clone()).is_ok());
+        lock(&self.subscribers).retain(|s| s.tx.send(event.clone()).is_ok());
+    }
+
+    /// The kinds of the subscribed clients, sorted.
+    fn client_kinds(&self) -> Vec<ClientKind> {
+        let mut kinds: Vec<_> = lock(&self.subscribers).iter().map(|s| s.kind).collect();
+        kinds.sort();
+        kinds
+    }
+
+    /// Registers a subscription and tells the others; the new one learns from `ping`.
+    fn add_subscriber(&self, kind: ClientKind, tx: Sender<Event>) -> u64 {
+        let id = NEXT_SUBSCRIBER.fetch_add(1, Ordering::Relaxed);
+        let mut subs = lock(&self.subscribers);
+        let event = Event::ServerClientsChanged {
+            clients: {
+                let mut k: Vec<_> = subs.iter().map(|s| s.kind).collect();
+                k.push(kind);
+                k.sort();
+                k
+            },
+        };
+        subs.retain(|s| s.tx.send(event.clone()).is_ok());
+        subs.push(Subscriber { id, kind, tx });
+        id
+    }
+
+    /// Drops a subscription (ending its event loop) and tells the rest.
+    fn remove_subscriber(&self, id: u64) {
+        let mut subs = lock(&self.subscribers);
+        let before = subs.len();
+        subs.retain(|s| s.id != id);
+        if subs.len() == before {
+            return;
+        }
+        let mut clients: Vec<_> = subs.iter().map(|s| s.kind).collect();
+        clients.sort();
+        let event = Event::ServerClientsChanged { clients };
+        subs.retain(|s| s.tx.send(event.clone()).is_ok());
     }
 
     /// Publishes the events of a layout change and saves the layout when there were any.
@@ -424,8 +472,29 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
         if request.method == "events.subscribe" && attachment.is_none() {
             // The subscription is registered before the response is sent, so an event caused by
             // the next request on another connection is never missed.
+            let info: EventsSubscribe = match parsed(&request) {
+                Ok(p) => p,
+                Err((code, message)) => {
+                    let response = Response::err(Some(&request.id), code, message);
+                    if out.send(&response).is_err() {
+                        return;
+                    }
+                    continue;
+                }
+            };
+            let kind = info.client.map_or(ClientKind::Unknown, |c| c.kind);
             let (tx, rx) = mpsc::channel();
-            lock(&shared.subscribers).push(tx);
+            let id = shared.add_subscriber(kind, tx);
+            // The client sends nothing more; the end of its side of the connection removes
+            // the subscription, which also ends the loop below.
+            let reader = stream.clone();
+            let watcher = Arc::clone(shared);
+            thread::spawn(move || {
+                let mut sink = [0u8; 256];
+                let mut reader = reader;
+                while matches!(std::io::Read::read(&mut reader, &mut sink), Ok(n) if n > 0) {}
+                watcher.remove_subscriber(id);
+            });
             let ok = Response::ok(&request.id, json!({ "subscribed": true }));
             if out.send(&ok).is_err() {
                 return;
@@ -434,9 +503,10 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
             let mut writer = stream;
             for event in rx {
                 if send(&mut writer, &event).is_err() {
-                    return;
+                    break;
                 }
             }
+            shared.remove_subscriber(id);
             return;
         }
         if request.method == "terminal.attach" {
@@ -617,6 +687,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             version: env!("CARGO_PKG_VERSION").to_string(),
             protocol: PROTOCOL_VERSION,
             pid: std::process::id(),
+            clients: shared.client_kinds(),
         })),
         "space.list" => {
             let inner = lock(&shared.inner);

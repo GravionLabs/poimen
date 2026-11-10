@@ -819,6 +819,7 @@ mod tests {
                 version: "0.8.0".into(),
                 protocol,
                 pid: 1,
+                clients: Vec::new(),
             })
         };
         let current = poimen_client::protocol::PROTOCOL_VERSION;
@@ -833,6 +834,7 @@ mod tests {
             version: version.into(),
             protocol,
             pid: 1,
+            clients: Vec::new(),
         })
     }
 

@@ -151,8 +151,18 @@ impl Client {
 
     /// Opens a connection that receives every event after the call returns.
     pub fn subscribe(&self) -> Result<EventStream, ClientError> {
+        self.subscribe_as(None)
+    }
+
+    /// Like [`Client::subscribe`], saying what the client is (counted as `unknown` without).
+    pub fn subscribe_as(
+        &self,
+        client: Option<poimen_protocol::ClientInfo>,
+    ) -> Result<EventStream, ClientError> {
         let mut conn = Connection::open(&self.path, None)?;
-        conn.call("events.subscribe", Value::Null)?;
+        let params = serde_json::to_value(poimen_protocol::EventsSubscribe { client })
+            .unwrap_or(Value::Null);
+        conn.call("events.subscribe", params)?;
         Ok(EventStream { conn })
     }
 
