@@ -1,0 +1,2 @@
+# Terminal output as bytes: never converted line endings.
+*.ansi binary
