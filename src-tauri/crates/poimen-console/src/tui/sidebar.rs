@@ -238,6 +238,25 @@ impl Model {
         self.terminals.iter().find(|t| t.id == id)
     }
 
+    /// The tab whose tree holds the terminal.
+    pub fn tab_of(&self, terminal_id: &str) -> Option<&Tab> {
+        self.tabs
+            .iter()
+            .find(|t| t.root.contains_terminal(terminal_id))
+    }
+
+    /// The tabs of a space in the space's order.
+    pub fn space_tabs(&self, space_id: &str) -> Vec<&Tab> {
+        let Some(space) = self.spaces.iter().find(|s| s.id == space_id) else {
+            return Vec::new();
+        };
+        space
+            .tabs
+            .iter()
+            .filter_map(|id| self.tabs.iter().find(|t| &t.tab_id == id))
+            .collect()
+    }
+
     /// The tabs of a space in order, each with its terminals depth first; terminals of the
     /// space in no tab (an older server) come last, as tabs of their own.
     fn tabs_of<'a>(&'a self, space: &'a Space) -> Vec<(Option<&'a Tab>, Vec<&'a Terminal>)> {
@@ -364,6 +383,74 @@ impl Model {
             .find(|id| usable(id))
             .map(str::to_owned)
     }
+}
+
+/// The leaf to focus when a tab is shown: its focused one, else the first that is not `skip`
+/// (the terminal the TUI runs in). `None` when the tab holds nothing else.
+pub fn focus_target(tab: &Tab, skip: Option<&str>) -> Option<String> {
+    let ok = |id: &str| Some(id) != skip;
+    if ok(&tab.active_terminal) && tab.root.contains_terminal(&tab.active_terminal) {
+        return Some(tab.active_terminal.clone());
+    }
+    tab.root
+        .terminal_ids()
+        .into_iter()
+        .find(|id| ok(id))
+        .map(str::to_owned)
+}
+
+/// The terminal to focus when the server's focus moved while `selected` stayed: the other
+/// active tab of the selected terminal's space, or the other focused leaf of its tab. `None`
+/// when nothing moved (also on the first read, and for the terminal this client just focused).
+pub fn remote_focus(
+    old: &Model,
+    new: &Model,
+    selected: &str,
+    skip: Option<&str>,
+) -> Option<String> {
+    let tab = new.tab_of(selected)?;
+    let old_tab = old.tab_of(selected).filter(|t| t.tab_id == tab.tab_id);
+    let old_space = old.spaces.iter().find(|s| s.id == tab.space_id)?;
+    let space = new.spaces.iter().find(|s| s.id == tab.space_id)?;
+    if old_space.active_tab != space.active_tab
+        && let Some(active) = space
+            .active_tab
+            .as_ref()
+            .and_then(|id| new.tabs.iter().find(|t| &t.tab_id == id))
+        && active.tab_id != tab.tab_id
+    {
+        return focus_target(active, skip);
+    }
+    let old_tab = old_tab?;
+    (old_tab.active_terminal != tab.active_terminal
+        && tab.active_terminal != selected
+        && Some(tab.active_terminal.as_str()) != skip
+        && tab.root.contains_terminal(&tab.active_terminal))
+    .then(|| tab.active_terminal.clone())
+}
+
+/// The terminal to focus when `selected` is gone from `new`: the focus of its tab when the
+/// tab is still there (a pane closed), else the active tab of its space (the tab closed), else
+/// the first usable terminal.
+pub fn after_loss(old: &Model, new: &Model, selected: &str, skip: Option<&str>) -> Option<String> {
+    let lost = old.tab_of(selected);
+    if let Some(lost) = lost {
+        if let Some(tab) = new.tabs.iter().find(|t| t.tab_id == lost.tab_id)
+            && let Some(id) = focus_target(tab, skip)
+        {
+            return Some(id);
+        }
+        let active = new
+            .spaces
+            .iter()
+            .find(|s| s.id == lost.space_id)
+            .and_then(|s| s.active_tab.as_ref())
+            .and_then(|id| new.tabs.iter().find(|t| &t.tab_id == id));
+        if let Some(id) = active.and_then(|t| focus_target(t, skip)) {
+            return Some(id);
+        }
+    }
+    new.initial(skip)
 }
 
 /// The terminal `delta` terminal rows away from `current` (wrapping), skipping `skip`; the first
@@ -577,5 +664,74 @@ mod tests {
         m.terminals.push(term("t9", "s2", "loose", "/srv"));
         let rows = m.rows(&SidebarRows::default(), None);
         assert_eq!(rows.last().unwrap().terminal_id.as_deref(), Some("t9"));
+    }
+
+    #[test]
+    fn tab_lookup_and_order() {
+        let m = model();
+        assert_eq!(m.tab_of("t3").unwrap().tab_id, "b");
+        assert!(m.tab_of("nope").is_none());
+        let names: Vec<_> = m.space_tabs("s1").iter().map(|t| t.name.clone()).collect();
+        assert_eq!(names, ["shell", "pair"]);
+        assert!(m.space_tabs("s2").is_empty());
+        assert!(m.space_tabs("nope").is_empty());
+    }
+
+    #[test]
+    fn focus_target_is_the_focused_leaf_else_the_first_usable() {
+        let mut m = model();
+        let pair = m.tabs[1].clone();
+        assert_eq!(focus_target(&pair, None).as_deref(), Some("t2"));
+        m.tabs[1].active_terminal = "t3".into();
+        assert_eq!(focus_target(&m.tabs[1], None).as_deref(), Some("t3"));
+        // The terminal the TUI runs in is skipped.
+        assert_eq!(focus_target(&m.tabs[1], Some("t3")).as_deref(), Some("t2"));
+        assert_eq!(focus_target(&m.tabs[0], Some("t1")), None);
+        // A stale focus falls back to the first leaf.
+        m.tabs[1].active_terminal = "gone".into();
+        assert_eq!(focus_target(&m.tabs[1], None).as_deref(), Some("t2"));
+    }
+
+    #[test]
+    fn remote_focus_follows_a_leaf_or_tab_focused_elsewhere() {
+        let old = model();
+        // Nothing moved.
+        assert_eq!(remote_focus(&old, &old, "t2", None), None);
+        // Another client focused t3 in our tab.
+        let mut new = old.clone();
+        new.tabs[1].active_terminal = "t3".into();
+        assert_eq!(remote_focus(&old, &new, "t2", None).as_deref(), Some("t3"));
+        // Our own focus (we are on t3 already) is not a move.
+        assert_eq!(remote_focus(&old, &new, "t3", None), None);
+        // Another client switched the space to tab a.
+        let mut new = old.clone();
+        new.spaces[0].active_tab = Some("a".into());
+        assert_eq!(remote_focus(&old, &new, "t2", None).as_deref(), Some("t1"));
+        // We are on that tab already.
+        assert_eq!(remote_focus(&old, &new, "t1", None), None);
+        // The first read has no earlier model.
+        assert_eq!(remote_focus(&Model::default(), &old, "t2", None), None);
+    }
+
+    #[test]
+    fn after_loss_prefers_the_same_tab_then_the_active_tab_then_anything() {
+        let old = model();
+        // t3 closed: the pair tab stays with t2.
+        let mut new = old.clone();
+        new.tabs[1].root = Node::terminal("t2");
+        new.terminals.retain(|t| t.id != "t3");
+        assert_eq!(after_loss(&old, &new, "t3", None).as_deref(), Some("t2"));
+        // The whole pair tab closed: the server's active tab of the space is shown.
+        let mut new = old.clone();
+        new.tabs.retain(|t| t.tab_id != "b");
+        new.spaces[0].tabs = vec!["a".into()];
+        new.spaces[0].active_tab = Some("a".into());
+        new.terminals.retain(|t| t.id == "t1");
+        assert_eq!(after_loss(&old, &new, "t2", None).as_deref(), Some("t1"));
+        // Its space is empty now: any terminal.
+        let mut new = new.clone();
+        new.spaces[0].active_tab = None;
+        assert_eq!(after_loss(&old, &new, "t2", None).as_deref(), Some("t1"));
+        assert_eq!(after_loss(&old, &Model::default(), "t2", None), None);
     }
 }

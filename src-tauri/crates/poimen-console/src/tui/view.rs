@@ -1,6 +1,6 @@
 //! Draws a frame of the TUI: the sidebar on the left, the pane, the status line at the bottom.
 
-use poimen_client::protocol::{AgentStatus, AttachMode};
+use poimen_client::protocol::{AgentStatus, AttachMode, SplitDirection};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -19,12 +19,15 @@ pub const MIN_WIDTH_FOR_SIDEBAR: u16 = 60;
 pub struct Areas {
     /// The sidebar's rows (without the border column).
     pub sidebar: Option<Rect>,
+    /// One line above the panes: the tabs of the focused space.
+    pub tabbar: Rect,
+    /// Where the split tree of the focused tab is laid out.
     pub pane: Rect,
     pub status: Rect,
 }
 
 /// Splits the window: status line at the bottom, the sidebar left of the pane when shown and the
-/// window is wide enough.
+/// window is wide enough, the tab bar on top of the pane column.
 pub fn layout(window: Rect, sidebar: bool) -> Areas {
     let body_h = window.height.saturating_sub(1);
     let status = Rect::new(
@@ -34,21 +37,21 @@ pub fn layout(window: Rect, sidebar: bool) -> Areas {
         window.height.min(1),
     );
     let show = sidebar && window.width >= MIN_WIDTH_FOR_SIDEBAR;
-    if !show {
-        return Areas {
-            sidebar: None,
-            pane: Rect::new(window.x, window.y, window.width, body_h),
-            status,
-        };
-    }
-    Areas {
-        sidebar: Some(Rect::new(window.x, window.y, SIDEBAR_WIDTH - 1, body_h)),
-        pane: Rect::new(
+    let (side, x, width) = if show {
+        (
+            Some(Rect::new(window.x, window.y, SIDEBAR_WIDTH - 1, body_h)),
             window.x + SIDEBAR_WIDTH,
-            window.y,
             window.width - SIDEBAR_WIDTH,
-            body_h,
-        ),
+        )
+    } else {
+        (None, window.x, window.width)
+    };
+    // The bar needs a line of its own; a one-line body is all pane.
+    let bar_h = u16::from(body_h > 1);
+    Areas {
+        sidebar: side,
+        tabbar: Rect::new(x, window.y, width, bar_h),
+        pane: Rect::new(x, window.y + bar_h, width, body_h - bar_h),
         status,
     }
 }
@@ -176,8 +179,44 @@ fn draw_sidebar(buf: &mut Buffer, area: Rect, app: &App) {
     }
 }
 
-fn draw_pane(f: &mut Frame, area: Rect, app: &App) {
-    let Some(pane) = &app.pane else {
+/// The tab bar: the tabs of the focused terminal's space, the focused one reversed.
+fn draw_tabbar(buf: &mut Buffer, area: Rect, app: &App) {
+    if area.height == 0 {
+        return;
+    }
+    let Some(tab) = app.current_tab() else {
+        return;
+    };
+    let mut x = area.x;
+    for (i, t) in app.model.space_tabs(&tab.space_id).iter().enumerate() {
+        let label = format!(" {}:{} ", i + 1, t.name);
+        let style = if t.tab_id == tab.tab_id {
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let room = usize::from(area.right().saturating_sub(x));
+        if room == 0 {
+            break;
+        }
+        let (nx, _) = buf.set_stringn(x, area.y, &label, room, style);
+        x = nx;
+    }
+}
+
+/// Whether a border runs along the focused pane (it is drawn in the accent color).
+fn touches(border: Rect, pane: Rect) -> bool {
+    Rect::new(
+        border.x.saturating_sub(1),
+        border.y.saturating_sub(1),
+        border.width + 2,
+        border.height + 2,
+    )
+    .intersects(pane)
+}
+
+fn draw_panes(f: &mut Frame, area: Rect, app: &App) {
+    if app.selected.is_none() {
         let text = if app.model.terminals.is_empty() {
             "No terminals. Create one with `poimen new <space>` or in the app."
         } else {
@@ -191,21 +230,61 @@ fn draw_pane(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::DarkGray),
         );
         return;
-    };
-    pane.grid.render(area, f.buffer_mut(), &app.palette);
-    if pane.controls()
-        && let Some((x, y)) = pane.grid.cursor()
-        && x < area.width
-        && y < area.height
-    {
-        f.set_cursor_position((area.x + x, area.y + y));
+    }
+    let tree = app.layout(area);
+    let focus = app.selected.as_deref();
+    for leaf in &tree.leaves {
+        let rect = leaf.rect;
+        if rect.width == 0 || rect.height == 0 {
+            continue;
+        }
+        let Some(pane) = app.pane(&leaf.terminal_id) else {
+            let text = if Some(&leaf.terminal_id) == app.own_terminal.as_ref() {
+                "poimen runs here"
+            } else {
+                "not attached"
+            };
+            f.buffer_mut().set_stringn(
+                rect.x + 1,
+                rect.y + rect.height / 2,
+                text,
+                usize::from(rect.width.saturating_sub(2)),
+                Style::default().fg(Color::DarkGray),
+            );
+            continue;
+        };
+        pane.grid.render(rect, f.buffer_mut(), &app.palette);
+        if Some(leaf.terminal_id.as_str()) == focus
+            && pane.controls()
+            && let Some((x, y)) = pane.grid.cursor()
+            && x < rect.width
+            && y < rect.height
+        {
+            f.set_cursor_position((rect.x + x, rect.y + y));
+        }
+    }
+    let focused = focus.and_then(|id| tree.rect_of(id));
+    for b in &tree.borders {
+        let (symbol, len) = match b.direction {
+            SplitDirection::Right => ("│", b.rect.height),
+            SplitDirection::Down => ("─", b.rect.width),
+        };
+        let accent = focused.is_some_and(|r| touches(b.rect, r));
+        let style = Style::default().fg(if accent { Color::Cyan } else { Color::DarkGray });
+        for i in 0..len {
+            let (x, y) = match b.direction {
+                SplitDirection::Right => (b.rect.x, b.rect.y + i),
+                SplitDirection::Down => (b.rect.x + i, b.rect.y),
+            };
+            f.buffer_mut()[(x, y)].set_symbol(symbol).set_style(style);
+        }
     }
 }
 
 /// The status line: the selected terminal and its mode, then a question, a notice or the keys.
 pub fn status_text(app: &App) -> (String, String) {
     let name = app.selected_name().unwrap_or("-");
-    let state = match &app.pane {
+    let state = match app.focused() {
         Some(p) if p.exited.is_some() => match p.exited {
             Some(Some(code)) => format!("exited with {code}"),
             _ => "exited".into(),
@@ -215,8 +294,7 @@ pub fn status_text(app: &App) -> (String, String) {
         None => "detached".into(),
     };
     let scrolled = app
-        .pane
-        .as_ref()
+        .focused()
         .map(|p| p.grid.display_offset())
         .filter(|o| *o > 0)
         .map(|o| format!(" · scrolled {o}"))
@@ -228,20 +306,36 @@ pub fn status_text(app: &App) -> (String, String) {
         "another client has the control: take over? [y/N]".to_owned()
     } else if app.prefix_pending {
         format!(
-            "{p} … {} detach · {} sidebar · {}/{} select · {p} sends {p}",
-            k.detach.label(),
-            k.sidebar.label(),
+            "{p} … {} tab · {}/{} tabs · {} close tab · {} {} split · {}{}{}{} focus · {}{}{}{} resize · {} close pane · {}/{} select · {} sidebar · {} detach · {p} sends {p}",
+            k.new_tab.label(),
+            k.previous_tab.label(),
+            k.next_tab.label(),
+            k.close_tab.label(),
+            k.split_right.label(),
+            k.split_down.label(),
+            k.focus_left.label(),
+            k.focus_down.label(),
+            k.focus_up.label(),
+            k.focus_right.label(),
+            k.resize_left.label(),
+            k.resize_down.label(),
+            k.resize_up.label(),
+            k.resize_right.label(),
+            k.close_pane.label(),
             k.previous.label(),
-            k.next.label()
+            k.next.label(),
+            k.sidebar.label(),
+            k.detach.label()
         )
     } else if let Some(n) = &app.notice {
         n.clone()
     } else {
         format!(
-            "{p} {} detach · {p} {}/{} select",
-            k.detach.label(),
-            k.previous.label(),
-            k.next.label()
+            "{p} {} tab · {p} {}/{} tabs · {p} {} detach",
+            k.new_tab.label(),
+            k.previous_tab.label(),
+            k.next_tab.label(),
+            k.detach.label()
         )
     };
     (left, right)
@@ -252,7 +346,8 @@ pub fn draw(f: &mut Frame, app: &App) {
     if let Some(side) = areas.sidebar {
         draw_sidebar(f.buffer_mut(), side, app);
     }
-    draw_pane(f, areas.pane, app);
+    draw_tabbar(f.buffer_mut(), areas.tabbar, app);
+    draw_panes(f, areas.pane, app);
     let (left, right) = status_text(app);
     let bar = Style::default().add_modifier(Modifier::REVERSED);
     let buf = f.buffer_mut();
@@ -308,13 +403,19 @@ mod tests {
         let w = Rect::new(0, 0, 100, 30);
         let a = layout(w, true);
         assert_eq!(a.sidebar, Some(Rect::new(0, 0, 31, 29)));
-        assert_eq!(a.pane, Rect::new(32, 0, 68, 29));
+        assert_eq!(a.tabbar, Rect::new(32, 0, 68, 1));
+        assert_eq!(a.pane, Rect::new(32, 1, 68, 28));
         assert_eq!(a.status, Rect::new(0, 29, 100, 1));
         let b = layout(w, false);
         assert_eq!(b.sidebar, None);
-        assert_eq!(b.pane, Rect::new(0, 0, 100, 29));
+        assert_eq!(b.tabbar, Rect::new(0, 0, 100, 1));
+        assert_eq!(b.pane, Rect::new(0, 1, 100, 28));
         // Too narrow: no sidebar even when it is on.
         assert_eq!(layout(Rect::new(0, 0, 50, 10), true).sidebar, None);
+        // A body of one line is all pane.
+        let tiny = layout(Rect::new(0, 0, 80, 2), false);
+        assert_eq!(tiny.tabbar.height, 0);
+        assert_eq!(tiny.pane, Rect::new(0, 0, 80, 1));
     }
 
     #[test]
