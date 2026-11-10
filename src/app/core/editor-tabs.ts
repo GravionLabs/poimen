@@ -370,6 +370,16 @@ export class EditorTabs {
     this.forget(oldId);
   }
 
+  /**
+   * A closed pane: its flow tab goes, and its tab passes to `successor` (another leaf of its split
+   * tab, see `paneSuccessor`) when there is one, else it closes too.
+   */
+  closePane(paneId: string, successor?: string): void {
+    if (successor) this.replace(paneId, successor);
+    else this.close(paneId);
+    this.close(flowTab(paneId));
+  }
+
   closeAll(): void {
     this.groups.set([{ id: 1, tabs: [], activeId: null }]);
     this.layout.set({ kind: "group", id: 1 });

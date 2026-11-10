@@ -65,6 +65,20 @@ export function survivingLeaf(tab: Tab | undefined, closedId: string): string | 
 }
 
 /**
+ * The leaf of `paneId`'s split tab that takes over its editor tab once it closes, read from a
+ * snapshot that still has the pane (the one before the close); `undefined` for an unknown pane
+ * or the last leaf of its tab.
+ */
+export function paneSuccessor(snapshot: Snapshot, paneId: string): string | undefined {
+  const tabId = snapshot.terminals.find((t) => t.terminal_id === paneId)?.tab_id;
+  if (tabId === undefined) return undefined;
+  return survivingLeaf(
+    snapshot.tabs.find((t) => t.tab_id === tabId),
+    paneId,
+  );
+}
+
+/**
  * The panes of `tab` in the order of its split tree (the first leaf first), then the panes of
  * the tab the tree does not name, in snapshot order; so no terminal of the tab is left out.
  */

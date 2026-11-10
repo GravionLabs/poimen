@@ -3,6 +3,7 @@ import {
   agentKind,
   closeWarning,
   paneDir,
+  paneSuccessor,
   rowName,
   spaceContaining,
   spaceRoot,
@@ -20,6 +21,15 @@ export type PaneDialogState =
   | { kind: "close"; paneId: string; name: string; warning: string }
   | { kind: "agent"; paneId: string; name: string }
   | { kind: "rename"; paneId: string; agent: boolean; current: string };
+
+/**
+ * A pane that was closed, and the leaf of its split tab that takes over its editor tab (resolved
+ * before the close, since the snapshot read after it no longer has the pane); none for the last leaf.
+ */
+export interface PaneClosed {
+  paneId: string;
+  successor?: string;
+}
 
 /**
  * Creates, splits and closes herdr panes. herdr owns the result: each call only asks herdr, then
@@ -173,12 +183,13 @@ export class PaneActions {
     }
   }
 
-  /** Closes the pane of the open dialog; resolves to its id once herdr closed it. */
-  async confirmClose(): Promise<string | undefined> {
+  /** Closes the pane of the open dialog; resolves to it and its successor once herdr closed it. */
+  async confirmClose(): Promise<PaneClosed | undefined> {
     const dialog = this._dialog();
     if (dialog?.kind !== "close") return undefined;
     this._dialog.set(null);
     this._error.set(null);
+    const successor = paneSuccessor(this.store.snapshot(), dialog.paneId);
     try {
       await this.bridge.invoke("pane_close", { paneId: dialog.paneId });
     } catch (err) {
@@ -186,7 +197,7 @@ export class PaneActions {
       return undefined;
     }
     await this.store.refresh();
-    return dialog.paneId;
+    return successor ? { paneId: dialog.paneId, successor } : { paneId: dialog.paneId };
   }
 
   /** Starts `kind` in the pane of the open agent dialog; the `args` field is split on whitespace into argv elements. */

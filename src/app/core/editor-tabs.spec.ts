@@ -116,6 +116,24 @@ describe("EditorTabs", () => {
     expect(ids()).toEqual(["b"]);
   });
 
+  it("closePane hands the tab to the successor and closes the flow tab", () => {
+    tabs.open("a", true);
+    tabs.openFlow("a");
+    tabs.open("b", true);
+    tabs.activate("a");
+    tabs.closePane("a", "x");
+    expect(ids()).toEqual(["x", "b"]);
+    expect(tabs.activeId()).toBe("x");
+  });
+
+  it("closePane without a successor closes the tab and its flow tab", () => {
+    tabs.open("a", true);
+    tabs.openFlow("a");
+    tabs.open("b", true);
+    tabs.closePane("a");
+    expect(ids()).toEqual(["b"]);
+  });
+
   it("opens one pinned flow tab per pane and activates it when it is open", () => {
     tabs.open("a", true);
     tabs.openFlow("a");

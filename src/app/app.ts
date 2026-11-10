@@ -19,7 +19,6 @@ import {
   rowName,
   supportsFlow,
   tabHeader,
-  survivingLeaf,
   treeTerminals,
   windowTitle,
   type Mode,
@@ -51,7 +50,6 @@ import {
   EditorTabs,
   changesDir,
   flowPane,
-  flowTab,
   spaceOfTab,
   spaceTab,
   tabKind,
@@ -71,7 +69,7 @@ import { SpaceOverview } from "./space-overview/space-overview";
 import { FlowTab } from "./flow-tab/flow-tab";
 import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
-import { PaneActions } from "./core/pane-actions";
+import { PaneActions, type PaneClosed } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { SpaceRebuild } from "./core/space-rebuild";
@@ -703,9 +701,9 @@ export class App {
     return tabKind(id) === "space";
   }
 
-  /** A space closed in herdr: the tabs of its panes go with it. */
+  /** A space closed in herdr: all its panes go, so their tabs close without a successor. */
   protected onSpaceClosed(paneIds: string[]): void {
-    for (const id of paneIds) this.onPaneClosed(id);
+    for (const id of paneIds) this.editor.closePane(id);
   }
 
   protected paneAction(paneId: string, action: string): void {
@@ -723,18 +721,11 @@ export class App {
 
   /**
    * A pane closed in herdr: its tab and its flow tab go with it, but when the pane's split tab still
-   * has other leaves its editor tab passes to one of them, so the split layout stays visible.
+   * has other leaves its editor tab passes to the successor resolved before the close, so the
+   * split layout stays visible.
    */
-  protected onPaneClosed(paneId: string): void {
-    const snap = this.store.snapshot();
-    const tabId = snap.terminals.find((t) => t.terminal_id === paneId)?.tab_id;
-    const next = survivingLeaf(
-      snap.tabs.find((t) => t.tab_id === tabId),
-      paneId,
-    );
-    if (next && !this.editor.groupOf(next)) this.editor.replace(paneId, next);
-    else this.editor.close(paneId);
-    this.editor.close(flowTab(paneId));
+  protected onPaneClosed(closed: PaneClosed): void {
+    this.editor.closePane(closed.paneId, closed.successor);
   }
 
   /** Context menu of a group's tabs; splitting needs a second tab in the group. */

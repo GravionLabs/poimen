@@ -185,8 +185,38 @@ describe("PaneActions", () => {
       };
     });
     actions.askClose("w1:p1");
-    expect(await actions.confirmClose()).toBe("w1:p1");
+    expect(await actions.confirmClose()).toEqual({ paneId: "w1:p1" });
     expect(tauri.calls("pane_close")).toEqual([{ paneId: "w1:p1" }]);
+    expect(store.pane("w1:p1")).toBeUndefined();
+  });
+
+  it("resolves the successor in the split tab from the snapshot before the close", async () => {
+    const leaf = (terminal_id: string) => ({ kind: "terminal" as const, terminal_id });
+    current = {
+      ...current,
+      tabs: [
+        {
+          ...current.tabs[0],
+          root: {
+            kind: "split",
+            split_id: "s1",
+            direction: "right",
+            ratio: 0.5,
+            children: [leaf("w1:p1"), leaf("w1:p2")],
+          },
+        },
+      ],
+    };
+    await store.refresh();
+    tauri.answer("pane_close", () => {
+      current = {
+        ...current,
+        tabs: [{ ...current.tabs[0], root: leaf("w1:p2") }],
+        terminals: current.terminals.filter((p) => p.terminal_id !== "w1:p1"),
+      };
+    });
+    actions.askClose("w1:p1");
+    expect(await actions.confirmClose()).toEqual({ paneId: "w1:p1", successor: "w1:p2" });
     expect(store.pane("w1:p1")).toBeUndefined();
   });
 
