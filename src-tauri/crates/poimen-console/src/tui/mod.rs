@@ -931,7 +931,7 @@ fn run_command(app: &mut App, client: &Client, tx: &Sender<Msg>, command: palett
             let Some((space_id, dir, _)) = focused_space(app) else {
                 return finish(app, "no space for the entry");
             };
-            run_entry(app, client, tx, space_id, dir, entry, None, String::new());
+            run_entry(app, client, tx, space_id, dir, entry, None);
         }
         Command::LoadIssues => load_issues(app, client, tx),
         Command::StartTask { issue, mode } => start_task(app, client, tx, issue, mode),
@@ -970,7 +970,6 @@ fn ask_trust(app: &mut App, pending: Pending, t: &poimen_client::protocol::Trust
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_entry(
     app: &mut App,
     client: &Client,
@@ -979,7 +978,6 @@ fn run_entry(
     dir: String,
     entry: Entry,
     decision: Option<Decision>,
-    hash: String,
 ) {
     let home = home_path(app);
     let result = actions::run_entry(
@@ -1035,7 +1033,6 @@ fn run_entry(
         Ok(actions::EntryResult::Missing) => finish(app, "the project file no longer lists it"),
         Err(e) => finish(app, format!("project entry failed: {e}")),
     }
-    let _ = hash;
 }
 
 /// The user answered the trust question: send the held request again with the answer.
@@ -1061,7 +1058,7 @@ fn answer(app: &mut App, client: &Client, tx: &Sender<Msg>, choice: palette::Tru
                 palette::TrustChoice::Trust => Decision::Trust { hash: hash.clone() },
                 palette::TrustChoice::Without => Decision::Without,
             };
-            run_entry(app, client, tx, space_id, dir, entry, Some(decision), hash);
+            run_entry(app, client, tx, space_id, dir, entry, Some(decision));
         }
     }
 }

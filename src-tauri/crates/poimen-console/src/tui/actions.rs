@@ -127,7 +127,12 @@ fn same_dir(a: &str, b: &str) -> bool {
         let p = p.strip_prefix(r"\\?\").unwrap_or(p).replace('\\', "/");
         p.trim_end_matches('/').to_owned()
     }
-    norm(a) == norm(b)
+    let (a, b) = (norm(a), norm(b));
+    if cfg!(windows) {
+        a.to_lowercase() == b.to_lowercase()
+    } else {
+        a == b
+    }
 }
 
 /// The repository root of `dir`, else `dir`.
@@ -575,7 +580,12 @@ mod tests {
         );
         let p = prepare_task(&app, Some(&home), &issue(), "echo", &[]).unwrap();
         let path = t.0.join("app-12");
-        assert_eq!(p.create.cwd, path.display().to_string());
+        assert!(
+            same_dir(&p.create.cwd, &path.display().to_string()),
+            "worktree cwd {} is not {}",
+            p.create.cwd,
+            path.display()
+        );
         assert_eq!(p.create.name, "#12 feat: Add picker");
         assert!(p.create.layout);
         assert_eq!(p.create.command.as_deref(), Some("echo 'task 12'"));
@@ -586,7 +596,12 @@ mod tests {
         );
         // A second start reuses the worktree of the branch.
         let again = prepare_task(&app, Some(&home), &issue(), "echo", &[]).unwrap();
-        assert_eq!(again.create.cwd, p.create.cwd);
+        assert!(
+            same_dir(&again.create.cwd, &p.create.cwd),
+            "reused cwd {} differs from {}",
+            again.create.cwd,
+            p.create.cwd
+        );
     }
 
     #[test]
@@ -610,7 +625,12 @@ mod tests {
         assert!(!t.0.join("app-12").exists(), "no worktree for this mode");
         let none = prepare_task(&app, Some(&home), &issue(), "here", &[]).unwrap();
         assert_eq!(none.reuse_space, None);
-        assert_eq!(none.create.cwd, app);
+        assert!(
+            same_dir(&none.create.cwd, &app),
+            "cwd {} is not {}",
+            none.create.cwd,
+            app
+        );
     }
 
     #[test]
