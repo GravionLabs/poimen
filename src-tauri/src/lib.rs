@@ -744,7 +744,10 @@ fn consent_reasons(
 /// Rebuilds the layout of a space without terminals (after a server restart: spaces persist,
 /// terminals do not) in the space's own directory, through the path of `create_space`: the
 /// layout is resolved again (project file > template > `spaces.layout` > default), the project
-/// file goes through `trust::gate` and the setup runs only when allowed. Unconfirmed, it builds
+/// file goes through `trust::gate` and the setup runs only when allowed. A backend that builds
+/// layouts itself (poimen-server, `Backend::apply_layout`) gets the confirmed rebuild and the
+/// trust answer and stores the trust; for the others (herdr) the app stores it and applies the
+/// layout (`layout::apply`). Unconfirmed, it builds
 /// only when nothing needs consent (no agent pane, no setup, nothing to trust); otherwise it
 /// answers `Consent` and creates nothing. A space with terminals is left alone.
 fn rebuild_space_with(
@@ -781,42 +784,70 @@ fn rebuild_space_with(
         .as_ref()
         .map(|s| s.trusted_projects.clone())
         .unwrap_or_default();
-    let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
-        trust::Gate::Ask(request) if confirmed => return Ok(RebuildOutcome::Trust { request }),
-        trust::Gate::Ask(_) => {
+    // Nothing is stored yet: a backend that builds layouts itself stores the trust on its own.
+    let (allow, store, asked) = match trust::gate(&sources, &trusted, decision.as_ref()) {
+        trust::Gate::Ask(_) if !confirmed => {
             return Ok(RebuildOutcome::Consent {
                 reasons: vec!["the project file is not trusted yet".into()],
             });
         }
-        trust::Gate::Strip => false,
-        trust::Gate::Run { store } => {
-            if let Some(hash) = store {
-                let home = home.ok_or("the home directory is not known")?;
-                settings::trust_project(home, &sources.root, &hash)?;
-            }
-            true
-        }
+        trust::Gate::Ask(request) => (false, None, Some(request)),
+        trust::Gate::Strip => (false, None, None),
+        trust::Gate::Run { store } => (true, store, None),
     };
-    let (agent_command, user_layout, mut warnings) = layout_inputs(&dir, user.as_ref(), home);
-    let planned = plan_layout(
-        &sources,
-        user_layout.as_ref(),
-        allow,
-        None,
-        agent_command.as_deref(),
-    );
+    let plan = || {
+        let (agent_command, user_layout, warnings) = layout_inputs(&dir, user.as_ref(), home);
+        let planned = plan_layout(
+            &sources,
+            user_layout.as_ref(),
+            allow,
+            None,
+            agent_command.as_deref(),
+        );
+        (planned, warnings)
+    };
     if !confirmed {
         let harnesses = user
             .as_ref()
             .map(|s| s.harnesses.clone())
             .unwrap_or_else(harness::default_harnesses);
         let setup = allow.then(|| project::setup_of(sources.refs().0)).flatten();
+        let (planned, _) = plan();
         let layout = planned.as_ref().ok().map(|(l, _)| l);
         let reasons = consent_reasons(layout, &harnesses, setup.as_deref());
         if !reasons.is_empty() {
             return Ok(RebuildOutcome::Consent { reasons });
         }
     }
+    // poimen-server resolves the layout again, answers the trust question itself and builds the
+    // tabs into the space (`space.apply_layout`).
+    let request = backend::ApplyRequest {
+        space_id,
+        cwd: &dir,
+        preset: None,
+        decision: decision.as_ref(),
+    };
+    if let Some(result) = backend.apply_layout(request) {
+        return Ok(match result? {
+            backend::LaidOut::Trust(request) => RebuildOutcome::Trust { request },
+            backend::LaidOut::Created {
+                warnings,
+                setup_started,
+                ..
+            } => RebuildOutcome::Rebuilt {
+                warnings,
+                setup_started,
+            },
+        });
+    }
+    if let Some(request) = asked {
+        return Ok(RebuildOutcome::Trust { request });
+    }
+    if let Some(hash) = store {
+        let home = home.ok_or("the home directory is not known")?;
+        settings::trust_project(home, &sources.root, &hash)?;
+    }
+    let (planned, mut warnings) = plan();
     let root_pane = backend.create_terminal(space_id, Some(&dir))?;
     warnings.extend(apply_planned(backend, planned, &dir, root_pane.as_deref()));
     let (setup_started, warning) = run_setup(backend, space_id, &dir, &sources, allow);
@@ -2945,6 +2976,114 @@ mod build_layout_tests {
             }
         );
         assert_eq!(fake.calls().len(), before + 1);
+    }
+
+    // The same rebuilds on a backend that builds layouts itself (poimen-server, #645).
+
+    /// [`restarted`] on a fake that answers `apply_layout` with `answer`.
+    fn restarted_layout(cwd: &str, answer: backend::LaidOut) -> FakeBackend {
+        let fake = restarted(cwd);
+        *fake.laid_out.lock().unwrap() = Some(answer);
+        fake
+    }
+
+    fn trust_question(dir: &str) -> trust::TrustRequest {
+        trust::TrustRequest {
+            root: dir.into(),
+            files: vec![format!("{dir}/.poimen/config.json")],
+            hash: "abc".into(),
+            commands: vec![],
+        }
+    }
+
+    #[test]
+    fn a_layout_backend_rebuilds_the_space_itself_and_the_app_creates_nothing() {
+        let (home, dir) = home_with_templates(SHELLS);
+        let fake = restarted_layout(&dir, built("s1"));
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Rebuilt {
+                warnings: vec!["layout: pane x could not be split".into()],
+                setup_started: true
+            }
+        );
+        // No terminal, split, rename or input from the app: `layout::apply` is herdr's only.
+        assert_eq!(
+            fake.calls(),
+            ["snapshot".to_owned(), format!("apply_layout s1 {dir} - -")]
+        );
+    }
+
+    #[test]
+    fn a_layout_backend_still_needs_consent_for_an_agent_pane_before_anything_is_sent() {
+        let fake = restarted_layout(&tmp_dir(), built("s1"));
+        let out = rebuild_space_with(&fake, None, "s1", None, false).unwrap();
+        assert!(matches!(out, RebuildOutcome::Consent { .. }), "{out:?}");
+        assert_eq!(fake.calls(), ["snapshot"]);
+        // Confirmed, the server builds it.
+        let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
+        assert!(matches!(out, RebuildOutcome::Rebuilt { .. }), "{out:?}");
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &format!("apply_layout s1 {} - -", tmp_dir())
+        );
+    }
+
+    #[test]
+    fn a_layout_backend_answers_the_trust_question_and_stores_the_trust_itself() {
+        let (home, dir) = home_with_templates(SHELLS);
+        let poimen_dir = std::path::Path::new(&dir).join(".poimen");
+        std::fs::create_dir_all(&poimen_dir).unwrap();
+        let file = r#"{"layout":{"panes":[{"name":"dev","command":"pnpm dev"}]}}"#;
+        std::fs::write(poimen_dir.join("config.json"), file).unwrap();
+        let config = home.join(".config/poimen/config.json");
+
+        // Unconfirmed: consent, nothing sent.
+        let fake = restarted_layout(&dir, backend::LaidOut::Trust(trust_question(&dir)));
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
+        assert!(matches!(out, RebuildOutcome::Consent { .. }), "{out:?}");
+        assert_eq!(fake.calls(), ["snapshot"]);
+        // Confirmed: the server's question goes to the trust dialog.
+        let out = rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap();
+        assert_eq!(
+            out,
+            RebuildOutcome::Trust {
+                request: trust_question(&dir)
+            }
+        );
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &format!("apply_layout s1 {dir} - -")
+        );
+
+        // The answer goes to the server; the app writes nothing to the user config.
+        let fake = restarted_layout(&dir, built("s1"));
+        let hash = trust::sha256_hex(file);
+        let decision = Some(trust::Decision::Trust { hash: hash.clone() });
+        let out = rebuild_space_with(&fake, Some(&home), "s1", decision, true).unwrap();
+        assert!(matches!(out, RebuildOutcome::Rebuilt { .. }), "{out:?}");
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &format!("apply_layout s1 {dir} - trust:{hash}")
+        );
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), SHELLS);
+        let decision = Some(trust::Decision::Without);
+        rebuild_space_with(&fake, Some(&home), "s1", decision, true).unwrap();
+        assert_eq!(
+            fake.calls().last().unwrap(),
+            &format!("apply_layout s1 {dir} - without")
+        );
+    }
+
+    #[test]
+    fn a_failing_apply_layout_is_an_error() {
+        let (home, dir) = home_with_templates(SHELLS);
+        let fake = restarted_layout(&dir, built("s1"));
+        fake.fail_on("apply_layout");
+        let err = rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap_err();
+        assert_eq!(err, "boom");
+        assert_eq!(fake.calls(), ["snapshot"]);
     }
 
     #[test]

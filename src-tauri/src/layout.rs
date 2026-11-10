@@ -1,5 +1,7 @@
 //! The pane layout of a new space. Parsing and resolution live in `poimen_core::layout`; `apply`
-//! goes through the `Backend` trait, so tests use a fake and never touch a live backend.
+//! goes through the `Backend` trait, so tests use a fake and never touch a live backend. Only the
+//! herdr backend needs `apply`: poimen-server builds layouts itself (`space.create`,
+//! `space.apply_layout`).
 
 pub use poimen_core::layout::*;
 

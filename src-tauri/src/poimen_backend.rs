@@ -16,15 +16,15 @@ use std::time::Duration;
 use poimen_client::agent::{self, PromptResult};
 use poimen_client::protocol::{
     self as wire, AgentStatus, AttachMode, DetachReason, ErrorCode, Event, Node, PROTOCOL_VERSION,
-    Space, SpaceCreate, SpaceCreateResult, SpaceList, Tab, TabSplit, Terminal, TerminalCreate,
-    TrustAnswer,
+    Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceCreate, SpaceCreateResult, SpaceCreated,
+    SpaceList, Tab, TabSplit, Terminal, TerminalCreate, TrustAnswer, TrustRequired,
 };
 use poimen_client::{AttachmentWriter, Client, ClientError};
 use serde_json::{Value, json};
 
 use crate::backend::{
-    Backend, BackendEvent, BackendInfo, CloseCode, LaidOut, LayoutRequest, Mode, NewSpace,
-    OnRecord, OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord,
+    ApplyRequest, Backend, BackendEvent, BackendInfo, CloseCode, LaidOut, LayoutRequest, Mode,
+    NewSpace, OnRecord, OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord,
     StreamRequest,
 };
 use crate::herdr::{AgentSession, PromptOutcome, ServerInfo};
@@ -273,29 +273,51 @@ fn default_name(cwd: &str) -> String {
         .to_owned()
 }
 
+/// The trust question of the server, for the dialog.
+fn trust_request(t: TrustRequired) -> LaidOut {
+    LaidOut::Trust(trust::TrustRequest {
+        root: t.root,
+        files: t.files,
+        hash: t.hash,
+        commands: t
+            .commands
+            .into_iter()
+            .map(|c| trust::ListedCommand {
+                what: c.what,
+                command: c.command,
+            })
+            .collect(),
+    })
+}
+
+fn built(created: SpaceCreated) -> LaidOut {
+    LaidOut::Created {
+        space_id: created.space.id,
+        warnings: created.warnings,
+        setup_started: created.setup_started,
+    }
+}
+
 /// The neutral answer of `space.create`: the space, or the trust question for the dialog.
 fn laid_out(result: SpaceCreateResult) -> LaidOut {
     match result {
-        SpaceCreateResult::TrustRequired { trust_required: t } => {
-            LaidOut::Trust(trust::TrustRequest {
-                root: t.root,
-                files: t.files,
-                hash: t.hash,
-                commands: t
-                    .commands
-                    .into_iter()
-                    .map(|c| trust::ListedCommand {
-                        what: c.what,
-                        command: c.command,
-                    })
-                    .collect(),
-            })
-        }
-        SpaceCreateResult::Created(created) => LaidOut::Created {
-            space_id: created.space.id,
-            warnings: created.warnings,
-            setup_started: created.setup_started,
-        },
+        SpaceCreateResult::TrustRequired { trust_required } => trust_request(trust_required),
+        SpaceCreateResult::Created(created) => built(created),
+    }
+}
+
+/// The neutral answer of `space.apply_layout`: the space it built into, or the trust question.
+fn applied(result: SpaceApplyLayoutResult) -> LaidOut {
+    match result {
+        SpaceApplyLayoutResult::TrustRequired { trust_required } => trust_request(trust_required),
+        SpaceApplyLayoutResult::Applied(created) => built(created),
+    }
+}
+
+fn trust_answer(decision: &trust::Decision) -> TrustAnswer {
+    match decision {
+        trust::Decision::Trust { hash } => TrustAnswer::Trust { hash: hash.clone() },
+        trust::Decision::Without => TrustAnswer::Without,
     }
 }
 
@@ -394,10 +416,7 @@ impl Backend for PoimenBackend {
         request: LayoutRequest<'_>,
     ) -> Option<Result<LaidOut, String>> {
         let params = SpaceCreate {
-            trust: request.decision.map(|d| match d {
-                trust::Decision::Trust { hash } => TrustAnswer::Trust { hash: hash.clone() },
-                trust::Decision::Without => TrustAnswer::Without,
-            }),
+            trust: request.decision.map(trust_answer),
             command: request.command.map(str::to_owned),
             ..SpaceCreate::with_layout(request.label, request.cwd)
         };
@@ -407,6 +426,18 @@ impl Backend for PoimenBackend {
                 .map(laid_out)
                 .map_err(text),
         )
+    }
+
+    /// `space.apply_layout`: the server builds the space's resolved layout (or the preset) into
+    /// it as new tabs and asks for trust in the project file first.
+    fn apply_layout(&self, request: ApplyRequest<'_>) -> Option<Result<LaidOut, String>> {
+        let params = SpaceApplyLayout {
+            space_id: request.space_id.to_owned(),
+            cwd: Some(request.cwd.to_owned()),
+            preset: request.preset.map(str::to_owned),
+            trust: request.decision.map(trust_answer),
+        };
+        Some(self.client.apply_layout(&params).map(applied).map_err(text))
     }
 
     /// The server's focus is shared by every client and changes only through `tab.focus`; the UI
@@ -1413,6 +1444,17 @@ mod tests {
                     "warnings": ["template app: harness codex is not installed"],
                     "setup_started": true,
                 })),
+                "space.apply_layout" if params["trust"].is_null() && params["preset"] == "duo" => {
+                    Ok(json!({"trust_required": {
+                        "root": "/work/api", "files": [], "hash": "abc", "commands": [],
+                    }}))
+                }
+                "space.apply_layout" => Ok(json!({
+                    "space": {"id": params["space_id"], "name": "api", "cwd": "/work/api", "tabs": ["tab1", "tab5"]},
+                    "tabs": [tab_json("tab5", "s1", json!({"kind": "terminal", "terminal_id": "t9"}))],
+                    "warnings": ["w"],
+                    "setup_started": true,
+                })),
                 "space.list" => Ok(json!({
                     "spaces": [{"id": "s1", "name": "api", "cwd": "/work/api", "tabs": ["tab1", "tab2"], "active_tab": "tab1"}],
                     "tabs": [
@@ -1667,6 +1709,59 @@ mod tests {
     }
 
     #[test]
+    fn apply_layout_goes_to_the_server_with_space_cwd_preset_and_answer() {
+        let (backend, log) = backend_for("apply", vec![], false);
+        let request = ApplyRequest {
+            space_id: "s1",
+            cwd: "/work/api",
+            preset: None,
+            decision: None,
+        };
+        assert_eq!(
+            backend.apply_layout(request).unwrap().unwrap(),
+            LaidOut::Created {
+                space_id: "s1".into(),
+                warnings: vec!["w".into()],
+                setup_started: true,
+            }
+        );
+        assert_eq!(
+            params_of(&log, "space.apply_layout"),
+            json!({"space_id": "s1", "cwd": "/work/api"})
+        );
+        // The server built the tabs: nothing else was sent.
+        assert_eq!(lock(&log).len(), 1);
+
+        let (backend, log) = backend_for("apply-preset", vec![], false);
+        let preset = ApplyRequest {
+            preset: Some("duo"),
+            ..request
+        };
+        let LaidOut::Trust(asked) = backend.apply_layout(preset).unwrap().unwrap() else {
+            panic!("expected the trust question")
+        };
+        assert_eq!(asked.hash, "abc");
+        let decision = trust::Decision::Trust { hash: "abc".into() };
+        let answered = ApplyRequest {
+            decision: Some(&decision),
+            ..preset
+        };
+        assert!(matches!(
+            backend.apply_layout(answered).unwrap().unwrap(),
+            LaidOut::Created { .. }
+        ));
+        let sent: Vec<Value> = lock(&log)
+            .iter()
+            .map(|l| serde_json::from_str(&l["space.apply_layout ".len()..]).unwrap())
+            .collect();
+        assert_eq!(
+            sent[1],
+            json!({"space_id": "s1", "cwd": "/work/api", "preset": "duo",
+                   "trust": {"kind": "trust", "hash": "abc"}})
+        );
+    }
+
+    #[test]
     fn a_failing_space_create_is_an_error() {
         let path = temp_socket("space-fail");
         serve(
@@ -1699,7 +1794,7 @@ mod tests {
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
-            ("0.9.0", Some(5), 5)
+            ("0.9.0", Some(6), 6)
         );
     }
 

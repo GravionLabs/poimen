@@ -6,8 +6,8 @@ use std::sync::Mutex;
 use serde_json::json;
 
 use crate::backend::{
-    Backend, BackendEvent, BackendInfo, LaidOut, LayoutRequest, NewSpace, OnRecord, OpenedStream,
-    Outcome, Snapshot, SplitDirection, StartError, StreamRecord, StreamRequest,
+    ApplyRequest, Backend, BackendEvent, BackendInfo, LaidOut, LayoutRequest, NewSpace, OnRecord,
+    OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord, StreamRequest,
 };
 use crate::herdr::{AgentSession, PromptOutcome};
 
@@ -20,7 +20,8 @@ pub struct FakeBackend {
     pub records: Mutex<Vec<StreamRecord>>,
     /// Whether opened streams are emulated.
     pub emulated: bool,
-    /// What `create_space_with_layout` answers; `None`: the fake does not build layouts (herdr).
+    /// What `create_space_with_layout` and `apply_layout` answer; `None`: the fake does not
+    /// build layouts (herdr).
     pub laid_out: Mutex<Option<LaidOut>>,
 }
 
@@ -69,6 +70,14 @@ impl FakeBackend {
     }
 }
 
+fn decision_text(decision: Option<&crate::trust::Decision>) -> String {
+    match decision {
+        None => "-".to_owned(),
+        Some(crate::trust::Decision::Trust { hash }) => format!("trust:{hash}"),
+        Some(crate::trust::Decision::Without) => "without".to_owned(),
+    }
+}
+
 fn dir(direction: SplitDirection) -> &'static str {
     match direction {
         SplitDirection::Right => "right",
@@ -105,16 +114,24 @@ impl Backend for FakeBackend {
         request: LayoutRequest<'_>,
     ) -> Option<Result<LaidOut, String>> {
         let answer = self.laid_out.lock().unwrap().clone()?;
-        let decision = match request.decision {
-            None => "-".to_owned(),
-            Some(crate::trust::Decision::Trust { hash }) => format!("trust:{hash}"),
-            Some(crate::trust::Decision::Without) => "without".to_owned(),
-        };
+        let decision = decision_text(request.decision);
         let line = format!(
             "create_space_with_layout {} {} {decision} {}",
             request.cwd,
             request.label,
             request.command.unwrap_or("-")
+        );
+        Some(self.record(line).map(|_| answer))
+    }
+
+    fn apply_layout(&self, request: ApplyRequest<'_>) -> Option<Result<LaidOut, String>> {
+        let answer = self.laid_out.lock().unwrap().clone()?;
+        let line = format!(
+            "apply_layout {} {} {} {}",
+            request.space_id,
+            request.cwd,
+            request.preset.unwrap_or("-"),
+            decision_text(request.decision)
         );
         Some(self.record(line).map(|_| answer))
     }

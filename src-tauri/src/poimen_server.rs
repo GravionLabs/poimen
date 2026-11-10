@@ -880,7 +880,6 @@ mod tests {
     fn a_protocol_4_server_without_the_trust_handshake_is_incompatible() {
         // The app skips `trust::gate` on the poimen backend and relies on the `space.create`
         // trust handshake, which protocol 5 introduced; a protocol 4 server never asks.
-        assert_eq!(poimen_client::protocol::PROTOCOL_VERSION, 5);
         assert_eq!(
             classify(pong_of("0.14.0", 4), false, "0.14.0"),
             Ping::Incompatible {
@@ -895,6 +894,22 @@ mod tests {
                 protocol: 4
             }
         );
+    }
+
+    #[test]
+    fn a_protocol_5_server_without_apply_layout_is_incompatible() {
+        // Rebuild and presets go through `space.apply_layout` (protocol 6) on the poimen
+        // backend; a protocol 5 server answers it with `unknown_method`.
+        assert_eq!(poimen_client::protocol::PROTOCOL_VERSION, 6);
+        for running in ["0.14.0", "0.15.0"] {
+            assert_eq!(
+                classify(pong_of(running, 5), false, "0.14.0"),
+                Ping::Incompatible {
+                    running: running.into(),
+                    protocol: 5
+                }
+            );
+        }
     }
 
     fn outdated_fake() -> Fake {
