@@ -143,6 +143,112 @@ fn row_lines(row: &Row) -> Vec<Line<'static>> {
         .collect()
 }
 
+/// The marks at the end of a row: `!` (red) for terminals that need you, `*` (cyan) for unread
+/// ones; a space row counts those of its terminals, a terminal row shows the mark alone.
+fn marks_of(app: &App, index: usize) -> Line<'static> {
+    let row = &app.rows[index];
+    let ids: Vec<&str> = match (&row.kind, &row.terminal_id) {
+        (_, Some(id)) => vec![id.as_str()],
+        (RowKind::Space, None) => app.rows[index + 1..]
+            .iter()
+            .take_while(|r| r.kind != RowKind::Space)
+            .filter_map(|r| r.terminal_id.as_deref())
+            .collect(),
+        _ => Vec::new(),
+    };
+    let ringing = ids
+        .iter()
+        .filter(|id| app.attention.has_attention(id))
+        .count();
+    let unread = ids.iter().filter(|id| app.attention.is_unread(id)).count();
+    let counted = |symbol: &str, n: usize| {
+        if row.terminal_id.is_some() {
+            symbol.to_owned()
+        } else {
+            format!("{symbol}{n}")
+        }
+    };
+    let mut spans = Vec::new();
+    if ringing > 0 {
+        spans.push(Span::styled(
+            counted("!", ringing),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if unread > 0 {
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(
+            counted("*", unread),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+    Line::from(spans)
+}
+
+/// The notification list over the pane area: age, terminal (and agent), what happened, the text.
+fn draw_notifications(buf: &mut Buffer, area: Rect, app: &App) {
+    let Some(selected) = app.list else {
+        return;
+    };
+    let entries = app.log.entries();
+    let height = u16::try_from(entries.len().max(1) + 2)
+        .unwrap_or(u16::MAX)
+        .min(area.height);
+    if height < 3 || area.width < 20 {
+        return;
+    }
+    let rect = Rect::new(area.x, area.y, area.width, height);
+    let plain = Style::default();
+    for y in rect.top()..rect.bottom() {
+        buf.set_string(rect.x, y, " ".repeat(usize::from(rect.width)), plain);
+    }
+    let title = " Notifications · Enter focuses · Esc closes ";
+    buf.set_stringn(
+        rect.x,
+        rect.y,
+        title,
+        usize::from(rect.width),
+        plain.add_modifier(Modifier::REVERSED | Modifier::BOLD),
+    );
+    if entries.is_empty() {
+        buf.set_stringn(
+            rect.x + 1,
+            rect.y + 1,
+            "no notifications",
+            usize::from(rect.width - 1),
+            Style::default().fg(Color::DarkGray),
+        );
+    }
+    let visible = usize::from(height - 2);
+    let first = selected.saturating_sub(visible - 1);
+    for (i, e) in entries.iter().enumerate().skip(first).take(visible) {
+        let y = rect.y + 1 + u16::try_from(i - first).unwrap_or(0);
+        let who = match &e.agent {
+            Some(a) => format!("{} ({a})", e.name),
+            None => e.name.clone(),
+        };
+        let line = format!(
+            " {:>6}  {} · {} · {}",
+            super::attention::age(app.now_ms, e.at_ms),
+            who,
+            e.kind.label(),
+            e.text
+        );
+        let color = match e.kind {
+            super::attention::Kind::Blocked => Color::Red,
+            super::attention::Kind::Done => Color::Green,
+        };
+        let mut style = Style::default().fg(color);
+        if i == selected {
+            style = style.add_modifier(Modifier::REVERSED);
+            buf.set_style(Rect::new(rect.x, y, rect.width, 1), style);
+        }
+        buf.set_stringn(rect.x, y, &line, usize::from(rect.width), style);
+    }
+}
+
 fn draw_sidebar(buf: &mut Buffer, area: Rect, app: &App) {
     let border = Rect::new(area.right(), area.y, 1, area.height);
     for y in border.top()..border.bottom() {
@@ -161,9 +267,10 @@ fn draw_sidebar(buf: &mut Buffer, area: Rect, app: &App) {
     }
     let first = first_visible(&app.rows, app.selected.as_deref(), area.height);
     let mut y = area.y;
-    for row in &app.rows[first..] {
+    for (index, row) in app.rows.iter().enumerate().skip(first) {
         let selected = row.terminal_id.is_some() && row.terminal_id == app.selected;
-        for line in row_lines(row) {
+        let marks = marks_of(app, index);
+        for (n, line) in row_lines(row).into_iter().enumerate() {
             if y >= area.bottom() {
                 return;
             }
@@ -174,6 +281,12 @@ fn draw_sidebar(buf: &mut Buffer, area: Rect, app: &App) {
                 );
             }
             buf.set_line(area.x, y, &line, area.width);
+            if n == 0 && !marks.spans.is_empty() {
+                let width = u16::try_from(marks.width()).unwrap_or(0);
+                if width < area.width {
+                    buf.set_line(area.right() - width, y, &marks, width);
+                }
+            }
             y += 1;
         }
     }
@@ -299,14 +412,18 @@ pub fn status_text(app: &App) -> (String, String) {
         .filter(|o| *o > 0)
         .map(|o| format!(" · scrolled {o}"))
         .unwrap_or_default();
-    let left = format!(" {name} · {state}{scrolled} ");
+    let marked = match app.attention.count() {
+        0 => String::new(),
+        n => format!(" · {n} to see"),
+    };
+    let left = format!(" {name} · {state}{scrolled}{marked} ");
     let p = app.config.prefix.label();
     let k = &app.config.keys;
     let right = if app.take_over.is_some() {
         "another client has the control: take over? [y/N]".to_owned()
     } else if app.prefix_pending {
         format!(
-            "{p} … {} tab · {}/{} tabs · {} close tab · {} {} split · {}{}{}{} focus · {}{}{}{} resize · {} close pane · {}/{} select · {} sidebar · {} detach · {p} sends {p}",
+            "{p} … {} tab · {}/{} tabs · {} close tab · {} {} split · {}{}{}{} focus · {}{}{}{} resize · {} close pane · {}/{} select · {} notifications · {} sidebar · {} detach · {p} sends {p}",
             k.new_tab.label(),
             k.previous_tab.label(),
             k.next_tab.label(),
@@ -324,6 +441,7 @@ pub fn status_text(app: &App) -> (String, String) {
             k.close_pane.label(),
             k.previous.label(),
             k.next.label(),
+            k.notifications.label(),
             k.sidebar.label(),
             k.detach.label()
         )
@@ -348,6 +466,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     }
     draw_tabbar(f.buffer_mut(), areas.tabbar, app);
     draw_panes(f, areas.pane, app);
+    draw_notifications(f.buffer_mut(), areas.pane, app);
     let (left, right) = status_text(app);
     let bar = Style::default().add_modifier(Modifier::REVERSED);
     let buf = f.buffer_mut();
