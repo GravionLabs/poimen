@@ -25,7 +25,6 @@ mod poimen_backend;
 mod poimen_server;
 mod project;
 mod project_edit;
-use poimen_core::remote;
 mod schemes;
 mod settings;
 mod spaces;
@@ -398,13 +397,7 @@ fn template_for<'a>(
     user: &'a settings::Settings,
     home: Option<&std::path::Path>,
 ) -> Option<&'a templates::Template> {
-    let remote = user
-        .space_templates
-        .iter()
-        .any(|t| t.remote.is_some())
-        .then(|| git::origin_url(dir).and_then(|u| remote::parse(&u)))
-        .flatten();
-    templates::resolve(dir, remote.as_ref(), &user.space_templates, home)
+    poimen_core::space_layout::template_for(dir, &user.space_templates, home)
 }
 
 /// The template a new space for a directory would use, for the new-space dialog.
@@ -602,20 +595,18 @@ fn layout_inputs(
     user: Option<&settings::Settings>,
     home: Option<&std::path::Path>,
 ) -> (Option<String>, Option<layout::Layout>, Vec<String>) {
-    let template = user.and_then(|s| template_for(dir, s, home).map(|t| (t, &s.harnesses)));
-    let mut warnings = Vec::new();
-    let agent_command = template.and_then(|(t, harnesses)| {
-        let path = gui_path::child_path();
-        templates::agent_command(t, harnesses, |p| {
-            gui_path::resolve_program(p, &path).is_some()
-        })
-        .map_err(|w| warnings.push(w))
-        .ok()
-    });
-    let user_layout = template
-        .and_then(|(t, _)| t.layout.clone())
-        .or_else(|| user.and_then(|s| s.spaces_layout.clone()));
-    (agent_command, user_layout, warnings)
+    let Some(user) = user else {
+        return (None, None, Vec::new());
+    };
+    let path = std::sync::OnceLock::new();
+    poimen_core::space_layout::inputs(
+        dir,
+        &user.space_templates,
+        &user.harnesses,
+        user.spaces_layout.as_ref(),
+        home,
+        |p| gui_path::resolve_program(p, path.get_or_init(gui_path::child_path)).is_some(),
+    )
 }
 
 /// The layout a new space gets from the already read project `sources` (the precedence of
@@ -627,27 +618,13 @@ fn plan_layout(
     root_command: Option<&str>,
     agent_command: Option<&str>,
 ) -> Result<(layout::Layout, Vec<String>), String> {
-    let (project, legacy) = sources.refs();
-    let (layout, warnings, from_project) = layout::resolve_origin(project, legacy, user_layout)?;
-    let layout = if from_project && !allow_project_commands {
-        layout.without_commands()
-    } else {
-        layout
-    };
-    // A task's command wins; then the template's agent, which fills a root pane without a command
-    // of its own (the built-in default's `claude` is not one).
-    let explicit = from_project || user_layout.is_some();
-    let root_free = layout
-        .panes
-        .iter()
-        .find(|p| p.split.is_none())
-        .is_none_or(|p| p.command.is_none() || !explicit);
-    let layout = match (root_command, agent_command) {
-        (Some(command), _) => layout.with_root_command(command),
-        (None, Some(agent)) if root_free => layout.with_root_command(agent),
-        _ => layout,
-    };
-    Ok((layout, warnings))
+    poimen_core::space_layout::plan(
+        sources,
+        user_layout,
+        allow_project_commands,
+        root_command,
+        agent_command,
+    )
 }
 
 /// What `rebuild_space` did with a space (wire shape, tagged by `state`).

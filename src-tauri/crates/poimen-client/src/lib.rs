@@ -17,9 +17,10 @@ pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
     AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, SetColors, Space,
-    SpaceClose, SpaceCreate, SpaceList, SpaceRename, Tab, TabClose, TabCreate, TabFocus, TabMove,
-    TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClose, TerminalCreate,
-    TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalResize,
+    SpaceClose, SpaceCreate, SpaceCreateResult, SpaceList, SpaceRename, Tab, TabClose, TabCreate,
+    TabFocus, TabMove, TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach,
+    TerminalClose, TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
+    TerminalResize,
 };
 use serde_json::{Value, json};
 
@@ -256,15 +257,22 @@ impl Client {
         ))
     }
 
+    /// A space without terminals (`space.create` with `layout: false`).
     pub fn create_space(&self, name: &str, cwd: &str) -> Result<Space, ClientError> {
         self.typed(
             "space.create",
-            to_value(&SpaceCreate {
-                name: name.into(),
-                cwd: cwd.into(),
-            }),
+            to_value(&SpaceCreate::empty(name, cwd)),
             Some("space"),
         )
+    }
+
+    /// `space.create` as given: with `layout` the server builds the resolved layout, or answers
+    /// `trust_required` and creates nothing.
+    pub fn create_space_with(
+        &self,
+        params: &SpaceCreate,
+    ) -> Result<SpaceCreateResult, ClientError> {
+        self.typed("space.create", to_value(params), None)
     }
 
     pub fn rename_space(&self, space_id: &str, name: &str) -> Result<Space, ClientError> {
