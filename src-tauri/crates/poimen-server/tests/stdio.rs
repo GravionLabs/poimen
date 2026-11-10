@@ -32,6 +32,7 @@ impl Env {
             socket: self.dir.join("run").join("server.sock"),
             state_file: self.dir.join("state").join("server.json"),
             scrollback: 1000,
+            home: None,
         }
     }
 }
