@@ -12,7 +12,7 @@ use serde_json::Value;
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
@@ -695,7 +695,7 @@ pub struct EventsSubscribe {
 /// `space.create`. With `layout` (the default) the server resolves the layout of `cwd` (project
 /// file, deprecated layout file, space template, `spaces.layout` of the user config, built-in
 /// default), asks for trust in the project file when it has commands and builds the tabs and
-/// splits itself; `layout: false` creates an empty space (the protocol 4.0 behavior).
+/// splits itself; `layout: false` creates an empty space (the protocol 4 behavior).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpaceCreate {
     pub name: String,
@@ -1771,7 +1771,7 @@ mod tests {
         assert_eq!(created.warnings, ["w"]);
         assert!(created.setup_started);
 
-        // A protocol 4.0 server answers only `{space}`.
+        // A protocol 4 server answers only `{space}`.
         let old: SpaceCreateResult =
             serde_json::from_value(json!({"space": {"id": "s1", "name": "a", "cwd": "/x"}}))
                 .unwrap();

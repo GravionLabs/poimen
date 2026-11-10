@@ -876,6 +876,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_protocol_4_server_without_the_trust_handshake_is_incompatible() {
+        // The app skips `trust::gate` on the poimen backend and relies on the `space.create`
+        // trust handshake, which protocol 5 introduced; a protocol 4 server never asks.
+        assert_eq!(poimen_client::protocol::PROTOCOL_VERSION, 5);
+        assert_eq!(
+            classify(pong_of("0.14.0", 4), false, "0.14.0"),
+            Ping::Incompatible {
+                running: "0.14.0".into(),
+                protocol: 4
+            }
+        );
+        assert_eq!(
+            classify(pong_of("0.15.0", 4), false, "0.14.0"),
+            Ping::Incompatible {
+                running: "0.15.0".into(),
+                protocol: 4
+            }
+        );
+    }
+
     fn outdated_fake() -> Fake {
         let fake = Fake::new(true, true, true);
         fake.found.replace(Some(Ping::Outdated {

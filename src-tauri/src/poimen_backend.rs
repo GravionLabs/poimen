@@ -45,6 +45,16 @@ pub struct PoimenBackend {
 }
 
 impl PoimenBackend {
+    /// Gives the tab whose only terminal is `terminal_id` the name `name`; no such tab is Ok.
+    fn rename_lone_tab(&self, terminal_id: &str, name: &str) -> Result<(), String> {
+        let alone = Node::terminal(terminal_id);
+        let layout = self.client.list_layout().map_err(text)?;
+        match layout.tabs.iter().find(|t| t.root == alone) {
+            Some(tab) => self.rename_tab(&tab.tab_id, name),
+            None => Ok(()),
+        }
+    }
+
     pub fn new(client: Client) -> Self {
         Self {
             client,
@@ -458,13 +468,12 @@ impl Backend for PoimenBackend {
             .rename_terminal(terminal_id, &name)
             .map_err(text)?;
         // A tab that holds only this terminal is the terminal to the user: it takes the name
-        // too, so every client shows the same.
-        let alone = Node::terminal(terminal_id);
-        let layout = self.client.list_layout().map_err(text)?;
-        match layout.tabs.iter().find(|t| t.root == alone) {
-            Some(tab) => self.rename_tab(&tab.tab_id, &name),
-            None => Ok(()),
+        // too, so every client shows the same. The terminal is renamed at this point, so a
+        // failure here is logged and never fails the call.
+        if let Err(err) = self.rename_lone_tab(terminal_id, &name) {
+            eprintln!("poimen: terminal {terminal_id} renamed, its tab not: {err}");
         }
+        Ok(())
     }
 
     fn close_tab(&self, tab_id: &str) -> Result<(), String> {
@@ -1512,6 +1521,50 @@ mod tests {
         );
     }
 
+    /// A backend whose server renames terminals but fails `failing` (`space.list` or
+    /// `tab.rename`).
+    fn backend_failing(
+        name: &str,
+        failing: &'static str,
+    ) -> (PoimenBackend, Arc<Mutex<Vec<String>>>) {
+        let path = temp_socket(name);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        serve(
+            &path,
+            log.clone(),
+            move |method, _| match method {
+                m if m == failing => Err(("internal", "server hiccup")),
+                "terminal.rename" => Ok(json!({"terminal": term_json("t1", "s1")})),
+                "space.list" => Ok(json!({
+                    "spaces": [{"id": "s1", "name": "api", "cwd": "/work/api", "tabs": ["tab1"], "active_tab": "tab1"}],
+                    "tabs": [tab_json("tab1", "s1", json!({"kind": "terminal", "terminal_id": "t1"}))],
+                })),
+                _ => Err(("unknown_method", "no")),
+            },
+            vec![],
+        );
+        (PoimenBackend::new(Client::new(path)), log)
+    }
+
+    #[test]
+    fn a_failed_tab_lookup_after_the_terminal_rename_does_not_fail_the_rename() {
+        let (backend, log) = backend_failing("rename-list-fails", "space.list");
+        assert_eq!(backend.rename_terminal("t1", Some("build")), Ok(()));
+        assert_eq!(params_of(&log, "terminal.rename")["name"], "build");
+        assert!(!lock(&log).iter().any(|l| l.starts_with("tab.rename")));
+    }
+
+    #[test]
+    fn a_failed_tab_rename_after_the_terminal_rename_does_not_fail_the_rename() {
+        let (backend, log) = backend_failing("rename-tab-fails", "tab.rename");
+        assert_eq!(backend.rename_terminal("t1", Some("build")), Ok(()));
+        assert_eq!(params_of(&log, "terminal.rename")["name"], "build");
+        assert_eq!(
+            params_of(&log, "tab.rename"),
+            json!({"tab_id": "tab1", "name": "build"})
+        );
+    }
+
     #[test]
     fn renaming_a_terminal_of_a_split_tab_leaves_the_tab_name() {
         let (backend, log) = backend_for("rename-split", vec![], false);
@@ -1646,7 +1699,7 @@ mod tests {
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
-            ("0.9.0", Some(4), 4)
+            ("0.9.0", Some(5), 5)
         );
     }
 
