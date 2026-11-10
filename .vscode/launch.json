@@ -13,7 +13,7 @@
       "request": "launch",
       "name": "Debug Rust",
       "cargo": {
-        "args": ["build", "--manifest-path=src-tauri/Cargo.toml", "--bin=poimen"],
+        "args": ["build", "--manifest-path=src-tauri/Cargo.toml", "--bin=poimen-app"],
         "filter": { "kind": "bin" }
       },
       "cwd": "${workspaceFolder}",

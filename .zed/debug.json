@@ -8,10 +8,10 @@
     "request": "launch",
     "build": {
       "command": "cargo",
-      "args": ["build", "--manifest-path=src-tauri/Cargo.toml", "--bin=poimen"],
+      "args": ["build", "--manifest-path=src-tauri/Cargo.toml", "--bin=poimen-app"],
       "cwd": "$ZED_WORKTREE_ROOT"
     },
-    "program": "$ZED_WORKTREE_ROOT/src-tauri/target/debug/poimen",
+    "program": "$ZED_WORKTREE_ROOT/src-tauri/target/debug/poimen-app",
     "cwd": "$ZED_WORKTREE_ROOT"
   }
 ]

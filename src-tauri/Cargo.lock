@@ -2990,7 +2990,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "poimen"
+name = "poimen-app"
 version = "0.15.1"
 dependencies = [
  "notify",
@@ -3028,6 +3028,7 @@ dependencies = [
  "poimen-client",
  "poimen-protocol",
  "poimen-server",
+ "serde_json",
  "signal-hook 0.3.18",
 ]
 
