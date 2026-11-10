@@ -132,6 +132,19 @@ describe("HerdrStore", () => {
     expect(tauri.calls("snapshot")).toHaveLength(1);
   });
 
+  it("re-reads the snapshot when a server tab changed or closed", async () => {
+    await store.start();
+    tauri.invoke.mockClear();
+
+    tauri.emit("herdr", { kind: "tab.changed", data: null });
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(tauri.calls("snapshot")).toHaveLength(1);
+
+    tauri.emit("herdr", { kind: "tab.closed", data: null });
+    await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
+    expect(tauri.calls("snapshot")).toHaveLength(2);
+  });
+
   it("resolves a call during a running re-read only after the queued re-read finished", async () => {
     const first = deferred<Snapshot>();
     tauri.answer("snapshot", () => first.promise);

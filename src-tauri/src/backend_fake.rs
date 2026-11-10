@@ -6,8 +6,8 @@ use std::sync::Mutex;
 use serde_json::json;
 
 use crate::backend::{
-    Backend, BackendEvent, BackendInfo, NewSpace, OnRecord, OpenedStream, Outcome, Snapshot,
-    SplitDirection, StartError, StreamRecord, StreamRequest,
+    Backend, BackendEvent, BackendInfo, LaidOut, LayoutRequest, NewSpace, OnRecord, OpenedStream,
+    Outcome, Snapshot, SplitDirection, StartError, StreamRecord, StreamRequest,
 };
 use crate::herdr::{AgentSession, PromptOutcome};
 
@@ -20,6 +20,8 @@ pub struct FakeBackend {
     pub records: Mutex<Vec<StreamRecord>>,
     /// Whether opened streams are emulated.
     pub emulated: bool,
+    /// What `create_space_with_layout` answers; `None`: the fake does not build layouts (herdr).
+    pub laid_out: Mutex<Option<LaidOut>>,
 }
 
 impl Default for FakeBackend {
@@ -34,6 +36,7 @@ impl Default for FakeBackend {
             }),
             records: Mutex::default(),
             emulated: false,
+            laid_out: Mutex::default(),
         }
     }
 }
@@ -97,6 +100,25 @@ impl Backend for FakeBackend {
         })
     }
 
+    fn create_space_with_layout(
+        &self,
+        request: LayoutRequest<'_>,
+    ) -> Option<Result<LaidOut, String>> {
+        let answer = self.laid_out.lock().unwrap().clone()?;
+        let decision = match request.decision {
+            None => "-".to_owned(),
+            Some(crate::trust::Decision::Trust { hash }) => format!("trust:{hash}"),
+            Some(crate::trust::Decision::Without) => "without".to_owned(),
+        };
+        let line = format!(
+            "create_space_with_layout {} {} {decision} {}",
+            request.cwd,
+            request.label,
+            request.command.unwrap_or("-")
+        );
+        Some(self.record(line).map(|_| answer))
+    }
+
     fn focus_space(&self, space_id: &str) -> Result<(), String> {
         self.record(format!("focus {space_id}")).map(drop)
     }
@@ -140,6 +162,14 @@ impl Backend for FakeBackend {
     fn rename_terminal(&self, terminal_id: &str, label: Option<&str>) -> Result<(), String> {
         self.record(format!("rename {terminal_id} {}", label.unwrap_or("-")))
             .map(drop)
+    }
+
+    fn close_tab(&self, tab_id: &str) -> Result<(), String> {
+        self.record(format!("close_tab {tab_id}")).map(drop)
+    }
+
+    fn rename_tab(&self, tab_id: &str, name: &str) -> Result<(), String> {
+        self.record(format!("rename_tab {tab_id} {name}")).map(drop)
     }
 
     fn send_input(&self, terminal_id: &str, text: &str) -> Result<(), String> {

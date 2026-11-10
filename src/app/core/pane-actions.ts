@@ -5,6 +5,7 @@ import {
   paneDir,
   rowName,
   spaceContaining,
+  spaceRoot,
   workspaceDirs,
   type Terminal,
   type SplitDirection,
@@ -120,7 +121,7 @@ export class PaneActions {
     }
     const outcome = await this.spaces.create(cwd, "");
     if (!outcome) return undefined;
-    return this.store.snapshot().terminals.find((t) => t.space_id === outcome.workspace_id);
+    return spaceRoot(this.store.snapshot(), outcome.workspace_id);
   }
 
   /** Splits `paneId`; the new shell starts in the pane's directory. Resolves to the new pane. */

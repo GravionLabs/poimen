@@ -23,6 +23,67 @@ export interface Tab {
   label: string;
   number: number;
   agent_status: AgentStatus;
+  /**
+   * The split tree of the tab as the server keeps it (poimen backend); absent for a herdr tab and
+   * for a terminal without a leaf (an exited one), which is a tab of its own.
+   */
+  root?: TabTree;
+  /** The focused leaf of the tab, shared by every client (poimen backend). */
+  active_terminal?: string;
+}
+
+/**
+ * A node of a tab's split tree (`Node` of the poimen-server protocol): a terminal, or a split of
+ * two nodes; `right` puts the second child right of the first, `down` below it, and `ratio` is the
+ * share of the first child.
+ */
+export type TabTree =
+  | { kind: "terminal"; terminal_id: string }
+  | {
+      kind: "split";
+      split_id: string;
+      direction: SplitDirection;
+      ratio: number;
+      children: [TabTree, TabTree];
+    };
+
+/** The terminals of the leaves of `tree`, depth first (first child before second). */
+export function treeTerminals(tree: TabTree | undefined): string[] {
+  if (!tree) return [];
+  if (tree.kind === "terminal") return [tree.terminal_id];
+  return tree.children.flatMap(treeTerminals);
+}
+
+/**
+ * The panes of `tab` in the order of its split tree (the first leaf first), then the panes of
+ * the tab the tree does not name, in snapshot order; so no terminal of the tab is left out.
+ */
+export function tabPanes(tab: Tab, terminals: readonly Terminal[]): Terminal[] {
+  const own = terminals.filter((t) => t.tab_id === tab.tab_id);
+  const leaves = treeTerminals(tab.root);
+  const rank = new Map(leaves.map((id, i) => [id, i]));
+  const inTree = own
+    .filter((t) => rank.has(t.terminal_id))
+    .sort((a, b) => rank.get(a.terminal_id)! - rank.get(b.terminal_id)!);
+  return [...inTree, ...own.filter((t) => !rank.has(t.terminal_id))];
+}
+
+/** The terminal a tab shows: the first leaf of its tree, else its first pane. */
+export function tabTerminal(tab: Tab, terminals: readonly Terminal[]): Terminal | undefined {
+  return tabPanes(tab, terminals)[0];
+}
+
+/**
+ * The root terminal of a space: the terminal its first tab (by number) shows, which is the root
+ * pane of the layout of a new space; else its first terminal.
+ */
+export function spaceRoot(snapshot: Snapshot, spaceId: string): Terminal | undefined {
+  const first = snapshot.tabs
+    .filter((t) => t.space_id === spaceId)
+    .sort((a, b) => a.number - b.number)
+    .map((tab) => tabTerminal(tab, snapshot.terminals))
+    .find((t) => t !== undefined);
+  return first ?? snapshot.terminals.find((t) => t.space_id === spaceId);
 }
 
 export interface Terminal {
@@ -218,10 +279,7 @@ export function buildTree(
     tabs: orderTabs(
       snapshot.tabs.filter((tab) => tab.space_id === workspace.space_id),
       tabOrder[workspace.space_id],
-    ).map((tab) => ({
-      tab,
-      panes: snapshot.terminals.filter((pane) => pane.tab_id === tab.tab_id),
-    })),
+    ).map((tab) => ({ tab, panes: tabPanes(tab, snapshot.terminals) })),
   }));
 }
 

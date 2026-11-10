@@ -125,6 +125,30 @@ pub struct NewSpace {
     pub root_terminal: Option<String>,
 }
 
+/// A space whose layout the backend resolves and builds itself (poimen-server's `space.create`).
+#[derive(Debug, Clone, Copy)]
+pub struct LayoutRequest<'a> {
+    pub cwd: &'a str,
+    pub label: &'a str,
+    /// The user's answer to an earlier [`LaidOut::Trust`]; `None` on the first send.
+    pub decision: Option<&'a crate::trust::Decision>,
+    /// Replaces the command of the layout's root pane (a task's command).
+    pub command: Option<&'a str>,
+}
+
+/// What [`Backend::create_space_with_layout`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaidOut {
+    /// The space exists with its layout (and the setup tab, when `setup_started`).
+    Created {
+        space_id: String,
+        warnings: Vec<String>,
+        setup_started: bool,
+    },
+    /// The project file has untrusted commands; nothing was created.
+    Trust(crate::trust::TrustRequest),
+}
+
 /// An event pushed by the backend (`kind` and a payload), or one of the synthetic
 /// `poimen.connected`, `poimen.disconnected` and `poimen.resync`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -209,6 +233,15 @@ pub trait Backend: Send + Sync {
     /// Lists spaces, tabs and terminals.
     fn snapshot(&self) -> Result<Snapshot, String>;
     fn create_space(&self, cwd: &str, label: &str) -> Result<NewSpace, String>;
+    /// Creates a space with the layout the backend resolves and builds itself, asking for trust
+    /// in the project file first; `None` when the backend does not build layouts (herdr: the app
+    /// creates the space with [`Backend::create_space`] and applies the layout).
+    fn create_space_with_layout(
+        &self,
+        _request: LayoutRequest<'_>,
+    ) -> Option<Result<LaidOut, String>> {
+        None
+    }
     fn focus_space(&self, space_id: &str) -> Result<(), String>;
     fn close_space(&self, space_id: &str) -> Result<(), String>;
     /// Renames a space; the label must not be blank.
@@ -226,6 +259,14 @@ pub trait Backend: Send + Sync {
     fn close_terminal(&self, terminal_id: &str) -> Result<(), String>;
     /// A blank label clears the name.
     fn rename_terminal(&self, terminal_id: &str, label: Option<&str>) -> Result<(), String>;
+    /// Closes a tab with all its terminals. Not supported by every backend.
+    fn close_tab(&self, _tab_id: &str) -> Result<(), String> {
+        Err("this backend cannot close a tab".into())
+    }
+    /// Renames a tab; the name must not be blank. Not supported by every backend.
+    fn rename_tab(&self, _tab_id: &str, _name: &str) -> Result<(), String> {
+        Err("this backend cannot rename a tab".into())
+    }
     /// Types `text` into the terminal and presses Enter.
     fn send_input(&self, terminal_id: &str, text: &str) -> Result<(), String>;
     fn agent_start(
