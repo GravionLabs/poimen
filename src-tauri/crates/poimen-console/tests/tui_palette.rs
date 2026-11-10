@@ -433,12 +433,13 @@ fn project_entries_are_listed_and_run_behind_the_trust_gate() {
 
     // Trusted now: the preset runs without asking and splits its tab.
     r.pick("Preset: duo");
-    wait_until("the preset tab exists", || {
-        f.tab_names().contains(&"duo".to_owned())
+    // The tab appears before its split does: wait for both terminals.
+    wait_until("the preset tab is split", || {
+        f.model()
+            .tabs
+            .iter()
+            .any(|t| t.name == "duo" && t.root.terminal_ids().len() == 2)
     });
-    let model = f.model();
-    let tab = model.tabs.iter().find(|t| t.name == "duo").unwrap();
-    assert_eq!(tab.root.terminal_ids().len(), 2);
     r.detach();
 }
 
