@@ -76,14 +76,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   color: var(--h-text-muted-color);
   background: transparent;
   border: 0;
   border-radius: 5px;
   cursor: pointer;
+}
+
+.tools .icon-button app-icon {
+  width: 24px;
+  height: 24px;
 }
 
 .tools .icon-button:hover {
@@ -205,4 +210,19 @@
 
 .dot.out {
   right: -2px;
+}
+
+.dot.vertical {
+  left: 50%;
+  top: auto;
+  margin: 0 0 0 -2px;
+}
+
+.dot.in.vertical {
+  top: -2px;
+}
+
+.dot.out.vertical {
+  right: auto;
+  bottom: -2px;
 }

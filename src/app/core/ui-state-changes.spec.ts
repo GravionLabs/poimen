@@ -33,3 +33,20 @@ describe("changes layout", () => {
     expect(parseLayout(JSON.stringify({ changesLayout: "inline" })).changesLayout).toBe("inline");
   });
 });
+
+describe("flow direction", () => {
+  it("is left to right until top to bottom is chosen, and is remembered", () => {
+    const storage = fakeStorage();
+    const state = stateOn(storage);
+    expect(state.flowDirection()).toBe("LR");
+    state.setFlowDirection("TB");
+    expect(stateOn(storage).flowDirection()).toBe("TB");
+    state.setFlowDirection("LR");
+    expect(stateOn(storage).flowDirection()).toBe("LR");
+  });
+
+  it("ignores a stored value that is not a direction", () => {
+    expect(parseLayout(JSON.stringify({ flowDirection: "RL" })).flowDirection).toBeUndefined();
+    expect(parseLayout(JSON.stringify({ flowDirection: "TB" })).flowDirection).toBe("TB");
+  });
+});
