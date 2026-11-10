@@ -2,6 +2,10 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/poimen-server"]
+    "windows": {
+      "nsis": { "installerHooks": "windows/nsis-hooks.nsh" },
+      "wix": { "fragmentPaths": ["windows/path.wxs"], "componentRefs": ["PoimenCliPath"] }
+    },
+    "externalBin": ["binaries/poimen-server", "binaries/poimen"]
   }
 }
