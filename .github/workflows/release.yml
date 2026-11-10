@@ -237,14 +237,71 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # poimen-server alone for Linux hosts reached over SSH (`poimen-server stdio`, #278): static musl binaries, so no
+  # glibc version matters, attached as poimen-server-<version>-<target>.tar.gz. A beta has no release: workflow artifacts.
+  server-linux:
+    name: Server ${{ matrix.target }}
+    needs: [test, release, prerelease]
+    if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) && contains(fromJSON('["success","skipped"]'), needs.prerelease.result) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload the assets to the release
+    env:
+      POIMEN_CHANNEL: ${{ needs.prerelease.outputs.version && 'rc' || 'stable' }}
+      VERSION: ${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ (needs.release.outputs.version || needs.prerelease.outputs.release-id) && format('v{0}', needs.release.outputs.version || needs.prerelease.outputs.version) || github.sha }}
+
+      - name: Build the static server
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          rustup target add "${{ matrix.target }}"
+          cd src-tauri
+          cargo build --release --locked -p poimen-server --target "${{ matrix.target }}"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="poimen-server-${VERSION:-$GITHUB_SHA}-${{ matrix.target }}"
+          mkdir -p dist
+          tar -C "src-tauri/target/${{ matrix.target }}/release" -czf "dist/$name.tar.gz" poimen-server
+          # The binary must be static (no glibc) and report its version and protocol.
+          file "src-tauri/target/${{ matrix.target }}/release/poimen-server"
+          "src-tauri/target/${{ matrix.target }}/release/poimen-server" --version
+
+      - name: Attach to the release
+        if: ${{ needs.release.outputs.release-id || needs.prerelease.outputs.release-id }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
+        run: gh release upload "$TAG" dist/*.tar.gz --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Upload the beta archive
+        if: ${{ !(needs.release.outputs.release-id || needs.prerelease.outputs.release-id) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   # SHA256SUMS over the attached installers and update archives, and a build provenance attestation over the same
   # files (#522): `gh attestation verify <file> --repo GravionLabs/poimen` shows that a download was built by this
   # workflow from the tag. The installers stay unsigned, so this is how a user checks a download. Runs only when every
   # installer was attached (a partial release gets no SHA256SUMS) and never for a beta (no release).
   checksums:
     name: Checksums and provenance
-    needs: [release, prerelease, installers]
-    if: ${{ !cancelled() && needs.installers.result == 'success' && (needs.release.outputs.release-id || needs.prerelease.outputs.release-id) != '' }}
+    needs: [release, prerelease, installers, server-linux]
+    if: ${{ !cancelled() && needs.installers.result == 'success' && needs.server-linux.result == 'success' && (needs.release.outputs.release-id || needs.prerelease.outputs.release-id) != '' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write # download the assets, upload SHA256SUMS

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use poimen_protocol::CHANNEL;
-use poimen_server::{Config, Server, StartError, claude, copilot, hook, report};
+use poimen_server::{Config, Server, StartError, claude, copilot, hook, report, stdio};
 
 const USAGE: &str =
     "usage: poimen-server integration install|uninstall|status claude|copilot [--settings <path>]";
@@ -16,7 +16,8 @@ const USAGE: &str =
 const HELP: &str = "\
 usage:
   poimen-server                      start the server (one per user; no argument)
-  poimen-server --version            print the version
+  poimen-server --version            print the version and the protocol version
+  poimen-server stdio                bridge stdin/stdout to the running server (started if absent)
   poimen-server --help, -h           print this usage
   poimen-server report tokens|clear|agent
   poimen-server hook claude
@@ -29,6 +30,7 @@ enum Mode {
     Serve,
     Version,
     Help,
+    Stdio,
     Subcommand,
     Unknown,
 }
@@ -38,9 +40,19 @@ fn mode(args: &[String]) -> Mode {
         None => Mode::Serve,
         Some("--version") => Mode::Version,
         Some("--help" | "-h") => Mode::Help,
+        Some("stdio") if args.len() == 1 => Mode::Stdio,
         Some("hook" | "report" | "integration") => Mode::Subcommand,
         Some(_) => Mode::Unknown,
     }
+}
+
+/// `poimen-server <version> (protocol <n>)`, read by the machine check of a remote host.
+fn version_line() -> String {
+    format!(
+        "poimen-server {} (protocol {})",
+        env!("CARGO_PKG_VERSION"),
+        poimen_protocol::PROTOCOL_VERSION
+    )
 }
 
 fn main() -> ExitCode {
@@ -48,9 +60,16 @@ fn main() -> ExitCode {
     match mode(&args) {
         Mode::Serve => serve(),
         Mode::Version => {
-            println!("poimen-server {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", version_line());
             ExitCode::SUCCESS
         }
+        Mode::Stdio => match stdio::run(&poimen_protocol::socket_path()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("poimen-server: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Mode::Help => {
             println!("{HELP}");
             ExitCode::SUCCESS
@@ -210,6 +229,19 @@ mod tests {
     #[test]
     fn version_flag_prints_version() {
         assert_eq!(mode(&args(&["--version"])), Mode::Version);
+    }
+
+    #[test]
+    fn stdio_takes_no_further_argument() {
+        assert_eq!(mode(&args(&["stdio"])), Mode::Stdio);
+        assert_eq!(mode(&args(&["stdio", "x"])), Mode::Unknown);
+    }
+
+    #[test]
+    fn version_line_has_version_and_protocol() {
+        let line = version_line();
+        assert!(line.starts_with(concat!("poimen-server ", env!("CARGO_PKG_VERSION"))));
+        assert!(line.ends_with(&format!("(protocol {})", poimen_protocol::PROTOCOL_VERSION)));
     }
 
     #[test]

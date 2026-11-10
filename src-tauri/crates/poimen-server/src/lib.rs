@@ -12,6 +12,7 @@ mod emulator;
 pub mod hook;
 mod pty;
 pub mod report;
+pub mod stdio;
 mod store;
 mod stream;
 mod tabs;
