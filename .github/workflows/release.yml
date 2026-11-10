@@ -294,14 +294,86 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The poimen CLI without the app (#519): static musl binaries on Linux as .tar.gz and as the packages poimen-cli
+  # (.deb always, .rpm only for a version without '-'), a .tar.gz on macOS and a .zip on Windows, attached as
+  # poimen-<version>-<target>.<ext>. The installers carry the CLI too (externalBin). A beta has no release: artifacts.
+  cli:
+    name: CLI ${{ matrix.target }}
+    needs: [test, release, prerelease]
+    if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) && contains(fromJSON('["success","skipped"]'), needs.prerelease.result) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload the assets to the release
+    env:
+      POIMEN_CHANNEL: ${{ needs.prerelease.outputs.version && 'rc' || 'stable' }}
+      VERSION: ${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl, arch: amd64 }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, arch: arm64 }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ (needs.release.outputs.version || needs.prerelease.outputs.release-id) && format('v{0}', needs.release.outputs.version || needs.prerelease.outputs.version) || github.sha }}
+
+      - name: Test the packaging script
+        shell: bash
+        run: bash scripts/package-cli.test.sh
+
+      - name: Build the CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.target }}" == *musl* ]]; then sudo apt-get update && sudo apt-get install -y musl-tools; fi
+          rustup target add "${{ matrix.target }}"
+          cd src-tauri
+          cargo build --release --locked -p poimen-console --target "${{ matrix.target }}"
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ext=""; [[ "${{ matrix.target }}" == *windows* ]] && ext=".exe"
+          bin="src-tauri/target/${{ matrix.target }}/release/poimen$ext"
+          bash scripts/package-cli.sh "${VERSION:-$GITHUB_SHA}" "${{ matrix.target }}" "$bin" dist
+          if [[ "${{ matrix.target }}" == *linux* ]]; then
+            file "$bin"
+            "$bin" --version
+            curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_Linux_$([ "${{ matrix.arch }}" = amd64 ] && echo x86_64 || echo arm64).tar.gz | tar -xz nfpm
+            export ARCH="${{ matrix.arch }}" BINARY="$PWD/$bin" VERSION="${VERSION:-0.0.0}"
+            ./nfpm package -f packaging/nfpm-poimen-cli.yaml -p deb -t dist
+            if [[ "$VERSION" != *-* ]]; then ./nfpm package -f packaging/nfpm-poimen-cli.yaml -p rpm -t dist; fi
+          fi
+
+      - name: Attach to the release
+        if: ${{ needs.release.outputs.release-id || needs.prerelease.outputs.release-id }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Upload the beta archive
+        if: ${{ !(needs.release.outputs.release-id || needs.prerelease.outputs.release-id) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
   # SHA256SUMS over the attached installers and update archives, and a build provenance attestation over the same
   # files (#522): `gh attestation verify <file> --repo GravionLabs/poimen` shows that a download was built by this
   # workflow from the tag. The installers stay unsigned, so this is how a user checks a download. Runs only when every
   # installer was attached (a partial release gets no SHA256SUMS) and never for a beta (no release).
   checksums:
     name: Checksums and provenance
-    needs: [release, prerelease, installers, server-linux]
-    if: ${{ !cancelled() && needs.installers.result == 'success' && needs.server-linux.result == 'success' && (needs.release.outputs.release-id || needs.prerelease.outputs.release-id) != '' }}
+    needs: [release, prerelease, installers, server-linux, cli]
+    if: ${{ !cancelled() && needs.installers.result == 'success' && needs.server-linux.result == 'success' && needs.cli.result == 'success' && (needs.release.outputs.release-id || needs.prerelease.outputs.release-id) != '' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write # download the assets, upload SHA256SUMS

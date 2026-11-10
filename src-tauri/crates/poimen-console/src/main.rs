@@ -19,6 +19,10 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Ok(Command::Version) => {
+            println!("poimen {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
         Ok(Command::Tui) => tui(),
         Ok(Command::Attach(a)) => attach(a),
         Ok(Command::Request(r)) => {

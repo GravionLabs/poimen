@@ -2881,17 +2881,21 @@ mod build_layout_tests {
         assert_eq!(rc["mainBinaryName"], "poimen-rc");
         assert_eq!(rc["bundle"]["createUpdaterArtifacts"], false);
         assert_eq!(rc["plugins"]["updater"]["endpoints"], json!([]));
-        // The sidecar is the name the app of each channel looks for beside itself.
+        // The sidecars are the names the app of each channel looks for beside itself: the server
+        // and the console (`poimen`, `poimen-cli-rc` on rc so it can sit beside the stable one).
         assert_eq!(
             bundle["bundle"]["externalBin"],
-            json!([format!(
-                "binaries/{}",
-                Channel::Stable.server_program(false)
-            )])
+            json!([
+                format!("binaries/{}", Channel::Stable.server_program(false)),
+                "binaries/poimen"
+            ])
         );
         assert_eq!(
             rc["bundle"]["externalBin"],
-            json!([format!("binaries/{}", Channel::Rc.server_program(false))])
+            json!([
+                format!("binaries/{}", Channel::Rc.server_program(false)),
+                "binaries/poimen-cli-rc"
+            ])
         );
     }
 

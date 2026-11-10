@@ -219,10 +219,21 @@ Optional `~/.config/poimen/config.json`, watched and applied without a restart. 
 | Part   | macOS                                  | Windows             | Linux                     |
 | ------ | -------------------------------------- | ------------------- | ------------------------- |
 | App    | `poimen.app/Contents/MacOS/poimen-app` | `poimen-app.exe`    | `/usr/bin/poimen-app`     |
-| CLI    | `poimen` ([ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)) | `poimen.exe` (later) | `/usr/bin/poimen` (later) |
+| CLI    | `poimen` ([ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)) | `poimen.exe` | `/usr/bin/poimen` |
 | Server | `poimen-server`                        | `poimen-server.exe` | `/usr/bin/poimen-server`  |
 
 The Cargo package of the app is `poimen-app` (library `poimen_lib`). The product name, the identifier `dev.gravionlabs.poimen` and with them the config directory stay `poimen`. The RC overlay builds `poimen-rc` and `poimen-server-rc`.
+
+## Console
+
+The `poimen` binary (CLI and TUI, [ADR 0006](docs/adr/0006-poimen-console-with-herdr-scope.md)) talks to `poimen-server`. It ships with every installer and as its own download:
+
+- **macOS:** inside the app at `/Applications/poimen.app/Contents/MacOS/poimen`. Link it onto the PATH with `sudo ln -sf /Applications/poimen.app/Contents/MacOS/poimen /usr/local/bin/poimen`.
+- **Windows:** the `-setup.exe` and the `.msi` install `poimen.exe` next to the app and add that directory to your user PATH (open a new terminal after the install).
+- **Linux:** the `.deb` and `.rpm` of the app install `/usr/bin/poimen`. For a host without the app, install the `poimen-cli` package (`.deb` or `.rpm` of the release; it conflicts with the app package). In the AppImage the binary is at `squashfs-root/usr/bin/poimen` after `./poimen_<version>_amd64.AppImage --appimage-extract`.
+- **Without the app:** the release assets `poimen-<version>-<target>.tar.gz` (Linux musl, macOS) and `.zip` (Windows) hold only the binary.
+
+A pre-release (RC) installs the CLI as `poimen-cli-rc` beside the "Poimen RC" app and has no `.rpm`.
 
 ## Releases
 
