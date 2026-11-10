@@ -519,6 +519,23 @@ impl Backend for PoimenBackend {
         self.client.rename_tab(tab_id, name).map(drop).map_err(text)
     }
 
+    fn resize_split(&self, tab_id: &str, split_id: &str, ratio: f64) -> Result<(), String> {
+        if !(ratio.is_finite() && ratio > 0.0 && ratio < 1.0) {
+            return Err("The ratio of a split must be between 0 and 1.".into());
+        }
+        self.client
+            .resize_split(tab_id, split_id, ratio)
+            .map(drop)
+            .map_err(text)
+    }
+
+    fn focus_tab(&self, tab_id: &str, terminal_id: &str) -> Result<(), String> {
+        self.client
+            .focus_tab(tab_id, Some(terminal_id))
+            .map(drop)
+            .map_err(text)
+    }
+
     fn send_input(&self, terminal_id: &str, text_: &str) -> Result<(), String> {
         self.client
             .input(terminal_id, &format!("{text_}\r"))
@@ -1472,6 +1489,11 @@ mod tests {
                     json!({"kind": "terminal", "terminal_id": "t1"}),
                 )})),
                 "tab.close" => Ok(json!({})),
+                "tab.resize_split" | "tab.focus" => Ok(json!({"tab": tab_json(
+                    "tab1",
+                    "s1",
+                    json!({"kind": "terminal", "terminal_id": "t1"})
+                )})),
                 "terminal.create" => {
                     Ok(json!({"terminal": term_json("t9", params["space_id"].as_str().unwrap())}))
                 }
@@ -1624,6 +1646,35 @@ mod tests {
         assert_eq!(
             params_of(&log, "tab.rename"),
             json!({"tab_id": "tab1", "name": "logs"})
+        );
+    }
+
+    #[test]
+    fn a_divider_drag_goes_to_the_server_as_tab_resize_split() {
+        let (backend, log) = backend_for("resize", vec![], false);
+        backend.resize_split("tab1", "split5", 0.7).unwrap();
+        assert_eq!(
+            params_of(&log, "tab.resize_split"),
+            json!({"tab_id": "tab1", "split_id": "split5", "ratio": 0.7})
+        );
+    }
+
+    #[test]
+    fn a_ratio_outside_zero_and_one_is_refused_before_the_server() {
+        let (backend, log) = backend_for("resize-bad", vec![], false);
+        for ratio in [0.0, 1.0, -0.2, f64::NAN] {
+            assert!(backend.resize_split("tab1", "split5", ratio).is_err());
+        }
+        assert!(!lock(&log).iter().any(|l| l.starts_with("tab.resize_split")));
+    }
+
+    #[test]
+    fn focusing_a_pane_goes_to_the_server_as_tab_focus() {
+        let (backend, log) = backend_for("focus", vec![], false);
+        backend.focus_tab("tab1", "t2").unwrap();
+        assert_eq!(
+            params_of(&log, "tab.focus"),
+            json!({"tab_id": "tab1", "terminal_id": "t2"})
         );
     }
 

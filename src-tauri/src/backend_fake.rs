@@ -189,6 +189,16 @@ impl Backend for FakeBackend {
         self.record(format!("rename_tab {tab_id} {name}")).map(drop)
     }
 
+    fn resize_split(&self, tab_id: &str, split_id: &str, ratio: f64) -> Result<(), String> {
+        self.record(format!("resize_split {tab_id} {split_id} {ratio}"))
+            .map(drop)
+    }
+
+    fn focus_tab(&self, tab_id: &str, terminal_id: &str) -> Result<(), String> {
+        self.record(format!("focus_tab {tab_id} {terminal_id}"))
+            .map(drop)
+    }
+
     fn send_input(&self, terminal_id: &str, text: &str) -> Result<(), String> {
         self.record(format!("input {terminal_id} {text}")).map(drop)
     }

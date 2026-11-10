@@ -25,6 +25,8 @@ import {
   spaceRoot,
   tabPanes,
   tabTerminal,
+  survivingLeaf,
+  paneSuccessor,
   treeTerminals,
   workspaceDirs,
   type Tab,
@@ -567,5 +569,83 @@ describe("transcript empty states", () => {
         "The flow",
       ),
     ).toBe("Waiting for the agent's transcript to appear.");
+  });
+});
+
+describe("survivingLeaf", () => {
+  const split = (): Tab =>
+    ({
+      tab_id: "tb",
+      root: {
+        kind: "split",
+        split_id: "s",
+        direction: "right",
+        ratio: 0.5,
+        children: [
+          { kind: "terminal", terminal_id: "t1" },
+          { kind: "terminal", terminal_id: "t2" },
+        ],
+      },
+      active_terminal: "t1",
+    }) as Tab;
+
+  it("takes the first other leaf when the active one is closed", () => {
+    expect(survivingLeaf(split(), "t1")).toBe("t2");
+  });
+
+  it("prefers the active terminal when it is not the closed one", () => {
+    expect(survivingLeaf({ ...split(), active_terminal: "t2" }, "t1")).toBe("t2");
+  });
+
+  it("is undefined for a single leaf or an unknown tab", () => {
+    const single = { tab_id: "tb", root: { kind: "terminal", terminal_id: "t1" } } as Tab;
+    expect(survivingLeaf(single, "t1")).toBeUndefined();
+    expect(survivingLeaf(undefined, "t1")).toBeUndefined();
+  });
+});
+
+describe("paneSuccessor", () => {
+  const leaf = (terminal_id: string) => ({ kind: "terminal" as const, terminal_id });
+  const snap: Snapshot = {
+    spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+    tabs: [
+      {
+        tab_id: "w1:t1",
+        space_id: "w1",
+        label: "a",
+        number: 1,
+        agent_status: "idle",
+        root: {
+          kind: "split",
+          split_id: "s",
+          direction: "down",
+          ratio: 0.5,
+          children: [leaf("w1:p1"), leaf("w1:p2")],
+        },
+      },
+      {
+        tab_id: "w1:t2",
+        space_id: "w1",
+        label: "b",
+        number: 2,
+        agent_status: "idle",
+        root: leaf("w1:p3"),
+      },
+    ],
+    terminals: [
+      pane({ terminal_id: "w1:p1" }),
+      pane({ terminal_id: "w1:p2" }),
+      pane({ terminal_id: "w1:p3", tab_id: "w1:t2" }),
+    ],
+  };
+
+  it("names the other leaf of the pane's split tab", () => {
+    expect(paneSuccessor(snap, "w1:p1")).toBe("w1:p2");
+    expect(paneSuccessor(snap, "w1:p2")).toBe("w1:p1");
+  });
+
+  it("has none for the last leaf of a tab or a pane the snapshot does not have", () => {
+    expect(paneSuccessor(snap, "w1:p3")).toBeUndefined();
+    expect(paneSuccessor(snap, "w1:p9")).toBeUndefined();
   });
 });
