@@ -22,7 +22,8 @@
 .divider {
   position: relative;
   flex: none;
-  --divider-color: var(--h-border-color);
+  /* Half foreground over the terminal background: visible in every scheme, user schemes included. */
+  --divider-color: color-mix(in srgb, var(--term-fg) 50%, var(--term-bg));
   box-sizing: border-box;
   width: 7px;
   border-left: 1px solid var(--divider-color);
