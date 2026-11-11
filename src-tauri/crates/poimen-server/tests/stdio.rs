@@ -13,7 +13,7 @@ use std::time::Duration;
 use poimen_client::Client;
 use poimen_client::protocol::TerminalCreate;
 use poimen_server::stdio::{bridge, connect_or_start};
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 
 struct Env {
     dir: PathBuf,
@@ -33,6 +33,7 @@ impl Env {
             state_file: self.dir.join("state").join("server.json"),
             scrollback: 1000,
             home: None,
+            pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         }
     }
 }

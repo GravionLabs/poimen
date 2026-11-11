@@ -49,6 +49,11 @@ The check (#602, 2026-11-11) is `the_child_outlives_its_clients_but_not_its_host
 
 Observed result (CI `windows` job on `windows-latest`, 2026-11-11, [run 42981307365](https://github.com/GravionLabs/poimen/actions/runs/42981307365/job/130392164144), commit `e3a5810`): the test passes. The child of the ConPTY kept running while its client was disconnected for three seconds and kept printing into the ring; the second client saw the same `child_pid`, a later `seq` and the records after the first client's without a `gap`. After the host was killed with `TerminateProcess` the child ended within the test's 30 s bound (the whole `tests/host.rs` run, including the three seconds without a client, took 4.56 s): on Windows as on Unix (where the child gets SIGHUP when the master closes) an ended host takes its terminal with it, and only its client may come and go. The first run of the check ([run 42980106897](https://github.com/GravionLabs/poimen/actions/runs/42980106897/job/130388328296)) failed for another reason: the ConPTY was created with `PSEUDOCONSOLE_INHERIT_CURSOR`, so conhost asked for the cursor position at start and held the child back until a reply the host never sends (no output while disconnected, a `cmd.exe /c exit 7` that never exited); the host now creates its ConPTY without that flag (`vendor/portable-pty/POIMEN.md`). The macOS run (local, 2026-11-11) passes.
 
+## Implementation
+
+- #602: the `poimen-pty-host` binary, the host protocol and the output ring (`docs/protocol.md`, "Host protocol").
+- #603: `poimen-server` starts every terminal in a host found next to its own binary and reads it as a client (`crates/poimen-server/src/host.rs`); a missing host is an error on `terminal.create`, there is no in-process PTY any more. The sidecar build, `externalBin` and the per-version copies (Windows, AppImage) ship the host next to the server; the cleanup rules of #605 refine that. A server restart still ends the terminals until #604 adopts the hosts: a graceful `server.shutdown` kills them, the hosts of a crashed server end with the orphan timeout.
+
 ## Alternatives
 
 - **`exec` of the new binary in the same process (Unix only).** Keeps pid, parent and descriptors, with the state serialized across the `exec`. Simple on Unix, but there is no equivalent on Windows, so it would need a second mechanism there. Rejected for that.

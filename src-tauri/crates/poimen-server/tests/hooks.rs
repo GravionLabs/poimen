@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use poimen_client::Client;
 use poimen_client::protocol::{AgentInfo, AgentStatus, TerminalCreate};
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 
 const HOOK: &str = env!("CARGO_BIN_EXE_poimen-server");
 
@@ -37,6 +37,7 @@ impl Env {
             state_file: self.dir.join("state").join("server.json"),
             scrollback: 1000,
             home: None,
+            pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         }
     }
 

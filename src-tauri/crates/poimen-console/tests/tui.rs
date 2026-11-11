@@ -21,7 +21,7 @@ use poimen_console::tui::config::Config;
 use poimen_console::tui::sidebar::{Model, RowKind};
 use poimen_console::tui::{self, Options, Outcome};
 use poimen_core::settings::SidebarRows;
-use poimen_server::{Config as ServerConfig, Server};
+use poimen_server::{Config as ServerConfig, PtyHost, Server};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -48,6 +48,7 @@ fn fixture(name: &str) -> Fixture {
         state_file: dir.join("state").join("server.json"),
         scrollback: 1000,
         home: None,
+        pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
     };
     let server = Server::bind(config.clone()).unwrap();
     thread::spawn(move || server.serve());

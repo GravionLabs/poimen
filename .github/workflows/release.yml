@@ -199,9 +199,10 @@ jobs:
           # The tag of a stable release or an rc; a beta has no tag and builds the commit of the dispatch.
           ref: ${{ (needs.release.outputs.version || needs.prerelease.outputs.release-id) && format('v{0}', needs.release.outputs.version || needs.prerelease.outputs.version) || github.sha }}
 
-      # poimen-server ships next to the app (bundle.externalBin in tauri.bundle.conf.json, which needs the
-      # target-suffixed file at build time); the app looks beside its own executable first. On the rc channel the
-      # sidecar is poimen-server-rc (externalBin of tauri.rc.conf.json).
+      # poimen-server and its PTY host poimen-pty-host ship next to the app (bundle.externalBin in
+      # tauri.bundle.conf.json, which needs the target-suffixed files at build time); the app looks beside its own
+      # executable first, the server finds the host beside itself. On the rc channel the sidecars are
+      # poimen-server-rc and poimen-pty-host-rc (externalBin of tauri.rc.conf.json).
       - name: Build the poimen-server sidecar
         shell: bash
         run: |
@@ -237,8 +238,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # poimen-server alone for Linux hosts reached over SSH (`poimen-server stdio`, #278): static musl binaries, so no
-  # glibc version matters, attached as poimen-server-<version>-<target>.tar.gz. A beta has no release: workflow artifacts.
+  # poimen-server (with the poimen-pty-host it starts its terminals in) for Linux hosts reached over SSH
+  # (`poimen-server stdio`, #278): static musl binaries, so no glibc version matters, attached as
+  # poimen-server-<version>-<target>.tar.gz. A beta has no release: workflow artifacts.
   server-linux:
     name: Server ${{ matrix.target }}
     needs: [test, release, prerelease]
@@ -266,17 +268,25 @@ jobs:
           sudo apt-get update && sudo apt-get install -y musl-tools
           rustup target add "${{ matrix.target }}"
           cd src-tauri
-          cargo build --release --locked -p poimen-server --target "${{ matrix.target }}"
+          cargo build --release --locked -p poimen-server -p poimen-pty-host --target "${{ matrix.target }}"
 
       - name: Package
         run: |
           set -euo pipefail
           name="poimen-server-${VERSION:-$GITHUB_SHA}-${{ matrix.target }}"
           mkdir -p dist
-          tar -C "src-tauri/target/${{ matrix.target }}/release" -czf "dist/$name.tar.gz" poimen-server
-          # The binary must be static (no glibc) and report its version and protocol.
-          file "src-tauri/target/${{ matrix.target }}/release/poimen-server"
-          "src-tauri/target/${{ matrix.target }}/release/poimen-server" --version
+          release="src-tauri/target/${{ matrix.target }}/release"
+          # The server starts its terminals in the PTY host next to it (ADR 0009), named for the channel.
+          host="poimen-pty-host"
+          if [ "$POIMEN_CHANNEL" = rc ]; then host="poimen-pty-host-rc"; fi
+          stage="$(mktemp -d)"
+          cp "$release/poimen-server" "$stage/poimen-server"
+          cp "$release/poimen-pty-host" "$stage/$host"
+          tar -C "$stage" -czf "dist/$name.tar.gz" poimen-server "$host"
+          # The binaries must be static (no glibc) and report their versions and protocols.
+          file "$release/poimen-server" "$release/poimen-pty-host"
+          "$release/poimen-server" --version
+          "$release/poimen-pty-host" --version
 
       - name: Attach to the release
         if: ${{ needs.release.outputs.release-id || needs.prerelease.outputs.release-id }}

@@ -11,9 +11,9 @@ Differences from upstream, nothing else:
   and `set_inherit_cursor(false)`, which drops `PSEUDOCONSOLE_INHERIT_CURSOR` from both attempts.
   Why: with that flag conhost sends DSR `ESC [ 6 n` at start and holds the child back until the
   reply; `poimen-pty-host` (#602) has no emulator to answer and may have no client, so its child
-  printed nothing and never exited (CI `windows`). `poimen-server` keeps the upstream flag: its
-  emulator answers the query.
+  printed nothing and never exited (CI `windows`). Since #603 every terminal runs in a host, so
+  no PTY of poimen keeps the flag.
 - Examples, `Cargo.lock` and package metadata files removed.
 
 Drop this copy when upstream passes the flag (or offers an option) and update `portable-pty` in
-`crates/poimen-server/Cargo.toml`.
+`crates/poimen-pty-host/Cargo.toml`.

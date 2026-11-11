@@ -1,5 +1,6 @@
-//! `poimen-server`: a headless daemon that owns the PTYs, so shells and agents keep running when
-//! the app closes. One server per user listens on a local socket (a Unix socket, a named pipe on
+//! `poimen-server`: a headless daemon that runs the terminals, so shells and agents keep running
+//! when the app closes. Each terminal's PTY and child live in a `poimen-pty-host` of its own,
+//! which the server reads as a client (`host.rs`, ADR 0009). One server per user listens on a local socket (a Unix socket, a named pipe on
 //! Windows; `docs/protocol.md`).
 //!
 //! The server keeps spaces (name, cwd) with terminals, and per space the tabs in order with a
@@ -11,6 +12,7 @@ pub mod copilot;
 mod create;
 mod emulator;
 pub mod hook;
+mod host;
 mod pty;
 pub mod report;
 pub mod stdio;
@@ -42,6 +44,7 @@ use poimen_protocol::{
 use serde_json::{Value, json};
 
 pub use emulator::DEFAULT_SCROLLBACK;
+pub use host::{Launch, PtyHost, host_beside};
 pub use store::state_file_path;
 use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
 
@@ -65,6 +68,9 @@ pub struct Config {
     /// `spaceTemplates`, `spaces.layout` and `harnesses` to `space.create` (which also writes
     /// `trustedProjects`); `None`: no user config.
     pub home: Option<PathBuf>,
+    /// How a new terminal's `poimen-pty-host` is started (ADR 0009): the binary next to the
+    /// server, or an in-process host in tests.
+    pub pty_host: PtyHost,
 }
 
 impl Config {
@@ -79,6 +85,7 @@ impl Config {
                 .and_then(|v| v.trim().parse().ok())
                 .unwrap_or(DEFAULT_SCROLLBACK),
             home: std::env::home_dir().filter(|h| !h.as_os_str().is_empty()),
+            pty_host: PtyHost::beside_server(),
         }
     }
 }
@@ -115,8 +122,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 struct TerminalEntry {
     info: Terminal,
-    /// `None` once the process has exited.
-    pty: Option<pty::Pty>,
+    /// The terminal's host (endpoint, last `seq` read, connection); `None` once it has exited.
+    host: Option<host::Handle>,
     /// The screen state and the attached clients; outlives the process.
     stream: Arc<TermStream>,
     /// `seq` of the last accepted agent report; older or equal reports are dropped.
@@ -182,6 +189,7 @@ pub(crate) struct Shared {
     state_file: PathBuf,
     scrollback: usize,
     home: Option<PathBuf>,
+    pty_host: PtyHost,
     /// The scheme colors for terminal queries, shared with every terminal's stream.
     colors: Arc<RwLock<Colors>>,
     /// Run once the terminals are ended after `server.shutdown`; the binary exits the process.
@@ -292,7 +300,7 @@ impl Shared {
         }
         entry.info.status = TerminalStatus::Exited;
         entry.info.exit_code = exit_code;
-        entry.pty = None;
+        entry.host = None;
         entry.info.agent = None;
         if !entry.info.tokens.is_empty() {
             entry.info.tokens.clear();
@@ -384,6 +392,7 @@ impl Server {
             state_file: config.state_file,
             scrollback: config.scrollback,
             home: config.home,
+            pty_host: config.pty_host,
             colors: Arc::default(),
             on_shutdown: Mutex::new(None),
         };
@@ -992,8 +1001,8 @@ fn build_tabs(
             .terminals
             .iter()
             .find(|t| t.info.id == id)
-            .and_then(|t| t.pty.as_ref())
-            .map(pty::Pty::writer)
+            .and_then(|t| t.host.as_ref())
+            .map(host::Handle::writer)
     };
     let mut queue = |inner: &Inner, pane: &str, id: &str, command: Option<&String>, setup| {
         if let (Some(command), Some(writer)) = (command, writer(inner, id)) {
@@ -1285,21 +1294,24 @@ fn spawn_terminal(
             })
         },
     ));
-    let spawned = pty::spawn(
-        &pty::SpawnSpec {
+    let term = std::env::var("TERM").ok();
+    let spawned = host::start(
+        &shared.pty_host,
+        &host::Spec {
             terminal_id: &id,
             socket: &shared.socket,
             command: &command,
             cwd: &cwd,
             cols,
             rows,
+            term: term.as_deref(),
         },
         {
             let stream = Arc::clone(&stream);
             move |bytes| stream.output(bytes)
         },
         {
-            // The wait thread reports the exit through the shared state.
+            // The host's reader reports the exit through the shared state.
             let id = id.clone();
             let shared = Arc::clone(shared);
             move |code| shared.terminal_exited(&id, code)
@@ -1322,7 +1334,7 @@ fn spawn_terminal(
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
-        pty: Some(spawned),
+        host: Some(spawned),
         stream,
         agent_seq: None,
         tokens: Vec::new(),
@@ -1504,8 +1516,8 @@ fn terminal_close(shared: &Shared, p: TerminalClose) -> ApiResult {
 /// caller removes its leaf.
 fn close_entry(shared: &Shared, entry: TerminalEntry) {
     entry.stream.closed();
-    if let Some(pty) = entry.pty {
-        pty.kill();
+    if let Some(host) = entry.host {
+        host.kill();
     }
     shared.publish(Event::TerminalClosed {
         terminal_id: entry.info.id,
@@ -1671,12 +1683,12 @@ fn tab_focus(shared: &Shared, p: TabFocus) -> ApiResult {
     Ok(json!({ "tab": tab, "space": inner.layout.space(&tab.space_id)? }))
 }
 
-fn running_pty<'a>(
+fn running_host<'a>(
     entry: &'a mut TerminalEntry,
     id: &str,
-) -> Result<&'a mut pty::Pty, (ErrorCode, String)> {
+) -> Result<&'a mut host::Handle, (ErrorCode, String)> {
     entry
-        .pty
+        .host
         .as_mut()
         .ok_or_else(|| (ErrorCode::Exited, format!("terminal {id} has exited")))
 }
@@ -1710,7 +1722,7 @@ fn terminal_input(shared: &Shared, p: TerminalInput, ctx: Option<&Attachment>) -
         let mut inner = lock(&shared.inner);
         let entry = terminal_mut(&mut inner, &p.terminal_id)?;
         authorize(&entry.stream, ctx, &p.terminal_id, false)?;
-        running_pty(entry, &p.terminal_id)?.writer()
+        running_host(entry, &p.terminal_id)?.writer()
     };
     writer
         .write(p.data.as_bytes())
@@ -1728,7 +1740,7 @@ fn terminal_resize(shared: &Shared, p: TerminalResize, ctx: Option<&Attachment>)
     let mut inner = lock(&shared.inner);
     let entry = terminal_mut(&mut inner, &p.terminal_id)?;
     authorize(&entry.stream, ctx, &p.terminal_id, true)?;
-    running_pty(entry, &p.terminal_id)?
+    running_host(entry, &p.terminal_id)?
         .resize(p.cols, p.rows)
         .map_err(|e| (ErrorCode::Internal, e))?;
     entry.info.cols = p.cols;
