@@ -5,10 +5,60 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.16.0] — 2026-11-11
+
+### Bug Fixes
+- **cli**: Enable crossterm windows feature for poimen-console (#176)
+- **cli**: -h/--help only counts as an option, not inside commands or text (#175)
+- **server**: Stdio test sets Config.home after #511 and #278 met on release/next (#634)
+- **protocol**: Send clients_changed only to declared clients (#512)
+- **tui**: Parse non-ASCII keys in console.prefix without panicking (#515)
+- **tui**: Compare paths without the verbatim prefix (#517)
+- **tui**: Compare directories through same_dir in the task tests (#517)
+- **flow**: Keep the arrows between sequential skills while a subagent runs (#626) (#643)
+- **app**: Tab rename failures keep the terminal rename, protocol 5 for the trust handshake (#513)
+- **app**: Keep the split layout when the tab-owning pane closes
+- **app**: Resolve the successor leaf before the pane close completes
+- **release**: Fill the nfpm variables before packaging the Linux CLI (#649)
+- **console**: Wait for the split of the preset tab in the palette test (#649)
+
+
+### Features
+- **cli**: Poimen attach for one terminal full screen (#176) (#627)
+- **cli**: Poimen attach for one terminal full screen (#176)
+- **cli**: Poimen CLI to list and steer terminals and agents (#175) (#631)
+- **cli**: Poimen CLI to list and steer terminals and agents (#175)
+- **server**: Stdio mode and Linux musl release builds of poimen-server (#630)
+- **server**: Space.create applies the resolved layout with a trust handshake (#633)
+- **protocol**: Client kinds on the event subscription (#512) (#636)
+- **protocol**: Client kinds on the event subscription (#512)
+- **tui**: Poimen opens the TUI with sidebar, one pane and a prefix key (#515) (#637)
+- **tui**: Poimen opens the TUI with sidebar, one pane and a prefix key (#515)
+- **tui**: Tabs and splits with prefix keys (#516) (#639)
+- **tui**: Attention marks and notifications, app has priority (#518) (#641)
+- **tui**: Command palette, project entries and task start (#517) (#640)
+- **tui**: Command palette, project entries and task start (#517)
+- **flow**: Larger zoom controls and layout direction in the Flow panel (#625) (#642)
+- **agents**: Run title and picker show subject, current task and progress (#632) (#644)
+- **app**: Tabs and layout from the server (#513) (#646)
+- **app**: Tabs and layout from the server (#513)
+- **server**: Space.apply_layout for rebuild and presets on the poimen backend (#645) (#648)
+- **app**: Split panes in a terminal tab (#514) (#647)
+- **app**: Split panes in a terminal tab (#514)
+
+
+### Refactoring
+- **core**: Share the color scheme and sidebar.rows parsers with the console (#515)
+
+
 ## [0.15.1] — 2026-11-09
 
 ### Bug Fixes
 - **release**: Set the released version for every poimen crate in Cargo.lock (#620)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.15.1 [skip ci]
 
 
 ## [0.15.0] — 2026-11-09
