@@ -232,29 +232,49 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
     builder.create(dir)
 }
 
-/// Copies the bundled server to `<bin_root>/<version>/<its file name>` and returns that path.
+/// Copies the bundled server to `<bin_root>/<version>/<its file name>` and returns that path,
+/// together with the `poimen-pty-host` next to it (ADR 0009: the server starts its terminals in
+/// hosts from its own directory), when there is one.
 /// Windows: the running copy then locks only itself, so an update can replace the installed one.
 /// AppImage: the copy outlives the mount it came from. The copy is executable (0755 on Unix). An
 /// up-to-date copy (same size and modification time) is reused; copies of other versions are
 /// removed when they are not running (a running exe cannot be deleted on Windows; on Unix a
 /// running copy keeps working after its file is removed).
 pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathBuf> {
-    let source = std::fs::metadata(bundled)?;
     let dir = bin_root.join(version);
     let name = bundled.file_name().map_or_else(
         || beside_name(cfg!(windows), CHANNEL).into(),
         OsString::from,
     );
-    let target = dir.join(&name);
+    let target = copy_into(bundled, &dir, &name)?;
+    let host = OsString::from(CHANNEL.host_program(cfg!(windows)));
+    let bundled_host = bundled.with_file_name(&host);
+    if bundled_host.is_file() {
+        copy_into(&bundled_host, &dir, &host)?;
+    }
+    if let Ok(entries) = std::fs::read_dir(bin_root) {
+        for entry in entries.flatten() {
+            if entry.file_name() != version && entry.path().is_dir() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    Ok(target)
+}
+
+/// Copies `source` to `<dir>/<name>` unless an up-to-date copy is there; returns its path.
+fn copy_into(source_path: &Path, dir: &Path, name: &OsString) -> io::Result<PathBuf> {
+    let source = std::fs::metadata(source_path)?;
+    let target = dir.join(name);
     let same = |m: &std::fs::Metadata| {
         m.len() == source.len() && m.modified().ok() == source.modified().ok()
     };
     if !std::fs::metadata(&target).is_ok_and(|m| same(&m)) {
-        create_private_dir(&dir)?;
+        create_private_dir(dir)?;
         let mut tmp_name = name.clone();
         tmp_name.push(format!(".{}.tmp", std::process::id()));
         let tmp = dir.join(tmp_name);
-        std::fs::copy(bundled, &tmp)?;
+        std::fs::copy(source_path, &tmp)?;
         // The copy takes the source's mode (0555 in a read-only mount): make it writable for
         // `set_modified` and executable for everyone, as an installed binary.
         #[cfg(unix)]
@@ -270,13 +290,6 @@ pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathB
             .and_then(|()| std::fs::rename(&tmp, &target).or_else(|e| reuse_staged(e, &target)));
         let _ = std::fs::remove_file(&tmp);
         copied?;
-    }
-    if let Ok(entries) = std::fs::read_dir(bin_root) {
-        for entry in entries.flatten() {
-            if entry.file_name() != version && entry.path().is_dir() {
-                let _ = std::fs::remove_dir_all(entry.path());
-            }
-        }
     }
     Ok(target)
 }
@@ -596,6 +609,25 @@ mod tests {
             .flatten()
             .collect();
         assert_eq!(names.len(), 1, "no temp file is left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_pty_host_next_to_the_server_is_staged_with_it() {
+        let dir = temp_dir("host");
+        let bundled = dir.join(beside_name(cfg!(windows), CHANNEL));
+        std::fs::write(&bundled, "server").unwrap();
+        let host = CHANNEL.host_program(cfg!(windows));
+        std::fs::write(dir.join(&host), "host").unwrap();
+        let bin = dir.join("bin");
+        let staged = stage(&bundled, &bin, "0.9.0").unwrap();
+        let staged_host = staged.with_file_name(&host);
+        assert_eq!(std::fs::read_to_string(&staged_host).unwrap(), "host");
+        // Without a host next to the server only the server is staged.
+        std::fs::remove_file(dir.join(&host)).unwrap();
+        let staged = stage(&bundled, &bin, "1.0.0").unwrap();
+        assert!(!staged.with_file_name(&host).exists());
+        assert!(!staged_host.exists(), "the old version went");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

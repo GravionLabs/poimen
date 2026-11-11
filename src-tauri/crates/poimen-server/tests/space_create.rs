@@ -14,7 +14,7 @@ use poimen_client::protocol::{
     TrustRequired,
 };
 use poimen_core::settings;
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 use serde_json::Value;
 
 /// Writes a marker file in the shell's directory; the same line works in sh, zsh, bash,
@@ -65,6 +65,7 @@ impl Env {
             state_file: self.dir.join("state").join("server.json"),
             scrollback: 1000,
             home: Some(self.home()),
+            pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         };
         let server = Server::bind(config.clone()).unwrap();
         thread::spawn(move || server.serve());

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use poimen_client::protocol::{AgentStatus, ErrorCode, Event, TerminalCreate, TerminalStatus};
 use poimen_client::{Client, ClientError};
-use poimen_server::{Config, Server, StartError};
+use poimen_server::{Config, PtyHost, Server, StartError};
 
 struct Env {
     dir: PathBuf,
@@ -30,6 +30,7 @@ impl Env {
             state_file: self.dir.join("state").join("server.json"),
             scrollback: 1000,
             home: None,
+            pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         }
     }
 

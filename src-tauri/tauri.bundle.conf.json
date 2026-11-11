@@ -6,6 +6,6 @@
       "nsis": { "installerHooks": "windows/nsis-hooks.nsh" },
       "wix": { "fragmentPaths": ["windows/path.wxs"], "componentRefs": ["PoimenCliPath"] }
     },
-    "externalBin": ["binaries/poimen-server", "binaries/poimen"]
+    "externalBin": ["binaries/poimen-server", "binaries/poimen-pty-host", "binaries/poimen"]
   }
 }

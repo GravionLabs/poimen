@@ -14,7 +14,7 @@ use poimen_client::protocol::{
 };
 use poimen_client::transport::{self, Conn};
 use poimen_client::{Attachment, Client, ClientError};
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 
 struct Env {
     dir: PathBuf,
@@ -49,6 +49,7 @@ fn fixture(name: &str) -> Fixture {
         state_file: env.dir.join("state").join("server.json"),
         scrollback: 1000,
         home: None,
+        pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
     };
     let server = Server::bind(config.clone()).unwrap();
     thread::spawn(move || server.serve());

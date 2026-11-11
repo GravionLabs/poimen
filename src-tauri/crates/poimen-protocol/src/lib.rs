@@ -77,6 +77,13 @@ impl Channel {
         let name = self.named("poimen-server");
         if windows { format!("{name}.exe") } else { name }
     }
+
+    /// The file name of this channel's `poimen-pty-host` binary, which ships next to the server
+    /// (`poimen-pty-host-rc` on rc; `.exe` on Windows).
+    pub fn host_program(self, windows: bool) -> String {
+        let name = self.named("poimen-pty-host");
+        if windows { format!("{name}.exe") } else { name }
+    }
 }
 
 const fn const_eq(a: &str, b: &str) -> bool {
@@ -1751,6 +1758,9 @@ mod tests {
         assert_eq!(Channel::Stable.server_program(false), "poimen-server");
         assert_eq!(Channel::Rc.server_program(false), "poimen-server-rc");
         assert_eq!(Channel::Rc.server_program(true), "poimen-server-rc.exe");
+        assert_eq!(Channel::Stable.host_program(false), "poimen-pty-host");
+        assert_eq!(Channel::Stable.host_program(true), "poimen-pty-host.exe");
+        assert_eq!(Channel::Rc.host_program(true), "poimen-pty-host-rc.exe");
         assert_eq!(Channel::Rc.name(), "rc");
         assert_eq!(serde_json::to_value(Channel::Rc).unwrap(), "rc");
         assert_eq!(serde_json::to_value(Channel::Stable).unwrap(), "stable");

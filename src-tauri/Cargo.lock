@@ -3204,6 +3204,7 @@ dependencies = [
  "poimen-client",
  "poimen-core",
  "poimen-protocol",
+ "poimen-pty-host",
  "poimen-server",
  "ratatui",
  "serde_json",
@@ -3236,6 +3237,7 @@ version = "0.16.0"
 dependencies = [
  "poimen-client",
  "poimen-protocol",
+ "poimen-server",
  "portable-pty",
  "serde_json",
 ]
@@ -3248,7 +3250,7 @@ dependencies = [
  "poimen-client",
  "poimen-core",
  "poimen-protocol",
- "portable-pty",
+ "poimen-pty-host",
  "serde",
  "serde_json",
 ]

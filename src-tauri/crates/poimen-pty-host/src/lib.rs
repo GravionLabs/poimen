@@ -526,6 +526,15 @@ fn attach(shared: &Shared, id: u64, since: u64) {
     }
 }
 
+/// Starts a host in this process and serves it on a thread: what the binary does, without a
+/// process of its own. For clients' tests (`poimen-server`'s `PtyHost::Launch`); `Ok` once the
+/// endpoint is bound and the child runs.
+pub fn spawn_in_thread(start: &HostStart) -> Result<(), String> {
+    let host = Host::start(start)?;
+    thread::spawn(move || host.serve());
+    Ok(())
+}
+
 /// Reads the [`HostStart`] line (without waiting for end of file).
 pub fn read_start(input: impl Read) -> Result<HostStart, String> {
     let mut line = String::new();
@@ -547,6 +556,19 @@ pub fn write_message(out: &mut impl Write, message: &HostMessage) -> io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #455: on Windows the ConPTY is created with pass-through (conhost must not re-encode VT
+    /// mouse input), falling back to the flags of upstream portable-pty when the OS rejects it.
+    /// (Read before any host starts here, so `INHERIT_CURSOR` is still in both sets.)
+    #[test]
+    fn conpty_tries_passthrough_then_falls_back() {
+        use portable_pty::conpty_flags::{PASSTHROUGH_MODE, UPSTREAM, attempts};
+        let a = attempts();
+        assert_eq!(a[0] & PASSTHROUGH_MODE, 0x8);
+        assert_eq!(a[0], 0xF);
+        assert_eq!(a[1], UPSTREAM);
+        assert_eq!(a[1] & PASSTHROUGH_MODE, 0);
+    }
 
     #[test]
     fn the_start_line_is_read_without_waiting_for_more() {
