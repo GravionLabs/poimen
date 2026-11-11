@@ -31,6 +31,6 @@ describe("divider style", () => {
   it("has a grip that turns --status-working on hover, focus and drag", () => {
     expect(css).toMatch(/\.divider::after \{[^}]*border-radius/);
     expect(css).toMatch(/\.divider\.dragging::after \{[^}]*var\(--status-working\)/);
-    expect(css).toMatch(/\.divider:hover \{[^}]*var\(--status-working\)/);
+    expect(css).toMatch(/\.divider\.dragging \{[^}]*border-color: var\(--status-working\)/);
   });
 });
