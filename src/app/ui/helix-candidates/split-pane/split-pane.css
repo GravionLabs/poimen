@@ -18,10 +18,14 @@
   min-height: 0;
 }
 
+/* Gutter: two parallel 1px lines with the panes kept apart by its width. */
 .divider {
+  position: relative;
   flex: none;
-  width: 5px;
-  margin: 0 -2px;
+  box-sizing: border-box;
+  width: 7px;
+  border-left: 1px solid var(--h-border-color);
+  border-right: 1px solid var(--h-border-color);
   z-index: 1;
   cursor: col-resize;
   touch-action: none;
@@ -29,14 +33,41 @@
 
 :host(.column) > .divider {
   width: auto;
-  height: 5px;
-  margin: -2px 0;
+  height: 7px;
+  border-left: 0;
+  border-right: 0;
+  border-top: 1px solid var(--h-border-color);
+  border-bottom: 1px solid var(--h-border-color);
   cursor: row-resize;
+}
+
+/* Grip: a small rounded rectangle centred in the gutter. */
+.divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: var(--h-border-color);
+}
+
+:host(.column) > .divider::after {
+  width: 24px;
+  height: 3px;
 }
 
 .divider:hover,
 .divider:focus-visible,
 .divider.dragging {
-  background: color-mix(in srgb, var(--status-working) 50%, transparent);
+  border-color: var(--status-working);
   outline: none;
+}
+
+.divider:hover::after,
+.divider:focus-visible::after,
+.divider.dragging::after {
+  background: var(--status-working);
 }
