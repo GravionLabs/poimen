@@ -1,6 +1,6 @@
 {
   "release": {
-    "prerelease": "gh workflow run release.yml --ref release/next -f prerelease=true",
+    "prerelease": "gh workflow run release.yml --ref release/next",
     "test": {
       "platforms": ["macOS", "Windows", "Linux"],
       "template": ".github/release-test.md",
