@@ -248,6 +248,16 @@ fn a_new_terminal_starts_a_host_with_its_spawn_spec_and_reads_it_by_seq() {
     let (host, said, starts) = fake(|listener, start, tx| {
         let mut peer = Peer::accept(&listener, 0, &start);
         report(&tx, peer.read());
+        // `kill` comes on a connection of its own.
+        let (kill_tx, kill_start) = (tx.clone(), start.clone());
+        thread::spawn(move || {
+            let mut killer = Peer::accept(&listener, 3, &kill_start);
+            let _ = kill_tx.send(format!(
+                "own connection: {:?} {:?}",
+                killer.read(),
+                killer.read()
+            ));
+        });
         // Records strictly by seq: repeated and older ones are not fed again.
         peer.output(1, "one ");
         peer.output(2, "two ");
@@ -298,7 +308,110 @@ fn a_new_terminal_starts_a_host_with_its_spawn_spec_and_reads_it_by_seq() {
         "Some(Resize { cols: 100, rows: 30 })"
     );
     f.client.close_terminal(&id).unwrap();
-    assert_eq!(said.recv_timeout(WAIT).unwrap(), "Some(Kill)");
+    // Attached after the last record read, so the host can hand over `exit` and end.
+    assert_eq!(
+        said.recv_timeout(WAIT).unwrap(),
+        "own connection: Some(Attach { since: 3 }) Some(Kill)"
+    );
+}
+
+/// Input of `n` bytes in `parts` requests, as ASCII letters by position.
+fn flood(n: usize, parts: usize) -> Vec<String> {
+    let text: String = (0..n).map(|i| char::from(b'a' + (i % 26) as u8)).collect();
+    let size = n / parts;
+    (0..parts)
+        .map(|p| text[p * size..(p + 1) * size].to_string())
+        .collect()
+}
+
+#[test]
+fn close_and_resize_do_not_wait_behind_input_the_host_does_not_take() {
+    // A child that never reads stdin: the host stops reading its connection.
+    let (host, said, _) = fake(|listener, start, tx| {
+        let mut peer = Peer::accept(&listener, 0, &start);
+        report(&tx, peer.read());
+        let mut killer = Peer::accept(&listener, 0, &start);
+        let _ = tx.send(format!(
+            "own connection: {:?} {:?}",
+            killer.read(),
+            killer.read()
+        ));
+        drop(peer);
+    });
+    let f = fixture("stuck", host);
+    let id = f.create().unwrap();
+    assert_eq!(
+        said.recv_timeout(WAIT).unwrap(),
+        "Some(Attach { since: 0 })"
+    );
+    // Far more than a socket buffer holds.
+    for part in flood(512 * 1024, 16) {
+        f.client.input(&id, &part).unwrap();
+    }
+    let started = Instant::now();
+    f.client.resize(&id, 120, 40).unwrap();
+    f.client.list_terminals(None).unwrap();
+    f.client.close_terminal(&id).unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "requests waited {:?} behind the input",
+        started.elapsed()
+    );
+    assert_eq!(
+        said.recv_timeout(WAIT).unwrap(),
+        "own connection: Some(Attach { since: 0 }) Some(Kill)"
+    );
+    f.wait_for(|e| matches!(e, Event::TerminalClosed { terminal_id, .. } if *terminal_id == id));
+    assert!(f.client.list_terminals(None).unwrap().is_empty());
+}
+
+#[test]
+fn input_the_host_takes_late_arrives_in_whole_lines_and_in_order() {
+    const TOTAL: usize = 256 * 1024;
+    let (host, said, _) = fake(|listener, start, tx| {
+        let mut peer = Peer::accept(&listener, 0, &start);
+        report(&tx, peer.read());
+        // A 5 s write timeout (the server's before this fix) gives up within this stall, after a
+        // partial write, and left half a line on the connection.
+        thread::sleep(Duration::from_secs(11));
+        let (mut input, mut invalid, mut resized) = (Vec::new(), 0, None);
+        while input.len() < TOTAL || resized.is_none() {
+            let mut line = String::new();
+            match peer.lines.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+            match parse_client_line(&line) {
+                Ok(ClientMessage::Input { bytes }) => {
+                    input.extend(decode_bytes(&bytes).unwrap());
+                }
+                Ok(ClientMessage::Resize { cols, rows }) => resized = Some((cols, rows)),
+                _ => invalid += 1,
+            }
+        }
+        let _ = tx.send(format!(
+            "invalid {invalid}, resized {resized:?}, input {}",
+            String::from_utf8_lossy(&input)
+        ));
+    });
+    let f = fixture("late", host);
+    let id = f.create().unwrap();
+    assert_eq!(
+        said.recv_timeout(WAIT).unwrap(),
+        "Some(Attach { since: 0 })"
+    );
+    let parts = flood(TOTAL, 32);
+    for part in &parts {
+        f.client.input(&id, part).unwrap();
+    }
+    f.client.resize(&id, 120, 40).unwrap();
+    assert_eq!(
+        said.recv_timeout(WAIT + WAIT).unwrap(),
+        format!(
+            "invalid 0, resized Some((120, 40)), input {}",
+            parts.concat()
+        )
+    );
 }
 
 #[test]

@@ -5,15 +5,17 @@
 //! `seq` (a record at or below the last one read is dropped, so none is fed twice) and hands them
 //! to [`pty::coalesce`], which feeds the terminal's stream. A connection the host dropped (the
 //! server read too slowly) is attached again after the last `seq` read. `exit`, or a host that
-//! is gone, ends the terminal through `on_exit`. Input, resize and kill are lines on the same
-//! connection.
+//! is gone, ends the terminal through `on_exit`. Input and resize are lines on the same
+//! connection, written whole by a thread of their own ([`Outbox`]); `kill` goes on a connection
+//! of its own.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -25,8 +27,11 @@ use crate::pty::{self, Chunk, PtyWriter};
 
 /// How long a started host may take to answer with `hello`.
 const START_TIMEOUT: Duration = Duration::from_secs(10);
-/// A write to a host that blocks this long gives up (Unix; pipes have no timeouts).
-const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Input queued for a host and not yet written; a writer past it waits (outside the global lock).
+const INPUT_QUEUE_BYTES: usize = 1024 * 1024;
+/// A write or read on the connection of `kill` gives up after this (Unix; pipes have no
+/// timeouts). Longer than the host's wait for a killed child.
+const KILL_IO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Bytes read from a host and not yet fed to the stream. The host never waits for its client (it
 /// drops one that falls behind), so the reader keeps reading into this queue while the emulator
 /// catches up; only past it the reader waits, the host drops the connection, and it is attached
@@ -135,14 +140,13 @@ pub(crate) fn start_line(spec: &Spec<'_>, endpoint: PathBuf) -> HostStart {
 }
 
 /// The connection to a host, shared by the reader (which replaces it on a reconnect) and the
-/// writers of input, resize and kill. One line is written at a time.
+/// [`Outbox`]'s writer thread.
 #[derive(Clone)]
 struct HostConn(Arc<Mutex<Conn>>);
 
 impl HostConn {
-    fn send(&self, message: &ClientMessage) -> io::Result<()> {
-        let conn = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        (&*conn).write_all(&to_line(message))
+    fn current(&self) -> Conn {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn replace(&self, conn: Conn) {
@@ -150,14 +154,159 @@ impl HostConn {
     }
 }
 
+/// Ends the child of the host at `endpoint` over a connection of its own, so a `kill` never
+/// waits behind input the host has not taken yet. The host takes the new connection as its
+/// client (the reader's gets `replaced`) and handles `kill` on it. The connection attaches after
+/// `since` too, and a thread reads it up to `exit`, so the host can end at once instead of
+/// keeping the exit for a client.
+fn send_kill(endpoint: &Path, since: u64) {
+    let Ok(conn) = Conn::connect(endpoint) else {
+        return;
+    };
+    // Two short lines on a fresh connection; the timeouts only guard against a wedged host.
+    let _ = conn.set_write_timeout(Some(KILL_IO_TIMEOUT));
+    let _ = conn.set_read_timeout(Some(KILL_IO_TIMEOUT));
+    let lines = [
+        to_line(&ClientMessage::Attach { since }),
+        to_line(&ClientMessage::Kill),
+    ]
+    .concat();
+    if (&conn).write_all(&lines).is_err() {
+        return;
+    }
+    thread::spawn(move || {
+        let mut lines = BufReader::new(conn);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match lines.read_line(&mut line) {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+            if matches!(
+                poimen_protocol::host::parse_host_line(&line),
+                Ok(HostMessage::Exit { .. } | HostMessage::Replaced)
+            ) {
+                return;
+            }
+        }
+    });
+}
+
+#[derive(Default)]
+struct Pending {
+    input: VecDeque<Vec<u8>>,
+    /// Bytes in `input` ([`INPUT_QUEUE_BYTES`]).
+    queued: usize,
+    /// The latest size asked for and not yet written; an older one is superseded.
+    resize: Option<(u16, u16)>,
+    closed: bool,
+}
+
+/// What the server sends a host over its connection, written by one thread per terminal
+/// ([`Outbox::run`]): every line is written whole, without a timeout, so the connection never
+/// holds half a line. Callers never wait for the host: a resize only replaces the pending size,
+/// input waits only while [`INPUT_QUEUE_BYTES`] are queued (outside the global lock, like a
+/// blocking PTY write).
+struct Outbox {
+    pending: Mutex<Pending>,
+    changed: Condvar,
+}
+
+impl Outbox {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            pending: Mutex::new(Pending::default()),
+            changed: Condvar::new(),
+        })
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Pending> {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn input(&self, data: &[u8]) -> io::Result<()> {
+        let mut pending = self.lock();
+        while !pending.closed
+            && pending.queued > 0
+            && pending.queued + data.len() > INPUT_QUEUE_BYTES
+        {
+            pending = self
+                .changed
+                .wait(pending)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+        if pending.closed {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "the terminal has ended",
+            ));
+        }
+        pending.queued += data.len();
+        pending.input.push_back(data.to_vec());
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
+        let mut pending = self.lock();
+        if pending.closed {
+            return Err("the terminal has ended".into());
+        }
+        pending.resize = Some((cols, rows));
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    /// Nothing more is written; queued input is dropped and waiting writers return an error.
+    fn close(&self) {
+        let mut pending = self.lock();
+        pending.closed = true;
+        pending.input.clear();
+        pending.queued = 0;
+        pending.resize = None;
+        self.changed.notify_all();
+    }
+
+    /// The next line to write (a pending resize first), `None` once closed.
+    fn next(&self) -> Option<ClientMessage> {
+        let mut pending = self.lock();
+        loop {
+            if pending.closed {
+                return None;
+            }
+            if let Some((cols, rows)) = pending.resize.take() {
+                return Some(ClientMessage::Resize { cols, rows });
+            }
+            if let Some(data) = pending.input.pop_front() {
+                pending.queued -= data.len();
+                self.changed.notify_all();
+                return Some(ClientMessage::Input {
+                    bytes: encode_bytes(&data),
+                });
+            }
+            pending = self
+                .changed
+                .wait(pending)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    /// Writes the lines to the current connection until closed. A failed write means the
+    /// connection is gone (the reader attaches again); its line is dropped.
+    fn run(&self, conn: &HostConn) {
+        while let Some(message) = self.next() {
+            let _ = (&conn.current()).write_all(&to_line(&message));
+        }
+    }
+}
+
 /// The input side for [`PtyWriter`]: every write is one `input` line.
-struct InputLines(HostConn);
+struct InputLines(Arc<Outbox>);
 
 impl Write for InputLines {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.send(&ClientMessage::Input {
-            bytes: encode_bytes(buf),
-        })?;
+        self.0.input(buf)?;
         Ok(buf.len())
     }
 
@@ -166,12 +315,12 @@ impl Write for InputLines {
     }
 }
 
-/// A terminal's host as the server keeps it: the endpoint, the last `seq` read, and the
-/// connection for input, resize and kill.
+/// A terminal's host as the server keeps it: the endpoint, the last `seq` read, and the outbox
+/// for input and resize. Dropping it stops the writing.
 pub(crate) struct Handle {
     endpoint: PathBuf,
     read: Arc<AtomicU64>,
-    conn: HostConn,
+    outbox: Arc<Outbox>,
     closing: Arc<AtomicBool>,
 }
 
@@ -195,19 +344,29 @@ impl Handle {
     }
 
     pub fn writer(&self) -> PtyWriter {
-        PtyWriter::new(Box::new(InputLines(self.conn.clone())))
+        PtyWriter::new(Box::new(InputLines(Arc::clone(&self.outbox))))
     }
 
+    /// Queues the size for the host; never waits for it.
     pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
-        self.conn
-            .send(&ClientMessage::Resize { cols, rows })
+        self.outbox
+            .resize(cols, rows)
             .map_err(|e| format!("resize did not reach the host: {e}"))
     }
 
-    /// Ends the child; the host sends `exit` and ends. The reader stops reconnecting.
+    /// Ends the child over a connection of its own ([`send_kill`]), so neither a blocked input
+    /// write nor the global lock waits on the input stream; the host ends. The reader stops
+    /// reconnecting.
     pub fn kill(self) {
         self.closing.store(true, Ordering::SeqCst);
-        let _ = self.conn.send(&ClientMessage::Kill);
+        self.outbox.close();
+        send_kill(&self.endpoint, self.read.load(Ordering::SeqCst));
+    }
+}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        self.outbox.close();
     }
 }
 
@@ -235,13 +394,16 @@ pub(crate) fn start(
         });
     }
     let (conn, lines) = attached.map_err(|e| format!("could not reach the host: {e}"))?;
-    let _ = conn.set_write_timeout(Some(WRITE_TIMEOUT));
+    let conn = HostConn(Arc::new(Mutex::new(conn)));
     let handle = Handle {
         endpoint,
         read: Arc::new(AtomicU64::new(0)),
-        conn: HostConn(Arc::new(Mutex::new(conn))),
+        outbox: Outbox::new(),
         closing: Arc::new(AtomicBool::new(false)),
     };
+    let outbox = Arc::clone(&handle.outbox);
+    let writing = conn.clone();
+    thread::spawn(move || outbox.run(&writing));
     let (tx, rx) = mpsc::channel::<Chunk>();
     let queued = Arc::new(AtomicUsize::new(0));
     let reader = Reader {
@@ -251,7 +413,7 @@ pub(crate) fn start(
             tx,
             queued: Arc::clone(&queued),
         },
-        conn: handle.conn.clone(),
+        conn,
         closing: Arc::clone(&handle.closing),
     };
     thread::spawn(move || reader.run(lines));
@@ -462,9 +624,14 @@ impl Reader {
             }
             match attach(&feed.endpoint, feed.read.load(Ordering::SeqCst)) {
                 Ok((conn, next)) => {
-                    let _ = conn.set_write_timeout(Some(WRITE_TIMEOUT));
                     self.conn.replace(conn);
                     lines = next;
+                    // A close while attaching: this connection may have replaced the one `kill`
+                    // went on before the host read it.
+                    if self.closing.load(Ordering::SeqCst) {
+                        send_kill(&feed.endpoint, feed.read.load(Ordering::SeqCst));
+                        break None;
+                    }
                 }
                 Err(_) => break None,
             }

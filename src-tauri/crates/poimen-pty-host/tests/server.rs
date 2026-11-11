@@ -94,3 +94,32 @@ fn closing_a_terminal_kills_its_host() {
         thread::sleep(Duration::from_millis(50));
     }
 }
+
+#[test]
+fn closing_a_terminal_whose_child_reads_no_input_still_kills_its_host() {
+    let (env, client, space) = server("stuck");
+    let id = client
+        .create_terminal(&sh(&space, "stty raw -echo; sleep 60"))
+        .unwrap()
+        .id;
+    let endpoint = env.0.join("run").join("hosts").join(&id);
+    // Far more than the PTY and the host connection hold: the host blocks on the PTY and stops
+    // reading its connection.
+    let chunk = "x".repeat(32 * 1024);
+    for _ in 0..16 {
+        client.input(&id, &chunk).unwrap();
+    }
+    let started = Instant::now();
+    client.resize(&id, 100, 30).unwrap();
+    client.close_terminal(&id).unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "close waited {:?} behind the input",
+        started.elapsed()
+    );
+    let deadline = Instant::now() + WAIT;
+    while endpoint.exists() {
+        assert!(Instant::now() < deadline, "the host did not end");
+        thread::sleep(Duration::from_millis(50));
+    }
+}
