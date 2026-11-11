@@ -8,6 +8,11 @@
 //! is gone, ends the terminal through `on_exit`. Input and resize are lines on the same
 //! connection, written whole by a thread of their own ([`Outbox`]); `kill` goes on a connection
 //! of its own.
+//!
+//! A restarted server adopts the hosts of the terminal list in `server.json` (#604): [`reach`]
+//! connects to a host that already runs and [`adopt`] reads it from the start of its ring, the
+//! records up to its `hello` as a replay ([`Chunk::Replay`]). A `gap` becomes a marker line in
+//! the grid ([`gap_marker`]).
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -20,7 +25,7 @@ use std::thread;
 use std::time::Duration;
 
 use poimen_client::transport::{self, Conn, Entry};
-use poimen_protocol::host::{ClientMessage, HostMessage, HostStart, SpawnSpec, to_line};
+use poimen_protocol::host::{ClientMessage, HostMessage, HostStart, Size, SpawnSpec, to_line};
 use poimen_protocol::{CHANNEL, Channel, ENV_SOCKET, ENV_TERMINAL_ID, decode_bytes, encode_bytes};
 
 use crate::pty::{self, Chunk, PtyWriter};
@@ -37,6 +42,8 @@ const KILL_IO_TIMEOUT: Duration = Duration::from_secs(10);
 /// catches up; only past it the reader waits, the host drops the connection, and it is attached
 /// again after the last `seq` read (with a `gap` when the host's ring moved on meanwhile).
 const QUEUE_BYTES: usize = 64 * 1024 * 1024;
+/// How long a host the server adopts may take to answer with `hello`.
+pub(crate) const ADOPT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How often a reader at [`QUEUE_BYTES`] looks again.
 const QUEUE_POLL: Duration = Duration::from_millis(2);
 /// Reconnects in a row that bring no new record before the host counts as gone.
@@ -315,30 +322,23 @@ impl Write for InputLines {
     }
 }
 
-/// A terminal's host as the server keeps it: the endpoint, the last `seq` read, and the outbox
-/// for input and resize. Dropping it stops the writing.
+/// A terminal's host as the server keeps it: the endpoint, the last `seq` read, the connection
+/// and the outbox for input and resize. Dropping it stops the writing.
 pub(crate) struct Handle {
     endpoint: PathBuf,
     read: Arc<AtomicU64>,
     outbox: Arc<Outbox>,
     closing: Arc<AtomicBool>,
+    conn: HostConn,
 }
 
 impl Handle {
     /// Where the host listens.
-    #[allow(
-        dead_code,
-        reason = "kept for the adoption of hosts after a restart (#604)"
-    )]
     pub fn endpoint(&self) -> &Path {
         &self.endpoint
     }
 
     /// The `seq` of the last output record read from the host (0: none yet).
-    #[allow(
-        dead_code,
-        reason = "kept for the adoption of hosts after a restart (#604)"
-    )]
     pub fn seq(&self) -> u64 {
         self.read.load(Ordering::SeqCst)
     }
@@ -362,6 +362,15 @@ impl Handle {
         self.outbox.close();
         send_kill(&self.endpoint, self.read.load(Ordering::SeqCst));
     }
+
+    /// Lets the host go without ending it (`server.shutdown` with `keep_terminals`): the server
+    /// stops writing and reading, the host keeps the child and buffers its output for the next
+    /// server. Nothing is reported as an exit.
+    pub fn release(self) {
+        self.closing.store(true, Ordering::SeqCst);
+        self.outbox.close();
+        let _ = self.conn.current().shutdown();
+    }
 }
 
 impl Drop for Handle {
@@ -370,13 +379,14 @@ impl Drop for Handle {
     }
 }
 
-/// Starts the host of a terminal and reads it: `on_output` gets the output in order, `on_exit`
-/// the exit code (`None`: unknown, or the host is gone) once all output before it was handed on.
-/// `Err` with a message for `terminal.create` when the host cannot be started or reached.
+/// Starts the host of a terminal and reads it: `on_output` gets the output in order (`live`
+/// false for a replay, see [`Chunk::Replay`]), `on_exit` the exit code (`None`: unknown, or the
+/// host is gone) once all output before it was handed on. `Err` with a message for
+/// `terminal.create` when the host cannot be started or reached.
 pub(crate) fn start(
     host: &PtyHost,
     spec: &Spec<'_>,
-    on_output: impl FnMut(&[u8]) + Send + 'static,
+    on_output: impl FnMut(&[u8], bool) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Result<Handle, String> {
     let endpoint = endpoint_for(spec.socket, spec.terminal_id);
@@ -394,12 +404,110 @@ pub(crate) fn start(
         });
     }
     let (conn, lines) = attached.map_err(|e| format!("could not reach the host: {e}"))?;
+    Ok(follow(endpoint, conn, lines, 0, on_output, on_exit))
+}
+
+/// A host that already ran when the server started, connected and attached from the start of
+/// its ring ([`reach`]), ready to [`adopt`].
+pub(crate) struct Reached {
+    endpoint: PathBuf,
+    conn: Conn,
+    lines: BufReader<Conn>,
+    /// The host's `seq` in its `hello`: the records up to it ran before this server.
+    pub seq: u64,
+    /// The PTY size in its `hello`.
+    pub size: Size,
+}
+
+/// Connects to the running host at `endpoint`, reads its `hello` (within `timeout`) and attaches
+/// with `since: 0`, so the whole ring is replayed. `min_seq` is the last `seq` the previous
+/// server read from it: a host behind it is another one. `Err` with the reason when the host does
+/// not answer.
+pub(crate) fn reach(endpoint: &Path, min_seq: u64, timeout: Duration) -> Result<Reached, String> {
+    let (tx, rx) = mpsc::channel();
+    let target = endpoint.to_path_buf();
+    // On a thread: a host that accepts but never answers (and a pipe has no read timeout) must
+    // not hold up the start of the server.
+    thread::spawn(move || {
+        let _ = tx.send(hello_of(&target));
+    });
+    let (conn, lines, seq, size) = match rx.recv_timeout(timeout) {
+        Ok(result) => result.map_err(|e| e.to_string())?,
+        Err(_) => {
+            return Err(format!("no hello within {} ms", timeout.as_millis()));
+        }
+    };
+    if seq < min_seq {
+        return Err(format!(
+            "the host is at seq {seq}, behind the {min_seq} read from it before (another host)"
+        ));
+    }
+    (&conn)
+        .write_all(&to_line(&ClientMessage::Attach { since: 0 }))
+        .map_err(|e| format!("could not attach: {e}"))?;
+    Ok(Reached {
+        endpoint: endpoint.to_path_buf(),
+        conn,
+        lines,
+        seq,
+        size,
+    })
+}
+
+impl Reached {
+    /// Ends the child of a host the server does not adopt (its terminal has no space any more).
+    pub fn kill(self) {
+        let _ = (&self.conn).write_all(&to_line(&ClientMessage::Kill));
+    }
+}
+
+type HelloOf = io::Result<(Conn, BufReader<Conn>, u64, Size)>;
+
+/// Connects and reads the `hello` line.
+fn hello_of(endpoint: &Path) -> HelloOf {
+    let conn = Conn::connect(endpoint)?;
+    let mut lines = BufReader::new(conn.clone());
+    let mut line = String::new();
+    lines.read_line(&mut line)?;
+    match poimen_protocol::host::parse_host_line(&line) {
+        Ok(HostMessage::Hello { seq, size, .. }) => Ok((conn, lines, seq, size)),
+        _ => Err(io::Error::other(format!("no hello: {:?}", line.trim_end()))),
+    }
+}
+
+/// Reads a [`reach`]ed host as [`start`] reads a new one; the records up to its `hello` go to
+/// `on_output` as a replay (`live` false), so their queries are not answered a second time.
+pub(crate) fn adopt(
+    reached: Reached,
+    on_output: impl FnMut(&[u8], bool) + Send + 'static,
+    on_exit: impl FnOnce(Option<u32>) + Send + 'static,
+) -> Handle {
+    let Reached {
+        endpoint,
+        conn,
+        lines,
+        seq,
+        ..
+    } = reached;
+    follow(endpoint, conn, lines, seq, on_output, on_exit)
+}
+
+/// Starts the threads that read and write an attached host connection.
+fn follow(
+    endpoint: PathBuf,
+    conn: Conn,
+    lines: BufReader<Conn>,
+    replay_until: u64,
+    on_output: impl FnMut(&[u8], bool) + Send + 'static,
+    on_exit: impl FnOnce(Option<u32>) + Send + 'static,
+) -> Handle {
     let conn = HostConn(Arc::new(Mutex::new(conn)));
     let handle = Handle {
         endpoint,
         read: Arc::new(AtomicU64::new(0)),
         outbox: Outbox::new(),
         closing: Arc::new(AtomicBool::new(false)),
+        conn: conn.clone(),
     };
     let outbox = Arc::clone(&handle.outbox);
     let writing = conn.clone();
@@ -412,6 +520,7 @@ pub(crate) fn start(
             read: Arc::clone(&handle.read),
             tx,
             queued: Arc::clone(&queued),
+            replay_until,
         },
         conn,
         closing: Arc::clone(&handle.closing),
@@ -419,13 +528,24 @@ pub(crate) fn start(
     thread::spawn(move || reader.run(lines));
     let mut on_output = on_output;
     thread::spawn(move || {
-        let code = pty::coalesce(&rx, |batch| {
-            on_output(batch);
+        let code = pty::coalesce(&rx, |batch, live| {
+            on_output(batch, live);
             queued.fetch_sub(batch.len(), Ordering::SeqCst);
         });
         on_exit(code);
     });
-    Ok(handle)
+    handle
+}
+
+/// The line a `gap` (records `from..=to` left the host's ring before this server read them)
+/// leaves in the grid, so the loss is shown and not hidden. After earlier output it starts on a
+/// line of its own.
+pub(crate) fn gap_marker(from: u64, to: u64, after_output: bool) -> Vec<u8> {
+    let lead = if after_output { "\r\n" } else { "" };
+    let records = to.saturating_sub(from).saturating_add(1);
+    let what = if records == 1 { "record" } else { "records" };
+    format!("{lead}[poimen: earlier output lost, {records} {what} left the host's buffer]\r\n")
+        .into_bytes()
 }
 
 /// Creates the private `hosts` directory and removes a stale entry at the endpoint (a host of an
@@ -592,6 +712,8 @@ struct Feed {
     tx: mpsc::Sender<Chunk>,
     /// Bytes in `tx` not yet fed ([`QUEUE_BYTES`]).
     queued: Arc<AtomicUsize>,
+    /// Records up to this `seq` ran before this server read the host: a replay.
+    replay_until: u64,
 }
 
 struct Reader {
@@ -667,7 +789,19 @@ impl Feed {
                     }
                     self.read.store(seq, Ordering::SeqCst);
                     self.queued.fetch_add(data.len(), Ordering::SeqCst);
-                    if self.tx.send(Chunk::Data(data)).is_err() {
+                    if self.tx.send(self.chunk(seq, data)).is_err() {
+                        return Ended::Stopped;
+                    }
+                }
+                HostMessage::Gap { from, to } => {
+                    // A gap at or before the last record read is no news (a reattach repeats it).
+                    if to <= self.read.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    let after_output = self.read.load(Ordering::SeqCst) > 0;
+                    let marker = gap_marker(from, to, after_output);
+                    self.queued.fetch_add(marker.len(), Ordering::SeqCst);
+                    if self.tx.send(self.chunk(to, marker)).is_err() {
                         return Ended::Stopped;
                     }
                 }
@@ -676,9 +810,18 @@ impl Feed {
                 HostMessage::Error { message } => {
                     eprintln!("poimen-server: host {}: {message}", self.endpoint.display());
                 }
-                // The records of a gap are gone; the next one follows. Others are not for here.
-                HostMessage::Gap { .. } | HostMessage::Hello { .. } | HostMessage::Unknown => {}
+                // Not for here.
+                HostMessage::Hello { .. } | HostMessage::Unknown => {}
             }
+        }
+    }
+
+    /// Output of record `seq`: a replay when it ran before this server read the host.
+    fn chunk(&self, seq: u64, data: Vec<u8>) -> Chunk {
+        if seq <= self.replay_until {
+            Chunk::Replay(data)
+        } else {
+            Chunk::Data(data)
         }
     }
 }
@@ -779,6 +922,7 @@ mod tests {
             read: Arc::new(AtomicU64::new(read)),
             tx,
             queued: Arc::default(),
+            replay_until: 0,
         };
         (feed, rx)
     }
@@ -795,6 +939,7 @@ mod tests {
         rx.try_iter()
             .map(|c| match c {
                 Chunk::Data(d) => String::from_utf8(d).unwrap(),
+                Chunk::Replay(d) => format!("replay {}", String::from_utf8(d).unwrap()),
                 Chunk::End(code) => format!("end {code:?}"),
             })
             .collect()
@@ -817,14 +962,54 @@ mod tests {
         assert_eq!(reader.read.load(Ordering::SeqCst), 3);
     }
 
+    fn gap(from: u64, to: u64) -> String {
+        String::from_utf8(to_line(&HostMessage::Gap { from, to })).unwrap()
+    }
+
     #[test]
-    fn a_reattached_connection_goes_on_after_the_last_seq_read() {
+    fn a_reattached_connection_goes_on_after_the_last_seq_read_and_marks_the_gap() {
         let (reader, rx) = reader(5);
-        let gap = String::from_utf8(to_line(&HostMessage::Gap { from: 6, to: 7 })).unwrap();
-        let lines = [output(4, "old"), output(5, "old"), gap, output(8, "new")].concat();
+        let lines = [
+            output(4, "old"),
+            output(5, "old"),
+            gap(6, 7),
+            output(8, "new"),
+        ]
+        .concat();
         reader.pump(&mut lines.as_bytes());
-        assert_eq!(data(&rx), ["new"]);
+        assert_eq!(
+            data(&rx),
+            [
+                "\r\n[poimen: earlier output lost, 2 records left the host's buffer]\r\n",
+                "new"
+            ]
+        );
         assert_eq!(reader.read.load(Ordering::SeqCst), 8);
+    }
+
+    #[test]
+    fn a_gap_already_behind_the_last_record_read_leaves_no_marker() {
+        let (reader, rx) = reader(9);
+        let lines = [gap(1, 7), output(10, "x")].concat();
+        reader.pump(&mut lines.as_bytes());
+        assert_eq!(data(&rx), ["x"]);
+    }
+
+    #[test]
+    fn the_ring_of_an_adopted_host_is_a_replay_up_to_its_hello_and_live_after() {
+        let (mut reader, rx) = reader(0);
+        reader.replay_until = 3;
+        let lines = [gap(1, 1), output(2, "b"), output(3, "c"), output(4, "d")].concat();
+        reader.pump(&mut lines.as_bytes());
+        assert_eq!(
+            data(&rx),
+            [
+                "replay [poimen: earlier output lost, 1 record left the host's buffer]\r\n",
+                "replay b",
+                "replay c",
+                "d"
+            ]
+        );
     }
 
     #[test]

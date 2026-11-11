@@ -38,6 +38,14 @@ import { holdsLinkModifier, isRepo, linkHandler, taskLinkHandler, type IssueLink
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
+/**
+ * Waits before each attempt to attach again after the connection to the server ended (a restart
+ * or a crash; the terminal lives on in its PTY host and the next server adopts it, #604): about
+ * 30 s in all, then the reason stays as the banner.
+ */
+export const REATTACH_DELAYS_MS = [250, 500, 1000, 2000, 3000, 5000, 8000, 10000];
+/** The banner while the view attaches again. */
+export const REATTACHING = "poimen-server is not reachable; attaching again…";
 
 export interface ModeState {
   mode: Mode;
@@ -136,6 +144,9 @@ export class TerminalView implements OnDestroy {
   /** Whether the pointer is over a link (xterm reports it for every renderer). */
   private linkHovered = false;
   private endDrag?: () => void;
+  /** The next attempt to attach again after a lost connection, and how many came before it. */
+  private reattachTimer?: ReturnType<typeof setTimeout>;
+  private reattaches = 0;
   /** Counts connects; a result of an older one is dropped. */
   private generation = 0;
   /** The mode of the stream being opened or running (what the CLI child was spawned with). */
@@ -465,7 +476,8 @@ export class TerminalView implements OnDestroy {
     await this.connect(mode, takeover);
   }
 
-  private async connect(mode: Mode, takeover: boolean): Promise<void> {
+  /** `reattach`: an attempt after a lost connection, which tries again when it fails. */
+  private async connect(mode: Mode, takeover: boolean, reattach = false): Promise<void> {
     this.framed = false;
     this.frameGrid = undefined;
     this.refitAfterSnapshot = false;
@@ -498,8 +510,32 @@ export class TerminalView implements OnDestroy {
       this.applyScrollback();
       for (const record of early.splice(0)) this.onRecord(session, record);
     } catch (err) {
-      if (generation === this.generation) this.failed(mode, String(err));
+      if (generation !== this.generation) return;
+      if (reattach) this.reattach(String(err));
+      else this.failed(mode, String(err));
     }
+  }
+
+  /**
+   * The connection to the server ended without a record: attach again in the same mode (never
+   * with a takeover) after the next of {@link REATTACH_DELAYS_MS}, read-only meanwhile; once they
+   * are used up the reason stays as the banner.
+   */
+  private reattach(reason: string): void {
+    if (this.destroyed) return;
+    const delay = REATTACH_DELAYS_MS[this.reattaches];
+    if (delay === undefined) {
+      this.reattaches = 0;
+      this.setState("observe", null);
+      this.banner.set(reason);
+      return;
+    }
+    this.reattaches++;
+    const mode = this.attempt;
+    this.setState("observe", null);
+    this.banner.set(REATTACHING);
+    clearTimeout(this.reattachTimer);
+    this.reattachTimer = setTimeout(() => void this.connect(mode, false, true), delay);
   }
 
   /** A stream ended or could not open: fall back to observing when control was attempted. */
@@ -516,6 +552,8 @@ export class TerminalView implements OnDestroy {
   }
 
   private closeStream(): void {
+    clearTimeout(this.reattachTimer);
+    this.reattaches = 0;
     this.endDrag?.();
     this.session?.close();
     this.session = undefined;
@@ -548,6 +586,11 @@ export class TerminalView implements OnDestroy {
     switch (record.type) {
       case "reset":
         this.framed = true;
+        if (this.reattaches > 0) {
+          // Attached again after a lost connection.
+          this.reattaches = 0;
+          this.banner.set(null);
+        }
         if (session.emulated) {
           // A snapshot follows as bytes. Reset first, so a reattach does not stack the snapshot
           // (and its scrollback) on the old screen; the grid is the server's until the
@@ -583,6 +626,10 @@ export class TerminalView implements OnDestroy {
       case "closed":
         this.session = undefined;
         if (record.reason === "detached") return;
+        if (record.code === "lost") {
+          this.reattach(record.reason);
+          return;
+        }
         if (record.code === "exited") {
           // The process ended: keep the last screen and say how; nothing to fall back to.
           this.setState("observe", null);

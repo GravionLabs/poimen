@@ -128,6 +128,8 @@ export interface Terminal {
   label?: string;
   /** Free-form key/value tokens set by integrations (e.g. `deliver_step`). */
   tokens?: Record<string, string>;
+  /** Runs in a PTY host that a restarted poimen-server adopts (poimen backend, #604). */
+  survives_restart?: boolean;
   terminal_title_stripped?: string;
   focused?: boolean;
 }
@@ -219,9 +221,11 @@ export type StreamRecord =
       exit_code?: number;
       /**
        * Set when the reason is more than text; `controller_held`: another client is the
-       * controller; `exited`: the process ended (`exit_code` says how) and its last screen stays.
+       * controller; `exited`: the process ended (`exit_code` says how) and its last screen stays;
+       * `lost`: the connection to the server ended (a restart or a crash), the terminal may come
+       * back with the next server.
        */
-      code?: "controller_held" | "exited";
+      code?: "controller_held" | "exited" | "lost";
     }
   /** Raw PTY bytes of an emulated stream (an `ArrayBuffer` over the channel). */
   | { type: "bytes"; data: Uint8Array };

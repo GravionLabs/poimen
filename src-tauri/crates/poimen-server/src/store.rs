@@ -1,11 +1,12 @@
-//! The persisted layout (`server.json`): the spaces (name, cwd, tab order, active tab), their
-//! tabs with the split trees, and the id counter. Terminals are not stored.
+//! The persisted state (`server.json`): the spaces (name, cwd, tab order, active tab), their
+//! tabs with the split trees, the id counter, and the running terminals with their hosts, so
+//! the next server adopts them (ADR 0009, #604).
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use poimen_protocol::{Channel, Space, Tab};
+use poimen_protocol::{AgentInfo, Channel, Space, Tab};
 use serde::{Deserialize, Serialize};
 
 use crate::tabs::Layout;
@@ -21,6 +22,48 @@ struct File {
     /// for nodes that were dropped since. Absent from a protocol 3 file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     next_id: Option<u64>,
+    /// The running terminals; absent from a file of a server before #604 (and when none runs).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    terminals: Vec<StoredTerminal>,
+}
+
+/// A running terminal as the next server needs it to adopt the host: who it is, where its host
+/// listens, and what the server keeps beside the grid (size, agent status, tokens).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StoredTerminal {
+    pub(crate) id: String,
+    pub(crate) space_id: String,
+    pub(crate) name: String,
+    pub(crate) cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) program: Option<String>,
+    /// The size last set (by the controller, or at create); the host's `hello` has the PTY's.
+    pub(crate) cols: u16,
+    pub(crate) rows: u16,
+    /// The endpoint of the terminal's `poimen-pty-host`.
+    pub(crate) endpoint: PathBuf,
+    /// The `seq` of the last output record read from the host when the list was written. A host
+    /// behind it is another one.
+    #[serde(default)]
+    pub(crate) seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) agent: Option<AgentInfo>,
+    /// The `seq` of the last accepted agent report, so a stale report stays dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) agent_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) tokens: Vec<StoredToken>,
+}
+
+/// A token with its owner and the end of its TTL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StoredToken {
+    pub(crate) name: String,
+    pub(crate) value: String,
+    pub(crate) source: String,
+    /// When the TTL runs out, milliseconds since the epoch; `None`: no TTL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) expires_at_ms: Option<u64>,
 }
 
 /// What [`load`] read.
@@ -29,6 +72,8 @@ pub(crate) struct Stored {
     pub(crate) layout: Layout,
     /// The first id counter value that collides with nothing ever given out.
     pub(crate) next_id: u64,
+    /// The terminals that ran when the file was written.
+    pub(crate) terminals: Vec<StoredTerminal>,
 }
 
 /// Unix: `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else
@@ -108,12 +153,26 @@ pub(crate) fn load(path: &Path) -> Stored {
         Err(_) => File::default(),
     };
     let layout = Layout::new(file.spaces, file.tabs);
-    let next_id = next_id(layout.ids()).max(file.next_id.unwrap_or(1));
-    Stored { layout, next_id }
+    let ids = layout
+        .ids()
+        .into_iter()
+        .chain(file.terminals.iter().map(|t| t.id.as_str()));
+    let next_id = next_id(ids).max(file.next_id.unwrap_or(1));
+    Stored {
+        layout,
+        next_id,
+        terminals: file.terminals,
+    }
 }
 
-/// Writes the layout and the id counter atomically (temp file, then rename).
-pub(crate) fn save(path: &Path, layout: &Layout, next_id: u64) -> io::Result<()> {
+/// Writes the layout, the id counter and the running terminals atomically (temp file, then
+/// rename), so a crash leaves the previous file or this one, never half of it.
+pub(crate) fn save(
+    path: &Path,
+    layout: &Layout,
+    next_id: u64,
+    terminals: Vec<StoredTerminal>,
+) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         create_private_dir(dir)?;
     }
@@ -121,6 +180,7 @@ pub(crate) fn save(path: &Path, layout: &Layout, next_id: u64) -> io::Result<()>
         spaces: layout.spaces.clone(),
         tabs: layout.tabs.clone(),
         next_id: Some(next_id),
+        terminals,
     })
     .map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
@@ -197,7 +257,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let base = temp("modes");
         let path = base.parent().unwrap().join("fresh").join("server.json");
-        save(&path, &layout(&["s1"]), 2).unwrap();
+        save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&path), 0o600);
         assert_eq!(mode(path.parent().unwrap()), 0o700);
@@ -221,10 +281,76 @@ mod tests {
             },
             active_terminal: "t6".into(),
         });
-        save(&path, &saved, 40).unwrap();
+        save(&path, &saved, 40, Vec::new()).unwrap();
         let loaded = load(&path);
         assert_eq!(loaded.layout, saved);
         assert_eq!(loaded.next_id, 40);
+    }
+
+    fn stored(id: &str) -> StoredTerminal {
+        StoredTerminal {
+            id: id.into(),
+            space_id: "s1".into(),
+            name: "agent".into(),
+            cwd: "/w".into(),
+            program: Some("zsh".into()),
+            cols: 120,
+            rows: 40,
+            endpoint: PathBuf::from("/run/u/poimen/hosts").join(id),
+            seq: 812,
+            agent: Some(AgentInfo {
+                status: poimen_protocol::AgentStatus::Blocked,
+                agent: Some("claude".into()),
+                session_id: Some("abc".into()),
+                message: Some("Allow Bash?".into()),
+                message_at: Some(1_700_000_000_000),
+            }),
+            agent_seq: Some(17),
+            tokens: vec![StoredToken {
+                name: "deliver_step".into(),
+                value: "review".into(),
+                source: "deliver".into(),
+                expires_at_ms: Some(1_700_000_060_000),
+            }],
+        }
+    }
+
+    #[test]
+    fn the_terminal_list_round_trips_with_endpoint_seq_status_and_tokens() {
+        let path = temp("terms");
+        save(&path, &layout(&["s1"]), 20, vec![stored("t9")]).unwrap();
+        let loaded = load(&path);
+        assert_eq!(loaded.terminals, vec![stored("t9")]);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("\"endpoint\": \"/run/u/poimen/hosts/t9\""),
+            "{text}"
+        );
+        assert!(text.contains("\"agent_seq\": 17"), "{text}");
+    }
+
+    #[test]
+    fn a_file_without_terminals_has_no_terminal_key_and_loads_an_empty_list() {
+        let path = temp("noterms");
+        save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("terminals"));
+        assert!(load(&path).terminals.is_empty());
+    }
+
+    #[test]
+    fn stored_terminal_ids_are_never_given_again() {
+        let path = temp("termids");
+        fs::write(
+            &path,
+            r#"{"spaces":[{"id":"s1","name":"a","cwd":"/x"}],"terminals":[{"id":"t41","space_id":"s1","name":"sh","cwd":"/x","cols":80,"rows":24,"endpoint":"/e/t41"}]}"#,
+        )
+        .unwrap();
+        let loaded = load(&path);
+        assert_eq!(loaded.next_id, 42);
+        // Fields a server before #604 never wrote take their defaults.
+        assert_eq!(loaded.terminals[0].seq, 0);
+        assert_eq!(loaded.terminals[0].agent, None);
+        assert!(loaded.terminals[0].tokens.is_empty());
     }
 
     #[test]
@@ -263,9 +389,9 @@ mod tests {
     fn the_persisted_counter_wins_over_the_ids_left_in_the_file() {
         // A split that was dropped took its id with it; the counter still remembers it.
         let path = temp("counter");
-        save(&path, &layout(&["s1"]), 30).unwrap();
+        save(&path, &layout(&["s1"]), 30, Vec::new()).unwrap();
         assert_eq!(load(&path).next_id, 30);
-        save(&path, &layout(&["s50"]), 30).unwrap();
+        save(&path, &layout(&["s50"]), 30, Vec::new()).unwrap();
         assert_eq!(load(&path).next_id, 51);
     }
 

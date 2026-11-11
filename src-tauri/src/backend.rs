@@ -181,6 +181,9 @@ pub enum CloseCode {
     ControllerHeld,
     /// The terminal's process ended (`exit_code` says how); the last screen stays.
     Exited,
+    /// The connection to the server ended without a record (it stopped or crashed); the
+    /// terminal may live on in its host, so the view attaches again once a server answers.
+    Lost,
 }
 
 /// One record of a terminal stream, the same for every backend. `bytes` is base64.

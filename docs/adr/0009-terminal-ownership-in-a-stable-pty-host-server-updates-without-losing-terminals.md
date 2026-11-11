@@ -52,7 +52,8 @@ Observed result (CI `windows` job on `windows-latest`, 2026-11-11, [run 42981307
 ## Implementation
 
 - #602: the `poimen-pty-host` binary, the host protocol and the output ring (`docs/protocol.md`, "Host protocol").
-- #603: `poimen-server` starts every terminal in a host found next to its own binary and reads it as a client (`crates/poimen-server/src/host.rs`); a missing host is an error on `terminal.create`, there is no in-process PTY any more. The sidecar build, `externalBin` and the per-version copies (Windows, AppImage) ship the host next to the server; the cleanup rules of #605 refine that. A server restart still ends the terminals until #604 adopts the hosts: a graceful `server.shutdown` kills them, the hosts of a crashed server end with the orphan timeout.
+- #603: `poimen-server` starts every terminal in a host found next to its own binary and reads it as a client (`crates/poimen-server/src/host.rs`); a missing host is an error on `terminal.create`, there is no in-process PTY any more. The sidecar build, `externalBin` and the per-version copies (Windows, AppImage) ship the host next to the server; the cleanup rules of #605 refine that. A server restart still ended the terminals until #604.
+- #604: the server writes its terminal list (endpoint, last `seq`, size, agent status with its `seq`, tokens) to `server.json` on every change and before `server.shutdown` with `keep_terminals` (the app's confirmed restart; "Quit poimen and stop server" still ends every terminal), and a new server adopts the hosts at start: the grid is rebuilt from the ring (replayed queries are not answered again, a `gap` is a marker line), a host that does not answer is dropped with its leaf. Clients attach again; the restart confirmation names only terminals without `survives_restart` (`docs/protocol.md`, "Persistence").
 
 ## Alternatives
 

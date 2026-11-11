@@ -549,6 +549,11 @@ pub struct Terminal {
     /// ones are gone. Empty when there are none.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tokens: BTreeMap<String, String>,
+    /// The terminal runs in a `poimen-pty-host` that a restarted server adopts: a
+    /// `server.shutdown` with `keep_terminals` keeps it (ADR 0009). Absent (false) from servers
+    /// that end their terminals on a restart.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub survives_restart: bool,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the
@@ -596,6 +601,15 @@ pub fn clean_message(text: &str) -> Option<String> {
     let cut: String = joined.chars().take(MAX_MESSAGE_CHARS).collect();
     let cut = cut.trim_end().to_owned();
     (!cut.is_empty()).then_some(cut)
+}
+
+/// Params of `server.shutdown`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerShutdown {
+    /// Leave the terminals running in their hosts for the next server to adopt (a restart);
+    /// `false` (the default, and what a client without the field gets) ends every terminal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_terminals: bool,
 }
 
 /// Params of `server.set_colors`: the colors the server answers terminal color queries with

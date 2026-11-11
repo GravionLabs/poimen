@@ -353,6 +353,21 @@ impl Client {
         self.request("server.shutdown", Value::Null).map(drop)
     }
 
+    /// Asks the server to save its terminal list and exit, leaving every terminal running in its
+    /// host for the next server to adopt (`server.shutdown` with `keep_terminals`, ADR 0009). A
+    /// server from before #604 ignores the flag and ends the terminals (`Terminal.survives_restart`
+    /// says which server keeps them).
+    pub fn shutdown_keeping_terminals(&self) -> Result<(), ClientError> {
+        let params = crate::protocol::ServerShutdown {
+            keep_terminals: true,
+        };
+        self.request(
+            "server.shutdown",
+            serde_json::to_value(params).unwrap_or_default(),
+        )
+        .map(drop)
+    }
+
     pub fn close_terminal(&self, terminal_id: &str) -> Result<(), ClientError> {
         self.request(
             "terminal.close",

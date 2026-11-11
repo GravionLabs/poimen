@@ -30,7 +30,15 @@
           <li>{{ name }}</li>
         }
       </ul>
-    } @else {
+    }
+    @if (restart.kept() > 0) {
+      <p class="hint kept">
+        {{ restart.kept() }}
+        {{ restart.kept() === 1 ? "terminal keeps" : "terminals keep" }} running; the new server
+        takes {{ restart.kept() === 1 ? "it" : "them" }} over.
+      </p>
+    }
+    @if (restart.terminals().length === 0 && restart.kept() === 0) {
       <p class="hint">No terminal is running.</p>
     }
     <p class="hint">
