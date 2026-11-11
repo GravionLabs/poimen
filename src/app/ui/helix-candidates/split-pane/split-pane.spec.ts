@@ -34,7 +34,10 @@ describe("divider style", () => {
       /\.divider:hover,\s*\.divider:focus-visible,\s*\.divider\.dragging \{[^}]*--divider-color: var\(--status-working\)/,
     );
     expect(css).not.toMatch(/\.divider[^{]*(hover|dragging)[^{]*\{[^}]*border-color/);
-    expect(css).toMatch(/\.divider \{[^}]*--divider-color: var\(--h-border-color\)/);
+    // Derived from the terminal tokens: 50% foreground on --term-bg gives >= 3:1 in both bundled schemes.
+    expect(css).toMatch(
+      /\.divider \{[^}]*--divider-color: color-mix\(in srgb, var\(--term-fg\) 50%, var\(--term-bg\)\)/,
+    );
     expect(css).toMatch(/> \.divider \{[^}]*border-top: 1px solid var\(--divider-color\)/);
     expect(css).toMatch(/> \.divider \{[^}]*border-bottom: 1px solid var\(--divider-color\)/);
     expect(css).toMatch(/\.divider::after \{[^}]*background: var\(--divider-color\)/);
