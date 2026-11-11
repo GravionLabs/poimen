@@ -16,6 +16,8 @@ import { HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/hel
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import {
   filterSpaces,
+  olderHost,
+  olderHostNote,
   type AgentStatus,
   type Terminal,
   type PaneRow,
@@ -207,6 +209,7 @@ export interface SidebarMenuAction {
     | "split-down"
     | "start-agent"
     | "rename"
+    | "restart"
     | "close"
     | "close-space"
     | "rename-space"
@@ -235,6 +238,8 @@ export function sidebarMenuItems(
   kind: SidebarMenuAction["kind"],
   /** The space is in a repository: it offers to start a task. */
   repo = false,
+  /** The terminal runs on an older PTY host: it offers a restart on the new one. */
+  outdatedHost = false,
 ): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
@@ -258,6 +263,9 @@ export function sidebarMenuItems(
             { action: "split-down", label: "Split down" },
             { action: "start-agent", label: "Start agent..." },
             { action: "rename", label: "Rename..." },
+            ...(outdatedHost
+              ? [{ action: "restart" as const, label: "Restart terminal on the new host..." }]
+              : []),
             { action: "close", label: "Close pane..." },
           ],
   };
@@ -354,7 +362,15 @@ export class Sidebar {
   } | null>(null);
   protected menuItems(kind: SidebarMenuAction["kind"], id: string) {
     const repo = kind === "workspace" && spaceRepoDir(this.store.spaces(), id) !== undefined;
-    return sidebarMenuItems(kind, repo);
+    const older =
+      kind === "pane" &&
+      olderHost(
+        this.store
+          .spaces()
+          .flatMap((n) => n.rows)
+          .find((r) => r.pane.terminal_id === id)?.pane,
+      ) !== null;
+    return sidebarMenuItems(kind, repo, older);
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
@@ -644,6 +660,12 @@ export class Sidebar {
 
   protected rowTitle(row: PaneRow): string {
     return [row.pane.terminal_id, row.dir, row.branch].filter(Boolean).join(" · ");
+  }
+
+  /** The tooltip of the quiet mark of a terminal on an older PTY host; `null` when it is current. */
+  protected hostNote(row: PaneRow): string | null {
+    const host = olderHost(row.pane);
+    return host ? olderHostNote(host) : null;
   }
 
   protected glyph(row: PaneRow): string {

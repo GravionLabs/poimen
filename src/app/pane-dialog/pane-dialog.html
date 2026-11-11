@@ -37,6 +37,25 @@
         <button type="submit" class="confirm">Create</button>
       </div>
     </form>
+  } @else if (d.kind === "restart") {
+    <div
+      class="dialog"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Restart terminal"
+      (keydown.escape)="cancel()"
+    >
+      <h2>Restart terminal</h2>
+      <p>
+        Restart <strong>{{ d.name }}</strong> on poimen-pty-host {{ d.bundled }} (it runs on
+        {{ d.have }})? The process in it ends; a new terminal with the same directory and command
+        takes its place.
+      </p>
+      <div class="buttons">
+        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
+        <button type="button" class="confirm danger" (click)="restart()">Restart terminal</button>
+      </div>
+    </div>
   } @else if (d.kind === "agent") {
     <form
       class="dialog"

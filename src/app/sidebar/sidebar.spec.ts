@@ -108,6 +108,20 @@ describe("sidebarMenuItems", () => {
     expect(actions(true, "pane")).not.toContain("start-task");
   });
 
+  it("offers the restart on the new host only for a terminal on an older host", () => {
+    const actions = (older: boolean) =>
+      sidebarMenuItems("pane", false, older).flatMap((g) => g.items.map((i) => i.action));
+    expect(actions(true)).toEqual([
+      "split-right",
+      "split-down",
+      "start-agent",
+      "rename",
+      "restart",
+      "close",
+    ]);
+    expect(actions(false)).not.toContain("restart");
+  });
+
   it("offers split and close on a pane", () => {
     expect(sidebarMenuItems("pane").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "split-right",

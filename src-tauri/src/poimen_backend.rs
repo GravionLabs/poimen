@@ -236,6 +236,14 @@ fn wire_pane(terminal: &Terminal, space_id: &str, tab_id: &str) -> Value {
         // The restart confirmation names only the terminals a restart ends.
         pane["survives_restart"] = json!(true);
     }
+    if let Some(program) = &terminal.program {
+        pane["program"] = json!(program);
+    }
+    if let (Some(have), Some(bundled)) = (&terminal.host_version, &terminal.host_bundled_version) {
+        // The mark on a terminal whose host is older than the bundled one (#606).
+        pane["host_version"] = json!(have);
+        pane["host_bundled_version"] = json!(bundled);
+    }
     pane
 }
 
@@ -501,6 +509,25 @@ impl Backend for PoimenBackend {
 
     fn close_terminal(&self, terminal_id: &str) -> Result<(), String> {
         self.client.close_terminal(terminal_id).map_err(text)
+    }
+
+    fn restart_terminal(&self, terminal_id: &str) -> Result<Option<String>, String> {
+        let old = self.terminal(terminal_id)?;
+        // The new terminal starts beside the old one; closing the old one collapses the split,
+        // so the new one takes its place in the tree.
+        let (_, new) = self
+            .client
+            .split(&TabSplit {
+                terminal_id: old.id.clone(),
+                direction: wire::SplitDirection::Right,
+                ratio: None,
+                cwd: Some(old.cwd.clone()),
+                name: Some(old.name.clone()),
+                command: old.program.clone().map(|p| vec![p]),
+            })
+            .map_err(text)?;
+        self.client.close_terminal(&old.id).map_err(text)?;
+        Ok(Some(new.id))
     }
 
     fn rename_terminal(&self, terminal_id: &str, label: Option<&str>) -> Result<(), String> {
@@ -835,6 +862,8 @@ mod tests {
             agent: None,
             tokens: Default::default(),
             survives_restart: false,
+            host_version: None,
+            host_bundled_version: None,
         }
     }
 
@@ -1353,6 +1382,17 @@ mod tests {
     }
 
     #[test]
+    fn the_host_versions_reach_the_pane_only_when_the_server_reports_them() {
+        let mut t = terminal("t1", "s1", "a");
+        t.host_version = Some("0.15.0".into());
+        t.host_bundled_version = Some("0.16.0".into());
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        assert_eq!(snapshot.panes[0]["host_version"], "0.15.0");
+        assert_eq!(snapshot.panes[0]["host_bundled_version"], "0.16.0");
+        assert!(snapshot.panes[1].get("host_version").is_none());
+    }
+
+    #[test]
     fn tokens_reach_the_pane_as_herdr_tokens_and_their_event_passes_through() {
         let mut t = terminal("t1", "s1", "a");
         t.tokens = [("deliver_step".to_owned(), "build".to_owned())].into();
@@ -1555,6 +1595,37 @@ mod tests {
         assert_eq!(created.space_id, "s9");
         assert_eq!(created.root_terminal.as_deref(), Some("t9"));
         assert_eq!(params_of(&log, "terminal.create")["space_id"], "s9");
+    }
+
+    #[test]
+    fn a_restart_splits_beside_the_terminal_then_closes_it() {
+        let (backend, log) = backend_for("restart", vec![], false);
+        let id = backend.restart_terminal("t1").unwrap();
+        assert_eq!(id.as_deref(), Some("t9"));
+        let params = params_of(&log, "tab.split");
+        assert_eq!(params["terminal_id"], "t1");
+        assert_eq!(params["direction"], "right");
+        let lines = lock(&log).clone();
+        let split = lines
+            .iter()
+            .position(|l| l.starts_with("tab.split"))
+            .unwrap();
+        let close = lines
+            .iter()
+            .position(|l| l.starts_with("terminal.close"))
+            .unwrap();
+        assert!(
+            split < close,
+            "the new terminal exists before the old one ends"
+        );
+        assert_eq!(params_of(&log, "terminal.close")["terminal_id"], "t1");
+    }
+
+    #[test]
+    fn a_restart_of_an_unknown_terminal_fails_and_closes_nothing() {
+        let (backend, log) = backend_for("restart-unknown", vec![], false);
+        assert!(backend.restart_terminal("nope").is_err());
+        assert!(!lock(&log).iter().any(|l| l.starts_with("terminal.close")));
     }
 
     #[test]

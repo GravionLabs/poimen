@@ -130,6 +130,11 @@ export interface Terminal {
   tokens?: Record<string, string>;
   /** Runs in a PTY host that a restarted poimen-server adopts (poimen backend, #604). */
   survives_restart?: boolean;
+  /** The program the terminal runs (poimen backend). */
+  program?: string;
+  /** Version of the PTY host the terminal runs in, and of the one the server ships with (#606). */
+  host_version?: string;
+  host_bundled_version?: string;
   terminal_title_stripped?: string;
   focused?: boolean;
 }
@@ -630,6 +635,42 @@ export function spaceContaining(snapshot: Snapshot, dir: string): string | undef
     }
   }
   return best?.id;
+}
+
+/** The numeric segments of a version (`0.16.0-rc1` is 0, 16, 0), `null` when it has none. */
+function versionParts(version: string): number[] | null {
+  const parts = version
+    .split("-")[0]
+    .split(".")
+    .map((p) => Number.parseInt(p, 10));
+  return parts.length > 0 && parts.every((n) => Number.isFinite(n)) ? parts : null;
+}
+
+/**
+ * The two versions of a terminal that runs on a PTY host older than the one the server ships with
+ * (a host is not updated in place, #606); `null` when it is current, newer or not reported.
+ */
+export function olderHost(
+  pane: Pick<Terminal, "host_version" | "host_bundled_version"> | undefined,
+): { have: string; bundled: string } | null {
+  const have = pane?.host_version;
+  const bundled = pane?.host_bundled_version;
+  if (!have || !bundled || have === bundled) return null;
+  const a = versionParts(have);
+  const b = versionParts(bundled);
+  if (a && b) {
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const [x, y] = [a[i] ?? 0, b[i] ?? 0];
+      if (x !== y) return x < y ? { have, bundled } : null;
+    }
+    return null;
+  }
+  return { have, bundled };
+}
+
+/** The tooltip of the quiet mark on a terminal with an older host. */
+export function olderHostNote(host: { have: string; bundled: string }): string {
+  return `Runs on poimen-pty-host ${host.have}; the bundled host is ${host.bundled}. Restart the terminal to use the new one.`;
 }
 
 /** What the close confirmation says: an agent that is still working or waiting gets a warning. */

@@ -437,6 +437,7 @@ fn the_exit_of_the_child_ends_the_terminal_with_its_code_after_its_output() {
     // An exited terminal has nothing left that a restart would keep.
     let listed = f.client.list_terminals(None).unwrap();
     assert!(!listed.iter().any(|t| t.survives_restart));
+    assert!(listed.iter().all(|t| t.host_version.is_none()));
     assert!(f.screen(&id).contains("bye"));
     // As on any exit, the terminal left its tab.
     f.wait_for(|e| matches!(e, Event::TabClosed { .. }));

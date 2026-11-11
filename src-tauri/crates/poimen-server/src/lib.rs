@@ -363,6 +363,8 @@ impl Shared {
         entry.info.exit_code = exit_code;
         // Nothing of it is left for a restart to keep.
         entry.info.survives_restart = false;
+        entry.info.host_version = None;
+        entry.info.host_bundled_version = None;
         entry.host = None;
         entry.info.agent = None;
         if !entry.info.tokens.is_empty() {
@@ -1402,6 +1404,8 @@ fn spawn_terminal(
         agent: None,
         tokens: Default::default(),
         survives_restart: true,
+        host_version: Some(spawned.version().to_string()),
+        host_bundled_version: Some(env!("CARGO_PKG_VERSION").to_string()),
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
@@ -1547,6 +1551,8 @@ fn adopted(
             agent: t.agent,
             tokens: visible,
             survives_restart: true,
+            host_version: Some(handle.version().to_string()),
+            host_bundled_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         },
         host: Some(handle),
         stream,

@@ -151,6 +151,16 @@ async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), S
     on_backend(backend.inner(), move |b| b.close_terminal(&pane_id)).await
 }
 
+/// Restarts a terminal on the bundled PTY host: a new terminal with the same directory, program
+/// and place; the old process ends. The UI confirms first. Returns the new pane id.
+#[tauri::command]
+async fn pane_restart(
+    backend: State<'_, Shared>,
+    pane_id: String,
+) -> Result<Option<String>, String> {
+    on_backend(backend.inner(), move |b| b.restart_terminal(&pane_id)).await
+}
+
 /// Closes a tab with all its terminals (`tab.close` on the poimen backend). The UI confirms first.
 #[tauri::command]
 async fn tab_close(backend: State<'_, Shared>, tab_id: String) -> Result<(), String> {
@@ -2155,6 +2165,7 @@ pub fn run() {
             tab_resize_split,
             tab_focus,
             pane_close,
+            pane_restart,
             tab_close,
             tab_rename,
             space_close,

@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from "@angular/core";
 import {
   agentKind,
   closeWarning,
+  olderHost,
   paneDir,
   paneSuccessor,
   rowName,
@@ -19,6 +20,7 @@ import { TauriBridge } from "./tauri";
 export type PaneDialogState =
   | { kind: "new"; workspaceId: string; dirs: string[]; cwd: string }
   | { kind: "close"; paneId: string; name: string; warning: string }
+  | { kind: "restart"; paneId: string; name: string; have: string; bundled: string }
   | { kind: "agent"; paneId: string; name: string }
   | { kind: "rename"; paneId: string; agent: boolean; current: string };
 
@@ -69,6 +71,22 @@ export class PaneActions {
       paneId,
       name: pane ? rowName(pane, tab?.label) : paneId,
       warning: closeWarning(pane),
+    });
+  }
+
+  /** Asks for confirmation to restart a terminal on an older PTY host on the bundled one (#606). */
+  askRestart(paneId: string): void {
+    const pane = this.store.pane(paneId);
+    const host = olderHost(pane);
+    if (!pane || !host) return;
+    const tab = this.store.snapshot().tabs.find((t) => t.tab_id === pane.tab_id);
+    this._error.set(null);
+    this._dialog.set({
+      kind: "restart",
+      paneId,
+      name: rowName(pane, tab?.label),
+      have: host.have,
+      bundled: host.bundled,
     });
   }
 
@@ -198,6 +216,28 @@ export class PaneActions {
     }
     await this.store.refresh();
     return successor ? { paneId: dialog.paneId, successor } : { paneId: dialog.paneId };
+  }
+
+  /**
+   * Restarts the pane of the open restart dialog: a new terminal with the same directory, program
+   * and place replaces it. Resolves to the old pane and the new one as its successor, so the
+   * host hands the editor tab over.
+   */
+  async confirmRestart(): Promise<PaneClosed | undefined> {
+    const dialog = this._dialog();
+    if (dialog?.kind !== "restart") return undefined;
+    this._dialog.set(null);
+    this._error.set(null);
+    try {
+      const created = await this.bridge.invoke<string | null>("pane_restart", {
+        paneId: dialog.paneId,
+      });
+      await this.store.refresh();
+      return created ? { paneId: dialog.paneId, successor: created } : { paneId: dialog.paneId };
+    } catch (err) {
+      this._error.set(String(err));
+      return undefined;
+    }
   }
 
   /** Starts `kind` in the pane of the open agent dialog; the `args` field is split on whitespace into argv elements. */

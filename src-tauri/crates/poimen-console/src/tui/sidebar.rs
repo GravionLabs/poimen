@@ -497,6 +497,8 @@ mod tests {
             agent: None,
             tokens: BTreeMap::new(),
             survives_restart: false,
+            host_version: None,
+            host_bundled_version: None,
         }
     }
 
