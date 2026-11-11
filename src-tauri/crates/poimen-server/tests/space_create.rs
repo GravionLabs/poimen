@@ -320,6 +320,65 @@ fn without_a_project_file_the_user_layout_is_built_without_asking() {
     client.close_space(&space.space.id).unwrap();
 }
 
+/// Compact form of a split tree: `name` of a leaf (by terminal name), `right[a, b]`, `down[a, b]`.
+fn shape(node: &Node, names: &std::collections::HashMap<String, String>) -> String {
+    match node {
+        Node::Terminal { terminal_id } => names[terminal_id].clone(),
+        Node::Split {
+            direction,
+            children,
+            ..
+        } => {
+            let d = match direction {
+                SplitDirection::Right => "right",
+                SplitDirection::Down => "down",
+            };
+            format!(
+                "{d}[{}, {}]",
+                shape(&children[0], names),
+                shape(&children[1], names)
+            )
+        }
+    }
+}
+
+#[test]
+fn the_user_layout_keeps_each_split_direction_and_from() {
+    // #664: copilot right of claude, shell below claude.
+    let env = Env::new("directions");
+    env.write_config(
+        r#"{"spaces": {"layout": {"panes": [
+            {"name": "claude"},
+            {"name": "copilot", "split": {"from": "claude", "direction": "right", "ratio": 0.5}},
+            {"name": "shell", "split": {"from": "claude", "direction": "down", "ratio": 0.7}}]}}}"#,
+    );
+    let client = env.start();
+    let space = created(create(&client, &env.repo("other"), None));
+    let names: std::collections::HashMap<String, String> = client
+        .list_terminals(None)
+        .unwrap()
+        .into_iter()
+        .map(|t| (t.id, t.name))
+        .collect();
+    assert_eq!(space.tabs.len(), 1);
+    assert_eq!(
+        shape(&space.tabs[0].root, &names),
+        "right[down[claude, shell], copilot]"
+    );
+    let Node::Split {
+        ratio, children, ..
+    } = &space.tabs[0].root
+    else {
+        panic!("root is a split")
+    };
+    assert_eq!(*ratio, 0.5);
+    let Node::Split { ratio, .. } = &children[0] else {
+        panic!("first child is a split")
+    };
+    assert_eq!(*ratio, 0.7);
+    client.close_space(&space.space.id).unwrap();
+}
+
 #[test]
 fn layout_false_creates_an_empty_space() {
     let env = Env::new("empty");

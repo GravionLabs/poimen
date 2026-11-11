@@ -236,6 +236,33 @@ mod tests {
     }
 
     #[test]
+    fn the_664_layout_puts_shell_below_claude_and_copilot_right_of_both() {
+        // right[down[claude, shell], copilot], as the server builds it from the layout of #664.
+        let node = split(
+            "split2",
+            SplitDirection::Right,
+            0.5,
+            split(
+                "split3",
+                SplitDirection::Down,
+                0.7,
+                leaf("claude"),
+                leaf("shell"),
+            ),
+            leaf("copilot"),
+        );
+        let l = layout(&node, Rect::new(0, 0, 81, 21));
+        assert_eq!(
+            rects(&l),
+            [
+                ("claude", Rect::new(0, 0, 40, 14)),
+                ("shell", Rect::new(0, 15, 40, 6)),
+                ("copilot", Rect::new(41, 0, 40, 21)),
+            ]
+        );
+    }
+
+    #[test]
     fn a_single_leaf_takes_the_whole_area_without_borders() {
         let l = layout(&leaf("t1"), Rect::new(3, 2, 40, 10));
         assert_eq!(rects(&l), [("t1", Rect::new(3, 2, 40, 10))]);
