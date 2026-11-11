@@ -232,6 +232,10 @@ fn wire_pane(terminal: &Terminal, space_id: &str, tab_id: &str) -> Value {
         // The same `tokens` map herdr's `pane.list` has, so `$<name>` row tokens work unchanged.
         pane["tokens"] = json!(terminal.tokens);
     }
+    if terminal.survives_restart {
+        // The restart confirmation names only the terminals a restart ends.
+        pane["survives_restart"] = json!(true);
+    }
     pane
 }
 
@@ -349,6 +353,15 @@ pub fn map_event(event: Event) -> Option<StreamRecord> {
             code: Some(CloseCode::Exited),
         }),
         _ => None,
+    }
+}
+
+/// The connection of an attached stream ended without a record.
+fn lost(err: &ClientError) -> StreamRecord {
+    StreamRecord::Closed {
+        reason: format!("the connection to poimen-server ended: {err}"),
+        exit_code: None,
+        code: Some(CloseCode::Lost),
     }
 }
 
@@ -648,14 +661,10 @@ impl Backend for PoimenBackend {
                             on_record(id, record);
                         }
                     }
-                    // Closed by poimen (the writer shut the socket down) or the server went away.
-                    Err(err) => {
-                        break StreamRecord::Closed {
-                            reason: err.to_string(),
-                            exit_code: None,
-                            code: None,
-                        };
-                    }
+                    // The server went away (a restart, a crash): the terminal may live on in its
+                    // host and come back with the next server (ADR 0009). (A stream closed by
+                    // poimen ends here too, but its view no longer listens.)
+                    Err(err) => break lost(&err),
                 }
             };
             lock(&streams).remove(&id);
@@ -825,6 +834,7 @@ mod tests {
             program: None,
             agent: None,
             tokens: Default::default(),
+            survives_restart: false,
         }
     }
 
@@ -1334,6 +1344,15 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_that_survives_a_restart_says_so_on_its_pane() {
+        let mut t = terminal("t1", "s1", "a");
+        t.survives_restart = true;
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        assert_eq!(snapshot.panes[0]["survives_restart"], true);
+        assert!(snapshot.panes[1].get("survives_restart").is_none());
+    }
+
+    #[test]
     fn tokens_reach_the_pane_as_herdr_tokens_and_their_event_passes_through() {
         let mut t = terminal("t1", "s1", "a");
         t.tokens = [("deliver_step".to_owned(), "build".to_owned())].into();
@@ -1407,6 +1426,11 @@ mod tests {
                         writeln!(stream, "{response}").unwrap();
                         if method == "terminal.attach" {
                             for line in &extra {
+                                // The server goes away (a restart or a crash).
+                                if line == GONE {
+                                    let _ = stream.shutdown();
+                                    return;
+                                }
                                 writeln!(stream, "{line}").unwrap();
                             }
                         }
@@ -1416,6 +1440,9 @@ mod tests {
             }
         });
     }
+
+    /// An `extra` line of [`serve`]: the server ends the connection without a record.
+    const GONE: &str = "<gone>";
 
     fn tab_json(tab_id: &str, space: &str, root: Value) -> Value {
         json!({"tab_id": tab_id, "space_id": space, "name": "zsh", "root": root, "active_terminal": "t1"})
@@ -2112,6 +2139,30 @@ mod tests {
         assert!(matches!(rx.recv().unwrap().1, StreamRecord::Closed { .. }));
         assert!(backend.stream_input(id, "y").is_err());
         let _ = log;
+    }
+
+    #[test]
+    fn a_server_that_goes_away_ends_the_stream_as_lost_so_the_view_attaches_again() {
+        let extra = vec![
+            r#"{"event":"terminal.output","data":{"terminal_id":"t1","seq":1,"data":"YQ=="}}"#
+                .into(),
+            GONE.into(),
+        ];
+        let (backend, _) = backend_for("gone", extra, false);
+        let (opened, rx) = collect(&backend, Mode::Control, false);
+        opened.unwrap();
+        let last = rx.iter().map(|(_, r)| r).last().unwrap();
+        assert!(
+            matches!(
+                &last,
+                StreamRecord::Closed {
+                    code: Some(CloseCode::Lost),
+                    exit_code: None,
+                    ..
+                }
+            ),
+            "{last:?}"
+        );
     }
 
     #[test]

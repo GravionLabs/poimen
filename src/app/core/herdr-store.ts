@@ -207,7 +207,7 @@ export class HerdrStore {
     } catch (err) {
       this._backend.set({ state: "failed", reason: String(err) });
     }
-    // A server that was just started has its spaces back, but no terminals.
+    // A server that was just started has its spaces back, but only the terminals it adopted.
     if (this._backend()?.state === "started") this.freshSession = true;
     // At start the first snapshot is already being read; only a started server needs another read.
     if (retry || this._backend()?.state === "started") {
@@ -391,7 +391,7 @@ export class HerdrStore {
         this._watchLost.set(true);
         this._connectionError.set(event.data?.reason ?? "");
         this._info.set(null);
-        // The server may come back restarted: its spaces without their terminals.
+        // The server may come back restarted: its spaces, and the terminals whose hosts it adopted.
         this.freshSession = true;
         return;
       case "pane.agent_status_changed":

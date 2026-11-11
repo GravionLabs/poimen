@@ -496,6 +496,7 @@ mod tests {
             program: None,
             agent: None,
             tokens: BTreeMap::new(),
+            survives_restart: false,
         }
     }
 

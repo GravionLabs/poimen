@@ -102,7 +102,7 @@ vi.mock("@xterm/addon-webgl", () => ({
   },
 }));
 
-import { TerminalView } from "./terminal-view";
+import { REATTACHING, REATTACH_DELAYS_MS, TerminalView } from "./terminal-view";
 
 const pane: Terminal = {
   terminal_id: "w1:p1",
@@ -1165,6 +1165,48 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
     settings.set({ ...DEFAULT_SETTINGS, scrollback: 500 });
     fixture.detectChanges();
     expect(scrollbackOf().scrollback).toBe(500);
+  });
+
+  it("attaches again in its mode after the server went away, without a takeover", async () => {
+    const frame: StreamRecord = { type: "reset", cols: 80, rows: 24, bytes: "" };
+    const { send, open, fixture, modes } = await setup("control", pane, true);
+    await send(0, frame);
+    await send(0, attached);
+    await send(0, {
+      type: "closed",
+      reason: "the connection to poimen-server ended: eof",
+      code: "lost",
+    });
+    expect(fixture.componentInstance.banner()).toBe(REATTACHING);
+    expect(modes.at(-1)).toEqual({ mode: "observe", blocked: null });
+    expect(open).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, REATTACH_DELAYS_MS[0] + 50));
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open.mock.calls[1][0]).toMatchObject({ mode: "control", takeover: false });
+    await send(1, frame);
+    await send(1, attached);
+    expect(fixture.componentInstance.banner()).toBeNull();
+    expect(modes.at(-1)).toEqual({ mode: "control", blocked: null });
+  });
+
+  it("keeps trying while no server answers yet", async () => {
+    const { send, open, fixture } = await setup("observe", pane, true);
+    open.mockImplementationOnce(() => Promise.reject("no server"));
+    await send(0, { type: "closed", reason: "gone", code: "lost" });
+    await new Promise((resolve) => setTimeout(resolve, REATTACH_DELAYS_MS[0] + 50));
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(fixture.componentInstance.banner()).toBe(REATTACHING);
+    await new Promise((resolve) => setTimeout(resolve, REATTACH_DELAYS_MS[1] + 50));
+    expect(open).toHaveBeenCalledTimes(3);
+    expect(open.mock.calls[2][0]).toMatchObject({ mode: "observe", takeover: false });
+  });
+
+  it("stops trying when the view is destroyed", async () => {
+    const { send, open, fixture } = await setup("observe", pane, true);
+    await send(0, { type: "closed", reason: "gone", code: "lost" });
+    fixture.destroy();
+    await new Promise((resolve) => setTimeout(resolve, REATTACH_DELAYS_MS[0] + 50));
+    expect(open).toHaveBeenCalledTimes(1);
   });
 
   it("closes silently when the server detaches the stream", async () => {

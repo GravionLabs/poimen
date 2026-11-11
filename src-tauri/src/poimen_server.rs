@@ -1,6 +1,8 @@
 //! Starting `poimen-server` (ADR 0003) when it is absent. poimen stops it only on a confirmed
-//! restart (an older server than the bundled one, [`restart`]) and a confirmed "Quit poimen and
-//! stop server" ([`stop`]); otherwise the server owns the PTYs and outlives the app. The wire protocol lives in `crates/poimen-protocol`, the client
+//! restart (an older server than the bundled one, [`restart`]: the terminals keep running in
+//! their hosts and the new server adopts them, ADR 0009) and a confirmed "Quit poimen and stop
+//! server" ([`stop`]: ends every terminal); otherwise the server and the PTY hosts of its
+//! terminals outlive the app. The wire protocol lives in `crates/poimen-protocol`, the client
 //! in `crates/poimen-client`; this module only decides whether to start a server and does so
 //! detached, like `backend.rs` does for herdr. On Windows it starts a per-version copy under
 //! `%LOCALAPPDATA%\poimen-server\bin` (see [`stage`]), breaking away from the app's job; inside
@@ -47,7 +49,8 @@ pub enum Ping {
     /// A server answered with the protocol poimen speaks.
     Answers,
     /// A server with the protocol poimen speaks, but older than the bundled one. Never replaced
-    /// without the user's consent: stopping it ends every terminal.
+    /// without the user's consent: a server from before #604 ends every terminal when it stops
+    /// (the terminals of a later one survive the restart, `Terminal.survives_restart`).
     Outdated { running: String },
     /// A server with another protocol version: it cannot be talked to, and a second one cannot
     /// start on its socket.
@@ -81,8 +84,9 @@ pub trait Runner {
     fn resolve(&self) -> Option<PathBuf>;
     /// Starts the program detached and returns without waiting for it.
     fn spawn(&self, program: &Path) -> io::Result<()>;
-    /// Asks the running server to end every terminal and exit (`server.shutdown`).
-    fn shutdown(&self) -> Result<(), String>;
+    /// Asks the running server to exit (`server.shutdown`): with `keep_terminals` it leaves them
+    /// running in their hosts for the next server, else it ends every terminal.
+    fn shutdown(&self, keep_terminals: bool) -> Result<(), String>;
     fn sleep(&self, duration: Duration);
     fn now(&self) -> Duration;
 }
@@ -129,14 +133,20 @@ pub fn ensure_running(runner: &impl Runner, auto_start: bool) -> Result<Outcome,
 pub const BUNDLED_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Asks the running server to shut down and waits until nothing answers any more. Ends every
-/// terminal: call it only after the user confirmed.
+/// terminal: call it only after the user confirmed ("Quit poimen and stop server").
 pub fn stop(runner: &impl Runner) -> Result<(), StartError> {
+    shut_down(runner, false)
+}
+
+/// [`stop`], keeping the terminals in their hosts when `keep_terminals` (a server from before
+/// #604 ends them anyway).
+fn shut_down(runner: &impl Runner, keep_terminals: bool) -> Result<(), StartError> {
     match runner.ping() {
         Ping::Absent => return Ok(()),
         Ping::Denied(e) => return Err(StartError::Denied(e)),
         _ => {}
     }
-    runner.shutdown().map_err(|e| {
+    runner.shutdown(keep_terminals).map_err(|e| {
         StartError::Shutdown(format!(
             "could not stop the running `poimen-server`: {e}. A server older than this poimen may not know `server.shutdown`: end its process by hand"
         ))
@@ -154,9 +164,10 @@ pub fn stop(runner: &impl Runner) -> Result<(), StartError> {
     )))
 }
 
-/// The confirmed restart: [`stop`] the running server, then start the bundled one.
+/// The confirmed restart: stop the running server, leaving the terminals in their hosts, then
+/// start the bundled one, which adopts them (ADR 0009).
 pub fn restart(runner: &impl Runner) -> Result<Outcome, StartError> {
-    stop(runner)?;
+    shut_down(runner, true)?;
     ensure_running(runner, true)
 }
 
@@ -516,8 +527,13 @@ impl Runner for SystemRunner {
         Ok(())
     }
 
-    fn shutdown(&self) -> Result<(), String> {
-        self.client.shutdown().map_err(|e| e.to_string())
+    fn shutdown(&self, keep_terminals: bool) -> Result<(), String> {
+        let result = if keep_terminals {
+            self.client.shutdown_keeping_terminals()
+        } else {
+            self.client.shutdown()
+        };
+        result.map_err(|e| e.to_string())
     }
 
     fn sleep(&self, duration: Duration) {
@@ -541,6 +557,8 @@ mod tests {
         /// What a running server's ping says; `None`: a current server (`Answers`).
         found: RefCell<Option<Ping>>,
         shutdowns: Cell<u32>,
+        /// `keep_terminals` of every shutdown asked for.
+        kept: RefCell<Vec<bool>>,
         shutdown_fails: bool,
         installed: bool,
         becomes_up: bool,
@@ -555,6 +573,7 @@ mod tests {
                 running: Cell::new(running),
                 found: RefCell::new(None),
                 shutdowns: Cell::new(0),
+                kept: RefCell::new(vec![]),
                 shutdown_fails: false,
                 installed,
                 becomes_up,
@@ -583,8 +602,9 @@ mod tests {
             self.found.replace(None);
             Ok(())
         }
-        fn shutdown(&self) -> Result<(), String> {
+        fn shutdown(&self, keep_terminals: bool) -> Result<(), String> {
             self.shutdowns.set(self.shutdowns.get() + 1);
+            self.kept.borrow_mut().push(keep_terminals);
             if self.shutdown_fails {
                 return Err("unknown method server.shutdown".into());
             }
@@ -1138,10 +1158,11 @@ mod tests {
     }
 
     #[test]
-    fn a_confirmed_restart_shuts_down_then_starts_the_bundled_server() {
+    fn a_confirmed_restart_shuts_down_keeping_the_terminals_then_starts_the_bundled_server() {
         let fake = outdated_fake();
         assert_eq!(restart(&fake), Ok(Outcome::Started));
         assert_eq!(fake.shutdowns.get(), 1);
+        assert_eq!(*fake.kept.borrow(), [true]);
         assert_eq!(fake.spawned.borrow().len(), 1);
         assert_eq!(fake.ping(), Ping::Answers);
     }
@@ -1164,10 +1185,11 @@ mod tests {
     }
 
     #[test]
-    fn stop_shuts_a_current_server_down_and_starts_nothing() {
+    fn stop_shuts_a_current_server_down_ending_the_terminals_and_starts_nothing() {
         let fake = Fake::new(true, true, true);
         assert_eq!(stop(&fake), Ok(()));
         assert_eq!(fake.shutdowns.get(), 1);
+        assert_eq!(*fake.kept.borrow(), [false]);
         assert!(fake.spawned.borrow().is_empty());
     }
 
@@ -1193,8 +1215,8 @@ mod tests {
         fn spawn(&self, program: &Path) -> io::Result<()> {
             self.fake.spawn(program)
         }
-        fn shutdown(&self) -> Result<(), String> {
-            self.fake.shutdown()
+        fn shutdown(&self, keep_terminals: bool) -> Result<(), String> {
+            self.fake.shutdown(keep_terminals)
         }
         fn sleep(&self, d: Duration) {
             self.fake.sleep(d)

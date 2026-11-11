@@ -14,17 +14,19 @@ const outdated: BackendStatus = {
   bundled: "0.12.0",
 };
 
-function setup(status: BackendStatus | null, invoke = vi.fn()) {
+type Pane = { terminal_id: string; label?: string; survives_restart?: boolean };
+
+function setup(
+  status: BackendStatus | null,
+  invoke = vi.fn(),
+  terminals: Pane[] = [{ terminal_id: "t1", label: "build" }, { terminal_id: "t2" }],
+) {
   const backend = signal<BackendStatus | null>(status);
   const ensureBackend = vi.fn(async () => backend.set({ state: "running", reason: null }));
   const store = {
     backend,
     ensureBackend,
-    snapshot: signal({
-      spaces: [],
-      tabs: [],
-      terminals: [{ terminal_id: "t1", label: "build" }, { terminal_id: "t2" }],
-    }),
+    snapshot: signal({ spaces: [], tabs: [], terminals }),
   };
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -83,6 +85,29 @@ describe("ServerRestart", () => {
     restart.cancel();
     expect(restart.action()).toBeNull();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("a restart ends only the terminals the next server does not adopt, a quit all", () => {
+    const panes = [
+      { terminal_id: "t1", label: "build", survives_restart: true },
+      { terminal_id: "t2", survives_restart: true },
+      { terminal_id: "t3", label: "old" },
+    ];
+    const { restart } = setup(outdated, vi.fn(), panes);
+    restart.askRestart();
+    expect(restart.terminals()).toEqual(["old"]);
+    expect(restart.kept()).toBe(2);
+    restart.askQuit();
+    expect(restart.terminals()).toEqual(["build", "t2", "old"]);
+    expect(restart.kept()).toBe(0);
+  });
+
+  it("a restart with every terminal in a host ends none", () => {
+    const panes = [{ terminal_id: "t1", survives_restart: true }];
+    const { restart } = setup(outdated, vi.fn(), panes);
+    restart.askRestart();
+    expect(restart.terminals()).toEqual([]);
+    expect(restart.kept()).toBe(1);
   });
 
   it("restarts after the confirmation and checks the backend again", async () => {

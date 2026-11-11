@@ -90,26 +90,41 @@ pub(crate) const MAX_BATCH: usize = 32 * 1024;
 pub(crate) enum Chunk {
     /// The bytes of an output record.
     Data(Vec<u8>),
+    /// Output that ran before this server read the host: the replay of its ring when a server
+    /// adopts it (#604). It rebuilds the grid; its terminal queries were answered back then (or
+    /// by nobody) and are not answered again.
+    Replay(Vec<u8>),
     /// The terminal ended: its child exited with the code, or its host is gone (`None`).
     End(Option<u32>),
 }
 
 /// Calls `on_output` with batches of the records of `rx` (what arrives within [`COALESCE`], up
-/// to [`MAX_BATCH`] bytes), in order. Returns the exit code of [`Chunk::End`] once everything before it was handed on (`None`
-/// also when the sender went away).
-pub(crate) fn coalesce(rx: &Receiver<Chunk>, mut on_output: impl FnMut(&[u8])) -> Option<u32> {
+/// to [`MAX_BATCH`] bytes), in order; `live` is false for a batch of [`Chunk::Replay`]s, and a
+/// batch never mixes the two. Returns the exit code of [`Chunk::End`] once everything before it
+/// was handed on (`None` also when the sender went away).
+pub(crate) fn coalesce(
+    rx: &Receiver<Chunk>,
+    mut on_output: impl FnMut(&[u8], bool),
+) -> Option<u32> {
     let mut end: Option<Option<u32>> = None;
+    // A chunk of the other kind that ended the last batch and starts the next.
+    let mut carried: Option<(Vec<u8>, bool)> = None;
     while end.is_none() {
-        let mut batch = match rx.recv() {
-            Ok(Chunk::Data(data)) => data,
-            Ok(Chunk::End(code)) => return code,
-            Err(_) => return None,
+        let (mut batch, live) = match carried.take() {
+            Some(first) => first,
+            None => match rx.recv() {
+                Ok(Chunk::Data(data)) => (data, true),
+                Ok(Chunk::Replay(data)) => (data, false),
+                Ok(Chunk::End(code)) => return code,
+                Err(_) => return None,
+            },
         };
         let deadline = Instant::now() + COALESCE;
         while batch.len() < MAX_BATCH {
             let left = deadline.saturating_duration_since(Instant::now());
-            match rx.recv_timeout(left) {
-                Ok(Chunk::Data(d)) => batch.extend_from_slice(&d),
+            let (data, kind) = match rx.recv_timeout(left) {
+                Ok(Chunk::Data(d)) => (d, true),
+                Ok(Chunk::Replay(d)) => (d, false),
                 Ok(Chunk::End(code)) => {
                     end = Some(code);
                     break;
@@ -119,9 +134,14 @@ pub(crate) fn coalesce(rx: &Receiver<Chunk>, mut on_output: impl FnMut(&[u8])) -
                     break;
                 }
                 Err(RecvTimeoutError::Timeout) => break,
+            };
+            if kind != live {
+                carried = Some((data, kind));
+                break;
             }
+            batch.extend_from_slice(&data);
         }
-        on_output(&batch);
+        on_output(&batch, live);
     }
     end.flatten()
 }
@@ -165,8 +185,36 @@ mod tests {
         }
         drop(tx);
         let mut batches = Vec::new();
-        let code = coalesce(&rx, |b| batches.push(b.to_vec()));
+        let code = coalesce(&rx, |b, _| batches.push(b.to_vec()));
         (batches, code)
+    }
+
+    #[test]
+    fn replayed_and_live_output_never_share_a_batch_and_keep_their_order() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for chunk in [
+            Chunk::Replay(b"old ".to_vec()),
+            Chunk::Replay(b"older ".to_vec()),
+            Chunk::Data(b"new".to_vec()),
+            Chunk::Data(b"er".to_vec()),
+            Chunk::Replay(b"x".to_vec()),
+            Chunk::End(Some(1)),
+        ] {
+            tx.send(chunk).unwrap();
+        }
+        let mut batches = Vec::new();
+        let code = coalesce(&rx, |b, live| {
+            batches.push((String::from_utf8(b.to_vec()).unwrap(), live));
+        });
+        assert_eq!(
+            batches,
+            [
+                ("old older ".to_string(), false),
+                ("newer".to_string(), true),
+                ("x".to_string(), false),
+            ]
+        );
+        assert_eq!(code, Some(1));
     }
 
     #[test]

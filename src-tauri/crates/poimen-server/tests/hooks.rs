@@ -177,19 +177,43 @@ fn a_copilot_hook_reports_from_every_terminal_of_every_space() {
 }
 
 #[test]
-fn a_terminal_of_a_space_restored_after_a_restart_reports() {
+fn a_terminal_adopted_after_a_restart_and_a_new_one_both_report() {
     let env = Env::new("restart");
     let first = env.start("run");
     let space = first.create_space("api", &env.work()).unwrap();
-    sh(&first, &space.id);
-    // A new server (another socket, same state file), as after a restart: the space is back,
-    // its terminals are not, and the app opens new ones in it.
-    let second = env.start("run2");
-    assert!(second.list_terminals(None).unwrap().is_empty());
-    let id = sh(&second, &space.id);
-    type_copilot_hook(&second, &id, "userPromptSubmitted", "s1");
-    let info = wait_for(&second, &id, AgentStatus::Working);
+    let kept = sh(&first, &space.id);
+    // A restart: the first server leaves its terminals to their hosts, the next one on the same
+    // socket (which the shell's POIMEN_SOCKET names) adopts them.
+    first.shutdown_keeping_terminals().unwrap();
+    let config = env.config("run");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    // The first server holds the socket's lock until its shutdown is done.
+    let server = loop {
+        match Server::bind(config.clone()) {
+            Ok(server) => break server,
+            Err(e) => assert!(
+                Instant::now() < deadline,
+                "the first server did not stop: {e}"
+            ),
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    thread::spawn(move || server.serve());
+    let second = Client::new(&config.socket);
+    let ids: Vec<String> = second
+        .list_terminals(None)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(ids, std::slice::from_ref(&kept));
+    type_copilot_hook(&second, &kept, "userPromptSubmitted", "s1");
+    let info = wait_for(&second, &kept, AgentStatus::Working);
     assert_eq!(info.agent.as_deref(), Some("copilot"));
+    let id = sh(&second, &space.id);
+    type_copilot_hook(&second, &id, "userPromptSubmitted", "s2");
+    wait_for(&second, &id, AgentStatus::Working);
+    assert_eq!(env.log(), "", "nothing failed");
 }
 
 #[test]

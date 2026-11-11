@@ -38,6 +38,19 @@ pub(crate) struct Link {
     /// Set when the stream could not queue a record: the writer then ends the attachment with
     /// the `overflow` reason, after what it already holds.
     pub overflowed: AtomicBool,
+    /// Set when the server stops and leaves the terminal to its host (`server.shutdown` with
+    /// `keep_terminals`): the writer closes the connection without a record, so the client sees
+    /// the server go away and attaches again to the next one.
+    pub released: AtomicBool,
+}
+
+impl Link {
+    pub fn new() -> Self {
+        Self {
+            overflowed: AtomicBool::new(false),
+            released: AtomicBool::new(false),
+        }
+    }
 }
 
 struct Client {
@@ -129,6 +142,17 @@ impl TermStream {
     /// answers of the grid are dropped so a query never gets two replies. The hand-over is at
     /// attach and detach of the controller.
     pub fn output(&self, bytes: &[u8]) {
+        self.feed(bytes, true);
+    }
+
+    /// Feeds output that ran before this server read the host (the replay of its ring when the
+    /// server adopts it): grid and clients as [`output`](Self::output), but its queries are not
+    /// answered again.
+    pub fn replay(&self, bytes: &[u8]) {
+        self.feed(bytes, false);
+    }
+
+    fn feed(&self, bytes: &[u8], live: bool) {
         for chunk in bytes.chunks(MAX_BATCH) {
             let mut st = self.lock();
             st.emulator.feed(chunk);
@@ -136,7 +160,7 @@ impl TermStream {
                 let colors = self.colors.read().unwrap_or_else(|e| e.into_inner());
                 st.emulator.take_replies(&colors)
             };
-            let answer = st.controller.is_none() && !replies.is_empty();
+            let answer = live && st.controller.is_none() && !replies.is_empty();
             st.seq += 1;
             let line = line_of(&Event::TerminalOutput {
                 terminal_id: self.terminal_id.clone(),
@@ -204,6 +228,21 @@ impl TermStream {
         });
         for client in st.clients.drain(..) {
             kick(&client, &line);
+        }
+        st.controller = None;
+    }
+
+    /// The server stops and leaves the terminal running in its host: every attachment ends
+    /// without a record, as if the server went away, so its client attaches to the next server.
+    pub fn release(&self) {
+        let mut st = self.lock();
+        for client in st.clients.drain(..) {
+            client.link.released.store(true, Ordering::SeqCst);
+            // Wakes the writer; a full queue is noticed by its next poll of the flag.
+            let _ = client.tx.try_send(Line {
+                text: Arc::from(""),
+                last: true,
+            });
         }
         st.controller = None;
     }
@@ -362,9 +401,7 @@ mod tests {
         cap: usize,
     ) -> Result<(Attached, Receiver<Line>), (ErrorCode, String)> {
         let (tx, rx) = sync_channel(cap);
-        let link = Arc::new(Link {
-            overflowed: AtomicBool::new(false),
-        });
+        let link = Arc::new(Link::new());
         s.attach("1", mode, take_over, tx, link).map(|a| (a, rx))
     }
 
@@ -555,6 +592,40 @@ mod tests {
         s.detach(c.client_id);
         s.output(b"\x1b[c");
         assert_eq!(answered(&sink), "\x1b[?6c");
+    }
+
+    #[test]
+    fn replayed_output_reaches_the_grid_and_the_clients_but_its_queries_get_no_answer() {
+        let (s, sink) = answering();
+        let (_, rx) = client(&s, AttachMode::Observe, false, 8).unwrap();
+        s.replay(b"prompt$ \x1b[c\x1b[6n");
+        assert_eq!(answered(&sink), "");
+        let lines = texts(&rx);
+        assert!(lines[1].contains("terminal.output"), "{lines:?}");
+        let (_, late) = client(&s, AttachMode::Observe, false, 8).unwrap();
+        let snap: serde_json::Value = serde_json::from_str(&texts(&late)[0]).unwrap();
+        let snap =
+            poimen_protocol::decode_bytes(snap["result"]["snapshot"].as_str().unwrap()).unwrap();
+        assert!(String::from_utf8_lossy(&snap).contains("prompt$"));
+        // Live output after the replay is answered again.
+        s.output(b"\x1b[c");
+        assert_eq!(answered(&sink), "\x1b[?6c");
+    }
+
+    #[test]
+    fn release_ends_every_attachment_without_a_record_and_frees_the_controller() {
+        let (s, _) = stream();
+        let (tx, rx) = sync_channel(8);
+        let link = Arc::new(Link::new());
+        s.attach("1", AttachMode::Control, false, tx, Arc::clone(&link))
+            .unwrap();
+        let _ = rx.try_recv(); // the attach response
+        s.release();
+        assert!(link.released.load(Ordering::SeqCst));
+        assert!(!s.has_controller());
+        let last = rx.try_recv().unwrap();
+        assert!(last.last && last.text.is_empty());
+        assert!(!link.overflowed.load(Ordering::SeqCst));
     }
 
     #[test]

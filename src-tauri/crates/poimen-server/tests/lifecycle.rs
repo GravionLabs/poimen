@@ -209,14 +209,21 @@ fn a_stale_socket_file_is_replaced() {
 }
 
 #[test]
-fn spaces_persist_across_restarts_but_terminals_do_not() {
+fn spaces_persist_across_restarts_and_ended_terminals_do_not_come_back() {
     let env = Env::new("persist");
     let first = env.config();
-    let client = start(&first);
+    let server = Server::bind(first.clone()).unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    server.on_shutdown(move || done_tx.send(()).unwrap());
+    thread::spawn(move || server.serve());
+    let client = Client::new(&first.socket);
     let space = client.create_space("api", &env.work()).unwrap();
     client.create_space("docs", &env.work()).unwrap();
     client.rename_space(&space.id, "api v2").unwrap();
     client.create_terminal(&sh(&space.id)).unwrap();
+    // A shutdown without `keep_terminals` ends them (a kept one is adopted, see tests/adopt.rs).
+    client.shutdown().unwrap();
+    done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
 
     // A new server (another socket, same state file), as after a restart.
     let second = Config {
