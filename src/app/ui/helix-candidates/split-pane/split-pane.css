@@ -22,10 +22,11 @@
 .divider {
   position: relative;
   flex: none;
+  --divider-color: var(--h-border-color);
   box-sizing: border-box;
   width: 7px;
-  border-left: 1px solid var(--h-border-color);
-  border-right: 1px solid var(--h-border-color);
+  border-left: 1px solid var(--divider-color);
+  border-right: 1px solid var(--divider-color);
   z-index: 1;
   cursor: col-resize;
   touch-action: none;
@@ -36,8 +37,8 @@
   height: 7px;
   border-left: 0;
   border-right: 0;
-  border-top: 1px solid var(--h-border-color);
-  border-bottom: 1px solid var(--h-border-color);
+  border-top: 1px solid var(--divider-color);
+  border-bottom: 1px solid var(--divider-color);
   cursor: row-resize;
 }
 
@@ -51,7 +52,7 @@
   height: 24px;
   transform: translate(-50%, -50%);
   border-radius: 2px;
-  background: var(--h-border-color);
+  background: var(--divider-color);
 }
 
 :host(.column) > .divider::after {
@@ -62,12 +63,6 @@
 .divider:hover,
 .divider:focus-visible,
 .divider.dragging {
-  border-color: var(--status-working);
+  --divider-color: var(--status-working);
   outline: none;
-}
-
-.divider:hover::after,
-.divider:focus-visible::after,
-.divider.dragging::after {
-  background: var(--status-working);
 }

@@ -18,19 +18,26 @@ describe("divider style", () => {
   const css = readFileSync(join(__dirname, "split-pane.css"), "utf8");
 
   it("draws the gutter as two 1px lines in the border color", () => {
-    expect(css).toMatch(/\.divider \{[^}]*border-left: 1px solid var\(--h-border-color\)/);
-    expect(css).toMatch(/\.divider \{[^}]*border-right: 1px solid var\(--h-border-color\)/);
-    expect(css).toMatch(/> \.divider \{[^}]*border-top: 1px solid var\(--h-border-color\)/);
-    expect(css).toMatch(/> \.divider \{[^}]*border-bottom: 1px solid var\(--h-border-color\)/);
+    expect(css).toMatch(/\.divider \{[^}]*border-left: 1px solid var\(--divider-color\)/);
+    expect(css).toMatch(/\.divider \{[^}]*border-right: 1px solid var\(--divider-color\)/);
+    expect(css).toMatch(/> \.divider \{[^}]*border-top: 1px solid var\(--divider-color\)/);
+    expect(css).toMatch(/> \.divider \{[^}]*border-bottom: 1px solid var\(--divider-color\)/);
   });
 
   it("keeps the panes apart (no negative margin)", () => {
     expect(css).not.toMatch(/margin:\s*-/);
   });
 
-  it("has a grip that turns --status-working on hover, focus and drag", () => {
+  it("changes only the --divider-color variable on hover, focus and drag", () => {
+    // Lines and grip read the variable, so no direction-specific rule can out-rank the state.
+    expect(css).toMatch(
+      /\.divider:hover,\s*\.divider:focus-visible,\s*\.divider\.dragging \{[^}]*--divider-color: var\(--status-working\)/,
+    );
+    expect(css).not.toMatch(/\.divider[^{]*(hover|dragging)[^{]*\{[^}]*border-color/);
+    expect(css).toMatch(/\.divider \{[^}]*--divider-color: var\(--h-border-color\)/);
+    expect(css).toMatch(/> \.divider \{[^}]*border-top: 1px solid var\(--divider-color\)/);
+    expect(css).toMatch(/> \.divider \{[^}]*border-bottom: 1px solid var\(--divider-color\)/);
+    expect(css).toMatch(/\.divider::after \{[^}]*background: var\(--divider-color\)/);
     expect(css).toMatch(/\.divider::after \{[^}]*border-radius/);
-    expect(css).toMatch(/\.divider\.dragging::after \{[^}]*var\(--status-working\)/);
-    expect(css).toMatch(/\.divider\.dragging \{[^}]*border-color: var\(--status-working\)/);
   });
 });
