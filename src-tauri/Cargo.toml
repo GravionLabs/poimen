@@ -11,8 +11,8 @@ edition = "2024"
 default-run = "poimen-app"
 
 [workspace]
-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core", "crates/poimen-console"]
-default-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core", "crates/poimen-console"]
+members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core", "crates/poimen-console", "crates/poimen-pty-host"]
+default-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core", "crates/poimen-console", "crates/poimen-pty-host"]
 
 [workspace.package]
 # The one version of the app and the poimen-* crates; release.yml rewrites this line.

@@ -1,0 +1,29 @@
+[package]
+name = "poimen-pty-host"
+version.workspace = true
+description = "Owns one terminal (PTY and child) for its whole life, so poimen-server can be replaced (ADR 0009)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "poimen_pty_host"
+
+[[bin]]
+name = "poimen-pty-host"
+path = "src/main.rs"
+
+# Kept small on purpose: the host is the part that is not updated with the server.
+[dependencies]
+poimen-client = { path = "../poimen-client" }
+poimen-protocol = { path = "../poimen-protocol" }
+portable-pty = "0.9"
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

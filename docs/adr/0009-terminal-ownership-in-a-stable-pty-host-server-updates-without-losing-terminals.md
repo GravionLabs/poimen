@@ -42,6 +42,13 @@ Terminal ownership moves out of `poimen-server` into a small, stable process, `p
 
 `ReleasePseudoConsole` (Windows 11 24H2 and Windows Server 2025) lets a pseudoconsole outlive its owner until its last client disconnects. It does not remove the need for a host: `ResizePseudoConsole` still needs the owner's `HPCON`, and Windows 10 does not have the call. The documentation does not say what happens when an owner ends without releasing; #602 checks it with a test on `windows-latest` and records the result here.
 
+The check (#602, 2026-11-11) is `the_child_outlives_its_clients_but_not_its_host` in `src-tauri/crates/poimen-pty-host/tests/host.rs`. It runs in the CI `windows` job on `windows-latest` (and on Linux and macOS in the other jobs) and checks:
+
+- A host runs `ping -n 600 127.0.0.1` in its ConPTY (never released). Its client attaches, reads output and disconnects. Three seconds later the child still runs (`tasklist`), and a second client sees the same `child_pid` in `hello`, a `seq` past the one the first client saw (the child kept printing into the ring while no client was connected) and the records after it without a `gap`.
+- The host is then killed with `TerminateProcess` (`Child::kill`), so it cannot close the pseudoconsole itself. The test expects the child to end within 30 s, as the console of an owner that is gone ends and its processes get a close signal, and fails with the child's pid otherwise.
+
+Observed result: comes from the CI `windows` job only (no local Windows run) and is to be confirmed from the job of the #602 pull request. A green job means the child of a killed host ends on Windows as on Unix (where it gets SIGHUP when the master closes): an ended host takes its terminal with it, and only its client may come and go. A red job on this test means the child survived its host; then this section records that and the host's end needs its own handling. The macOS run (local, 2026-11-11) passes.
+
 ## Alternatives
 
 - **`exec` of the new binary in the same process (Unix only).** Keeps pid, parent and descriptors, with the state serialized across the `exec`. Simple on Unix, but there is no equivalent on Windows, so it would need a second mechanism there. Rejected for that.
