@@ -12,6 +12,9 @@ import {
 } from "@angular/core";
 import { resizeSizes } from "../../../core/editor-layout";
 
+/** Width of a divider gutter in px (matches the CSS). */
+const DIVIDER = 7;
+
 /** Fractions that fill the pane: `sizes` when they match `count`, else equal shares. */
 export function paneSizes(sizes: readonly number[] | undefined, count: number): number[] {
   return sizes && sizes.length === count
@@ -53,7 +56,7 @@ export class SplitPane {
     this.drag = {
       start: column ? event.clientY : event.clientX,
       sizes: this.shares(),
-      extent: (column ? box.height : box.width) || 1,
+      extent: Math.max((column ? box.height : box.width) - (this.count() - 1) * DIVIDER, 1),
     };
   }
 
