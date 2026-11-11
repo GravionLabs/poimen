@@ -237,9 +237,8 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
 /// hosts from its own directory), when there is one.
 /// Windows: the running copy then locks only itself, so an update can replace the installed one.
 /// AppImage: the copy outlives the mount it came from. The copy is executable (0755 on Unix). An
-/// up-to-date copy (same size and modification time) is reused; copies of other versions are
-/// removed when they are not running (a running exe cannot be deleted on Windows; on Unix a
-/// running copy keeps working after its file is removed).
+/// up-to-date copy (same size and modification time) is reused; the directories of other versions
+/// are then removed by [`prune`] unless a server or a host still runs from them.
 pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathBuf> {
     let dir = bin_root.join(version);
     let name = bundled.file_name().map_or_else(
@@ -252,13 +251,7 @@ pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathB
     if bundled_host.is_file() {
         copy_into(&bundled_host, &dir, &host)?;
     }
-    if let Ok(entries) = std::fs::read_dir(bin_root) {
-        for entry in entries.flatten() {
-            if entry.file_name() != version && entry.path().is_dir() {
-                let _ = std::fs::remove_dir_all(entry.path());
-            }
-        }
-    }
+    prune(bin_root, version, &running_exes());
     Ok(target)
 }
 
@@ -292,6 +285,74 @@ fn copy_into(source_path: &Path, dir: &Path, name: &OsString) -> io::Result<Path
         copied?;
     }
     Ok(target)
+}
+
+/// The executables of the running processes, or `None` where that cannot be read (Windows:
+/// there a running exe cannot be moved, which [`prune`] uses instead). Linux reads `/proc/*/exe`;
+/// other Unix systems `ps` (full path in `comm`).
+fn running_exes() -> Option<Vec<PathBuf>> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut exes = Vec::new();
+        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+            if let Ok(exe) = std::fs::read_link(entry.path().join("exe")) {
+                exes.push(exe);
+            }
+        }
+        Some(exes)
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let out = gui_path::command("ps")
+            .args(["-axo", "comm="])
+            .output()
+            .ok()?;
+        out.status.success().then(|| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|l| PathBuf::from(l.trim()))
+                .collect()
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+/// Removes the directories of other versions under `bin_root` when no process runs from them:
+/// neither a server nor a `poimen-pty-host` (ADR 0009: a host outlives its server, so it can
+/// run from an old version's directory for as long as its terminal lives). `running` lists the
+/// executables of the running processes; `None` means unknown, then a directory is probed by
+/// renaming it, which Windows refuses while an executable in it runs. A directory in use is left
+/// whole and tried again at the next stage.
+pub fn prune(bin_root: &Path, keep: &str, running: &Option<Vec<PathBuf>>) {
+    let Ok(entries) = std::fs::read_dir(bin_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if entry.file_name() == keep || !path.is_dir() {
+            continue;
+        }
+        let in_use = match running {
+            Some(exes) => exes.iter().any(|exe| exe.starts_with(&path)),
+            None => {
+                let probe =
+                    bin_root.join(format!(".{}.removing", entry.file_name().to_string_lossy()));
+                match std::fs::rename(&path, &probe) {
+                    Ok(()) => {
+                        let _ = std::fs::remove_dir_all(&probe);
+                        false
+                    }
+                    Err(_) => true,
+                }
+            }
+        };
+        if !in_use {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
 }
 
 /// `<bin_root>/poimen-server`, a symlink to the staged copy (relative, so the directory can
@@ -794,6 +855,98 @@ mod tests {
             2,
             "the version and the link, no temp file: {names:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn version_dir_with(bin: &Path, version: &str, files: &[&str]) -> PathBuf {
+        let dir = bin.join(version);
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in files {
+            std::fs::write(dir.join(f), "x").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn the_host_beside_the_server_is_staged_into_the_same_version_directory() {
+        let dir = temp_dir("host");
+        let host_name = CHANNEL.host_program(cfg!(windows));
+        let server_name = beside_name(cfg!(windows), CHANNEL);
+        let bundled = dir.join("app");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::write(bundled.join(&server_name), "server").unwrap();
+        std::fs::write(bundled.join(&host_name), "host").unwrap();
+        let bin = dir.join("bin");
+
+        let staged = prepare(&bundled.join(&server_name), &bin, "1.0.0").unwrap();
+        assert_eq!(staged.program, bin.join("1.0.0").join(&server_name));
+        assert_eq!(
+            std::fs::read_to_string(bin.join("1.0.0").join(&host_name)).unwrap(),
+            "host"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bundle_without_a_host_stages_the_server_alone() {
+        let dir = temp_dir("no-host");
+        let server_name = beside_name(cfg!(windows), CHANNEL);
+        std::fs::write(dir.join(&server_name), "server").unwrap();
+        let bin = dir.join("bin");
+        assert!(prepare(&dir.join(&server_name), &bin, "1.0.0").is_some());
+        let names: Vec<_> = std::fs::read_dir(bin.join("1.0.0"))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(names.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_version_with_a_running_host_or_server_is_kept_and_the_others_removed() {
+        let dir = temp_dir("prune");
+        let bin = dir.join("bin");
+        let host_only = version_dir_with(&bin, "0.1.0", &["poimen-server", "poimen-pty-host"]);
+        let server_only = version_dir_with(&bin, "0.2.0", &["poimen-server", "poimen-pty-host"]);
+        let idle = version_dir_with(&bin, "0.3.0", &["poimen-server", "poimen-pty-host"]);
+        let current = version_dir_with(&bin, "0.4.0", &["poimen-server"]);
+        let running = Some(vec![
+            host_only.join("poimen-pty-host"),
+            server_only.join("poimen-server"),
+            PathBuf::from("/usr/bin/other"),
+        ]);
+
+        prune(&bin, "0.4.0", &running);
+        assert!(host_only.exists(), "a running host keeps its directory");
+        assert!(server_only.exists(), "a running server keeps its directory");
+        assert!(!idle.exists());
+        assert!(current.exists(), "the current version is never removed");
+
+        // Once nothing runs from them, the next prune removes them.
+        prune(&bin, "0.4.0", &Some(Vec::new()));
+        assert!(!host_only.exists() && !server_only.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_leaves_files_and_a_missing_root_alone() {
+        let dir = temp_dir("prune-files");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("poimen-server"), "link").unwrap();
+        prune(&bin, "1.0.0", &Some(Vec::new()));
+        assert!(bin.join("poimen-server").exists());
+        prune(&dir.join("missing"), "1.0.0", &None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unknown_process_list_probes_by_renaming() {
+        let dir = temp_dir("prune-probe");
+        let bin = dir.join("bin");
+        let old = version_dir_with(&bin, "0.1.0", &["poimen-pty-host"]);
+        prune(&bin, "0.2.0", &None);
+        assert!(!old.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -8,6 +8,19 @@ restarts poimen.
 
 Terminals are not touched: `poimen-server` (and herdr, on the herdr backend) keeps them running, so closing or restarting poimen never closes a terminal or pane. On Windows a running `.exe` cannot be replaced, so poimen never starts the installed `poimen-server.exe` itself: it starts a copy under `%LOCALAPPDATA%\poimen-server\bin\<version>\`, and the installer can replace the installed file while that copy runs. The new version starts its own copy only when no server answers; the old server keeps running (and keeps the terminals) until it is stopped. Copies of other versions are removed when they are not running.
 
+## Terminals and updates (`poimen-pty-host`)
+
+Each terminal is owned by its own small process, `poimen-pty-host` ([ADR 0009](adr/0009-terminal-ownership-in-a-stable-pty-host-server-updates-without-losing-terminals.md)), which ships next to `poimen-server` in every package (macOS `.dmg`, Windows installers, Linux `.deb`, `.rpm` and AppImage; `poimen-pty-host-rc` on the RC). It runs from the same place as the server:
+
+- Windows and AppImage: from a per-version copy next to the server copy, `%LOCALAPPDATA%\poimen-server\bin\<version>\` or `$XDG_DATA_HOME/poimen-server/bin/<version>/`, so an update can replace the installed file while a host runs.
+- macOS and the Linux packages: the installed binary.
+
+Copies of other versions are removed only when neither a server nor a host runs from them, so an update never touches a running host; a directory that is still in use is left whole and checked again at the next start.
+
+**The first update to the version that ships the host ends the existing terminals once**, because the older server owns its terminals itself and ends them when it is restarted (the confirmation names them). From then on an update keeps the terminals: the new server reconnects to the running hosts.
+
+A host is not replaced by an update, so a terminal keeps the host version it started with; a fix to the host applies to terminals started after the update. The host version of a running terminal is the `version` of its `hello` message (host protocol in `docs/protocol.md`); the version of an installed host is `poimen-pty-host --version`, and a host running from a copy shows its version in the directory name of its path (`ps`, Task Manager).
+
 ## Errors
 
 The header names the failed step and shows the error text (select it to copy):
