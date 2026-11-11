@@ -361,6 +361,8 @@ pub enum ErrorCode {
 
 /// A line sent by the server: a response, or an event on a subscribed connection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// An event carries a whole `Terminal`; boxing it would change every reader for no gain.
+#[allow(clippy::large_enum_variant)]
 #[serde(untagged)]
 pub enum ServerLine {
     Event(Event),
@@ -542,6 +544,10 @@ pub struct Terminal {
     /// what it types for that shell. Absent from servers that do not report it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
+    /// The arguments after `program` (the command line the terminal was created with); lets a
+    /// client start the same command again. Absent when there are none and from older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
     /// The agent in the terminal, as its hooks last reported it; absent when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
@@ -554,6 +560,15 @@ pub struct Terminal {
     /// that end their terminals on a restart.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub survives_restart: bool,
+    /// The version of the `poimen-pty-host` the terminal runs in. A host is not updated with the
+    /// server, so it can be older than `host_bundled_version`. Absent from servers before #606
+    /// and from terminals without a host (exited).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_version: Option<String>,
+    /// The version of the host this server ships with (the one a new terminal gets); set
+    /// together with `host_version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_bundled_version: Option<String>,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the

@@ -48,6 +48,11 @@ export class PaneDialog {
     if (closed) this.closed.emit(closed);
   }
 
+  protected async restart(): Promise<void> {
+    const closed = await this.actions.confirmRestart();
+    if (closed) this.closed.emit(closed);
+  }
+
   protected async startAgent(form: HTMLFormElement): Promise<void> {
     const data = new FormData(form);
     const field = (key: string) => String(data.get(key) ?? "");

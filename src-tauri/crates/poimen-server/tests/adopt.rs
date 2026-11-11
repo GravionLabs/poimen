@@ -236,6 +236,12 @@ fn a_second_server_adopts_the_host_with_its_id_screen_status_and_tokens() {
     .unwrap();
     let before = a.list_terminals(None).unwrap();
     assert!(before[0].survives_restart);
+    // The fake host says it is version "fake": older than the one the server ships with.
+    assert_eq!(before[0].host_version.as_deref(), Some("fake"));
+    assert_eq!(
+        before[0].host_bundled_version.as_deref(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
 
     a.shutdown_keeping_terminals().unwrap();
     a_down.recv_timeout(WAIT).unwrap();
@@ -263,6 +269,11 @@ fn a_second_server_adopts_the_host_with_its_id_screen_status_and_tokens() {
     assert_eq!(t.status, TerminalStatus::Running);
     assert_eq!((t.cols, t.rows), (90, 20));
     assert!(t.survives_restart);
+    assert_eq!(
+        t.host_version.as_deref(),
+        Some("fake"),
+        "read from hello again"
+    );
     let agent = t.agent.as_ref().expect("the agent status is back");
     assert_eq!(agent.status, AgentStatus::Blocked);
     assert_eq!(agent.session_id.as_deref(), Some("sess-1"));

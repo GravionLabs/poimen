@@ -281,6 +281,12 @@ pub trait Backend: Send + Sync {
         ratio: Option<f64>,
     ) -> Result<Option<String>, String>;
     fn close_terminal(&self, terminal_id: &str) -> Result<(), String>;
+    /// Replaces a terminal by a new one with the same directory, program and place in its tab
+    /// (a terminal on an older PTY host runs on the bundled one afterwards); the old process
+    /// ends. Returns the new terminal's id. Not supported by every backend.
+    fn restart_terminal(&self, _terminal_id: &str) -> Result<Option<String>, String> {
+        Err("this backend cannot restart a terminal".into())
+    }
     /// A blank label clears the name.
     fn rename_terminal(&self, terminal_id: &str, label: Option<&str>) -> Result<(), String>;
     /// Closes a tab with all its terminals. Not supported by every backend.

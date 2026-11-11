@@ -20,6 +20,8 @@ import {
   waitingCount,
   agentKinds,
   closeWarning,
+  olderHost,
+  olderHostNote,
   emptySpaces,
   spaceContaining,
   spaceRoot,
@@ -441,6 +443,35 @@ describe("agentKinds", () => {
     expect(kinds).toHaveLength(24);
     expect(kinds.slice(0, 5)).toEqual(["claude", "codex", "gemini", "opencode", "copilot"]);
     expect(kinds).toContain("muse");
+  });
+});
+
+describe("olderHost", () => {
+  const host = (have?: string, bundled?: string) =>
+    olderHost({ host_version: have, host_bundled_version: bundled });
+
+  it("names both versions of a host older than the bundled one", () => {
+    expect(host("0.15.0", "0.16.0")).toEqual({ have: "0.15.0", bundled: "0.16.0" });
+    expect(host("0.9.3", "0.16.0")).toEqual({ have: "0.9.3", bundled: "0.16.0" });
+    expect(host("0.16.0-rc1", "0.16.1")).toEqual({ have: "0.16.0-rc1", bundled: "0.16.1" });
+  });
+
+  it("is null for a current, newer or unreported host", () => {
+    expect(host("0.16.0", "0.16.0")).toBeNull();
+    expect(host("0.17.0", "0.16.0")).toBeNull();
+    expect(host(undefined, "0.16.0")).toBeNull();
+    expect(host("0.16.0", undefined)).toBeNull();
+    expect(olderHost(undefined)).toBeNull();
+  });
+
+  it("treats a version it cannot read, which differs from the bundled one, as older", () => {
+    expect(host("fake", "0.16.0")).toEqual({ have: "fake", bundled: "0.16.0" });
+  });
+
+  it("words the tooltip with both versions", () => {
+    expect(olderHostNote({ have: "0.15.0", bundled: "0.16.0" })).toBe(
+      "Runs on poimen-pty-host 0.15.0; the bundled host is 0.16.0. Restart the terminal to use the new one.",
+    );
   });
 });
 

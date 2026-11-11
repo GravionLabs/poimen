@@ -330,9 +330,16 @@ pub(crate) struct Handle {
     outbox: Arc<Outbox>,
     closing: Arc<AtomicBool>,
     conn: HostConn,
+    /// The host binary's version from its `hello`.
+    version: String,
 }
 
 impl Handle {
+    /// The version of the host binary running this terminal.
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
     /// Where the host listens.
     pub fn endpoint(&self) -> &Path {
         &self.endpoint
@@ -403,8 +410,10 @@ pub(crate) fn start(
             let _ = child.wait();
         });
     }
-    let (conn, lines) = attached.map_err(|e| format!("could not reach the host: {e}"))?;
-    Ok(follow(endpoint, conn, lines, 0, on_output, on_exit))
+    let (conn, lines, version) = attached.map_err(|e| format!("could not reach the host: {e}"))?;
+    Ok(follow(
+        endpoint, conn, lines, 0, version, on_output, on_exit,
+    ))
 }
 
 /// A host that already ran when the server started, connected and attached from the start of
@@ -417,6 +426,8 @@ pub(crate) struct Reached {
     pub seq: u64,
     /// The PTY size in its `hello`.
     pub size: Size,
+    /// The host binary's version in its `hello`.
+    version: String,
 }
 
 /// Connects to the running host at `endpoint`, reads its `hello` (within `timeout`) and attaches
@@ -431,7 +442,7 @@ pub(crate) fn reach(endpoint: &Path, min_seq: u64, timeout: Duration) -> Result<
     thread::spawn(move || {
         let _ = tx.send(hello_of(&target));
     });
-    let (conn, lines, seq, size) = match rx.recv_timeout(timeout) {
+    let (conn, lines, seq, size, version) = match rx.recv_timeout(timeout) {
         Ok(result) => result.map_err(|e| e.to_string())?,
         Err(_) => {
             return Err(format!("no hello within {} ms", timeout.as_millis()));
@@ -451,6 +462,7 @@ pub(crate) fn reach(endpoint: &Path, min_seq: u64, timeout: Duration) -> Result<
         lines,
         seq,
         size,
+        version,
     })
 }
 
@@ -461,7 +473,7 @@ impl Reached {
     }
 }
 
-type HelloOf = io::Result<(Conn, BufReader<Conn>, u64, Size)>;
+type HelloOf = io::Result<(Conn, BufReader<Conn>, u64, Size, String)>;
 
 /// Connects and reads the `hello` line.
 fn hello_of(endpoint: &Path) -> HelloOf {
@@ -470,7 +482,9 @@ fn hello_of(endpoint: &Path) -> HelloOf {
     let mut line = String::new();
     lines.read_line(&mut line)?;
     match poimen_protocol::host::parse_host_line(&line) {
-        Ok(HostMessage::Hello { seq, size, .. }) => Ok((conn, lines, seq, size)),
+        Ok(HostMessage::Hello {
+            seq, size, version, ..
+        }) => Ok((conn, lines, seq, size, version)),
         _ => Err(io::Error::other(format!("no hello: {:?}", line.trim_end()))),
     }
 }
@@ -487,9 +501,10 @@ pub(crate) fn adopt(
         conn,
         lines,
         seq,
+        version,
         ..
     } = reached;
-    follow(endpoint, conn, lines, seq, on_output, on_exit)
+    follow(endpoint, conn, lines, seq, version, on_output, on_exit)
 }
 
 /// Starts the threads that read and write an attached host connection.
@@ -498,6 +513,7 @@ fn follow(
     conn: Conn,
     lines: BufReader<Conn>,
     replay_until: u64,
+    version: String,
     on_output: impl FnMut(&[u8], bool) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Handle {
@@ -508,6 +524,7 @@ fn follow(
         outbox: Outbox::new(),
         closing: Arc::new(AtomicBool::new(false)),
         conn: conn.clone(),
+        version,
     };
     let outbox = Arc::clone(&handle.outbox);
     let writing = conn.clone();
@@ -666,14 +683,14 @@ fn first_line(input: impl Read) -> io::Result<String> {
 }
 
 /// Connects to the host, reads its `hello` and attaches after record `since`.
-fn attach(endpoint: &Path, since: u64) -> io::Result<(Conn, BufReader<Conn>)> {
+fn attach(endpoint: &Path, since: u64) -> io::Result<(Conn, BufReader<Conn>, String)> {
     let conn = Conn::connect(endpoint)?;
     let mut lines = BufReader::new(conn.clone());
     let mut line = String::new();
     lines.read_line(&mut line)?;
-    match poimen_protocol::host::parse_host_line(&line) {
+    let version = match poimen_protocol::host::parse_host_line(&line) {
         // A host behind `since` is another one than the one read so far.
-        Ok(HostMessage::Hello { seq, .. }) if seq >= since => {}
+        Ok(HostMessage::Hello { seq, version, .. }) if seq >= since => version,
         Ok(HostMessage::Hello { seq, .. }) => {
             return Err(io::Error::other(format!(
                 "the host at {} is at seq {seq}, behind {since}",
@@ -687,9 +704,9 @@ fn attach(endpoint: &Path, since: u64) -> io::Result<(Conn, BufReader<Conn>)> {
                 line.trim_end()
             )));
         }
-    }
+    };
     (&conn).write_all(&to_line(&ClientMessage::Attach { since }))?;
-    Ok((conn, lines))
+    Ok((conn, lines, version))
 }
 
 /// How a connection to a host ended.
@@ -745,7 +762,7 @@ impl Reader {
                 break None;
             }
             match attach(&feed.endpoint, feed.read.load(Ordering::SeqCst)) {
-                Ok((conn, next)) => {
+                Ok((conn, next, _)) => {
                     self.conn.replace(conn);
                     lines = next;
                     // A close while attaching: this connection may have replaced the one `kill`

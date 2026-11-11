@@ -168,6 +168,7 @@ impl TerminalEntry {
             name: self.info.name.clone(),
             cwd: self.info.cwd.clone(),
             program: self.info.program.clone(),
+            args: self.info.args.clone(),
             cols: self.info.cols,
             rows: self.info.rows,
             endpoint: host.endpoint().to_path_buf(),
@@ -363,6 +364,8 @@ impl Shared {
         entry.info.exit_code = exit_code;
         // Nothing of it is left for a restart to keep.
         entry.info.survives_restart = false;
+        entry.info.host_version = None;
+        entry.info.host_bundled_version = None;
         entry.host = None;
         entry.info.agent = None;
         if !entry.info.tokens.is_empty() {
@@ -1399,9 +1402,12 @@ fn spawn_terminal(
         status: TerminalStatus::Running,
         exit_code: None,
         program: Some(program),
+        args: command[1..].to_vec(),
         agent: None,
         tokens: Default::default(),
         survives_restart: true,
+        host_version: Some(spawned.version().to_string()),
+        host_bundled_version: Some(host_bundled_version()),
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
@@ -1544,15 +1550,24 @@ fn adopted(
             status: TerminalStatus::Running,
             exit_code: None,
             program: t.program,
+            args: t.args,
             agent: t.agent,
             tokens: visible,
             survives_restart: true,
+            host_version: Some(handle.version().to_string()),
+            host_bundled_version: Some(host_bundled_version()),
         },
         host: Some(handle),
         stream,
         agent_seq: t.agent_seq,
         tokens,
     }
+}
+
+/// The version of the host this server ships with. While the server and the host ship together
+/// it is the version of this crate.
+fn host_bundled_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 fn terminal_mut<'a>(

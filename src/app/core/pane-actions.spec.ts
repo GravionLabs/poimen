@@ -52,6 +52,60 @@ describe("PaneActions", () => {
     await store.refresh();
   });
 
+  describe("restart on the new host", () => {
+    beforeEach(async () => {
+      current = {
+        ...current,
+        terminals: [
+          pane("w1:p1", { host_version: "0.15.0", host_bundled_version: "0.16.0" }),
+          pane("w1:p2", { host_version: "0.16.0", host_bundled_version: "0.16.0" }),
+        ],
+      };
+      await store.refresh();
+    });
+
+    it("asks first, naming both versions", () => {
+      actions.askRestart("w1:p1");
+      expect(actions.dialog()).toMatchObject({
+        kind: "restart",
+        paneId: "w1:p1",
+        have: "0.15.0",
+        bundled: "0.16.0",
+      });
+      expect(tauri.calls("pane_restart")).toEqual([]);
+    });
+
+    it("asks nothing for a terminal on the current host", () => {
+      actions.askRestart("w1:p2");
+      expect(actions.dialog()).toBeNull();
+    });
+
+    it("restarts after the confirmation and hands the place to the new terminal", async () => {
+      tauri.answer("pane_restart", () => "w1:p9");
+      actions.askRestart("w1:p1");
+      const result = await actions.confirmRestart();
+      expect(tauri.calls("pane_restart")).toEqual([{ paneId: "w1:p1" }]);
+      expect(result).toEqual({ paneId: "w1:p1", successor: "w1:p9" });
+      expect(actions.dialog()).toBeNull();
+    });
+
+    it("cancelling restarts nothing", async () => {
+      actions.askRestart("w1:p1");
+      actions.cancel();
+      expect(await actions.confirmRestart()).toBeUndefined();
+      expect(tauri.calls("pane_restart")).toEqual([]);
+    });
+
+    it("keeps the error when the restart fails", async () => {
+      tauri.answer("pane_restart", () => {
+        throw "terminal gone";
+      });
+      actions.askRestart("w1:p1");
+      expect(await actions.confirmRestart()).toBeUndefined();
+      expect(actions.error()).toBe("terminal gone");
+    });
+  });
+
   it("asks for a directory, offering the workspace's directories", () => {
     actions.askNew("w1");
     expect(actions.dialog()).toEqual({

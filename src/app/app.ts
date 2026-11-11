@@ -15,6 +15,8 @@ import { applyUiFont } from "./core/ui-font";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import {
   flowSession,
+  olderHost,
+  olderHostNote,
   paneDir,
   rowName,
   supportsFlow,
@@ -258,6 +260,7 @@ export class App {
             preview: !tab.pinned,
             attention: ringing.has(tab.paneId),
             unread: unread.has(tab.paneId),
+            note: this.hostNote(pane),
             title: `${header.title}${tab.pinned ? "" : " (preview)"}`,
           };
         }),
@@ -706,6 +709,11 @@ export class App {
     for (const id of paneIds) this.editor.closePane(id);
   }
 
+  private hostNote(pane: Terminal | undefined): string | undefined {
+    const host = olderHost(pane);
+    return host ? olderHostNote(host) : undefined;
+  }
+
   protected paneAction(paneId: string, action: string): void {
     if (action === "split-right" || action === "split-down") {
       const direction = action === "split-right" ? "right" : "down";
@@ -714,6 +722,8 @@ export class App {
       this.paneActions.askStartAgent(paneId);
     } else if (action === "rename") {
       this.paneActions.askRename(paneId);
+    } else if (action === "restart") {
+      this.paneActions.askRestart(paneId);
     } else if (action === "close") {
       this.paneActions.askClose(paneId);
     }
@@ -754,6 +764,11 @@ export class App {
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
       { action: "pane-rename", label: "Rename pane..." },
+      {
+        action: "pane-restart",
+        label: "Restart terminal on the new host...",
+        appliesTo: (id) => tabKind(id) === "pane" && olderHost(this.pane(id)) !== null,
+      },
       { action: "pane-close", label: "Close pane..." },
     ];
   }

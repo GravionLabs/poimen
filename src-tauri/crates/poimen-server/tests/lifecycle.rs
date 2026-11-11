@@ -317,6 +317,25 @@ fn a_real_cmd_gets_its_environment_input_and_resize() {
 }
 
 #[test]
+fn a_terminal_keeps_the_arguments_it_was_created_with() {
+    let env = Env::new("args");
+    let client = start(&env.config());
+    let space = client.create_space("work", &env.work()).unwrap();
+    let shell = if cfg!(windows) { "cmd.exe" } else { "sh" };
+    let with_args = TerminalCreate {
+        command: Some(vec![shell.into(), "-x".into(), "--foo".into()]),
+        ..sh(&space.id)
+    };
+    let created = client.create_terminal(&with_args).unwrap();
+    assert_eq!(created.program.as_deref(), Some(shell));
+    assert_eq!(created.args, vec!["-x", "--foo"]);
+    let listed = client.list_terminals(None).unwrap();
+    assert_eq!(listed[0].args, vec!["-x", "--foo"]);
+    let bare = client.create_terminal(&sh(&space.id)).unwrap();
+    assert!(bare.args.is_empty());
+}
+
+#[test]
 fn exit_close_and_rename_are_reported() {
     let env = Env::new("exit");
     let client = start(&env.config());

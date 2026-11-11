@@ -28,7 +28,7 @@ const spaces: SpaceNode[] = [
   },
 ];
 
-async function setup(message: string | null = null) {
+async function setup(message: string | null = null, nodes: SpaceNode[] = spaces) {
   const ensureBackend = vi.fn();
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
@@ -36,7 +36,7 @@ async function setup(message: string | null = null) {
       {
         provide: HerdrStore,
         useValue: {
-          spaces: signal(spaces),
+          spaces: signal(nodes),
           disconnected: signal<string | null>(message),
           ensureBackend,
         },
@@ -102,6 +102,29 @@ async function setup(message: string | null = null) {
 describe("Sidebar with the real hx-tree", () => {
   beforeAll(() => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
+  });
+
+  it("marks a terminal on an older host quietly, with both versions in the tooltip", async () => {
+    const old: Terminal = {
+      ...pane("w1:p3"),
+      host_version: "0.15.0",
+      host_bundled_version: "0.16.0",
+    };
+    const nodes: SpaceNode[] = [
+      {
+        workspace: spaces[0].workspace,
+        rows: [
+          { pane: old, tab: "c", name: "old", worktree: false },
+          { pane: pane("w1:p4"), tab: "d", name: "current", worktree: false },
+        ],
+      },
+    ];
+    const { root, workspace, key } = await setup(null, nodes);
+    await key(workspace(), "ArrowRight");
+    const marks = [...root.querySelectorAll<HTMLElement>(".host-note")];
+    expect(marks).toHaveLength(1);
+    expect(marks[0].title).toContain("0.15.0");
+    expect(marks[0].title).toContain("0.16.0");
   });
 
   it("shows one disconnected message with a Retry button that asks the backend again", async () => {
