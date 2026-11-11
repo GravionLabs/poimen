@@ -182,6 +182,9 @@ impl Host {
 
     fn spawn(start: &HostStart, program: &str, listener: Listener) -> Result<Host, String> {
         let spawn = &start.spawn;
+        // ConPTY with `INHERIT_CURSOR` holds the child back until its cursor query is answered,
+        // and the host answers nothing (it does not emulate; no client may be connected).
+        portable_pty::conpty_flags::set_inherit_cursor(false);
         let pair = native_pty_system()
             .openpty(pty_size(spawn.cols, spawn.rows))
             .map_err(|e| e.to_string())?;
