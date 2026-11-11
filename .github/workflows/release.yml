@@ -345,8 +345,12 @@ jobs:
             "$bin" --version
             curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_Linux_$([ "${{ matrix.arch }}" = amd64 ] && echo x86_64 || echo arm64).tar.gz | tar -xz nfpm
             export ARCH="${{ matrix.arch }}" BINARY="$PWD/$bin" VERSION="${VERSION:-0.0.0}"
-            ./nfpm package -f packaging/nfpm-poimen-cli.yaml -p deb -t dist
-            if [[ "$VERSION" != *-* ]]; then ./nfpm package -f packaging/nfpm-poimen-cli.yaml -p rpm -t dist; fi
+            # nfpm does not expand the environment in `contents.src` (the glob failed on a literal ${BINARY}),
+            # so fill the three variables into a copy of the file first.
+            cfg="$RUNNER_TEMP/nfpm-poimen-cli.yaml"
+            envsubst '${ARCH} ${VERSION} ${BINARY}' < packaging/nfpm-poimen-cli.yaml > "$cfg"
+            ./nfpm package -f "$cfg" -p deb -t dist
+            if [[ "$VERSION" != *-* ]]; then ./nfpm package -f "$cfg" -p rpm -t dist; fi
           fi
 
       - name: Attach to the release
