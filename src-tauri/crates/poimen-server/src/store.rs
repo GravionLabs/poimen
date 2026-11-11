@@ -296,7 +296,7 @@ mod tests {
             program: Some("zsh".into()),
             cols: 120,
             rows: 40,
-            endpoint: PathBuf::from("/run/u/poimen/hosts").join(id),
+            endpoint: PathBuf::from(format!("/run/u/poimen/hosts/{id}")),
             seq: 812,
             agent: Some(AgentInfo {
                 status: poimen_protocol::AgentStatus::Blocked,
