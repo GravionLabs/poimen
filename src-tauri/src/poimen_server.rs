@@ -869,7 +869,7 @@ mod tests {
 
     #[test]
     fn the_host_beside_the_server_is_staged_into_the_same_version_directory() {
-        let dir = temp_dir("host");
+        let dir = temp_dir("host-same-version");
         let host_name = CHANNEL.host_program(cfg!(windows));
         let server_name = beside_name(cfg!(windows), CHANNEL);
         let bundled = dir.join("app");
