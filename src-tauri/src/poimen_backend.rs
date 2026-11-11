@@ -523,7 +523,11 @@ impl Backend for PoimenBackend {
                 ratio: None,
                 cwd: Some(old.cwd.clone()),
                 name: Some(old.name.clone()),
-                command: old.program.clone().map(|p| vec![p]),
+                command: old.program.clone().map(|p| {
+                    let mut argv = vec![p];
+                    argv.extend(old.args.iter().cloned());
+                    argv
+                }),
             })
             .map_err(text)?;
         self.client.close_terminal(&old.id).map_err(text)?;
@@ -859,6 +863,7 @@ mod tests {
             status: TerminalStatus::Running,
             exit_code: None,
             program: None,
+            args: Vec::new(),
             agent: None,
             tokens: Default::default(),
             survives_restart: false,
@@ -1564,7 +1569,12 @@ mod tests {
                 "terminal.create" => {
                     Ok(json!({"terminal": term_json("t9", params["space_id"].as_str().unwrap())}))
                 }
-                "terminal.list" => Ok(json!({"terminals": [term_json("t1", "s1")]})),
+                "terminal.list" => {
+                    let mut t1 = term_json("t1", "s1");
+                    t1["program"] = json!("claude");
+                    t1["args"] = json!(["--model", "opus"]);
+                    Ok(json!({"terminals": [t1]}))
+                }
                 "terminal.rename" => Ok(json!({"terminal": term_json("t1", "s1")})),
                 "terminal.input" | "terminal.close" | "space.close" => Ok(json!({})),
                 "ping" => Ok(json!({"version": "0.9.0", "protocol": PROTOCOL_VERSION, "pid": 1})),
@@ -1605,6 +1615,7 @@ mod tests {
         let params = params_of(&log, "tab.split");
         assert_eq!(params["terminal_id"], "t1");
         assert_eq!(params["direction"], "right");
+        assert_eq!(params["command"], json!(["claude", "--model", "opus"]));
         let lines = lock(&log).clone();
         let split = lines
             .iter()

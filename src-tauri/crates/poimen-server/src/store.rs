@@ -37,6 +37,8 @@ pub(crate) struct StoredTerminal {
     pub(crate) cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) program: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) args: Vec<String>,
     /// The size last set (by the controller, or at create); the host's `hello` has the PTY's.
     pub(crate) cols: u16,
     pub(crate) rows: u16,
@@ -294,6 +296,7 @@ mod tests {
             name: "agent".into(),
             cwd: "/w".into(),
             program: Some("zsh".into()),
+            args: vec!["-l".into()],
             cols: 120,
             rows: 40,
             endpoint: PathBuf::from(format!("/run/u/poimen/hosts/{id}")),

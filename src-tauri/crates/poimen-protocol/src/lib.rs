@@ -544,6 +544,10 @@ pub struct Terminal {
     /// what it types for that shell. Absent from servers that do not report it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
+    /// The arguments after `program` (the command line the terminal was created with); lets a
+    /// client start the same command again. Absent when there are none and from older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
     /// The agent in the terminal, as its hooks last reported it; absent when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
