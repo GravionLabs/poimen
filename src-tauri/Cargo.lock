@@ -3231,6 +3231,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "poimen-pty-host"
+version = "0.16.0"
+dependencies = [
+ "poimen-client",
+ "poimen-protocol",
+ "portable-pty",
+ "serde_json",
+]
+
+[[package]]
 name = "poimen-server"
 version = "0.16.0"
 dependencies = [
