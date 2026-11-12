@@ -143,9 +143,63 @@
       @if (run(); as current) {
         <div class="run-line" data-testid="run-line">{{ runLabel(current, now()) }}</div>
       }
+      <div class="event head" [style.grid-template-columns]="eventGrid()" data-testid="event-head">
+        <span></span>
+        <span class="col">
+          Time
+          <span
+            class="grip"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize time column"
+            tabindex="0"
+            data-col="time"
+            (pointerdown)="colStart($event, 'time', 1)"
+            (pointermove)="colMove($event)"
+            (pointerup)="colEnd()"
+            (pointercancel)="colEnd()"
+            (keydown)="colKey($event, 'time', 1)"
+          ></span>
+        </span>
+        <span class="col">
+          Task
+          <span
+            class="grip"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize task column"
+            tabindex="0"
+            data-col="task"
+            (pointerdown)="colStart($event, 'task', 1)"
+            (pointermove)="colMove($event)"
+            (pointerup)="colEnd()"
+            (pointercancel)="colEnd()"
+            (keydown)="colKey($event, 'task', 1)"
+          ></span>
+        </span>
+        <span class="col">
+          Step
+          <span
+            class="grip"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize result column"
+            tabindex="0"
+            data-col="result"
+            (pointerdown)="colStart($event, 'result', -1)"
+            (pointermove)="colMove($event)"
+            (pointerup)="colEnd()"
+            (pointercancel)="colEnd()"
+            (keydown)="colKey($event, 'result', -1)"
+          ></span>
+        </span>
+        <span class="col">Result</span>
+        <span></span>
+      </div>
       @for (row of rows(); track $index) {
         <div
           class="event"
+          [style.grid-template-columns]="eventGrid()"
           [class]="toneStyle(row.tone).class"
           [class.attention]="toneStyle(row.tone).attention"
         >

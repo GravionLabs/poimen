@@ -197,12 +197,55 @@ pre {
 
 .event {
   display: grid;
-  grid-template-columns: 1.2em 5.5em 4em 1fr auto auto;
-  gap: 0.6em;
+  grid-template-columns: 1.2em 66px 140px 1fr 90px auto;
+  gap: 0;
   align-items: baseline;
   padding: 2px 8px;
   border-left: 3px solid transparent;
   font-size: 12px;
+}
+.event > span {
+  min-width: 0;
+  padding: 0 0.6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event > .time,
+.event > .issue,
+.event > .step,
+.event > .result {
+  border-left: 1px solid var(--h-border-color, color-mix(in srgb, currentColor 22%, transparent));
+}
+.event.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--h-surface-color, canvas);
+  font-weight: 600;
+  border-bottom: 1px solid var(--h-border-color, color-mix(in srgb, currentColor 22%, transparent));
+}
+.event.head > .col {
+  position: relative;
+  overflow: visible;
+  border-left: 1px solid var(--h-border-color, color-mix(in srgb, currentColor 22%, transparent));
+}
+.grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  padding: 0;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.grip:hover,
+.grip:focus-visible {
+  background: var(--h-primary-color, #3b82f6);
+  opacity: 0.5;
+  outline: none;
 }
 .event .time,
 .event .issue,

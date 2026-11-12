@@ -129,6 +129,8 @@ export interface LayoutState {
   changesLayout?: string;
   /** Layout direction of the Flow tab: `TB` (top to bottom); left to right when absent. */
   flowDirection?: string;
+  /** Widths in px of the resizable columns of the Events tab; absent ones use the defaults. */
+  eventColumns?: Partial<Record<EventColumn, number>>;
   /** Review comments of the Changes tab per worktree, kept until sent to the agent. */
   lineComments?: Record<string, CommentSet>;
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
@@ -147,6 +149,33 @@ export interface LayoutState {
   hooksSeen?: string[];
   /** The first-start defaults (`spaces.layout`, default space template) were written once. */
   defaultsSeeded?: boolean;
+}
+
+/** Columns of the Events tab whose width the user can change, in px. */
+export type EventColumn = "time" | "task" | "result";
+export const EVENT_COLUMN_MIN = 40;
+export const EVENT_COLUMN_MAX = 600;
+export const EVENT_COLUMN_DEFAULTS: Readonly<Record<EventColumn, number>> = {
+  time: 66,
+  task: 140,
+  result: 90,
+};
+
+export function clampEventColumn(width: number, fallback: number): number {
+  if (!Number.isFinite(width)) return fallback;
+  return Math.min(EVENT_COLUMN_MAX, Math.max(EVENT_COLUMN_MIN, Math.round(width)));
+}
+
+function parseEventColumns(value: unknown): Partial<Record<EventColumn, number>> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const out: Partial<Record<EventColumn, number>> = {};
+  for (const key of Object.keys(EVENT_COLUMN_DEFAULTS) as EventColumn[]) {
+    const width = (value as Record<string, unknown>)[key];
+    if (typeof width === "number" && Number.isFinite(width)) {
+      out[key] = clampEventColumn(width, EVENT_COLUMN_DEFAULTS[key]);
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 export function clampPanelHeight(height: number): number {
@@ -203,6 +232,7 @@ export function parseLayout(raw: string | null): LayoutState {
       tabOrder,
       changesLayout,
       flowDirection,
+      eventColumns,
       lineComments,
       collapsedIssues,
       githubPage,
@@ -218,6 +248,8 @@ export function parseLayout(raw: string | null): LayoutState {
     if (changesLayout === "inline" || changesLayout === "split")
       state.changesLayout = changesLayout;
     if (flowDirection === "TB" || flowDirection === "LR") state.flowDirection = flowDirection;
+    const columns = parseEventColumns(eventColumns);
+    if (columns) state.eventColumns = columns;
     if (
       typeof collapsedIssues === "object" &&
       collapsedIssues !== null &&
@@ -339,6 +371,11 @@ export class UiState {
   );
   /** Layout direction of the Flow tab (left to right by default). */
   readonly flowDirection = signal<"LR" | "TB">(this.initial.flowDirection === "TB" ? "TB" : "LR");
+  /** Widths in px of the resizable columns of the Events tab. */
+  readonly eventColumns = signal<Readonly<Record<EventColumn, number>>>({
+    ...EVENT_COLUMN_DEFAULTS,
+    ...this.initial.eventColumns,
+  });
   /** Review comments of the Changes tab per worktree (pending until the agent got them). */
   readonly lineComments = signal<Readonly<Record<string, CommentSet>>>(
     this.initial.lineComments ?? {},
@@ -370,6 +407,22 @@ export class UiState {
 
   setChangesLayout(layout: "inline" | "split"): void {
     this.changesLayout.set(layout);
+    this.save();
+  }
+
+  private customEventColumns(): Partial<Record<EventColumn, number>> | undefined {
+    const out: Partial<Record<EventColumn, number>> = {};
+    for (const key of Object.keys(EVENT_COLUMN_DEFAULTS) as EventColumn[]) {
+      if (this.eventColumns()[key] !== EVENT_COLUMN_DEFAULTS[key])
+        out[key] = this.eventColumns()[key];
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+
+  /** Sets the width of an Events column, kept between {@link EVENT_COLUMN_MIN} and the maximum. */
+  setEventColumn(column: EventColumn, width: number): void {
+    const next = clampEventColumn(width, this.eventColumns()[column]);
+    this.eventColumns.update((all) => ({ ...all, [column]: next }));
     this.save();
   }
 
@@ -593,6 +646,7 @@ export class UiState {
       githubShowEmpty: this.githubShowEmpty() ? true : undefined,
       changesLayout: this.changesLayout() === "inline" ? "inline" : undefined,
       flowDirection: this.flowDirection() === "TB" ? "TB" : undefined,
+      eventColumns: this.customEventColumns(),
       lineComments: Object.keys(this.lineComments()).length ? this.lineComments() : undefined,
       settingsPage: this.settingsPage() ?? undefined,
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
