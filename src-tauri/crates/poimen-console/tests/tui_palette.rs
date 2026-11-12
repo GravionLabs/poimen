@@ -16,7 +16,7 @@ use poimen_console::tui::config::Config;
 use poimen_console::tui::sidebar::Model;
 use poimen_console::tui::{self, Options, Outcome};
 use poimen_core::github::OpenIssue;
-use poimen_server::{Config as ServerConfig, Server};
+use poimen_server::{Config as ServerConfig, PtyHost, Server};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -49,6 +49,7 @@ fn fixture(name: &str, config: &str) -> Fixture {
         state_file: dir.join("state").join("server.json"),
         scrollback: 1000,
         home: Some(home.clone()),
+        pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
     };
     let server = Server::bind(server_config.clone()).unwrap();
     thread::spawn(move || server.serve());
@@ -121,7 +122,6 @@ fn start(f: &Fixture, issues: Option<poimen_console::tui::actions::IssueSource>)
         own_terminal: None,
         mirror: Some(screen.clone()),
         issues,
-        notify: None,
     };
     let stop = Arc::new(AtomicBool::new(false));
     let handle = thread::spawn(move || {

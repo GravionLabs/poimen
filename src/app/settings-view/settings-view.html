@@ -222,29 +222,6 @@
               </section>
             </section>
           }
-          @case ("notifications") {
-            <section aria-label="Notifications">
-              <p class="hint">
-                System notifications while you do not see the agent's tab in the focused window.
-              </p>
-              <label class="check" [class.hit]="hit('When an agent waits for you')">
-                <input
-                  type="checkbox"
-                  [checked]="settings().notifyOnBlocked"
-                  (change)="setNotification('blocked', $event)"
-                />
-                When an agent waits for you
-              </label>
-              <label class="check" [class.hit]="hit('When an agent is done')">
-                <input
-                  type="checkbox"
-                  [checked]="settings().notifyOnDone"
-                  (change)="setNotification('done', $event)"
-                />
-                When an agent is done
-              </label>
-            </section>
-          }
           @case ("explorer") {
             <section aria-label="Explorer">
               <p class="hint">

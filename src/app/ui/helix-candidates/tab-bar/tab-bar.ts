@@ -30,6 +30,8 @@ export interface TabBarItem {
   attention?: boolean;
   /** Shows an unread badge. */
   unread?: boolean;
+  /** A quiet mark after the label; the text is its tooltip. */
+  note?: string;
 }
 
 /** An entry of the tab context menu; `action` is reported back with the tab id. */

@@ -232,6 +232,18 @@ fn wire_pane(terminal: &Terminal, space_id: &str, tab_id: &str) -> Value {
         // The same `tokens` map herdr's `pane.list` has, so `$<name>` row tokens work unchanged.
         pane["tokens"] = json!(terminal.tokens);
     }
+    if terminal.survives_restart {
+        // The restart confirmation names only the terminals a restart ends.
+        pane["survives_restart"] = json!(true);
+    }
+    if let Some(program) = &terminal.program {
+        pane["program"] = json!(program);
+    }
+    if let (Some(have), Some(bundled)) = (&terminal.host_version, &terminal.host_bundled_version) {
+        // The mark on a terminal whose host is older than the bundled one (#606).
+        pane["host_version"] = json!(have);
+        pane["host_bundled_version"] = json!(bundled);
+    }
     pane
 }
 
@@ -349,6 +361,15 @@ pub fn map_event(event: Event) -> Option<StreamRecord> {
             code: Some(CloseCode::Exited),
         }),
         _ => None,
+    }
+}
+
+/// The connection of an attached stream ended without a record.
+fn lost(err: &ClientError) -> StreamRecord {
+    StreamRecord::Closed {
+        reason: format!("the connection to poimen-server ended: {err}"),
+        exit_code: None,
+        code: Some(CloseCode::Lost),
     }
 }
 
@@ -488,6 +509,29 @@ impl Backend for PoimenBackend {
 
     fn close_terminal(&self, terminal_id: &str) -> Result<(), String> {
         self.client.close_terminal(terminal_id).map_err(text)
+    }
+
+    fn restart_terminal(&self, terminal_id: &str) -> Result<Option<String>, String> {
+        let old = self.terminal(terminal_id)?;
+        // The new terminal starts beside the old one; closing the old one collapses the split,
+        // so the new one takes its place in the tree.
+        let (_, new) = self
+            .client
+            .split(&TabSplit {
+                terminal_id: old.id.clone(),
+                direction: wire::SplitDirection::Right,
+                ratio: None,
+                cwd: Some(old.cwd.clone()),
+                name: Some(old.name.clone()),
+                command: old.program.clone().map(|p| {
+                    let mut argv = vec![p];
+                    argv.extend(old.args.iter().cloned());
+                    argv
+                }),
+            })
+            .map_err(text)?;
+        self.client.close_terminal(&old.id).map_err(text)?;
+        Ok(Some(new.id))
     }
 
     fn rename_terminal(&self, terminal_id: &str, label: Option<&str>) -> Result<(), String> {
@@ -648,14 +692,10 @@ impl Backend for PoimenBackend {
                             on_record(id, record);
                         }
                     }
-                    // Closed by poimen (the writer shut the socket down) or the server went away.
-                    Err(err) => {
-                        break StreamRecord::Closed {
-                            reason: err.to_string(),
-                            exit_code: None,
-                            code: None,
-                        };
-                    }
+                    // The server went away (a restart, a crash): the terminal may live on in its
+                    // host and come back with the next server (ADR 0009). (A stream closed by
+                    // poimen ends here too, but its view no longer listens.)
+                    Err(err) => break lost(&err),
                 }
             };
             lock(&streams).remove(&id);
@@ -823,8 +863,12 @@ mod tests {
             status: TerminalStatus::Running,
             exit_code: None,
             program: None,
+            args: Vec::new(),
             agent: None,
             tokens: Default::default(),
+            survives_restart: false,
+            host_version: None,
+            host_bundled_version: None,
         }
     }
 
@@ -1334,6 +1378,26 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_that_survives_a_restart_says_so_on_its_pane() {
+        let mut t = terminal("t1", "s1", "a");
+        t.survives_restart = true;
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        assert_eq!(snapshot.panes[0]["survives_restart"], true);
+        assert!(snapshot.panes[1].get("survives_restart").is_none());
+    }
+
+    #[test]
+    fn the_host_versions_reach_the_pane_only_when_the_server_reports_them() {
+        let mut t = terminal("t1", "s1", "a");
+        t.host_version = Some("0.15.0".into());
+        t.host_bundled_version = Some("0.16.0".into());
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        assert_eq!(snapshot.panes[0]["host_version"], "0.15.0");
+        assert_eq!(snapshot.panes[0]["host_bundled_version"], "0.16.0");
+        assert!(snapshot.panes[1].get("host_version").is_none());
+    }
+
+    #[test]
     fn tokens_reach_the_pane_as_herdr_tokens_and_their_event_passes_through() {
         let mut t = terminal("t1", "s1", "a");
         t.tokens = [("deliver_step".to_owned(), "build".to_owned())].into();
@@ -1407,6 +1471,11 @@ mod tests {
                         writeln!(stream, "{response}").unwrap();
                         if method == "terminal.attach" {
                             for line in &extra {
+                                // The server goes away (a restart or a crash).
+                                if line == GONE {
+                                    let _ = stream.shutdown();
+                                    return;
+                                }
                                 writeln!(stream, "{line}").unwrap();
                             }
                         }
@@ -1416,6 +1485,9 @@ mod tests {
             }
         });
     }
+
+    /// An `extra` line of [`serve`]: the server ends the connection without a record.
+    const GONE: &str = "<gone>";
 
     fn tab_json(tab_id: &str, space: &str, root: Value) -> Value {
         json!({"tab_id": tab_id, "space_id": space, "name": "zsh", "root": root, "active_terminal": "t1"})
@@ -1497,7 +1569,12 @@ mod tests {
                 "terminal.create" => {
                     Ok(json!({"terminal": term_json("t9", params["space_id"].as_str().unwrap())}))
                 }
-                "terminal.list" => Ok(json!({"terminals": [term_json("t1", "s1")]})),
+                "terminal.list" => {
+                    let mut t1 = term_json("t1", "s1");
+                    t1["program"] = json!("claude");
+                    t1["args"] = json!(["--model", "opus"]);
+                    Ok(json!({"terminals": [t1]}))
+                }
                 "terminal.rename" => Ok(json!({"terminal": term_json("t1", "s1")})),
                 "terminal.input" | "terminal.close" | "space.close" => Ok(json!({})),
                 "ping" => Ok(json!({"version": "0.9.0", "protocol": PROTOCOL_VERSION, "pid": 1})),
@@ -1528,6 +1605,38 @@ mod tests {
         assert_eq!(created.space_id, "s9");
         assert_eq!(created.root_terminal.as_deref(), Some("t9"));
         assert_eq!(params_of(&log, "terminal.create")["space_id"], "s9");
+    }
+
+    #[test]
+    fn a_restart_splits_beside_the_terminal_then_closes_it() {
+        let (backend, log) = backend_for("restart", vec![], false);
+        let id = backend.restart_terminal("t1").unwrap();
+        assert_eq!(id.as_deref(), Some("t9"));
+        let params = params_of(&log, "tab.split");
+        assert_eq!(params["terminal_id"], "t1");
+        assert_eq!(params["direction"], "right");
+        assert_eq!(params["command"], json!(["claude", "--model", "opus"]));
+        let lines = lock(&log).clone();
+        let split = lines
+            .iter()
+            .position(|l| l.starts_with("tab.split"))
+            .unwrap();
+        let close = lines
+            .iter()
+            .position(|l| l.starts_with("terminal.close"))
+            .unwrap();
+        assert!(
+            split < close,
+            "the new terminal exists before the old one ends"
+        );
+        assert_eq!(params_of(&log, "terminal.close")["terminal_id"], "t1");
+    }
+
+    #[test]
+    fn a_restart_of_an_unknown_terminal_fails_and_closes_nothing() {
+        let (backend, log) = backend_for("restart-unknown", vec![], false);
+        assert!(backend.restart_terminal("nope").is_err());
+        assert!(!lock(&log).iter().any(|l| l.starts_with("terminal.close")));
     }
 
     #[test]
@@ -2112,6 +2221,30 @@ mod tests {
         assert!(matches!(rx.recv().unwrap().1, StreamRecord::Closed { .. }));
         assert!(backend.stream_input(id, "y").is_err());
         let _ = log;
+    }
+
+    #[test]
+    fn a_server_that_goes_away_ends_the_stream_as_lost_so_the_view_attaches_again() {
+        let extra = vec![
+            r#"{"event":"terminal.output","data":{"terminal_id":"t1","seq":1,"data":"YQ=="}}"#
+                .into(),
+            GONE.into(),
+        ];
+        let (backend, _) = backend_for("gone", extra, false);
+        let (opened, rx) = collect(&backend, Mode::Control, false);
+        opened.unwrap();
+        let last = rx.iter().map(|(_, r)| r).last().unwrap();
+        assert!(
+            matches!(
+                &last,
+                StreamRecord::Closed {
+                    code: Some(CloseCode::Lost),
+                    exit_code: None,
+                    ..
+                }
+            ),
+            "{last:?}"
+        );
     }
 
     #[test]

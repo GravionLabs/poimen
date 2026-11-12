@@ -231,10 +231,6 @@ export interface Settings {
   scrollback: number;
   /** Start the backend's server when it is not running (`herdr.autoStart`). */
   herdrAutoStart: boolean;
-  /** System notification when an agent turns blocked (`notifications.blocked`). */
-  notifyOnBlocked: boolean;
-  /** System notification when an agent finishes (`notifications.done`). */
-  notifyOnDone: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
   /** `spaceTemplates`: directory or remote matched templates with agent and layout. */
@@ -305,8 +301,6 @@ export const DEFAULT_SETTINGS: Settings = {
   backend: "poimen",
   scrollback: 10000,
   herdrAutoStart: true,
-  notifyOnBlocked: true,
-  notifyOnDone: true,
   spacesLayout: null,
   spaceTemplates: [],
   trustedProjects: {},
@@ -412,8 +406,6 @@ export function parseSettings(raw: unknown): Settings {
         ? r["scrollback"]
         : DEFAULT_SETTINGS.scrollback,
     herdrAutoStart: r["herdrAutoStart"] !== false,
-    notifyOnBlocked: r["notifyOnBlocked"] !== false,
-    notifyOnDone: r["notifyOnDone"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
     spaceTemplates: parseSpaceTemplates(r["spaceTemplates"]),
     trustedProjects: parseTrusted(r["trustedProjects"]),
@@ -497,12 +489,6 @@ export class SettingsStore {
       "set_explorer_show_hidden",
       { show: explorerShowHidden },
     );
-  }
-
-  /** Writes `notifications.blocked` or `notifications.done` of config.json and applies it at once. */
-  async setNotification(kind: "blocked" | "done", on: boolean): Promise<void> {
-    const patch = kind === "blocked" ? { notifyOnBlocked: on } : { notifyOnDone: on };
-    await this.write(patch, `the ${kind} notification option`, "set_notification", { kind, on });
   }
 
   /** Writes `terminal.fontFamily` (empty removes it: the default stack) and applies it at once. */

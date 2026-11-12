@@ -11,7 +11,7 @@ use poimen_client::protocol::{
     TerminalCreate,
 };
 use poimen_client::{Client, ClientError};
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 use serde_json::Value;
 
 struct Env {
@@ -32,6 +32,7 @@ impl Env {
             state_file: self.dir.join("state").join("server.json"),
             scrollback: 1000,
             home: None,
+            pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         }
     }
 
@@ -556,11 +557,16 @@ fn closing_a_space_closes_its_tabs() {
 }
 
 #[test]
-fn tabs_and_trees_are_persisted_and_dangling_leaves_dropped_after_a_restart() {
+fn tabs_and_trees_are_persisted_and_kept_with_their_adopted_terminals_after_a_restart() {
     let env = Env::new("persist");
-    let client = start(&env.config("run"));
+    let config = env.config("run");
+    let server = Server::bind(config.clone()).unwrap();
+    let (down_tx, down_rx) = mpsc::channel();
+    server.on_shutdown(move || down_tx.send(()).unwrap());
+    thread::spawn(move || server.serve());
+    let client = Client::new(&config.socket);
     let (space, first, tab) = space_with_terminal(&client, &env);
-    let (after, _) = client
+    let (after, second) = client
         .split(&split_of(&first.id, SplitDirection::Right, Some(0.4)))
         .unwrap();
     let old_split = split_id(&after.root);
@@ -575,24 +581,35 @@ fn tabs_and_trees_are_persisted_and_dangling_leaves_dropped_after_a_restart() {
     assert_eq!(state["tabs"][0]["root"]["ratio"], 0.4);
     assert!(state["next_id"].as_u64().is_some());
 
-    // A new server on the same state file: the terminals are gone, so are their leaves, the
-    // split and the tab; the space stays.
+    // A restart that keeps the terminals: the new server (same state file) adopts them, so the
+    // tab keeps its tree with the same split and terminal ids (the leaves of terminals that do
+    // not come back are dropped, see tests/adopt.rs).
+    client.shutdown_keeping_terminals().unwrap();
+    down_rx.recv_timeout(Duration::from_secs(10)).unwrap();
     let client = start(&env.config("run2"));
     let layout = client.list_layout().unwrap();
-    assert!(layout.tabs.is_empty());
     assert_eq!(layout.spaces.len(), 1);
     assert_eq!(layout.spaces[0].id, space.id);
-    assert!(layout.spaces[0].tabs.is_empty());
-    assert_eq!(layout.spaces[0].active_tab, None);
-    assert!(env.state()["tabs"].as_array().unwrap().is_empty());
+    assert_eq!(layout.spaces[0].tabs, std::slice::from_ref(&tab.tab_id));
+    assert_eq!(layout.tabs.len(), 1);
+    assert_eq!(layout.tabs[0].root, after.root);
+    assert_eq!(layout.tabs[0].name, "dev");
+    let ids: Vec<String> = client
+        .list_terminals(None)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(ids, [first.id.clone(), second.id.clone()]);
 
-    // Ids are never given twice: not the dropped split's, not the dropped tab's.
+    // Ids are never given twice: a new split and tab get fresh ones.
     let fresh = client.create_terminal(&sh(&space.id)).unwrap();
     let (after, _) = client
         .split(&split_of(&fresh.id, SplitDirection::Down, None))
         .unwrap();
     assert_ne!(split_id(&after.root), old_split);
     assert_ne!(after.tab_id, tab.tab_id);
+    assert!(![first.id, second.id].contains(&fresh.id));
 }
 
 #[test]

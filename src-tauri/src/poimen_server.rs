@@ -1,6 +1,8 @@
 //! Starting `poimen-server` (ADR 0003) when it is absent. poimen stops it only on a confirmed
-//! restart (an older server than the bundled one, [`restart`]) and a confirmed "Quit poimen and
-//! stop server" ([`stop`]); otherwise the server owns the PTYs and outlives the app. The wire protocol lives in `crates/poimen-protocol`, the client
+//! restart (an older server than the bundled one, [`restart`]: the terminals keep running in
+//! their hosts and the new server adopts them, ADR 0009) and a confirmed "Quit poimen and stop
+//! server" ([`stop`]: ends every terminal); otherwise the server and the PTY hosts of its
+//! terminals outlive the app. The wire protocol lives in `crates/poimen-protocol`, the client
 //! in `crates/poimen-client`; this module only decides whether to start a server and does so
 //! detached, like `backend.rs` does for herdr. On Windows it starts a per-version copy under
 //! `%LOCALAPPDATA%\poimen-server\bin` (see [`stage`]), breaking away from the app's job; inside
@@ -47,7 +49,8 @@ pub enum Ping {
     /// A server answered with the protocol poimen speaks.
     Answers,
     /// A server with the protocol poimen speaks, but older than the bundled one. Never replaced
-    /// without the user's consent: stopping it ends every terminal.
+    /// without the user's consent: a server from before #604 ends every terminal when it stops
+    /// (the terminals of a later one survive the restart, `Terminal.survives_restart`).
     Outdated { running: String },
     /// A server with another protocol version: it cannot be talked to, and a second one cannot
     /// start on its socket.
@@ -81,8 +84,9 @@ pub trait Runner {
     fn resolve(&self) -> Option<PathBuf>;
     /// Starts the program detached and returns without waiting for it.
     fn spawn(&self, program: &Path) -> io::Result<()>;
-    /// Asks the running server to end every terminal and exit (`server.shutdown`).
-    fn shutdown(&self) -> Result<(), String>;
+    /// Asks the running server to exit (`server.shutdown`): with `keep_terminals` it leaves them
+    /// running in their hosts for the next server, else it ends every terminal.
+    fn shutdown(&self, keep_terminals: bool) -> Result<(), String>;
     fn sleep(&self, duration: Duration);
     fn now(&self) -> Duration;
 }
@@ -129,14 +133,20 @@ pub fn ensure_running(runner: &impl Runner, auto_start: bool) -> Result<Outcome,
 pub const BUNDLED_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Asks the running server to shut down and waits until nothing answers any more. Ends every
-/// terminal: call it only after the user confirmed.
+/// terminal: call it only after the user confirmed ("Quit poimen and stop server").
 pub fn stop(runner: &impl Runner) -> Result<(), StartError> {
+    shut_down(runner, false)
+}
+
+/// [`stop`], keeping the terminals in their hosts when `keep_terminals` (a server from before
+/// #604 ends them anyway).
+fn shut_down(runner: &impl Runner, keep_terminals: bool) -> Result<(), StartError> {
     match runner.ping() {
         Ping::Absent => return Ok(()),
         Ping::Denied(e) => return Err(StartError::Denied(e)),
         _ => {}
     }
-    runner.shutdown().map_err(|e| {
+    runner.shutdown(keep_terminals).map_err(|e| {
         StartError::Shutdown(format!(
             "could not stop the running `poimen-server`: {e}. A server older than this poimen may not know `server.shutdown`: end its process by hand"
         ))
@@ -154,9 +164,10 @@ pub fn stop(runner: &impl Runner) -> Result<(), StartError> {
     )))
 }
 
-/// The confirmed restart: [`stop`] the running server, then start the bundled one.
+/// The confirmed restart: stop the running server, leaving the terminals in their hosts, then
+/// start the bundled one, which adopts them (ADR 0009).
 pub fn restart(runner: &impl Runner) -> Result<Outcome, StartError> {
-    stop(runner)?;
+    shut_down(runner, true)?;
     ensure_running(runner, true)
 }
 
@@ -232,29 +243,42 @@ fn create_private_dir(dir: &Path) -> io::Result<()> {
     builder.create(dir)
 }
 
-/// Copies the bundled server to `<bin_root>/<version>/<its file name>` and returns that path.
+/// Copies the bundled server to `<bin_root>/<version>/<its file name>` and returns that path,
+/// together with the `poimen-pty-host` next to it (ADR 0009: the server starts its terminals in
+/// hosts from its own directory), when there is one.
 /// Windows: the running copy then locks only itself, so an update can replace the installed one.
 /// AppImage: the copy outlives the mount it came from. The copy is executable (0755 on Unix). An
-/// up-to-date copy (same size and modification time) is reused; copies of other versions are
-/// removed when they are not running (a running exe cannot be deleted on Windows; on Unix a
-/// running copy keeps working after its file is removed).
+/// up-to-date copy (same size and modification time) is reused; the directories of other versions
+/// are then removed by [`prune`] unless a server or a host still runs from them.
 pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathBuf> {
-    let source = std::fs::metadata(bundled)?;
     let dir = bin_root.join(version);
     let name = bundled.file_name().map_or_else(
         || beside_name(cfg!(windows), CHANNEL).into(),
         OsString::from,
     );
-    let target = dir.join(&name);
+    let target = copy_into(bundled, &dir, &name)?;
+    let host = OsString::from(CHANNEL.host_program(cfg!(windows)));
+    let bundled_host = bundled.with_file_name(&host);
+    if bundled_host.is_file() {
+        copy_into(&bundled_host, &dir, &host)?;
+    }
+    prune(bin_root, version, &running_exes());
+    Ok(target)
+}
+
+/// Copies `source` to `<dir>/<name>` unless an up-to-date copy is there; returns its path.
+fn copy_into(source_path: &Path, dir: &Path, name: &OsString) -> io::Result<PathBuf> {
+    let source = std::fs::metadata(source_path)?;
+    let target = dir.join(name);
     let same = |m: &std::fs::Metadata| {
         m.len() == source.len() && m.modified().ok() == source.modified().ok()
     };
     if !std::fs::metadata(&target).is_ok_and(|m| same(&m)) {
-        create_private_dir(&dir)?;
+        create_private_dir(dir)?;
         let mut tmp_name = name.clone();
         tmp_name.push(format!(".{}.tmp", std::process::id()));
         let tmp = dir.join(tmp_name);
-        std::fs::copy(bundled, &tmp)?;
+        std::fs::copy(source_path, &tmp)?;
         // The copy takes the source's mode (0555 in a read-only mount): make it writable for
         // `set_modified` and executable for everyone, as an installed binary.
         #[cfg(unix)]
@@ -271,14 +295,75 @@ pub fn stage(bundled: &Path, bin_root: &Path, version: &str) -> io::Result<PathB
         let _ = std::fs::remove_file(&tmp);
         copied?;
     }
-    if let Ok(entries) = std::fs::read_dir(bin_root) {
-        for entry in entries.flatten() {
-            if entry.file_name() != version && entry.path().is_dir() {
-                let _ = std::fs::remove_dir_all(entry.path());
+    Ok(target)
+}
+
+/// The executables of the running processes, or `None` where that cannot be read (Windows:
+/// there a running exe cannot be moved, which [`prune`] uses instead). Linux reads `/proc/*/exe`;
+/// other Unix systems `ps` (full path in `comm`).
+fn running_exes() -> Option<Vec<PathBuf>> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut exes = Vec::new();
+        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+            if let Ok(exe) = std::fs::read_link(entry.path().join("exe")) {
+                exes.push(exe);
             }
         }
+        Some(exes)
     }
-    Ok(target)
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let out = gui_path::command("ps")
+            .args(["-axo", "comm="])
+            .output()
+            .ok()?;
+        out.status.success().then(|| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(|l| PathBuf::from(l.trim()))
+                .collect()
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+/// Removes the directories of other versions under `bin_root` when no process runs from them:
+/// neither a server nor a `poimen-pty-host` (ADR 0009: a host outlives its server, so it can
+/// run from an old version's directory for as long as its terminal lives). `running` lists the
+/// executables of the running processes; `None` means unknown, then a directory is probed by
+/// renaming it, which Windows refuses while an executable in it runs. A directory in use is left
+/// whole and tried again at the next stage.
+pub fn prune(bin_root: &Path, keep: &str, running: &Option<Vec<PathBuf>>) {
+    let Ok(entries) = std::fs::read_dir(bin_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if entry.file_name() == keep || !path.is_dir() {
+            continue;
+        }
+        let in_use = match running {
+            Some(exes) => exes.iter().any(|exe| exe.starts_with(&path)),
+            None => {
+                let probe =
+                    bin_root.join(format!(".{}.removing", entry.file_name().to_string_lossy()));
+                match std::fs::rename(&path, &probe) {
+                    Ok(()) => {
+                        let _ = std::fs::remove_dir_all(&probe);
+                        false
+                    }
+                    Err(_) => true,
+                }
+            }
+        };
+        if !in_use {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
 }
 
 /// `<bin_root>/poimen-server`, a symlink to the staged copy (relative, so the directory can
@@ -442,8 +527,13 @@ impl Runner for SystemRunner {
         Ok(())
     }
 
-    fn shutdown(&self) -> Result<(), String> {
-        self.client.shutdown().map_err(|e| e.to_string())
+    fn shutdown(&self, keep_terminals: bool) -> Result<(), String> {
+        let result = if keep_terminals {
+            self.client.shutdown_keeping_terminals()
+        } else {
+            self.client.shutdown()
+        };
+        result.map_err(|e| e.to_string())
     }
 
     fn sleep(&self, duration: Duration) {
@@ -467,6 +557,8 @@ mod tests {
         /// What a running server's ping says; `None`: a current server (`Answers`).
         found: RefCell<Option<Ping>>,
         shutdowns: Cell<u32>,
+        /// `keep_terminals` of every shutdown asked for.
+        kept: RefCell<Vec<bool>>,
         shutdown_fails: bool,
         installed: bool,
         becomes_up: bool,
@@ -481,6 +573,7 @@ mod tests {
                 running: Cell::new(running),
                 found: RefCell::new(None),
                 shutdowns: Cell::new(0),
+                kept: RefCell::new(vec![]),
                 shutdown_fails: false,
                 installed,
                 becomes_up,
@@ -509,8 +602,9 @@ mod tests {
             self.found.replace(None);
             Ok(())
         }
-        fn shutdown(&self) -> Result<(), String> {
+        fn shutdown(&self, keep_terminals: bool) -> Result<(), String> {
             self.shutdowns.set(self.shutdowns.get() + 1);
+            self.kept.borrow_mut().push(keep_terminals);
             if self.shutdown_fails {
                 return Err("unknown method server.shutdown".into());
             }
@@ -596,6 +690,25 @@ mod tests {
             .flatten()
             .collect();
         assert_eq!(names.len(), 1, "no temp file is left");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_pty_host_next_to_the_server_is_staged_with_it() {
+        let dir = temp_dir("host");
+        let bundled = dir.join(beside_name(cfg!(windows), CHANNEL));
+        std::fs::write(&bundled, "server").unwrap();
+        let host = CHANNEL.host_program(cfg!(windows));
+        std::fs::write(dir.join(&host), "host").unwrap();
+        let bin = dir.join("bin");
+        let staged = stage(&bundled, &bin, "0.9.0").unwrap();
+        let staged_host = staged.with_file_name(&host);
+        assert_eq!(std::fs::read_to_string(&staged_host).unwrap(), "host");
+        // Without a host next to the server only the server is staged.
+        std::fs::remove_file(dir.join(&host)).unwrap();
+        let staged = stage(&bundled, &bin, "1.0.0").unwrap();
+        assert!(!staged.with_file_name(&host).exists());
+        assert!(!staged_host.exists(), "the old version went");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -762,6 +875,98 @@ mod tests {
             2,
             "the version and the link, no temp file: {names:?}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn version_dir_with(bin: &Path, version: &str, files: &[&str]) -> PathBuf {
+        let dir = bin.join(version);
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in files {
+            std::fs::write(dir.join(f), "x").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn the_host_beside_the_server_is_staged_into_the_same_version_directory() {
+        let dir = temp_dir("host-same-version");
+        let host_name = CHANNEL.host_program(cfg!(windows));
+        let server_name = beside_name(cfg!(windows), CHANNEL);
+        let bundled = dir.join("app");
+        std::fs::create_dir_all(&bundled).unwrap();
+        std::fs::write(bundled.join(&server_name), "server").unwrap();
+        std::fs::write(bundled.join(&host_name), "host").unwrap();
+        let bin = dir.join("bin");
+
+        let staged = prepare(&bundled.join(&server_name), &bin, "1.0.0").unwrap();
+        assert_eq!(staged.program, bin.join("1.0.0").join(&server_name));
+        assert_eq!(
+            std::fs::read_to_string(bin.join("1.0.0").join(&host_name)).unwrap(),
+            "host"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bundle_without_a_host_stages_the_server_alone() {
+        let dir = temp_dir("no-host");
+        let server_name = beside_name(cfg!(windows), CHANNEL);
+        std::fs::write(dir.join(&server_name), "server").unwrap();
+        let bin = dir.join("bin");
+        assert!(prepare(&dir.join(&server_name), &bin, "1.0.0").is_some());
+        let names: Vec<_> = std::fs::read_dir(bin.join("1.0.0"))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert_eq!(names.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_version_with_a_running_host_or_server_is_kept_and_the_others_removed() {
+        let dir = temp_dir("prune");
+        let bin = dir.join("bin");
+        let host_only = version_dir_with(&bin, "0.1.0", &["poimen-server", "poimen-pty-host"]);
+        let server_only = version_dir_with(&bin, "0.2.0", &["poimen-server", "poimen-pty-host"]);
+        let idle = version_dir_with(&bin, "0.3.0", &["poimen-server", "poimen-pty-host"]);
+        let current = version_dir_with(&bin, "0.4.0", &["poimen-server"]);
+        let running = Some(vec![
+            host_only.join("poimen-pty-host"),
+            server_only.join("poimen-server"),
+            PathBuf::from("/usr/bin/other"),
+        ]);
+
+        prune(&bin, "0.4.0", &running);
+        assert!(host_only.exists(), "a running host keeps its directory");
+        assert!(server_only.exists(), "a running server keeps its directory");
+        assert!(!idle.exists());
+        assert!(current.exists(), "the current version is never removed");
+
+        // Once nothing runs from them, the next prune removes them.
+        prune(&bin, "0.4.0", &Some(Vec::new()));
+        assert!(!host_only.exists() && !server_only.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_leaves_files_and_a_missing_root_alone() {
+        let dir = temp_dir("prune-files");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("poimen-server"), "link").unwrap();
+        prune(&bin, "1.0.0", &Some(Vec::new()));
+        assert!(bin.join("poimen-server").exists());
+        prune(&dir.join("missing"), "1.0.0", &None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unknown_process_list_probes_by_renaming() {
+        let dir = temp_dir("prune-probe");
+        let bin = dir.join("bin");
+        let old = version_dir_with(&bin, "0.1.0", &["poimen-pty-host"]);
+        prune(&bin, "0.2.0", &None);
+        assert!(!old.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -953,10 +1158,11 @@ mod tests {
     }
 
     #[test]
-    fn a_confirmed_restart_shuts_down_then_starts_the_bundled_server() {
+    fn a_confirmed_restart_shuts_down_keeping_the_terminals_then_starts_the_bundled_server() {
         let fake = outdated_fake();
         assert_eq!(restart(&fake), Ok(Outcome::Started));
         assert_eq!(fake.shutdowns.get(), 1);
+        assert_eq!(*fake.kept.borrow(), [true]);
         assert_eq!(fake.spawned.borrow().len(), 1);
         assert_eq!(fake.ping(), Ping::Answers);
     }
@@ -979,10 +1185,11 @@ mod tests {
     }
 
     #[test]
-    fn stop_shuts_a_current_server_down_and_starts_nothing() {
+    fn stop_shuts_a_current_server_down_ending_the_terminals_and_starts_nothing() {
         let fake = Fake::new(true, true, true);
         assert_eq!(stop(&fake), Ok(()));
         assert_eq!(fake.shutdowns.get(), 1);
+        assert_eq!(*fake.kept.borrow(), [false]);
         assert!(fake.spawned.borrow().is_empty());
     }
 
@@ -1008,8 +1215,8 @@ mod tests {
         fn spawn(&self, program: &Path) -> io::Result<()> {
             self.fake.spawn(program)
         }
-        fn shutdown(&self) -> Result<(), String> {
-            self.fake.shutdown()
+        fn shutdown(&self, keep_terminals: bool) -> Result<(), String> {
+            self.fake.shutdown(keep_terminals)
         }
         fn sleep(&self, d: Duration) {
             self.fake.sleep(d)

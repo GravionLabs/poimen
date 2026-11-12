@@ -22,13 +22,13 @@ poimen-client = { path = "../poimen-client" }
 poimen-core = { path = "../poimen-core" }
 poimen-protocol = { path = "../poimen-protocol" }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"] }
-notify-rust = "4"
 serde_json = "1"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
 [dev-dependencies]
+poimen-pty-host = { path = "../poimen-pty-host" }
 poimen-server = { path = "../poimen-server" }
 
 [lints.rust]

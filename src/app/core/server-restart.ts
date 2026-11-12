@@ -26,8 +26,9 @@ function errorText(error: unknown): string {
 
 /**
  * The outdated or incompatible poimen-server and the "Quit poimen and stop server" command.
- * Stopping the server ends every terminal, so nothing happens without the confirmation that names
- * them; "Later" keeps the old server for this app session (in memory only).
+ * Stopping the server ends every terminal; a restart only those that do not run in a PTY host the
+ * next server adopts (`survives_restart`, ADR 0009). Nothing happens without the confirmation
+ * that names them; "Later" keeps the old server for this app session (in memory only).
  */
 @Injectable({ providedIn: "root" })
 export class ServerRestart {
@@ -47,9 +48,19 @@ export class ServerRestart {
   /** The notice of the status bar; `null` when the server is fine or "Later" was chosen. */
   readonly notice = computed(() => (this._later() ? null : serverNotice(this.store.backend())));
 
-  /** The terminals the stop would end, by name. */
+  /** The terminals the open action would end, by name: all on quit, on a restart the ones not adopted. */
   readonly terminals = computed(() =>
-    this.store.snapshot().terminals.map((t) => t.label || t.terminal_id),
+    this.store
+      .snapshot()
+      .terminals.filter((t) => this._action() === "quit" || !t.survives_restart)
+      .map((t) => t.label || t.terminal_id),
+  );
+
+  /** How many terminals keep running through the open action (a restart only). */
+  readonly kept = computed(() =>
+    this._action() === "restart"
+      ? this.store.snapshot().terminals.filter((t) => t.survives_restart).length
+      : 0,
   );
 
   /** "Later": the old server stays and the notice is gone for this session. */

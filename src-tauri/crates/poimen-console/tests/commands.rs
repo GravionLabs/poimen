@@ -10,7 +10,7 @@ use poimen_client::Client;
 use poimen_client::protocol::{AgentStatus, TerminalCreate};
 use poimen_console::cli::{self, Command, Request};
 use poimen_console::commands::{self, Failure};
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 use serde_json::Value;
 
 struct Fixture {
@@ -34,6 +34,7 @@ fn fixture(name: &str) -> Fixture {
         state_file: dir.join("state").join("server.json"),
         scrollback: 1000,
         home: None,
+        pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
     };
     let server = Server::bind(config.clone()).unwrap();
     thread::spawn(move || server.serve());

@@ -271,6 +271,9 @@
         [attr.aria-label]="d.row.agent ? 'Agent ' + d.row.agent : 'Terminal'"
         >{{ glyph(d.row) }}</span
       >
+      @if (hostNote(d.row); as note) {
+        <span class="host-note" role="img" [attr.aria-label]="note" [title]="note"></span>
+      }
       <span class="main">
         @for (line of d.lines; track $index) {
           <span class="line">

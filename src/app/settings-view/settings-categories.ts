@@ -39,11 +39,6 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
           "UI font size",
         ],
       },
-      {
-        id: "notifications",
-        title: "Notifications",
-        labels: ["When an agent waits for you", "When an agent is done"],
-      },
     ],
   },
   {
@@ -95,7 +90,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
 export const DEFAULT_SETTINGS_PAGE = SETTINGS_GROUPS[0].pages[0].id;
 
 /** Retired page ids, mapped to the page that now holds their settings (persisted selections, deep links). */
-const RETIRED_PAGES: ReadonlyMap<string, string> = new Map([["color-scheme", "appearance"]]);
+const RETIRED_PAGES: ReadonlyMap<string, string> = new Map([
+  ["color-scheme", "appearance"],
+  // System notifications were removed (#676).
+  ["notifications", "appearance"],
+]);
 
 export function allPages(groups: readonly SettingsGroup[] = SETTINGS_GROUPS): SettingsPage[] {
   return groups.flatMap((g) => g.pages);

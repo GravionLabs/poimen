@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod host;
+
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
 pub const PROTOCOL_VERSION: u32 = 6;
@@ -73,6 +75,13 @@ impl Channel {
     /// on Windows).
     pub fn server_program(self, windows: bool) -> String {
         let name = self.named("poimen-server");
+        if windows { format!("{name}.exe") } else { name }
+    }
+
+    /// The file name of this channel's `poimen-pty-host` binary, which ships next to the server
+    /// (`poimen-pty-host-rc` on rc; `.exe` on Windows).
+    pub fn host_program(self, windows: bool) -> String {
+        let name = self.named("poimen-pty-host");
         if windows { format!("{name}.exe") } else { name }
     }
 }
@@ -352,6 +361,8 @@ pub enum ErrorCode {
 
 /// A line sent by the server: a response, or an event on a subscribed connection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// An event carries a whole `Terminal`; boxing it would change every reader for no gain.
+#[allow(clippy::large_enum_variant)]
 #[serde(untagged)]
 pub enum ServerLine {
     Event(Event),
@@ -533,6 +544,10 @@ pub struct Terminal {
     /// what it types for that shell. Absent from servers that do not report it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
+    /// The arguments after `program` (the command line the terminal was created with); lets a
+    /// client start the same command again. Absent when there are none and from older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
     /// The agent in the terminal, as its hooks last reported it; absent when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentInfo>,
@@ -540,6 +555,20 @@ pub struct Terminal {
     /// ones are gone. Empty when there are none.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tokens: BTreeMap<String, String>,
+    /// The terminal runs in a `poimen-pty-host` that a restarted server adopts: a
+    /// `server.shutdown` with `keep_terminals` keeps it (ADR 0009). Absent (false) from servers
+    /// that end their terminals on a restart.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub survives_restart: bool,
+    /// The version of the `poimen-pty-host` the terminal runs in. A host is not updated with the
+    /// server, so it can be older than `host_bundled_version`. Absent from servers before #606
+    /// and from terminals without a host (exited).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_version: Option<String>,
+    /// The version of the host this server ships with (the one a new terminal gets); set
+    /// together with `host_version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_bundled_version: Option<String>,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the
@@ -587,6 +616,15 @@ pub fn clean_message(text: &str) -> Option<String> {
     let cut: String = joined.chars().take(MAX_MESSAGE_CHARS).collect();
     let cut = cut.trim_end().to_owned();
     (!cut.is_empty()).then_some(cut)
+}
+
+/// Params of `server.shutdown`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerShutdown {
+    /// Leave the terminals running in their hosts for the next server to adopt (a restart);
+    /// `false` (the default, and what a client without the field gets) ends every terminal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_terminals: bool,
 }
 
 /// Params of `server.set_colors`: the colors the server answers terminal color queries with
@@ -1749,6 +1787,9 @@ mod tests {
         assert_eq!(Channel::Stable.server_program(false), "poimen-server");
         assert_eq!(Channel::Rc.server_program(false), "poimen-server-rc");
         assert_eq!(Channel::Rc.server_program(true), "poimen-server-rc.exe");
+        assert_eq!(Channel::Stable.host_program(false), "poimen-pty-host");
+        assert_eq!(Channel::Stable.host_program(true), "poimen-pty-host.exe");
+        assert_eq!(Channel::Rc.host_program(true), "poimen-pty-host-rc.exe");
         assert_eq!(Channel::Rc.name(), "rc");
         assert_eq!(serde_json::to_value(Channel::Rc).unwrap(), "rc");
         assert_eq!(serde_json::to_value(Channel::Stable).unwrap(), "stable");

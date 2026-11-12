@@ -15,7 +15,7 @@ use poimen_client::{Client, ClientError};
 use poimen_console::keys::DEFAULT_PREFIX;
 use poimen_console::session::{self, Error, Options, Outcome, RESET};
 use poimen_console::tty::{RawGuard, Terminal};
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 
 struct Fixture {
     dir: PathBuf,
@@ -38,6 +38,7 @@ fn fixture(name: &str) -> Fixture {
         state_file: dir.join("state").join("server.json"),
         scrollback: 1000,
         home: None,
+        pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
     };
     let server = Server::bind(config.clone()).unwrap();
     thread::spawn(move || server.serve());

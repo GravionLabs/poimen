@@ -200,7 +200,7 @@ describe("renderRow", () => {
     ]);
     expect(
       texts(renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, space([a, a]), ctx)),
-    ).toEqual([["One", "idle", "main"], ["…/b/c"]]);
+    ).toEqual([["One", "idle", "…/b/c"], ["main"]]);
   });
 
   it("skips empty values, repeats of the name or an earlier value, and empty lines", () => {
@@ -237,12 +237,15 @@ describe("renderRow", () => {
       expect(ws(row({}))).toEqual([]);
     });
 
-    it("shows the workspace row after the branch in the default layout", () => {
+    it("puts the path in the first line and branch, dirty and sync in the second of the default layout", () => {
       const r = row({ dir: "/a/b/c", branch: "main", dirty: 2, ahead: 1, behind: 0 });
       const sp = space([r, r]);
       expect(
         texts(renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, sp, spaceContext(sp))),
-      ).toEqual([["One", "idle", "main", "●2", "↑1"], ["…/b/c"]]);
+      ).toEqual([
+        ["One", "idle", "…/b/c"],
+        ["main", "●2", "↑1"],
+      ]);
     });
 
     it("shows a pane value only when it differs from the workspace", () => {

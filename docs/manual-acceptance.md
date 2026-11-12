@@ -20,15 +20,13 @@ names a path, use the path the app shows, not a guess.
    (`copilot --version`).
 2. For every item write **pass**, **fail** or **not run**, with the date. A not-run item needs a
    reason.
-3. Post one comment per package on the milestone's `release-test` issue (the RC test of the
-   pre-release, created from `.github/release-test.md`). Use the item IDs in the comment.
+3. Keep the result with the item IDs (a comment on the release PR or the bug issues of step 4);
+   no `release-test` issue is created per milestone.
 4. Every gap becomes a `[Bug]` issue (`github-issue` conventions, for example
    `[Bug] fix(backend): ...`) that names the item ID and the package. Link the bug from the comment.
    An item with a gap is not **pass**.
 5. The release counts as manually checked when every item is **pass** or has a linked bug.
-6. An RC test left open is superseded by the next milestone's `release-test` issue: when the next RC
-   is cut, close the old issue with a link to the new one. The RC test never blocks the release PR;
-   its gaps are bugs (step 4).
+6. The RC test never blocks the release PR; its gaps are bugs (step 4).
 
 Keep the exact error text. For an elevated-server denial or a hook failure, paste the message as it
 was shown.
@@ -158,6 +156,16 @@ test.
   `sudo ln -sf /Applications/poimen.app/Contents/MacOS/poimen /usr/local/bin/poimen` and, in a new terminal, `poimen --version`.
 - **Expected:** both print the version of the app. After the link `poimen` resolves from the PATH.
 - **Source:** #519.
+
+### M-11 Update keeps running agents (PTY host)
+
+- **Steps:** run a version that already ships `poimen-pty-host` (not the first one that does: that update
+  ends the terminals once, see `docs/updater.md`) with a running agent. Check
+  `ls Contents/MacOS` of the app: `poimen-pty-host` sits next to `poimen-server`. Update to the next
+  version and restart (confirm **Restart server** if offered).
+- **Expected:** the agent and its terminal still run and attach again; `pgrep -fl poimen-pty-host` shows the
+  host started before the update. macOS runs the installed binary (no copy under a staging root).
+- **Source:** #605, ADR 0009.
 
 ## Windows: `-setup.exe`
 
@@ -289,6 +297,16 @@ The open M10 checks (W-S-9 to W-S-14) run once, here. The `.msi` section repeats
 - **Expected:** `poimen.exe` is found in the install directory and prints the app version. After the uninstall the
   install directory is gone from the user PATH (Settings > Environment Variables) and `where poimen` finds nothing.
 - **Source:** #519.
+
+### W-S-16 Update keeps running agents (PTY host)
+
+- **Steps:** as M-11 on Windows: a version with the host, a running agent and a PowerShell terminal. Check
+  `%LOCALAPPDATA%\poimen-server\bin\<version>\` for `poimen-server.exe` and `poimen-pty-host.exe`. Install the
+  next version and restart poimen.
+- **Expected:** the update installs while the host runs, and the terminals and the agent survive. The new
+  version has its own directory; the old one stays while its host runs and is removed after the last
+  terminal of that version has ended.
+- **Source:** #605, ADR 0009.
 
 ## Windows: `.msi`
 
@@ -577,6 +595,16 @@ checks A-7 to A-9 verify that staging.
 - **Steps:** run `./poimen_<version>_amd64.AppImage --appimage-extract`, then `squashfs-root/usr/bin/poimen --version`.
 - **Expected:** the extracted `squashfs-root/usr/bin/poimen` prints the app version. README "Console" names this path.
 - **Source:** #519.
+
+### A-14 Update keeps running agents (PTY host)
+
+- **Steps:** as A-10 with a version that ships the host: a running agent, then run the next AppImage and
+  quit the first. Check `$XDG_DATA_HOME/poimen-server/bin/<version>/` for `poimen-server` and
+  `poimen-pty-host`.
+- **Expected:** the terminals and the agent survive. The old version's directory stays while its host or
+  server runs and is removed afterwards. The `.deb` and `.rpm` run the installed host (L-D-8, L-R-8 plus
+  `pgrep -fl poimen-pty-host`).
+- **Source:** #605, ADR 0009.
 
 ## CLI archives (all platforms)
 

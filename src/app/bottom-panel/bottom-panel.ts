@@ -16,7 +16,14 @@ import { Deliver } from "../deliver/deliver";
 import { HerdrStore } from "../core/herdr-store";
 import { eventTime, runLabel, runsOfSpace, selectRun, toneStyle } from "./run-events";
 import { TaskLog } from "../core/task-log";
-import { PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT, UiState } from "../core/ui-state";
+import {
+  EVENT_COLUMN_MAX,
+  EVENT_COLUMN_MIN,
+  PANEL_MAX_HEIGHT,
+  PANEL_MIN_HEIGHT,
+  UiState,
+  type EventColumn,
+} from "../core/ui-state";
 import {
   Subagents,
   atBottom,
@@ -51,6 +58,8 @@ export class BottomPanel {
   protected readonly deliver = inject(Deliver);
   protected readonly minHeight = PANEL_MIN_HEIGHT;
   protected readonly maxHeight = PANEL_MAX_HEIGHT;
+  protected readonly colMin = EVENT_COLUMN_MIN;
+  protected readonly colMax = EVENT_COLUMN_MAX;
   protected readonly tabs = Object.entries(PANEL_TAB_LABELS);
   protected readonly label = subagentLabel;
   protected readonly summary = toolSummary;
@@ -153,6 +162,38 @@ export class BottomPanel {
     if (event.key === "ArrowUp") this.ui.setPanelHeight(this.ui.panelHeight() + step);
     else if (event.key === "ArrowDown") this.ui.setPanelHeight(this.ui.panelHeight() - step);
     else return;
+    event.preventDefault();
+  }
+
+  /** Grid columns shared by the Events header and every row. */
+  protected readonly eventGrid = computed(() => {
+    const c = this.ui.eventColumns();
+    return `1.2em ${c.time}px ${c.task}px 1fr ${c.result}px 2.5em`;
+  });
+
+  private colDrag: { column: EventColumn; sign: 1 | -1; startX: number; start: number } | null =
+    null;
+
+  /** Starts dragging a column border; `sign` is -1 where growing the column moves the border left. */
+  protected colStart(event: PointerEvent, column: EventColumn, sign: 1 | -1): void {
+    (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+    this.colDrag = { column, sign, startX: event.clientX, start: this.ui.eventColumns()[column] };
+  }
+
+  protected colMove(event: PointerEvent): void {
+    const d = this.colDrag;
+    if (d) this.ui.setEventColumn(d.column, d.start + d.sign * (event.clientX - d.startX));
+  }
+
+  protected colEnd(): void {
+    this.colDrag = null;
+  }
+
+  protected colKey(event: KeyboardEvent, column: EventColumn, sign: 1 | -1): void {
+    const step = event.shiftKey ? 40 : 10;
+    const delta = event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0;
+    if (!delta) return;
+    this.ui.setEventColumn(column, this.ui.eventColumns()[column] + sign * delta);
     event.preventDefault();
   }
 

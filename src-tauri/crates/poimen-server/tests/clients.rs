@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use poimen_client::protocol::{ClientInfo, ClientKind, Event};
 use poimen_client::{Client, EventStream};
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 
 fn start(name: &str) -> (Client, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("poimen-clients-{}-{name}", std::process::id()));
@@ -17,6 +17,7 @@ fn start(name: &str) -> (Client, std::path::PathBuf) {
         state_file: dir.join("state").join("server.json"),
         scrollback: 1000,
         home: None,
+        pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
     };
     let server = Server::bind(config.clone()).unwrap();
     thread::spawn(move || server.serve());

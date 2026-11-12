@@ -148,6 +148,16 @@
   border-radius: 50%;
 }
 
+.note {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  align-self: center;
+  border-radius: 50%;
+  border: 1px solid var(--h-text-muted-color, currentColor);
+  opacity: 0.7;
+}
+
 .attention-mark {
   background: var(--status-blocked);
 }

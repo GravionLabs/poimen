@@ -13,7 +13,7 @@ describe("settings categories", () => {
       filterGroups("").map((g) => [g.title, g.pages.map((p) => p.title)]),
     );
     expect(tree).toEqual({
-      "Appearance & Behavior": ["Appearance", "Notifications"],
+      "Appearance & Behavior": ["Appearance"],
       Workspace: ["Explorer", "Spaces", "New space layout", "Trusted projects"],
       Backend: ["Server", "Agents"],
     });
@@ -24,7 +24,7 @@ describe("settings categories", () => {
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");
-    expect(allPages()).toHaveLength(8);
+    expect(allPages()).toHaveLength(7);
   });
 
   it("resolves the retired color-scheme page to appearance", () => {
@@ -65,8 +65,8 @@ describe("settings categories", () => {
   });
 
   it("filters by the label of a setting", () => {
-    expect(filterGroups("agent is done").flatMap((g) => g.pages.map((p) => p.id))).toEqual([
-      "notifications",
+    expect(filterGroups("hidden folders").flatMap((g) => g.pages.map((p) => p.id))).toEqual([
+      "explorer",
     ]);
   });
 

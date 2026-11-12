@@ -12,11 +12,11 @@ import {
   inject,
   signal,
 } from "@angular/core";
-import { treeTerminals, type Mode, type Terminal, type TabTree } from "../core/herdr";
+import { olderHost, treeTerminals, type Mode, type Terminal, type TabTree } from "../core/herdr";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { TerminalView } from "../terminal-view/terminal-view";
 
-export type PaneMenuAction = "split-right" | "split-down" | "close";
+export type PaneMenuAction = "split-right" | "split-down" | "restart" | "close";
 
 /** The leaf `delta` places after `current` in `leaves`, wrapping; the first leaf when `current` is unknown. */
 export function cycleFocus(
@@ -107,6 +107,11 @@ export class TabLayout implements OnChanges, OnDestroy {
 
   protected pane(id: string): Terminal | undefined {
     return this.panes.get(id);
+  }
+
+  /** The terminal runs on an older PTY host: its menu offers a restart on the new one (#606). */
+  protected onOlderHost(id: string): boolean {
+    return olderHost(this.panes.get(id)) !== null;
   }
 
   protected modeOf(id: string): Mode {

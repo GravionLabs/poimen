@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use poimen_client::protocol::{AgentStatus, ErrorCode, Event, TerminalCreate, TerminalStatus};
 use poimen_client::{Client, ClientError};
-use poimen_server::{Config, Server, StartError};
+use poimen_server::{Config, PtyHost, Server, StartError};
 
 struct Env {
     dir: PathBuf,
@@ -30,6 +30,7 @@ impl Env {
             state_file: self.dir.join("state").join("server.json"),
             scrollback: 1000,
             home: None,
+            pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         }
     }
 
@@ -208,14 +209,21 @@ fn a_stale_socket_file_is_replaced() {
 }
 
 #[test]
-fn spaces_persist_across_restarts_but_terminals_do_not() {
+fn spaces_persist_across_restarts_and_ended_terminals_do_not_come_back() {
     let env = Env::new("persist");
     let first = env.config();
-    let client = start(&first);
+    let server = Server::bind(first.clone()).unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    server.on_shutdown(move || done_tx.send(()).unwrap());
+    thread::spawn(move || server.serve());
+    let client = Client::new(&first.socket);
     let space = client.create_space("api", &env.work()).unwrap();
     client.create_space("docs", &env.work()).unwrap();
     client.rename_space(&space.id, "api v2").unwrap();
     client.create_terminal(&sh(&space.id)).unwrap();
+    // A shutdown without `keep_terminals` ends them (a kept one is adopted, see tests/adopt.rs).
+    client.shutdown().unwrap();
+    done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
 
     // A new server (another socket, same state file), as after a restart.
     let second = Config {
@@ -306,6 +314,25 @@ fn a_real_cmd_gets_its_environment_input_and_resize() {
     client.resize(&terminal.id, 100, 30).unwrap();
     let listed = client.list_terminals(Some(&space.id)).unwrap();
     assert_eq!((listed[0].cols, listed[0].rows), (100, 30));
+}
+
+#[test]
+fn a_terminal_keeps_the_arguments_it_was_created_with() {
+    let env = Env::new("args");
+    let client = start(&env.config());
+    let space = client.create_space("work", &env.work()).unwrap();
+    let shell = if cfg!(windows) { "cmd.exe" } else { "sh" };
+    let with_args = TerminalCreate {
+        command: Some(vec![shell.into(), "-x".into(), "--foo".into()]),
+        ..sh(&space.id)
+    };
+    let created = client.create_terminal(&with_args).unwrap();
+    assert_eq!(created.program.as_deref(), Some(shell));
+    assert_eq!(created.args, vec!["-x", "--foo"]);
+    let listed = client.list_terminals(None).unwrap();
+    assert_eq!(listed[0].args, vec!["-x", "--foo"]);
+    let bare = client.create_terminal(&sh(&space.id)).unwrap();
+    assert!(bare.args.is_empty());
 }
 
 #[test]

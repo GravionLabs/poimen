@@ -11,8 +11,8 @@ edition = "2024"
 default-run = "poimen-app"
 
 [workspace]
-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core", "crates/poimen-console"]
-default-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core", "crates/poimen-console"]
+members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core", "crates/poimen-console", "crates/poimen-pty-host"]
+default-members = [".", "crates/poimen-protocol", "crates/poimen-client", "crates/poimen-server", "crates/poimen-core", "crates/poimen-console", "crates/poimen-pty-host"]
 
 [workspace.package]
 # The one version of the app and the poimen-* crates; release.yml rewrites this line.
@@ -41,11 +41,8 @@ toml = "0.8"
 tauri-plugin-dialog = "2"
 notify = "8"
 sha2 = "0.10"
-tauri-plugin-notification = "2"
 poimen-client = { path = "crates/poimen-client" }
 poimen-core = { path = "crates/poimen-core" }
-# First release with `month_usage` (GravionLabs/tamias#119).
-tamias-core = { git = "https://github.com/GravionLabs/tamias", tag = "v0.3.0" }
 
 [lints.rust]
 unsafe_code = "forbid"

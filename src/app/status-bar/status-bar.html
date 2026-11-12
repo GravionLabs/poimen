@@ -23,18 +23,6 @@
   <span class="item conn {{ connection().state }}" [title]="label(connection(), backend())">
     <span class="dot"></span>{{ label(connection(), backend()) }}
   </span>
-  @if (usageFigures(usage()); as items) {
-    @if (items.length > 0) {
-      <span class="item usage" [title]="usageText(usage())">
-        @for (f of items; track f.key; let last = $last) {
-          <span class="figure {{ f.color }}">{{ f.label }}</span>
-          @if (!last) {
-            <span class="sep" aria-hidden="true">·</span>
-          }
-        }
-      </span>
-    }
-  }
   @if (deliver(); as run) {
     <button
       type="button"

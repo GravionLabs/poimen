@@ -184,6 +184,37 @@ describe("TabLayout", () => {
     expect(el.querySelector(".menu")).toBeNull();
   });
 
+  it("offers a restart on the new host only for a terminal on an older host", () => {
+    const { fixture, el, log } = setup();
+    fixture.componentRef.setInput(
+      "panes",
+      new Map([
+        ["t1", term("t1")],
+        ["t2", { ...term("t2"), host_version: "0.15.0", host_bundled_version: "0.16.0" }],
+        ["t3", { ...term("t3"), host_version: "0.16.0", host_bundled_version: "0.16.0" }],
+      ]),
+    );
+    fixture.detectChanges();
+    const open = (id: string): string[] => {
+      el.querySelector(`[data-terminal="${id}"]`)!.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+      fixture.detectChanges();
+      return [...el.querySelectorAll<HTMLButtonElement>(".menu button")].map((b) =>
+        b.textContent!.trim(),
+      );
+    };
+    expect(open("t3")).not.toContain("Restart terminal on the new host...");
+    expect(open("t2")).toEqual([
+      "Split right",
+      "Split down",
+      "Restart terminal on the new host...",
+      "Close pane",
+    ]);
+    el.querySelectorAll<HTMLButtonElement>(".menu button")[2].click();
+    expect(log.actions).toEqual([{ terminalId: "t2", action: "restart" }]);
+  });
+
   it("leaves out a leaf whose terminal is not in the snapshot", () => {
     const { fixture, el } = setup();
     fixture.componentRef.setInput("panes", new Map([["t1", term("t1")]]));

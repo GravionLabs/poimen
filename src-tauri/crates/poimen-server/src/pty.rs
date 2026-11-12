@@ -1,31 +1,14 @@
-//! One PTY with its child process (`portable-pty`).
+//! What the server does for a terminal's PTY that its `poimen-pty-host` does not (ADR 0009):
+//! the default shell and terminal name, the input handle, and the batching of output before it
+//! reaches the emulator. The PTY and the child live in the host (`host.rs`).
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use poimen_protocol::{ENV_SOCKET, ENV_TERMINAL_ID};
-use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
-
-pub(crate) struct SpawnSpec<'a> {
-    pub terminal_id: &'a str,
-    pub socket: &'a Path,
-    pub command: &'a [String],
-    pub cwd: &'a str,
-    pub cols: u16,
-    pub rows: u16,
-}
-
-pub(crate) struct Pty {
-    master: Box<dyn MasterPty + Send>,
-    writer: PtyWriter,
-    killer: Box<dyn ChildKiller + Send + Sync>,
-}
-
-/// A shared handle on the input side of a PTY, so a blocking write can happen without holding
-/// the server's global lock.
+/// A shared handle on the input side of a terminal, so a blocking write can happen without
+/// holding the server's global lock. Behind it is the terminal's host connection (`host.rs`).
 #[derive(Clone)]
 pub(crate) struct PtyWriter(std::sync::Arc<std::sync::Mutex<Box<dyn Write + Send>>>);
 
@@ -39,33 +22,6 @@ impl PtyWriter {
         w.write_all(data)
             .and_then(|()| w.flush())
             .map_err(|e| e.to_string())
-    }
-}
-
-impl Pty {
-    pub fn writer(&self) -> PtyWriter {
-        self.writer.clone()
-    }
-
-    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
-        self.master
-            .resize(size(cols, rows))
-            .map_err(|e| e.to_string())
-    }
-
-    /// Ends the child (SIGHUP on Unix, TerminateProcess on Windows); the master closes when the
-    /// `Pty` is dropped.
-    pub fn kill(mut self) {
-        let _ = self.killer.kill();
-    }
-}
-
-fn size(cols: u16, rows: u16) -> PtySize {
-    PtySize {
-        rows,
-        cols,
-        pixel_width: 0,
-        pixel_height: 0,
     }
 }
 
@@ -129,90 +85,65 @@ pub(crate) fn program_name_for(program: &str, windows: bool) -> String {
 /// Output is passed on in batches: what arrives within this time, up to [`MAX_BATCH`] bytes.
 const COALESCE: Duration = Duration::from_millis(4);
 pub(crate) const MAX_BATCH: usize = 32 * 1024;
-/// How long the exit report waits for the output of the dead process to be handled.
-const DRAIN_WAIT: Duration = Duration::from_secs(1);
 
-enum Chunk {
+/// What the reader of a host hands to [`coalesce`].
+pub(crate) enum Chunk {
+    /// The bytes of an output record.
     Data(Vec<u8>),
-    Eof,
+    /// Output that ran before this server read the host: the replay of its ring when a server
+    /// adopts it (#604). It rebuilds the grid; its terminal queries were answered back then (or
+    /// by nobody) and are not answered again.
+    Replay(Vec<u8>),
+    /// The terminal ended: its child exited with the code, or its host is gone (`None`).
+    End(Option<u32>),
 }
 
-/// Starts the command in a new PTY. A reader thread drains the PTY (a chatty child only blocks
-/// when `on_output` is slow), a second thread coalesces what it reads and calls `on_output`
-/// with batches of at most [`MAX_BATCH`] bytes. `on_exit` runs on a helper thread when the
-/// process ends, with its exit code, after the output has been handled.
-pub(crate) fn spawn(
-    spec: &SpawnSpec<'_>,
-    mut on_output: impl FnMut(&[u8]) + Send + 'static,
-    on_exit: impl FnOnce(Option<u32>) + Send + 'static,
-) -> Result<Pty, String> {
-    let pair = native_pty_system()
-        .openpty(size(spec.cols, spec.rows))
-        .map_err(|e| e.to_string())?;
-    let mut cmd = CommandBuilder::new(&spec.command[0]);
-    cmd.args(&spec.command[1..]);
-    cmd.cwd(spec.cwd);
-    if std::env::var_os("TERM").is_none_or(|t| t.is_empty() || t == "dumb") {
-        cmd.env("TERM", "xterm-256color");
-    }
-    cmd.env(ENV_SOCKET, spec.socket);
-    cmd.env(ENV_TERMINAL_ID, spec.terminal_id);
-
-    let mut child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("could not start {}: {e}", spec.command[0]))?;
-    // Only the child holds the slave, so the reader sees EOF when it ends.
-    drop(pair.slave);
-    let killer = child.clone_killer();
-    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-
-    let (tx, rx) = mpsc::sync_channel::<Chunk>(32);
-    let (drained_tx, drained_rx) = mpsc::channel::<()>();
-    thread::spawn(move || {
-        let mut buf = [0u8; 16 * 1024];
-        while let Ok(n) = reader.read(&mut buf) {
-            if n == 0 || tx.send(Chunk::Data(buf[..n].to_vec())).is_err() {
-                break;
-            }
-        }
-        let _ = tx.send(Chunk::Eof);
-    });
-    thread::spawn(move || {
-        while let Ok(Chunk::Data(mut batch)) = rx.recv() {
-            let deadline = Instant::now() + COALESCE;
-            let mut eof = false;
-            while batch.len() < MAX_BATCH {
-                let left = deadline.saturating_duration_since(Instant::now());
-                match rx.recv_timeout(left) {
-                    Ok(Chunk::Data(d)) => batch.extend_from_slice(&d),
-                    Ok(Chunk::Eof) | Err(RecvTimeoutError::Disconnected) => {
-                        eof = true;
-                        break;
-                    }
-                    Err(RecvTimeoutError::Timeout) => break,
+/// Calls `on_output` with batches of the records of `rx` (what arrives within [`COALESCE`], up
+/// to [`MAX_BATCH`] bytes), in order; `live` is false for a batch of [`Chunk::Replay`]s, and a
+/// batch never mixes the two. Returns the exit code of [`Chunk::End`] once everything before it
+/// was handed on (`None` also when the sender went away).
+pub(crate) fn coalesce(
+    rx: &Receiver<Chunk>,
+    mut on_output: impl FnMut(&[u8], bool),
+) -> Option<u32> {
+    let mut end: Option<Option<u32>> = None;
+    // A chunk of the other kind that ended the last batch and starts the next.
+    let mut carried: Option<(Vec<u8>, bool)> = None;
+    while end.is_none() {
+        let (mut batch, live) = match carried.take() {
+            Some(first) => first,
+            None => match rx.recv() {
+                Ok(Chunk::Data(data)) => (data, true),
+                Ok(Chunk::Replay(data)) => (data, false),
+                Ok(Chunk::End(code)) => return code,
+                Err(_) => return None,
+            },
+        };
+        let deadline = Instant::now() + COALESCE;
+        while batch.len() < MAX_BATCH {
+            let left = deadline.saturating_duration_since(Instant::now());
+            let (data, kind) = match rx.recv_timeout(left) {
+                Ok(Chunk::Data(d)) => (d, true),
+                Ok(Chunk::Replay(d)) => (d, false),
+                Ok(Chunk::End(code)) => {
+                    end = Some(code);
+                    break;
                 }
-            }
-            on_output(&batch);
-            if eof {
+                Err(RecvTimeoutError::Disconnected) => {
+                    end = Some(None);
+                    break;
+                }
+                Err(RecvTimeoutError::Timeout) => break,
+            };
+            if kind != live {
+                carried = Some((data, kind));
                 break;
             }
+            batch.extend_from_slice(&data);
         }
-        let _ = drained_tx.send(());
-    });
-    thread::spawn(move || {
-        let code = child.wait().ok().map(|status| status.exit_code());
-        // A grandchild that keeps the PTY open must not delay the report for ever.
-        let _ = drained_rx.recv_timeout(DRAIN_WAIT);
-        on_exit(code);
-    });
-
-    Ok(Pty {
-        master: pair.master,
-        writer: PtyWriter::new(writer),
-        killer,
-    })
+        on_output(&batch, live);
+    }
+    end.flatten()
 }
 
 #[cfg(test)]
@@ -220,18 +151,6 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
-
-    /// #455: on Windows the ConPTY is created with pass-through (conhost must not re-encode VT
-    /// mouse input), falling back to the flags of upstream portable-pty when the OS rejects it.
-    #[test]
-    fn conpty_tries_passthrough_then_falls_back() {
-        use portable_pty::conpty_flags::{PASSTHROUGH_MODE, UPSTREAM, attempts};
-        let a = attempts();
-        assert_eq!(a[0] & PASSTHROUGH_MODE, 0x8);
-        assert_eq!(a[0], 0xF);
-        assert_eq!(a[1], UPSTREAM);
-        assert_eq!(a[1] & PASSTHROUGH_MODE, 0);
-    }
 
     /// Records every `write` call of the PTY input.
     #[derive(Clone, Default)]
@@ -257,6 +176,78 @@ mod tests {
             *calls.0.lock().unwrap(),
             vec![b"\x1b[<0;12;5M".to_vec(), b"\x1b[<0;12;5m".to_vec()]
         );
+    }
+
+    fn fed(chunks: Vec<Chunk>) -> (Vec<Vec<u8>>, Option<u32>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for chunk in chunks {
+            tx.send(chunk).unwrap();
+        }
+        drop(tx);
+        let mut batches = Vec::new();
+        let code = coalesce(&rx, |b, _| batches.push(b.to_vec()));
+        (batches, code)
+    }
+
+    #[test]
+    fn replayed_and_live_output_never_share_a_batch_and_keep_their_order() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for chunk in [
+            Chunk::Replay(b"old ".to_vec()),
+            Chunk::Replay(b"older ".to_vec()),
+            Chunk::Data(b"new".to_vec()),
+            Chunk::Data(b"er".to_vec()),
+            Chunk::Replay(b"x".to_vec()),
+            Chunk::End(Some(1)),
+        ] {
+            tx.send(chunk).unwrap();
+        }
+        let mut batches = Vec::new();
+        let code = coalesce(&rx, |b, live| {
+            batches.push((String::from_utf8(b.to_vec()).unwrap(), live));
+        });
+        assert_eq!(
+            batches,
+            [
+                ("old older ".to_string(), false),
+                ("newer".to_string(), true),
+                ("x".to_string(), false),
+            ]
+        );
+        assert_eq!(code, Some(1));
+    }
+
+    #[test]
+    fn queued_output_is_fed_in_one_batch_in_order_before_the_exit() {
+        let (batches, code) = fed(vec![
+            Chunk::Data(b"ab".to_vec()),
+            Chunk::Data(b"cd".to_vec()),
+            Chunk::End(Some(2)),
+        ]);
+        assert_eq!(batches, [b"abcd".to_vec()]);
+        assert_eq!(code, Some(2));
+    }
+
+    #[test]
+    fn a_batch_stops_at_max_batch_bytes() {
+        let (batches, _) = fed(vec![
+            Chunk::Data(vec![b'x'; MAX_BATCH]),
+            Chunk::Data(b"y".to_vec()),
+            Chunk::End(None),
+        ]);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].len(), MAX_BATCH);
+        assert_eq!(batches[1], b"y");
+    }
+
+    #[test]
+    fn without_output_the_end_comes_at_once_and_a_lost_sender_is_no_code() {
+        assert_eq!(fed(vec![Chunk::End(Some(0))]), (vec![], Some(0)));
+        assert_eq!(
+            fed(vec![Chunk::Data(b"z".to_vec())]),
+            (vec![b"z".to_vec()], None)
+        );
+        assert_eq!(fed(vec![]), (vec![], None));
     }
 
     #[test]

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use poimen_client::Client;
 use poimen_client::protocol::{Event, TerminalCreate};
-use poimen_server::{Config, Server};
+use poimen_server::{Config, PtyHost, Server};
 use serde_json::{Value, json};
 
 struct Env {
@@ -31,6 +31,7 @@ impl Env {
             state_file: dir.join("state").join("server.json"),
             scrollback: 1000,
             home: None,
+            pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         };
         let server = Server::bind(config.clone()).unwrap();
         thread::spawn(move || server.serve());

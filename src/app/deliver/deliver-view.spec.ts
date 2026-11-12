@@ -7,7 +7,6 @@ import { ACTIVITY_VIEWS } from "../activity-bar/activity-bar";
 import { POIMEN_COMMANDS } from "../core/command-palette";
 import { DELIVER_TAB, EditorTabs, tabKind } from "../core/editor-tabs";
 import type { Terminal } from "../core/herdr";
-import { TauriBridge } from "../core/tauri";
 import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE } from "../core/ui-state";
 import { HerdrStore } from "../core/herdr-store";
@@ -240,7 +239,7 @@ describe("Deliver panel", () => {
   });
 });
 
-describe("Deliver service ordering and notifications", () => {
+describe("Deliver service ordering", () => {
   it("keeps the order of the runs on an update and drops the runs that are gone", async () => {
     const { deliver } = await render();
     deliver.apply("/r", events("failed", "session"));
@@ -251,18 +250,6 @@ describe("Deliver service ordering and notifications", () => {
     expect(order()).toEqual(["danger", "neutral"]);
     deliver.apply("/r", events("session"));
     expect(order()).toEqual(["neutral"]);
-  });
-
-  it("does not notify for the first read and notifies for a new decision of a run", async () => {
-    const { deliver } = await render();
-    const notify = vi.spyOn(TestBed.inject(TauriBridge), "notify").mockResolvedValue(true);
-    deliver.apply("/r", events("session"));
-    expect(notify).not.toHaveBeenCalled();
-    const next = JSON.parse(readFileSync("src/app/deliver/fixtures/events-session.json", "utf8"));
-    next.attentions = [{ id: "a", reason: "pick one", needsYou: true }];
-    deliver.apply("/r", { kind: "events", runs: [next] });
-    expect(notify.mock.calls.map((c) => c[1])).toEqual(["Needs you: pick one"]);
-    expect(notify.mock.calls[0][2]).toEqual({ deliverRoot: "/r" });
   });
 });
 
@@ -299,49 +286,6 @@ describe("Deliver service", () => {
     await deliver.watch(["/a"]);
     await deliver.watch(["/a"]);
     expect(tauri.calls("deliver_watch")).toHaveLength(2);
-  });
-
-  describe("notifications", () => {
-    it("notifies when a task fails, a decision is needed or the run ends", async () => {
-      const { deliver } = await render();
-      const notify = vi.spyOn(TestBed.inject(TauriBridge), "notify").mockResolvedValue(true);
-      const base = JSON.parse(readFileSync("src/app/deliver/fixtures/events-session.json", "utf8"));
-      const step = (over: Record<string, unknown>): DeliverRead => ({
-        kind: "events",
-        runs: [{ ...base, ...over }],
-      });
-      deliver.apply("/r", step({}));
-      expect(notify).not.toHaveBeenCalled();
-      deliver.apply("/r", step({ attentions: [{ id: "a", reason: "pick one", needsYou: true }] }));
-      deliver.apply(
-        "/r",
-        step({
-          attentions: [{ id: "a", reason: "pick one", needsYou: true }],
-          finished: {
-            succeeded: [],
-            failed: [{ task: "t2", subject: { id: "2", title: "Second" }, reason: "CI red" }],
-            cancelled: [],
-            skipped: [],
-          },
-        }),
-      );
-      deliver.apply(
-        "/r",
-        step({ status: "finished", outcome: "succeeded", tasks: [], attentions: [] }),
-      );
-      expect(notify.mock.calls.map((c) => c[1])).toEqual([
-        "Needs you: pick one",
-        "Second failed: CI red",
-        "The run is done",
-      ]);
-    });
-
-    it("does not notify for the first read of a repository", async () => {
-      const { deliver } = await render();
-      const notify = vi.spyOn(TestBed.inject(TauriBridge), "notify").mockResolvedValue(true);
-      deliver.apply("/r", read("blocked"));
-      expect(notify).not.toHaveBeenCalled();
-    });
   });
 });
 

@@ -9,7 +9,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use poimen_core::schemes::Scheme;
 use poimen_core::settings::{SidebarRows, resolve_sidebar_rows};
 
-use super::attention::Policy;
 use serde_json::Value;
 
 /// A key with modifiers, written like `C-b`, `ctrl+b`, `M-x`, `d` or `up`.
@@ -310,8 +309,6 @@ pub struct Config {
     pub rows: SidebarRows,
     /// The user scheme `colorSchema` names; `None` uses the colors of the local terminal.
     pub scheme: Option<Scheme>,
-    /// `notifications.blocked` / `notifications.done` (both on by default).
-    pub notify: Policy,
     pub warnings: Vec<String>,
 }
 
@@ -330,33 +327,10 @@ pub fn parse(root: &Value, schemes: &[Scheme]) -> Config {
     if let Some(sidebar) = root.get("sidebar") {
         c.rows = resolve_sidebar_rows(sidebar, &mut c.warnings);
     }
-    if let Some(value) = root.get("notifications") {
-        parse_notifications(value, &mut c);
-    }
     if let Some(name) = scheme_name(root) {
         c.scheme = schemes.iter().find(|s| s.name == name).cloned();
     }
     c
-}
-
-/// `notifications.blocked` / `notifications.done`; a wrong type warns and keeps `true`.
-fn parse_notifications(value: &Value, c: &mut Config) {
-    let Some(obj) = value.as_object() else {
-        c.warnings.push("notifications must be an object".into());
-        return;
-    };
-    for (key, slot) in [
-        ("blocked", &mut c.notify.blocked),
-        ("done", &mut c.notify.done),
-    ] {
-        match obj.get(key) {
-            None => {}
-            Some(Value::Bool(b)) => *slot = *b,
-            Some(_) => c.warnings.push(format!(
-                "notifications.{key} must be true or false; using true"
-            )),
-        }
-    }
 }
 
 fn parse_console(console: &Value, c: &mut Config) {
@@ -669,16 +643,14 @@ mod tests {
     }
 
     #[test]
-    fn notifications_default_on_and_can_be_turned_off_one_by_one() {
-        let c = parse(&json!({}), &[]);
-        assert!(c.notify.blocked && c.notify.done);
-        let c = parse(&json!({"notifications": {"done": false}}), &[]);
-        assert!(c.notify.blocked && !c.notify.done);
-        let c = parse(&json!({"notifications": {"blocked": "no"}}), &[]);
-        assert!(c.notify.blocked);
-        assert_eq!(c.warnings.len(), 1);
-        let c = parse(&json!({"notifications": true}), &[]);
-        assert_eq!(c.warnings.len(), 1);
+    fn a_leftover_notifications_key_is_ignored_and_the_list_key_stays() {
+        // System notifications were removed (#676); an old config keeps working silently.
+        let c = parse(
+            &json!({"notifications": {"done": false, "blocked": "no"}}),
+            &[],
+        );
+        assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+        assert_eq!(c, parse(&json!({}), &[]));
         let c = parse(&json!({"console": {"keys": {"notifications": "i"}}}), &[]);
         assert_eq!(c.keys.notifications, KeySpec::plain(KeyCode::Char('i')));
     }

@@ -36,7 +36,6 @@ mod terminal_colors;
 mod transcripts;
 use poimen_core::trust;
 mod updater;
-mod usage;
 mod watch;
 mod worktree;
 
@@ -149,6 +148,16 @@ async fn pane_split(
 #[tauri::command]
 async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), String> {
     on_backend(backend.inner(), move |b| b.close_terminal(&pane_id)).await
+}
+
+/// Restarts a terminal on the bundled PTY host: a new terminal with the same directory, program
+/// and place; the old process ends. The UI confirms first. Returns the new pane id.
+#[tauri::command]
+async fn pane_restart(
+    backend: State<'_, Shared>,
+    pane_id: String,
+) -> Result<Option<String>, String> {
+    on_backend(backend.inner(), move |b| b.restart_terminal(&pane_id)).await
 }
 
 /// Closes a tab with all its terminals (`tab.close` on the poimen backend). The UI confirms first.
@@ -920,16 +929,6 @@ fn run_setup(
     }
 }
 
-/// The usage report of tamias for the status bar (`null` without tamias or data); later reads
-/// arrive as `usage` events.
-#[tauri::command]
-async fn get_usage() -> Option<tamias_core::report::Report> {
-    tauri::async_runtime::spawn_blocking(|| usage::read(&usage::SystemRunner))
-        .await
-        .ok()
-        .flatten()
-}
-
 /// Revokes the trust of the project file of `root`; the settings watcher emits the change.
 #[tauri::command]
 fn revoke_project(root: String) -> Result<(), String> {
@@ -1507,13 +1506,6 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
-/// Writes only `notifications.<kind>` (`blocked` or `done`); the settings watcher emits the change.
-#[tauri::command]
-fn set_notification(kind: String, on: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_notification(&home, &kind, on)
-}
-
 /// Writes only `terminal.fontFamily`; the settings watcher emits the change.
 #[tauri::command]
 fn set_terminal_font_family(family: String) -> Result<(), String> {
@@ -2056,8 +2048,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_dialog::init());
     // An rc build never updates itself (no updater artifacts, no endpoint in tauri.rc.conf.json).
     let builder = if updater::enabled(poimen_client::protocol::CHANNEL) {
         builder.plugin(tauri_plugin_updater::Builder::new().build())
@@ -2104,14 +2095,6 @@ pub fn run() {
                     });
                 });
             }
-            {
-                let handle = handle.clone();
-                std::thread::spawn(move || {
-                    usage::watch(usage::POLL_INTERVAL, |report| {
-                        let _ = handle.emit("usage", report);
-                    });
-                });
-            }
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
                 std::thread::spawn(move || {
@@ -2145,7 +2128,6 @@ pub fn run() {
             hooks_status,
             hooks_install,
             set_herdr_auto_start,
-            set_notification,
             set_terminal_font_family,
             set_terminal_font_size,
             clear_terminal_font_size,
@@ -2155,6 +2137,7 @@ pub fn run() {
             tab_resize_split,
             tab_focus,
             pane_close,
+            pane_restart,
             tab_close,
             tab_rename,
             space_close,
@@ -2180,7 +2163,6 @@ pub fn run() {
             app_channel,
             updater::update_check,
             updater::update_install,
-            get_usage,
             get_settings,
             get_harnesses,
             get_agent_actions,
@@ -3257,12 +3239,14 @@ mod build_layout_tests {
         assert_eq!(rc["mainBinaryName"], "poimen-rc");
         assert_eq!(rc["bundle"]["createUpdaterArtifacts"], false);
         assert_eq!(rc["plugins"]["updater"]["endpoints"], json!([]));
-        // The sidecars are the names the app of each channel looks for beside itself: the server
-        // and the console (`poimen`, `poimen-cli-rc` on rc so it can sit beside the stable one).
+        // The sidecars are the names the app of each channel looks for beside itself: the server,
+        // the PTY host the server looks for beside itself, and the console (`poimen`,
+        // `poimen-cli-rc` on rc so it can sit beside the stable one).
         assert_eq!(
             bundle["bundle"]["externalBin"],
             json!([
                 format!("binaries/{}", Channel::Stable.server_program(false)),
+                format!("binaries/{}", Channel::Stable.host_program(false)),
                 "binaries/poimen"
             ])
         );
@@ -3270,6 +3254,7 @@ mod build_layout_tests {
             rc["bundle"]["externalBin"],
             json!([
                 format!("binaries/{}", Channel::Rc.server_program(false)),
+                format!("binaries/{}", Channel::Rc.host_program(false)),
                 "binaries/poimen-cli-rc"
             ])
         );

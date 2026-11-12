@@ -15,6 +15,8 @@ import { applyUiFont } from "./core/ui-font";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import {
   flowSession,
+  olderHost,
+  olderHostNote,
   paneDir,
   rowName,
   supportsFlow,
@@ -27,10 +29,9 @@ import {
 } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
-import { Attention, type StatusChange } from "./core/attention";
+import { Attention } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
-import { Notifier, type NotifyContext } from "./core/notifier";
 import { NotificationCenter } from "./core/notification-center";
 import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
@@ -39,7 +40,6 @@ import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { Updater } from "./core/updater";
-import { Usage } from "./core/usage";
 import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
@@ -145,7 +145,6 @@ const ZOOM_STEP = 1;
 export class App {
   protected readonly store = inject(HerdrStore);
   protected readonly updater = inject(Updater);
-  protected readonly usage = inject(Usage);
   protected readonly serverRestart = inject(ServerRestart);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
@@ -192,7 +191,6 @@ export class App {
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
   private readonly agentRuns = inject(AgentRuns);
-  private readonly notifier = inject(Notifier);
   private readonly center = inject(NotificationCenter);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
@@ -258,6 +256,7 @@ export class App {
             preview: !tab.pinned,
             attention: ringing.has(tab.paneId),
             unread: unread.has(tab.paneId),
+            note: this.hostNote(pane),
             title: `${header.title}${tab.pinned ? "" : " (preview)"}`,
           };
         }),
@@ -297,10 +296,7 @@ export class App {
       untracked(() => {
         const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
-        // A pane's `done` because its linked run ended is notified once, by the run (#540).
-        const changes = this.deliver.withoutRunEnds(observed);
-        this.center.record(changes, (id) => this.tabTitle(id), Date.now());
-        this.notifyChanges(changes);
+        this.center.record(observed, (id) => this.tabTitle(id), Date.now());
       });
     });
     effect(() => {
@@ -308,16 +304,8 @@ export class App {
     });
 
     const destroyRef = inject(DestroyRef);
-    // Coming back to the window sees the active tabs again: withdraw their notifications.
-    destroyRef.onDestroy(this.notifier.watchFocus(window, () => this.notifyContext()));
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
-    // A click on a system notification opens the tab of the pane it was about.
-    const clicks = this.notifier.listen(
-      (paneId) => this.openPaneById(paneId),
-      () => this.editor.openDeliver(),
-    );
-    destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
     // The deliver loops of the repositories of the open spaces (status files, watched, no polling).
     destroyRef.onDestroy(this.deliver.start());
     // Spaces back from a server restart without terminals get their layout again.
@@ -706,6 +694,11 @@ export class App {
     for (const id of paneIds) this.editor.closePane(id);
   }
 
+  private hostNote(pane: Terminal | undefined): string | undefined {
+    const host = olderHost(pane);
+    return host ? olderHostNote(host) : undefined;
+  }
+
   protected paneAction(paneId: string, action: string): void {
     if (action === "split-right" || action === "split-down") {
       const direction = action === "split-right" ? "right" : "down";
@@ -714,6 +707,8 @@ export class App {
       this.paneActions.askStartAgent(paneId);
     } else if (action === "rename") {
       this.paneActions.askRename(paneId);
+    } else if (action === "restart") {
+      this.paneActions.askRestart(paneId);
     } else if (action === "close") {
       this.paneActions.askClose(paneId);
     }
@@ -754,6 +749,11 @@ export class App {
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
       { action: "pane-rename", label: "Rename pane..." },
+      {
+        action: "pane-restart",
+        label: "Restart terminal on the new host...",
+        appliesTo: (id) => tabKind(id) === "pane" && olderHost(this.pane(id)) !== null,
+      },
       { action: "pane-close", label: "Close pane..." },
     ];
   }
@@ -907,24 +907,6 @@ export class App {
   protected jumpToWaiting(): void {
     const next = this.store.nextWaiting(this.editor.activeId());
     if (next) this.open(next);
-  }
-
-  /** Sends notifications for `changes` and withdraws those of panes the user sees now. */
-  private notifyChanges(changes: readonly StatusChange[]): void {
-    this.notifier.notify(changes, this.notifyContext());
-  }
-
-  private notifyContext(): NotifyContext {
-    const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
-    return {
-      // Read live: a delayed done notification checks again when it is due.
-      seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
-      status: (id) => this.store.panes().get(id)?.agent_status,
-      onBlocked: notifyOnBlocked,
-      onDone: notifyOnDone,
-      label: (id) => this.tabTitle(id),
-      now: Date.now(),
-    };
   }
 
   /** Space and name of a pane, as its tab shows them. */

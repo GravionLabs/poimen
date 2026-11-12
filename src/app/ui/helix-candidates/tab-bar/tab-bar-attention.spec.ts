@@ -18,6 +18,7 @@ const tabs = [
   { id: "a", label: "blocked", attention: true },
   { id: "b", label: "finished", unread: true },
   { id: "c", label: "calm" },
+  { id: "d", label: "old host", note: "Runs on poimen-pty-host 0.15.0; bundled is 0.16.0" },
 ];
 
 describe("TabBar attention and unread marks", () => {
@@ -42,7 +43,14 @@ describe("TabBar attention and unread marks", () => {
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     const rows = [...root.querySelectorAll(".tab")];
-    expect(rows.map((t) => t.classList.contains("attention"))).toEqual([true, false, false]);
-    expect(rows.map((t) => t.querySelector(".unread") !== null)).toEqual([false, true, false]);
+    expect(rows.map((t) => t.classList.contains("attention"))).toEqual([true, false, false, false]);
+    expect(rows.map((t) => t.querySelector(".unread") !== null)).toEqual([
+      false,
+      true,
+      false,
+      false,
+    ]);
+    expect(rows.map((t) => t.querySelector(".note") !== null)).toEqual([false, false, false, true]);
+    expect(rows[3].querySelector<HTMLElement>(".note")!.title).toContain("0.15.0");
   });
 });
