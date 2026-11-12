@@ -20,15 +20,13 @@ names a path, use the path the app shows, not a guess.
    (`copilot --version`).
 2. For every item write **pass**, **fail** or **not run**, with the date. A not-run item needs a
    reason.
-3. Post one comment per package on the milestone's `release-test` issue (the RC test of the
-   pre-release, created from `.github/release-test.md`). Use the item IDs in the comment.
+3. Keep the result with the item IDs (a comment on the release PR or the bug issues of step 4);
+   no `release-test` issue is created per milestone.
 4. Every gap becomes a `[Bug]` issue (`github-issue` conventions, for example
    `[Bug] fix(backend): ...`) that names the item ID and the package. Link the bug from the comment.
    An item with a gap is not **pass**.
 5. The release counts as manually checked when every item is **pass** or has a linked bug.
-6. An RC test left open is superseded by the next milestone's `release-test` issue: when the next RC
-   is cut, close the old issue with a link to the new one. The RC test never blocks the release PR;
-   its gaps are bugs (step 4).
+6. The RC test never blocks the release PR; its gaps are bugs (step 4).
 
 Keep the exact error text. For an elevated-server denial or a hook failure, paste the message as it
 was shown.
