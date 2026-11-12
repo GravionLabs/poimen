@@ -3,6 +3,7 @@
 ; an installer that starts PowerShell to write the registry trips Microsoft Defender heuristics).
 ; ReadRegStr returns the unexpanded value, WriteRegExpandStr keeps REG_EXPAND_SZ. Segments are compared
 ; case-insensitively (StrCmp), so a reinstall or update adds no duplicate.
+; A Path as long as NSIS_MAX_STRLEN was cut by ReadRegStr: it is left untouched, never written back.
 ; Registers: $R0 Path, $R1 rest to scan, $R2 position, $R3 character, $R4 segment, $R5 result.
 !macro NSIS_HOOK_POSTINSTALL
   Push $R0
@@ -12,6 +13,13 @@
   Push $R4
   Push $R5
   ReadRegStr $R0 HKCU "Environment" "Path"
+  StrLen $R3 $R0
+  IntOp $R3 $R3 + 1
+  IntCmp $R3 ${NSIS_MAX_STRLEN} poimen_path_add_toolong poimen_path_add_fits poimen_path_add_toolong
+  poimen_path_add_toolong:
+    DetailPrint "User PATH is too long to edit safely; left unchanged."
+    Goto poimen_path_add_done
+  poimen_path_add_fits:
   StrCpy $R1 $R0
   poimen_path_add_next:
     StrCmp $R1 "" poimen_path_add_append
@@ -57,6 +65,13 @@
   Push $R4
   Push $R5
   ReadRegStr $R0 HKCU "Environment" "Path"
+  StrLen $R3 $R0
+  IntOp $R3 $R3 + 1
+  IntCmp $R3 ${NSIS_MAX_STRLEN} poimen_path_remove_toolong poimen_path_remove_fits poimen_path_remove_toolong
+  poimen_path_remove_toolong:
+    DetailPrint "User PATH is too long to edit safely; left unchanged."
+    Goto poimen_path_remove_done
+  poimen_path_remove_fits:
   StrCmp $R0 "" poimen_path_remove_done
   StrCpy $R1 $R0
   StrCpy $R5 ""

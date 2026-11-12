@@ -100,3 +100,34 @@ fn labels_are_unique_across_the_hooks() {
     assert_eq!(n, labels.len(), "duplicate NSIS label");
     assert!(n > 0);
 }
+
+#[test]
+fn a_path_at_the_nsis_string_limit_is_left_untouched() {
+    for (name, label, write_at) in [
+        ("NSIS_HOOK_POSTINSTALL", "add", "WriteRegExpandStr"),
+        ("NSIS_HOOK_POSTUNINSTALL", "remove", "WriteRegExpandStr"),
+    ] {
+        let body = macro_body(&hooks(), name);
+        let read = body
+            .find(r#"ReadRegStr $R0 HKCU "Environment" "Path""#)
+            .unwrap();
+        let len = body.find("StrLen $R3 $R0").expect("length check");
+        let cmp = body
+            .find("IntCmp $R3 ${NSIS_MAX_STRLEN}")
+            .expect("limit compare");
+        let write = body.find(write_at).unwrap();
+        assert!(
+            read < len && len < cmp && cmp < write,
+            "{name}: guard order"
+        );
+        assert!(
+            body.contains(&format!("Goto poimen_path_{label}_done")),
+            "{name}: too long jumps to the end, registry untouched"
+        );
+        // Push and Pop stay balanced: the jump lands before the Pops.
+        assert_eq!(
+            body.matches("Push $R").count(),
+            body.matches("Pop $R").count()
+        );
+    }
+}
