@@ -54,7 +54,7 @@ The sidebar lists the spaces as a tree of spaces with their panes. Each row show
 
 ### Agent status
 
-Statuses come from the backend (agent hooks on `poimen-server`). A pane that turns blocked while you are not looking rings on its tab and sidebar row, one that turns done counts as unread, and viewing the tab clears both. "Next waiting agent" jumps to the next blocked agent, and poimen can send a macOS notification and show the number of waiting agents on the dock icon.
+Statuses come from the backend (agent hooks on `poimen-server`). A pane that turns blocked while you are not looking rings on its tab and sidebar row, one that turns done counts as unread, and viewing the tab clears both. "Next waiting agent" jumps to the next blocked agent, and the dock icon shows the number of waiting agents.
 
 <Screenshot src="blocked-dark.png" alt="A blocked agent: its tab and sidebar row are ringed and the terminal shows the question Claude Code asks, with a 1 waiting count in the status bar" caption="A blocked agent rings on its tab and sidebar row; the status bar counts the waiting agents (demo data)." />
 
