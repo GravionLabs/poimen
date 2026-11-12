@@ -204,7 +204,7 @@ pre {
   border-left: 3px solid transparent;
   font-size: 12px;
 }
-.event > span {
+.event > span:not(.icon) {
   min-width: 0;
   padding: 0 0.6em;
   overflow: hidden;

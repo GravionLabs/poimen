@@ -16,7 +16,14 @@ import { Deliver } from "../deliver/deliver";
 import { HerdrStore } from "../core/herdr-store";
 import { eventTime, runLabel, runsOfSpace, selectRun, toneStyle } from "./run-events";
 import { TaskLog } from "../core/task-log";
-import { PANEL_MAX_HEIGHT, PANEL_MIN_HEIGHT, UiState, type EventColumn } from "../core/ui-state";
+import {
+  EVENT_COLUMN_MAX,
+  EVENT_COLUMN_MIN,
+  PANEL_MAX_HEIGHT,
+  PANEL_MIN_HEIGHT,
+  UiState,
+  type EventColumn,
+} from "../core/ui-state";
 import {
   Subagents,
   atBottom,
@@ -51,6 +58,8 @@ export class BottomPanel {
   protected readonly deliver = inject(Deliver);
   protected readonly minHeight = PANEL_MIN_HEIGHT;
   protected readonly maxHeight = PANEL_MAX_HEIGHT;
+  protected readonly colMin = EVENT_COLUMN_MIN;
+  protected readonly colMax = EVENT_COLUMN_MAX;
   protected readonly tabs = Object.entries(PANEL_TAB_LABELS);
   protected readonly label = subagentLabel;
   protected readonly summary = toolSummary;
