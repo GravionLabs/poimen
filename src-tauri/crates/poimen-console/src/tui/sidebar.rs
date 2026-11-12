@@ -75,15 +75,8 @@ fn tokens(names: &[&str]) -> Vec<RowToken> {
 pub fn default_lines(kind: &str) -> Vec<Vec<RowToken>> {
     match kind {
         "workspace" => vec![
-            tokens(&[
-                "state_icon",
-                "name",
-                "state_text",
-                "branch",
-                "dirty",
-                "sync",
-            ]),
-            tokens(&["dir"]),
+            tokens(&["state_icon", "name", "state_text", "dir"]),
+            tokens(&["branch", "dirty", "sync"]),
         ],
         _ => vec![
             tokens(&["state_icon", "name", "state_text"]),
@@ -602,7 +595,7 @@ mod tests {
     fn default_rows_show_status_agent_and_paths() {
         let rows = model().rows(&SidebarRows::default(), Some("/home/u"));
         // The space takes the highest status of its terminals.
-        assert_eq!(texts(&rows[0]), ["▲ work blocked", "~/work"]);
+        assert_eq!(texts(&rows[0]), ["▲ work blocked ~/work"]);
         assert_eq!(rows[0].status, Some(AgentStatus::Blocked));
         // A plain terminal in the space's directory: only its name.
         assert_eq!(texts(&rows[1]), ["· shell"]);
@@ -610,7 +603,7 @@ mod tests {
         assert_eq!(texts(&rows[3]), ["▲ claude blocked"]);
         // A differing directory is shown.
         assert_eq!(texts(&rows[4]), ["· logs", "~/work/sub"]);
-        assert_eq!(texts(&rows[5]), ["· empty", "/srv"]);
+        assert_eq!(texts(&rows[5]), ["· empty /srv"]);
     }
 
     #[test]
