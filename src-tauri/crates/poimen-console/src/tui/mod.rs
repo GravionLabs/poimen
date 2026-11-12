@@ -22,8 +22,7 @@
 //! Attention (`attention`, the rules of the app's `core/attention.ts`): a terminal that turns
 //! blocked while not on screen rings in the sidebar, one that turns done counts as unread,
 //! showing the tab clears both; the prefix key `N` lists the notifications and Enter focuses the
-//! terminal of one. System notifications (`notifications.blocked`/`done`, done after 5 s) go out
-//! only while `server.clients` has no `app`: an app notifies by itself.
+//! terminal of one. poimen sends no system notifications (#676).
 //!
 //! `config` reads the prefix and keys, `input` routes keys, `grid` is a pane's emulator,
 //! `sidebar` the row model, `tree` the rectangles of a split tree, `screen` the local terminal
@@ -37,7 +36,6 @@ pub mod input;
 pub mod palette;
 pub mod screen;
 pub mod sidebar;
-pub mod system;
 pub mod tree;
 pub mod view;
 
@@ -46,7 +44,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event as InputEvent, KeyCode, KeyEventKind};
 use poimen_client::protocol::{
@@ -62,7 +60,7 @@ use ratatui::backend::Backend;
 use ratatui::buffer::Buffer;
 
 use crate::session::Error;
-use attention::{Attention, Change, Entry, Kind, Log, Notifier, Sink};
+use attention::{Attention, Change, Entry, Kind, Log};
 use config::Config;
 use grid::{Grid, Palette};
 use input::{Routed, Router, Wheel};
@@ -83,8 +81,6 @@ pub struct Options {
     pub mirror: Option<Arc<Mutex<Buffer>>>,
     /// Where the task picker reads issues from; `None`: `gh` (cached under the home directory).
     pub issues: Option<actions::IssueSource>,
-    /// Where system notifications go; `None` sends none.
-    pub notify: Option<Arc<dyn Sink>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -101,8 +97,6 @@ enum Msg {
     Input(InputEvent),
     /// Something changed on the server: read the model again.
     Changed,
-    /// The clients connected to the server changed.
-    Clients(Vec<ClientKind>),
     ServerGone(String),
     /// A stream record of the attachment with this generation.
     Record(u64, Box<Result<Event, String>>),
@@ -179,12 +173,8 @@ pub struct App {
     pub log: Log,
     /// The notification list is open, with this entry selected.
     pub list: Option<usize>,
-    /// The clients connected to the server (an `app` among them silences system notifications).
-    pub clients: Vec<ClientKind>,
     /// Milliseconds since the epoch at the last pass of the loop.
     pub now_ms: u64,
-    notifier: Notifier,
-    sink: Option<Arc<dyn Sink>>,
     generation: u64,
 }
 
@@ -209,10 +199,7 @@ impl App {
             attention: Attention::default(),
             log: Log::default(),
             list: None,
-            clients: Vec::new(),
             now_ms: epoch_ms(),
-            notifier: Notifier::default(),
-            sink: opts.notify.clone(),
             generation: 0,
         }
     }
@@ -253,7 +240,7 @@ impl App {
             .collect()
     }
 
-    /// Folds the server's statuses into the marks, the list and the system notifications. Cheap
+    /// Folds the server's statuses into the marks and the list. Cheap
     /// and repeatable: also run after the view changed, which is what clears a mark.
     fn observe(&mut self) {
         self.now_ms = epoch_ms();
@@ -264,46 +251,6 @@ impl App {
         for c in &changes {
             let Some(entry) = self.entry(c) else { continue };
             self.log.push(entry);
-        }
-        let seen = |id: &str| viewed.contains(id);
-        let blocked = self
-            .notifier
-            .changes(&changes, &seen, self.config.notify, Instant::now());
-        self.send(&blocked, Kind::Blocked);
-    }
-
-    /// Sends the done notifications whose delay has passed.
-    fn tick(&mut self) {
-        if !self.notifier.waiting() {
-            return;
-        }
-        let viewed = self.viewed();
-        let model = &self.model;
-        let status = |id: &str| model.terminal(id)?.agent.as_ref().map(|a| a.status);
-        let due = self
-            .notifier
-            .due(Instant::now(), &status, &|id: &str| viewed.contains(id));
-        self.send(&due, Kind::Done);
-    }
-
-    /// One system notification per terminal, unless an app is connected.
-    fn send(&self, ids: &[String], kind: Kind) {
-        let Some(sink) = self
-            .sink
-            .as_ref()
-            .filter(|_| !attention::app_connected(&self.clients))
-        else {
-            return;
-        };
-        for id in ids {
-            let Some(t) = self.model.terminal(id) else {
-                continue;
-            };
-            let text = t.agent.as_ref().and_then(|a| a.message.clone());
-            sink.send(
-                &format!("{} is {}", t.name, kind.label()),
-                text.as_deref().unwrap_or(""),
-            );
         }
     }
 
@@ -397,12 +344,7 @@ pub fn run<B: Backend>(
         thread::spawn(move || {
             for event in events.by_ref() {
                 match event {
-                    Ok(ev) => {
-                        if let Event::ServerClientsChanged { clients } = ev
-                            && tx.send(Msg::Clients(clients)).is_err()
-                        {
-                            return;
-                        }
+                    Ok(_) => {
                         if tx.send(Msg::Changed).is_err() {
                             return;
                         }
@@ -430,7 +372,6 @@ pub fn run<B: Backend>(
     let mut app = App::new(opts);
     let mut router = Router::new(&opts.config);
     app.refresh(client)?;
-    app.clients = client.ping().map(|p| p.clients).unwrap_or_default();
     let first = app.model.initial(app.own_terminal.as_deref());
     select(&mut app, client, &tx, first, How::Control);
 
@@ -439,7 +380,6 @@ pub fn run<B: Backend>(
             return Ok(Outcome::Interrupted);
         }
         app.observe();
-        app.tick();
         sync_size(&mut app, terminal)?;
         let completed = terminal
             .draw(|f| view::draw(f, &app))
@@ -460,7 +400,6 @@ pub fn run<B: Backend>(
         for msg in std::iter::once(first).chain(rx.try_iter()) {
             match msg {
                 Msg::Changed => changed = true,
-                Msg::Clients(clients) => app.clients = clients,
                 Msg::ServerGone(e) => return Ok(Outcome::ServerGone(e)),
                 Msg::Record(generation, rec) => record(&mut app, client, &tx, generation, *rec),
                 Msg::Issues(result) => palette_issues(&mut app, result),

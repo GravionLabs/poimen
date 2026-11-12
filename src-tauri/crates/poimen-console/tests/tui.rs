@@ -11,12 +11,10 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{Event as InputEvent, KeyCode, KeyEvent, KeyModifiers};
 use poimen_client::protocol::{
-    AttachMode, ClientInfo, ClientKind, Event, Node, SplitDirection, Tab, TabSplit, TerminalCreate,
-    TerminalStatus,
+    AttachMode, Event, Node, SplitDirection, Tab, TabSplit, TerminalCreate, TerminalStatus,
 };
 use poimen_client::{Client, ClientError};
 use poimen_console::session::Error;
-use poimen_console::tui::attention::Sink;
 use poimen_console::tui::config::Config;
 use poimen_console::tui::sidebar::{Model, RowKind};
 use poimen_console::tui::{self, Options, Outcome};
@@ -108,26 +106,6 @@ struct Running {
 
 /// The TUI on a 100x30 test screen: the pane is 68x28 right of the sidebar.
 fn start(f: &Fixture, own_terminal: Option<String>) -> Running {
-    start_with(f, own_terminal, None)
-}
-
-/// Records the system notifications instead of showing them.
-#[derive(Default)]
-struct Recorder(Mutex<Vec<(String, String)>>);
-
-impl Sink for Recorder {
-    fn send(&self, title: &str, body: &str) {
-        self.0.lock().unwrap().push((title.into(), body.into()));
-    }
-}
-
-impl Recorder {
-    fn titles(&self) -> Vec<String> {
-        self.0.lock().unwrap().iter().map(|n| n.0.clone()).collect()
-    }
-}
-
-fn start_with(f: &Fixture, own_terminal: Option<String>, sink: Option<Arc<Recorder>>) -> Running {
     let (input, rx) = mpsc::channel();
     let screen = Arc::new(Mutex::new(Buffer::empty(Default::default())));
     let stop = Arc::new(AtomicBool::new(false));
@@ -138,7 +116,6 @@ fn start_with(f: &Fixture, own_terminal: Option<String>, sink: Option<Arc<Record
         own_terminal,
         mirror: Some(screen.clone()),
         issues: None,
-        notify: sink.map(|s| s as Arc<dyn Sink>),
     };
     let s = stop.clone();
     let handle = thread::spawn(move || {
@@ -836,52 +813,5 @@ fn an_empty_notification_list_says_so_and_escape_closes_it() {
     t.wait_for("no notifications");
     t.key(KeyCode::Esc, KeyModifiers::NONE);
     wait_until("closed", || !t.text().contains("no notifications"));
-    assert_eq!(t.detach(), Outcome::Detached);
-}
-
-#[test]
-fn system_notifications_go_out_only_while_no_app_is_connected() {
-    let (f, other) = two_with_a_working_agent("app-priority");
-    let sink = Arc::new(Recorder::default());
-    let t = start_with(&f, None, Some(sink.clone()));
-    t.wait_for("working");
-
-    // No app: blocked notifies at once.
-    report(&f, &other, 2, "blocked", Some("Allow rm?"));
-    wait_until("notified", || sink.titles() == ["other is blocked"]);
-    assert_eq!(sink.0.lock().unwrap()[0].1, "Allow rm?");
-
-    // An app connects: the next one stays with the app.
-    let _app = f
-        .client
-        .subscribe_as(Some(ClientInfo {
-            kind: ClientKind::App,
-            pid: 1,
-        }))
-        .unwrap();
-    wait_until("server counts the app", || {
-        f.client.ping().unwrap().clients.contains(&ClientKind::App)
-    });
-    // The TUI hears `server.clients_changed` before it reads the next change.
-    thread::sleep(Duration::from_millis(500));
-    report(&f, &other, 10, "working", None);
-    thread::sleep(Duration::from_millis(200));
-    report(&f, &other, 11, "blocked", Some("again"));
-    thread::sleep(Duration::from_millis(700));
-    thread::sleep(Duration::from_millis(300));
-    assert_eq!(sink.titles().len(), 1);
-    assert_eq!(t.detach(), Outcome::Detached);
-}
-
-#[test]
-fn done_notifies_after_five_seconds_when_no_app_is_connected() {
-    let (f, other) = two_with_a_working_agent("done-delay");
-    let sink = Arc::new(Recorder::default());
-    let t = start_with(&f, None, Some(sink.clone()));
-    t.wait_for("working");
-    report(&f, &other, 2, "done", None);
-    thread::sleep(Duration::from_millis(1500));
-    assert!(sink.titles().is_empty());
-    wait_until("done notified", || sink.titles() == ["other is done"]);
     assert_eq!(t.detach(), Outcome::Detached);
 }

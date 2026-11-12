@@ -130,7 +130,6 @@ fn tui() -> ExitCode {
             .filter(|id| !id.is_empty()),
         mirror: None,
         issues: None,
-        notify: Some(std::sync::Arc::new(tui::system::SystemSink)),
     };
     let stop = Arc::new(AtomicBool::new(false));
     // Raw mode turns Ctrl+C into a key for the terminal; these arrive from outside (kill, a

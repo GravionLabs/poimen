@@ -1,19 +1,13 @@
-//! Attention marks and notifications of the TUI, the rules of the app's `core/attention.ts` and
-//! `core/notifier.ts`: a terminal that turns blocked while not viewed rings, one that turns done
+//! Attention marks and the notification list of the TUI, the rules of the app's
+//! `core/attention.ts`: a terminal that turns blocked while not viewed rings, one that turns done
 //! while not viewed counts as unread, viewing clears both. Everything here is pure (the clock and
 //! the statuses are parameters); `mod.rs` feeds it after every read of the server's model.
 //!
-//! System notifications go out through a [`Sink`] only while no app is connected
-//! ([`app_connected`]): the app notifies by itself and two notifiers would double every one.
+//! poimen sends no system notifications (#676); the list (`N`) is in the TUI only.
 
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
 
-use poimen_client::protocol::{AgentStatus, ClientKind};
-
-/// How long a terminal must stay done before its system notification goes out (the app's
-/// `DONE_DELAY_MS`): a done between two tool calls is gone again within a moment.
-pub const DONE_DELAY: Duration = Duration::from_secs(5);
+use poimen_client::protocol::AgentStatus;
 
 /// The most entries the notification list keeps.
 pub const LOG_CAP: usize = 50;
@@ -168,106 +162,6 @@ pub fn age(now_ms: u64, at_ms: u64) -> String {
     }
 }
 
-/// Whether an app is among the connected clients.
-pub fn app_connected(clients: &[ClientKind]) -> bool {
-    clients.contains(&ClientKind::App)
-}
-
-/// `notifications.blocked` / `notifications.done`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Policy {
-    pub blocked: bool,
-    pub done: bool,
-}
-
-impl Default for Policy {
-    fn default() -> Self {
-        Self {
-            blocked: true,
-            done: true,
-        }
-    }
-}
-
-/// Where system notifications go (`notify-rust` in the binary, a fake in tests).
-pub trait Sink: Send + Sync {
-    fn send(&self, title: &str, body: &str);
-}
-
-/// Decides which changes become a system notification: blocked at once, done after
-/// [`DONE_DELAY`] if the terminal is still done and not seen, and then not again until seen.
-#[derive(Debug, Default)]
-pub struct Notifier {
-    pending: HashMap<String, Instant>,
-    done_sent: HashSet<String>,
-}
-
-impl Notifier {
-    /// Folds the changes of one read in; returns the blocked ones to notify now.
-    pub fn changes(
-        &mut self,
-        changes: &[Change],
-        seen: &dyn Fn(&str) -> bool,
-        policy: Policy,
-        now: Instant,
-    ) -> Vec<String> {
-        self.done_sent.retain(|id| !seen(id));
-        self.pending.retain(|id, _| !seen(id));
-        let mut now_ids = Vec::new();
-        for c in changes {
-            let wanted = match c.kind {
-                Kind::Blocked => policy.blocked,
-                Kind::Done => policy.done,
-            };
-            if !wanted || seen(&c.terminal_id) {
-                continue;
-            }
-            match c.kind {
-                Kind::Blocked => now_ids.push(c.terminal_id.clone()),
-                Kind::Done => {
-                    if !self.done_sent.contains(&c.terminal_id) {
-                        self.pending.entry(c.terminal_id.clone()).or_insert(now);
-                    }
-                }
-            }
-        }
-        now_ids
-    }
-
-    /// The done notifications whose delay has passed and whose terminal is still done and not
-    /// seen. A terminal that left `done` loses its wait.
-    pub fn due(
-        &mut self,
-        now: Instant,
-        status: &dyn Fn(&str) -> Option<AgentStatus>,
-        seen: &dyn Fn(&str) -> bool,
-    ) -> Vec<String> {
-        self.pending
-            .retain(|id, _| status(id) == Some(AgentStatus::Done));
-        let ready: Vec<String> = self
-            .pending
-            .iter()
-            .filter(|(_, since)| now.duration_since(**since) >= DONE_DELAY)
-            .map(|(id, _)| id.clone())
-            .collect();
-        let mut out = Vec::new();
-        for id in ready {
-            self.pending.remove(&id);
-            if !seen(&id) {
-                self.done_sent.insert(id.clone());
-                out.push(id);
-            }
-        }
-        out.sort();
-        out
-    }
-
-    /// Whether a done notification waits for its delay.
-    pub fn waiting(&self) -> bool {
-        !self.pending.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,82 +280,5 @@ mod tests {
         assert_eq!(log.entries()[0].terminal_id, format!("t{}", LOG_CAP + 4));
         log.retain_terminals(|id| id == "t30");
         assert_eq!(log.entries().len(), 1);
-    }
-
-    #[test]
-    fn only_an_app_counts_as_the_app() {
-        assert!(!app_connected(&[]));
-        assert!(!app_connected(&[ClientKind::Tui, ClientKind::Cli]));
-        assert!(app_connected(&[ClientKind::Tui, ClientKind::App]));
-    }
-
-    #[test]
-    fn blocked_notifies_at_once_unless_seen_or_turned_off() {
-        let t0 = Instant::now();
-        let mut n = Notifier::default();
-        let never = |_: &str| false;
-        let c = [change("a", Kind::Blocked)];
-        assert_eq!(n.changes(&c, &never, Policy::default(), t0), vec!["a"]);
-        assert!(n.changes(&c, &|_| true, Policy::default(), t0).is_empty());
-        let off = Policy {
-            blocked: false,
-            done: true,
-        };
-        assert!(n.changes(&c, &never, off, t0).is_empty());
-    }
-
-    #[test]
-    fn done_waits_five_seconds_and_only_while_still_done() {
-        let t0 = Instant::now();
-        let mut n = Notifier::default();
-        let never = |_: &str| false;
-        let done = |_: &str| Some(Done);
-        n.changes(&[change("a", Kind::Done)], &never, Policy::default(), t0);
-        assert!(n.waiting());
-        assert!(n.due(t0 + Duration::from_secs(4), &done, &never).is_empty());
-        assert_eq!(n.due(t0 + Duration::from_secs(5), &done, &never), vec!["a"]);
-        assert!(!n.waiting());
-    }
-
-    #[test]
-    fn done_that_turns_working_again_is_dropped() {
-        let t0 = Instant::now();
-        let mut n = Notifier::default();
-        let never = |_: &str| false;
-        n.changes(&[change("a", Kind::Done)], &never, Policy::default(), t0);
-        let working = |_: &str| Some(Working);
-        assert!(n.due(t0 + DONE_DELAY, &working, &never).is_empty());
-        assert!(!n.waiting());
-    }
-
-    #[test]
-    fn done_is_not_repeated_until_seen() {
-        let t0 = Instant::now();
-        let mut n = Notifier::default();
-        let never = |_: &str| false;
-        let done = |_: &str| Some(Done);
-        let c = [change("a", Kind::Done)];
-        n.changes(&c, &never, Policy::default(), t0);
-        assert_eq!(n.due(t0 + DONE_DELAY, &done, &never).len(), 1);
-        n.changes(&c, &never, Policy::default(), t0 + DONE_DELAY);
-        assert!(!n.waiting());
-        // Seen once: quiet state ends and a later done notifies again.
-        n.changes(&[], &|_| true, Policy::default(), t0 + DONE_DELAY);
-        n.changes(&c, &never, Policy::default(), t0 + DONE_DELAY);
-        assert!(n.waiting());
-    }
-
-    #[test]
-    fn done_seen_before_its_delay_is_not_sent() {
-        let t0 = Instant::now();
-        let mut n = Notifier::default();
-        n.changes(
-            &[change("a", Kind::Done)],
-            &|_| false,
-            Policy::default(),
-            t0,
-        );
-        let done = |_: &str| Some(Done);
-        assert!(n.due(t0 + DONE_DELAY, &done, &|_| true).is_empty());
     }
 }
