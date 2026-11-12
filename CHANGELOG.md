@@ -5,6 +5,49 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.17.0] — 2026-11-12
+
+### Bug Fixes
+- Split panes show no divider between terminals (#654) (#658)
+- **ui**: Draw a gutter between split panes (#654)
+- **ui**: Highlight column dividers on hover and drag (#654)
+- **pty-host**: Create the ConPTY without INHERIT_CURSOR (#602)
+- **server**: Write host lines whole and kill on a connection of its own (#603)
+- **server**: Restart a terminal with its full command and offer it in the split menu
+- **ui**: Make split pane divider visible (#665) (#666)
+- **installer**: Leave a user PATH at the NSIS string limit untouched (#671)
+- **ui**: Keep the tone icon visible and add aria values to the Events column grips (#673)
+- **bottom-panel**: Fixed width for the last Events column so header and rows align (#673)
+- **notify**: UI freezes after hours because waiting OS notifications poll on the main thread (#676) (#677)
+- **notify**: The app sends no system notifications (#676)
+- **tui**: The console sends no system notifications (#676)
+
+
+### Documentation
+- **adr**: Record the observed ConPTY result of the host check (#602)
+- Poimen sends no system notifications (#676)
+
+
+### Features
+- **pty-host**: Poimen-pty-host binary with the host protocol and output ring (#602) (#659)
+- **protocol**: Wire types of the host protocol (#602)
+- **pty-host**: Poimen-pty-host binary with the host protocol and output ring (#602)
+- **server**: Start terminals in PTY hosts and read them as a client (#603) (#660)
+- **server**: Start terminals in PTY hosts and read them as a client (#603)
+- **server**: Adopt running PTY hosts after a server update or crash (#604) (#662)
+- **server**: Adopt running PTY hosts after a server update or crash (#604)
+- **app**: Show terminals on an older host version with a restart (#606) (#663)
+- **app**: Show terminals on an older host version with a restart (#606)
+- **sidebar**: Path in the first line, branch and git status in the second line of a space (#667) (#670)
+- **bottom-panel**: Resizable columns in the Events tab, wider task column (#673) (#675)
+- **bottom-panel**: Resizable columns with a header and dividers in the Events tab (#673)
+
+
+### Refactoring
+- **bundle**: PATH hook with native NSIS commands instead of PowerShell (#671) (#674)
+- **bundle**: PATH hook with native NSIS commands instead of PowerShell (#671)
+
+
 ## [0.16.0] — 2026-11-11
 
 ### Bug Fixes
@@ -21,6 +64,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **app**: Resolve the successor leaf before the pane close completes
 - **release**: Fill the nfpm variables before packaging the Linux CLI (#649)
 - **console**: Wait for the split of the preset tab in the palette test (#649)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.16.0 [skip ci]
 
 
 ### Features
