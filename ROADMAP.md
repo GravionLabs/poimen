@@ -266,7 +266,6 @@ Updated 2026-11-09. Last release `v0.14.0`.
 | #258  | [PBI] feat(project): custom commands and presets in the command palette             |
 | #264  | [PBI] docs(site): screenshots of the Flow tab and the deliver board                 |
 | #349  | [PBI] refactor(tasks): task modes start agents through the harness registry         |
-| #359  | [PBI] feat(status-bar): Claude usage 5h, 7d, 1d and 1m from tamias                  |
 | #361  | [PBI] feat(settings): terminal and UI font family and size on the Appearance page   |
 | #370  | [PBI] feat(spaces): rename a space                                                  |
 | #430  | [PBI] ci: check the server crates without the Tauri libraries and run jobs per area |

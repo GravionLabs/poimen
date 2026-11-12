@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
-import { figures, usageTitle, type UsageReport } from "../core/usage";
 import { SERVER_RESTART_NOTE, errorTitle, type UpdateState } from "../core/updater";
 import type { BackendKind } from "../core/settings";
 import type { BarSummary } from "../deliver/deliver-status";
@@ -104,10 +103,6 @@ export class StatusBar {
   /** The deliver item was clicked. */
   readonly showDeliver = output<void>();
 
-  /** Usage report of tamias; `null` hides the usage item. */
-  readonly usage = input<UsageReport | null>(null);
-  protected readonly usageFigures = figures;
-  protected readonly usageText = usageTitle;
   protected readonly label = connectionLabel;
   protected readonly modeText = modeLabel;
   protected readonly modeHint = modeTitle;

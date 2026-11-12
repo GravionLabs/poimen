@@ -40,7 +40,6 @@ import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { Updater } from "./core/updater";
-import { Usage } from "./core/usage";
 import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
@@ -146,7 +145,6 @@ const ZOOM_STEP = 1;
 export class App {
   protected readonly store = inject(HerdrStore);
   protected readonly updater = inject(Updater);
-  protected readonly usage = inject(Usage);
   protected readonly serverRestart = inject(ServerRestart);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);

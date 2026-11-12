@@ -5,7 +5,6 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { SERVER_RESTART_NOTE, type UpdateState } from "../core/updater";
-import { figures, usageTitle, type UsageReport } from "../core/usage";
 import type { BarSummary } from "../deliver/deliver-status";
 import { CHANNEL_TITLE, connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
 
@@ -74,7 +73,6 @@ describe("mode button", () => {
     mode: "control" | "observe",
     blocked: string | null,
     panelOpen = true,
-    usage: UsageReport | null = null,
     deliver: BarSummary | null = null,
     server: string | null = null,
     update: UpdateState = { kind: "idle" },
@@ -125,11 +123,8 @@ describe("mode button", () => {
       herdrLabel = () => "";
       warning = () => "";
       backend = () => "herdr";
-      usage = () => usage;
       deliver = () => deliver;
       showDeliver = { emit: () => deliverClicks++ };
-      usageFigures = figures;
-      usageText = usageTitle;
     }
     TestBed.resetTestingModule();
     const fixture = TestBed.createComponent(Host);
@@ -149,7 +144,7 @@ describe("mode button", () => {
   };
 
   it("shows the running deliver loops and opens the panel on a click", () => {
-    const { root, deliverClicks } = render("control", null, true, null, {
+    const { root, deliverClicks } = render("control", null, true, {
       text: "▶ M5 7/19",
       title: "o/n M5 7/19",
       warning: false,
@@ -162,7 +157,7 @@ describe("mode button", () => {
   });
 
   it("marks the deliver item as a warning and hides it without a run", () => {
-    const warned = render("control", null, true, null, {
+    const warned = render("control", null, true, {
       text: "⚠ M5 7/19",
       title: "",
       warning: true,
@@ -197,7 +192,7 @@ describe("mode button", () => {
 
   it("shows the server notice with Restart server and Later", () => {
     const text = "poimen-server 0.1.0 is running, 0.2.0 is installed";
-    const { root, serverClicks } = render("control", null, true, null, null, text);
+    const { root, serverClicks } = render("control", null, true, null, text);
     expect(root.querySelector("[data-testid=server-notice]")?.textContent).toContain(text);
     root.querySelector<HTMLButtonElement>("[data-testid=restart-server]")!.click();
     root.querySelector<HTMLButtonElement>("[data-testid=later-server]")!.click();
@@ -206,7 +201,7 @@ describe("mode button", () => {
 
   it("says before the install that restarting the server ends the terminals", () => {
     const info = { version: "9.9.9", currentVersion: "0.1.0", notes: null, date: null };
-    const { root } = render("control", null, true, null, null, null, {
+    const { root } = render("control", null, true, null, null, {
       kind: "available",
       info,
     });
@@ -232,7 +227,7 @@ describe("mode button", () => {
   });
 
   it("shows the RC badge and no self-update in an RC build", () => {
-    const { root } = render("control", null, true, null, null, null, { kind: "idle" }, "rc");
+    const { root } = render("control", null, true, null, null, { kind: "idle" }, "rc");
     const badge = root.querySelector<HTMLElement>("[data-testid=channel]")!;
     expect(badge.textContent?.trim()).toBe("RC");
     expect(badge.title).toContain("does not update itself");
@@ -262,49 +257,6 @@ describe("mode button", () => {
     expect(root.querySelectorAll(".bar > .item").length).toBeGreaterThan(4);
     // CSS draws the bar (.item + .item::before), so a screen reader never meets it.
     expect(root.textContent).not.toContain("|");
-  });
-
-  it("shows the usage next to the connection, colored, with the tooltip", () => {
-    const report: UsageReport = {
-      schema_version: 1,
-      generated_at: "2026-11-03T10:05:00Z",
-      providers: [
-        {
-          provider: "claude",
-          status: "ok",
-          windows: [
-            {
-              window: "five_hour",
-              unit: "percent",
-              used: 12,
-              limit: 100,
-              resets_at: "2026-11-03T13:30:00Z",
-            },
-            {
-              window: "seven_day",
-              unit: "percent",
-              used: 85,
-              limit: 100,
-              resets_at: "2026-11-07T12:00:00Z",
-            },
-          ],
-        },
-      ],
-    };
-    const { root } = render("control", null, true, report);
-    const item = root.querySelector<HTMLElement>(".bar > .item.usage")!;
-    expect(item.textContent?.replace(/\s+/g, " ").trim()).toBe("5h 12%·7d 85%");
-    expect(item.querySelector(".figure.green")?.textContent).toBe("5h 12%");
-    expect(item.querySelector(".figure.red")?.textContent).toBe("7d 85%");
-    expect(item.title).toContain("5h resets");
-    const items = Array.from(root.querySelectorAll(".bar > .item"));
-    expect(items[0].classList.contains("conn")).toBe(true);
-    expect(items[1]).toBe(item);
-  });
-
-  it("hides the usage item without a report", () => {
-    const { root } = render("control", null);
-    expect(root.querySelector(".usage")).toBeNull();
   });
 
   it("hides the panel button while the panel is open", () => {
