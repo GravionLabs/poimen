@@ -168,7 +168,7 @@ export class BottomPanel {
   /** Grid columns shared by the Events header and every row. */
   protected readonly eventGrid = computed(() => {
     const c = this.ui.eventColumns();
-    return `1.2em ${c.time}px ${c.task}px 1fr ${c.result}px auto`;
+    return `1.2em ${c.time}px ${c.task}px 1fr ${c.result}px 2.5em`;
   });
 
   private colDrag: { column: EventColumn; sign: 1 | -1; startX: number; start: number } | null =

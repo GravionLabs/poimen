@@ -218,7 +218,9 @@
           <span class="step">{{ row.step ?? row.type }}</span>
           <span class="result">{{ row.outcome ?? "" }}</span>
           @if (row.link; as url) {
-            <a class="pr" [href]="url" (click)="openPr($event, url)">link</a>
+            <a class="pr" title="Open pull request" [href]="url" (click)="openPr($event, url)"
+              >link</a
+            >
           }
         </div>
       }
