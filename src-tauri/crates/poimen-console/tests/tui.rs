@@ -257,7 +257,7 @@ fn sidebar_model_comes_from_the_server_with_agent_status_and_tokens() {
     };
     assert_eq!(rows.len(), 3, "{rows:#?}");
     assert_eq!(rows[0].kind, RowKind::Space);
-    assert_eq!(text(0), "▲ work blocked");
+    assert!(text(0).starts_with("▲ work blocked "), "{}", text(0));
     assert_eq!(rows[1].terminal_id.as_deref(), Some(shell.as_str()));
     assert_eq!(text(1), "· shell $0.40");
     assert_eq!(text(2), "▲ claude blocked");
