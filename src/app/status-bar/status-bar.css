@@ -90,26 +90,6 @@
   background: #f85149;
 }
 
-.usage {
-  gap: 4px;
-}
-
-.figure.green {
-  color: #3fb950;
-}
-
-.figure.yellow {
-  color: #d29922;
-}
-
-.figure.red {
-  color: #f85149;
-}
-
-.figure.grey {
-  color: var(--h-text-muted-color);
-}
-
 .version.warn {
   color: #d29922;
   font-weight: 600;

@@ -36,7 +36,6 @@ mod terminal_colors;
 mod transcripts;
 use poimen_core::trust;
 mod updater;
-mod usage;
 mod watch;
 mod worktree;
 
@@ -928,16 +927,6 @@ fn run_setup(
         Ok(()) => (true, None),
         Err(e) => (false, Some(format!("setup not started: {e}"))),
     }
-}
-
-/// The usage report of tamias for the status bar (`null` without tamias or data); later reads
-/// arrive as `usage` events.
-#[tauri::command]
-async fn get_usage() -> Option<tamias_core::report::Report> {
-    tauri::async_runtime::spawn_blocking(|| usage::read(&usage::SystemRunner))
-        .await
-        .ok()
-        .flatten()
 }
 
 /// Revokes the trust of the project file of `root`; the settings watcher emits the change.
@@ -2106,14 +2095,6 @@ pub fn run() {
                     });
                 });
             }
-            {
-                let handle = handle.clone();
-                std::thread::spawn(move || {
-                    usage::watch(usage::POLL_INTERVAL, |report| {
-                        let _ = handle.emit("usage", report);
-                    });
-                });
-            }
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
                 std::thread::spawn(move || {
@@ -2182,7 +2163,6 @@ pub fn run() {
             app_channel,
             updater::update_check,
             updater::update_install,
-            get_usage,
             get_settings,
             get_harnesses,
             get_agent_actions,

@@ -1,8 +1,0 @@
-{
-  "schema_version": 1,
-  "generated_at": "2026-11-03T10:05:00Z",
-  "providers": [
-    { "provider": "claude", "status": "unavailable", "windows": [] },
-    { "provider": "copilot", "status": "unavailable", "windows": [] }
-  ]
-}
