@@ -93,7 +93,6 @@ describe("parseSettings", () => {
           palette: ["#111111", null, 5],
         },
         autoControl: false,
-        notifyOnBlocked: false,
         spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
         spaceTemplates: [
           { name: "w", dir: "~/src", remote: null, agent: "claude", model: "opus", layout: null },
@@ -131,8 +130,6 @@ describe("parseSettings", () => {
       backend: "poimen",
       scrollback: 10000,
       herdrAutoStart: true,
-      notifyOnBlocked: false,
-      notifyOnDone: true,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       spaceTemplates: [
         { name: "w", dir: "~/src", remote: null, agent: "claude", model: "opus", layout: null },
@@ -315,12 +312,10 @@ describe("herdrAutoStart", () => {
 });
 
 describe("notifications", () => {
-  it("default on and parse per kind", () => {
-    expect(parseSettings({}).notifyOnBlocked).toBe(true);
-    expect(parseSettings({}).notifyOnDone).toBe(true);
-    const s = parseSettings({ notifyOnBlocked: false, notifyOnDone: "no" });
-    expect(s.notifyOnBlocked).toBe(false);
-    expect(s.notifyOnDone).toBe(true);
+  it("has no system notification setting any more (#676)", () => {
+    const s = parseSettings({ notifyOnBlocked: true, notifyOnDone: true });
+    expect(s).not.toHaveProperty("notifyOnBlocked");
+    expect(s).not.toHaveProperty("notifyOnDone");
   });
 });
 

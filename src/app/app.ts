@@ -29,10 +29,9 @@ import {
 } from "./core/herdr";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
-import { Attention, type StatusChange } from "./core/attention";
+import { Attention } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
-import { Notifier, type NotifyContext } from "./core/notifier";
 import { NotificationCenter } from "./core/notification-center";
 import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
@@ -194,7 +193,6 @@ export class App {
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
   private readonly agentRuns = inject(AgentRuns);
-  private readonly notifier = inject(Notifier);
   private readonly center = inject(NotificationCenter);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
@@ -300,10 +298,7 @@ export class App {
       untracked(() => {
         const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
-        // A pane's `done` because its linked run ended is notified once, by the run (#540).
-        const changes = this.deliver.withoutRunEnds(observed);
-        this.center.record(changes, (id) => this.tabTitle(id), Date.now());
-        this.notifyChanges(changes);
+        this.center.record(observed, (id) => this.tabTitle(id), Date.now());
       });
     });
     effect(() => {
@@ -311,16 +306,8 @@ export class App {
     });
 
     const destroyRef = inject(DestroyRef);
-    // Coming back to the window sees the active tabs again: withdraw their notifications.
-    destroyRef.onDestroy(this.notifier.watchFocus(window, () => this.notifyContext()));
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
-    // A click on a system notification opens the tab of the pane it was about.
-    const clicks = this.notifier.listen(
-      (paneId) => this.openPaneById(paneId),
-      () => this.editor.openDeliver(),
-    );
-    destroyRef.onDestroy(() => void clicks.then((stop) => stop()));
     // The deliver loops of the repositories of the open spaces (status files, watched, no polling).
     destroyRef.onDestroy(this.deliver.start());
     // Spaces back from a server restart without terminals get their layout again.
@@ -922,24 +909,6 @@ export class App {
   protected jumpToWaiting(): void {
     const next = this.store.nextWaiting(this.editor.activeId());
     if (next) this.open(next);
-  }
-
-  /** Sends notifications for `changes` and withdraws those of panes the user sees now. */
-  private notifyChanges(changes: readonly StatusChange[]): void {
-    this.notifier.notify(changes, this.notifyContext());
-  }
-
-  private notifyContext(): NotifyContext {
-    const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
-    return {
-      // Read live: a delayed done notification checks again when it is due.
-      seen: (id) => document.hasFocus() && this.viewedPanes().has(id),
-      status: (id) => this.store.panes().get(id)?.agent_status,
-      onBlocked: notifyOnBlocked,
-      onDone: notifyOnDone,
-      label: (id) => this.tabTitle(id),
-      now: Date.now(),
-    };
   }
 
   /** Space and name of a pane, as its tab shows them. */
