@@ -1517,13 +1517,6 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
-/// Writes only `notifications.<kind>` (`blocked` or `done`); the settings watcher emits the change.
-#[tauri::command]
-fn set_notification(kind: String, on: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_notification(&home, &kind, on)
-}
-
 /// Writes only `terminal.fontFamily`; the settings watcher emits the change.
 #[tauri::command]
 fn set_terminal_font_family(family: String) -> Result<(), String> {
@@ -2066,8 +2059,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_dialog::init());
     // An rc build never updates itself (no updater artifacts, no endpoint in tauri.rc.conf.json).
     let builder = if updater::enabled(poimen_client::protocol::CHANNEL) {
         builder.plugin(tauri_plugin_updater::Builder::new().build())
@@ -2155,7 +2147,6 @@ pub fn run() {
             hooks_status,
             hooks_install,
             set_herdr_auto_start,
-            set_notification,
             set_terminal_font_family,
             set_terminal_font_size,
             clear_terminal_font_size,

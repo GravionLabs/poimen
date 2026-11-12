@@ -402,10 +402,6 @@ export class SettingsView {
     });
   }
 
-  protected setNotification(kind: "blocked" | "done", event: Event): void {
-    void this.store.setNotification(kind, (event.target as HTMLInputElement).checked);
-  }
-
   protected setAutoStart(event: Event): void {
     void this.store.setHerdrAutoStart((event.target as HTMLInputElement).checked);
   }

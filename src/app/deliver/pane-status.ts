@@ -1,4 +1,3 @@
-import type { StatusChange } from "../core/attention";
 import type { AgentStatus } from "../core/herdr";
 import { runState, type DeliverCard, type DeliverStatus } from "./deliver-status";
 
@@ -37,27 +36,4 @@ export function runsByTerminal(
     map.set(id, [...(map.get(id) ?? []), card.state.status]);
   }
   return map;
-}
-
-/** The terminal a run that just finished (running before, finished now) was linked to. */
-export function endedTerminal(
-  prev: DeliverStatus | undefined,
-  next: DeliverStatus,
-): string | undefined {
-  if (!prev || prev.run !== next.run) return undefined;
-  return prev.status === "running" && next.status === "finished"
-    ? next.host[TERMINAL_KEY]
-    : undefined;
-}
-
-/**
- * Drops the `done` changes of panes whose linked run just ended: the run's own end-of-run
- * notification (`transitions`) already tells the user, so the pane going `working` to `done` must
- * not notify a second time. The pane keeps its status and unread mark (`Attention` saw it).
- */
-export function withoutRunEnds(
-  changes: readonly StatusChange[],
-  ended: ReadonlySet<string>,
-): StatusChange[] {
-  return changes.filter((c) => !(c.status === "done" && ended.has(c.paneId)));
 }

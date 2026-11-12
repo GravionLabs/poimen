@@ -349,42 +349,6 @@ describe("SettingsView explorer section", () => {
     fixture.detectChanges();
     expect(host.querySelector(".error")?.textContent).toContain("read-only");
   });
-
-  it("stacks the notification checkboxes instead of sharing a row (#360)", () => {
-    const { host } = setup(null, ["~"], "notifications");
-    const style = document.createElement("style");
-    style.textContent = readFileSync("src/app/settings-view/settings-view.css", "utf8");
-    document.head.append(style);
-    try {
-      const labels = host.querySelectorAll<HTMLElement>(
-        'section[aria-label="Notifications"] .check',
-      );
-      expect(labels.length).toBe(2);
-      expect(getComputedStyle(labels[0]).display).toBe("flex");
-      expect(getComputedStyle(labels[1]).marginTop).toBe("8px");
-    } finally {
-      style.remove();
-    }
-  });
-
-  it("saves the notification switches", async () => {
-    tauri.reset();
-    const { host } = setup(null, ["~"], "notifications");
-    const section = host.querySelector('section[aria-label="Notifications"]')!;
-    const [blocked, done] = section.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-    expect(blocked.checked).toBe(true);
-    expect(done.checked).toBe(true);
-    done.checked = false;
-    done.dispatchEvent(new Event("change"));
-    blocked.checked = false;
-    blocked.dispatchEvent(new Event("change"));
-    await vi.waitFor(() =>
-      expect(tauri.calls("set_notification")).toEqual([
-        { kind: "done", on: false },
-        { kind: "blocked", on: false },
-      ]),
-    );
-  });
 });
 
 describe("SettingsView fonts", () => {
@@ -662,7 +626,6 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([
       "Appearance & Behavior",
       "Appearance",
-      "Notifications",
       "Workspace",
       "Explorer",
       "Spaces",
@@ -729,15 +692,22 @@ describe("SettingsView categories", () => {
 
   it("filters the tree by page title and by setting label, keeping the group", () => {
     const { fixture, host } = setup();
-    type(fixture, host, "notif");
-    expect(titles(host)).toEqual(["Appearance & Behavior", "Notifications"]);
+    type(fixture, host, "trusted");
+    expect(titles(host)).toEqual(["Workspace", "Trusted projects"]);
     type(fixture, host, "hidden folders");
     expect(titles(host)).toEqual(["Workspace", "Explorer"]);
     type(fixture, host, "zzz");
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(11);
+    expect(titles(host)).toHaveLength(10);
+  });
+
+  it("opens the removed notifications page as Appearance, without notification switches (#676)", () => {
+    const { host } = setup(undefined, undefined, "notifications");
+    expect(crumb(host)).toBe("Appearance & Behavior › Appearance");
+    expect(host.querySelector('section[aria-label="Notifications"]')).toBeNull();
+    expect(host.textContent).not.toContain("When an agent is done");
   });
 
   it("opens a retired color-scheme page as Appearance, with the scheme picker", () => {
@@ -750,7 +720,7 @@ describe("SettingsView categories", () => {
   });
 
   it("follows a deep link to a retired color-scheme page made while the view is open", () => {
-    const { fixture, host } = setup(undefined, undefined, "notifications");
+    const { fixture, host } = setup(undefined, undefined, "explorer");
     TestBed.inject(UiState).selectSettingsPage("color-scheme");
     fixture.detectChanges();
     expect(crumb(host)).toBe("Appearance & Behavior › Appearance");
@@ -776,7 +746,10 @@ describe("SettingsView categories", () => {
   });
 
   it("has every label of the category list in its page template", () => {
-    const html = readFileSync("src/app/settings-view/settings-view.html", "utf8");
+    // Option labels such as the theme's Light/Dark/System live in the component's option lists.
+    const html =
+      readFileSync("src/app/settings-view/settings-view.html", "utf8") +
+      readFileSync("src/app/settings-view/settings-view.ts", "utf8");
     const editor = readFileSync("src/app/settings-view/space-layout-editor.html", "utf8");
     const templates = readFileSync("src/app/settings-view/space-templates-editor.html", "utf8");
     for (const page of allPages()) {
@@ -793,8 +766,8 @@ describe("SettingsView categories", () => {
     document.body.append(host);
     const node = (n: string) => item(host, n);
     press(node("p:appearance"), "ArrowDown");
-    expect(document.activeElement).toBe(node("p:notifications"));
-    press(node("p:notifications"), "ArrowUp");
+    expect(document.activeElement).toBe(node("g:workspace"));
+    press(node("g:workspace"), "ArrowUp");
     press(node("p:appearance"), "ArrowLeft");
     expect(document.activeElement).toBe(node("g:appearance-behavior"));
     press(node("g:appearance-behavior"), "ArrowLeft");
@@ -842,8 +815,8 @@ describe("SettingsView categories", () => {
 
   it("follows a deep link made while the view is open", () => {
     const { fixture, host } = setup();
-    TestBed.inject(UiState).selectSettingsPage("notifications");
+    TestBed.inject(UiState).selectSettingsPage("trusted-projects");
     fixture.detectChanges();
-    expect(crumb(host)).toBe("Appearance & Behavior › Notifications");
+    expect(crumb(host)).toBe("Workspace › Trusted projects");
   });
 });

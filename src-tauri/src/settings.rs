@@ -84,10 +84,6 @@ pub struct Settings {
     pub scrollback: u32,
     /// Start the herdr server when nothing answers on its socket (`herdr.autoStart`).
     pub herdr_auto_start: bool,
-    /// System notification when an agent turns blocked (`notifications.blocked`).
-    pub notify_on_blocked: bool,
-    /// System notification when an agent finishes (`notifications.done`).
-    pub notify_on_done: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
     /// The space templates (`spaceTemplates`); invalid entries are skipped with a warning.
@@ -274,8 +270,6 @@ impl Default for Settings {
             backend: "poimen".into(),
             scrollback: DEFAULT_SCROLLBACK,
             herdr_auto_start: true,
-            notify_on_blocked: true,
-            notify_on_done: true,
             spaces_layout: None,
             space_templates: Vec::new(),
             trusted_projects: BTreeMap::new(),
@@ -402,26 +396,6 @@ fn resolve_herdr(value: &Value, s: &mut Settings) {
         Some(_) => s
             .warnings
             .push("herdr.autoStart must be true or false; using true".into()),
-    }
-}
-
-/// `notifications.blocked` / `notifications.done`; a wrong type warns and keeps `true`.
-fn resolve_notifications(value: &Value, s: &mut Settings) {
-    let Some(obj) = value.as_object() else {
-        s.warnings.push("notifications must be an object".into());
-        return;
-    };
-    for (key, slot) in [
-        ("blocked", &mut s.notify_on_blocked),
-        ("done", &mut s.notify_on_done),
-    ] {
-        match obj.get(key) {
-            None => {}
-            Some(Value::Bool(b)) => *slot = *b,
-            Some(_) => s.warnings.push(format!(
-                "notifications.{key} must be true or false; using true"
-            )),
-        }
     }
 }
 
@@ -552,10 +526,6 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
         Some(other) => s.warnings.push(format!(
             "backend {other} must be \"poimen\" or \"herdr\"; using poimen"
         )),
-    }
-
-    if let Some(value) = root.get("notifications") {
-        resolve_notifications(value, &mut s);
     }
 
     if let Some(value) = root.get("trustedProjects") {
@@ -957,19 +927,6 @@ pub fn set_herdr_auto_start_text(text: &str, on: bool) -> Result<String, String>
 /// Writes `herdr.autoStart` below `home`, like `save_theme`.
 pub fn save_herdr_auto_start(home: &Path, on: bool) -> Result<(), String> {
     save_with(home, |text| set_herdr_auto_start_text(text, on))
-}
-
-/// Returns `text` with `notifications.<kind>` set (`blocked` or `done`), touching nothing else.
-pub fn set_notification_text(text: &str, kind: &str, on: bool) -> Result<String, String> {
-    if !matches!(kind, "blocked" | "done") {
-        return Err(format!("unknown notification kind `{kind}`"));
-    }
-    set_path_text(text, &["notifications", kind], &on.to_string())
-}
-
-/// Writes `notifications.<kind>` below `home`, like `save_theme`.
-pub fn save_notification(home: &Path, kind: &str, on: bool) -> Result<(), String> {
-    save_with(home, |text| set_notification_text(text, kind, on))
 }
 
 /// Returns `text` with `terminal.fontFamily` set; an empty family removes the key.
@@ -1413,28 +1370,6 @@ mod tests {
     }
 
     #[test]
-    fn notifications_default_on_and_can_be_turned_off_one_by_one() {
-        let d = rows("{}");
-        assert!(d.notify_on_blocked && d.notify_on_done);
-        let s = rows(r#"{"notifications":{"done":false}}"#);
-        assert!(s.notify_on_blocked);
-        assert!(!s.notify_on_done);
-        assert!(s.warnings.is_empty());
-    }
-
-    #[test]
-    fn notifications_invalid_warns_and_keeps_true() {
-        for json in [
-            r#"{"notifications":{"blocked":"no"}}"#,
-            r#"{"notifications":true}"#,
-        ] {
-            let s = rows(json);
-            assert!(s.notify_on_blocked && s.notify_on_done, "{json}");
-            assert_eq!(s.warnings.len(), 1, "{json}");
-        }
-    }
-
-    #[test]
     fn backend_defaults_to_poimen_and_keeps_an_explicit_herdr() {
         assert_eq!(rows("{}").backend, "poimen");
         assert_eq!(rows(r#"{"backend":"poimen"}"#).backend, "poimen");
@@ -1493,26 +1428,6 @@ mod tests {
             assert!(s.herdr_auto_start, "{json}");
             assert_eq!(s.warnings.len(), 1, "{json}");
         }
-    }
-
-    #[test]
-    fn set_notification_keeps_comments_and_other_keys() {
-        let text = "{\n  // keep\n  \"theme\": \"dark\"\n}";
-        let out = set_notification_text(text, "done", false).unwrap();
-        assert!(out.contains("// keep"), "{out}");
-        assert!(
-            out.contains("\"notifications\": { \"done\": false }"),
-            "{out}"
-        );
-        let created = set_notification_text("{\"theme\":\"dark\"}", "done", false).unwrap();
-        let r = resolve(Some(&created), || None);
-        assert!(!r.notify_on_done && r.notify_on_blocked);
-        assert_eq!(r.theme, "dark");
-        let both = set_notification_text(&created, "blocked", false).unwrap();
-        let r = resolve(Some(&both), || None);
-        assert!(!r.notify_on_blocked && !r.notify_on_done);
-        let back = set_notification_text(&both, "done", true).unwrap();
-        assert!(resolve(Some(&back), || None).notify_on_done);
     }
 
     #[test]
@@ -1584,8 +1499,10 @@ mod tests {
     }
 
     #[test]
-    fn set_notification_rejects_an_unknown_kind() {
-        assert!(set_notification_text("{}", "sound", true).is_err());
+    fn a_leftover_notifications_key_is_ignored_without_a_warning() {
+        // System notifications were removed (#676); an old config keeps working silently.
+        let s = rows(r#"{"notifications":{"blocked":false,"done":"no"}}"#);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
     }
 
     #[test]

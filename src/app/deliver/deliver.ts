@@ -1,8 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { agentKind, paneDir, type AgentStatus, type Terminal } from "../core/herdr";
-import type { StatusChange } from "../core/attention";
 import { HerdrStore } from "../core/herdr-store";
-import { SettingsStore } from "../core/settings";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge, type Unlisten } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
@@ -10,23 +8,18 @@ import {
   barSummary,
   cardKey,
   cardsOf,
-  transitions,
   type DeliverCard,
-  type DeliverEvent,
   type DeliverRead,
   type DeliverStatus,
   type Subject,
 } from "./deliver-status";
-import { effectiveStatus, endedTerminal, runsByTerminal, withoutRunEnds } from "./pane-status";
+import { effectiveStatus, runsByTerminal } from "./pane-status";
 
 /** The task mode `Start loop` runs; `{nr}` is the milestone number, `{title}` its title. */
 export const DELIVER_MODE = "deliver-loop";
 
 /** How often the age texts and the stale rule are re-evaluated. */
 const CLOCK_MS = 30_000;
-
-/** How long the pane's `done` after its run ended counts as part of the run's end. */
-const RUN_END_MS = 10_000;
 
 interface DeliverEventPayload {
   root: string;
@@ -67,13 +60,12 @@ export function milestoneNumber(subject: Pick<Subject, "id" | "title">): number 
  * The deliver runs of the repositories of the open spaces: the backend watches each repository's
  * progress events (`.agents/events` of the common dir, else the legacy
  * `.agents/deliver-loop/status.json`; `deliver_watch`) and pushes `deliver` events; this keeps one
- * card per run, and raises the notifications when a run changes.
+ * card per run.
  */
 @Injectable({ providedIn: "root" })
 export class Deliver {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(HerdrStore);
-  private readonly prefs = inject(SettingsStore);
   private readonly tasks = inject(TaskStarter);
 
   /** One card per run (progress events) or status file, in the order they appeared. */
@@ -97,18 +89,6 @@ export class Deliver {
       return runs ? effectiveStatus(hook, runs, now) : hook;
     };
   });
-
-  /** Terminals whose linked run just ended, with the time; see `withoutRunEnds`. */
-  private readonly endedAt = new Map<string, number>();
-
-  /**
-   * `changes` without the `done` of panes whose linked run just ended: the end of the run is
-   * notified once, by `transitions`.
-   */
-  withoutRunEnds(changes: readonly StatusChange[], now = Date.now()): StatusChange[] {
-    for (const [id, at] of this.endedAt) if (now - at > RUN_END_MS) this.endedAt.delete(id);
-    return withoutRunEnds(changes, new Set(this.endedAt.keys()));
-  }
 
   private watchedKey: string | undefined;
   private listening: Promise<Unlisten> | undefined;
@@ -146,7 +126,7 @@ export class Deliver {
     }
   }
 
-  /** Applies one read of a repository: its cards, then notifications for what changed. */
+  /** Applies one read of a repository: its cards. */
   apply(root: string, read: DeliverRead): void {
     const before = this.cards().filter((c) => c.root === root);
     const next = cardsOf(root, read);
@@ -159,26 +139,6 @@ export class Deliver {
       );
       return at < 0 ? [...rest, ...placed] : [...rest.slice(0, at), ...placed, ...rest.slice(at)];
     });
-    for (const card of next) {
-      const old = before.find((c) => cardKey(c) === cardKey(card));
-      if (old?.state.kind === "ok" && card.state.kind === "ok") {
-        const ended = endedTerminal(old.state.status, card.state.status);
-        if (ended) this.endedAt.set(ended, Date.now());
-        this.notify(root, transitions(old.state.status, card.state.status));
-      }
-    }
-  }
-
-  private notify(root: string, events: readonly DeliverEvent[]): void {
-    const { notifyOnBlocked, notifyOnDone } = this.prefs.settings();
-    for (const event of events) {
-      const allowed =
-        event.kind === "blocked" || event.kind === "needs-you" ? notifyOnBlocked : notifyOnDone;
-      if (!allowed) continue;
-      void this.bridge
-        .notify(event.title, event.body, { deliverRoot: root })
-        .catch((error: unknown) => console.warn("poimen: notification failed", error));
-    }
   }
 
   /** Opens a GitHub link of the run in the browser; anything else is ignored. */

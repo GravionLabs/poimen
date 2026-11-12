@@ -41,7 +41,6 @@ toml = "0.8"
 tauri-plugin-dialog = "2"
 notify = "8"
 sha2 = "0.10"
-tauri-plugin-notification = "2"
 poimen-client = { path = "crates/poimen-client" }
 poimen-core = { path = "crates/poimen-core" }
 # First release with `month_usage` (GravionLabs/tamias#119).

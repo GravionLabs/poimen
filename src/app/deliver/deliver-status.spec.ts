@@ -12,7 +12,6 @@ import {
   progressText,
   runState,
   stateText,
-  transitions,
   type DeliverCard,
   type DeliverStatus,
 } from "./deliver-status";
@@ -294,42 +293,5 @@ describe("barSummary", () => {
     expect(
       barSummary([{ root: "/r", run: "", state: { kind: "invalid", error: "x" } }], NOW),
     ).toBeNull();
-  });
-});
-
-describe("transitions", () => {
-  it("has nothing to say without a previous state or for another run", () => {
-    expect(transitions(undefined, MILESTONE)).toEqual([]);
-    expect(transitions(SESSION, MILESTONE)).toEqual([]);
-  });
-
-  it("reports a newly failed task and a new decision once", () => {
-    const before: DeliverStatus = {
-      ...MILESTONE,
-      finished: MILESTONE.finished.filter((t) => t.outcome !== "failed"),
-      attentions: [],
-    };
-    const events = transitions(before, MILESTONE);
-    expect(events.map((e) => e.kind)).toEqual(["blocked", "needs-you"]);
-    expect(events[0]!.body).toBe("Zero failed: review rejected");
-    expect(events[1]!.body).toContain("decide whether the field names are final");
-    expect(events[0]!.title).toBe("Run M4 Deliver loop");
-    expect(transitions(MILESTONE, MILESTONE)).toEqual([]);
-  });
-
-  it("reports the end of a run once: done, cancelled, or failed without a failed task", () => {
-    const running: DeliverStatus = { ...SESSION };
-    const done: DeliverStatus = { ...SESSION, status: "finished", outcome: "succeeded" };
-    expect(transitions(running, done)).toEqual([
-      { kind: "ended", title: `Run ${SESSION.run}`, body: "The run is done" },
-    ]);
-    expect(transitions(done, done)).toEqual([]);
-    expect(transitions(running, { ...done, outcome: "cancelled" })[0]!.body).toBe(
-      "The run ended: cancelled",
-    );
-    const failed = transitions(running, { ...done, outcome: "failed", reason: "boom" });
-    expect(failed).toEqual([
-      { kind: "blocked", title: `Run ${SESSION.run}`, body: "The run failed: boom" },
-    ]);
   });
 });
