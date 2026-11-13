@@ -18,6 +18,7 @@ import {
   olderHost,
   olderHostNote,
   paneDir,
+  paneTitle,
   rowName,
   splitId,
   supportsFlow,
@@ -924,12 +925,8 @@ export class App {
 
   /** Space and name of a pane, as its tab shows them. */
   private tabTitle(id: string): string {
-    const snap = this.store.all();
     const pane = this.pane(id);
-    if (!pane) return id;
-    const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
-    const workspace = snap.spaces.find((w) => w.space_id === pane.space_id)?.label;
-    return withMachine(tabHeader(workspace, rowName(pane, tabLabel)).title, pane.machine);
+    return pane ? paneTitle(this.store.all(), pane) : id;
   }
 
   private pane(id: string): Terminal | undefined {

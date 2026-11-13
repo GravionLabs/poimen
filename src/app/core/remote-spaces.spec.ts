@@ -7,9 +7,13 @@ import {
   qualifyId,
   qualifySnapshot,
   splitId,
+  paneTitle,
   withMachine,
   type Snapshot,
 } from "./herdr";
+import { Attention } from "./attention";
+import { DockBadge } from "./dock-badge";
+import { NotificationCenter } from "./notification-center";
 import { HerdrStore } from "./herdr-store";
 import { Machines, type MachineStatus } from "./machines";
 import { REMOTE_REFRESH_DEBOUNCE_MS, RemoteSpaces, remoteSnapshot } from "./remote-spaces";
@@ -172,5 +176,36 @@ describe("RemoteSpaces and the store", () => {
     TestBed.tick();
     expect(store.remoteTree("box")).toHaveLength(1);
     expect(store.pane("box::t1")?.agent_status).toBe("unknown");
+  });
+
+  it("carries a remote agent's change to attention, the notification center and the dock badge with the machine name", async () => {
+    const { store } = await started();
+    const attention = TestBed.inject(Attention);
+    const center = TestBed.inject(NotificationCenter);
+    const setBadge = vi.spyOn(TauriBridge.prototype, "setBadgeCount").mockResolvedValue();
+    TestBed.inject(DockBadge);
+    const statuses = () =>
+      new Map([...store.panes()].map(([id, p]) => [id, p.agent_status] as const));
+    const label = (id: string) => paneTitle(store.all(), store.pane(id)!);
+
+    attention.observe(statuses(), new Set());
+    tauri.emit("machine:event", {
+      machine: "box",
+      kind: "pane.agent_status_changed",
+      data: { pane_id: "t1", agent_status: "blocked" },
+    });
+    const changes = attention.observe(statuses(), new Set());
+    center.record(changes, label, 1);
+
+    expect(changes).toEqual([{ paneId: "box::t1", status: "blocked" }]);
+    expect(attention.count()).toBe(1);
+    expect(center.entries()[0].label).toBe("box: API / claude");
+    TestBed.tick();
+    expect(setBadge).toHaveBeenLastCalledWith(1);
+  });
+
+  it("labels a remote pane with the machine name once in its title", async () => {
+    const { store } = await started();
+    expect(paneTitle(store.all(), store.pane("box::t1")!)).toBe("box: API / claude");
   });
 });

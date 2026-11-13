@@ -271,6 +271,13 @@ export function withMachine(title: string, machine: string | undefined): string 
   return machine ? `${machine}: ${title}` : title;
 }
 
+/** Space and name of a pane as its tab title shows them, with the machine name for a remote pane. */
+export function paneTitle(snap: Snapshot, pane: Terminal): string {
+  const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
+  const workspace = snap.spaces.find((w) => w.space_id === pane.space_id)?.label;
+  return withMachine(tabHeader(workspace, rowName(pane, tabLabel)).title, pane.machine);
+}
+
 /** Payload of the `herdr` Tauri event: a herdr event or a poimen connection event. */
 export interface HerdrEvent {
   kind: string;
