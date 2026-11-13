@@ -25,6 +25,7 @@ import { TauriBridge } from "../core/tauri";
 import {
   agentKind,
   decodeBase64,
+  splitId,
   type Mode,
   type Terminal,
   type StreamRecord,
@@ -490,7 +491,8 @@ export class TerminalView implements OnDestroy {
       session = await this.streams.open(
         {
           mode,
-          target: this.pane().terminal_id,
+          target: splitId(this.pane().terminal_id).id,
+          ...(this.pane().machine ? { machine: this.pane().machine } : {}),
           cols: this.size.cols,
           rows: this.size.rows,
           takeover,

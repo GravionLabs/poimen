@@ -330,6 +330,9 @@
     </span>
   }
 </ng-template>
+@if (machines.machines().length) {
+  <h2 class="local-title">This Mac</h2>
+}
 @if (layout() === "tree") {
   <hx-tree
     #tree
@@ -403,6 +406,7 @@
     </ng-template>
   </app-split-pane>
 }
+<app-machines-section (selected)="selected.emit($event)" />
 @if (menuAt(); as at) {
   <button
     type="button"

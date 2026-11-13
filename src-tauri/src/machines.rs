@@ -33,7 +33,8 @@ use poimen_core::gui_path;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::poimen_backend::PoimenBackend;
+use crate::backend::{Backend, BackendEvent};
+use crate::poimen_backend::{PoimenBackend, backend_event};
 
 /// `reposDir` when a machine sets none.
 pub const DEFAULT_REPOS_DIR: &str = "~/Source/{owner}/{repo}";
@@ -197,17 +198,35 @@ struct Shared {
     /// Every connection opened to the machine, so a drop or a stop can end them.
     pipes: Mutex<Vec<WeakPipe>>,
     on_change: Box<dyn Fn(&State) + Send + Sync>,
+    /// Gets every event of the machine's subscription, as the frontend's backend event.
+    on_event: Box<dyn Fn(&BackendEvent) + Send + Sync>,
 }
 
 impl Shared {
+    #[cfg(test)]
     fn new(on_change: impl Fn(&State) + Send + Sync + 'static) -> Self {
+        Self::with_events(on_change, |_| {})
+    }
+
+    fn with_events(
+        on_change: impl Fn(&State) + Send + Sync + 'static,
+        on_event: impl Fn(&BackendEvent) + Send + Sync + 'static,
+    ) -> Self {
         Self {
+            on_event: Box::new(on_event),
             status: Mutex::new((State::Connecting, 0)),
             stopped: AtomicBool::new(false),
             woken: Mutex::new(false),
             wake: Condvar::new(),
             pipes: Mutex::default(),
             on_change: Box::new(on_change),
+        }
+    }
+
+    /// Hands one event of the subscription on, unless the machine was stopped.
+    fn forward(&self, event: &Event) {
+        if !self.stopped() {
+            (self.on_event)(&backend_event(event));
         }
     }
 
@@ -354,10 +373,16 @@ fn supervise(link: &dyn Link, shared: &Shared, pause: &dyn Pause) {
                     server_version: ping.version,
                 });
                 backoff.reset();
-                let error = session
-                    .filter_map(Result::err)
-                    .next()
-                    .unwrap_or_else(|| "the connection ended".into());
+                let mut error = "the connection ended".to_owned();
+                for item in session {
+                    match item {
+                        Ok(event) => shared.forward(&event),
+                        Err(e) => {
+                            error = e;
+                            break;
+                        }
+                    }
+                }
                 // Offline first, so the gate refuses before the connections end.
                 shared.set(State::Offline { error });
                 shared.close_pipes();
@@ -478,10 +503,16 @@ impl Machine {
         config: MachineConfig,
         connector: Arc<dyn Connector>,
         on_change: impl Fn(&MachineStatus) + Send + Sync + 'static,
+        on_event: impl Fn(&BackendEvent) + Send + Sync + 'static,
     ) -> Self {
-        Self::start_with(config, connector, Arc::new(RealPause), on_change, |c| {
-            Box::new(c)
-        })
+        Self::start_with(
+            config,
+            connector,
+            Arc::new(RealPause),
+            on_change,
+            on_event,
+            |c| Box::new(c),
+        )
     }
 
     fn start_with(
@@ -489,15 +520,19 @@ impl Machine {
         connector: Arc<dyn Connector>,
         pause: Arc<dyn Pause>,
         on_change: impl Fn(&MachineStatus) + Send + Sync + 'static,
+        on_event: impl Fn(&BackendEvent) + Send + Sync + 'static,
         link: impl FnOnce(Client) -> Box<dyn Link>,
     ) -> Self {
         let named = config.clone();
-        let shared = Arc::new(Shared::new(move |state| {
-            on_change(&MachineStatus {
-                config: named.clone(),
-                state: state.clone(),
-            });
-        }));
+        let shared = Arc::new(Shared::with_events(
+            move |state| {
+                on_change(&MachineStatus {
+                    config: named.clone(),
+                    state: state.clone(),
+                });
+            },
+            on_event,
+        ));
         let label = format!("ssh:{}", config.ssh);
         let tracked = || Tracked {
             inner: connector.clone(),
@@ -595,6 +630,39 @@ impl Machines {
             .find(|m| m.config().name == name)
             .map(f)
             .ok_or_else(|| format!("no machine named {name:?}"))
+    }
+}
+
+/// First id of a stream on a machine's backend: local streams count up from 1, so the two never
+/// meet and the stream commands route by the id alone.
+pub const REMOTE_STREAM_BASE: u32 = 1 << 31;
+
+type StreamMap = std::collections::HashMap<u32, (Arc<dyn Backend>, u32)>;
+
+/// The terminal streams open on machines: an id the webview uses, mapped to the machine's backend
+/// and its own stream id.
+#[derive(Default)]
+pub struct RemoteStreams {
+    streams: Mutex<(u32, StreamMap)>,
+}
+
+impl RemoteStreams {
+    /// Registers stream `inner` of `backend`; returns the id for the webview.
+    pub fn add(&self, backend: Arc<dyn Backend>, inner: u32) -> u32 {
+        let mut streams = lock(&self.streams);
+        streams.0 += 1;
+        let id = REMOTE_STREAM_BASE + streams.0;
+        streams.1.insert(id, (backend, inner));
+        id
+    }
+
+    /// The backend and stream id behind `id`; `None` for a local stream or a closed one.
+    pub fn get(&self, id: u32) -> Option<(Arc<dyn Backend>, u32)> {
+        lock(&self.streams).1.get(&id).cloned()
+    }
+
+    pub fn remove(&self, id: u32) -> Option<(Arc<dyn Backend>, u32)> {
+        lock(&self.streams).1.remove(&id)
     }
 }
 
@@ -1276,6 +1344,7 @@ mod tests {
             Arc::new(ArcConnector(recorder.clone())),
             pause,
             move |s| lock(&record).push(s.clone()),
+            |_| {},
             |_| {
                 Box::new(FakeLink {
                     steps: Mutex::new(
@@ -1317,6 +1386,7 @@ mod tests {
                     woken: vec![],
                 }),
                 |_| {},
+                |_| {},
                 |_| {
                     Box::new(FakeLink {
                         steps: Mutex::default(),
@@ -1335,6 +1405,41 @@ mod tests {
         assert!(machines.reconnect("zz").unwrap_err().contains("zz"));
         machines.sync(&[], start);
         assert!(machines.list().is_empty());
+    }
+
+    #[test]
+    fn remote_streams_get_ids_beside_the_local_ones_and_route_to_their_backend() {
+        use crate::backend_fake::FakeBackend;
+        let streams = RemoteStreams::default();
+        let backend: Arc<dyn Backend> = Arc::new(FakeBackend::default());
+        let a = streams.add(backend.clone(), 1);
+        let b = streams.add(backend, 1);
+        assert!(a >= REMOTE_STREAM_BASE && b > a);
+        assert_eq!(streams.get(a).map(|(_, inner)| inner), Some(1));
+        assert!(streams.get(7).is_none());
+        assert!(streams.remove(a).is_some());
+        assert!(streams.get(a).is_none());
+        assert!(streams.get(b).is_some());
+    }
+
+    #[test]
+    fn the_events_of_a_session_are_forwarded_as_backend_events() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = seen.clone();
+        let shared = Shared::with_events(|_| {}, move |e| lock(&record).push(e.clone()));
+        let link = FakeLink {
+            steps: Mutex::new(vec![Step::Session(PROTOCOL_VERSION, vec![event()], "reset")].into()),
+        };
+        let pause = FakePause {
+            delays: Mutex::default(),
+            stop_after: 1,
+            woken: vec![],
+        };
+        supervise(&link, &shared, &pause);
+        let seen = lock(&seen).clone();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].kind, "terminal.closed");
+        assert_eq!(seen[0].data["terminal_id"], "t1");
     }
 
     // --- ssh's error on the end of its output -------------------------------------------------

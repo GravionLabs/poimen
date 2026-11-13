@@ -15,6 +15,8 @@ export interface Space {
    * terminals across a server restart); herdr workspaces have none.
    */
   cwd?: string;
+  /** The machine the space lives on (remote spaces only, #280); its ids are qualified. */
+  machine?: string;
 }
 
 export interface Tab {
@@ -30,6 +32,8 @@ export interface Tab {
   root?: TabTree;
   /** The focused leaf of the tab, shared by every client (poimen backend). */
   active_terminal?: string;
+  /** The machine of a remote tab (#280). */
+  machine?: string;
 }
 
 /**
@@ -137,6 +141,8 @@ export interface Terminal {
   host_bundled_version?: string;
   terminal_title_stripped?: string;
   focused?: boolean;
+  /** The machine of a remote terminal (#280). */
+  machine?: string;
 }
 
 /** Branch and worktree flag of a directory (answer of the `repo_info` command). */
@@ -194,6 +200,82 @@ export function toSnapshot(wire: WireSnapshot): Snapshot {
       space_id: workspace_id,
     })),
   };
+}
+
+const QUALIFIER = "::";
+
+/** The id of `id` on `machine`: ids of two machines (and of this Mac) never collide. */
+export function qualifyId(machine: string, id: string): string {
+  return `${machine}${QUALIFIER}${id}`;
+}
+
+/** The machine and the machine's own id of an id from `qualifyId`; a local id has no machine. */
+export function splitId(id: string): { machine?: string; id: string } {
+  const at = id.lastIndexOf(QUALIFIER);
+  return at < 0 ? { id } : { machine: id.slice(0, at), id: id.slice(at + QUALIFIER.length) };
+}
+
+function qualifyTree(machine: string, tree: TabTree): TabTree {
+  return tree.kind === "terminal"
+    ? { ...tree, terminal_id: qualifyId(machine, tree.terminal_id) }
+    : {
+        ...tree,
+        children: [qualifyTree(machine, tree.children[0]), qualifyTree(machine, tree.children[1])],
+      };
+}
+
+/**
+ * A snapshot read from `machine` with every id qualified and `machine` set on each record. With
+ * `stale` the machine is not reachable: its agents report `unknown`, so no old status rings.
+ */
+export function qualifySnapshot(machine: string, snapshot: Snapshot, stale = false): Snapshot {
+  return {
+    spaces: snapshot.spaces.map((s) => ({
+      ...s,
+      machine,
+      space_id: qualifyId(machine, s.space_id),
+      ...(stale ? { agent_status: "unknown" as const } : {}),
+    })),
+    tabs: snapshot.tabs.map((t) => ({
+      ...t,
+      machine,
+      tab_id: qualifyId(machine, t.tab_id),
+      space_id: qualifyId(machine, t.space_id),
+      ...(t.root ? { root: qualifyTree(machine, t.root) } : {}),
+      ...(t.active_terminal ? { active_terminal: qualifyId(machine, t.active_terminal) } : {}),
+      ...(stale ? { agent_status: "unknown" as const } : {}),
+    })),
+    terminals: snapshot.terminals.map((p) => ({
+      ...p,
+      machine,
+      terminal_id: qualifyId(machine, p.terminal_id),
+      tab_id: qualifyId(machine, p.tab_id),
+      space_id: qualifyId(machine, p.space_id),
+      ...(stale ? { agent_status: "unknown" as const } : {}),
+    })),
+  };
+}
+
+/** Appends `extra` to `base` (disjoint ids; spaces with the same name stay two spaces). */
+export function mergeSnapshots(base: Snapshot, extra: readonly Snapshot[]): Snapshot {
+  if (extra.length === 0) return base;
+  return {
+    spaces: [...base.spaces, ...extra.flatMap((s) => s.spaces)],
+    tabs: [...base.tabs, ...extra.flatMap((s) => s.tabs)],
+    terminals: [...base.terminals, ...extra.flatMap((s) => s.terminals)],
+  };
+}
+
+/** A tab or window title with the machine name in front when the pane is remote. */
+export function withMachine(title: string, machine: string | undefined): string {
+  return machine ? `${machine}: ${title}` : title;
+}
+
+/** Space and name of a pane as its tab title shows them, with the machine name for a remote pane. */
+export function paneTitle(snap: Snapshot, pane: Terminal): string {
+  const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
+  const workspace = snap.spaces.find((w) => w.space_id === pane.space_id)?.label;
+  return withMachine(tabHeader(workspace, rowName(pane, tabLabel)).title, pane.machine);
 }
 
 /** Payload of the `herdr` Tauri event: a herdr event or a poimen connection event. */

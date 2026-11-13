@@ -17,10 +17,12 @@ import {
   toSnapshot,
   type BranchPull,
   type AppChannel,
+  mergeSnapshots,
 } from "./herdr";
 import type { BackendKind } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 import { UiState } from "./ui-state";
+import { RemoteSpaces } from "./remote-spaces";
 
 /** Delay that collapses a burst of herdr events into one re-read. */
 export const REFRESH_DEBOUNCE_MS = 80;
@@ -62,6 +64,7 @@ const EMPTY: Snapshot = { spaces: [], tabs: [], terminals: [] };
 export class HerdrStore {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState, { optional: true });
+  private readonly remote = inject(RemoteSpaces, { optional: true });
 
   private readonly _snapshot = signal<Snapshot>(EMPTY);
   private readonly _connectionError = signal<string | null>(null);
@@ -96,6 +99,14 @@ export class HerdrStore {
     });
     return changed ? { ...raw, terminals } : raw;
   });
+  /**
+   * This Mac's snapshot with the spaces of the machines (#280) after it, their ids qualified by
+   * the machine name. Attention, notifications, the dock badge and the tab bar read this; the
+   * space tree and every space command work on `snapshot`.
+   */
+  readonly all = computed(() =>
+    mergeSnapshots(this.snapshot(), this.remote ? [this.remote.snapshot()] : []),
+  );
   /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
   readonly loaded = this._loaded.asReadonly();
   /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
@@ -153,10 +164,22 @@ export class HerdrStore {
   readonly spaces = computed(() =>
     buildSpaces(this.snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
   );
-  readonly waiting = computed(() => waitingCount(this.snapshot().terminals));
-  readonly panes = computed(
-    () => new Map(this.snapshot().terminals.map((p) => [p.terminal_id, p])),
-  );
+  /** The spaces of one machine as a tree (`machine` set on every space), last known when offline. */
+  remoteTree(machine: string) {
+    return this.remoteTrees().get(machine) ?? [];
+  }
+  private readonly remoteTrees = computed(() => {
+    const snapshot = this.remote?.snapshot();
+    if (!snapshot) return new Map<string, ReturnType<typeof buildTree>>();
+    const trees = new Map<string, ReturnType<typeof buildTree>>();
+    for (const node of buildTree(snapshot)) {
+      const name = node.workspace.machine!;
+      trees.set(name, [...(trees.get(name) ?? []), node]);
+    }
+    return trees;
+  });
+  readonly waiting = computed(() => waitingCount(this.all().terminals));
+  readonly panes = computed(() => new Map(this.all().terminals.map((p) => [p.terminal_id, p])));
 
   /** Sets how a pane's hook status is combined with its runs; `App` wires `Deliver.paneStatus`. */
   setStatusOf(fn: (terminalId: string, hook: AgentStatus) => AgentStatus): void {
@@ -227,7 +250,7 @@ export class HerdrStore {
 
   /** The next blocked pane after `activeId`, wrapping around. */
   nextWaiting(activeId: string | null): Terminal | undefined {
-    return nextWaiting(this.snapshot().terminals, activeId);
+    return nextWaiting(this.all().terminals, activeId);
   }
 
   pane(paneId: string): Terminal | undefined {
