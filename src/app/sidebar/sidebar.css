@@ -475,6 +475,11 @@
   flex: 1;
 }
 
+/* Lines below a first line that starts with the status dot align with the name: dot (8px) + gap (6px). */
+.space-main .line.under-dot {
+  padding-left: 14px;
+}
+
 /*
  * Split layout: two labelled lists stacked in a split pane with a draggable divider between them
  * (sizes are UI state). The host stops scrolling; each section scrolls its own list below its title.
