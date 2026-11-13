@@ -47,12 +47,61 @@ export function parseMachineStatus(raw: unknown): MachineStatus | null {
   }
 }
 
+/** The outcome of one check of `machine_check`. `warning` is something optional (one agent). */
+export type CheckStatus = "ok" | "missing" | "warning";
+
+/** One check; `fix` is the command to run on the machine, which poimen only shows. */
+export interface MachineCheckItem {
+  id: string;
+  status: CheckStatus;
+  detail: string | null;
+  fix: string | null;
+}
+
+/** The result of `machine.check` (#281). */
+export interface MachineCheck {
+  version: string;
+  protocol: number;
+  checks: MachineCheckItem[];
+}
+
+/** A machine check of the wire, or `null` when it is malformed; unknown statuses are dropped. */
+export function parseMachineCheck(raw: unknown): MachineCheck | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (!Array.isArray(r["checks"])) return null;
+  const checks: MachineCheckItem[] = [];
+  for (const c of r["checks"]) {
+    if (!c || typeof c !== "object") continue;
+    const o = c as Record<string, unknown>;
+    const status = o["status"];
+    if (typeof o["id"] !== "string") continue;
+    if (status !== "ok" && status !== "missing" && status !== "warning") continue;
+    checks.push({
+      id: o["id"],
+      status,
+      detail: typeof o["detail"] === "string" ? o["detail"] : null,
+      fix: typeof o["fix"] === "string" ? o["fix"] : null,
+    });
+  }
+  return { version: str(r["version"]), protocol: num(r["protocol"]), checks };
+}
+
+/** No check is missing; warnings do not count. */
+export const checkPassed = (check: MachineCheck): boolean =>
+  check.checks.every((c) => c.status !== "missing");
+
 /** The configured machines and their connection state (#279). */
 @Injectable({ providedIn: "root" })
 export class Machines {
   private readonly bridge = inject(TauriBridge);
   private readonly _machines = signal<readonly MachineStatus[]>([]);
   readonly machines = this._machines.asReadonly();
+  private readonly _checks = signal<Readonly<Record<string, MachineCheck | { error: string }>>>({});
+  /** The last check per machine name: the result, or the error when it could not run. */
+  readonly checks = this._checks.asReadonly();
+  /** Machines checked in this session: the first connect checks, a reconnect does not. */
+  private readonly checked = new Set<string>();
 
   async start(): Promise<void> {
     await this.bridge.listen<unknown>("machine:state_changed", (raw) => this.update(raw));
@@ -75,6 +124,23 @@ export class Machines {
     await this.bridge.invoke("reconnect_machine", { name });
   }
 
+  /**
+   * Runs the read-only `machine.check` on a connected machine (from its context menu, or at its
+   * first connect). poimen never runs the fixes it lists.
+   */
+  async check(name: string): Promise<void> {
+    this.checked.add(name);
+    try {
+      const check = parseMachineCheck(await this.bridge.invoke<unknown>("machine_check", { name }));
+      this._checks.update((c) => ({
+        ...c,
+        [name]: check ?? { error: "unreadable machine check" },
+      }));
+    } catch (e) {
+      this._checks.update((c) => ({ ...c, [name]: { error: String(e) } }));
+    }
+  }
+
   private update(raw: unknown): void {
     const status = parseMachineStatus(raw);
     if (!status) return;
@@ -83,5 +149,7 @@ export class Machines {
     // A machine that is not listed yet (a settings change) comes with the next list.
     if (i < 0) void this.refresh();
     else this._machines.set(list.map((m, j) => (j === i ? status : m)));
+    if (status.state === "connected" && !this.checked.has(status.name))
+      void this.check(status.name);
   }
 }

@@ -704,6 +704,46 @@ pub struct PingResult {
     pub clients: Vec<ClientKind>,
 }
 
+/// The outcome of one check of `machine.check`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckStatus {
+    Ok,
+    /// Something tasks need is missing.
+    Missing,
+    /// Something optional is missing (one of two agents, a hook integration).
+    Warning,
+}
+
+/// One check of `machine.check`: `id` is `server`, `git`, `gh`, `gh_auth`, `claude`, `copilot`,
+/// `hooks_claude` or `hooks_copilot`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineCheckItem {
+    pub id: String,
+    pub status: CheckStatus,
+    /// What was found (a path, a version) or why it failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// The command to run on the machine to fix it; poimen never runs it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix: Option<String>,
+}
+
+/// Result of `machine.check` (since protocol 6, additive).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineCheckResult {
+    pub version: String,
+    pub protocol: u32,
+    pub checks: Vec<MachineCheckItem>,
+}
+
+impl MachineCheckResult {
+    /// No check is `missing` (warnings do not count).
+    pub fn ok(&self) -> bool {
+        self.checks.iter().all(|c| c.status != CheckStatus::Missing)
+    }
+}
+
 /// What a client is, said on `events.subscribe` (ADR 0006).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1654,6 +1694,31 @@ mod tests {
         assert_eq!(
             unix_env(None, None, Some("jk")).path(stable),
             PathBuf::from("/tmp/poimen-jk/server.sock")
+        );
+    }
+
+    #[test]
+    fn machine_check_result_parses_and_ok_ignores_warnings() {
+        let r: MachineCheckResult = serde_json::from_value(json!({
+            "version": "0.18.0", "protocol": 6,
+            "checks": [
+                {"id": "git", "status": "ok"},
+                {"id": "copilot", "status": "warning", "detail": "x", "fix": "copilot"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(r.checks[1].status, CheckStatus::Warning);
+        assert_eq!(r.checks[1].fix.as_deref(), Some("copilot"));
+        assert_eq!(r.checks[0].detail, None);
+        assert!(r.ok());
+        let bad: MachineCheckResult = serde_json::from_value(json!({
+            "version": "1", "protocol": 6, "checks": [{"id": "gh", "status": "missing"}]
+        }))
+        .unwrap();
+        assert!(!bad.ok());
+        assert!(
+            serde_json::from_value::<MachineCheckItem>(json!({"id": "x", "status": "bogus"}))
+                .is_err()
         );
     }
 

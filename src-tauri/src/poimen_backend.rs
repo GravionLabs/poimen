@@ -75,6 +75,11 @@ impl PoimenBackend {
         }
     }
 
+    /// `machine.check` of this backend's server (#281).
+    pub fn machine_check(&self) -> Result<poimen_client::protocol::MachineCheckResult, String> {
+        self.client.machine_check().map_err(text)
+    }
+
     fn local_only(&self) -> Result<(), StartError> {
         if self.remote {
             return Err(StartError::Other(

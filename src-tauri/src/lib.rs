@@ -1069,6 +1069,20 @@ fn reconnect_machine(machines: State<'_, SharedMachines>, name: String) -> Resul
     machines.reconnect(&name)
 }
 
+/// What a connected machine has for tasks (git, gh and its login, agents, hooks) and the command
+/// to fix each gap (#281); fails while the machine is not connected. Nothing is run or installed
+/// by poimen beyond the read-only checks of the machine's own server.
+#[tauri::command]
+async fn machine_check(
+    machines: State<'_, SharedMachines>,
+    name: String,
+) -> Result<poimen_client::protocol::MachineCheckResult, String> {
+    let backend = machines.backend(&name)?;
+    tauri::async_runtime::spawn_blocking(move || backend.machine_check())
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// The spaces of a machine's server; fails while the machine is not connected.
 #[tauri::command]
 async fn machine_snapshot(
@@ -2175,6 +2189,7 @@ pub fn run() {
             list_machines,
             reconnect_machine,
             machine_snapshot,
+            machine_check,
             set_terminal_colors,
             hooks_status,
             hooks_install,
