@@ -74,6 +74,33 @@ describe("runs of a space", () => {
   });
 });
 
+describe("runs of a remote space (#692)", () => {
+  const local = card("r1", "2026-11-07T10:00:00.000Z", "t1");
+  const remote: DeliverCard = {
+    ...card("r1", "2026-11-07T11:00:00.000Z", "box::t1"),
+    machine: "box",
+  };
+
+  it("keeps a local and a remote run with the same run id and path apart", () => {
+    const cards = [local, remote];
+    expect(runsOfSpace(cards, "/repo").map((r) => r.machine)).toEqual([undefined]);
+    const onBox = runsOfSpace(cards, "/repo", "box");
+    expect(onBox.map((r) => r.machine)).toEqual(["box"]);
+    expect(onBox[0]!.key).not.toBe(runsOfSpace(cards, "/repo")[0]!.key);
+    expect(runsOfSpace(cards, "/repo", "gpu")).toEqual([]);
+    // The remote run is found by the qualified terminal of the machine's snapshot.
+    expect(selectRun(onBox, "box::t1", null)?.status.updated).toBe("2026-11-07T11:00:00.000Z");
+  });
+
+  it("labels a remote run with its machine and an offline one as offline", () => {
+    const now = Date.parse("2026-11-07T11:05:00.000Z");
+    const [run] = runsOfSpace([{ ...remote, offline: true }], "/repo", "box");
+    expect(run!.offline).toBe(true);
+    expect(runLabel(run!, now)).toMatch(/^box: .*\(running, 5 min ago, offline\)$/);
+    expect(runLabel(runsOfSpace([local], "/repo")[0]!, now)).not.toContain("offline");
+  });
+});
+
 describe("tone style", () => {
   it("maps every tone to its class and icon", () => {
     expect(toneStyle("success")).toEqual({ class: "tone-success", icon: "✓", attention: false });

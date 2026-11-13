@@ -1,5 +1,4 @@
 use poimen_core::agent_actions;
-mod agent_events;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
@@ -26,6 +25,7 @@ mod poimen_backend;
 mod poimen_server;
 mod project;
 mod project_edit;
+mod remote_runs;
 mod schemes;
 mod settings;
 mod spaces;
@@ -1094,12 +1094,17 @@ async fn machine_snapshot(
 }
 
 /// Starts, keeps or stops the machine connections for `configs`; state changes go to the
-/// frontend as `machine:state_changed`.
+/// frontend as `machine:state_changed`, the runs of a machine (`run.events`, #692) as `deliver`
+/// with its name, every other event as `machine:event`.
 fn sync_machines(
     machines: &machines::Machines,
     configs: &[machines::MachineConfig],
     handle: &tauri::AppHandle,
 ) {
+    let runs = handle
+        .state::<std::sync::Arc<remote_runs::RemoteRuns>>()
+        .inner()
+        .clone();
     machines.sync(configs, |config| {
         let handle = handle.clone();
         machines::Machine::start(
@@ -1114,7 +1119,16 @@ fn sync_machines(
             {
                 let handle = handle.clone();
                 let machine = config.name.clone();
+                let runs = runs.clone();
                 move |event| {
+                    // Progress events of the machine's runs go to the Deliver panel (#692).
+                    if event.kind == "run.events" {
+                        if let Some(payload) = runs.apply(&machine, &event.data, deliver::now_secs())
+                        {
+                            let _ = handle.emit("deliver", payload);
+                        }
+                        return;
+                    }
                     let _ = handle.emit(
                         "machine:event",
                         serde_json::json!({"machine": machine, "kind": event.kind, "data": event.data}),
@@ -1123,6 +1137,8 @@ fn sync_machines(
             },
         )
     });
+    let names: Vec<&str> = configs.iter().map(|c| c.name.as_str()).collect();
+    runs.retain(&names);
 }
 
 /// Gives `poimen-server` the colors of the active scheme (`foreground`, `background`, `cursor`,
@@ -2199,6 +2215,7 @@ pub fn run() {
         .manage(terminal_colors::TerminalColors::default())
         .manage(SharedMachines::default())
         .manage(std::sync::Arc::new(machines::RemoteStreams::default()))
+        .manage(std::sync::Arc::new(remote_runs::RemoteRuns::default()))
         .setup(move |app| {
             let handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {

@@ -302,10 +302,19 @@ impl Client {
         &self,
         client: Option<poimen_protocol::ClientInfo>,
     ) -> Result<EventStream, ClientError> {
+        self.subscribe_with(poimen_protocol::EventsSubscribe {
+            client,
+            ..Default::default()
+        })
+    }
+
+    /// Like [`Client::subscribe`] with every param of `events.subscribe` (`run_events`).
+    pub fn subscribe_with(
+        &self,
+        params: poimen_protocol::EventsSubscribe,
+    ) -> Result<EventStream, ClientError> {
         let mut conn = Connection::open(&self.endpoint, &self.path, None)?;
-        let params = serde_json::to_value(poimen_protocol::EventsSubscribe { client })
-            .unwrap_or(Value::Null);
-        conn.call("events.subscribe", params)?;
+        conn.call("events.subscribe", to_value(&params))?;
         Ok(EventStream { conn })
     }
 
@@ -316,15 +325,25 @@ impl Client {
         &self,
         client: Option<poimen_protocol::ClientInfo>,
     ) -> Result<(PingResult, Option<EventStream>), ClientError> {
+        self.ping_and_subscribe_with(poimen_protocol::EventsSubscribe {
+            client,
+            ..Default::default()
+        })
+    }
+
+    /// Like [`Client::ping_and_subscribe`] with every param of `events.subscribe` (a machine's
+    /// connection asks for `run_events`).
+    pub fn ping_and_subscribe_with(
+        &self,
+        params: poimen_protocol::EventsSubscribe,
+    ) -> Result<(PingResult, Option<EventStream>), ClientError> {
         let mut conn = Connection::open(&self.endpoint, &self.path, None)?;
         let ping: PingResult = serde_json::from_value(conn.call("ping", Value::Null)?)
             .map_err(|e| ClientError::Protocol(format!("ping: {e}")))?;
         if ping.protocol != protocol::PROTOCOL_VERSION {
             return Ok((ping, None));
         }
-        let params = serde_json::to_value(poimen_protocol::EventsSubscribe { client })
-            .unwrap_or(Value::Null);
-        conn.call("events.subscribe", params)?;
+        conn.call("events.subscribe", to_value(&params))?;
         Ok((ping, Some(EventStream { conn })))
     }
 

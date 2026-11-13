@@ -10,6 +10,7 @@ import type { Terminal } from "../core/herdr";
 import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE } from "../core/ui-state";
 import { HerdrStore } from "../core/herdr-store";
+import { Machines } from "../core/machines";
 import { Deliver, loopPane, milestoneNumber } from "./deliver";
 import { DeliverView, linkLabel, prLabel, stepText } from "./deliver-view";
 import { cardsOf, type DeliverCard, type DeliverRead, type DeliverStatus } from "./deliver-status";
@@ -289,6 +290,73 @@ describe("Deliver service", () => {
   });
 });
 
+describe("remote runs (#692)", () => {
+  const machine = (state: string) => ({
+    name: "box",
+    ssh: "box.lan",
+    reposDir: "~/Source/{owner}/{repo}",
+    state,
+    ...(state === "connected" ? { serverVersion: "0.18.0" } : { error: "ssh: timeout" }),
+  });
+
+  async function withBox() {
+    tauri.answer("list_machines", () => [machine("connected")]);
+    const view = await render();
+    const machines = TestBed.inject(Machines);
+    await machines.start();
+    return { ...view, machines };
+  }
+
+  it("merges a local and a remote run with the same run id, labelled with the machine", async () => {
+    const { deliver, el, show } = await withBox();
+    const stop = deliver.start();
+    await vi.waitFor(() => expect(tauri.listen).toHaveBeenCalledWith("deliver", expect.anything()));
+    tauri.emit("deliver", { root: "/r", read: events("session") });
+    tauri.emit("deliver", { root: "/r", machine: "box", read: events("session") });
+    // A replay after a reconnect updates the same card.
+    tauri.emit("deliver", { root: "/r", machine: "box", read: events("session") });
+    await show();
+    expect(deliver.cards().map((c) => c.machine)).toEqual([undefined, "box"]);
+    const cards = el.querySelectorAll("[data-testid=card]");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]!.querySelector("[data-testid=machine]")).toBeNull();
+    expect(text(cards[1]!.querySelector("[data-testid=machine]"))).toBe("box");
+    expect(text(cards[1]!.querySelector("footer"))).toContain("box:/r");
+    expect(cards[1]!.querySelector("[data-testid=offline]")).toBeNull();
+    stop();
+  });
+
+  it("keeps the last state of an offline machine marked, and drops a removed one", async () => {
+    const { deliver, el, show } = await withBox();
+    deliver.apply("/r", events("milestone", "failed"), "box");
+    tauri.emit("machine:state_changed", machine("offline"));
+    await show();
+    const card = el.querySelector("[data-testid=card]")!;
+    expect(text(card.querySelector("[data-testid=offline]"))).toContain("offline");
+    expect(card.classList).toContain("offline");
+    expect(deliver.cards()).toHaveLength(2);
+    // Remote runs are not started from here (#693).
+    expect(el.querySelector("[data-testid=start]")).toBeNull();
+    tauri.answer("list_machines", () => []);
+    await TestBed.inject(Machines).refresh();
+    await show();
+    expect(deliver.cards()).toEqual([]);
+  });
+
+  it("keeps the remote cards when the local watch changes", async () => {
+    tauri.answer("deliver_watch", () => ["/a"]);
+    const { deliver } = await withBox();
+    deliver.apply("/a", read("running"));
+    deliver.apply("/remote", events("session"), "box");
+    await deliver.watch(["/a"]);
+    expect(deliver.cards().map((c) => c.root)).toEqual(["/a", "/remote"]);
+    expect(await deliver.startLoop(MILESTONE_STATUS(), "/remote", "box")).toBe(false);
+  });
+});
+
+const MILESTONE_STATUS = (): DeliverStatus =>
+  (cardsOf("/r", events("milestone"))[0]!.state as { status: DeliverStatus }).status;
+
 describe("helpers", () => {
   const pane = (id: string, cwd: string, agent?: string): Terminal =>
     ({ terminal_id: id, tab_id: "t", space_id: "s", agent_status: "idle", cwd, agent }) as Terminal;
@@ -329,9 +397,15 @@ describe("helpers", () => {
       return { deliver: TestBed.inject(Deliver) };
     })();
     const store = TestBed.inject(HerdrStore);
-    vi.spyOn(store, "snapshot").mockReturnValue({
-      terminals: [pane("t7", "/elsewhere"), pane("t2", "/r", "claude")],
-    } as never);
+    vi.spyOn(store, "all").mockReturnValue({
+      spaces: [],
+      tabs: [],
+      terminals: [
+        pane("t7", "/elsewhere"),
+        pane("t2", "/r", "claude"),
+        { ...pane("box::t3", "/r", "claude"), machine: "box" },
+      ],
+    });
     const card = (host: Record<string, string>): DeliverCard => ({
       root: "/r",
       run: "x",
@@ -348,6 +422,11 @@ describe("helpers", () => {
     expect(deliver.paneOf({ root: "/r", run: "", state: { kind: "invalid", error: "x" } })).toBe(
       undefined,
     );
+    // A remote run finds only a terminal of its machine.
+    const remote = (host: Record<string, string>) => ({ ...card(host), machine: "box" });
+    expect(deliver.paneOf(remote({ "poimen.terminal": "box::t3" }))).toBe("box::t3");
+    expect(deliver.paneOf(remote({ "poimen.terminal": "t7" }))).toBe("box::t3");
+    expect(deliver.paneOf({ ...card({}), machine: "gpu" })).toBeUndefined();
   });
 
   it("labels a pull request URL", () => {

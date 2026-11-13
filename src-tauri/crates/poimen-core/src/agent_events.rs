@@ -2,13 +2,19 @@
 //! the lines of one `<run>.jsonl` into the run state of `schema/v0/run-state.schema.json`. Displays
 //! are core readers and depend on agent-events only: profiles (`deliver@1`, ...) are not read, their
 //! types and fields are ignored. It passes every reader fixture `fixtures/state/<case>.jsonl` with
-//! its `<case>.state.json` (`tests/fixtures/agent-events/`, the pinned tag is in `SOURCE.txt`).
+//! its `<case>.state.json` (`fixtures/agent-events/`, the pinned tag is in `SOURCE.txt`).
 //! Pure: the clock and the pid check are parameters. Unknown types, fields and profiles are
-//! ignored, an incomplete last line is skipped (the `Tailer` of `deliver.rs` leaves it for the next
-//! read), a gap in `seq` is recorded and folded anyway, events of another `v` are skipped and
-//! reported.
+//! ignored, an incomplete last line is skipped ([`LineTail`] leaves it for the next read), a gap in
+//! `seq` is recorded and folded anyway, events of another `v` are skipped and reported.
+//!
+//! Shared by the app (`deliver.rs` folds the local files, `remote_runs.rs` the events a machine
+//! forwards) and `poimen-server` (`runs.rs` forwards the files of its spaces, #692): the run-file
+//! names of the jsonl-file binding ([`is_run_file`]) and [`LineTail`], which reads the complete
+//! lines a file gained since the last read.
 
 use std::collections::{BTreeMap, HashSet};
+use std::io::{Read as _, Seek, SeekFrom};
+use std::path::Path;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -35,6 +41,78 @@ const OUTCOMES: [&str; 4] = ["succeeded", "failed", "cancelled", "skipped"];
 
 /// The `host` key of the jsonl-file binding with the writer's pid.
 const PID_KEY: &str = "jsonl-file.pid";
+
+/// The progress event files relative to the git common dir (jsonl-file binding).
+pub const EVENTS_PATH: &str = ".agents/events";
+
+/// A larger event file is not read.
+pub const MAX_EVENTS_BYTES: u64 = 16 << 20;
+
+/// Whether `path` is a run file of the jsonl-file binding: `<run>.jsonl` with a run id of
+/// `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; files with other names are ignored.
+pub fn is_run_file(path: &Path) -> bool {
+    run_of(path).is_some()
+}
+
+/// The run id of a run file ([`is_run_file`]), `None` for any other name.
+pub fn run_of(path: &Path) -> Option<&str> {
+    let (Some(stem), Some("jsonl")) = (
+        path.file_stem().and_then(|s| s.to_str()),
+        path.extension().and_then(|e| e.to_str()),
+    ) else {
+        return None;
+    };
+    let mut chars = stem.chars();
+    (stem.len() <= 128
+        && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
+    .then_some(stem)
+}
+
+/// Where the reading of one event file stands: the offset after its last complete line.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LineTail {
+    offset: u64,
+}
+
+/// What [`LineTail::read`] found.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Tailed {
+    /// The file is shorter than what was read before (truncated or replaced): `lines` start from
+    /// its beginning, and what was folded before is to be dropped.
+    pub reset: bool,
+    /// The complete, non-blank lines added since the last read, in file order.
+    pub lines: Vec<String>,
+}
+
+impl LineTail {
+    /// Reads the complete lines `path` gained since the last read; `len` is its current length.
+    /// An incomplete last line is still being written and is left for the next read.
+    pub fn read(&mut self, path: &Path, len: u64) -> std::io::Result<Tailed> {
+        let mut out = Tailed::default();
+        if len < self.offset {
+            out.reset = true;
+            self.offset = 0;
+        }
+        if len == self.offset {
+            return Ok(out);
+        }
+        let mut file = std::fs::File::open(path)?;
+        file.seek(SeekFrom::Start(self.offset))?;
+        let mut buf = Vec::new();
+        file.take(len - self.offset).read_to_end(&mut buf)?;
+        let Some(end) = buf.iter().rposition(|b| *b == b'\n') else {
+            return Ok(out);
+        };
+        out.lines = String::from_utf8_lossy(&buf[..=end])
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_owned)
+            .collect();
+        self.offset += end as u64 + 1;
+        Ok(out)
+    }
+}
 
 /// An open task: `subject`, `step`, `progress` and `links` are passed on as the writer sent them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -566,7 +644,7 @@ pub fn pid_alive(pid: u32) -> bool {
 mod tests {
     use super::*;
 
-    const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/agent-events");
+    const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/agent-events");
 
     fn fixture(name: &str, ext: &str) -> String {
         std::fs::read_to_string(format!("{DIR}/{name}.{ext}")).unwrap()
@@ -716,5 +794,81 @@ not json
         ] {
             assert_eq!(parse_ts(bad), None, "{bad}");
         }
+    }
+
+    fn temp_file(name: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "poimen-core-events-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    fn read(tail: &mut LineTail, path: &Path) -> Tailed {
+        let len = std::fs::metadata(path).unwrap().len();
+        tail.read(path, len).unwrap()
+    }
+
+    #[test]
+    fn the_line_tail_gives_complete_lines_once_and_waits_for_a_half_written_one() {
+        let path = temp_file("r1.jsonl");
+        std::fs::write(&path, "{\"seq\":1}\n\n{\"seq\":2}\n{\"se").unwrap();
+        let mut tail = LineTail::default();
+        assert_eq!(
+            read(&mut tail, &path),
+            Tailed {
+                reset: false,
+                lines: vec!["{\"seq\":1}".into(), "{\"seq\":2}".into()]
+            }
+        );
+        // Nothing new: nothing again.
+        assert_eq!(read(&mut tail, &path), Tailed::default());
+        // The rest of the line arrives.
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("q\":3}\n");
+        std::fs::write(&path, &text).unwrap();
+        assert_eq!(read(&mut tail, &path).lines, ["{\"seq\":3}"]);
+        // Truncated: read again from the start, marked as a reset.
+        std::fs::write(&path, "{\"seq\":1}\n").unwrap();
+        assert_eq!(
+            read(&mut tail, &path),
+            Tailed {
+                reset: true,
+                lines: vec!["{\"seq\":1}".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn a_missing_file_is_an_error_of_the_tail() {
+        let mut tail = LineTail::default();
+        assert!(
+            tail.read(Path::new("/nonexistent/poimen/r.jsonl"), 3)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn run_files_are_named_by_a_run_id_of_the_binding() {
+        assert_eq!(run_of(Path::new("/x/r1.jsonl")), Some("r1"));
+        assert_eq!(
+            run_of(Path::new("2026-11-08.run_1.jsonl")),
+            Some("2026-11-08.run_1")
+        );
+        for bad in [".x.jsonl", "a b.jsonl", "r1.txt", "r1", "-x.jsonl"] {
+            assert!(!is_run_file(Path::new(bad)), "{bad}");
+        }
+        assert!(!is_run_file(Path::new(&format!(
+            "{}.jsonl",
+            "a".repeat(129)
+        ))));
+        assert!(is_run_file(Path::new(&format!(
+            "{}.jsonl",
+            "a".repeat(128)
+        ))));
     }
 }

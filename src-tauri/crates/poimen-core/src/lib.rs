@@ -1,9 +1,11 @@
 //! Project-side logic shared by the app, the console and `poimen-server`, free of Tauri: the
 //! project file, trust in it, space templates, remote parsing and the pure part of the pane
 //! layout, plus what they need (task modes, harnesses, agent actions, the GUI `PATH`, and the
-//! settings parsers and the in-place config editor).
+//! settings parsers and the in-place config editor), and the agent-events reducer of the
+//! Deliver panel.
 
 pub mod agent_actions;
+pub mod agent_events;
 pub mod git;
 pub mod github;
 pub mod gui_path;
