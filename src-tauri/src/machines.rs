@@ -646,6 +646,51 @@ impl Machines {
     }
 }
 
+/// The machine and the machine's own id of an id qualified as `<machine>::<id>` (the frontend's
+/// `qualifyId`); a local id has no machine.
+pub fn split_id(id: &str) -> (Option<&str>, &str) {
+    match id.rfind("::") {
+        Some(at) => (Some(&id[..at]), &id[at + 2..]),
+        None => (None, id),
+    }
+}
+
+/// The backend an id addresses and the id on it (#693).
+pub struct Routed {
+    pub backend: Arc<dyn Backend>,
+    pub id: String,
+}
+
+/// Routes by the machine part of `id`: a qualified id goes to the backend `resolve` gives for that
+/// machine (an error while it is unknown), a local id to `local`; never to the local one for a
+/// machine's id.
+pub fn route_id(
+    id: &str,
+    local: &Arc<dyn Backend>,
+    resolve: impl FnOnce(&str) -> Result<Arc<dyn Backend>, String>,
+) -> Result<Routed, String> {
+    match split_id(id) {
+        (Some(machine), own) => Ok(Routed {
+            backend: resolve(machine)?,
+            id: own.to_owned(),
+        }),
+        (None, own) => Ok(Routed {
+            backend: local.clone(),
+            id: own.to_owned(),
+        }),
+    }
+}
+
+impl Machines {
+    /// [`route_id`] over the configured machines.
+    pub fn route(&self, local: &Arc<dyn Backend>, id: &str) -> Result<Routed, String> {
+        route_id(id, local, |name| {
+            let backend: Arc<dyn Backend> = self.backend(name)?;
+            Ok(backend)
+        })
+    }
+}
+
 /// First id of a stream on a machine's backend: local streams count up from 1, so the two never
 /// meet and the stream commands route by the id alone.
 pub const REMOTE_STREAM_BASE: u32 = 1 << 31;
@@ -1429,6 +1474,31 @@ mod tests {
         );
         machines.sync(&[], start);
         assert!(machines.list().is_empty());
+    }
+
+    #[test]
+    fn ids_route_by_their_machine_part_and_never_to_the_local_backend() {
+        use crate::backend_fake::FakeBackend;
+        let local: Arc<dyn Backend> = Arc::new(FakeBackend::default());
+        let remote: Arc<dyn Backend> = Arc::new(FakeBackend::default());
+        let r = route_id("box::7", &local, |m| {
+            assert_eq!(m, "box");
+            Ok(remote.clone())
+        })
+        .unwrap();
+        assert!(Arc::ptr_eq(&r.backend, &remote));
+        assert_eq!(r.id, "7");
+        let l = route_id("7", &local, |_| panic!("local id")).unwrap();
+        assert!(Arc::ptr_eq(&l.backend, &local));
+        // An unknown machine is an error, not the local backend.
+        let err = route_id("gone::7", &local, |m| {
+            Err(format!("no machine named {m:?}"))
+        });
+        assert!(err.is_err());
+        let machines = Machines::default();
+        assert!(machines.route(&local, "gone::1").is_err());
+        assert!(machines.route(&local, "1").is_ok());
+        assert_eq!(split_id("a::b::c"), (Some("a::b"), "c"));
     }
 
     #[test]

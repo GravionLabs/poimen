@@ -434,7 +434,14 @@
           <div class="menu-heading" aria-hidden="true">{{ group.label }}</div>
         }
         @for (item of group.items; track item.action) {
-          <button type="button" role="menuitem" class="menu-item" (click)="choose(item.action)">
+          <button
+            type="button"
+            role="menuitem"
+            class="menu-item"
+            [disabled]="!!item.disabled"
+            [attr.title]="item.disabled ?? null"
+            (click)="choose(item.action)"
+          >
             {{ item.label }}
           </button>
         }

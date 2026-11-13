@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from "@angular/core";
+import { splitId } from "./herdr";
 import { parseMachine, type Machine } from "./settings";
 import { TauriBridge } from "./tauri";
 
@@ -44,6 +45,28 @@ export function parseMachineStatus(raw: unknown): MachineStatus | null {
       };
     default:
       return null;
+  }
+}
+
+/**
+ * Why an action on `id` cannot run (#693): `id` is qualified by a machine (`<machine>::<id>`) that
+ * is not connected. `null` for a local id and for a connected machine. The action is disabled with
+ * this reason and never sent anywhere else.
+ */
+export function machineBlock(machines: readonly MachineStatus[], id: string): string | null {
+  const name = splitId(id).machine;
+  if (name === undefined) return null;
+  const machine = machines.find((m) => m.name === name);
+  if (!machine) return `${name} is not a configured machine`;
+  switch (machine.state) {
+    case "connected":
+      return null;
+    case "connecting":
+      return `${name} is connecting`;
+    case "offline":
+      return `${name} is offline${machine.error ? `: ${machine.error}` : ""}`;
+    case "incompatible":
+      return `${name} runs an incompatible server`;
   }
 }
 
@@ -102,6 +125,11 @@ export class Machines {
   readonly checks = this._checks.asReadonly();
   /** Machines checked in this session: the first connect checks, a reconnect does not. */
   private readonly checked = new Set<string>();
+
+  /** Why an action on `id` is blocked (see {@link machineBlock}); `null` when it can run. */
+  blockedReason(id: string): string | null {
+    return machineBlock(this._machines(), id);
+  }
 
   async start(): Promise<void> {
     await this.bridge.listen<unknown>("machine:state_changed", (raw) => this.update(raw));

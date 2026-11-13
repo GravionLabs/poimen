@@ -8,6 +8,7 @@ import {
   type Snapshot,
 } from "./herdr";
 import { HerdrStore } from "./herdr-store";
+import { Machines } from "./machines";
 import type { TemplateHint } from "./space-templates";
 import { TauriBridge } from "./tauri";
 import { UiState } from "./ui-state";
@@ -109,6 +110,7 @@ export class SpaceActions {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(HerdrStore);
   private readonly ui = inject(UiState);
+  private readonly machines = inject(Machines, { optional: true });
 
   private readonly _open = signal(false);
   private readonly _error = signal<string | null>(null);
@@ -327,6 +329,11 @@ export class SpaceActions {
     }
     const space = this.store.snapshot().spaces.find((s) => s.space_id === workspaceId);
     if (space?.label === label) return true;
+    const blocked = this.machines?.blockedReason(workspaceId) ?? null;
+    if (blocked) {
+      this._renameError.set(blocked);
+      return false;
+    }
     try {
       await this.bridge.invoke("space_rename", { workspaceId, label });
     } catch (err) {
@@ -404,6 +411,11 @@ export class SpaceActions {
 
   private async close(workspaceId: string): Promise<string[] | undefined> {
     if (this._closingIds().has(workspaceId)) return undefined;
+    const blocked = this.machines?.blockedReason(workspaceId) ?? null;
+    if (blocked) {
+      this._closeError.set(blocked);
+      return undefined;
+    }
     const snapshot = this.store.snapshot();
     const paneIds = snapshot.terminals
       .filter((p) => p.space_id === workspaceId)
