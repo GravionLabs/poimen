@@ -8,7 +8,16 @@ import {
 } from "@angular/core";
 import { rowName, type Terminal, type WorkspaceNode } from "../../core/herdr";
 import { HerdrStore } from "../../core/herdr-store";
-import { Machines, type MachineStatus } from "../../core/machines";
+import { checkPassed, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
+
+/** One line for the last check of a machine: its result, the error, or what is missing. */
+export function checkNote(check: MachineCheck | { error: string } | undefined): string | null {
+  if (!check) return null;
+  if ("error" in check) return `Check failed: ${check.error}`;
+  if (checkPassed(check)) return "Check passed";
+  const missing = check.checks.filter((c) => c.status === "missing").map((c) => c.id);
+  return `Check: missing ${missing.join(", ")}`;
+}
 
 /** The text under a machine's name: its connection state, or why it is not usable. */
 export function machineNote(machine: MachineStatus): string {
@@ -65,6 +74,9 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
           }
         </div>
         <p class="note" role="status">{{ g.note }}</p>
+        @if (g.check) {
+          <p class="note check" role="status">{{ g.check }}</p>
+        }
         @for (s of g.spaces; track s.node.workspace.space_id) {
           <div class="space" [attr.aria-disabled]="!g.usable || null">
             <span class="space-name">{{ s.node.workspace.label }}</span>
@@ -95,6 +107,15 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
       <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
         <button type="button" role="menuitem" class="menu-item" (click)="reconnect(at.name)">
           Reconnect
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="menu-item"
+          [disabled]="!usableMenu()"
+          (click)="runCheck(at.name)"
+        >
+          Check
         </button>
       </div>
     }
@@ -233,6 +254,7 @@ export class MachinesSection {
       machine,
       note: machineNote(machine),
       usable: machineUsable(machine),
+      check: checkNote(this.machines.checks()[machine.name]),
       spaces: this.store.remoteTree(machine.name).map((node) => ({
         node,
         rows: machineRows(node),
@@ -240,6 +262,12 @@ export class MachinesSection {
     })),
   );
   protected readonly menuAt = signal<{ name: string; x: number; y: number } | null>(null);
+
+  protected readonly usableMenu = computed(() => {
+    const at = this.menuAt();
+    const m = at && this.machines.machines().find((x) => x.name === at.name);
+    return !!m && machineUsable(m);
+  });
 
   protected pick(terminal: Terminal, usable: boolean): void {
     if (usable) this.selected.emit(terminal);
@@ -252,6 +280,11 @@ export class MachinesSection {
 
   protected closeMenu(): void {
     this.menuAt.set(null);
+  }
+
+  protected runCheck(name: string): void {
+    this.closeMenu();
+    void this.machines.check(name);
   }
 
   protected reconnect(name: string): void {

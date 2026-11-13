@@ -41,7 +41,6 @@ import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TerminalColorSync } from "./core/terminal-colors";
-import { Machines } from "./core/machines";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { Updater } from "./core/updater";
@@ -196,7 +195,6 @@ export class App {
 
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
-  private readonly machines = inject(Machines);
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
@@ -360,7 +358,6 @@ export class App {
     void this.machines.start();
     void this.store.start().then(() => this.dropMissing());
     void this.remoteSpaces.start();
-    void this.machines.start();
     void this.seedDefaults();
   }
 
