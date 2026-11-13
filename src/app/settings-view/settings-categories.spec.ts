@@ -15,7 +15,7 @@ describe("settings categories", () => {
     expect(tree).toEqual({
       "Appearance & Behavior": ["Appearance"],
       Workspace: ["Explorer", "Spaces", "New space layout", "Trusted projects"],
-      Backend: ["Server", "Agents"],
+      Backend: ["Server", "Machines", "Agents"],
     });
   });
 
@@ -24,7 +24,7 @@ describe("settings categories", () => {
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");
-    expect(allPages()).toHaveLength(7);
+    expect(allPages()).toHaveLength(8);
   });
 
   it("resolves the retired color-scheme page to appearance", () => {

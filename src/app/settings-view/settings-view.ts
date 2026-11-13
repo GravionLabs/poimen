@@ -47,6 +47,7 @@ import {
   MIN_TERMINAL_FONT_SIZE,
   MIN_UI_FONT_SIZE,
 } from "../core/ui-font";
+import { MachinesPage } from "../machines-page/machines-page";
 import { SpaceLayoutEditor } from "./space-layout-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 
@@ -147,7 +148,7 @@ export function withRoot(
 /** The settings view (an editor tab): appearance and the color scheme picker with live preview. */
 @Component({
   selector: "app-settings-view",
-  imports: [SpaceLayoutEditor, SpaceTemplatesEditor],
+  imports: [MachinesPage, SpaceLayoutEditor, SpaceTemplatesEditor],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -633,6 +633,7 @@ describe("SettingsView categories", () => {
       "Trusted projects",
       "Backend",
       "Server",
+      "Machines",
       "Agents",
     ]);
     expect(crumb(host)).toBe("Workspace › Explorer");
@@ -700,7 +701,7 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(10);
+    expect(titles(host)).toHaveLength(11);
   });
 
   it("opens the removed notifications page as Appearance, without notification switches (#676)", () => {
@@ -752,8 +753,16 @@ describe("SettingsView categories", () => {
       readFileSync("src/app/settings-view/settings-view.ts", "utf8");
     const editor = readFileSync("src/app/settings-view/space-layout-editor.html", "utf8");
     const templates = readFileSync("src/app/settings-view/space-templates-editor.html", "utf8");
+    const machinesPage = readFileSync("src/app/machines-page/machines-page.ts", "utf8");
     for (const page of allPages()) {
-      const source = page.id === "space-layout" ? editor : page.id === "spaces" ? templates : html;
+      const source =
+        page.id === "space-layout"
+          ? editor
+          : page.id === "spaces"
+            ? templates
+            : page.id === "machines"
+              ? machinesPage
+              : html;
       for (const label of page.labels) {
         expect(source.toLowerCase(), `${page.id}: ${label}`).toContain(label.toLowerCase());
       }

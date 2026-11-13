@@ -37,6 +37,7 @@ import { Notifications } from "./notifications/notifications";
 import { HerdrStore } from "./core/herdr-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TerminalColorSync } from "./core/terminal-colors";
+import { Machines } from "./core/machines";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { Updater } from "./core/updater";
@@ -150,6 +151,7 @@ export class App {
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
   private readonly userSchemes = inject(UserSchemes);
+  private readonly machines = inject(Machines);
   private readonly terminalColors = inject(TerminalColorSync);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
@@ -347,6 +349,7 @@ export class App {
     });
     void this.prefs.start();
     void this.userSchemes.start();
+    void this.machines.start();
     void this.store.start().then(() => this.dropMissing());
     void this.seedDefaults();
   }
