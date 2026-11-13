@@ -825,7 +825,7 @@ impl Backend for PoimenBackend {
 }
 
 /// `{"event": kind, "data": ...}` of the wire form as a backend event.
-fn backend_event(event: &Event) -> BackendEvent {
+pub fn backend_event(event: &Event) -> BackendEvent {
     // The frontend applies status changes from herdr's event, keyed by pane.
     if let Event::AgentStatusChanged {
         terminal_id,

@@ -42,6 +42,8 @@ import { isGithubUrl } from "../github/pulls";
 import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
+import { Machines } from "../core/machines";
+import { MachinesSection } from "./machines-section/machines-section";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 
 /** What a tree node carries back to the template. */
@@ -333,6 +335,7 @@ export class SpaceEditFocus {
     HxInput,
     NgTemplateOutlet,
     SplitPane,
+    MachinesSection,
   ],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
@@ -340,6 +343,7 @@ export class SpaceEditFocus {
   host: { "[class.split]": "layout() === 'split'" },
 })
 export class Sidebar {
+  protected readonly machines = inject(Machines);
   /** Ids of the panes that have an open view. */
   readonly openIds = input<ReadonlySet<string>>(new Set());
   /** Id of the pane whose tab is active in the editor. */

@@ -10,6 +10,8 @@ export interface OpenTerminal {
   rows: number;
   /** Replaces the current controller (control mode only). */
   takeover: boolean;
+  /** The machine whose backend runs the terminal (#280); absent for this Mac. */
+  machine?: string;
 }
 
 /** A mouse command for a rendered stream; `modifiers` combines Shift = 1, Ctrl = 2, Alt = 4. */

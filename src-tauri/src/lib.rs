@@ -1105,8 +1105,21 @@ fn sync_machines(
         machines::Machine::start(
             config.clone(),
             std::sync::Arc::new(machines::SshConnector::new(&config.ssh)),
-            move |status| {
-                let _ = handle.emit("machine:state_changed", status);
+            {
+                let handle = handle.clone();
+                move |status| {
+                    let _ = handle.emit("machine:state_changed", status);
+                }
+            },
+            {
+                let handle = handle.clone();
+                let machine = config.name.clone();
+                move |event| {
+                    let _ = handle.emit(
+                        "machine:event",
+                        serde_json::json!({"machine": machine, "kind": event.kind, "data": event.data}),
+                    );
+                }
             },
         )
     });
@@ -1874,6 +1887,7 @@ fn channel_messages(record: &backend::StreamRecord, emulated: bool) -> Vec<Invok
 /// global event, so no record is lost or mixed up before the view has its id). The result says
 /// whether the stream is emulated (raw PTY bytes) or rendered (finished frames).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn open_terminal(
     backend: State<'_, Shared>,
     mode: Mode,
@@ -1881,8 +1895,16 @@ fn open_terminal(
     cols: u16,
     rows: u16,
     takeover: bool,
+    machine: Option<String>,
     on_record: Channel<InvokeResponseBody>,
+    machines: State<'_, SharedMachines>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
 ) -> Result<backend::OpenedStream, String> {
+    // A terminal of a machine opens over that machine's backend (never started by poimen).
+    let backend: Shared = match &machine {
+        Some(name) => machines.backend(name)?,
+        None => backend.inner().clone(),
+    };
     let request = StreamRequest {
         mode,
         target: &target,
@@ -1891,44 +1913,74 @@ fn open_terminal(
         takeover,
     };
     let emulated = backend.emulated();
-    backend.open_stream(
+    let opened = backend.open_stream(
         request,
         Box::new(move |_, record| {
             for message in channel_messages(&record, emulated) {
                 let _ = on_record.send(message);
             }
         }),
-    )
+    )?;
+    if machine.is_none() {
+        return Ok(opened);
+    }
+    Ok(backend::OpenedStream {
+        id: remote.add(backend, opened.id),
+        ..opened
+    })
+}
+
+/// The backend and stream id a stream command works on: a machine's stream by its mapped id, else
+/// the local backend.
+fn stream_of(backend: &Shared, remote: &machines::RemoteStreams, id: u32) -> (Shared, u32) {
+    if id >= machines::REMOTE_STREAM_BASE
+        && let Some(found) = remote.get(id)
+    {
+        return found;
+    }
+    (backend.clone(), id)
 }
 
 #[tauri::command]
-fn terminal_input(backend: State<'_, Shared>, id: u32, text: String) -> Result<(), String> {
+fn terminal_input(
+    backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
+    id: u32,
+    text: String,
+) -> Result<(), String> {
+    let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_input(id, &text)
 }
 
 #[tauri::command]
 fn terminal_resize(
     backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
     id: u32,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_resize(id, cols, rows)
 }
 
 #[tauri::command]
 fn terminal_scroll(
     backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
     id: u32,
     up: bool,
     lines: u16,
 ) -> Result<(), String> {
+    let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_scroll(id, up, lines)
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn terminal_mouse(
     backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
     id: u32,
     action: String,
     button: String,
@@ -1936,11 +1988,23 @@ fn terminal_mouse(
     row: u16,
     modifiers: u8,
 ) -> Result<(), String> {
+    let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_mouse(id, &action, &button, column, row, modifiers)
 }
 
 #[tauri::command]
-fn close_terminal(backend: State<'_, Shared>, id: u32) {
+fn close_terminal(
+    backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
+    id: u32,
+) {
+    let (backend, id) = if id >= machines::REMOTE_STREAM_BASE {
+        remote
+            .remove(id)
+            .unwrap_or_else(|| (backend.inner().clone(), id))
+    } else {
+        (backend.inner().clone(), id)
+    };
     backend.close_stream(id);
 }
 
@@ -2134,6 +2198,7 @@ pub fn run() {
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
         .manage(SharedMachines::default())
+        .manage(std::sync::Arc::new(machines::RemoteStreams::default()))
         .setup(move |app| {
             let handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
