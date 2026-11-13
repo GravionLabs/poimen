@@ -138,6 +138,22 @@ describe("Machines.check", () => {
     expect(asked).toEqual([{ name: "box" }]);
   });
 
+  it("checks a machine that is already connected when the list is read, once", async () => {
+    const asked: unknown[] = [];
+    tauri.answer("list_machines", () => [{ ...box, state: "connected", serverVersion: "1" }]);
+    tauri.answer("machine_check", (args) => {
+      asked.push(args);
+      return result;
+    });
+    const m = create();
+    await m.start();
+    await vi.waitFor(() => expect(m.checks()["box"]).toBeDefined());
+    await m.refresh();
+    tauri.emit("machine:state_changed", { ...box, state: "connected", serverVersion: "1" });
+    await Promise.resolve();
+    expect(asked).toEqual([{ name: "box" }]);
+  });
+
   it("checks again on demand and keeps the error when it cannot run", async () => {
     tauri.answer("machine_check", () => {
       throw new Error("machine is not connected");

@@ -113,7 +113,11 @@ export class Machines {
     try {
       const raw = await this.bridge.invoke<unknown>("list_machines");
       const list = Array.isArray(raw) ? raw : [];
-      this._machines.set(list.map(parseMachineStatus).filter((m) => m !== null));
+      const machines = list.map(parseMachineStatus).filter((m) => m !== null);
+      this._machines.set(machines);
+      // A machine already connected when the list is read is checked now (first connect).
+      for (const m of machines)
+        if (m.state === "connected" && !this.checked.has(m.name)) void this.check(m.name);
     } catch {
       // keep the last list
     }
