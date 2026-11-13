@@ -8,6 +8,7 @@
 //! persist in `server.json` (`store.rs`); a new server adopts the hosts of that list (#604) and
 //! drops the leaves whose terminal did not come back.
 
+pub mod check;
 pub mod claude;
 pub mod copilot;
 mod create;
@@ -791,6 +792,12 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             pid: std::process::id(),
             clients: shared.client_kinds(),
         })),
+        "machine.check" => Ok(json!(check::run(
+            &check::System,
+            env!("CARGO_PKG_VERSION"),
+            PROTOCOL_VERSION,
+            proto::CHANNEL,
+        ))),
         "space.list" => {
             let inner = lock(&shared.inner);
             Ok(json!(SpaceList {

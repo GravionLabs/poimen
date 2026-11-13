@@ -19,11 +19,11 @@ pub mod pipe;
 pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
-    AttachMode, AttachResult, ErrorCode, Event, PingResult, Request, ServerLine, SetColors, Space,
-    SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
-    SpaceList, SpaceRename, Tab, TabClose, TabCreate, TabFocus, TabMove, TabRename, TabResizeSplit,
-    TabSplit, Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalDetach,
-    TerminalInput, TerminalList, TerminalRename, TerminalResize,
+    AttachMode, AttachResult, ErrorCode, Event, MachineCheckResult, PingResult, Request,
+    ServerLine, SetColors, Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose,
+    SpaceCreate, SpaceCreateResult, SpaceList, SpaceRename, Tab, TabClose, TabCreate, TabFocus,
+    TabMove, TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClose,
+    TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalResize,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -326,6 +326,12 @@ impl Client {
             None => result,
         };
         serde_json::from_value(value).map_err(|e| ClientError::Protocol(format!("{method}: {e}")))
+    }
+
+    /// `machine.check`: what the machine of this server has for tasks, per check. A server that
+    /// predates it answers `unknown_method`.
+    pub fn machine_check(&self) -> Result<MachineCheckResult, ClientError> {
+        self.typed("machine.check", Value::Null, None)
     }
 
     pub fn ping(&self) -> Result<PingResult, ClientError> {
@@ -894,6 +900,34 @@ mod tests {
         assert!(sent.contains(r#""direction":"down""#), "{sent}");
         assert!(sent.contains(r#""ratio":0.4"#), "{sent}");
         assert!(!sent.contains("cwd"), "{sent}");
+    }
+
+    #[test]
+    fn machine_check_reads_the_checks_and_unknown_method_is_an_error() {
+        let path = temp_socket("mcheck");
+        let server = fake_server(
+            &path,
+            vec![
+                r#"{"id":"$ID","result":{"version":"0.18.0","protocol":6,"checks":[{"id":"gh","status":"missing","fix":"gh auth login"}]}}"#.into(),
+            ],
+        );
+        let r = Client::new(&path).machine_check().unwrap();
+        assert_eq!(r.checks[0].fix.as_deref(), Some("gh auth login"));
+        assert!(!r.ok());
+        assert!(
+            server
+                .join()
+                .unwrap()
+                .contains(r#""method":"machine.check""#)
+        );
+
+        let path = temp_socket("mcheck-old");
+        let server = fake_server(
+            &path,
+            vec![r#"{"id":"$ID","error":{"code":"unknown_method","message":"no"}}"#.into()],
+        );
+        assert!(Client::new(&path).machine_check().is_err());
+        server.join().unwrap();
     }
 
     #[test]
