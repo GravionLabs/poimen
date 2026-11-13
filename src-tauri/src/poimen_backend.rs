@@ -40,6 +40,8 @@ struct Stream {
 
 pub struct PoimenBackend {
     client: Client,
+    /// The server of a machine (`machines.rs`): reached over SSH, never started or stopped here.
+    remote: bool,
     next_id: AtomicU32,
     streams: Arc<Mutex<HashMap<u32, Arc<Stream>>>>,
 }
@@ -58,9 +60,28 @@ impl PoimenBackend {
     pub fn new(client: Client) -> Self {
         Self {
             client,
+            remote: false,
             next_id: AtomicU32::new(0),
             streams: Arc::default(),
         }
+    }
+
+    /// The backend of a machine's server: `client` reaches it over its connector, and poimen never
+    /// starts, restarts or stops that server.
+    pub fn remote(client: Client) -> Self {
+        Self {
+            remote: true,
+            ..Self::new(client)
+        }
+    }
+
+    fn local_only(&self) -> Result<(), StartError> {
+        if self.remote {
+            return Err(StartError::Other(
+                "poimen never starts or stops the poimen-server of a machine".into(),
+            ));
+        }
+        Ok(())
     }
 
     fn stream(&self, id: u32) -> Result<Arc<Stream>, String> {
@@ -392,16 +413,19 @@ fn controller_held() -> StreamRecord {
 
 impl Backend for PoimenBackend {
     fn ensure_running(&self, auto_start: bool) -> Result<Outcome, StartError> {
+        self.local_only()?;
         poimen_server::ensure_running(&poimen_server::SystemRunner::new(), auto_start)
             .map_err(|e| StartError::Other(e.to_string()))
     }
 
     fn restart_server(&self) -> Result<Outcome, StartError> {
+        self.local_only()?;
         poimen_server::restart(&poimen_server::SystemRunner::new())
             .map_err(|e| StartError::Other(e.to_string()))
     }
 
     fn stop_server(&self) -> Result<(), StartError> {
+        self.local_only()?;
         poimen_server::stop(&poimen_server::SystemRunner::new())
             .map_err(|e| StartError::Other(e.to_string()))
     }
