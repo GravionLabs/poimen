@@ -207,6 +207,39 @@ pub fn for_project(
     }
 }
 
+/// The task modes of a user config (`tasks`): its `modes` replace the default list and its
+/// `worktreeDir` the default directory, as in the app's settings. Invalid entries warn.
+pub fn user_modes(config: &serde_json::Value, warnings: &mut Vec<String>) -> TaskModes {
+    let mut modes = TaskModes::default();
+    if let Some(value) = config.get("tasks") {
+        let parsed = crate::settings::parse_tasks(value, "using the default agent mode", warnings);
+        if let Some(dir) = parsed.worktree_dir {
+            modes.worktree_dir = dir;
+        }
+        if let Some(list) = parsed.modes {
+            modes.modes = list;
+        }
+    }
+    modes
+}
+
+/// The task modes for the repository of `dir`: those of `~/.config/poimen/config.json` under
+/// `home` (none: the defaults) with the trusted project file's merged over them
+/// ([`for_project`]).
+pub fn for_dir(home: Option<&std::path::Path>, dir: &str) -> Resolved {
+    let config = home
+        .and_then(|h| std::fs::read_to_string(crate::settings::config_path(h)).ok())
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let user = user_modes(&config, &mut Vec::new());
+    let root = crate::git::toplevel(dir).unwrap_or_else(|| dir.to_owned());
+    let sources = crate::trust::Sources::read(&root);
+    let trusted = home
+        .map(crate::settings::trusted_projects)
+        .unwrap_or_default();
+    for_project(&user, &sources, &trusted)
+}
+
 /// The names of the `{placeholder}`s in `template`, in order.
 pub fn placeholders(template: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -418,6 +451,23 @@ pub fn expand_mode(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn user_modes_replace_the_defaults_like_the_app() {
+        let mut warnings = Vec::new();
+        let none = super::user_modes(&serde_json::Value::Null, &mut warnings);
+        assert_eq!(none, super::TaskModes::default());
+        let config = serde_json::json!({"tasks": {
+            "worktreeDir": "../wt/{repo}-{nr}",
+            "modes": [{"name": "fix", "branch": "fix/{nr}"}]
+        }});
+        let modes = super::user_modes(&config, &mut warnings);
+        assert_eq!(modes.worktree_dir, "../wt/{repo}-{nr}");
+        let names: Vec<&str> = modes.modes.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["fix"]);
+        assert_eq!(modes.modes[0].branch, "fix/{nr}");
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
     use super::*;
     use crate::harness::default_harnesses;
     use crate::trust::Sources;

@@ -34,14 +34,16 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::vte::ansi::Rgb;
 use emulator::Colors;
+use poimen_core::{repos, worktree};
 use poimen_protocol::{
     self as proto, AgentInfo, AgentStatus, AttachMode, ClientKind, DetachReason, ErrorCode, Event,
-    EventsSubscribe, PROTOCOL_VERSION, PingResult, Request, Response, ServerShutdown, SetColors,
-    Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
-    SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabRename,
-    TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose,
-    TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
-    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus,
+    EventsSubscribe, PROTOCOL_VERSION, PingResult, RepoEnsure, RepoEnsureResult, Request, Response,
+    ServerShutdown, SetColors, Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose,
+    SpaceCreate, SpaceCreateResult, SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate,
+    TabFocus, TabMove, TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach,
+    TerminalClearTokens, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
+    TerminalList, TerminalRename, TerminalReportAgent, TerminalReportTokens, TerminalResize,
+    TerminalStatus, WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 
@@ -231,6 +233,8 @@ pub(crate) struct Shared {
     scrollback: usize,
     home: Option<PathBuf>,
     pty_host: PtyHost,
+    /// What `repo.ensure` clones with: the real `gh`, or a fake set by tests ([`Server::set_gh`]).
+    gh: RwLock<Arc<dyn repos::Gh>>,
     /// The scheme colors for terminal queries, shared with every terminal's stream.
     colors: Arc<RwLock<Colors>>,
     /// Run once the terminals are ended after `server.shutdown`; the binary exits the process.
@@ -454,6 +458,7 @@ impl Server {
             scrollback: config.scrollback,
             home: config.home,
             pty_host: config.pty_host,
+            gh: RwLock::new(Arc::new(repos::SystemGh)),
             colors: Arc::default(),
             on_shutdown: Mutex::new(None),
             stopped: AtomicBool::new(false),
@@ -493,6 +498,12 @@ impl Server {
     /// its terminals (tests use this to observe a shutdown without ending their process).
     pub fn on_shutdown(&self, f: impl FnOnce() + Send + 'static) {
         *lock(&self.shared.on_shutdown) = Some(Box::new(f));
+    }
+
+    /// Replaces the `gh` that `repo.ensure` clones with (tests map `gh repo clone` onto a local
+    /// origin, so they need no network).
+    pub fn set_gh(&self, gh: Arc<dyn repos::Gh>) {
+        *self.shared.gh.write().unwrap_or_else(|e| e.into_inner()) = gh;
     }
 
     /// Accepts connections forever, one thread each.
@@ -798,6 +809,8 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             PROTOCOL_VERSION,
             proto::CHANNEL,
         ))),
+        "repo.ensure" => repo_ensure(shared, parsed(request)?),
+        "worktree.create" => worktree_create(shared, parsed(request)?),
         "space.list" => {
             let inner = lock(&shared.inner);
             Ok(json!(SpaceList {
@@ -934,6 +947,49 @@ fn space_create(shared: &Arc<Shared>, p: SpaceCreate) -> ApiResult {
     let (mut created, typing) = build_space(shared, name, build)?;
     type_commands(typing, &mut created);
     Ok(json!(SpaceCreateResult::Created(created)))
+}
+
+/// `repo.ensure` (#282): the clone of `owner/repo` under `reposDir` of the user config, cloned
+/// with `gh repo clone` when absent and fetched when present; anything else at its path is
+/// `conflict` and stays untouched. Runs on the connection's thread, without the server lock.
+fn repo_ensure(shared: &Arc<Shared>, p: RepoEnsure) -> ApiResult {
+    let home = shared.home.as_deref();
+    let template = repos::user_repos_dir(home);
+    let gh = Arc::clone(&shared.gh.read().unwrap_or_else(|e| e.into_inner()));
+    match repos::ensure(gh.as_ref(), home, &template, p.owner.trim(), p.repo.trim()) {
+        Ok(done) => Ok(json!(RepoEnsureResult {
+            path: done.path,
+            cloned: done.cloned,
+        })),
+        Err(repos::EnsureError::Invalid(m)) => Err((ErrorCode::InvalidParams, m)),
+        Err(repos::EnsureError::Occupied(m)) => Err((ErrorCode::Conflict, m)),
+        Err(repos::EnsureError::Failed(m)) => Err((ErrorCode::Internal, m)),
+    }
+}
+
+/// `worktree.create` (#282): `task_worktree` of #190 through `poimen_core::worktree`, with the
+/// task modes of the user config and the trusted project file.
+fn worktree_create(shared: &Arc<Shared>, p: WorktreeCreate) -> ApiResult {
+    if !Path::new(&p.repo_dir).is_dir() {
+        return Err((
+            ErrorCode::InvalidParams,
+            format!("{} is not a directory", p.repo_dir),
+        ));
+    }
+    let issue = worktree::Issue {
+        nr: p.issue.nr,
+        title: p.issue.title,
+        url: p.issue.url,
+    };
+    match worktree::task_worktree(shared.home.as_deref(), &p.repo_dir, &issue, &p.mode) {
+        Ok(wt) => Ok(json!(WorktreeCreateResult {
+            path: wt.path,
+            branch: wt.branch,
+            created: wt.created,
+        })),
+        Err(worktree::TaskWorktreeError::UnknownMode(m)) => Err((ErrorCode::InvalidParams, m)),
+        Err(worktree::TaskWorktreeError::Failed(m)) => Err((ErrorCode::Internal, m)),
+    }
 }
 
 /// `space.apply_layout`: the resolved layout of the space (or a preset of its project file)

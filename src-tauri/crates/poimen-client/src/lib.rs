@@ -19,17 +19,20 @@ pub mod pipe;
 pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
-    AttachMode, AttachResult, ErrorCode, Event, MachineCheckResult, PingResult, Request,
-    ServerLine, SetColors, Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose,
-    SpaceCreate, SpaceCreateResult, SpaceList, SpaceRename, Tab, TabClose, TabCreate, TabFocus,
-    TabMove, TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClose,
-    TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename, TerminalResize,
+    AttachMode, AttachResult, ErrorCode, Event, MachineCheckResult, PingResult, RepoEnsure,
+    RepoEnsureResult, Request, ServerLine, SetColors, Space, SpaceApplyLayout,
+    SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult, SpaceList, SpaceRename,
+    Tab, TabClose, TabCreate, TabFocus, TabMove, TabRename, TabResizeSplit, TabSplit, TaskIssue,
+    Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
+    TerminalList, TerminalRename, TerminalResize, WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// How long a request waits for its response.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a request that clones or fetches (`repo.ensure`, `worktree.create`) may take.
+pub const LONG_REQUEST_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -207,8 +210,9 @@ fn request_on(
     path: &Path,
     method: &str,
     params: Value,
+    timeout: Duration,
 ) -> Result<Value, ClientError> {
-    let mut conn = Connection::open(endpoint, path, Some(REQUEST_TIMEOUT))?;
+    let mut conn = Connection::open(endpoint, path, Some(timeout))?;
     conn.call(method, params)
 }
 
@@ -256,8 +260,18 @@ impl Client {
 
     /// Sends one request and returns its `result`, waiting at most [`REQUEST_TIMEOUT`].
     pub fn request(&self, method: &str, params: Value) -> Result<Value, ClientError> {
+        self.request_within(method, params, REQUEST_TIMEOUT)
+    }
+
+    /// Like [`Client::request`], waiting at most `timeout`.
+    pub fn request_within(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, ClientError> {
         if self.endpoint.timeouts_supported() {
-            return request_on(&self.endpoint, &self.path, method, params);
+            return request_on(&self.endpoint, &self.path, method, params, timeout);
         }
         // Named pipes and connector pipes have no I/O timeouts: the request runs on a thread of
         // its own, which ends when the connection does.
@@ -265,9 +279,9 @@ impl Client {
         let (endpoint, path, method) =
             (self.endpoint.clone(), self.path.clone(), method.to_string());
         thread::spawn(move || {
-            let _ = tx.send(request_on(&endpoint, &path, &method, params));
+            let _ = tx.send(request_on(&endpoint, &path, &method, params, timeout));
         });
-        match rx.recv_timeout(REQUEST_TIMEOUT) {
+        match rx.recv_timeout(timeout) {
             Ok(result) => result,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 Err(ClientError::Io(io::ErrorKind::TimedOut.into()))
@@ -332,6 +346,38 @@ impl Client {
     /// predates it answers `unknown_method`.
     pub fn machine_check(&self) -> Result<MachineCheckResult, ClientError> {
         self.typed("machine.check", Value::Null, None)
+    }
+
+    /// `repo.ensure`: the clone of `owner/repo` under the server's `reposDir`, cloned when absent
+    /// and fetched when present; waits up to [`LONG_REQUEST_TIMEOUT`].
+    pub fn ensure_repo(&self, owner: &str, repo: &str) -> Result<RepoEnsureResult, ClientError> {
+        let params = serde_json::to_value(RepoEnsure {
+            owner: owner.to_owned(),
+            repo: repo.to_owned(),
+        })
+        .unwrap_or(Value::Null);
+        let value = self.request_within("repo.ensure", params, LONG_REQUEST_TIMEOUT)?;
+        serde_json::from_value(value)
+            .map_err(|e| ClientError::Protocol(format!("repo.ensure: {e}")))
+    }
+
+    /// `worktree.create`: the worktree of `issue` for task mode `mode` of the repository of
+    /// `repo_dir` on the server's machine; waits up to [`LONG_REQUEST_TIMEOUT`].
+    pub fn create_worktree(
+        &self,
+        repo_dir: &str,
+        issue: TaskIssue,
+        mode: &str,
+    ) -> Result<WorktreeCreateResult, ClientError> {
+        let params = serde_json::to_value(WorktreeCreate {
+            repo_dir: repo_dir.to_owned(),
+            issue,
+            mode: mode.to_owned(),
+        })
+        .unwrap_or(Value::Null);
+        let value = self.request_within("worktree.create", params, LONG_REQUEST_TIMEOUT)?;
+        serde_json::from_value(value)
+            .map_err(|e| ClientError::Protocol(format!("worktree.create: {e}")))
     }
 
     pub fn ping(&self) -> Result<PingResult, ClientError> {
@@ -927,6 +973,50 @@ mod tests {
             vec![r#"{"id":"$ID","error":{"code":"unknown_method","message":"no"}}"#.into()],
         );
         assert!(Client::new(&path).machine_check().is_err());
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn ensure_repo_and_create_worktree_send_their_params() {
+        let path = temp_socket("repo");
+        let server = fake_server(
+            &path,
+            vec![r#"{"id":"$ID","result":{"path":"/s/o/r","cloned":true}}"#.into()],
+        );
+        let r = Client::new(&path).ensure_repo("o", "r").unwrap();
+        assert_eq!(r.path, "/s/o/r");
+        assert!(r.cloned);
+        let sent = server.join().unwrap();
+        assert!(sent.contains(r#""method":"repo.ensure""#), "{sent}");
+        assert!(sent.contains(r#""owner":"o""#), "{sent}");
+
+        let path = temp_socket("wt");
+        let server = fake_server(
+            &path,
+            vec![
+                r#"{"id":"$ID","result":{"path":"/s/o/r-7","branch":"feat/7-x","created":true}}"#
+                    .into(),
+            ],
+        );
+        let issue = TaskIssue {
+            nr: 7,
+            title: "feat: X".into(),
+            url: String::new(),
+        };
+        let w = Client::new(&path)
+            .create_worktree("/s/o/r", issue, "agent")
+            .unwrap();
+        assert_eq!(w.branch, "feat/7-x");
+        let sent = server.join().unwrap();
+        assert!(sent.contains(r#""method":"worktree.create""#), "{sent}");
+        assert!(sent.contains(r#""mode":"agent""#), "{sent}");
+
+        let path = temp_socket("repo-err");
+        let server = fake_server(
+            &path,
+            vec![r#"{"id":"$ID","error":{"code":"conflict","message":"taken"}}"#.into()],
+        );
+        assert!(Client::new(&path).ensure_repo("o", "r").is_err());
         server.join().unwrap();
     }
 
