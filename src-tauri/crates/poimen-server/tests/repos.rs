@@ -1,4 +1,4 @@
-//! `repo.ensure` and `worktree.create` (#282) end to end: a real server on a temp socket, a temp
+//! `repo.ensure`, `worktree.create` (#282) and `worktree.cleanup` (#284) end to end: a real server on a temp socket, a temp
 //! home and a bare local `origin`. `gh repo clone` is faked by a `Gh` that clones the bare origin
 //! and points the clone's `origin` at the GitHub URL (with an `insteadOf` back to the bare one),
 //! so no test needs the network. Never the user's server, home or config.
@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, thread};
 
-use poimen_client::protocol::{ErrorCode, TaskIssue};
+use poimen_client::protocol::{ErrorCode, MergedPull, TaskIssue, WorktreeCleanup};
 use poimen_client::{Client, ClientError};
 use poimen_core::github::Output;
 use poimen_core::repos::Gh;
@@ -336,4 +336,200 @@ fn worktree_create_matches_task_worktree() {
     let gone = env.dir.join("gone").display().to_string();
     let (c, _) = code(client.create_worktree(&gone, issue(), "agent").unwrap_err());
     assert_eq!(c, ErrorCode::InvalidParams);
+}
+
+fn issue(nr: u64) -> TaskIssue {
+    TaskIssue {
+        nr,
+        title: format!("feat: Task {nr}"),
+        url: String::new(),
+    }
+}
+
+fn cleanup(
+    owner: &str,
+    repo: &str,
+    merged: &[(&str, u64)],
+    focused: Option<&str>,
+) -> WorktreeCleanup {
+    WorktreeCleanup {
+        owner: owner.into(),
+        repo: repo.into(),
+        merged: merged
+            .iter()
+            .map(|(branch, number)| MergedPull {
+                branch: (*branch).into(),
+                number: *number,
+            })
+            .collect(),
+        focused_space: focused.map(Into::into),
+        skip_teardown: false,
+    }
+}
+
+#[test]
+fn worktree_cleanup_removes_merged_clean_worktrees_and_leaves_the_rest() {
+    let env = Env::new();
+    let client = env.start();
+    let repo = client.ensure_repo("o", "app").unwrap();
+    let wt = |nr| {
+        client
+            .create_worktree(&repo.path, issue(nr), "agent")
+            .unwrap()
+    };
+    // 7: merged, clean, pushed. 8: merged, dirty. 9: merged, a commit on no remote branch.
+    // 10: merged, clean, the focused space. 11: not merged.
+    let (w7, w8, w9, w10, w11) = (wt(7), wt(8), wt(9), wt(10), wt(11));
+    git(Path::new(&w7.path), &["push", "origin", &w7.branch]);
+    std::fs::write(Path::new(&w8.path).join("dirty.txt"), "x").unwrap();
+    std::fs::write(Path::new(&w9.path).join("local.txt"), "x").unwrap();
+    git(Path::new(&w9.path), &["add", "."]);
+    git(Path::new(&w9.path), &["commit", "-m", "local"]);
+    let s7 = client.create_space("seven", &w7.path).unwrap();
+    let s10 = client.create_space("ten", &w10.path).unwrap();
+
+    let merged = [
+        (w7.branch.as_str(), 107),
+        (w8.branch.as_str(), 108),
+        (w9.branch.as_str(), 109),
+        (w10.branch.as_str(), 110),
+        ("main", 1),
+    ];
+    let report = client
+        .cleanup_worktrees(cleanup("o", "app", &merged, Some(&s10.id)))
+        .unwrap();
+    assert_eq!(report.path.as_deref(), Some(repo.path.as_str()));
+    assert!(!report.teardown_untrusted);
+
+    let removed: Vec<(u64, bool)> = report
+        .removed
+        .iter()
+        .map(|r| (r.pr, r.branch_deleted))
+        .collect();
+    assert_eq!(removed, [(107, true), (109, false)]);
+    assert!(!Path::new(&w7.path).exists());
+    assert!(!Path::new(&w9.path).exists());
+    let note = report.removed[1].note.clone().unwrap_or_default();
+    assert!(note.contains("1 commit(s) on no remote branch"), "{note}");
+    // The unpushed branch is kept, the pushed one deleted.
+    let branches = git(Path::new(&repo.path), &["branch", "--list"]);
+    assert!(branches.contains(&w9.branch), "{branches}");
+    assert!(!branches.contains(&w7.branch), "{branches}");
+
+    let mut left: Vec<(u64, String)> = report
+        .left
+        .iter()
+        .map(|l| (l.pr, l.reason.clone()))
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            (108, "it has uncommitted or untracked changes".to_string()),
+            (110, "its space is the focused one".to_string()),
+        ]
+    );
+    assert!(report.left[0].command.contains("git worktree remove"));
+    assert!(Path::new(&w8.path).join("dirty.txt").exists());
+    assert!(Path::new(&w10.path).exists());
+    assert!(Path::new(&w11.path).exists());
+    assert!(Path::new(&repo.path).join("a.txt").exists());
+
+    // The space in the removed worktree is closed, the focused one stays.
+    let spaces: Vec<String> = client
+        .list_spaces()
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert!(!spaces.contains(&s7.id), "{spaces:?}");
+    assert!(spaces.contains(&s10.id), "{spaces:?}");
+}
+
+#[test]
+fn worktree_cleanup_without_a_clone_does_nothing_and_refuses_a_foreign_path() {
+    let env = Env::new();
+    let client = env.start();
+    let report = client
+        .cleanup_worktrees(cleanup("o", "app", &[("feat/7-x", 7)], None))
+        .unwrap();
+    assert_eq!(report.path, None);
+    assert!(report.removed.is_empty() && report.left.is_empty());
+    assert_eq!(env.calls(), 0);
+    assert!(!env.home().join("Source").exists());
+
+    let foreign = env.home().join("Source").join("o").join("other");
+    std::fs::create_dir_all(&foreign).unwrap();
+    std::fs::write(foreign.join("keep.txt"), "k").unwrap();
+    let (c, _) = code(
+        client
+            .cleanup_worktrees(cleanup("o", "other", &[], None))
+            .unwrap_err(),
+    );
+    assert_eq!(c, ErrorCode::Conflict);
+    assert_eq!(listing(&foreign), ["keep.txt"]);
+    let (c, _) = code(
+        client
+            .cleanup_worktrees(cleanup("..", "x", &[], None))
+            .unwrap_err(),
+    );
+    assert_eq!(c, ErrorCode::InvalidParams);
+}
+
+#[test]
+fn worktree_cleanup_runs_the_cleanup_command_of_a_mode_on_the_server() {
+    let env = Env::new();
+    std::fs::write(
+        settings::config_path(&env.home()),
+        serde_json::json!({"tasks": {"modes": [{
+            "name": "agent",
+            "branch": "feat/{nr}-{slug}",
+            "cleanup": ["git", "tag", "cleaned-{nr}-pr{pr}"]
+        }]}})
+        .to_string(),
+    )
+    .unwrap();
+    let client = env.start();
+    let repo = client.ensure_repo("o", "app").unwrap();
+    let w7 = client
+        .create_worktree(&repo.path, issue(7), "agent")
+        .unwrap();
+    let report = client
+        .cleanup_worktrees(cleanup("o", "app", &[(w7.branch.as_str(), 70)], None))
+        .unwrap();
+    assert_eq!(report.removed.len(), 1, "{report:?}");
+    assert_eq!(report.removed[0].pr, 70);
+    // The command ran in the clone instead of the built-in removal.
+    let tags = git(Path::new(&repo.path), &["tag", "--list"]);
+    assert_eq!(tags, "cleaned-7-pr70");
+    assert!(Path::new(&w7.path).exists());
+}
+
+#[test]
+fn worktree_cleanup_asks_before_skipping_an_untrusted_teardown() {
+    let env = Env::new();
+    let client = env.start();
+    let repo = client.ensure_repo("o", "app").unwrap();
+    let w7 = client
+        .create_worktree(&repo.path, issue(7), "agent")
+        .unwrap();
+    git(Path::new(&w7.path), &["push", "origin", &w7.branch]);
+    let project = Path::new(&repo.path).join(".poimen");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("config.json"), r#"{"teardown": "echo bye"}"#).unwrap();
+    let merged = [(w7.branch.as_str(), 70)];
+
+    let report = client
+        .cleanup_worktrees(cleanup("o", "app", &merged, None))
+        .unwrap();
+    assert!(report.teardown_untrusted);
+    assert!(report.removed.is_empty() && report.left.is_empty());
+    assert!(Path::new(&w7.path).exists());
+
+    let mut skip = cleanup("o", "app", &merged, None);
+    skip.skip_teardown = true;
+    let report = client.cleanup_worktrees(skip).unwrap();
+    assert!(!report.teardown_untrusted);
+    assert_eq!(report.removed.len(), 1);
+    assert!(!Path::new(&w7.path).exists());
 }

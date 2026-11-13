@@ -788,6 +788,66 @@ pub struct WorktreeCreateResult {
     pub created: bool,
 }
 
+/// A merged pull request of `worktree.cleanup`: its head branch and number.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergedPull {
+    pub branch: String,
+    pub number: u64,
+}
+
+/// Params of `worktree.cleanup` (#284): "Clean up merged tasks" in the clone of `owner/repo`
+/// under `reposDir` of the server's user config. `merged` comes from the client's `gh`; only the
+/// git work runs on the server's machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeCleanup {
+    pub owner: String,
+    pub repo: String,
+    pub merged: Vec<MergedPull>,
+    /// A space of this server that is never touched (the client's focused one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused_space: Option<String>,
+    /// Remove without the project's teardown when the project file is not trusted.
+    #[serde(default)]
+    pub skip_teardown: bool,
+}
+
+/// A worktree `worktree.cleanup` removed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupRemoved {
+    pub path: String,
+    pub branch: String,
+    pub pr: u64,
+    pub branch_deleted: bool,
+    /// Why the branch was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// A worktree `worktree.cleanup` left, with the reason and the command to remove it by hand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupLeft {
+    pub path: String,
+    pub branch: String,
+    pub pr: u64,
+    pub reason: String,
+    pub command: String,
+}
+
+/// Result of `worktree.cleanup`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeCleanupResult {
+    /// The clone on the server's machine; `None` when there is none (nothing to clean up).
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub removed: Vec<CleanupRemoved>,
+    #[serde(default)]
+    pub left: Vec<CleanupLeft>,
+    /// The project file has a teardown but is not trusted on that machine: nothing was removed.
+    #[serde(default)]
+    pub teardown_untrusted: bool,
+}
+
 /// What a client is, said on `events.subscribe` (ADR 0006).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1815,6 +1875,41 @@ mod tests {
             serde_json::from_value::<MachineCheckItem>(json!({"id": "x", "status": "bogus"}))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn worktree_cleanup_parses() {
+        let p: WorktreeCleanup = serde_json::from_value(json!({
+            "owner": "o", "repo": "app",
+            "merged": [{"branch": "feat/7-x", "number": 12}]
+        }))
+        .unwrap();
+        assert_eq!(p.merged[0].number, 12);
+        assert_eq!(p.focused_space, None);
+        assert!(!p.skip_teardown);
+        assert!(
+            serde_json::from_value::<WorktreeCleanup>(json!({"owner": "o", "repo": "app"}))
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<WorktreeCleanup>(json!({
+                "owner": "o", "repo": "app", "merged": [{"branch": "b"}]
+            }))
+            .is_err()
+        );
+        let r: WorktreeCleanupResult = serde_json::from_value(json!({
+            "path": "/s/o/app",
+            "removed": [{"path": "/s/o/app-7", "branch": "feat/7-x", "pr": 12, "branch_deleted": true}],
+            "left": [{"path": "/s/o/app-8", "branch": "feat/8-y", "pr": 13,
+                      "reason": "dirty", "command": "git worktree remove x"}],
+            "teardown_untrusted": false
+        }))
+        .unwrap();
+        assert_eq!(r.removed[0].note, None);
+        assert!(r.removed[0].branch_deleted);
+        assert_eq!(r.left[0].reason, "dirty");
+        let none: WorktreeCleanupResult = serde_json::from_value(json!({"path": null})).unwrap();
+        assert_eq!(none, WorktreeCleanupResult::default());
     }
 
     #[test]
