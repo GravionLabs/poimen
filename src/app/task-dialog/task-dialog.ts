@@ -49,6 +49,10 @@ export class TaskDialog {
     handler();
   }
 
+  protected machine(event: Event): void {
+    this.picker.setMachine((event.target as HTMLSelectElement).value || null);
+  }
+
   protected input(event: Event): void {
     this.picker.setQuery((event.target as HTMLInputElement).value);
   }
