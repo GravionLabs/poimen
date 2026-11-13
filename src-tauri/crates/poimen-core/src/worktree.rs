@@ -87,6 +87,12 @@ fn normalize(path: &Path) -> PathBuf {
     out
 }
 
+/// A path of `git worktree list` as this platform writes it: git lists `/` on Windows too, so
+/// it is normalized like a created path and both calls for the same issue return the same string.
+fn listed_path(path: &str) -> String {
+    normalize(Path::new(path)).to_string_lossy().into_owned()
+}
+
 /// The checked-out worktrees as (path, branch) from `git worktree list --porcelain`.
 pub fn parse_worktrees(output: &str) -> Vec<(String, Option<String>)> {
     let mut list: Vec<(String, Option<String>)> = Vec::new();
@@ -139,7 +145,7 @@ pub fn ensure(
         .find(|(_, b)| b.as_deref() == Some(branch.as_str()))
     {
         return Ok(Worktree {
-            path: existing.clone(),
+            path: listed_path(existing),
             branch,
             created: false,
         });
@@ -276,7 +282,7 @@ pub fn pr_worktree(repo_dir: &str, nr: u64, head_ref: Option<&str>) -> Result<Wo
         .find(|(_, b)| b.as_deref() == Some(branch.as_str()))
     {
         return Ok(Worktree {
-            path: existing.clone(),
+            path: listed_path(existing),
             branch,
             created: false,
         });
@@ -285,7 +291,7 @@ pub fn pr_worktree(repo_dir: &str, nr: u64, head_ref: Option<&str>) -> Result<Wo
         let same = |p: &str| canonical(Path::new(p)) == canonical(&path);
         return match listed.iter().find(|(p, _)| same(p)) {
             Some((existing, other)) => Ok(Worktree {
-                path: existing.clone(),
+                path: listed_path(existing),
                 branch: other.clone().unwrap_or(branch),
                 created: false,
             }),

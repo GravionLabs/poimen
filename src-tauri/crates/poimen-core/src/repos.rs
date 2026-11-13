@@ -130,7 +130,9 @@ pub fn target(
             "reposDir {template:?} must be an absolute path or start with ~"
         )));
     }
-    Ok(path)
+    // Rebuilt from its components, so a template written with `/` gets the platform's
+    // separator: on Windows `~/Source/o/r` must not become `C:\Users\me\Source/o/r`.
+    Ok(path.components().collect())
 }
 
 fn home_or_err(home: Option<&Path>) -> Result<PathBuf, EnsureError> {
