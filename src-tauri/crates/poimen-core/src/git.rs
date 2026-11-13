@@ -187,23 +187,27 @@ pub fn parse_roots(output: &str) -> Option<(String, String)> {
     (!top.is_empty() && !common.is_empty()).then(|| (top.to_owned(), common.to_owned()))
 }
 
+/// The toplevel and the common git dir (absolute) of the repository containing `dir`; `None`
+/// outside a repository.
+pub fn roots(dir: &str) -> Option<(String, String)> {
+    let out = crate::gui_path::command("git")
+        .args(["-C", dir, "rev-parse", "--path-format=absolute"])
+        .args(["--show-toplevel", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_roots(&String::from_utf8_lossy(&out.stdout))
+}
+
 /// The distinct repositories among `dirs` (a linked worktree counts as its main repository), each
 /// by the toplevel of the first directory that belongs to it; directories outside one are skipped.
 pub fn repo_roots(dirs: &[String]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut roots = Vec::new();
     for dir in dirs {
-        let Ok(out) = crate::gui_path::command("git")
-            .args(["-C", dir, "rev-parse", "--path-format=absolute"])
-            .args(["--show-toplevel", "--git-common-dir"])
-            .output()
-        else {
-            continue;
-        };
-        if !out.status.success() {
-            continue;
-        }
-        if let Some((top, common)) = parse_roots(&String::from_utf8_lossy(&out.stdout))
+        if let Some((top, common)) = self::roots(dir)
             && seen.insert(common)
         {
             roots.push(top);

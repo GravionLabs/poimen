@@ -17,6 +17,7 @@ pub mod hook;
 mod host;
 mod pty;
 pub mod report;
+mod runs;
 pub mod stdio;
 mod store;
 mod stream;
@@ -216,6 +217,8 @@ struct Subscriber {
     /// The client said what it is. Only these get `server.clients_changed`: an older client
     /// cannot parse the event and would resync in a loop.
     declared: bool,
+    /// It asked for `run_events` ([`Event::RunEvents`], #692).
+    runs: bool,
     tx: Sender<Event>,
 }
 
@@ -227,6 +230,11 @@ fn notify_declared(subs: &mut Vec<Subscriber>, event: &Event) {
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
     subscribers: Mutex<Vec<Subscriber>>,
+    /// The run files followed for the subscriptions with `run_events`. Taken before
+    /// `subscribers`, so a new subscription gets the replay and then every later event once.
+    runs: Mutex<runs::Runs>,
+    /// The repositories of the space and terminal directories, for `runs`.
+    run_repos: Mutex<runs::Repos>,
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
@@ -261,9 +269,23 @@ impl Shared {
         kinds
     }
 
-    /// Registers a subscription and tells the others; the new one learns from `ping`.
-    fn add_subscriber(&self, kind: ClientKind, declared: bool, tx: Sender<Event>) -> u64 {
+    /// Registers a subscription and tells the others; the new one learns from `ping`. One that
+    /// asks for `runs` first gets the events of the followed runs from the start.
+    fn add_subscriber(
+        &self,
+        kind: ClientKind,
+        declared: bool,
+        runs: bool,
+        tx: Sender<Event>,
+    ) -> u64 {
         let id = NEXT_SUBSCRIBER.fetch_add(1, Ordering::Relaxed);
+        // Held until the subscription is listed, so no run event falls between the two.
+        let followed = runs.then(|| lock(&self.runs));
+        if let Some(followed) = &followed {
+            for event in followed.replay() {
+                let _ = tx.send(event);
+            }
+        }
         let mut subs = lock(&self.subscribers);
         let event = Event::ServerClientsChanged {
             clients: {
@@ -278,9 +300,47 @@ impl Shared {
             id,
             kind,
             declared,
+            runs,
             tx,
         });
         id
+    }
+
+    /// Reads what the run files of the spaces' repositories gained and sends it to the
+    /// subscriptions with `run_events`; without one, the followed files are forgotten (#692).
+    fn follow_runs(&self) {
+        let wanted = || lock(&self.subscribers).iter().any(|s| s.runs);
+        {
+            // Under the lock, so a subscription that comes meanwhile is never cleared away.
+            let mut followed = lock(&self.runs);
+            if !wanted() {
+                followed.clear();
+                return;
+            }
+        }
+        let dirs: Vec<String> = {
+            let inner = lock(&self.inner);
+            let mut dirs: Vec<String> = inner.layout.spaces.iter().map(|s| s.cwd.clone()).collect();
+            for t in &inner.terminals {
+                if t.info.status == TerminalStatus::Running && !dirs.contains(&t.info.cwd) {
+                    dirs.push(t.info.cwd.clone());
+                }
+            }
+            dirs
+        };
+        let repos = lock(&self.run_repos).resolve(&dirs, Instant::now(), poimen_core::git::roots);
+        let mut followed = lock(&self.runs);
+        // Checked again under the lock: a subscription that came meanwhile got the replay of what
+        // is kept, so it is only dropped while there is none.
+        if !wanted() {
+            followed.clear();
+            return;
+        }
+        let events = followed.scan(&repos, std::time::SystemTime::now());
+        let mut subs = lock(&self.subscribers);
+        for event in events {
+            subs.retain(|s| !s.runs || s.tx.send(event.clone()).is_ok());
+        }
     }
 
     /// Drops a subscription (ending its event loop) and tells the rest.
@@ -452,6 +512,8 @@ impl Server {
                 terminals: Vec::new(),
             }),
             subscribers: Mutex::new(Vec::new()),
+            runs: Mutex::default(),
+            run_repos: Mutex::default(),
             next_id: AtomicU64::new(next_id),
             socket: config.socket,
             state_file: config.state_file,
@@ -513,6 +575,13 @@ impl Server {
             loop {
                 thread::sleep(TOKEN_SWEEP);
                 shared.expire_tokens();
+            }
+        });
+        let runs = Arc::clone(&self.shared);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(runs::POLL);
+                runs.follow_runs();
             }
         });
         for stream in self.listener.incoming() {
@@ -596,7 +665,7 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
             let declared = info.client.is_some();
             let kind = info.client.map_or(ClientKind::Unknown, |c| c.kind);
             let (tx, rx) = mpsc::channel();
-            let id = shared.add_subscriber(kind, declared, tx);
+            let id = shared.add_subscriber(kind, declared, info.run_events, tx);
             // The client sends nothing more; the end of its side of the connection removes
             // the subscription, which also ends the loop below.
             let reader = stream.clone();

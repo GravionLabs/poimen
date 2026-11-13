@@ -1,14 +1,13 @@
 //! Live state of deliver runs. Primary source: the progress events of
 //! `<git-common-dir>/.agents/events/*.jsonl` (ADR 0001 of GravionLabs/skills), each file replayed
 //! from the start and then followed (`Tailer`), a half-written last line left for the next read,
-//! folded by `agent_events.rs`; interactive `/deliver` sessions and loops alike. Fallback
+//! folded by `poimen_core::agent_events`; interactive `/deliver` sessions and loops alike. Fallback
 //! during the migration: `<repo>/.agents/deliver-loop/status.json` (schema
 //! `deliver-loop-status.schema.json`, `schemaVersion: 1`) when the repository has no events. Both
 //! are watched with `notify`, no polling. The loop writes status.json atomically (temp file, then
 //! rename), so a read never sees a partial file. Read-only: poimen never writes either.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{Read as _, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -17,7 +16,7 @@ use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::agent_events::{self, Reducer, Run};
+use poimen_core::agent_events::{self, EVENTS_PATH, LineTail, MAX_EVENTS_BYTES, Reducer, Run};
 
 /// The status file relative to a repository root.
 pub const STATUS_PATH: &str = ".agents/deliver-loop/status.json";
@@ -52,12 +51,6 @@ pub enum Read {
     },
 }
 
-/// The progress event files relative to the git common dir.
-pub const EVENTS_PATH: &str = ".agents/events";
-
-/// A larger event file is not read.
-const MAX_EVENTS_BYTES: u64 = 16 << 20;
-
 /// Runs that ended or were abandoned longer ago than this are not shown, nor are older files read.
 const RECENT_SECS: f64 = 24.0 * 3600.0;
 
@@ -66,7 +59,7 @@ const MAX_RUNS: usize = 12;
 
 struct FileState {
     reducer: Reducer,
-    offset: u64,
+    tail: LineTail,
 }
 
 /// The event files of one repository: each is replayed from the start once and then read from
@@ -78,30 +71,14 @@ pub struct Tailer {
 
 impl Tailer {
     fn advance(state: &mut FileState, path: &Path, len: u64) -> std::io::Result<()> {
-        if len < state.offset {
+        let tailed = state.tail.read(path, len)?;
+        if tailed.reset {
             // Truncated or replaced: replay.
-            *state = FileState {
-                reducer: Reducer::new(),
-                offset: 0,
-            };
+            state.reducer = Reducer::new();
         }
-        if len == state.offset {
-            return Ok(());
+        for line in &tailed.lines {
+            state.reducer.push_line(line);
         }
-        let mut file = std::fs::File::open(path)?;
-        file.seek(SeekFrom::Start(state.offset))?;
-        let mut buf = Vec::new();
-        file.take(len - state.offset).read_to_end(&mut buf)?;
-        // An incomplete last line is still being written: leave it for the next read.
-        let Some(end) = buf.iter().rposition(|b| *b == b'\n') else {
-            return Ok(());
-        };
-        for line in String::from_utf8_lossy(&buf[..=end]).lines() {
-            if !line.trim().is_empty() {
-                state.reducer.push_line(line);
-            }
-        }
-        state.offset += end as u64 + 1;
         Ok(())
     }
 
@@ -112,7 +89,7 @@ impl Tailer {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !is_run_file(&path) {
+                if !agent_events::is_run_file(&path) {
                     continue;
                 }
                 let Ok(meta) = std::fs::symlink_metadata(&path) else {
@@ -132,7 +109,7 @@ impl Tailer {
                 seen.insert(path.clone());
                 let state = self.files.entry(path.clone()).or_insert_with(|| FileState {
                     reducer: Reducer::new(),
-                    offset: 0,
+                    tail: LineTail::default(),
                 });
                 let _ = Self::advance(state, &path, meta.len());
             }
@@ -142,51 +119,48 @@ impl Tailer {
         let mut runs = Vec::new();
         for (path, state) in &self.files {
             unknown = unknown.or(state.reducer.unknown_v);
-            if let Some(mut run) = state.reducer.snapshot(now, &agent_events::pid_alive) {
-                if run.state.run.is_empty()
-                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-                {
-                    run.state.run = stem.to_owned();
-                }
-                let last = run
-                    .state
-                    .updated
-                    .as_deref()
-                    .and_then(agent_events::parse_ts);
-                let over = run.state.status != "running";
-                if over && last.is_some_and(|t| now - t > RECENT_SECS) {
-                    continue;
-                }
-                runs.push(run);
-            }
+            let run = state.reducer.snapshot(now, &agent_events::pid_alive);
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            runs.extend(run.map(|r| named(r, stem)));
         }
-        runs.sort_by(|a, b| {
-            b.state
-                .updated
-                .cmp(&a.state.updated)
-                .then_with(|| a.state.run.cmp(&b.state.run))
-        });
-        runs.truncate(MAX_RUNS);
-        (runs, unknown)
+        (recent(runs, now), unknown)
     }
 }
 
-/// Whether `path` is a run file of the jsonl-file binding: `<run>.jsonl` with a run id of
-/// `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`; files with other names are ignored.
-fn is_run_file(path: &Path) -> bool {
-    let (Some(stem), Some("jsonl")) = (
-        path.file_stem().and_then(|s| s.to_str()),
-        path.extension().and_then(|e| e.to_str()),
-    ) else {
-        return false;
-    };
-    let mut chars = stem.chars();
-    stem.len() <= 128
-        && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+/// `run` with the run id of its file when its events name none.
+pub fn named(mut run: Run, file_run: &str) -> Run {
+    if run.state.run.is_empty() {
+        run.state.run = file_run.to_owned();
+    }
+    run
 }
 
-fn now_secs() -> f64 {
+/// The runs the panel shows, newest first: runs that ended or were abandoned more than a day ago
+/// are left out, and at most [`MAX_RUNS`] are kept.
+pub fn recent(runs: Vec<Run>, now: f64) -> Vec<Run> {
+    let mut runs: Vec<Run> = runs
+        .into_iter()
+        .filter(|run| {
+            let last = run
+                .state
+                .updated
+                .as_deref()
+                .and_then(agent_events::parse_ts);
+            let over = run.state.status != "running";
+            !(over && last.is_some_and(|t| now - t > RECENT_SECS))
+        })
+        .collect();
+    runs.sort_by(|a, b| {
+        b.state
+            .updated
+            .cmp(&a.state.updated)
+            .then_with(|| a.state.run.cmp(&b.state.run))
+    });
+    runs.truncate(MAX_RUNS);
+    runs
+}
+
+pub fn now_secs() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0.0, |d| d.as_secs_f64())
@@ -610,20 +584,6 @@ mod tests {
         let mut status: Vec<_> = runs.iter().map(|r| r.state.status.as_str()).collect();
         status.sort_unstable();
         assert_eq!(status, ["finished", "running"]);
-    }
-
-    #[test]
-    fn only_run_ids_of_the_binding_name_a_run_file() {
-        for ok in ["r1.jsonl", "2026-11-08.run_1.jsonl", "A.jsonl"] {
-            assert!(is_run_file(Path::new(ok)), "{ok}");
-        }
-        for bad in [".x.jsonl", "a b.jsonl", "r1.txt", "r1", "-x.jsonl"] {
-            assert!(!is_run_file(Path::new(bad)), "{bad}");
-        }
-        assert!(!is_run_file(Path::new(&format!(
-            "{}.jsonl",
-            "a".repeat(129)
-        ))));
     }
 
     #[test]

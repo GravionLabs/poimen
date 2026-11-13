@@ -160,3 +160,17 @@ footer {
   display: flex;
   gap: 6px;
 }
+/* A run on a machine (#692): the machine name above the title; offline greys the last state. */
+.machine {
+  margin: 0 0 4px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--h-text-muted-color);
+}
+.offline-mark {
+  font-size: 12px;
+}
+.card.offline {
+  opacity: 0.6;
+}

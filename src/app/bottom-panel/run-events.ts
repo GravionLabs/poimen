@@ -13,6 +13,10 @@ export interface RunChoice {
   key: string;
   root: string;
   status: DeliverStatus;
+  /** The machine of a remote run (#692); absent on this Mac. */
+  machine?: string;
+  /** The machine is not connected: the last known events. */
+  offline?: boolean;
 }
 
 const inside = (dir: string, root: string): boolean => {
@@ -20,12 +24,28 @@ const inside = (dir: string, root: string): boolean => {
   return dir === root || dir.startsWith(base + "/");
 };
 
-/** The runs (with a readable state) of the repository that contains `dir`, oldest first. */
-export function runsOfSpace(cards: readonly DeliverCard[], dir: string | undefined): RunChoice[] {
+/**
+ * The runs (with a readable state) of the repository that contains `dir`, oldest first. `machine`
+ * is the machine of the space (`dir` is a path there); only its runs count, so a local and a
+ * remote repository at the same path stay apart.
+ */
+export function runsOfSpace(
+  cards: readonly DeliverCard[],
+  dir: string | undefined,
+  machine?: string,
+): RunChoice[] {
   if (!dir) return [];
   return cards.flatMap((card) =>
-    card.state.kind === "ok" && inside(dir, card.root)
-      ? [{ key: cardKey(card), root: card.root, status: card.state.status }]
+    card.state.kind === "ok" && card.machine === machine && inside(dir, card.root)
+      ? [
+          {
+            key: cardKey(card),
+            root: card.root,
+            status: card.state.status,
+            ...(card.machine === undefined ? {} : { machine: card.machine }),
+            ...(card.offline ? { offline: true } : {}),
+          },
+        ]
       : [],
   );
 }
@@ -67,7 +87,8 @@ export function currentTaskText(status: DeliverStatus): string {
 
 /**
  * The line of a run: `M014 3/18 · #177 review 4/7 (running, 2 min ago)`: title, run progress,
- * the current task and the state with its age. Parts without data are left out.
+ * the current task and the state with its age. Parts without data are left out. A remote run has
+ * its machine in front (`box: ...`) and `offline` in the state while the machine is not connected.
  */
 export function runLabel(run: RunChoice, now: number): string {
   const s = run.status;
@@ -76,8 +97,9 @@ export function runLabel(run: RunChoice, now: number): string {
     .join(" ");
   const task = currentTaskText(s);
   const age = ageText(s.updated, now);
-  const state = [s.status, age].filter((p) => p !== "").join(", ");
-  return `${[head, task].filter((p) => p !== "").join(" · ")} (${state})`;
+  const state = [s.status, age, run.offline ? "offline" : ""].filter((p) => p !== "").join(", ");
+  const machine = run.machine ? `${run.machine}: ` : "";
+  return `${machine}${[head, task].filter((p) => p !== "").join(" · ")} (${state})`;
 }
 
 /** Style of a row, from the tone alone: a CSS class and an icon. */

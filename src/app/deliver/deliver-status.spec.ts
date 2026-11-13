@@ -4,6 +4,7 @@ import {
   STALE_MS,
   ageText,
   barSummary,
+  cardKey,
   cardsOf,
   fromLegacy,
   needsAttention,
@@ -14,6 +15,7 @@ import {
   stateText,
   type DeliverCard,
   type DeliverStatus,
+  withMachines,
 } from "./deliver-status";
 
 const json = (path: string): Record<string, unknown> =>
@@ -293,5 +295,51 @@ describe("barSummary", () => {
     expect(
       barSummary([{ root: "/r", run: "", state: { kind: "invalid", error: "x" } }], NOW),
     ).toBeNull();
+  });
+});
+
+describe("remote runs (#692)", () => {
+  const read = { kind: "events" as const, runs: [json("events-session")] };
+
+  it("puts the machine on each card and qualifies the terminal of its run", () => {
+    const [local] = cardsOf("/r", read);
+    const [remote] = cardsOf("/r", read, "box");
+    expect(local!.machine).toBeUndefined();
+    expect(remote!.machine).toBe("box");
+    const host = (c: DeliverCard) => (c.state as { status: DeliverStatus }).status.host;
+    expect(host(local!)["poimen.terminal"]).toBe("t9");
+    expect(host(remote!)["poimen.terminal"]).toBe("box::t9");
+    // The same run id on this Mac and on two machines: three keys.
+    const keys = new Set([local!, remote!, cardsOf("/r", read, "gpu")[0]!].map(cardKey));
+    expect(keys.size).toBe(3);
+    expect(cardKey(local!)).toBe(`/r\n${local!.run}`);
+  });
+
+  it("marks a hint card of a machine with the machine too", () => {
+    const [hint] = cardsOf("/r", { kind: "events", runs: [], unknownVersion: 2 }, "box");
+    expect(hint).toMatchObject({ machine: "box", state: { kind: "events-version" } });
+  });
+
+  it("shows remote cards of configured machines only, offline while not connected", () => {
+    const cards = [
+      ...cardsOf("/r", read),
+      ...cardsOf("/r", read, "box"),
+      ...cardsOf("/r", read, "gone"),
+    ];
+    const shown = withMachines(cards, new Map([["box", "offline"]]));
+    expect(shown.map((c) => [c.machine, c.offline])).toEqual([
+      [undefined, undefined],
+      ["box", true],
+    ]);
+    const back = withMachines(shown, new Map([["box", "connected"]]));
+    expect(back[1]!.offline).toBe(false);
+    // The last known state stays.
+    expect(back[1]!.state).toEqual(shown[1]!.state);
+  });
+
+  it("names the machine of a remote run in the status bar", () => {
+    const [remote] = cardsOf("/r", { kind: "events", runs: [json("events-milestone")] }, "box");
+    const now = Date.parse(MILESTONE.updated) + 60_000;
+    expect(barSummary([remote!], now)!.text).toMatch(/^. box: /);
   });
 });

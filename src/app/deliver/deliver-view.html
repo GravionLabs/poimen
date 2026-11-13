@@ -13,7 +13,7 @@
   @for (card of deliver.cards(); track cardKey(card)) {
     @if (card.state.kind === "events-version") {
       <section class="card" data-testid="card">
-        <h2 class="mono">{{ card.root }}</h2>
+        <h2 class="mono">{{ where(card) }}</h2>
         <p class="hint" data-testid="events-version">
           Some events use version {{ $any(card.state).version }}, which this version of poimen does
           not know (it reads version {{ eventsVersion }}). Update poimen to see those runs.
@@ -21,7 +21,7 @@
       </section>
     } @else if (card.state.kind === "unsupported") {
       <section class="card" data-testid="card">
-        <h2 class="mono">{{ card.root }}</h2>
+        <h2 class="mono">{{ where(card) }}</h2>
         <p class="hint" data-testid="unsupported">
           This status file uses schema version {{ $any(card.state).version }}, which this version of
           poimen does not know (it reads version {{ supported }}). Update poimen to see this run.
@@ -29,7 +29,7 @@
       </section>
     } @else if (card.state.kind === "invalid") {
       <section class="card" data-testid="card">
-        <h2 class="mono">{{ card.root }}</h2>
+        <h2 class="mono">{{ where(card) }}</h2>
         <p class="problem" role="alert" data-testid="invalid">
           The run cannot be shown: {{ $any(card.state).error }}
         </p>
@@ -39,9 +39,19 @@
       @let state = runState(s);
       <section
         class="card state-{{ state }} tone-{{ s.tone }}"
+        [class.offline]="card.offline"
         data-testid="card"
         [attr.data-tone]="s.tone"
+        [attr.data-machine]="card.machine ?? null"
       >
+        @if (card.machine) {
+          <p class="machine" data-testid="machine">
+            <span class="mono">{{ card.machine }}</span>
+            @if (card.offline) {
+              <span class="offline-mark" data-testid="offline">offline, last known state</span>
+            }
+          </p>
+        }
         <div class="card-head">
           <h2>
             @if (s.subject?.url; as url) {
@@ -163,7 +173,7 @@
         }
 
         <footer>
-          <span class="hint mono">{{ agentText(s) }}{{ card.root }}</span>
+          <span class="hint mono">{{ agentText(s) }}{{ where(card) }}</span>
           <span class="actions">
             @if (s.subject?.url; as url) {
               <button type="button" data-testid="open-subject" (click)="deliver.openUrl(url)">
@@ -175,8 +185,12 @@
                 Focus terminal
               </button>
             }
-            @if (state !== "running" && s.subject?.kind === "github.milestone") {
-              <button type="button" data-testid="start" (click)="deliver.startLoop(s, card.root)">
+            @if (!card.machine && state !== "running" && s.subject?.kind === "github.milestone") {
+              <button
+                type="button"
+                data-testid="start"
+                (click)="deliver.startLoop(s, card.root, card.machine)"
+              >
                 Start loop
               </button>
             }

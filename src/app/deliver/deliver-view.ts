@@ -11,6 +11,7 @@ import {
   stepText,
   stateText,
   type Attention,
+  type DeliverCard,
   type DeliverStatus,
   type Link,
 } from "./deliver-status";
@@ -69,6 +70,11 @@ export class DeliverView {
   protected subjectLabel(status: DeliverStatus): string {
     const kind = status.subject?.kind ?? "";
     return kind.includes(".") ? kind.slice(kind.indexOf(".") + 1).replace("-", " ") : "subject";
+  }
+
+  /** Where the repository is: its path, with the machine in front for a remote one (`box:/src/api`). */
+  protected where(card: DeliverCard): string {
+    return card.machine ? `${card.machine}:${card.root}` : card.root;
   }
 
   /** "claude sonnet · " when the run said which agent it is, else empty. */

@@ -329,8 +329,12 @@ impl Link for Client {
             kind: wire::ClientKind::App,
             pid: std::process::id(),
         };
+        // The runs of the machine's repositories come over the same subscription (#692).
         let (ping, stream) = self
-            .ping_and_subscribe(Some(me))
+            .ping_and_subscribe_with(wire::EventsSubscribe {
+                client: Some(me),
+                run_events: true,
+            })
             .map_err(|e| e.to_string())?;
         let session =
             stream.map(|s| -> Session { Box::new(s.map(|r| r.map_err(|e| e.to_string()))) });

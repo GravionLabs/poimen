@@ -78,7 +78,11 @@ export class BottomPanel {
 
   /** The runs of the active space's repository, the one chosen for the Events tab and its rows. */
   protected readonly spaceRuns = computed(() =>
-    runsOfSpace(this.deliver.cards(), paneDir(this.activePane() ?? ({} as Terminal))),
+    runsOfSpace(
+      this.deliver.cards(),
+      paneDir(this.activePane() ?? ({} as Terminal)),
+      this.activePane()?.machine,
+    ),
   );
   private readonly pickedRun = signal<string | null>(null);
   protected readonly run = computed(() =>

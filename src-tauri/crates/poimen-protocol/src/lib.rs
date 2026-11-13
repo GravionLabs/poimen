@@ -812,6 +812,11 @@ pub struct ClientInfo {
 pub struct EventsSubscribe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<ClientInfo>,
+    /// Asks for the progress events of the runs in the repositories of the server's spaces
+    /// ([`Event::RunEvents`], #692): first the events of the recent runs from the start, then the
+    /// new ones. Off by default, so a client that does not ask never sees the event.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub run_events: bool,
 }
 
 /// `space.create`. With `layout` (the default) the server resolves the layout of `cwd` (project
@@ -1250,6 +1255,15 @@ pub enum Event {
     /// carries the kinds now connected, sorted.
     #[serde(rename = "server.clients_changed")]
     ServerClientsChanged { clients: Vec<ClientKind> },
+    /// Progress events of a run (agent-events, jsonl-file binding) in the repository at `root`,
+    /// as written to `<git-common-dir>/.agents/events/<run>.jsonl`: complete lines, JSON objects,
+    /// in file order and unchanged. Only to subscriptions with `run_events`.
+    #[serde(rename = "run.events")]
+    RunEvents {
+        root: String,
+        run: String,
+        events: Vec<Value>,
+    },
     #[serde(rename = "agent.status_changed")]
     AgentStatusChanged {
         terminal_id: String,
@@ -1294,6 +1308,43 @@ mod tests {
         // A kind of a newer client is read as unknown, not refused.
         let p: EventsSubscribe = params(&r).unwrap();
         assert_eq!(p.client.unwrap().kind, ClientKind::Unknown);
+    }
+
+    #[test]
+    fn subscribe_asks_for_run_events_only_when_set() {
+        let r = parse_request(
+            r#"{"id":"1","method":"events.subscribe","params":{"client":{"kind":"app","pid":7},"run_events":true}}"#,
+        )
+        .unwrap();
+        let p: EventsSubscribe = params(&r).unwrap();
+        assert!(p.run_events);
+        let r = parse_request(r#"{"id":"1","method":"events.subscribe","params":{}}"#).unwrap();
+        assert!(!params::<EventsSubscribe>(&r).unwrap().run_events);
+        // Off is not sent, so an older server sees the params it knows.
+        assert_eq!(
+            serde_json::to_value(EventsSubscribe::default()).unwrap(),
+            json!({})
+        );
+    }
+
+    #[test]
+    fn run_events_wire_shape() {
+        let line = r#"{"event":"run.events","data":{"root":"/home/me/api","run":"r1","events":[{"v":1,"seq":1,"type":"run.started"}]}}"#;
+        let ServerLine::Event(e) = parse_server_line(line).unwrap() else {
+            panic!("not an event");
+        };
+        assert_eq!(
+            e,
+            Event::RunEvents {
+                root: "/home/me/api".into(),
+                run: "r1".into(),
+                events: vec![json!({"v":1,"seq":1,"type":"run.started"})],
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            serde_json::from_str::<Value>(line).unwrap()
+        );
     }
 
     #[test]
