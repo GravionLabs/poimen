@@ -135,6 +135,8 @@ export interface LayoutState {
   lineComments?: Record<string, CommentSet>;
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
   collapsedIssues?: Record<string, number[]>;
+  /** Per repository directory, the machine a task was last started on (absent: this Mac). */
+  taskMachine?: Record<string, string>;
   /** The selected sub-page of the GitHub tab (`pulls`, `issues` or `milestones`). */
   githubPage?: string;
   /** The GitHub tab also lists repositories without matches. */
@@ -230,6 +232,7 @@ export function parseLayout(raw: string | null): LayoutState {
       recentCommands,
       spaceOrder,
       tabOrder,
+      taskMachine,
       changesLayout,
       flowDirection,
       eventColumns,
@@ -264,6 +267,12 @@ export function parseLayout(raw: string | null): LayoutState {
       if (entries.length) state.collapsedIssues = Object.fromEntries(entries);
     }
     if (typeof settingsPage === "string" && settingsPage) state.settingsPage = settingsPage;
+    if (taskMachine && typeof taskMachine === "object" && !Array.isArray(taskMachine)) {
+      const clean = Object.fromEntries(
+        Object.entries(taskMachine).filter(([, m]) => typeof m === "string" && m),
+      );
+      if (Object.keys(clean).length) state.taskMachine = clean;
+    }
     if (isGithubPage(githubPage)) state.githubPage = githubPage;
     if (githubShowEmpty === true) state.githubShowEmpty = true;
     if (hooksOfferDismissed === true) state.hooksOfferDismissed = true;
@@ -354,6 +363,8 @@ export class UiState {
   readonly tabOrder = signal<Readonly<Record<string, readonly string[]>>>(
     this.initial.tabOrder ?? {},
   );
+  /** The machine a task was last started on per repository directory (persisted). */
+  readonly taskMachine = signal<Readonly<Record<string, string>>>(this.initial.taskMachine ?? {});
   readonly recentCommands = signal<readonly string[]>(this.initial.recentCommands ?? []);
   /** Collapsed nodes of the GitHub issue tree per repository (expanded is the default). */
   readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
@@ -516,6 +527,15 @@ export class UiState {
     this.save();
   }
 
+  /** Remembers the machine of a task for `dir`; `null` (this Mac) forgets it. */
+  setTaskMachine(dir: string, machine: string | null): void {
+    const next = { ...this.taskMachine() };
+    if (machine) next[dir] = machine;
+    else delete next[dir];
+    this.taskMachine.set(next);
+    this.save();
+  }
+
   /** Stores the tab order of one space. */
   setTabOrder(spaceId: string, ids: readonly string[]): void {
     this.tabOrder.set({ ...this.tabOrder(), [spaceId]: [...new Set(ids)] });
@@ -639,6 +659,7 @@ export class UiState {
       tabOrder: Object.keys(this.tabOrder()).length
         ? Object.fromEntries(Object.entries(this.tabOrder()).map(([s, t]) => [s, [...t]]))
         : undefined,
+      taskMachine: Object.keys(this.taskMachine()).length ? { ...this.taskMachine() } : undefined,
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,

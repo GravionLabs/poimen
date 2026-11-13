@@ -80,6 +80,27 @@ impl PoimenBackend {
         self.client.machine_check().map_err(text)
     }
 
+    /// `repo.ensure` of this backend's server: the clone of `owner/repo` on its machine (#283).
+    pub fn ensure_repo(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<poimen_client::protocol::RepoEnsureResult, String> {
+        self.client.ensure_repo(owner, repo).map_err(text)
+    }
+
+    /// `worktree.create` of this backend's server: the worktree of a task issue (#283).
+    pub fn create_worktree(
+        &self,
+        repo_dir: &str,
+        issue: poimen_client::protocol::TaskIssue,
+        mode: &str,
+    ) -> Result<poimen_client::protocol::WorktreeCreateResult, String> {
+        self.client
+            .create_worktree(repo_dir, issue, mode)
+            .map_err(text)
+    }
+
     fn local_only(&self) -> Result<(), StartError> {
         if self.remote {
             return Err(StartError::Other(

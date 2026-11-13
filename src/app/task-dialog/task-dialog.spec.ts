@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { Machines } from "../core/machines";
 import { tauri } from "../core/tauri.mock";
 import { TaskDialog } from "./task-dialog";
 import { TaskPicker, filterIssues, markers, type PickIssue, type TaskChoice } from "./task-picker";
@@ -68,7 +69,10 @@ beforeAll(() => {
   });
 });
 
-async function setup(issuesAnswer: () => unknown = () => ISSUES) {
+async function setup(
+  issuesAnswer: () => unknown = () => ISSUES,
+  before: () => Promise<void> = async () => {},
+) {
   tauri.reset();
   tauri.answer("task_issues", issuesAnswer);
   tauri.answer("get_task_modes", () => MODES);
@@ -89,6 +93,7 @@ async function setup(issuesAnswer: () => unknown = () => ISSUES) {
       await fixture.whenStable();
     }
   };
+  await before();
   let result: TaskChoice | null | undefined;
   const opened = picker.open("/work/app").then((c) => (result = c));
   await vi.waitFor(() => expect(picker.loading()).toBe(false));
@@ -209,5 +214,50 @@ describe("TaskDialog", () => {
     const { picker, type } = await setup();
     await type("12");
     expect(picker.typedNumber()).toBeNull();
+  });
+});
+
+describe("TaskDialog machine selector", () => {
+  const machines = [
+    { name: "dev", ssh: "me@dev", state: "connected", serverVersion: "1" },
+    { name: "off", ssh: "me@off", state: "offline", error: "x" },
+  ];
+
+  async function open() {
+    return setup(undefined, async () => {
+      tauri.answer("list_machines", () => machines);
+      await TestBed.inject(Machines).refresh();
+    });
+  }
+
+  it("offers this Mac and the connected machines only, and returns the choice's machine", async () => {
+    const { picker, root, settle, opened } = await open();
+    const options = [...root.querySelectorAll("select option")].map((o) => o.textContent!.trim());
+    expect(options).toEqual(["This Mac", "dev"]);
+    picker.setMachine("dev");
+    await settle();
+    picker.confirm();
+    expect(await opened).toMatchObject({ number: 12, machine: "dev" });
+  });
+
+  it("remembers the machine per repository and offers it again", async () => {
+    const first = await open();
+    first.picker.setMachine("dev");
+    first.picker.confirm();
+    await first.opened;
+    const again = first.picker;
+    void again.open("/work/app");
+    expect(again.machine()).toBe("dev");
+    void again.open("/work/other");
+    expect(again.machine()).toBeNull();
+    again.cancel();
+  });
+
+  it("this Mac is the choice without a machine, and an offline machine cannot be picked", async () => {
+    const { picker, opened } = await open();
+    picker.setMachine("off");
+    expect(picker.machine()).toBeNull();
+    picker.confirm();
+    expect((await opened)?.machine).toBeUndefined();
   });
 });

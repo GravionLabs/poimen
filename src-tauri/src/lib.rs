@@ -1093,6 +1093,125 @@ async fn machine_snapshot(
     on_backend(&backend, |b| b.snapshot()).await
 }
 
+/// `repo.ensure` on a machine: its clone of `owner/repo`, cloned when absent (#283).
+#[tauri::command]
+async fn machine_repo_ensure(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    owner: String,
+    repo: String,
+) -> Result<poimen_client::protocol::RepoEnsureResult, String> {
+    let backend = machines.backend(&name)?;
+    tauri::async_runtime::spawn_blocking(move || backend.ensure_repo(&owner, &repo))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// `worktree.create` on a machine: the worktree of a task issue in its clone (#283).
+#[tauri::command]
+async fn machine_worktree_create(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    repo_dir: String,
+    issue: poimen_client::protocol::TaskIssue,
+    mode: String,
+) -> Result<poimen_client::protocol::WorktreeCreateResult, String> {
+    let backend = machines.backend(&name)?;
+    tauri::async_runtime::spawn_blocking(move || backend.create_worktree(&repo_dir, issue, &mode))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Creates the space of a task on a machine, or focuses its existing space for `cwd`.
+#[tauri::command]
+async fn machine_create_space(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    cwd: String,
+    label: Option<String>,
+    command: Option<String>,
+) -> Result<spaces::SpaceOutcome, String> {
+    let backend: Shared = machines.backend(&name)?;
+    on_backend(&backend, move |b| {
+        remote_create_space(
+            b,
+            &cwd,
+            label.as_deref().unwrap_or_default(),
+            command.as_deref(),
+        )
+    })
+    .await
+}
+
+/// A tab with a command in a space of a machine (a task mode without a worktree).
+#[tauri::command]
+async fn machine_task_tab(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    workspace_id: String,
+    dir: String,
+    tab: String,
+    command: String,
+) -> Result<(), String> {
+    let backend: Shared = machines.backend(&name)?;
+    on_backend(&backend, move |b| {
+        task_start::start_tab(b, &workspace_id, &dir, &tab, &command)
+    })
+    .await
+}
+
+/// The body of `machine_create_space`, against the backend of a machine. `cwd` is a path on that
+/// machine, so it is not checked here: an existing space for it is focused and nothing is created;
+/// else the server builds the layout. A project file that needs trust is an error (the dialog
+/// shows the local file only).
+fn remote_create_space(
+    backend: &dyn Backend,
+    cwd: &str,
+    label: &str,
+    command: Option<&str>,
+) -> Result<spaces::SpaceOutcome, String> {
+    let snapshot = backend.snapshot()?;
+    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
+    let workspaces = list(&snapshot.workspaces);
+    let panes = list(&snapshot.panes);
+    let outcome =
+        |workspace_id: String, created: bool, warnings, setup_started| spaces::SpaceOutcome {
+            workspace_id,
+            created,
+            warnings,
+            setup_started,
+            trust: None,
+        };
+    if let Some(id) = spaces::find_space(cwd, &workspaces, &panes) {
+        backend.focus_space(&id)?;
+        return Ok(outcome(id, false, Vec::new(), false));
+    }
+    let request = backend::LayoutRequest {
+        cwd,
+        label,
+        decision: None,
+        command,
+    };
+    match backend.create_space_with_layout(request) {
+        None => Err("the machine's server cannot build a layout".into()),
+        Some(result) => match result? {
+            backend::LaidOut::Trust(_) => Err(
+                "the project file of this repository is not trusted on the machine; \
+                 open the repository there once to trust it"
+                    .into(),
+            ),
+            backend::LaidOut::Created {
+                space_id,
+                warnings,
+                setup_started,
+            } => {
+                backend.focus_space(&space_id)?;
+                Ok(outcome(space_id, true, warnings, setup_started))
+            }
+        },
+    }
+}
+
 /// Starts, keeps or stops the machine connections for `configs`; state changes go to the
 /// frontend as `machine:state_changed`.
 fn sync_machines(
@@ -2254,6 +2373,10 @@ pub fn run() {
             list_machines,
             reconnect_machine,
             machine_snapshot,
+            machine_repo_ensure,
+            machine_worktree_create,
+            machine_create_space,
+            machine_task_tab,
             machine_check,
             set_terminal_colors,
             hooks_status,
@@ -2799,6 +2922,53 @@ mod build_layout_tests {
         let fake = FakeBackend::default();
         assert!(create_space_with(&fake, None, "/no/such/dir/at/all", None, None, None).is_err());
         assert!(fake.calls().is_empty());
+    }
+
+    // Spaces on a machine (#283).
+
+    #[test]
+    fn remote_create_space_builds_the_layout_without_checking_the_local_disk() {
+        let fake = layout_backend(built("s1"));
+        let out = remote_create_space(&fake, "/srv/wt/app-12", "#12 x", Some("claude")).unwrap();
+        assert!(out.created);
+        assert_eq!(out.workspace_id, "s1");
+        let calls = fake.calls();
+        assert!(
+            calls.contains(&"create_space_with_layout /srv/wt/app-12 #12 x - claude".to_string()),
+            "{calls:?}"
+        );
+    }
+
+    #[test]
+    fn remote_create_space_focuses_an_existing_space_and_creates_nothing() {
+        let fake = layout_backend(built("s1"));
+        *fake.snapshot.lock().unwrap() = backend::Snapshot {
+            workspaces: serde_json::json!([{"workspace_id": "s7", "label": "x", "cwd": "/srv/wt/app-12"}]),
+            tabs: serde_json::json!([]),
+            panes: serde_json::json!([]),
+        };
+        let out = remote_create_space(&fake, "/srv/wt/app-12", "x", None).unwrap();
+        assert!(!out.created);
+        assert_eq!(out.workspace_id, "s7");
+        assert!(!fake.calls().iter().any(|c| c.starts_with("create_space")));
+    }
+
+    #[test]
+    fn remote_create_space_refuses_an_untrusted_project_and_a_failing_server() {
+        let ask = backend::LaidOut::Trust(trust::TrustRequest {
+            root: "/r".into(),
+            files: Vec::new(),
+            hash: "h".into(),
+            commands: Vec::new(),
+        });
+        let err = remote_create_space(&layout_backend(ask), "/r", "l", None).unwrap_err();
+        assert!(err.contains("not trusted"), "{err}");
+        let fake = layout_backend(built("s1"));
+        fake.fail_on("create_space_with_layout");
+        assert_eq!(
+            remote_create_space(&fake, "/r", "l", None),
+            Err("boom".into())
+        );
     }
 
     // A backend that builds the layout itself (poimen-server's `space.create`).

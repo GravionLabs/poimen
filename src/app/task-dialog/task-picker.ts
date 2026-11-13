@@ -1,6 +1,8 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import type { GhError } from "../github/pulls";
+import { Machines } from "../core/machines";
 import { TauriBridge } from "../core/tauri";
+import { UiState } from "../core/ui-state";
 import type { TaskMode, TaskModes } from "../core/settings";
 
 /** An open issue as `task_issues` returns it (`OpenIssue` of `github.rs`). */
@@ -13,8 +15,9 @@ export interface PickIssue {
   url: string;
 }
 
-/** What the dialog returns. `title` and `url` are null for a number typed by hand. */
+/** What the dialog returns. `title` and `url` are null for a number typed by hand. `machine` is a machine name, absent for this Mac. */
 export interface TaskChoice {
+  machine?: string;
   number: number;
   title: string | null;
   url: string | null;
@@ -52,7 +55,10 @@ export function filterIssues(
 @Injectable({ providedIn: "root" })
 export class TaskPicker {
   private readonly bridge = inject(TauriBridge);
+  private readonly machineList = inject(Machines);
+  private readonly ui = inject(UiState);
   private resolve: ((choice: TaskChoice | null) => void) | null = null;
+  private dir = "";
 
   readonly isOpen = signal(false);
   readonly loading = signal(false);
@@ -63,6 +69,16 @@ export class TaskPicker {
   readonly query = signal("");
   readonly level = signal<PickIssue["level"]>(null);
   readonly index = signal(0);
+
+  /** The machine to run on: a connected machine's name, `null` for this Mac. */
+  readonly machine = signal<string | null>(null);
+  /** The machines a task can start on: the connected ones (this Mac is always there). */
+  readonly machines = computed(() =>
+    this.machineList
+      .machines()
+      .filter((m) => m.state === "connected")
+      .map((m) => m.name),
+  );
 
   readonly visible = computed(() => filterIssues(this.issues(), this.query(), this.level()));
   readonly activeIssue = computed(() => this.visible()[this.index()] ?? null);
@@ -77,6 +93,9 @@ export class TaskPicker {
   /** Opens the dialog for the repository of `dir` (with issue `preselect` highlighted); resolves with the choice, null when cancelled. */
   async open(dir: string, preselect?: number): Promise<TaskChoice | null> {
     this.cancel();
+    this.dir = dir;
+    const last = this.ui.taskMachine()[dir];
+    this.machine.set(last && this.machines().includes(last) ? last : null);
     this.query.set("");
     this.level.set(null);
     this.index.set(0);
@@ -125,6 +144,10 @@ export class TaskPicker {
     if (n > 0) this.index.set((this.index() + delta + n) % n);
   }
 
+  setMachine(name: string | null): void {
+    this.machine.set(name && this.machines().includes(name) ? name : null);
+  }
+
   toggleMode(): void {
     const n = this.modes().length;
     if (n > 0) this.mode.set((this.mode() + 1) % n);
@@ -134,8 +157,15 @@ export class TaskPicker {
   confirm(issue: PickIssue | null = this.activeIssue()): void {
     const mode = this.modeName();
     const typed = this.typedNumber();
-    if (issue) this.finish({ number: issue.number, title: issue.title, url: issue.url, mode });
-    else if (typed) this.finish({ number: typed, title: null, url: null, mode });
+    const machine = this.machine();
+    const where = machine ? { machine } : {};
+    let choice: TaskChoice | null = null;
+    if (issue)
+      choice = { number: issue.number, title: issue.title, url: issue.url, mode, ...where };
+    else if (typed) choice = { number: typed, title: null, url: null, mode, ...where };
+    if (!choice) return;
+    this.ui.setTaskMachine(this.dir, machine);
+    this.finish(choice);
   }
 
   cancel(): void {
