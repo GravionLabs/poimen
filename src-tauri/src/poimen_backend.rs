@@ -101,6 +101,14 @@ impl PoimenBackend {
             .map_err(text)
     }
 
+    /// `worktree.cleanup` of this backend's server: "Clean up merged tasks" in its clone (#284).
+    pub fn cleanup_worktrees(
+        &self,
+        params: poimen_client::protocol::WorktreeCleanup,
+    ) -> Result<poimen_client::protocol::WorktreeCleanupResult, String> {
+        self.client.cleanup_worktrees(params).map_err(text)
+    }
+
     fn local_only(&self) -> Result<(), StartError> {
         if self.remote {
             return Err(StartError::Other(

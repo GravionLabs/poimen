@@ -1,13 +1,11 @@
 //! The worktree rules live in `poimen_core::worktree`; the app adds the cleanup over its `Backend`.
 
-use std::path::Path;
-
 use crate::backend::Backend;
 pub use poimen_core::worktree::*;
 use poimen_core::worktree::{SpaceView, Spaces};
 
-/// The running `Backend` as the spaces the cleanup may close.
-struct BackendSpaces<'a>(&'a dyn Backend);
+/// The running `Backend` as the spaces the cleanup may close (`cleanup_merged`).
+pub struct BackendSpaces<'a>(pub &'a dyn Backend);
 
 impl Spaces for BackendSpaces<'_> {
     fn view(&self) -> Result<SpaceView, String> {
@@ -21,26 +19,6 @@ impl Spaces for BackendSpaces<'_> {
     fn close_space(&self, id: &str) -> Result<(), String> {
         self.0.close_space(id)
     }
-}
-
-/// Cleans up the merged task worktrees of `root`; spaces inside a worktree are closed through
-/// `backend` (see `poimen_core::worktree::cleanup`).
-pub fn cleanup(
-    root: &Path,
-    merged: &[MergedPr],
-    mode: &CleanupMode,
-    backend: &dyn Backend,
-    focused_space: Option<&str>,
-    teardown: Option<&Teardown<'_>>,
-) -> Result<CleanupReport, String> {
-    poimen_core::worktree::cleanup(
-        root,
-        merged,
-        mode,
-        &BackendSpaces(backend),
-        focused_space,
-        teardown,
-    )
 }
 
 #[cfg(test)]

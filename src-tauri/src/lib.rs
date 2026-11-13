@@ -1160,6 +1160,89 @@ async fn machine_task_tab(
     .await
 }
 
+/// "Clean up merged tasks" on a machine (#284): the merged pull requests come from the local `gh`
+/// for the GitHub repository of the local clone at `dir`; the git work runs on the machine's
+/// server (`worktree.cleanup` in its clone of that repository, the rules of #192). Only while the
+/// machine is `connected`. Destructive, so only on a user action.
+#[tauri::command]
+async fn machine_task_cleanup(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    dir: String,
+    focused_space: Option<String>,
+    skip_teardown: Option<bool>,
+) -> Result<worktree::CleanupReport, String> {
+    let backend = machines.connected_backend(&name)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = worktree::main_worktree(std::path::Path::new(&dir))?;
+        let repo = github::repo_of(&root)
+            .ok_or_else(|| "the repository has no GitHub origin".to_owned())?;
+        let merged = worktree::merged_prs(&github::SystemRunner, &repo)?;
+        let result = backend.cleanup_worktrees(remote_cleanup_params(
+            &repo,
+            &merged,
+            focused_space,
+            skip_teardown == Some(true),
+        ))?;
+        Ok(remote_cleanup_report(result))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The `worktree.cleanup` request for `repo` and its merged pull requests.
+fn remote_cleanup_params(
+    repo: &github::Repo,
+    merged: &[worktree::MergedPr],
+    focused_space: Option<String>,
+    skip_teardown: bool,
+) -> poimen_client::protocol::WorktreeCleanup {
+    poimen_client::protocol::WorktreeCleanup {
+        owner: repo.owner.clone(),
+        repo: repo.name.clone(),
+        merged: merged
+            .iter()
+            .map(|m| poimen_client::protocol::MergedPull {
+                branch: m.branch.clone(),
+                number: m.number,
+            })
+            .collect(),
+        focused_space,
+        skip_teardown,
+    }
+}
+
+/// A machine's `worktree.cleanup` result as the report of the local `task_cleanup`.
+fn remote_cleanup_report(
+    result: poimen_client::protocol::WorktreeCleanupResult,
+) -> worktree::CleanupReport {
+    worktree::CleanupReport {
+        removed: result
+            .removed
+            .into_iter()
+            .map(|r| worktree::Removed {
+                path: r.path,
+                branch: r.branch,
+                pr: r.pr,
+                branch_deleted: r.branch_deleted,
+                note: r.note,
+            })
+            .collect(),
+        left: result
+            .left
+            .into_iter()
+            .map(|l| worktree::Left {
+                path: l.path,
+                branch: l.branch,
+                pr: l.pr,
+                reason: l.reason,
+                command: l.command,
+            })
+            .collect(),
+        teardown_untrusted: result.teardown_untrusted,
+    }
+}
+
 /// The body of `machine_create_space`, against the backend of a machine. `cwd` is a path on that
 /// machine, so it is not checked here: an existing space for it is focused and nothing is created;
 /// else the server builds the layout. A project file that needs trust is an error (the dialog
@@ -1494,7 +1577,7 @@ async fn task_plan(
 }
 
 /// Removes the worktrees, spaces and local branches of the repository of `dir` whose pull request
-/// is merged (see `worktree::cleanup`). The first task mode with a `cleanup` command replaces the
+/// is merged (see `worktree::cleanup_merged`). The first task mode with a `cleanup` command replaces the
 /// built-in removal. `focused_space` is never touched. Destructive, so only on a user action.
 #[tauri::command]
 async fn task_cleanup(
@@ -1510,46 +1593,14 @@ async fn task_cleanup(
             .ok_or_else(|| "the repository has no GitHub origin".to_owned())?;
         let merged = worktree::merged_prs(&github::SystemRunner, &repo)?;
         let settings = get_settings();
-        let root_str = root.to_string_lossy().into_owned();
-        let sources = trust::Sources::read(&root_str);
-        let resolved = tasks::for_project(&settings.tasks, &sources, &settings.trusted_projects);
-        let mode = resolved
-            .modes
-            .modes
-            .iter()
-            .find_map(|m| m.cleanup.clone())
-            .map_or(
-                worktree::CleanupMode::Builtin,
-                worktree::CleanupMode::Command,
-            );
-        // The project's teardown runs in each worktree first, only for a trusted project file.
-        let command = match project::teardown_plan(&sources, &settings.trusted_projects) {
-            project::TeardownPlan::Run(command) => Some(command),
-            project::TeardownPlan::Untrusted if skip_teardown != Some(true) => {
-                return Ok(worktree::CleanupReport {
-                    teardown_untrusted: true,
-                    ..Default::default()
-                });
-            }
-            _ => None,
-        };
-        let teardown = command.map(|command| {
-            move |worktree: &std::path::Path| -> Result<(), String> {
-                let result = project::run_teardown(&project::SystemRunner, &command, worktree)?;
-                if result.success() {
-                    Ok(())
-                } else {
-                    Err(result.failure_text())
-                }
-            }
-        });
-        worktree::cleanup(
+        worktree::cleanup_merged(
             &root,
             &merged,
-            &mode,
-            backend.as_ref(),
+            &settings.tasks,
+            &settings.trusted_projects,
+            &worktree::BackendSpaces(backend.as_ref()),
             focused_space.as_deref(),
-            teardown.as_ref().map(|t| t as &worktree::Teardown<'_>),
+            skip_teardown == Some(true),
         )
     })
     .await
@@ -2394,6 +2445,7 @@ pub fn run() {
             machine_worktree_create,
             machine_create_space,
             machine_task_tab,
+            machine_task_cleanup,
             machine_check,
             set_terminal_colors,
             hooks_status,
@@ -2939,6 +2991,48 @@ mod build_layout_tests {
         let fake = FakeBackend::default();
         assert!(create_space_with(&fake, None, "/no/such/dir/at/all", None, None, None).is_err());
         assert!(fake.calls().is_empty());
+    }
+
+    // Clean up merged tasks on a machine (#284).
+
+    #[test]
+    fn remote_cleanup_sends_the_local_merged_pulls_and_maps_the_report_back() {
+        let repo = github::Repo {
+            owner: "o".into(),
+            name: "app".into(),
+        };
+        let merged = [worktree::MergedPr {
+            branch: "feat/7-x".into(),
+            number: 70,
+        }];
+        let p = remote_cleanup_params(&repo, &merged, Some("s1".into()), true);
+        assert_eq!((p.owner.as_str(), p.repo.as_str()), ("o", "app"));
+        assert_eq!(p.merged[0].branch, "feat/7-x");
+        assert_eq!(p.merged[0].number, 70);
+        assert_eq!(p.focused_space.as_deref(), Some("s1"));
+        assert!(p.skip_teardown);
+
+        let result: poimen_client::protocol::WorktreeCleanupResult =
+            serde_json::from_value(serde_json::json!({
+                "path": "/srv/o/app",
+                "removed": [{"path": "/srv/o/app-7", "branch": "feat/7-x", "pr": 70,
+                             "branch_deleted": false, "note": "branch kept: protected"}],
+                "left": [{"path": "/srv/o/app-8", "branch": "feat/8-y", "pr": 80,
+                          "reason": "it has uncommitted or untracked changes", "command": "c"}],
+                "teardown_untrusted": false
+            }))
+            .unwrap();
+        let report = serde_json::to_value(remote_cleanup_report(result)).unwrap();
+        assert_eq!(
+            report,
+            serde_json::json!({
+                "removed": [{"path": "/srv/o/app-7", "branch": "feat/7-x", "pr": 70,
+                             "branchDeleted": false, "note": "branch kept: protected"}],
+                "left": [{"path": "/srv/o/app-8", "branch": "feat/8-y", "pr": 80,
+                          "reason": "it has uncommitted or untracked changes", "command": "c"}],
+                "teardownUntrusted": false
+            })
+        );
     }
 
     // Spaces on a machine (#283).

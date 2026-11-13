@@ -628,6 +628,15 @@ impl Machines {
         self.with(name, Machine::backend)
     }
 
+    /// The backend of a machine that is `connected` now; any other state is an error naming it,
+    /// so a destructive request is never queued for a later connection.
+    pub fn connected_backend(&self, name: &str) -> Result<Arc<PoimenBackend>, String> {
+        self.with(name, |m| match m.status().state {
+            State::Connected { .. } => Ok(m.backend()),
+            _ => Err(format!("{name} is not connected")),
+        })?
+    }
+
     fn with<T>(&self, name: &str, f: impl FnOnce(&Machine) -> T) -> Result<T, String> {
         lock(&self.machines)
             .iter()
@@ -1407,6 +1416,17 @@ mod tests {
         assert_eq!(names, ["a", "b", "c"]);
         assert!(machines.reconnect("c").is_ok());
         assert!(machines.reconnect("zz").unwrap_err().contains("zz"));
+        // Never connected (its link has no steps): no backend for a destructive request.
+        assert_eq!(
+            machines.connected_backend("a").err().as_deref(),
+            Some("a is not connected")
+        );
+        assert!(
+            machines
+                .connected_backend("zz")
+                .err()
+                .is_some_and(|e| e.contains("zz"))
+        );
         machines.sync(&[], start);
         assert!(machines.list().is_empty());
     }
