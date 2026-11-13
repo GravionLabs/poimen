@@ -44,7 +44,7 @@ use poimen_protocol::{
     TabFocus, TabMove, TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach,
     TerminalClearTokens, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
     TerminalList, TerminalRename, TerminalReportAgent, TerminalReportTokens, TerminalResize,
-    TerminalStatus, WorktreeCreate, WorktreeCreateResult,
+    TerminalStatus, WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 
@@ -880,6 +880,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         ))),
         "repo.ensure" => repo_ensure(shared, parsed(request)?),
         "worktree.create" => worktree_create(shared, parsed(request)?),
+        "worktree.cleanup" => worktree_cleanup(shared, parsed(request)?),
         "space.list" => {
             let inner = lock(&shared.inner);
             Ok(json!(SpaceList {
@@ -1058,6 +1059,113 @@ fn worktree_create(shared: &Arc<Shared>, p: WorktreeCreate) -> ApiResult {
         })),
         Err(worktree::TaskWorktreeError::UnknownMode(m)) => Err((ErrorCode::InvalidParams, m)),
         Err(worktree::TaskWorktreeError::Failed(m)) => Err((ErrorCode::Internal, m)),
+    }
+}
+
+/// `worktree.cleanup` (#284): "Clean up merged tasks" of #192 in the clone of `owner/repo` under
+/// `reposDir`, through `poimen_core::worktree::cleanup_merged` with the task modes and trusted
+/// projects of the user config of this machine. Spaces of this server inside a removed worktree
+/// are closed like `space.close`. No clone is `{path: null}` and nothing happens; anything else at
+/// the path is `conflict`. Runs on the connection's thread, the server lock taken only to read or
+/// close spaces.
+fn worktree_cleanup(shared: &Arc<Shared>, p: WorktreeCleanup) -> ApiResult {
+    let home = shared.home.as_deref();
+    let template = repos::user_repos_dir(home);
+    let path = match repos::locate(home, &template, p.owner.trim(), p.repo.trim()) {
+        Ok(Some(path)) => path,
+        Ok(None) => return Ok(json!(WorktreeCleanupResult::default())),
+        Err(repos::EnsureError::Invalid(m)) => return Err((ErrorCode::InvalidParams, m)),
+        Err(repos::EnsureError::Occupied(m)) => return Err((ErrorCode::Conflict, m)),
+        Err(repos::EnsureError::Failed(m)) => return Err((ErrorCode::Internal, m)),
+    };
+    let root = worktree::main_worktree(&path).map_err(|e| (ErrorCode::Internal, e))?;
+    let config = home
+        .and_then(|h| std::fs::read_to_string(poimen_core::settings::config_path(h)).ok())
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .unwrap_or(Value::Null);
+    let user = poimen_core::tasks::user_modes(&config, &mut Vec::new());
+    let trusted = home
+        .map(poimen_core::settings::trusted_projects)
+        .unwrap_or_default();
+    let merged: Vec<worktree::MergedPr> = p
+        .merged
+        .into_iter()
+        .map(|m| worktree::MergedPr {
+            branch: m.branch,
+            number: m.number,
+        })
+        .collect();
+    let report = worktree::cleanup_merged(
+        &root,
+        &merged,
+        &user,
+        &trusted,
+        &ServerSpaces(shared),
+        p.focused_space.as_deref(),
+        p.skip_teardown,
+    )
+    .map_err(|e| (ErrorCode::Internal, e))?;
+    Ok(json!(WorktreeCleanupResult {
+        path: Some(path.to_string_lossy().into_owned()),
+        removed: report
+            .removed
+            .into_iter()
+            .map(|r| proto::CleanupRemoved {
+                path: r.path,
+                branch: r.branch,
+                pr: r.pr,
+                branch_deleted: r.branch_deleted,
+                note: r.note,
+            })
+            .collect(),
+        left: report
+            .left
+            .into_iter()
+            .map(|l| proto::CleanupLeft {
+                path: l.path,
+                branch: l.branch,
+                pr: l.pr,
+                reason: l.reason,
+                command: l.command,
+            })
+            .collect(),
+        teardown_untrusted: report.teardown_untrusted,
+    }))
+}
+
+/// The spaces of this server as the cleanup sees them: every terminal with its space and start
+/// directory, every space with its own `cwd`.
+struct ServerSpaces<'a>(&'a Shared);
+
+impl worktree::Spaces for ServerSpaces<'_> {
+    fn view(&self) -> Result<worktree::SpaceView, String> {
+        let inner = lock(&self.0.inner);
+        let panes = inner
+            .terminals
+            .iter()
+            .map(|t| json!({"workspace_id": t.info.space_id, "cwd": t.info.cwd}))
+            .collect();
+        let workspaces = inner
+            .layout
+            .spaces
+            .iter()
+            .map(|s| json!({"workspace_id": s.id, "cwd": s.cwd}))
+            .collect();
+        Ok(worktree::SpaceView {
+            panes: Value::Array(panes),
+            workspaces: Value::Array(workspaces),
+        })
+    }
+
+    fn close_space(&self, id: &str) -> Result<(), String> {
+        space_close(
+            self.0,
+            SpaceClose {
+                space_id: id.to_owned(),
+            },
+        )
+        .map(|_| ())
+        .map_err(|(_, m)| m)
     }
 }
 

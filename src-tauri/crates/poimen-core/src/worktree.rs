@@ -779,6 +779,60 @@ fn remove_builtin(
     }
 }
 
+/// "Clean up merged tasks" of the repository whose main worktree is `root`, as the app and
+/// poimen-server (`worktree.cleanup`, #284) run it: the first task mode (of `user` with the
+/// trusted project file's `tasks` merged over them) with a `cleanup` command replaces the built-in
+/// removal, and the project's `teardown` runs in each worktree first when the project file is
+/// trusted. An untrusted project file with a teardown removes nothing and answers
+/// `teardown_untrusted`, unless `skip_teardown`.
+pub fn cleanup_merged(
+    root: &Path,
+    merged: &[MergedPr],
+    user: &crate::tasks::TaskModes,
+    trusted: &std::collections::BTreeMap<String, String>,
+    spaces: &dyn Spaces,
+    focused_space: Option<&str>,
+    skip_teardown: bool,
+) -> Result<CleanupReport, String> {
+    use crate::project;
+    let sources = crate::trust::Sources::read(&root.to_string_lossy());
+    let resolved = crate::tasks::for_project(user, &sources, trusted);
+    let mode = resolved
+        .modes
+        .modes
+        .iter()
+        .find_map(|m| m.cleanup.clone())
+        .map_or(CleanupMode::Builtin, CleanupMode::Command);
+    let command = match project::teardown_plan(&sources, trusted) {
+        project::TeardownPlan::Run(command) => Some(command),
+        project::TeardownPlan::Untrusted if !skip_teardown => {
+            return Ok(CleanupReport {
+                teardown_untrusted: true,
+                ..Default::default()
+            });
+        }
+        _ => None,
+    };
+    let teardown = command.map(|command| {
+        move |worktree: &Path| -> Result<(), String> {
+            let result = project::run_teardown(&project::SystemRunner, &command, worktree)?;
+            if result.success() {
+                Ok(())
+            } else {
+                Err(result.failure_text())
+            }
+        }
+    });
+    cleanup(
+        root,
+        merged,
+        &mode,
+        spaces,
+        focused_space,
+        teardown.as_ref().map(|t| t as &Teardown<'_>),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -24,7 +24,8 @@ use poimen_protocol::{
     SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult, SpaceList, SpaceRename,
     Tab, TabClose, TabCreate, TabFocus, TabMove, TabRename, TabResizeSplit, TabSplit, TaskIssue,
     Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
-    TerminalList, TerminalRename, TerminalResize, WorktreeCreate, WorktreeCreateResult,
+    TerminalList, TerminalRename, TerminalResize, WorktreeCleanup, WorktreeCleanupResult,
+    WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -397,6 +398,18 @@ impl Client {
         let value = self.request_within("worktree.create", params, LONG_REQUEST_TIMEOUT)?;
         serde_json::from_value(value)
             .map_err(|e| ClientError::Protocol(format!("worktree.create: {e}")))
+    }
+
+    /// `worktree.cleanup`: "Clean up merged tasks" in the server's clone of `owner/repo` for the
+    /// `merged` pull requests (#284); waits up to [`LONG_REQUEST_TIMEOUT`] (teardowns may run).
+    pub fn cleanup_worktrees(
+        &self,
+        params: WorktreeCleanup,
+    ) -> Result<WorktreeCleanupResult, ClientError> {
+        let params = serde_json::to_value(params).unwrap_or(Value::Null);
+        let value = self.request_within("worktree.cleanup", params, LONG_REQUEST_TIMEOUT)?;
+        serde_json::from_value(value)
+            .map_err(|e| ClientError::Protocol(format!("worktree.cleanup: {e}")))
     }
 
     pub fn ping(&self) -> Result<PingResult, ClientError> {
@@ -1037,6 +1050,35 @@ mod tests {
         );
         assert!(Client::new(&path).ensure_repo("o", "r").is_err());
         server.join().unwrap();
+    }
+
+    #[test]
+    fn cleanup_worktrees_sends_the_merged_pulls_and_reads_the_report() {
+        let path = temp_socket("cleanup");
+        let server = fake_server(
+            &path,
+            vec![
+                r#"{"id":"$ID","result":{"path":"/s/o/r","removed":[],"left":[{"path":"/s/o/r-7","branch":"feat/7-x","pr":9,"reason":"dirty","command":"c"}],"teardown_untrusted":false}}"#
+                    .into(),
+            ],
+        );
+        let r = Client::new(&path)
+            .cleanup_worktrees(WorktreeCleanup {
+                owner: "o".into(),
+                repo: "r".into(),
+                merged: vec![poimen_protocol::MergedPull {
+                    branch: "feat/7-x".into(),
+                    number: 9,
+                }],
+                focused_space: Some("s1".into()),
+                skip_teardown: false,
+            })
+            .unwrap();
+        assert_eq!(r.left[0].pr, 9);
+        let sent = server.join().unwrap();
+        assert!(sent.contains(r#""method":"worktree.cleanup""#), "{sent}");
+        assert!(sent.contains(r#""focused_space":"s1""#), "{sent}");
+        assert!(sent.contains(r#""number":9"#), "{sent}");
     }
 
     #[test]

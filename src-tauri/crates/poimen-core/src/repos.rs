@@ -191,6 +191,22 @@ fn check_clone(path: &Path, owner: &str, repo: &str) -> Result<(), String> {
     }
 }
 
+/// The clone of `owner/repo` at its path under `template`, without cloning or fetching:
+/// `None` when nothing is at the path, `Occupied` when something else is. Only reads.
+pub fn locate(
+    home: Option<&Path>,
+    template: &str,
+    owner: &str,
+    repo: &str,
+) -> Result<Option<PathBuf>, EnsureError> {
+    let path = target(template, home, owner, repo)?;
+    if std::fs::symlink_metadata(&path).is_err() {
+        return Ok(None);
+    }
+    check_clone(&path, owner, repo).map_err(EnsureError::Occupied)?;
+    Ok(Some(path))
+}
+
 /// Clones `owner/repo` into its path under `template` when the path is absent (`gh repo clone`),
 /// fetches `origin` when the path is a clone of it, and refuses anything else at the path.
 pub fn ensure(
