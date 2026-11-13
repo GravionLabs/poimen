@@ -1,7 +1,9 @@
 //! Client of the `poimen-server` socket API (`docs/protocol.md`): connect, requests and the event
 //! stream. Blocking and free of any app dependency, so the app, a CLI and `poimen attach` share it.
 //!
-//! Requests use short-lived connections; [`Client::subscribe`] keeps its connection open.
+//! Requests use short-lived connections; [`Client::subscribe`] keeps its connection open. A
+//! client reaches its server on the local socket, or through a [`pipe::Connector`] (a remote
+//! machine: `ssh <target> poimen-server stdio`).
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -13,6 +15,7 @@ use std::thread;
 use std::time::Duration;
 
 pub mod agent;
+pub mod pipe;
 pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
@@ -23,6 +26,7 @@ use poimen_protocol::{
     TerminalInput, TerminalList, TerminalRename, TerminalResize,
 };
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 /// How long a request waits for its response.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -61,9 +65,114 @@ impl fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
-type Stream = transport::Conn;
+/// One connection: the local socket, or a pipe of a connector.
+#[derive(Clone, Debug)]
+enum Stream {
+    Local(transport::Conn),
+    Pipe(pipe::Pipe),
+}
 
-fn connect_stream(path: &Path) -> io::Result<Stream> {
+impl Stream {
+    fn timeouts_supported(&self) -> bool {
+        matches!(self, Stream::Local(_)) && transport::TIMEOUTS_SUPPORTED
+    }
+
+    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        match self {
+            Stream::Local(c) => c.set_read_timeout(timeout),
+            Stream::Pipe(_) => Ok(()),
+        }
+    }
+
+    fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        match self {
+            Stream::Local(c) => c.set_write_timeout(timeout),
+            Stream::Pipe(_) => Ok(()),
+        }
+    }
+
+    fn shutdown(&self) -> io::Result<()> {
+        match self {
+            Stream::Local(c) => c.shutdown(),
+            Stream::Pipe(p) => {
+                p.close();
+                Ok(())
+            }
+        }
+    }
+}
+
+impl io::Read for &Stream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Stream::Local(c) => (&*c).read(buf),
+            Stream::Pipe(p) => (&*p).read(buf),
+        }
+    }
+}
+
+impl io::Read for Stream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        (&*self).read(buf)
+    }
+}
+
+impl Write for &Stream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Stream::Local(c) => (&*c).write(buf),
+            Stream::Pipe(p) => (&*p).write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Stream::Local(c) => (&*c).flush(),
+            Stream::Pipe(p) => (&*p).flush(),
+        }
+    }
+}
+
+impl Write for Stream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        (&*self).write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        (&*self).flush()
+    }
+}
+
+/// Where a client reaches its server.
+#[derive(Clone)]
+enum Endpoint {
+    Socket,
+    Connector(Arc<dyn pipe::Connector>),
+}
+
+impl fmt::Debug for Endpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Endpoint::Socket => f.write_str("Socket"),
+            Endpoint::Connector(_) => f.write_str("Connector"),
+        }
+    }
+}
+
+impl Endpoint {
+    fn open(&self, path: &Path) -> io::Result<Stream> {
+        match self {
+            Endpoint::Socket => connect_stream(path).map(Stream::Local),
+            Endpoint::Connector(c) => c.connect().map(Stream::Pipe),
+        }
+    }
+
+    fn timeouts_supported(&self) -> bool {
+        matches!(self, Endpoint::Socket) && transport::TIMEOUTS_SUPPORTED
+    }
+}
+
+fn connect_stream(path: &Path) -> io::Result<transport::Conn> {
     // Never talk to a socket in a directory another user could have replaced it in. A missing
     // directory falls through to the connect error. (Windows: the pipe's DACL protects it.)
     #[cfg(unix)]
@@ -93,15 +202,21 @@ fn explain_denied(e: io::Error) -> io::Error {
 }
 
 /// One request on a connection of its own, bounded by the socket timeouts where they exist.
-fn request_on(path: &Path, method: &str, params: Value) -> Result<Value, ClientError> {
-    let mut conn = Connection::open(path, Some(REQUEST_TIMEOUT))?;
+fn request_on(
+    endpoint: &Endpoint,
+    path: &Path,
+    method: &str,
+    params: Value,
+) -> Result<Value, ClientError> {
+    let mut conn = Connection::open(endpoint, path, Some(REQUEST_TIMEOUT))?;
     conn.call(method, params)
 }
 
-/// A handle on the server socket. Cheap; holds no connection.
+/// A handle on the server socket (or a connector). Cheap; holds no connection.
 #[derive(Debug, Clone)]
 pub struct Client {
     path: PathBuf,
+    endpoint: Endpoint,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -119,24 +234,38 @@ impl Default for Client {
 
 impl Client {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            endpoint: Endpoint::Socket,
+        }
     }
 
+    /// A client whose connections are opened by `connector`; `label` names it where a socket
+    /// path would be shown ([`Client::socket`]).
+    pub fn with_connector(label: impl Into<PathBuf>, connector: Arc<dyn pipe::Connector>) -> Self {
+        Self {
+            path: label.into(),
+            endpoint: Endpoint::Connector(connector),
+        }
+    }
+
+    /// The socket path, or the label of a connector client.
     pub fn socket(&self) -> &Path {
         &self.path
     }
 
     /// Sends one request and returns its `result`, waiting at most [`REQUEST_TIMEOUT`].
     pub fn request(&self, method: &str, params: Value) -> Result<Value, ClientError> {
-        if transport::TIMEOUTS_SUPPORTED {
-            return request_on(&self.path, method, params);
+        if self.endpoint.timeouts_supported() {
+            return request_on(&self.endpoint, &self.path, method, params);
         }
-        // Named pipes have no I/O timeouts: the request runs on a thread of its own, which ends
-        // when the connection does.
+        // Named pipes and connector pipes have no I/O timeouts: the request runs on a thread of
+        // its own, which ends when the connection does.
         let (tx, rx) = mpsc::channel();
-        let (path, method) = (self.path.clone(), method.to_string());
+        let (endpoint, path, method) =
+            (self.endpoint.clone(), self.path.clone(), method.to_string());
         thread::spawn(move || {
-            let _ = tx.send(request_on(&path, &method, params));
+            let _ = tx.send(request_on(&endpoint, &path, &method, params));
         });
         match rx.recv_timeout(REQUEST_TIMEOUT) {
             Ok(result) => result,
@@ -159,11 +288,30 @@ impl Client {
         &self,
         client: Option<poimen_protocol::ClientInfo>,
     ) -> Result<EventStream, ClientError> {
-        let mut conn = Connection::open(&self.path, None)?;
+        let mut conn = Connection::open(&self.endpoint, &self.path, None)?;
         let params = serde_json::to_value(poimen_protocol::EventsSubscribe { client })
             .unwrap_or(Value::Null);
         conn.call("events.subscribe", params)?;
         Ok(EventStream { conn })
+    }
+
+    /// `ping`, then `events.subscribe` on the same connection: the version of the server and its
+    /// event stream, whose end is the end of the connection. A server whose protocol is not
+    /// [`protocol::PROTOCOL_VERSION`] gets no subscription; its ping is returned without a stream.
+    pub fn ping_and_subscribe(
+        &self,
+        client: Option<poimen_protocol::ClientInfo>,
+    ) -> Result<(PingResult, Option<EventStream>), ClientError> {
+        let mut conn = Connection::open(&self.endpoint, &self.path, None)?;
+        let ping: PingResult = serde_json::from_value(conn.call("ping", Value::Null)?)
+            .map_err(|e| ClientError::Protocol(format!("ping: {e}")))?;
+        if ping.protocol != protocol::PROTOCOL_VERSION {
+            return Ok((ping, None));
+        }
+        let params = serde_json::to_value(poimen_protocol::EventsSubscribe { client })
+            .unwrap_or(Value::Null);
+        conn.call("events.subscribe", params)?;
+        Ok((ping, Some(EventStream { conn })))
     }
 
     fn typed<T: serde::de::DeserializeOwned>(
@@ -398,7 +546,7 @@ impl Client {
         mode: AttachMode,
         take_over: bool,
     ) -> Result<Attachment, ClientError> {
-        let mut conn = Connection::open(&self.path, None)?;
+        let mut conn = Connection::open(&self.endpoint, &self.path, None)?;
         let result = conn.call(
             "terminal.attach",
             to_value(&TerminalAttach {
@@ -435,7 +583,7 @@ impl Attachment {
     /// Sets how long [`Attachment::next_record`] waits for a record (`None`: for ever).
     /// Unsupported on Windows (named pipes have no read timeout).
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<(), ClientError> {
-        if !transport::TIMEOUTS_SUPPORTED {
+        if !self.conn.reader.get_ref().timeouts_supported() {
             return Err(ClientError::Io(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "named pipes have no read timeout",
@@ -560,8 +708,12 @@ struct Connection {
 }
 
 impl Connection {
-    fn open(path: &Path, timeout: Option<Duration>) -> Result<Self, ClientError> {
-        let stream = connect_stream(path).map_err(ClientError::Connect)?;
+    fn open(
+        endpoint: &Endpoint,
+        path: &Path,
+        timeout: Option<Duration>,
+    ) -> Result<Self, ClientError> {
+        let stream = endpoint.open(path).map_err(ClientError::Connect)?;
         stream.set_read_timeout(timeout).map_err(ClientError::Io)?;
         stream.set_write_timeout(timeout).map_err(ClientError::Io)?;
         Ok(Self {
@@ -876,6 +1028,108 @@ mod tests {
         assert!(input.contains(r#""method":"terminal.input""#));
         assert!(input.contains(r#""terminal_id":"t1""#));
         assert!(input.contains(r#""data":"ls\r""#));
+    }
+
+    /// A connector whose every connection is served by `serve` on a thread, over OS pipes.
+    struct FakeConnector {
+        serve: fn(BufReader<io::PipeReader>, io::PipeWriter),
+    }
+
+    impl pipe::Connector for FakeConnector {
+        fn connect(&self) -> io::Result<pipe::Pipe> {
+            let (to_server_r, to_server_w) = io::pipe()?;
+            let (from_server_r, from_server_w) = io::pipe()?;
+            let serve = self.serve;
+            thread::spawn(move || serve(BufReader::new(to_server_r), from_server_w));
+            Ok(pipe::Pipe::new(from_server_r, to_server_w, || {}))
+        }
+    }
+
+    fn answer(reader: &mut BufReader<io::PipeReader>, out: &mut io::PipeWriter, result: &str) {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        let id = serde_json::from_str::<Value>(&line).unwrap()["id"].clone();
+        writeln!(out, r#"{{"id":{id},"result":{result}}}"#).unwrap();
+    }
+
+    #[test]
+    fn a_connector_client_sends_requests_over_its_pipe() {
+        let client = Client::with_connector(
+            "ssh:box",
+            Arc::new(FakeConnector {
+                serve: |mut r, mut w| {
+                    answer(
+                        &mut r,
+                        &mut w,
+                        r#"{"spaces":[{"id":"s1","name":"a","cwd":"/x"}]}"#,
+                    )
+                },
+            }),
+        );
+        assert_eq!(client.list_spaces().unwrap()[0].name, "a");
+        assert_eq!(client.socket(), Path::new("ssh:box"));
+    }
+
+    #[test]
+    fn ping_and_subscribe_shares_one_connection_and_ends_with_it() {
+        let client = Client::with_connector(
+            "ssh:box",
+            Arc::new(FakeConnector {
+                serve: |mut r, mut w| {
+                    let ping = format!(
+                        r#"{{"version":"0.9.0","protocol":{},"pid":7}}"#,
+                        protocol::PROTOCOL_VERSION
+                    );
+                    answer(&mut r, &mut w, &ping);
+                    answer(&mut r, &mut w, "{}");
+                    writeln!(
+                        w,
+                        r#"{{"event":"terminal.closed","data":{{"terminal_id":"t1","space_id":"s1"}}}}"#
+                    )
+                    .unwrap();
+                },
+            }),
+        );
+        let (ping, stream) = client.ping_and_subscribe(None).unwrap();
+        assert_eq!(ping.version, "0.9.0");
+        let mut stream = stream.expect("a stream for the same protocol");
+        assert!(stream.next().unwrap().is_ok());
+        assert!(stream.next().unwrap().is_err(), "the end of the connection");
+    }
+
+    #[test]
+    fn ping_and_subscribe_does_not_subscribe_to_another_protocol() {
+        let client = Client::with_connector(
+            "ssh:box",
+            Arc::new(FakeConnector {
+                serve: |mut r, mut w| {
+                    answer(
+                        &mut r,
+                        &mut w,
+                        r#"{"version":"0.1.0","protocol":1,"pid":7}"#,
+                    );
+                    // A subscribe would be a second line; none may come.
+                    let mut rest = String::new();
+                    assert_eq!(r.read_line(&mut rest).unwrap(), 0, "{rest}");
+                },
+            }),
+        );
+        let (ping, stream) = client.ping_and_subscribe(None).unwrap();
+        assert_eq!((ping.protocol, stream.is_none()), (1, true));
+    }
+
+    #[test]
+    fn a_failing_connector_is_a_connect_error() {
+        struct Down;
+        impl pipe::Connector for Down {
+            fn connect(&self) -> io::Result<pipe::Pipe> {
+                Err(io::Error::other("offline"))
+            }
+        }
+        let err = Client::with_connector("ssh:box", Arc::new(Down))
+            .ping()
+            .unwrap_err();
+        assert!(err.is_not_running(), "{err}");
     }
 
     #[test]

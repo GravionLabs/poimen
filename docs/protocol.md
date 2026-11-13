@@ -176,6 +176,8 @@ Linux AppImage (`APPIMAGE` or `APPDIR` set): the bundled binary lives in the App
 
 `poimen-server stdio` connects its stdin and stdout to the user's running server on its socket, so `ssh host poimen-server stdio` speaks this protocol over SSH. It starts the server detached (own process group, no terminal) when none answers, waits up to 10 s for it, and uses a running server as it is: it never stops, restarts or replaces one. The bridge copies bytes unchanged in both directions (no parsing, no reframing); it is one connection like any other client's, so `events.subscribe` and `terminal.attach` work through it. When stdin closes (or the SSH session drops) the server gets end of file and may still answer for up to 2 s; then only the bridge ends, the server and its terminals keep running.
 
+The app reaches a machine of `machines[]` this way (`src-tauri/src/machines.rs`): `ssh -T -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -- <target> poimen-server stdio` (`poimen-server-rc` on rc), one ssh process per connection. Its first connection sends `ping` and, when the protocol matches, `events.subscribe` on the same connection; the end of that connection is the machine going offline. A server of another protocol gets nothing after the `ping`.
+
 `poimen-server --version` prints `poimen-server <version> (protocol <n>)`, which a machine check reads. Releases attach static musl builds as `poimen-server-<version>-x86_64-unknown-linux-musl.tar.gz` and `poimen-server-<version>-aarch64-unknown-linux-musl.tar.gz` (the archive holds the `poimen-server` binary and the `poimen-pty-host` it starts its terminals in, `poimen-pty-host-rc` on rc; keep them in one directory).
 
 ## Host protocol

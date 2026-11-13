@@ -144,9 +144,29 @@ describe("parseSettings", () => {
       ],
       trustedProjects: {},
       tasks: DEFAULT_SETTINGS.tasks,
+      machines: [],
       home: "/Users/x",
       warnings: ["w"],
     });
+  });
+
+  it("parses machines and skips entries without a name or an ssh target", () => {
+    expect(
+      parseSettings({
+        machines: [
+          { name: "box", ssh: "box", reposDir: "~/Source/{owner}/{repo}" },
+          { name: "gpu", ssh: "me@gpu" },
+          { name: "", ssh: "x" },
+          { name: "nossh" },
+          7,
+        ],
+      }).machines,
+    ).toEqual([
+      { name: "box", ssh: "box", reposDir: "~/Source/{owner}/{repo}" },
+      { name: "gpu", ssh: "me@gpu", reposDir: "~/Source/{owner}/{repo}" },
+    ]);
+    expect(parseSettings({ machines: "box" }).machines).toEqual([]);
+    expect(parseSettings({}).machines).toEqual([]);
   });
 
   it("reads the backend and falls back to poimen for anything else", () => {

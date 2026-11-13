@@ -21,6 +21,7 @@ mod hooks;
 mod layout;
 #[cfg(test)]
 mod live;
+mod machines;
 mod poimen_backend;
 mod poimen_server;
 mod project;
@@ -1054,6 +1055,49 @@ fn backend_kind(kind: State<'_, BackendKind>) -> &'static str {
     kind.0
 }
 
+type SharedMachines = std::sync::Arc<machines::Machines>;
+
+/// The machines of the settings with their connection state (#279).
+#[tauri::command]
+fn list_machines(machines: State<'_, SharedMachines>) -> Vec<machines::MachineStatus> {
+    machines.list()
+}
+
+/// Tries to connect an offline or incompatible machine at once.
+#[tauri::command]
+fn reconnect_machine(machines: State<'_, SharedMachines>, name: String) -> Result<(), String> {
+    machines.reconnect(&name)
+}
+
+/// The spaces of a machine's server; fails while the machine is not connected.
+#[tauri::command]
+async fn machine_snapshot(
+    machines: State<'_, SharedMachines>,
+    name: String,
+) -> Result<backend::Snapshot, String> {
+    let backend: Shared = machines.backend(&name)?;
+    on_backend(&backend, |b| b.snapshot()).await
+}
+
+/// Starts, keeps or stops the machine connections for `configs`; state changes go to the
+/// frontend as `machine:state_changed`.
+fn sync_machines(
+    machines: &machines::Machines,
+    configs: &[machines::MachineConfig],
+    handle: &tauri::AppHandle,
+) {
+    machines.sync(configs, |config| {
+        let handle = handle.clone();
+        machines::Machine::start(
+            config.clone(),
+            std::sync::Arc::new(machines::SshConnector::new(&config.ssh)),
+            move |status| {
+                let _ = handle.emit("machine:state_changed", status);
+            },
+        )
+    });
+}
+
 /// Gives `poimen-server` the colors of the active scheme (`foreground`, `background`, `cursor`,
 /// 16 `palette` entries as `#rrggbb`), so it answers color queries while no app is attached. Kept
 /// for when the server starts; a no-op for the herdr backend, and an unreachable server is no error.
@@ -2075,6 +2119,7 @@ pub fn run() {
         .manage(DeliverWatch::default())
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
+        .manage(SharedMachines::default())
         .setup(move |app| {
             let handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
@@ -2097,9 +2142,12 @@ pub fn run() {
             }
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
+                let machines = app.state::<SharedMachines>().inner().clone();
+                sync_machines(&machines, &settings::load(&home).machines, &handle);
                 std::thread::spawn(move || {
                     settings::watch(&home, std::time::Duration::from_secs(1), |s| {
                         let _ = handle.emit("settings", s);
+                        sync_machines(&machines, &s.machines, &handle);
                         // Menu items carry the accelerators; rebuild them on the main thread.
                         let (app, shortcuts) = (handle.clone(), s.shortcuts.clone());
                         let _ = handle.run_on_main_thread(move || {
@@ -2124,6 +2172,9 @@ pub fn run() {
             restart_server,
             quit_and_stop_server,
             backend_kind,
+            list_machines,
+            reconnect_machine,
+            machine_snapshot,
             set_terminal_colors,
             hooks_status,
             hooks_install,

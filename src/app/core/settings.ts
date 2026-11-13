@@ -49,6 +49,26 @@ export interface TaskMode {
   cleanup: string[] | string | null;
 }
 
+/** A remote machine (`machines[]`, wire shape of `machines.rs`). */
+export interface Machine {
+  name: string;
+  /** The ssh target as in `~/.ssh/config`. */
+  ssh: string;
+  /** Where repositories live on the machine (`{owner}`, `{repo}`). */
+  reposDir: string;
+}
+
+/** A machine of the wire, or `null` when `name` or `ssh` is missing. */
+export function parseMachine(raw: unknown): Machine | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  const name = r["name"];
+  const ssh = r["ssh"];
+  if (typeof name !== "string" || name === "" || typeof ssh !== "string" || ssh === "") return null;
+  const reposDir = typeof r["reposDir"] === "string" ? r["reposDir"] : "~/Source/{owner}/{repo}";
+  return { name, ssh, reposDir };
+}
+
 export interface TaskModes {
   modes: TaskMode[];
   worktreeDir: string;
@@ -239,6 +259,8 @@ export interface Settings {
   trustedProjects: Record<string, string>;
   /** `tasks`: the task modes and the worktree directory template. */
   tasks: TaskModes;
+  /** `machines`: remote machines reached over SSH; invalid entries are settings warnings. */
+  machines: Machine[];
   /** The home directory `~` stands for; `null` until the backend knows it. */
   home: string | null;
   warnings: string[];
@@ -305,6 +327,7 @@ export const DEFAULT_SETTINGS: Settings = {
   spaceTemplates: [],
   trustedProjects: {},
   tasks: DEFAULT_TASKS,
+  machines: [],
   home: null,
   warnings: [],
 };
@@ -410,6 +433,9 @@ export function parseSettings(raw: unknown): Settings {
     spaceTemplates: parseSpaceTemplates(r["spaceTemplates"]),
     trustedProjects: parseTrusted(r["trustedProjects"]),
     tasks: parseTaskModes(r["tasks"]),
+    machines: Array.isArray(r["machines"])
+      ? r["machines"].map(parseMachine).filter((m) => m !== null)
+      : [],
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
