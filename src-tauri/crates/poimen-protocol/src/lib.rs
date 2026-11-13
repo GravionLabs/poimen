@@ -744,6 +744,50 @@ impl MachineCheckResult {
     }
 }
 
+/// Params of `repo.ensure` (#282): the GitHub repository `owner/repo`, at its path under
+/// `reposDir` of the server's user config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoEnsure {
+    pub owner: String,
+    pub repo: String,
+}
+
+/// Result of `repo.ensure`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoEnsureResult {
+    /// The repository's path on the server's machine.
+    pub path: String,
+    /// `true`: cloned now; `false`: an existing clone, fetched.
+    pub cloned: bool,
+}
+
+/// The issue of `worktree.create`; its fields fill the task mode's templates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskIssue {
+    pub nr: u64,
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+/// Params of `worktree.create` (#282): the worktree of `issue` for task mode `mode` of the
+/// repository of `repo_dir`, as `task_worktree` of the app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeCreate {
+    pub repo_dir: String,
+    pub issue: TaskIssue,
+    pub mode: String,
+}
+
+/// Result of `worktree.create`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeCreateResult {
+    pub path: String,
+    pub branch: String,
+    /// `false` when an existing worktree of the branch was returned.
+    pub created: bool,
+}
+
 /// What a client is, said on `events.subscribe` (ADR 0006).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1720,6 +1764,39 @@ mod tests {
             serde_json::from_value::<MachineCheckItem>(json!({"id": "x", "status": "bogus"}))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn repo_and_worktree_requests_parse() {
+        let p: RepoEnsure =
+            serde_json::from_value(json!({"owner": "GravionLabs", "repo": "poimen"})).unwrap();
+        assert_eq!(
+            (p.owner.as_str(), p.repo.as_str()),
+            ("GravionLabs", "poimen")
+        );
+        assert!(serde_json::from_value::<RepoEnsure>(json!({"owner": "o"})).is_err());
+        let r: RepoEnsureResult =
+            serde_json::from_value(json!({"path": "/s/o/r", "cloned": true})).unwrap();
+        assert!(r.cloned);
+
+        let w: WorktreeCreate = serde_json::from_value(json!({
+            "repo_dir": "/s/o/r", "issue": {"nr": 7, "title": "feat: X"}, "mode": "agent"
+        }))
+        .unwrap();
+        assert_eq!(w.issue.nr, 7);
+        assert_eq!(w.issue.url, "");
+        assert!(
+            serde_json::from_value::<WorktreeCreate>(json!({
+                "repo_dir": "/r", "issue": {"title": "x"}, "mode": "agent"
+            }))
+            .is_err()
+        );
+        let r: WorktreeCreateResult = serde_json::from_value(
+            json!({"path": "/s/o/r-7", "branch": "feat/7-x", "created": false}),
+        )
+        .unwrap();
+        assert_eq!(r.branch, "feat/7-x");
+        assert!(!r.created);
     }
 
     #[test]

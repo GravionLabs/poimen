@@ -167,6 +167,43 @@ pub fn ensure(
     })
 }
 
+/// Why [`task_worktree`] made no worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskWorktreeError {
+    /// No task mode of that name for the repository.
+    UnknownMode(String),
+    /// [`ensure`] failed.
+    Failed(String),
+}
+
+impl std::fmt::Display for TaskWorktreeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownMode(m) | Self::Failed(m) => f.write_str(m),
+        }
+    }
+}
+
+/// `task_worktree` of #190 for any caller: the task mode `mode` of the repository of `repo_dir`
+/// (user config under `home` and the trusted project file, [`crate::tasks::for_dir`]) and its
+/// worktree created or reused through [`ensure`].
+pub fn task_worktree(
+    home: Option<&Path>,
+    repo_dir: &str,
+    issue: &Issue,
+    mode: &str,
+) -> Result<Worktree, TaskWorktreeError> {
+    let resolved = crate::tasks::for_dir(home, repo_dir);
+    let found = resolved
+        .modes
+        .modes
+        .iter()
+        .find(|m| m.name == mode)
+        .ok_or_else(|| TaskWorktreeError::UnknownMode(format!("unknown task mode {mode:?}")))?;
+    ensure(repo_dir, issue, &found.branch, &resolved.modes.worktree_dir)
+        .map_err(TaskWorktreeError::Failed)
+}
+
 /// A worktree of a repository and the branch checked out in it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Checkout {
@@ -838,6 +875,32 @@ mod tests {
         assert_eq!(PathBuf::from(&wt.path), f.base.join("app-7"));
         assert!(wt.created);
         assert!(f.base.join("app-7/b.txt").exists(), "based on release/next");
+    }
+
+    #[test]
+    fn task_worktree_uses_the_mode_of_the_user_config() {
+        let f = Fixture::new(false);
+        let home = f.base.join("home");
+        let config = crate::settings::config_path(&home);
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config,
+            r#"{"tasks": {"worktreeDir": "../wt-{nr}", "modes": [{"name": "fix", "branch": "fix/{nr}"}]}}"#,
+        )
+        .unwrap();
+        let repo = f.repo.to_str().unwrap();
+        let wt = task_worktree(Some(&home), repo, &Fixture::issue(), "fix").unwrap();
+        assert_eq!(wt.branch, "fix/7");
+        assert_eq!(PathBuf::from(&wt.path), f.base.join("wt-7"));
+        assert!(wt.created);
+        // The default mode is replaced by the user's list, as in the app.
+        assert!(matches!(
+            task_worktree(Some(&home), repo, &Fixture::issue(), "agent"),
+            Err(TaskWorktreeError::UnknownMode(_))
+        ));
+        // Without a home: the default `agent` mode.
+        let wt = task_worktree(None, repo, &Fixture::issue(), "agent").unwrap();
+        assert_eq!(wt.branch, "feat/7-add-thing");
     }
 
     #[test]
