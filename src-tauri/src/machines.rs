@@ -236,10 +236,22 @@ impl Shared {
         }
     }
 
-    fn track(&self, pipe: &Pipe) {
+    /// Registers `pipe` so a drop or a stop ends it; a stopped machine closes and refuses it.
+    fn track(&self, pipe: &Pipe) -> io::Result<()> {
         let mut pipes = lock(&self.pipes);
+        // Checked under the lock: `stop` sets the flag before it takes the list, so a pipe pushed
+        // here while not stopped is closed by that stop.
+        if self.stopped() {
+            drop(pipes);
+            pipe.close();
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "the machine is stopped",
+            ));
+        }
         pipes.retain(|p| p.upgrade().is_some());
         pipes.push(pipe.downgrade());
+        Ok(())
     }
 
     /// Ends every connection of the machine (poimen's ssh processes, never a terminal).
@@ -326,7 +338,13 @@ fn supervise(link: &dyn Link, shared: &Shared, pause: &dyn Pause) {
     let mut backoff = Backoff::default();
     while !shared.stopped() {
         shared.set(State::Connecting);
-        let delay = match link.connect() {
+        let connected = link.connect();
+        // Stopped while connecting (a connect can take ssh's ConnectTimeout plus the ping): never
+        // connected; its connection was refused by `track`, and the session is dropped unread.
+        if shared.stopped() {
+            break;
+        }
+        let delay = match connected {
             Err(error) => {
                 shared.set(State::Offline { error });
                 Some(backoff.next())
@@ -373,7 +391,7 @@ struct Tracked {
 impl Connector for Tracked {
     fn connect(&self) -> io::Result<Pipe> {
         let pipe = self.inner.connect()?;
-        self.shared.track(&pipe);
+        self.shared.track(&pipe)?;
         Ok(pipe)
     }
 }
@@ -1151,7 +1169,7 @@ mod tests {
         let watcher = Pipe::new(io::empty(), io::sink(), move || {
             counter.fetch_add(1, Ordering::SeqCst);
         });
-        shared.track(&watcher);
+        shared.track(&watcher).unwrap();
         let pause = FakePause {
             delays: Mutex::default(),
             stop_after: 1,
@@ -1170,6 +1188,77 @@ mod tests {
             written_before,
             "no close request"
         );
+    }
+
+    /// Stops the machine while its connect is under way, then answers with a live session.
+    struct StoppedWhileConnecting {
+        shared: Arc<Shared>,
+        read: Arc<AtomicBool>,
+    }
+
+    impl Link for StoppedWhileConnecting {
+        fn connect(&self) -> Result<(PingResult, Option<Session>), String> {
+            self.shared.stop();
+            let read = self.read.clone();
+            let session = std::iter::once(Ok(event())).inspect(move |_| {
+                read.store(true, Ordering::SeqCst);
+            });
+            Ok((ping(PROTOCOL_VERSION), Some(Box::new(session))))
+        }
+    }
+
+    #[test]
+    fn a_machine_stopped_while_connecting_never_connects_or_follows_the_session() {
+        let shared = Arc::new(Shared::new(|_| {}));
+        let read = Arc::new(AtomicBool::new(false));
+        let link = StoppedWhileConnecting {
+            shared: shared.clone(),
+            read: read.clone(),
+        };
+        let pause = FakePause {
+            delays: Mutex::default(),
+            stop_after: 1,
+            woken: vec![],
+        };
+        supervise(&link, &shared, &pause);
+        assert_eq!(shared.state(), State::Connecting);
+        assert_eq!(shared.session(), None);
+        assert!(!read.load(Ordering::SeqCst), "the session is not followed");
+        assert!(lock(&pause.delays).is_empty(), "no retry after the stop");
+    }
+
+    /// A connection that counts its closes.
+    struct Closing(Arc<AtomicU32>);
+
+    impl Connector for Closing {
+        fn connect(&self) -> io::Result<Pipe> {
+            let closed = self.0.clone();
+            Ok(Pipe::new(io::empty(), io::sink(), move || {
+                closed.fetch_add(1, Ordering::SeqCst);
+            }))
+        }
+    }
+
+    #[test]
+    fn a_connection_that_opens_after_the_stop_is_closed_and_refused() {
+        let shared = Arc::new(Shared::new(|_| {}));
+        let closed = Arc::new(AtomicU32::new(0));
+        let tracked = Tracked {
+            inner: Arc::new(Closing(closed.clone())),
+            shared: shared.clone(),
+        };
+        let before = tracked.connect().unwrap();
+        shared.stop();
+        assert_eq!(closed.load(Ordering::SeqCst), 1, "the open one ended");
+        let late = tracked.connect().unwrap_err();
+        assert_eq!(late.kind(), io::ErrorKind::NotConnected);
+        assert_eq!(
+            closed.load(Ordering::SeqCst),
+            2,
+            "the late ssh process ended"
+        );
+        assert!(lock(&shared.pipes).is_empty(), "nothing left to keep alive");
+        drop(before);
     }
 
     #[test]
