@@ -37,7 +37,7 @@ import { Attention } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
-import { Sounds } from "./core/sounds";
+import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
 import { SpacesStore } from "./core/spaces-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
@@ -307,8 +307,9 @@ export class App {
         const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
         this.center.record(observed, (id) => this.tabTitle(id), Date.now());
-        // Remote agents count like local ones, but nothing plays for a machine that is not connected.
-        this.sounds.notify(observed.filter((c) => this.machines.blockedReason(c.paneId) === null));
+        // Remote agents count like local ones, but nothing plays for a pane being viewed or for a
+        // machine that is not connected.
+        this.sounds.notify(soundChanges(observed, viewed, (id) => this.machines.blockedReason(id)));
       });
     });
     effect(() => {

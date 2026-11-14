@@ -383,7 +383,7 @@ export class SettingsView {
     return typeof v === "string" ? v : "";
   }
 
-  /** The switch: on keeps a file already set, else the built-in tone; off writes `false`. */
+  /** The switch: on writes `true` (the built-in tone), off writes `false`; either drops a file path, which is typed again. */
   protected setSoundOn(kind: SoundKind, event: Event): void {
     const on = (event.target as HTMLInputElement).checked;
     void this.store.setSound(kind, on ? true : false);

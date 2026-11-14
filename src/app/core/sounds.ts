@@ -28,6 +28,18 @@ const NOTE_SECONDS = 0.14;
 const GAIN = 0.2;
 
 /**
+ * The transitions that may play a sound: not for a pane being viewed and not for a machine that is
+ * not connected (`blockedReason` is null for a pane that is reachable).
+ */
+export function soundChanges(
+  observed: readonly StatusChange[],
+  viewed: ReadonlySet<string>,
+  blockedReason: (paneId: string) => string | null,
+): StatusChange[] {
+  return observed.filter((c) => !viewed.has(c.paneId) && blockedReason(c.paneId) === null);
+}
+
+/**
  * Sounds for an agent that is blocked or done while not viewed (#724). The only file that touches
  * `AudioContext`. The transitions come from `Attention.observe`; the first snapshot of a backend
  * session is silent, several transitions within 2 s play one sound and blocked wins over done.
@@ -55,11 +67,13 @@ export class Sounds {
     const first = this.fresh;
     this.fresh = false;
     if (first || changes.length === 0) return;
-    const kind: SoundKind = changes.some((c) => c.status === "blocked") ? "blocked" : "done";
+    const sounds = this.prefs.settings().sounds;
+    const wanted = changes.filter((c) => sounds[c.status as SoundKind] !== false);
+    if (wanted.length === 0) return;
+    const kind: SoundKind = wanted.some((c) => c.status === "blocked") ? "blocked" : "done";
     const last = this.last;
     if (last && now - last.at < SOUND_WINDOW_MS && !(kind === "blocked" && last.kind === "done"))
       return;
-    if (this.prefs.settings().sounds[kind] === false) return;
     this.last = { at: now, kind };
     void this.play(kind);
   }

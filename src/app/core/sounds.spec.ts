@@ -2,7 +2,7 @@ import { Injector, signal } from "@angular/core";
 import { describe, expect, it, vi } from "vitest";
 import type { StatusChange } from "./attention";
 import { SettingsStore, DEFAULT_SETTINGS, type SoundSettings } from "./settings";
-import { AUDIO_CONTEXT, SOUND_WINDOW_MS, Sounds } from "./sounds";
+import { AUDIO_CONTEXT, SOUND_WINDOW_MS, Sounds, soundChanges } from "./sounds";
 import { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 
@@ -76,7 +76,22 @@ function setup(
   };
 }
 
+describe("soundChanges", () => {
+  it("drops panes being viewed and panes of a machine that is not connected", () => {
+    const remote: StatusChange = { paneId: "m::c", status: "done" };
+    const reason = (id: string) => (id.startsWith("m::") ? "offline" : null);
+    expect(soundChanges([blocked, done, remote], new Set(["b"]), reason)).toEqual([blocked]);
+    expect(soundChanges([blocked, remote], new Set(), () => null)).toEqual([blocked, remote]);
+  });
+});
+
 describe("Sounds", () => {
+  it("plays done when blocked is off and a mixed batch arrives", () => {
+    const t = setup({ blocked: false, done: true });
+    t.sounds.notify([blocked, done], 10_000);
+    expect(t.freqs()).toEqual([523, 784]);
+  });
+
   it("plays nothing while the setting is off", () => {
     const t = setup({ blocked: false, done: false });
     t.sounds.notify([blocked], 10_000);
