@@ -122,6 +122,16 @@ describe("sidebarMenuItems", () => {
     expect(actions(false)).not.toContain("restart");
   });
 
+  it("offers Mark as unread first, only on a pane that can be marked", () => {
+    const actions = (kind: "workspace" | "pane", markable: boolean) =>
+      sidebarMenuItems(kind, false, false, null, markable).flatMap((g) =>
+        g.items.map((i) => i.action),
+      );
+    expect(actions("pane", true)[0]).toBe("mark-unread");
+    expect(actions("pane", false)).not.toContain("mark-unread");
+    expect(actions("workspace", true)).not.toContain("mark-unread");
+  });
+
   it("offers split and close on a pane", () => {
     expect(sidebarMenuItems("pane").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "split-right",
