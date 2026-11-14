@@ -66,6 +66,7 @@ import { GithubView } from "./github/github-view";
 import { Deliver } from "./deliver/deliver";
 import { DeliverView } from "./deliver/deliver-view";
 import { Keymap } from "./core/keymap";
+import { TerminalSearch } from "./terminal-view/search";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
@@ -159,6 +160,7 @@ export class App {
   private readonly terminalColors = inject(TerminalColorSync);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
+  private readonly terminalSearch = inject(TerminalSearch);
   private readonly paneActions = inject(PaneActions);
   private readonly explorerSelection = inject(ExplorerSelection);
   protected readonly spaceActions = inject(SpaceActions);
@@ -579,6 +581,9 @@ export class App {
         break;
       case "showShortcuts":
         this.shortcutsOverview.open();
+        break;
+      case "find":
+        this.terminalSearch.open();
         break;
       case "nextWaiting":
         this.jumpToWaiting();

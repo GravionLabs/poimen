@@ -45,4 +45,59 @@
     }
   </div>
 }
+@if (searchOpen()) {
+  <div class="search-bar" role="search" (keydown)="searchKey($event)">
+    <input
+      #searchInput
+      class="search-input"
+      type="text"
+      placeholder="Find"
+      aria-label="Find in terminal"
+      spellcheck="false"
+      autocomplete="off"
+      [value]="searchQuery()"
+      (input)="setQuery($any($event.target).value)"
+    />
+    <span class="search-count" aria-live="polite">{{ searchCounter() }}</span>
+    @if (screenOnly()) {
+      <span class="search-note" title="This backend keeps no scrollback in the app">
+        Screen only
+      </span>
+    }
+    <button
+      type="button"
+      class="search-toggle"
+      title="Match case"
+      aria-label="Match case"
+      [attr.aria-pressed]="searchCase()"
+      (click)="toggleCase()"
+    >
+      Aa
+    </button>
+    <button
+      type="button"
+      class="search-toggle"
+      title="Regular expression"
+      aria-label="Regular expression"
+      [attr.aria-pressed]="searchRegex()"
+      (click)="toggleRegex()"
+    >
+      .*
+    </button>
+    <button
+      type="button"
+      title="Previous match (Shift+Enter)"
+      aria-label="Previous match"
+      (click)="find(false)"
+    >
+      &uarr;
+    </button>
+    <button type="button" title="Next match (Enter)" aria-label="Next match" (click)="find(true)">
+      &darr;
+    </button>
+    <button type="button" title="Close (Escape)" aria-label="Close search" (click)="closeSearch()">
+      &times;
+    </button>
+  </div>
+}
 <div class="view-pad"><div #body class="view-body"></div></div>

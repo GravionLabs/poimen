@@ -97,12 +97,25 @@ vi.mock("@xterm/addon-web-links", () => ({
     ) {}
   },
 }));
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    findNext = vi.fn(() => true);
+    findPrevious = vi.fn(() => true);
+    clearDecorations = vi.fn();
+    listener?: (e: { resultIndex: number; resultCount: number }) => void;
+    onDidChangeResults(l: (e: { resultIndex: number; resultCount: number }) => void) {
+      this.listener = l;
+      return { dispose() {} };
+    }
+  },
+}));
 vi.mock("@xterm/addon-webgl", () => ({
   WebglAddon: class {
     onContextLoss = vi.fn();
   },
 }));
 
+import { TerminalSearch } from "./search";
 import { REATTACHING, REATTACH_DELAYS_MS, TerminalView } from "./terminal-view";
 
 const pane: Terminal = {
@@ -878,6 +891,141 @@ describe("TerminalView app shortcuts (#23, #26)", () => {
     await setup("control");
     expect(fake.keyHandler?.(key("\\"))).toBe(true);
     expect(fake.keyHandler?.(key("c", { ctrlKey: true }))).toBe(true);
+  });
+});
+
+describe("TerminalView search (#714)", () => {
+  type FakeSearch = {
+    findNext: ReturnType<typeof vi.fn>;
+    findPrevious: ReturnType<typeof vi.fn>;
+    clearDecorations: ReturnType<typeof vi.fn>;
+    listener: (e: { resultIndex: number; resultCount: number }) => void;
+  };
+  const addon = () =>
+    fake.addons.find((a) => typeof (a as FakeSearch).findNext === "function") as FakeSearch;
+  const key = (k: string, init: KeyboardEventInit = {}) =>
+    new KeyboardEvent("keydown", { key: k, cancelable: true, ...init });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const view = (fixture: { componentInstance: unknown }) => fixture.componentInstance as any;
+
+  it("loads the search addon with the others", async () => {
+    await setup("control");
+    expect(addon()).toBeDefined();
+  });
+
+  it("takes Ctrl+Shift+F off macOS and keeps it from the PTY", async () => {
+    vi.stubGlobal("navigator", { platform: "Linux x86_64" });
+    try {
+      const { fixture } = await setup("control");
+      expect(fake.keyHandler?.(key("F", { ctrlKey: true, shiftKey: true }))).toBe(false);
+      expect(view(fixture).searchOpen()).toBe(true);
+      expect(fake.keyHandler?.(key("f", { ctrlKey: true }))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("opens in an observer too and says Screen only without xterm scrollback", async () => {
+    const { fixture } = await setup("observe");
+    view(fixture).openSearch();
+    fixture.detectChanges();
+    expect(view(fixture).searchOpen()).toBe(true);
+    expect(fixture.nativeElement.textContent).toContain("Screen only");
+  });
+
+  it("does not say Screen only on an emulated stream", async () => {
+    const { fixture } = await setup("control", pane, true);
+    view(fixture).openSearch();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).not.toContain("Screen only");
+  });
+
+  it("searches while typing, steps with Enter and Shift+Enter and shows the position", async () => {
+    const { fixture } = await setup("control", pane, true);
+    const v = view(fixture);
+    v.openSearch();
+    v.setQuery("err");
+    expect(addon().findNext).toHaveBeenCalledWith(
+      "err",
+      expect.objectContaining({ caseSensitive: false, regex: false }),
+    );
+    addon().listener({ resultIndex: 1, resultCount: 4 });
+    expect(v.searchCounter()).toBe("2 of 4");
+    v.searchKey(key("Enter"));
+    expect(addon().findNext).toHaveBeenCalledTimes(2);
+    v.searchKey(key("Enter", { shiftKey: true }));
+    expect(addon().findPrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports no results and passes the case and regex toggles", async () => {
+    const { fixture } = await setup("control", pane, true);
+    const v = view(fixture);
+    v.openSearch();
+    v.setQuery("x+");
+    v.toggleCase();
+    v.toggleRegex();
+    expect(addon().findNext).toHaveBeenLastCalledWith(
+      "x+",
+      expect.objectContaining({ caseSensitive: true, regex: true }),
+    );
+    addon().listener({ resultIndex: -1, resultCount: 0 });
+    expect(v.searchCounter()).toBe("No results");
+  });
+
+  it("clears highlights without a query", async () => {
+    const { fixture } = await setup("control", pane, true);
+    const v = view(fixture);
+    v.openSearch();
+    v.setQuery("");
+    expect(addon().findNext).not.toHaveBeenCalled();
+    expect(addon().clearDecorations).toHaveBeenCalled();
+    expect(v.searchCounter()).toBe("");
+  });
+
+  it("colors the highlights from the theme tokens", async () => {
+    document.documentElement.style.setProperty("--term-ansi-3", "#aabbcc");
+    try {
+      const { fixture } = await setup("control", pane, true);
+      const v = view(fixture);
+      v.openSearch();
+      v.setQuery("a");
+      const options = addon().findNext.mock.calls[0][1];
+      expect(options.decorations.activeMatchBackground).toBe("#aabbcc");
+    } finally {
+      document.documentElement.style.removeProperty("--term-ansi-3");
+    }
+  });
+
+  it("closes with Escape, clears the highlights and does not let the key out", async () => {
+    const { fixture } = await setup("control", pane, true);
+    const v = view(fixture);
+    v.openSearch();
+    v.setQuery("a");
+    const event = key("Escape");
+    const stop = vi.spyOn(event, "stopPropagation");
+    v.searchKey(event);
+    expect(v.searchOpen()).toBe(false);
+    expect(addon().clearDecorations).toHaveBeenCalled();
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it("returns the focus to the terminal on close", async () => {
+    const { fixture } = await setup("control", pane, true);
+    const focus = vi.spyOn(fake.term as unknown as { focus(): void }, "focus");
+    view(fixture).openSearch();
+    view(fixture).closeSearch();
+    expect(focus).toHaveBeenCalled();
+  });
+
+  it("is found by the hub only while the view lives", async () => {
+    const { fixture } = await setup("control");
+    const hub = TestBed.inject(TerminalSearch);
+    expect(hub.open()).toBe(false);
+    view(fixture).onSearchFocus();
+    expect(hub.open()).toBe(true);
+    expect(view(fixture).searchOpen()).toBe(true);
+    fixture.destroy();
+    expect(hub.open()).toBe(false);
   });
 });
 
