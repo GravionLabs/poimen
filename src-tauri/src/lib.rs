@@ -125,6 +125,27 @@ async fn on_backend<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
+/// Runs `f` on the backend `id` addresses (#693): the machine of a qualified id (`<machine>::<id>`),
+/// else the local one, with the id on that backend. An offline machine fails; the local backend is
+/// never the fallback for a machine's id.
+async fn on_routed<T: Send + 'static>(
+    local: &Shared,
+    machines: &SharedMachines,
+    id: &str,
+    f: impl FnOnce(&dyn Backend, &str) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let routed = machines.route(local, id)?;
+    on_backend(&routed.backend, move |b| f(b, &routed.id)).await
+}
+
+/// `new`, an id returned by a backend, in the form of `origin`, the id the request addressed.
+fn qualify_like(origin: &str, new: String) -> String {
+    match machines::split_id(origin).0 {
+        Some(machine) => format!("{machine}::{new}"),
+        None => new,
+    }
+}
+
 /// Workspaces, tabs and panes in one call; the frontend rebuilds its tree from it.
 #[tauri::command]
 async fn snapshot(backend: State<'_, Shared>) -> Result<backend::Snapshot, String> {
@@ -135,20 +156,30 @@ async fn snapshot(backend: State<'_, Shared>) -> Result<backend::Snapshot, Strin
 #[tauri::command]
 async fn pane_split(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     target: String,
     direction: SplitDirection,
     cwd: Option<String>,
 ) -> Result<Option<String>, String> {
-    on_backend(backend.inner(), move |b| {
-        b.split(&target, direction, cwd.as_deref(), None)
+    let origin = target.clone();
+    let created = on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
+        b.split(id, direction, cwd.as_deref(), None)
     })
-    .await
+    .await?;
+    Ok(created.map(|id| qualify_like(&origin, id)))
 }
 
 /// Closes a pane. The UI confirms first; the backend ends the pane's process.
 #[tauri::command]
-async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| b.close_terminal(&pane_id)).await
+async fn pane_close(
+    backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
+    pane_id: String,
+) -> Result<(), String> {
+    on_routed(backend.inner(), machines.inner(), &pane_id, |b, id| {
+        b.close_terminal(id)
+    })
+    .await
 }
 
 /// Restarts a terminal on the bundled PTY host: a new terminal with the same directory, program
@@ -156,21 +187,34 @@ async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), S
 #[tauri::command]
 async fn pane_restart(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     pane_id: String,
 ) -> Result<Option<String>, String> {
-    on_backend(backend.inner(), move |b| b.restart_terminal(&pane_id)).await
+    let created = on_routed(backend.inner(), machines.inner(), &pane_id, |b, id| {
+        b.restart_terminal(id)
+    })
+    .await?;
+    Ok(created.map(|id| qualify_like(&pane_id, id)))
 }
 
 /// Closes a tab with all its terminals (`tab.close` on the poimen backend). The UI confirms first.
 #[tauri::command]
-async fn tab_close(backend: State<'_, Shared>, tab_id: String) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| b.close_tab(&tab_id)).await
+async fn tab_close(
+    backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
+    tab_id: String,
+) -> Result<(), String> {
+    on_routed(backend.inner(), machines.inner(), &tab_id, |b, id| {
+        b.close_tab(id)
+    })
+    .await
 }
 
 /// Renames a tab (`tab.rename` on the poimen backend); a blank name is rejected.
 #[tauri::command]
 async fn tab_rename(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     tab_id: String,
     name: String,
 ) -> Result<(), String> {
@@ -178,19 +222,23 @@ async fn tab_rename(
     if name.is_empty() {
         return Err("The name of a tab cannot be empty.".into());
     }
-    on_backend(backend.inner(), move |b| b.rename_tab(&tab_id, &name)).await
+    on_routed(backend.inner(), machines.inner(), &tab_id, move |b, id| {
+        b.rename_tab(id, &name)
+    })
+    .await
 }
 
 /// Sets the ratio of a split of a tab (`tab.resize_split` on the poimen backend).
 #[tauri::command]
 async fn tab_resize_split(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     tab_id: String,
     split_id: String,
     ratio: f64,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.resize_split(&tab_id, &split_id, ratio)
+    on_routed(backend.inner(), machines.inner(), &tab_id, move |b, id| {
+        b.resize_split(id, &split_id, ratio)
     })
     .await
 }
@@ -199,10 +247,16 @@ async fn tab_resize_split(
 #[tauri::command]
 async fn tab_focus(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     tab_id: String,
     terminal_id: String,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| b.focus_tab(&tab_id, &terminal_id)).await
+    // The terminal is of the tab's machine: its own id is what the machine's server knows.
+    let terminal = machines::split_id(&terminal_id).1.to_owned();
+    on_routed(backend.inner(), machines.inner(), &tab_id, move |b, id| {
+        b.focus_tab(id, &terminal)
+    })
+    .await
 }
 
 /// Closes a space with all its panes; only on an explicit user action (the UI confirms first when
@@ -211,16 +265,26 @@ async fn tab_focus(
 #[tauri::command]
 async fn space_close(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     workspace_id: String,
     focus: Option<String>,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.close_space(&workspace_id)?;
-        if let Some(id) = focus.filter(|id| !id.is_empty()) {
-            let _ = b.focus_space(&id);
-        }
-        Ok(())
-    })
+    // The neighbour to focus afterwards counts only on the same backend.
+    let machine = machines::split_id(&workspace_id).0.map(str::to_owned);
+    let focus =
+        focus.filter(|id| !id.is_empty() && machines::split_id(id).0.map(str::to_owned) == machine);
+    on_routed(
+        backend.inner(),
+        machines.inner(),
+        &workspace_id,
+        move |b, id| {
+            b.close_space(id)?;
+            if let Some(next) = focus {
+                let _ = b.focus_space(machines::split_id(&next).1);
+            }
+            Ok(())
+        },
+    )
     .await
 }
 
@@ -228,6 +292,7 @@ async fn space_close(
 #[tauri::command]
 async fn space_rename(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     workspace_id: String,
     label: String,
 ) -> Result<(), String> {
@@ -235,9 +300,12 @@ async fn space_rename(
     if label.is_empty() {
         return Err("The name of a space cannot be empty.".into());
     }
-    on_backend(backend.inner(), move |b| {
-        b.rename_space(&workspace_id, &label)
-    })
+    on_routed(
+        backend.inner(),
+        machines.inner(),
+        &workspace_id,
+        move |b, id| b.rename_space(id, &label),
+    )
     .await
 }
 
@@ -245,13 +313,14 @@ async fn space_rename(
 #[tauri::command]
 async fn agent_start(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     pane_id: String,
     kind: String,
     name: Option<String>,
     args: Vec<String>,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.agent_start(&pane_id, &kind, name.as_deref(), &args)
+    on_routed(backend.inner(), machines.inner(), &pane_id, move |b, id| {
+        b.agent_start(id, &kind, name.as_deref(), &args)
     })
     .await
 }
@@ -260,11 +329,12 @@ async fn agent_start(
 #[tauri::command]
 async fn agent_rename(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     target: String,
     name: Option<String>,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.agent_rename(&target, name.as_deref())
+    on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
+        b.agent_rename(id, name.as_deref())
     })
     .await
 }
@@ -274,21 +344,26 @@ async fn agent_rename(
 #[tauri::command]
 async fn agent_prompt(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     target: String,
     text: String,
 ) -> Result<herdr::PromptOutcome, String> {
-    on_backend(backend.inner(), move |b| Ok(b.agent_prompt(&target, &text))).await
+    on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
+        Ok(b.agent_prompt(id, &text))
+    })
+    .await
 }
 
 /// Renames a pane; an empty label clears it.
 #[tauri::command]
 async fn pane_rename(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     pane_id: String,
     label: Option<String>,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.rename_terminal(&pane_id, label.as_deref())
+    on_routed(backend.inner(), machines.inner(), &pane_id, move |b, id| {
+        b.rename_terminal(id, label.as_deref())
     })
     .await
 }
@@ -435,13 +510,18 @@ async fn task_issues(
 #[tauri::command]
 async fn terminal_create(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     workspace_id: String,
     cwd: Option<String>,
 ) -> Result<Option<String>, String> {
-    on_backend(backend.inner(), move |b| {
-        b.create_terminal(&workspace_id, cwd.as_deref())
-    })
-    .await
+    let created = on_routed(
+        backend.inner(),
+        machines.inner(),
+        &workspace_id,
+        move |b, id| b.create_terminal(id, cwd.as_deref()),
+    )
+    .await?;
+    Ok(created.map(|id| qualify_like(&workspace_id, id)))
 }
 
 /// The space template that applies to `dir`; `origin` is read only when a template matches by
@@ -1954,16 +2034,21 @@ async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, 
 async fn subagents_watch(
     app: AppHandle,
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     watch: State<'_, SubagentWatch>,
     key: String,
     pane_id: String,
 ) -> Result<bool, String> {
     let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
-    let session = {
-        let pane_id = pane_id.clone();
-        on_backend(backend.inner(), move |b| b.agent_session(&pane_id)).await?
-    };
-    let found = session.and_then(|s| {
+    // The session is asked of the pane's own backend. The transcript files of a machine's agent
+    // are on that machine and the server has no request to read them yet, so a remote pane is
+    // never looked up in the local `~/.claude` or `~/.copilot` (#693): nothing is watched.
+    let remote = machines::split_id(&pane_id).0.is_some();
+    let session = on_routed(backend.inner(), machines.inner(), &pane_id, |b, id| {
+        b.agent_session(id)
+    })
+    .await?;
+    let found = session.filter(|_| !remote).and_then(|s| {
         let home = home_dir()?;
         let dir = match s.agent {
             herdr::TranscriptAgent::Claude => transcripts::locate_project_dir(
@@ -3504,6 +3589,12 @@ mod build_layout_tests {
         let err = rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap_err();
         assert_eq!(err, "boom");
         assert_eq!(fake.calls(), ["snapshot"]);
+    }
+
+    #[test]
+    fn a_returned_id_is_qualified_like_the_id_the_request_addressed() {
+        assert_eq!(qualify_like("box::3", "9".into()), "box::9");
+        assert_eq!(qualify_like("3", "9".into()), "9");
     }
 
     #[test]

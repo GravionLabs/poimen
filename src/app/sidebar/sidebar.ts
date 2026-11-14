@@ -224,6 +224,8 @@ export interface SidebarMenuAction {
 export interface SidebarMenuItem {
   action: SidebarMenuAction["action"];
   label: string;
+  /** Why the entry cannot be used (its machine is not connected, #693); set means disabled. */
+  disabled?: string;
 }
 
 /** A group of context menu entries; `label` is the heading, `null` for the built-in group. */
@@ -242,6 +244,8 @@ export function sidebarMenuItems(
   repo = false,
   /** The terminal runs on an older PTY host: it offers a restart on the new one. */
   outdatedHost = false,
+  /** The row is on a machine that is not connected: every entry is disabled with this reason. */
+  blocked: string | null = null,
 ): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
@@ -271,7 +275,11 @@ export function sidebarMenuItems(
             { action: "close", label: "Close pane..." },
           ],
   };
-  return [builtin];
+  return [
+    blocked
+      ? { ...builtin, items: builtin.items.map((item) => ({ ...item, disabled: blocked })) }
+      : builtin,
+  ];
 }
 
 /**
@@ -374,7 +382,7 @@ export class Sidebar {
           .flatMap((n) => n.rows)
           .find((r) => r.pane.terminal_id === id)?.pane,
       ) !== null;
-    return sidebarMenuItems(kind, repo, older);
+    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id));
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
@@ -409,6 +417,8 @@ export class Sidebar {
 
   protected choose(action: SidebarMenuAction["action"]): void {
     const at = this.menuAt();
+    // A disabled entry (offline machine) does nothing, and never reaches another backend.
+    if (at && this.machines.blockedReason(at.id)) return;
     this.closeMenu();
     if (at) this.menuAction.emit({ kind: at.kind, id: at.id, action });
   }
