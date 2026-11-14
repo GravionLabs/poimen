@@ -470,6 +470,24 @@
     >
       {{ sort() === "name" ? "✓ " : "" }}By name
     </button>
+    <button
+      type="button"
+      role="menuitemradio"
+      class="menu-item"
+      [attr.aria-checked]="sort() === 'attention'"
+      (click)="chooseSort('attention')"
+    >
+      {{ sort() === "attention" ? "✓ " : "" }}By attention
+    </button>
+    <button
+      type="button"
+      role="menuitemradio"
+      class="menu-item"
+      [attr.aria-checked]="sort() === 'recent'"
+      (click)="chooseSort('recent')"
+    >
+      {{ sort() === "recent" ? "✓ " : "" }}Most recent
+    </button>
     <div class="menu-separator" role="separator"></div>
     <button type="button" role="menuitem" class="menu-item" (click)="chooseSort('now')">
       Sort alphabetically now

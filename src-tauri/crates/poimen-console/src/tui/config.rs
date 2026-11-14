@@ -650,7 +650,11 @@ mod tests {
         assert_eq!(parse(&json!({}), &[]).sort, SidebarSort::Manual);
         let c = parse(&json!({"sidebar": {"sort": "name"}}), &[]);
         assert_eq!(c.sort, SidebarSort::Name);
+        let c = parse(&json!({"sidebar": {"sort": "attention"}}), &[]);
+        assert_eq!(c.sort, SidebarSort::Attention);
         let c = parse(&json!({"sidebar": {"sort": "recent"}}), &[]);
+        assert_eq!(c.sort, SidebarSort::Recent);
+        let c = parse(&json!({"sidebar": {"sort": "newest"}}), &[]);
         assert_eq!(c.sort, SidebarSort::Manual);
         assert_eq!(c.warnings.len(), 1);
     }

@@ -6,6 +6,7 @@ import {
   filterSpaces,
   groupWorktrees,
   orderSpaces,
+  spaceAttentionRanks,
   reorderGrouped,
   applyStatus,
   buildTree,
@@ -831,5 +832,102 @@ describe("pinned spaces (#710)", () => {
       );
     expect(list(["w3"])).toEqual(["w3", "w1", "w2", "w4"]);
     expect(list(["w2"])).toEqual(["w3", "w2", "w1", "w4"]);
+  });
+});
+
+describe("sort by attention and recent (#712)", () => {
+  const sp = (id: string, label: string, number: number) => ({
+    space_id: id,
+    label,
+    number,
+    agent_status: "idle" as const,
+  });
+  const spaces = [
+    sp("w1", "beta", 1),
+    sp("w2", "alpha", 2),
+    sp("w3", "gamma", 3),
+    sp("w4", "delta", 4),
+  ];
+  const term = (id: string, space: string, status: string, agent?: string) =>
+    ({
+      terminal_id: id,
+      tab_id: "t",
+      space_id: space,
+      agent_status: status,
+      ...(agent ? { agent } : {}),
+    }) as unknown as import("./snapshot").Terminal;
+  const ids = (list: { space_id: string }[]) => list.map((s) => s.space_id);
+
+  it("ranks blocked, done and unread, working, idle or read, no agent", () => {
+    const ranks = spaceAttentionRanks(
+      [
+        term("a", "w1", "done", "claude"),
+        term("b", "w2", "working", "claude"),
+        term("c", "w3", "blocked", "claude"),
+        term("d", "w4", "done", "claude"),
+        term("e", "w5", "unknown"),
+        term("f", "w6", "idle", "claude"),
+        term("g", "w2", "idle", "claude"),
+      ],
+      new Set(["a"]),
+    );
+    expect([...ranks]).toEqual([
+      ["w1", 1],
+      ["w2", 2],
+      ["w3", 0],
+      ["w4", 3],
+      ["w5", 4],
+      ["w6", 3],
+    ]);
+  });
+
+  it("takes the most urgent pane of a space", () => {
+    const ranks = spaceAttentionRanks(
+      [term("a", "w1", "working", "claude"), term("b", "w1", "blocked", "claude")],
+      new Set(),
+    );
+    expect(ranks.get("w1")).toBe(0);
+  });
+
+  it("orders by rank and by name inside a rank", () => {
+    const attention = new Map([
+      ["w1", 2],
+      ["w2", 2],
+      ["w3", 0],
+      ["w4", 4],
+    ]);
+    expect(ids(orderSpaces(spaces, [], "attention", [], { attention }))).toEqual([
+      "w3",
+      "w2",
+      "w1",
+      "w4",
+    ]);
+  });
+
+  it("treats a space without a rank as having no agent", () => {
+    expect(
+      ids(orderSpaces(spaces, [], "attention", [], { attention: new Map([["w4", 1]]) })),
+    ).toEqual(["w4", "w2", "w1", "w3"]);
+  });
+
+  it("orders recent by focus time, then never focused by newest number", () => {
+    const recent = { w1: 100, w3: 300 };
+    expect(ids(orderSpaces(spaces, [], "recent", [], { recent }))).toEqual([
+      "w3",
+      "w1",
+      "w4",
+      "w2",
+    ]);
+    expect(ids(orderSpaces(spaces, [], "recent"))).toEqual(["w4", "w3", "w2", "w1"]);
+  });
+
+  it("keeps pinned spaces first", () => {
+    const recent = { w1: 100, w3: 300 };
+    expect(ids(orderSpaces(spaces, [], "recent", ["w2"], { recent }))).toEqual([
+      "w2",
+      "w3",
+      "w1",
+      "w4",
+    ]);
   });
 });

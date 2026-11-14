@@ -1830,7 +1830,7 @@ fn set_sidebar_layout(layout: String) -> Result<(), String> {
     settings::save_sidebar_layout(&home, &layout)
 }
 
-/// Writes only `sidebar.sort` (`manual` or `name`); the settings watcher emits the change.
+/// Writes only `sidebar.sort` (`manual`, `name`, `attention` or `recent`); the settings watcher emits the change.
 #[tauri::command]
 fn set_sidebar_sort(sort: String) -> Result<(), String> {
     let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;

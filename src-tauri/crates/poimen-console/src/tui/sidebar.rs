@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use poimen_client::protocol::{AgentStatus, Space, Tab, Terminal};
 use poimen_client::{Client, ClientError};
-use poimen_core::order::compare_space_names;
+use poimen_core::order::{attention_rank, compare_space_names};
 use poimen_core::settings::{RowToken, SidebarRows, SidebarSort};
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -277,8 +277,22 @@ impl Model {
         out
     }
 
-    /// The sidebar rows: spaces in server order for `manual`, by name for `name`.
+    /// The sidebar rows: spaces in server order for `manual`, by name for `name` and `recent`
+    /// (the focus times are UI state of the app), by agent urgency for `attention` without any
+    /// unread terminal.
     pub fn rows(&self, config: &SidebarRows, sort: SidebarSort, home: Option<&str>) -> Vec<Row> {
+        self.rows_unread(config, sort, home, &HashSet::new())
+    }
+
+    /// [`Model::rows`] with the terminals the TUI marks unread (`tui/attention.rs`): a done agent
+    /// ranks as unread only through that set.
+    pub fn rows_unread(
+        &self,
+        config: &SidebarRows,
+        sort: SidebarSort,
+        home: Option<&str>,
+        unread: &HashSet<String>,
+    ) -> Vec<Row> {
         let workspace = config
             .workspace
             .clone()
@@ -293,8 +307,26 @@ impl Model {
             .unwrap_or_else(|| default_lines("terminal"));
         let mut rows = Vec::new();
         let mut spaces: Vec<&Space> = self.spaces.iter().collect();
-        if sort == SidebarSort::Name {
-            spaces.sort_by(|a, b| compare_space_names(&a.name, &a.id, &b.name, &b.id));
+        match sort {
+            SidebarSort::Name | SidebarSort::Recent => {
+                spaces.sort_by(|a, b| compare_space_names(&a.name, &a.id, &b.name, &b.id));
+            }
+            SidebarSort::Attention => {
+                let rank_of = |space: &Space| {
+                    self.terminals
+                        .iter()
+                        .filter(|t| t.space_id == space.id)
+                        .map(|t| attention_rank(terminal_status(t), unread.contains(&t.id)))
+                        .min()
+                        .unwrap_or(4)
+                };
+                spaces.sort_by(|a, b| {
+                    rank_of(a)
+                        .cmp(&rank_of(b))
+                        .then_with(|| compare_space_names(&a.name, &a.id, &b.name, &b.id))
+                });
+            }
+            SidebarSort::Manual => {}
         }
         for space in spaces {
             let tabs = self.tabs_of(space);
@@ -674,6 +706,65 @@ mod tests {
         assert!(texts(&rows[1])[0].contains("work"), "{:?}", texts(&rows[1]));
         // Terminal rows keep their tab order below the second space; step walks them as shown.
         assert_eq!(step(&rows, Some("t3"), 1, None).as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn attention_sort_ranks_by_the_most_urgent_agent_then_by_name() {
+        let mut m = model();
+        for (id, name) in [("s3", "Zed"), ("s4", "Mid"), ("s5", "Alpha")] {
+            m.spaces.push(Space {
+                id: id.into(),
+                name: name.into(),
+                cwd: "/srv".into(),
+                tabs: vec![],
+                active_tab: None,
+            });
+        }
+        let mut blocked = term("b1", "s3", "b", "/srv");
+        blocked.agent = agent(AgentStatus::Blocked);
+        let mut done = term("d1", "s4", "d", "/srv");
+        done.agent = agent(AgentStatus::Done);
+        let mut working = term("w1", "s5", "w", "/srv");
+        working.agent = agent(AgentStatus::Working);
+        m.terminals.extend([blocked, done, working]);
+        let order = |unread: &[&str]| -> Vec<String> {
+            let unread = unread.iter().map(|s| (*s).to_owned()).collect();
+            m.rows_unread(
+                &SidebarRows::default(),
+                SidebarSort::Attention,
+                None,
+                &unread,
+            )
+            .iter()
+            .filter(|r| r.kind == RowKind::Space)
+            .map(|r| texts(r)[0].clone())
+            .collect()
+        };
+        let first = |v: Vec<String>| {
+            v.iter()
+                .map(|t| {
+                    ["Zed", "Mid", "Alpha", "work", "empty"]
+                        .into_iter()
+                        .find(|n| t.contains(n))
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
+        };
+        // Blocked ("work" and "Zed", by name), working, the read done one, no agent.
+        assert_eq!(first(order(&[])), ["work", "Zed", "Alpha", "Mid", "empty"]);
+        // Unread done ranks right after blocked.
+        assert_eq!(
+            first(order(&["d1"])),
+            ["work", "Zed", "Mid", "Alpha", "empty"]
+        );
+    }
+
+    #[test]
+    fn recent_sort_falls_back_to_the_name() {
+        let m = model();
+        let recent = m.rows(&SidebarRows::default(), SidebarSort::Recent, None);
+        let by_name = m.rows(&SidebarRows::default(), SidebarSort::Name, None);
+        assert_eq!(recent, by_name);
     }
 
     #[test]

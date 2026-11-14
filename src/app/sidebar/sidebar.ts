@@ -7,6 +7,7 @@ import {
   Injector,
   afterNextRender,
   computed,
+  effect,
   inject,
   input,
   output,
@@ -375,7 +376,13 @@ export class SpaceEditFocus {
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { "[class.split]": "layout() === 'split'" },
+  host: {
+    "[class.split]": "layout() === 'split'",
+    // The order stays while the pointer is pressed, so a row does not move under it (#712).
+    "(pointerdown)": "holdSort(true)",
+    "(window:pointerup)": "holdSort(false)",
+    "(window:pointercancel)": "holdSort(false)",
+  },
 })
 export class Sidebar {
   protected readonly machines = inject(Machines);
@@ -657,6 +664,24 @@ export class Sidebar {
   protected readonly otherLayout = computed(() => (this.layout() === "tree" ? "split" : "tree"));
 
   protected readonly sort = computed(() => this.settings.settings().sidebarSort);
+
+  /** Keeps the order of the spaces while the pointer is pressed. */
+  holdSort(held: boolean): void {
+    this.store.holdSort(held);
+  }
+
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  /** A re-sort keeps the selected row in view (#712). */
+  protected readonly keepSelectedInView = effect(() => {
+    this.store.spaces();
+    afterNextRender(
+      () =>
+        this.host.nativeElement
+          .querySelector<HTMLElement>(".row.active, [aria-selected='true']")
+          ?.scrollIntoView?.({ block: "nearest" }),
+      { injector: this.injector },
+    );
+  });
   /** Where the sort menu of the header is open (below its button); `null` when closed. */
   protected readonly sortMenuAt = signal<{ x: number; y: number } | null>(null);
 
@@ -665,7 +690,7 @@ export class Sidebar {
     this.sortMenuAt.set({ x: box.left, y: box.bottom + 2 });
   }
 
-  protected chooseSort(choice: "manual" | "name" | "now"): void {
+  protected chooseSort(choice: "manual" | "name" | "attention" | "recent" | "now"): void {
     this.sortMenuAt.set(null);
     if (choice === "now") this.spaceActions.sortNow();
     else void this.settings.setSidebarSort(choice);

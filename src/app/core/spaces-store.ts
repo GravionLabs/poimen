@@ -3,7 +3,10 @@ import {
   applyStatus,
   buildSpaces,
   buildTree,
+  NO_AGENT_RANK,
   orderSpaces,
+  spaceAttentionRanks,
+  type SortKeys,
   paneDir,
   nextWaiting,
   waitingCount,
@@ -20,6 +23,8 @@ import { type BackendEvent, type BackendInfo, type AppChannel } from "./backend"
 import { SettingsStore, type BackendKind, type SidebarSort } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 import { UiState } from "./ui-state";
+import { Attention } from "./attention";
+import { SortSettle } from "./sort-settle";
 import { RemoteSpaces } from "./remote-spaces";
 
 /** Delay that collapses a burst of backend events into one re-read. */
@@ -64,6 +69,7 @@ export class SpacesStore {
   private readonly ui = inject(UiState, { optional: true });
   private readonly remote = inject(RemoteSpaces, { optional: true });
   private readonly settings = inject(SettingsStore, { optional: true });
+  private readonly attention = inject(Attention, { optional: true });
 
   private readonly _snapshot = signal<Snapshot>(EMPTY);
   private readonly _connectionError = signal<string | null>(null);
@@ -159,6 +165,48 @@ export class SpacesStore {
   readonly sidebarSort = computed<SidebarSort>(
     () => this.settings?.settings().sidebarSort ?? "manual",
   );
+  /** Attention rank per space as the statuses are now (only computed in `attention` mode). */
+  private readonly liveRanks = computed<ReadonlyMap<string, number>>(() => {
+    if (this.sidebarSort() !== "attention") return new Map();
+    const all = this.all();
+    const ranks = spaceAttentionRanks(all.terminals, this.attention?.unread() ?? new Set());
+    return new Map(all.spaces.map((s) => [s.space_id, ranks.get(s.space_id) ?? NO_AGENT_RANK]));
+  });
+  /**
+   * The ranks the tree is sorted by: `liveRanks`, held back while statuses still change (#712).
+   * Evaluated lazily; the timer only asks it to look again once the settle time has passed.
+   */
+  private readonly settledRanks = computed<ReadonlyMap<string, number>>(() => {
+    const live = this.liveRanks();
+    const mode = this.sidebarSort();
+    this.settleTick();
+    clearTimeout(this.settleTimer);
+    if (this.sortHeld()) return this.shownRanks;
+    const result = this.settle.update(live, mode !== this.settleMode);
+    this.settleMode = mode;
+    this.shownRanks = result.keys;
+    if (result.wait > 0) {
+      this.settleTimer = setTimeout(() => this.settleTick.update((n) => n + 1), result.wait);
+    }
+    return result.keys;
+  });
+  private readonly settleTick = signal(0);
+  private shownRanks: ReadonlyMap<string, number> = new Map();
+  private readonly settle = new SortSettle<number>(() => Date.now());
+  private settleTimer: ReturnType<typeof setTimeout> | undefined;
+  private settleMode: SidebarSort | undefined;
+  /** True while the pointer is pressed in the sidebar: the order does not change meanwhile. */
+  private readonly sortHeld = signal(false);
+  private readonly sortKeys = computed<SortKeys>(() => ({
+    attention: this.settledRanks(),
+    recent: this.ui?.recentSpaces(),
+  }));
+
+  /** Holds the order while the pointer is pressed on a row; releasing applies what waited. */
+  holdSort(held: boolean): void {
+    this.sortHeld.set(held);
+  }
+
   /** The spaces in the user's order; every list, shortcut and neighbour lookup reads this. */
   readonly orderedSpaces = computed(() =>
     orderSpaces(
@@ -166,6 +214,7 @@ export class SpacesStore {
       this.spaceOrder(),
       this.sidebarSort(),
       this.pinnedSpaces(),
+      this.sortKeys(),
     ),
   );
   /** The user's tab order per space (ids); tabs outside it follow by number. */
@@ -179,6 +228,7 @@ export class SpacesStore {
       this.tabOrder(),
       this.sidebarSort(),
       this.pinnedSpaces(),
+      this.sortKeys(),
     ),
   );
   readonly spaces = computed(() =>
@@ -191,6 +241,7 @@ export class SpacesStore {
       this.sidebarSort(),
       this.settings?.settings().sidebarGroupWorktrees ?? true,
       this.pinnedSpaces(),
+      this.sortKeys(),
     ),
   );
   /** The spaces of one machine as a tree (`machine` set on every space), last known when offline. */
@@ -201,8 +252,10 @@ export class SpacesStore {
     const snapshot = this.remote?.snapshot();
     if (!snapshot) return new Map<string, ReturnType<typeof buildTree>>();
     const trees = new Map<string, ReturnType<typeof buildTree>>();
-    // Remote spaces have no manual order: server order, or by name in `name` mode.
-    for (const node of buildTree(snapshot, [], {}, this.sidebarSort())) {
+    // Remote spaces have no manual order: server order, or by name in `name` mode. `attention`
+    // applies, `recent` falls back to the name (focus times are of this Mac's spaces).
+    const sort = this.sidebarSort() === "recent" ? "name" : this.sidebarSort();
+    for (const node of buildTree(snapshot, [], {}, sort, [], this.sortKeys())) {
       const name = node.workspace.machine!;
       trees.set(name, [...(trees.get(name) ?? []), node]);
     }
@@ -232,6 +285,7 @@ export class SpacesStore {
     this.watchRepoTriggers();
     inject(DestroyRef).onDestroy(() => {
       clearTimeout(this.refreshTimer);
+      clearTimeout(this.settleTimer);
       void this.unlisten?.then((stop) => stop());
     });
   }
@@ -305,6 +359,7 @@ export class SpacesStore {
         const ids = snapshot.spaces.map((s) => s.space_id);
         this.ui?.pruneSpaceOrder(ids);
         this.ui?.prunePinnedSpaces(ids);
+        this.ui?.pruneRecentSpaces(ids);
       }
       if (snapshot.spaces.length) {
         const alive = new Map<string, string[]>();

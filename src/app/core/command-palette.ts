@@ -29,6 +29,8 @@ export interface PoimenCommand {
     | "moveSpaceDown"
     | "sortSpacesManual"
     | "sortSpacesByName"
+    | "sortSpacesByAttention"
+    | "sortSpacesRecent"
     | "sortSpacesNow"
     | "startTask"
     | "openTerminalHere"
@@ -49,6 +51,8 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "moveSpaceDown", title: "Move Space Down" },
   { id: "sortSpacesManual", title: "Sort Spaces: Manual" },
   { id: "sortSpacesByName", title: "Sort Spaces: By Name" },
+  { id: "sortSpacesByAttention", title: "Sort Spaces: By Attention" },
+  { id: "sortSpacesRecent", title: "Sort Spaces: Most Recent" },
   { id: "sortSpacesNow", title: "Sort Spaces Alphabetically Now" },
   { id: "closeSpace", title: "Close Space" },
   { id: "closeTab", title: "Close Tab" },
@@ -160,6 +164,8 @@ export class CommandPalette {
         c.id === "moveSpaceDown" ||
         c.id === "sortSpacesManual" ||
         c.id === "sortSpacesByName" ||
+        c.id === "sortSpacesByAttention" ||
+        c.id === "sortSpacesRecent" ||
         c.id === "sortSpacesNow" ||
         c.id === "startTask" ||
         c.id === "openTerminalHere" ||
