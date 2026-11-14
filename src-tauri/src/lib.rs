@@ -1830,6 +1830,13 @@ fn set_sidebar_layout(layout: String) -> Result<(), String> {
     settings::save_sidebar_layout(&home, &layout)
 }
 
+/// Writes only `sidebar.sort` (`manual` or `name`); the settings watcher emits the change.
+#[tauri::command]
+fn set_sidebar_sort(sort: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_sidebar_sort(&home, &sort)
+}
+
 /// Writes only `explorer.roots` (paths under the home directory as `~/…`); the watcher emits it.
 #[tauri::command]
 fn set_explorer_roots(roots: Vec<String>) -> Result<(), String> {
@@ -1842,6 +1849,21 @@ fn set_explorer_roots(roots: Vec<String>) -> Result<(), String> {
 fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::save_explorer_show_hidden(&home, show)
+}
+
+/// Writes only `sounds.<kind>` (`blocked` or `done`: `false`, `true` or a file path).
+#[tauri::command]
+fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_sound(&home, &kind, &value)
+}
+
+/// The bytes of the audio file configured for `sounds.<kind>` (#724). The path comes from the
+/// settings, never from the caller; a regular file up to 1 MiB.
+#[tauri::command]
+fn sound_file(kind: String) -> Result<tauri::ipc::Response, String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::read_sound_file(&home, &kind).map(tauri::ipc::Response::new)
 }
 
 /// Writes only `terminal.fontFamily`; the settings watcher emits the change.
@@ -2625,8 +2647,11 @@ pub fn run() {
             set_theme,
             set_color_schema,
             set_sidebar_layout,
+            set_sidebar_sort,
             set_explorer_roots,
             set_explorer_show_hidden,
+            set_sound,
+            sound_file,
             set_spaces_layout,
             set_space_templates,
             resolve_space_template,
@@ -3747,7 +3772,7 @@ mod build_layout_tests {
 
     #[test]
     fn the_app_package_is_poimen_app_and_the_identity_is_unchanged() {
-        let cargo: toml::Value = include_str!("../Cargo.toml").parse().unwrap();
+        let cargo: toml::Value = toml::from_str(include_str!("../Cargo.toml")).unwrap();
         assert_eq!(cargo["package"]["name"].as_str(), Some("poimen-app"));
         assert_eq!(cargo["package"]["default-run"].as_str(), Some("poimen-app"));
         assert_eq!(cargo["lib"]["name"].as_str(), Some("poimen_lib"));

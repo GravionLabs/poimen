@@ -42,3 +42,27 @@ describe("sidebar layout setting", () => {
     expect(store.writeError()).toContain("disk full");
   });
 });
+
+describe("sidebar sort setting", () => {
+  beforeEach(() => tauri.reset());
+
+  it("parses name and falls back to manual", () => {
+    expect(parseSettings({ sidebarSort: "name" }).sidebarSort).toBe("name");
+    expect(parseSettings({ sidebarSort: "recent" }).sidebarSort).toBe("manual");
+    expect(parseSettings({}).sidebarSort).toBe("manual");
+  });
+
+  it("writes through set_sidebar_sort and goes back when the write fails", async () => {
+    const store = create();
+    await store.setSidebarSort("name");
+    expect(tauri.calls("set_sidebar_sort")).toEqual([{ sort: "name" }]);
+    expect(store.settings().sidebarSort).toBe("name");
+    tauri.answer("set_sidebar_sort", () => {
+      throw new Error("disk full");
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await store.setSidebarSort("manual");
+    expect(store.settings().sidebarSort).toBe("name");
+    expect(store.writeError()).toContain("disk full");
+  });
+});

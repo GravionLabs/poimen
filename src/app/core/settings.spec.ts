@@ -125,6 +125,8 @@ describe("parseSettings", () => {
       shortcuts: DEFAULT_SETTINGS.shortcuts,
       sidebarRows: DEFAULT_SETTINGS.sidebarRows,
       sidebarLayout: "tree",
+      sidebarSort: "manual",
+      sidebarGroupWorktrees: true,
       explorerRoots: ["~"],
       explorerShowHidden: false,
       backend: "poimen",
@@ -145,6 +147,7 @@ describe("parseSettings", () => {
       trustedProjects: {},
       tasks: DEFAULT_SETTINGS.tasks,
       machines: [],
+      sounds: { blocked: false, done: false },
       home: "/Users/x",
       warnings: ["w"],
     });
@@ -336,6 +339,35 @@ describe("notifications", () => {
     const s = parseSettings({ notifyOnBlocked: true, notifyOnDone: true });
     expect(s).not.toHaveProperty("notifyOnBlocked");
     expect(s).not.toHaveProperty("notifyOnDone");
+  });
+});
+
+describe("sounds", () => {
+  it("are off by default", () => {
+    expect(parseSettings({}).sounds).toEqual({ blocked: false, done: false });
+  });
+
+  it("read true and file paths, anything else is off", () => {
+    expect(parseSettings({ sounds: { blocked: true, done: "~/a.wav" } }).sounds).toEqual({
+      blocked: true,
+      done: "~/a.wav",
+    });
+    expect(parseSettings({ sounds: { blocked: 3, done: "  " } }).sounds).toEqual({
+      blocked: false,
+      done: false,
+    });
+    expect(parseSettings({ sounds: "yes" }).sounds).toEqual({ blocked: false, done: false });
+  });
+
+  it("setSound writes one kind and keeps the other", async () => {
+    tauri.reset();
+    tauri.answer("get_settings", () => ({ sounds: { blocked: true, done: false } }));
+    tauri.answer("set_sound", () => null);
+    const store = create();
+    await store.start();
+    expect(await store.setSound("done", "~/d.wav")).toBe(true);
+    expect(store.settings().sounds).toEqual({ blocked: true, done: "~/d.wav" });
+    expect(tauri.calls("set_sound")).toEqual([{ kind: "done", value: "~/d.wav" }]);
   });
 });
 

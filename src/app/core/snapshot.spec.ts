@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  buildSpaces,
+  dropAllowed,
+  filterSpaces,
+  groupWorktrees,
+  reorderGrouped,
   applyStatus,
   buildTree,
   flowAgentName,
@@ -675,5 +680,105 @@ describe("paneSuccessor", () => {
   it("has none for the last leaf of a tab or a pane the snapshot does not have", () => {
     expect(paneSuccessor(snap, "w1:p3")).toBeUndefined();
     expect(paneSuccessor(snap, "w1:p9")).toBeUndefined();
+  });
+});
+
+describe("worktrees below the space of their repository", () => {
+  const space = (n: number, label: string, cwd: string) => ({
+    space_id: `w${n}`,
+    label,
+    number: n,
+    agent_status: "idle" as const,
+    cwd,
+  });
+  const repo = (worktree: boolean, common = "/r/.git") => ({
+    branch: "main",
+    worktree,
+    common_dir: common,
+  });
+  const snap: Snapshot = {
+    spaces: [
+      space(1, "wt-b", "/wt-b"),
+      space(2, "main", "/r"),
+      space(3, "other", "/o"),
+      space(4, "wt-a", "/wt-a"),
+      space(5, "orphan wt", "/ow"),
+      space(6, "plain", "/p"),
+    ],
+    tabs: [],
+    terminals: [],
+  };
+  const repos = new Map([
+    ["/wt-b", repo(true)],
+    ["/r", repo(false)],
+    ["/o", repo(false, "/o/.git")],
+    ["/wt-a", repo(true)],
+    ["/ow", repo(true, "/x/.git")],
+  ]);
+  const ids = (nodes: { workspace: { space_id: string } }[]) =>
+    nodes.map((n) => n.workspace.space_id);
+
+  it("lists members right after their head, in the manual order", () => {
+    const nodes = buildSpaces(snap, repos, new Map(), [], {}, "manual", true);
+    expect(ids(nodes)).toEqual(["w2", "w1", "w4", "w3", "w5", "w6"]);
+    expect(nodes.filter((n) => n.parent).map((n) => [n.workspace.space_id, n.parent])).toEqual([
+      ["w1", "w2"],
+      ["w4", "w2"],
+    ]);
+  });
+
+  it("sorts heads and members by name in name mode", () => {
+    const nodes = buildSpaces(snap, repos, new Map(), [], {}, "name", true);
+    expect(ids(nodes)).toEqual(["w2", "w4", "w1", "w5", "w3", "w6"]);
+  });
+
+  it("keeps everything flat when grouping is off, for a group without head and without repository", () => {
+    expect(ids(buildSpaces(snap, repos, new Map(), [], {}, "manual", false))).toEqual([
+      "w1",
+      "w2",
+      "w3",
+      "w4",
+      "w5",
+      "w6",
+    ]);
+    const flat = groupWorktrees(buildSpaces(snap, repos, new Map(), [], {}, "manual", false));
+    expect(flat.find((n) => n.workspace.space_id === "w5")?.parent).toBeUndefined();
+    expect(flat.find((n) => n.workspace.space_id === "w6")?.parent).toBeUndefined();
+  });
+
+  it("shows the head of a matching member when filtering", () => {
+    const nodes = buildSpaces(snap, repos, new Map(), [], {}, "manual", true);
+    const withRow = nodes.map((n) =>
+      n.workspace.space_id === "w4"
+        ? {
+            ...n,
+            rows: [
+              {
+                pane: {
+                  terminal_id: "t",
+                  tab_id: "x",
+                  space_id: "w4",
+                  agent_status: "idle" as const,
+                },
+                tab: "t",
+                name: "findme",
+                worktree: true,
+              },
+            ],
+          }
+        : n,
+    );
+    const out = filterSpaces(withRow, "findme");
+    expect(ids(out)).toEqual(["w2", "w4"]);
+    expect(out[0].rows).toEqual([]);
+  });
+
+  it("moves a head with its members and keeps a member among its siblings", () => {
+    const nodes = buildSpaces(snap, repos, new Map(), [], {}, "manual", true);
+    expect(reorderGrouped(nodes, "w2", "w6", true)).toEqual(["w3", "w5", "w6", "w2", "w1", "w4"]);
+    expect(reorderGrouped(nodes, "w4", "w1", false)).toEqual(["w2", "w4", "w1", "w3", "w5", "w6"]);
+    expect(reorderGrouped(nodes, "w4", "w3", true)).toBeNull();
+    expect(dropAllowed(nodes, "w2", "w1")).toBe(false);
+    expect(dropAllowed(nodes, "w2", "w3")).toBe(true);
   });
 });

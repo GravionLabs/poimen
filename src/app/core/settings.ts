@@ -19,6 +19,8 @@ import {
 } from "../sidebar/spaces";
 
 export type SidebarLayout = "tree" | "split";
+/** `sidebar.sort`: the user's own space order, or alphabetical. */
+export type SidebarSort = "manual" | "name";
 
 export type ThemeSetting = "light" | "dark" | "system";
 
@@ -241,6 +243,10 @@ export interface Settings {
   sidebarRows: SidebarRows;
   /** `sidebar.layout`: the Spaces view as a tree or as two lists (Spaces, Agents). */
   sidebarLayout: SidebarLayout;
+  /** `sidebar.sort`: how the spaces tree is ordered. */
+  sidebarSort: SidebarSort;
+  /** `sidebar.groupWorktrees`: list linked worktrees below the space of their repository. */
+  sidebarGroupWorktrees: boolean;
   /** Roots of the explorer; a leading `~` is the home directory (resolved by the backend). */
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
@@ -261,9 +267,31 @@ export interface Settings {
   tasks: TaskModes;
   /** `machines`: remote machines reached over SSH; invalid entries are settings warnings. */
   machines: Machine[];
+  /** `sounds`: what plays when an agent is blocked or done and not viewed. */
+  sounds: SoundSettings;
   /** The home directory `~` stands for; `null` until the backend knows it. */
   home: string | null;
   warnings: string[];
+}
+
+/** `blocked` or `done`: the agent transitions that can play a sound (#724). */
+export type SoundKind = "blocked" | "done";
+
+/** One entry of `sounds`: off, the built-in tone, or the path of an audio file. */
+export type SoundSetting = boolean | string;
+
+export interface SoundSettings {
+  blocked: SoundSetting;
+  done: SoundSetting;
+}
+
+function parseSound(v: unknown): SoundSetting {
+  return v === true || (typeof v === "string" && v.trim() !== "") ? v : false;
+}
+
+function parseSounds(v: unknown): SoundSettings {
+  const r = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  return { blocked: parseSound(r["blocked"]), done: parseSound(r["done"]) };
 }
 
 /** The theme a click on the toolbar button selects: system, then light, then dark. */
@@ -318,6 +346,8 @@ export const DEFAULT_SETTINGS: Settings = {
   shortcuts: DEFAULT_SHORTCUTS,
   sidebarRows: DEFAULT_SIDEBAR_ROWS,
   sidebarLayout: "tree",
+  sidebarSort: "manual",
+  sidebarGroupWorktrees: true,
   explorerRoots: ["~"],
   explorerShowHidden: false,
   backend: "poimen",
@@ -328,6 +358,7 @@ export const DEFAULT_SETTINGS: Settings = {
   trustedProjects: {},
   tasks: DEFAULT_TASKS,
   machines: [],
+  sounds: { blocked: false, done: false },
   home: null,
   warnings: [],
 };
@@ -419,6 +450,8 @@ export function parseSettings(raw: unknown): Settings {
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
+    sidebarSort: r["sidebarSort"] === "name" ? "name" : "manual",
+    sidebarGroupWorktrees: r["sidebarGroupWorktrees"] !== false,
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     backend: r["backend"] === "herdr" ? "herdr" : "poimen",
@@ -436,6 +469,7 @@ export function parseSettings(raw: unknown): Settings {
     machines: Array.isArray(r["machines"])
       ? r["machines"].map(parseMachine).filter((m) => m !== null)
       : [],
+    sounds: parseSounds(r["sounds"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")
@@ -500,6 +534,20 @@ export class SettingsStore {
     }
   }
 
+  /** Writes `sidebar.sort` of config.json and applies it at once; the watcher confirms. */
+  async setSidebarSort(sidebarSort: SidebarSort): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, sidebarSort });
+    try {
+      await this.bridge.invoke("set_sidebar_sort", { sort: sidebarSort });
+      this._writeError.set(null);
+    } catch (e) {
+      this._settings.set(previous);
+      this._writeError.set(`Cannot save the sidebar sort: ${e}`);
+      console.warn(`poimen settings: cannot save sidebar.sort: ${e}`);
+    }
+  }
+
   /** Writes `explorer.roots` of config.json (home paths as `~/…`) and applies it at once. */
   async setExplorerRoots(explorerRoots: string[]): Promise<void> {
     await this.write({ explorerRoots }, "the explorer folders", "set_explorer_roots", {
@@ -515,6 +563,12 @@ export class SettingsStore {
       "set_explorer_show_hidden",
       { show: explorerShowHidden },
     );
+  }
+
+  /** Writes `sounds.<kind>` (`false`, `true` or an audio file path) and applies it at once. */
+  async setSound(kind: SoundKind, value: SoundSetting): Promise<boolean> {
+    const sounds = { ...this._settings().sounds, [kind]: value };
+    return this.write({ sounds }, "the sound", "set_sound", { kind, value });
   }
 
   /** Writes `terminal.fontFamily` (empty removes it: the default stack) and applies it at once. */

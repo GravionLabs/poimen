@@ -23,8 +23,9 @@ import {
   type PaneRow,
   type SpaceNode,
   type Space,
+  dropAllowed,
 } from "../core/snapshot";
-import { Attention, workspaceUnread } from "../core/attention";
+import { Attention, canMarkUnread, workspaceUnread } from "../core/attention";
 import { SpacesStore } from "../core/spaces-store";
 import {
   DEFAULT_SIDEBAR_ROWS,
@@ -55,6 +56,8 @@ export type SpaceData =
       lines: Line[];
       /** Split layout only: the workspace whose terminals are listed. */
       selected?: boolean;
+      /** A linked worktree listed below the space of its repository: indented. */
+      member?: boolean;
     }
   | { kind: "pane"; row: PaneRow; lines: Line[] };
 
@@ -90,6 +93,7 @@ export function spaceNodes(
         workspace: space.workspace,
         status,
         lines: renderRow("workspace", rows.workspace, space, ctx),
+        member: !!space.parent,
       },
       children: space.rows.map((row) => ({
         key: row.pane.terminal_id,
@@ -143,6 +147,7 @@ export function splitSections(
         status: aggregateStatus(space),
         lines: renderRow("workspace", rows.workspace, space, ctx),
         selected: isSelected,
+        member: !!space.parent,
       },
       children: isSelected
         ? space.rows
@@ -212,6 +217,7 @@ export interface SidebarMenuAction {
     | "start-agent"
     | "rename"
     | "restart"
+    | "mark-unread"
     | "close"
     | "close-space"
     | "rename-space"
@@ -246,6 +252,8 @@ export function sidebarMenuItems(
   outdatedHost = false,
   /** The row is on a machine that is not connected: every entry is disabled with this reason. */
   blocked: string | null = null,
+  /** The row is an agent that is done or idle and not unread (#725). */
+  markable = false,
 ): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
@@ -265,6 +273,7 @@ export function sidebarMenuItems(
             { action: "close-space", label: "Close space" },
           ]
         : [
+            ...(markable ? [{ action: "mark-unread" as const, label: "Mark as unread" }] : []),
             { action: "split-right", label: "Split right" },
             { action: "split-down", label: "Split down" },
             { action: "start-agent", label: "Start agent..." },
@@ -374,15 +383,16 @@ export class Sidebar {
   } | null>(null);
   protected menuItems(kind: SidebarMenuAction["kind"], id: string) {
     const repo = kind === "workspace" && spaceRepoDir(this.store.spaces(), id) !== undefined;
-    const older =
-      kind === "pane" &&
-      olderHost(
-        this.store
-          .spaces()
-          .flatMap((n) => n.rows)
-          .find((r) => r.pane.terminal_id === id)?.pane,
-      ) !== null;
-    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id));
+    const row =
+      kind === "pane"
+        ? this.store
+            .spaces()
+            .flatMap((n) => n.rows)
+            .find((r) => r.pane.terminal_id === id)?.pane
+        : undefined;
+    const older = row !== undefined && olderHost(row) !== null;
+    const markable = canMarkUnread(row, this.attn.unread());
+    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id), markable);
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
@@ -399,7 +409,9 @@ export class Sidebar {
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const items = [
+      ...menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]'),
+    ];
     const current = items.findIndex((e) => e === document.activeElement);
     const to = menuTarget(
       items.map((e) => e.textContent?.trim() ?? ""),
@@ -464,9 +476,9 @@ export class Sidebar {
   /** Where the dragged space would land: before or after `id`. */
   protected readonly dropMark = signal<{ id: string; after: boolean } | null>(null);
 
-  /** Dragging reorders the complete list, so it is off while a filter hides spaces. */
+  /** Dragging reorders the complete list, so it is off while a filter hides spaces or outside `manual`. */
   protected canDrag(workspaceId: string): boolean {
-    return this.query().trim() === "" && this.editing() !== workspaceId;
+    return this.sort() === "manual" && this.query().trim() === "" && this.editing() !== workspaceId;
   }
 
   protected dragStart(event: DragEvent, workspaceId: string): void {
@@ -482,6 +494,7 @@ export class Sidebar {
   protected dragOver(event: DragEvent, workspaceId: string): void {
     const source = this.dragging();
     if (source === null || source === workspaceId) return;
+    if (!dropAllowed(this.store.spaces(), source, workspaceId)) return;
     event.preventDefault();
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
     this.dropMark.set({ id: workspaceId, after: event.clientY > box.top + box.height / 2 });
@@ -615,6 +628,21 @@ export class Sidebar {
   protected readonly writeError = this.settings.writeError;
   /** The layout a click on the toggle switches to. */
   protected readonly otherLayout = computed(() => (this.layout() === "tree" ? "split" : "tree"));
+
+  protected readonly sort = computed(() => this.settings.settings().sidebarSort);
+  /** Where the sort menu of the header is open (below its button); `null` when closed. */
+  protected readonly sortMenuAt = signal<{ x: number; y: number } | null>(null);
+
+  protected openSortMenu(event: MouseEvent): void {
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.sortMenuAt.set({ x: box.left, y: box.bottom + 2 });
+  }
+
+  protected chooseSort(choice: "manual" | "name" | "now"): void {
+    this.sortMenuAt.set(null);
+    if (choice === "now") this.spaceActions.sortNow();
+    else void this.settings.setSidebarSort(choice);
+  }
 
   protected toggleLayout(): void {
     void this.settings.setSidebarLayout(this.otherLayout());

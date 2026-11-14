@@ -224,7 +224,7 @@ fn sidebar_model_comes_from_the_server_with_agent_status_and_tokens() {
         ..SidebarRows::default()
     };
     let model = Model::load(&f.client).unwrap();
-    let rows = model.rows(&config, None);
+    let rows = model.rows(&config, poimen_core::settings::SidebarSort::Manual, None);
     let text = |i: usize| {
         rows[i].lines[0]
             .iter()
@@ -240,6 +240,43 @@ fn sidebar_model_comes_from_the_server_with_agent_status_and_tokens() {
     assert_eq!(text(2), "▲ claude blocked");
     // The first tab stays the active one.
     assert_eq!(model.initial(None).as_deref(), Some(shell.as_str()));
+}
+
+#[test]
+fn sidebar_sort_name_in_the_config_orders_the_spaces() {
+    let f = fixture("sort");
+    let alpha_dir = f.dir.join("alpha");
+    std::fs::create_dir_all(&alpha_dir).unwrap();
+    let alpha = f
+        .client
+        .create_space(
+            "Alpha",
+            &alpha_dir.canonicalize().unwrap().display().to_string(),
+        )
+        .unwrap()
+        .id;
+    let shell = f.cat_terminal("shell");
+    let home = f.dir.join("home");
+    let config_file = poimen_core::settings::config_path(&home);
+    std::fs::create_dir_all(config_file.parent().unwrap()).unwrap();
+    std::fs::write(&config_file, r#"{"sidebar": {"sort": "name"}}"#).unwrap();
+
+    let config = poimen_console::tui::config::load(Some(&home));
+    let model = Model::load(&f.client).unwrap();
+    let names = |sort| {
+        model
+            .rows(&SidebarRows::default(), sort, None)
+            .iter()
+            .filter(|r| r.kind == RowKind::Space)
+            .map(|r| r.lines[0][1].text.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(config.sort), ["Alpha", "work"]);
+    assert_eq!(
+        names(poimen_core::settings::SidebarSort::Manual),
+        ["work", "Alpha"]
+    );
+    let _ = (alpha, shell);
 }
 
 #[test]

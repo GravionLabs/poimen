@@ -4,9 +4,11 @@ import {
   orderSpaces,
   orderTabs,
   pathSegments,
+  reorderGrouped,
   reorderIds,
   type Snapshot,
 } from "./snapshot";
+import { SettingsStore, type SidebarSort } from "./settings";
 import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
 import type { TemplateHint } from "./space-templates";
@@ -84,8 +86,9 @@ export function neighbourSpace(
   snapshot: Snapshot,
   workspaceId: string,
   order: readonly string[] = [],
+  sort: SidebarSort = "manual",
 ): string | null {
-  const ids = orderSpaces(snapshot.spaces, order).map((w) => w.space_id);
+  const ids = orderSpaces(snapshot.spaces, order, sort).map((w) => w.space_id);
   const i = ids.indexOf(workspaceId);
   if (i < 0) return null;
   return ids[i + 1] ?? ids[i - 1] ?? null;
@@ -110,6 +113,7 @@ export class SpaceActions {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(SpacesStore);
   private readonly ui = inject(UiState);
+  private readonly settings = inject(SettingsStore, { optional: true });
   private readonly machines = inject(Machines, { optional: true });
 
   private readonly _open = signal(false);
@@ -382,8 +386,16 @@ export class SpaceActions {
    * same space, an unknown id or a drop that leaves the order as it is.
    */
   reorder(sourceId: string, targetId: string, after: boolean): void {
-    const ids = this.store.orderedSpaces().map((s) => s.space_id);
-    const next = reorderIds(ids, sourceId, targetId, after);
+    if (this.store.sidebarSort() !== "manual") return;
+    const nodes = this.store.spaces();
+    const next = nodes.some((n) => n.parent)
+      ? reorderGrouped(nodes, sourceId, targetId, after)
+      : reorderIds(
+          this.store.orderedSpaces().map((s) => s.space_id),
+          sourceId,
+          targetId,
+          after,
+        );
     if (next) this.ui.setSpaceOrder(next);
   }
 
@@ -398,10 +410,23 @@ export class SpaceActions {
     if (next) this.ui.setTabOrder(spaceId, next);
   }
 
-  /** Moves a space one step up (`-1`) or down (`1`); at either end nothing happens. */
+  /**
+   * "Sort alphabetically now": writes the by-name order of the local spaces into the manual order
+   * once and switches to `manual`, so the user can arrange it from there.
+   */
+  sortNow(): void {
+    const sorted = orderSpaces(this.store.snapshot().spaces, [], "name");
+    this.ui.setSpaceOrder(sorted.map((s) => s.space_id));
+    void this.settings?.setSidebarSort("manual");
+  }
+
+  /** Moves a space one step up (`-1`) or down (`1`); at either end, or outside `manual`, nothing happens. */
   shift(spaceId: string, delta: -1 | 1): void {
-    const ids = this.store.orderedSpaces().map((s) => s.space_id);
-    const target = ids[ids.indexOf(spaceId) + delta];
+    if (this.store.sidebarSort() !== "manual") return;
+    const nodes = this.store.spaces();
+    const parent = nodes.find((n) => n.workspace.space_id === spaceId)?.parent;
+    const siblings = nodes.filter((n) => n.parent === parent).map((n) => n.workspace.space_id);
+    const target = siblings[siblings.indexOf(spaceId) + delta];
     if (target) this.reorder(spaceId, target, delta === 1);
   }
 
@@ -424,7 +449,12 @@ export class SpaceActions {
     try {
       await this.bridge.invoke("space_close", {
         spaceId: workspaceId,
-        focus: neighbourSpace(snapshot, workspaceId, this.store.spaceOrder()),
+        focus: neighbourSpace(
+          snapshot,
+          workspaceId,
+          this.store.spaceOrder(),
+          this.store.sidebarSort(),
+        ),
       });
     } catch (err) {
       this._closeError.set(String(err));

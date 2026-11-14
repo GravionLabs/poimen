@@ -12,8 +12,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use poimen_core::settings::{
-    SidebarRows, config_path, parse_space_templates, parse_tasks, parse_trusted_projects,
-    resolve_sidebar_rows, revoke_project, trust_project,
+    SidebarRows, SidebarSort, config_path, parse_space_templates, parse_tasks,
+    parse_trusted_projects, resolve_group_worktrees, resolve_sidebar_rows, resolve_sidebar_sort,
+    revoke_project, trust_project,
 };
 use poimen_core::settings::{
     find_value, remove_path_text, root_open, save_with, set_key_text, set_path_text,
@@ -46,6 +47,83 @@ pub enum ColorSchema {
     Pair { light: String, dark: String },
 }
 
+/// One of the `sounds` entries: off, the built-in tone, or the path of an audio file.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum SoundSetting {
+    #[default]
+    Off,
+    Builtin,
+    File(String),
+}
+
+impl Serialize for SoundSetting {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Off => serializer.serialize_bool(false),
+            Self::Builtin => serializer.serialize_bool(true),
+            Self::File(path) => serializer.serialize_str(path),
+        }
+    }
+}
+
+/// The `sounds` setting: what plays when an agent is blocked or done (#724).
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+pub struct Sounds {
+    pub blocked: SoundSetting,
+    pub done: SoundSetting,
+}
+
+/// Largest audio file `sound_file` reads.
+pub const MAX_SOUND_BYTES: u64 = 1024 * 1024;
+
+fn resolve_sounds(value: &Value, warnings: &mut Vec<String>) -> Sounds {
+    let mut sounds = Sounds::default();
+    let Some(obj) = value.as_object() else {
+        warnings.push("sounds must be an object".into());
+        return sounds;
+    };
+    for (key, slot) in [("blocked", &mut sounds.blocked), ("done", &mut sounds.done)] {
+        match obj.get(key) {
+            None => {}
+            Some(Value::Bool(false)) => {}
+            Some(Value::Bool(true)) => *slot = SoundSetting::Builtin,
+            Some(Value::String(p)) if !p.trim().is_empty() => {
+                *slot = SoundSetting::File(p.trim().to_owned());
+            }
+            Some(other) => warnings.push(format!(
+                "sounds.{key} {other} must be true, false or the path of an audio file"
+            )),
+        }
+    }
+    sounds
+}
+
+/// Reads the audio file of `sounds.<kind>` for the `sound_file` command: the path comes from the
+/// settings below `home`, never from the caller. A regular file up to 1 MiB; `~/` is the home.
+pub fn read_sound_file(home: &Path, kind: &str) -> Result<Vec<u8>, String> {
+    let sounds = load(home).sounds;
+    let setting = match kind {
+        "blocked" => sounds.blocked,
+        "done" => sounds.done,
+        other => return Err(format!("unknown sound {other:?}")),
+    };
+    let SoundSetting::File(path) = setting else {
+        return Err(format!("sounds.{kind} is not an audio file"));
+    };
+    let full = match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        Some(rest) => home.join(rest),
+        None => PathBuf::from(&path),
+    };
+    let meta = std::fs::metadata(&full).map_err(|e| format!("cannot read {path}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("{path} is not a regular file"));
+    }
+    if meta.len() > MAX_SOUND_BYTES {
+        return Err(format!("{path} is larger than 1 MiB"));
+    }
+    std::fs::read(&full).map_err(|e| format!("cannot read {path}: {e}"))
+}
+
 /// The resolved settings sent to the frontend (event `settings`, command `get_settings`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,6 +151,10 @@ pub struct Settings {
     pub sidebar_rows: SidebarRows,
     /// `sidebar.layout`: `tree` (default) or `split`.
     pub sidebar_layout: String,
+    /// `sidebar.sort`: `manual` (default) or `name`.
+    pub sidebar_sort: SidebarSort,
+    /// `sidebar.groupWorktrees`: list linked worktrees below the space of their repository.
+    pub sidebar_group_worktrees: bool,
     /// Roots of the explorer (`explorer.roots`, a leading `~` is the home directory).
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
@@ -100,6 +182,8 @@ pub struct Settings {
     pub agent_actions: Vec<crate::agent_actions::Spec>,
     /// The remote machines (`machines`); invalid entries are skipped with a warning.
     pub machines: Vec<crate::machines::MachineConfig>,
+    /// What plays when an agent is blocked or done (`sounds`).
+    pub sounds: Sounds,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -267,6 +351,8 @@ impl Default for Settings {
             shortcuts: default_shortcuts(),
             sidebar_rows: SidebarRows::default(),
             sidebar_layout: "tree".into(),
+            sidebar_sort: SidebarSort::Manual,
+            sidebar_group_worktrees: true,
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
             backend: "poimen".into(),
@@ -279,6 +365,7 @@ impl Default for Settings {
             harnesses: crate::harness::default_harnesses(),
             agent_actions: Vec::new(),
             machines: Vec::new(),
+            sounds: Sounds::default(),
             home: None,
             warnings: Vec::new(),
         }
@@ -503,6 +590,8 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("sidebar") {
         s.sidebar_rows = resolve_sidebar_rows(value, &mut s.warnings);
+        s.sidebar_sort = resolve_sidebar_sort(value, &mut s.warnings);
+        s.sidebar_group_worktrees = resolve_group_worktrees(value, &mut s.warnings);
         match value.get("layout") {
             None => {}
             Some(Value::String(l)) if matches!(l.as_str(), "tree" | "split") => {
@@ -551,6 +640,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("machines") {
         s.machines = crate::machines::parse(value, &mut s.warnings);
+    }
+    if let Some(value) = root.get("sounds") {
+        s.sounds = resolve_sounds(value, &mut s.warnings);
     }
 
     if let Some(ui) = root.get("ui") {
@@ -806,6 +898,18 @@ pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, Strin
     set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
 }
 
+/// Returns `text` with `sidebar.sort` set to `manual` or `name`, touching nothing else.
+pub fn set_sidebar_sort_text(text: &str, sort: &str) -> Result<String, String> {
+    let Some(sort) = SidebarSort::parse(sort) else {
+        return Err(format!("invalid sidebar sort {sort:?}"));
+    };
+    set_path_text(
+        text,
+        &["sidebar", "sort"],
+        &format!("\"{}\"", sort.as_str()),
+    )
+}
+
 /// Returns `text` with `spaces.layout` set to `layout` after validating it like the settings
 /// loader does; other keys, comments and formatting stay.
 pub fn set_spaces_layout_text(text: &str, layout: &Value) -> Result<String, String> {
@@ -908,6 +1012,11 @@ pub fn save_color_schema(home: &Path, schema: &serde_json::Value) -> Result<(), 
     save_with(home, |text| set_color_schema_text(text, schema))
 }
 
+/// Writes `sidebar.sort` below `home`, like `save_sidebar_layout`.
+pub fn save_sidebar_sort(home: &Path, sort: &str) -> Result<(), String> {
+    save_with(home, |text| set_sidebar_sort_text(text, sort))
+}
+
 /// Writes `sidebar.layout` below `home`, like `save_theme`.
 pub fn save_sidebar_layout(home: &Path, layout: &str) -> Result<(), String> {
     save_with(home, |text| set_sidebar_layout_text(text, layout))
@@ -1002,6 +1111,24 @@ pub fn save_ui_font_family(home: &Path, family: &str) -> Result<(), String> {
 /// Writes `ui.fontSize` below `home`, like `save_theme`.
 pub fn save_ui_font_size(home: &Path, size: f64) -> Result<(), String> {
     save_with(home, |t| set_ui_font_size_text(t, size))
+}
+
+/// Returns `text` with `sounds.<kind>` set to `value` (`false`, `true` or a path string).
+pub fn set_sound_text(text: &str, kind: &str, value: &Value) -> Result<String, String> {
+    if !matches!(kind, "blocked" | "done") {
+        return Err(format!("unknown sound {kind:?}"));
+    }
+    match value {
+        Value::Bool(_) => {}
+        Value::String(p) if !p.trim().is_empty() => {}
+        _ => return Err("a sound is true, false or the path of an audio file".into()),
+    }
+    set_path_text(text, &["sounds", kind], &value.to_string())
+}
+
+/// Writes `sounds.<kind>` below `home`, like `save_theme`.
+pub fn save_sound(home: &Path, kind: &str, value: &Value) -> Result<(), String> {
+    save_with(home, |text| set_sound_text(text, kind, value))
 }
 
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
@@ -1532,6 +1659,86 @@ mod tests {
     }
 
     #[test]
+    fn sounds_default_to_off_and_parse_true_false_and_paths() {
+        assert_eq!(rows("{}").sounds, Sounds::default());
+        let s = rows(r#"{"sounds":{"blocked":true,"done":"~/ding.wav"}}"#);
+        assert_eq!(s.sounds.blocked, SoundSetting::Builtin);
+        assert_eq!(s.sounds.done, SoundSetting::File("~/ding.wav".into()));
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let json = serde_json::to_value(&s.sounds).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"blocked": true, "done": "~/ding.wav"})
+        );
+    }
+
+    #[test]
+    fn other_sound_values_warn_and_stay_off() {
+        let s = rows(r#"{"sounds":{"blocked":3,"done":""}}"#);
+        assert_eq!(s.sounds, Sounds::default());
+        assert_eq!(s.warnings.len(), 2, "{:?}", s.warnings);
+        assert_eq!(rows(r#"{"sounds":true}"#).warnings.len(), 1);
+    }
+
+    #[test]
+    fn set_sound_text_writes_one_key_and_refuses_other_values() {
+        let out = set_sound_text("{\"theme\":\"dark\"}", "done", &Value::Bool(true)).unwrap();
+        assert!(
+            out.contains("\"done\": true") || out.contains("\"done\":true"),
+            "{out}"
+        );
+        assert!(set_sound_text("{}", "other", &Value::Bool(true)).is_err());
+        assert!(set_sound_text("{}", "done", &Value::from(3)).is_err());
+    }
+
+    fn sound_home(name: &str, config: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!("poimen-sound-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+        std::fs::write(config_path(&home), config).unwrap();
+        home
+    }
+
+    #[test]
+    fn sound_file_reads_the_configured_file() {
+        let home = sound_home("ok", r#"{"sounds":{"done":"~/ding.wav"}}"#);
+        std::fs::write(home.join("ding.wav"), [1u8, 2, 3]).unwrap();
+        assert_eq!(read_sound_file(&home, "done").unwrap(), vec![1, 2, 3]);
+        // `blocked` is off: the caller cannot name a path, only a kind.
+        assert!(read_sound_file(&home, "blocked").is_err());
+        assert!(read_sound_file(&home, "/etc/passwd").is_err());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn sound_file_refuses_missing_large_and_directory() {
+        let home = sound_home(
+            "bad",
+            r#"{"sounds":{"blocked":"~/none.wav","done":"~/dir"}}"#,
+        );
+        assert!(read_sound_file(&home, "blocked").is_err());
+        std::fs::create_dir(home.join("dir")).unwrap();
+        assert!(
+            read_sound_file(&home, "done")
+                .unwrap_err()
+                .contains("regular")
+        );
+        std::fs::write(
+            home.join("none.wav"),
+            vec![0u8; MAX_SOUND_BYTES as usize + 1],
+        )
+        .unwrap();
+        assert!(
+            read_sound_file(&home, "blocked")
+                .unwrap_err()
+                .contains("1 MiB")
+        );
+        std::fs::write(home.join("none.wav"), vec![0u8; MAX_SOUND_BYTES as usize]).unwrap();
+        assert!(read_sound_file(&home, "blocked").is_ok());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn set_herdr_auto_start_keeps_comments_and_other_keys() {
         let text = "{\n  // keep\n  \"herdr\": { \"autoStart\": true }\n}";
         let out = set_herdr_auto_start_text(text, false).unwrap();
@@ -1588,6 +1795,47 @@ mod tests {
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
         let tokens = s.sidebar_rows.agent.expect("row kept");
         assert_eq!(tokens[1][0].token, "notification");
+    }
+
+    #[test]
+    fn sidebar_sort_reaches_the_settings() {
+        assert_eq!(rows("{}").sidebar_sort, SidebarSort::Manual);
+        assert_eq!(
+            rows(r#"{"sidebar":{"sort":"name"}}"#).sidebar_sort,
+            SidebarSort::Name
+        );
+        let s = rows(r#"{"sidebar":{"sort":"attention"}}"#);
+        assert_eq!(s.sidebar_sort, SidebarSort::Manual);
+        assert!(s.warnings[0].contains("sidebar.sort"));
+    }
+
+    #[test]
+    fn group_worktrees_reaches_the_settings() {
+        assert!(rows("{}").sidebar_group_worktrees);
+        assert!(!rows(r#"{"sidebar":{"groupWorktrees":false}}"#).sidebar_group_worktrees);
+    }
+
+    #[test]
+    fn set_sidebar_sort_keeps_comments_and_other_keys() {
+        let text = "{\n  // mine\n  \"sidebar\": { \"layout\": \"split\" }\n}";
+        let out = set_sidebar_sort_text(text, "name").unwrap();
+        assert!(out.contains("// mine") && out.contains("\"layout\": \"split\""));
+        assert!(out.contains("\"sort\": \"name\"") || out.contains("\"sort\":\"name\""));
+        let again = set_sidebar_sort_text(&out, "manual").unwrap();
+        assert!(again.contains("\"manual\"") && !again.contains("\"name\""));
+        assert!(set_sidebar_sort_text("{}", "recent").is_err());
+        assert!(set_sidebar_sort_text("{\"sidebar\":3}", "name").is_err());
+    }
+
+    #[test]
+    fn save_sidebar_sort_round_trips() {
+        let home = std::env::temp_dir().join(format!("poimen-sort-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        save_sidebar_sort(&home, "name").unwrap();
+        assert_eq!(load(&home).sidebar_sort, SidebarSort::Name);
+        save_sidebar_sort(&home, "manual").unwrap();
+        assert_eq!(load(&home).sidebar_sort, SidebarSort::Manual);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

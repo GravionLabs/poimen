@@ -33,10 +33,11 @@ import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
 import { RemoteSpaces } from "./core/remote-spaces";
-import { Attention } from "./core/attention";
+import { Attention, canMarkUnread } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
+import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
 import { SpacesStore } from "./core/spaces-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
@@ -198,6 +199,7 @@ export class App {
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
+  private readonly sounds = inject(Sounds);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
   protected readonly groupItems = computed(() => {
@@ -305,6 +307,9 @@ export class App {
         const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
         this.center.record(observed, (id) => this.tabTitle(id), Date.now());
+        // Remote agents count like local ones, but nothing plays for a pane being viewed or for a
+        // machine that is not connected.
+        this.sounds.notify(soundChanges(observed, viewed, (id) => this.machines.blockedReason(id)));
       });
     });
     effect(() => {
@@ -474,6 +479,13 @@ export class App {
       else this.spaceActions.notify("Show Space Overview: there is no focused space");
       return;
     }
+    if (id === "markUnread") {
+      const paneId = this.activePaneId();
+      const pane = paneId ? this.pane(paneId) : undefined;
+      if (canMarkUnread(pane, this.attention.unread())) this.attention.markUnread(pane.terminal_id);
+      else this.spaceActions.notify("Mark as unread: the active pane is not an idle or done agent");
+      return;
+    }
     if (id === "showChanges") {
       this.showChangesOfActiveSpace();
       return;
@@ -508,6 +520,14 @@ export class App {
       const paneId = this.activePaneId();
       const spaceId = paneId ? this.pane(paneId)?.space_id : undefined;
       if (spaceId) this.spaceActions.shift(spaceId, id === "moveSpaceUp" ? -1 : 1);
+      return;
+    }
+    if (id === "sortSpacesManual" || id === "sortSpacesByName") {
+      void this.prefs.setSidebarSort(id === "sortSpacesManual" ? "manual" : "name");
+      return;
+    }
+    if (id === "sortSpacesNow") {
+      this.spaceActions.sortNow();
       return;
     }
     if (id === "closeSpace") {
@@ -713,7 +733,9 @@ export class App {
   }
 
   protected paneAction(paneId: string, action: string): void {
-    if (action === "split-right" || action === "split-down") {
+    if (action === "mark-unread") {
+      this.attention.markUnread(paneId);
+    } else if (action === "split-right" || action === "split-down") {
       const direction = action === "split-right" ? "right" : "down";
       void this.paneActions.split(paneId, direction).then((pane) => pane && this.open(pane, true));
     } else if (action === "start-agent") {
@@ -761,6 +783,12 @@ export class App {
       { action: "pane-split-right", label: "New pane to the right" },
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
+      {
+        action: "pane-mark-unread",
+        label: "Mark as unread",
+        appliesTo: (id) =>
+          tabKind(id) === "pane" && canMarkUnread(this.pane(id), this.attention.unread()),
+      },
       { action: "pane-rename", label: "Rename pane..." },
       {
         action: "pane-restart",
