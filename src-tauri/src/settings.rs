@@ -155,6 +155,8 @@ pub struct Settings {
     pub sidebar_sort: SidebarSort,
     /// `sidebar.groupWorktrees`: list linked worktrees below the space of their repository.
     pub sidebar_group_worktrees: bool,
+    /// `sidebar.showBaseBranch`: show the branch token also on the base branch (default false).
+    pub sidebar_show_base_branch: bool,
     /// Roots of the explorer (`explorer.roots`, a leading `~` is the home directory).
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
@@ -353,6 +355,7 @@ impl Default for Settings {
             sidebar_layout: "tree".into(),
             sidebar_sort: SidebarSort::Manual,
             sidebar_group_worktrees: true,
+            sidebar_show_base_branch: false,
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
             backend: "poimen".into(),
@@ -600,6 +603,13 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
             Some(other) => s.warnings.push(format!(
                 "sidebar.layout {other} must be \"tree\" or \"split\"; using tree"
             )),
+        }
+        match value.get("showBaseBranch") {
+            None => {}
+            Some(Value::Bool(b)) => s.sidebar_show_base_branch = *b,
+            Some(_) => s
+                .warnings
+                .push("sidebar.showBaseBranch must be true or false; using false".into()),
         }
     }
 
@@ -1848,6 +1858,15 @@ mod tests {
         let s = rows(r#"{"sidebar":{"layout":"grid"}}"#);
         assert_eq!(s.sidebar_layout, "tree");
         assert!(s.warnings[0].contains("sidebar.layout"));
+    }
+
+    #[test]
+    fn show_base_branch_parses_and_invalid_warns() {
+        assert!(!rows("{}").sidebar_show_base_branch);
+        assert!(rows(r#"{"sidebar":{"showBaseBranch":true}}"#).sidebar_show_base_branch);
+        let s = rows(r#"{"sidebar":{"showBaseBranch":"yes"}}"#);
+        assert!(!s.sidebar_show_base_branch);
+        assert!(s.warnings[0].contains("sidebar.showBaseBranch"));
     }
 
     #[test]
