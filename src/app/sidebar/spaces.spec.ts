@@ -283,6 +283,11 @@ describe("renderRow", () => {
       expect(ws([row({ dir: "/a/b/c" })])).toEqual([]);
     });
 
+    it("keeps the token of a linked worktree on the base branch", () => {
+      const wt = row({ dir: "/a/b/c", branch: "main", worktree: true, onBase: true });
+      expect(ws([wt, wt])).toEqual([["wt main"]]);
+    });
+
     it("leaves the pane rule unchanged", () => {
       const feat = row({ dir: "/a/b/c", branch: "feat/x" });
       const sp = space([base, feat]);

@@ -121,7 +121,11 @@ export function spaceContext(space: SpaceNode, showBaseBranch = false): SpaceCon
     dir: same("dir"),
     branch,
     worktree: branch !== undefined && first.worktree,
-    hideBranch: !showBaseBranch && branch !== undefined && first.onBase === true,
+    hideBranch:
+      !showBaseBranch &&
+      branch !== undefined &&
+      !first.worktree &&
+      space.rows.every((r) => r.onBase === true),
     dirty: sharedText((r) => dirtyText(r.dirty)),
     sync: sharedText((r) => syncText(r.ahead, r.behind)),
     pr: rest.every((r) => r.pr?.url === first.pr?.url) ? first.pr : undefined,
