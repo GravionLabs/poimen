@@ -167,6 +167,12 @@ pub struct BackendEvent {
     pub data: Value,
 }
 
+/// The kind of the event that carries an agent status change of one terminal to the frontend,
+/// with `{terminal_id, agent_status, agent_message?, agent_message_at?}`, the same for every
+/// backend (herdr's `pane.agent_status_changed` and poimen-server's `agent.status_changed` are
+/// mapped onto it).
+pub const AGENT_STATUS_CHANGED: &str = "terminal.agent_status_changed";
+
 /// Why a stream ended, when the reason is more than text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -712,12 +718,29 @@ impl<R: Runner + Send + Sync> Backend for HerdrBackend<R> {
     }
 
     fn watch(&self, emit: &dyn Fn(&BackendEvent)) {
-        watch::run(self.client.clone(), |event| {
-            emit(&BackendEvent {
-                kind: event.kind.clone(),
-                data: event.data.clone(),
-            })
-        });
+        watch::run(self.client.clone(), |event| emit(&herdr_event(event)));
+    }
+}
+
+/// A herdr event as a backend event: herdr's `pane.agent_status_changed` becomes the neutral
+/// [`AGENT_STATUS_CHANGED`] with its `pane_id` as `terminal_id`; every other event passes as is
+/// (the frontend only invalidates its snapshot on them).
+pub fn herdr_event(event: &herdr::Event) -> BackendEvent {
+    if event.kind == "pane.agent_status_changed" {
+        let mut data = event.data.clone();
+        if let Some(fields) = data.as_object_mut()
+            && let Some(id) = fields.remove("pane_id")
+        {
+            fields.insert("terminal_id".into(), id);
+        }
+        return BackendEvent {
+            kind: AGENT_STATUS_CHANGED.into(),
+            data,
+        };
+    }
+    BackendEvent {
+        kind: event.kind.clone(),
+        data: event.data.clone(),
     }
 }
 
@@ -785,7 +808,48 @@ impl From<Result<Outcome, StartError>> for BackendStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::cell::{Cell, RefCell};
+
+    fn herdr(kind: &str, data: Value) -> herdr::Event {
+        herdr::Event {
+            kind: kind.into(),
+            data,
+        }
+    }
+
+    #[test]
+    fn a_herdr_agent_status_event_becomes_the_neutral_one_keyed_by_terminal() {
+        let event = herdr_event(&herdr(
+            "pane.agent_status_changed",
+            json!({"pane_id": "w1:p1", "workspace_id": "w1", "agent_status": "blocked"}),
+        ));
+        assert_eq!(event.kind, "terminal.agent_status_changed");
+        assert_eq!(
+            event.data,
+            json!({"terminal_id": "w1:p1", "workspace_id": "w1", "agent_status": "blocked"})
+        );
+    }
+
+    #[test]
+    fn a_herdr_agent_status_event_without_a_pane_keeps_its_data() {
+        let event = herdr_event(&herdr("pane.agent_status_changed", Value::Null));
+        assert_eq!(event.kind, "terminal.agent_status_changed");
+        assert_eq!(event.data, Value::Null);
+        let event = herdr_event(&herdr(
+            "pane.agent_status_changed",
+            json!({"agent_status": "idle"}),
+        ));
+        assert_eq!(event.data, json!({"agent_status": "idle"}));
+    }
+
+    #[test]
+    fn other_herdr_events_pass_unchanged() {
+        let data = json!({"pane_id": "w1:p1"});
+        let event = herdr_event(&herdr("pane.closed", data.clone()));
+        assert_eq!(event.kind, "pane.closed");
+        assert_eq!(event.data, data);
+    }
 
     /// Answers `Down` for `down_probes` probes, then `up`; records what happened.
     struct Fake {

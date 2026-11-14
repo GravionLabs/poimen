@@ -123,14 +123,14 @@ describe("actions on remote spaces and terminals (#693)", () => {
     await panes.confirmRename("x");
     panes.askClose("box::p1");
     await panes.confirmClose();
-    expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "box::1", cwd: "/r" }]);
-    expect(tauri.calls("pane_rename")).toEqual([{ paneId: "box::p1", label: "x" }]);
-    expect(tauri.calls("pane_close")).toEqual([{ paneId: "box::p1" }]);
+    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "box::1", cwd: "/r" }]);
+    expect(tauri.calls("pane_rename")).toEqual([{ terminalId: "box::p1", label: "x" }]);
+    expect(tauri.calls("pane_close")).toEqual([{ terminalId: "box::p1" }]);
   });
 
   it("sends rename and close of a remote space with its qualified id", async () => {
     expect(await spaces.rename("box::1", "Renamed")).toBe(true);
-    expect(tauri.calls("space_rename")).toEqual([{ workspaceId: "box::1", label: "Renamed" }]);
+    expect(tauri.calls("space_rename")).toEqual([{ spaceId: "box::1", label: "Renamed" }]);
     await spaces.requestClose("box::1");
     expect(tauri.calls("space_close").length).toBe(0);
   });

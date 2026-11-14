@@ -59,7 +59,7 @@ describe("SpaceRebuild", () => {
   it("rebuilds an empty space on the first snapshot of a session without asking", async () => {
     await store.refresh();
     await settle();
-    expect(calls()).toEqual([{ workspaceId: "s1", decision: null, confirmed: false }]);
+    expect(calls()).toEqual([{ spaceId: "s1", decision: null, confirmed: false }]);
     expect(rebuild.marks().size).toBe(0);
     // The rebuilt space is re-read.
     expect(tauri.calls("snapshot").length).toBeGreaterThanOrEqual(2);
@@ -110,7 +110,7 @@ describe("SpaceRebuild", () => {
     await settle();
     expect(rebuild.marks().get("s1")).toEqual({ kind: "consent", reasons: ["setup runs: pnpm i"] });
     await rebuild.rebuild("s1");
-    expect(calls()[1]).toEqual({ workspaceId: "s1", decision: null, confirmed: true });
+    expect(calls()[1]).toEqual({ spaceId: "s1", decision: null, confirmed: true });
     expect(rebuild.marks().has("s1")).toBe(false);
     expect(actions.warning()).toBe("layout not fully applied: boom");
   });
@@ -130,7 +130,7 @@ describe("SpaceRebuild", () => {
     await rebuild.rebuild("s1");
     await actions.answerTrust("trust");
     expect(calls()[2]).toEqual({
-      workspaceId: "s1",
+      spaceId: "s1",
       decision: { kind: "trust", hash: "h1" },
       confirmed: true,
     });
@@ -139,7 +139,7 @@ describe("SpaceRebuild", () => {
     await rebuild.rebuild("s1");
     await actions.answerTrust("without");
     expect(calls().at(-1)).toEqual({
-      workspaceId: "s1",
+      spaceId: "s1",
       decision: { kind: "without" },
       confirmed: true,
     });

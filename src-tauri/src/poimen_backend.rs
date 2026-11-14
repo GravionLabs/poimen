@@ -858,7 +858,7 @@ impl Backend for PoimenBackend {
 
 /// `{"event": kind, "data": ...}` of the wire form as a backend event.
 pub fn backend_event(event: &Event) -> BackendEvent {
-    // The frontend applies status changes from herdr's event, keyed by pane.
+    // The frontend applies status changes from the neutral event, keyed by terminal.
     if let Event::AgentStatusChanged {
         terminal_id,
         status,
@@ -867,13 +867,13 @@ pub fn backend_event(event: &Event) -> BackendEvent {
         ..
     } = event
     {
-        let mut data = json!({"pane_id": terminal_id, "agent_status": status_name(*status)});
+        let mut data = json!({"terminal_id": terminal_id, "agent_status": status_name(*status)});
         if let Some(message) = message {
             data["agent_message"] = json!(message);
             data["agent_message_at"] = json!(message_at);
         }
         return BackendEvent {
-            kind: "pane.agent_status_changed".into(),
+            kind: crate::backend::AGENT_STATUS_CHANGED.into(),
             data,
         };
     }
@@ -1402,7 +1402,7 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_status_event_becomes_the_pane_event_the_frontend_applies() {
+    fn an_agent_status_event_becomes_the_neutral_event_the_frontend_applies() {
         let changed = |status| {
             backend_event(&Event::AgentStatusChanged {
                 terminal_id: "t1".into(),
@@ -1414,10 +1414,10 @@ mod tests {
             })
         };
         let event = changed(AgentStatus::Blocked);
-        assert_eq!(event.kind, "pane.agent_status_changed");
+        assert_eq!(event.kind, "terminal.agent_status_changed");
         assert_eq!(
             event.data,
-            json!({"pane_id": "t1", "agent_status": "blocked"})
+            json!({"terminal_id": "t1", "agent_status": "blocked"})
         );
         assert_eq!(changed(AgentStatus::Gone).data["agent_status"], "unknown");
     }
@@ -1434,7 +1434,7 @@ mod tests {
         });
         assert_eq!(
             event.data,
-            json!({"pane_id": "t1", "agent_status": "blocked",
+            json!({"terminal_id": "t1", "agent_status": "blocked",
                 "agent_message": "Allow Bash?", "agent_message_at": 1700})
         );
         let mut t = terminal("t1", "s1", "a");

@@ -162,8 +162,8 @@ describe("RemoteSpaces and the store", () => {
     tauri.invoke.mockClear();
     tauri.emit("machine:event", {
       machine: "box",
-      kind: "pane.agent_status_changed",
-      data: { pane_id: "t1", agent_status: "blocked" },
+      kind: "terminal.agent_status_changed",
+      data: { terminal_id: "t1", agent_status: "blocked" },
     });
     expect(store.pane("box::t1")?.agent_status).toBe("blocked");
     await vi.advanceTimersByTimeAsync(REMOTE_REFRESH_DEBOUNCE_MS);
@@ -191,8 +191,8 @@ describe("RemoteSpaces and the store", () => {
     attention.observe(statuses(), new Set());
     tauri.emit("machine:event", {
       machine: "box",
-      kind: "pane.agent_status_changed",
-      data: { pane_id: "t1", agent_status: "blocked" },
+      kind: "terminal.agent_status_changed",
+      data: { terminal_id: "t1", agent_status: "blocked" },
     });
     const changes = attention.observe(statuses(), new Set());
     center.record(changes, label, 1);

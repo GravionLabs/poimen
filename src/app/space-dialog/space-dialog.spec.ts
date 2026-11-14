@@ -224,7 +224,7 @@ describe("SpaceDialog", () => {
     const paneIds = actions.confirmClose().then(closed);
     await paneIds;
     await settle();
-    expect(bridge.invoke).toHaveBeenCalledWith("space_close", { workspaceId: "w1", focus: "w2" });
+    expect(bridge.invoke).toHaveBeenCalledWith("space_close", { spaceId: "w1", focus: "w2" });
     expect(closed).toHaveBeenCalledWith(["w1:p1"]);
     expect(root.querySelector("[role=dialog]")).toBeNull();
   });
@@ -235,7 +235,7 @@ describe("SpaceDialog", () => {
     await actions.requestClose("w2");
     await settle();
     expect(root.querySelector("[role=dialog]")).toBeNull();
-    expect(bridge.invoke).toHaveBeenCalledWith("space_close", { workspaceId: "w2", focus: "w1" });
+    expect(bridge.invoke).toHaveBeenCalledWith("space_close", { spaceId: "w2", focus: "w1" });
   });
 
   it("keeps the space and shows herdr's error when the close fails", async () => {

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 /// What `create_space` did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpaceOutcome {
-    pub workspace_id: String,
+    pub space_id: String,
     /// False when an existing space for the directory was focused instead.
     pub created: bool,
     /// Why the layout of a new space was not applied (or only partly); empty otherwise.
@@ -21,7 +21,7 @@ pub struct SpaceOutcome {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub setup_started: bool,
     /// Set instead of creating anything when the project file of the repository is not trusted
-    /// yet: the commands to show. `workspace_id` is empty then.
+    /// yet: the commands to show. `space_id` is empty then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trust: Option<crate::trust::TrustRequest>,
 }
@@ -233,6 +233,21 @@ pub fn list_dirs(input: &str, home: Option<&Path>, limit: usize) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_space_outcome_names_the_space_by_its_neutral_id() {
+        let outcome = SpaceOutcome {
+            space_id: "s1".into(),
+            created: true,
+            warnings: Vec::new(),
+            setup_started: false,
+            trust: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&outcome).unwrap(),
+            json!({ "space_id": "s1", "created": true })
+        );
+    }
 
     fn ws(id: &str, label: &str) -> Space {
         Space {

@@ -55,7 +55,7 @@ const EMPTY: Snapshot = { spaces: [], tabs: [], terminals: [] };
 
 /**
  * The spaces, tabs and terminals of the backend as poimen shows them. The backend owns the state:
- * the snapshot is re-read from it, events only invalidate it. `pane.agent_status_changed` is
+ * the snapshot is re-read from it, events only invalidate it. `terminal.agent_status_changed` is
  * applied right away so the status dots react without waiting for the re-read.
  */
 @Injectable({ providedIn: "root" })
@@ -415,12 +415,12 @@ export class SpacesStore {
         // The server may come back restarted: its spaces, and the terminals whose hosts it adopted.
         this.freshSession = true;
         return;
-      case "pane.agent_status_changed":
-        if (event.data?.pane_id && event.data.agent_status) {
+      case "terminal.agent_status_changed":
+        if (event.data?.terminal_id && event.data.agent_status) {
           this._snapshot.update((s) =>
             applyStatus(
               s,
-              event.data!.pane_id!,
+              event.data!.terminal_id!,
               event.data!.agent_status!,
               event.data!.agent_message
                 ? {

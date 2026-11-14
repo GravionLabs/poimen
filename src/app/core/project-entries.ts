@@ -79,7 +79,7 @@ export class ProjectEntries {
     let outcome: EntryOutcome;
     try {
       outcome = await this.bridge.invoke<EntryOutcome>("project_run", {
-        workspaceId,
+        spaceId: workspaceId,
         dir,
         entry,
         decision,

@@ -72,7 +72,7 @@ export class SpaceRebuild {
     let outcome: RebuildOutcome;
     try {
       outcome = await this.bridge.invoke<RebuildOutcome>("rebuild_space", {
-        workspaceId: id,
+        spaceId: id,
         decision,
         confirmed,
       });

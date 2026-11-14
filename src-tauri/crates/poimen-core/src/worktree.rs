@@ -576,7 +576,9 @@ fn run_cleanup_command(root: &Path, command: &crate::tasks::Cmd) -> Result<(), S
 /// The spaces the cleanup may close; the app implements it over its `Backend`, poimen-core stays
 /// free of it.
 pub trait Spaces {
-    /// The current spaces and their terminals (the backend's snapshot).
+    /// The current spaces and their terminals (the backend's snapshot). The cleanup reads only
+    /// `Space::space_id`/`cwd` and `Terminal::space_id`/`cwd`; the poimen-server implementation
+    /// (`ServerSpaces`) fills just these and leaves the other fields and `tabs` empty.
     fn view(&self) -> Result<Snapshot, String>;
     /// Closes a space with all its terminals.
     fn close_space(&self, id: &str) -> Result<(), String>;

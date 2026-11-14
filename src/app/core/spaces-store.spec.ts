@@ -182,8 +182,8 @@ describe("SpacesStore", () => {
     await store.start();
 
     tauri.emit("herdr", {
-      kind: "pane.agent_status_changed",
-      data: { pane_id: "w1:p2", agent_status: "blocked" },
+      kind: "terminal.agent_status_changed",
+      data: { terminal_id: "w1:p2", agent_status: "blocked" },
     });
 
     expect(store.pane("w1:p2")?.agent_status).toBe("blocked");
@@ -198,8 +198,8 @@ describe("SpacesStore", () => {
     await store.start();
     const before = store.snapshot();
 
-    tauri.emit("herdr", { kind: "pane.agent_status_changed", data: { pane_id: "w1:p1" } });
-    tauri.emit("herdr", { kind: "pane.agent_status_changed", data: null });
+    tauri.emit("herdr", { kind: "terminal.agent_status_changed", data: { terminal_id: "w1:p1" } });
+    tauri.emit("herdr", { kind: "terminal.agent_status_changed", data: null });
 
     expect(store.snapshot()).toBe(before);
   });

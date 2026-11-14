@@ -516,6 +516,38 @@ describe("toSnapshot", () => {
     expect(toSnapshot(null)).toEqual({ spaces: [], tabs: [], terminals: [] });
     expect(toSnapshot(undefined)).toEqual({ spaces: [], tabs: [], terminals: [] });
   });
+
+  it("reads each missing list as empty and keeps the lists that are there", () => {
+    const space = { space_id: "s1", label: "api", number: 1, agent_status: "idle" as const };
+    const tab = {
+      tab_id: "s1:1",
+      space_id: "s1",
+      label: "1",
+      number: 1,
+      agent_status: "idle" as const,
+    };
+    const terminal = {
+      terminal_id: "t1",
+      tab_id: "s1:1",
+      space_id: "s1",
+      agent_status: "idle" as const,
+    };
+    expect(toSnapshot({ tabs: [tab], terminals: [terminal] })).toEqual({
+      spaces: [],
+      tabs: [tab],
+      terminals: [terminal],
+    });
+    expect(toSnapshot({ spaces: [space], terminals: [terminal] })).toEqual({
+      spaces: [space],
+      tabs: [],
+      terminals: [terminal],
+    });
+    expect(toSnapshot({ spaces: [space], tabs: [tab] })).toEqual({
+      spaces: [space],
+      tabs: [tab],
+      terminals: [],
+    });
+  });
 });
 
 describe("transcript empty states", () => {

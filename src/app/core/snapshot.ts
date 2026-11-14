@@ -397,7 +397,7 @@ export function nextWaiting(panes: Terminal[], activeId: string | null): Termina
 }
 
 /**
- * Applies a pane.agent_status_changed event without a full refresh. A notification text replaces
+ * Applies a terminal.agent_status_changed event without a full refresh. A notification text replaces
  * the kept one; without one the text stays, except when the agent turns `working` or ends
  * (`unknown`).
  */

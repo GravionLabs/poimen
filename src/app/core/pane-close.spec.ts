@@ -66,7 +66,7 @@ describe("closing a leaf of a split tab", () => {
     tauri.answer("snapshot", () => current);
     // As the server answers after the close: the pane is gone, the tab has one leaf left.
     tauri.answer("pane_close", (args) => {
-      const paneId = args?.["paneId"];
+      const paneId = args?.["terminalId"];
       const rest = current.terminals.filter((p) => p.terminal_id !== paneId);
       current = {
         ...current,

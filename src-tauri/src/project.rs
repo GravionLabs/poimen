@@ -7,23 +7,23 @@ pub use poimen_core::project::*;
 /// created, named, and the command typed with Enter. The caller decides whether it may run (trust).
 pub fn start_setup(
     backend: &dyn crate::backend::Backend,
-    workspace_id: &str,
+    space_id: &str,
     cwd: &str,
     command: &str,
 ) -> Result<(), String> {
-    start_tab(backend, workspace_id, cwd, SETUP_LABEL, command)
+    start_tab(backend, space_id, cwd, SETUP_LABEL, command)
 }
 
 /// Opens a tab named `name` in a space, in `cwd`, and types `command` into it.
 pub fn start_tab(
     backend: &dyn crate::backend::Backend,
-    workspace_id: &str,
+    space_id: &str,
     cwd: &str,
     name: &str,
     command: &str,
 ) -> Result<(), String> {
     let pane = backend
-        .create_terminal(workspace_id, Some(cwd))?
+        .create_terminal(space_id, Some(cwd))?
         .ok_or("herdr did not report the new tab")?;
     backend.rename_terminal(&pane, Some(name))?;
     backend.send_input(&pane, command)?;
@@ -42,7 +42,7 @@ pub fn run_entry(
     trusted: &std::collections::BTreeMap<String, String>,
     decision: Option<&crate::trust::Decision>,
     persist: &dyn Fn(&str) -> Result<(), String>,
-    workspace_id: &str,
+    space_id: &str,
     dir: &str,
     entry: &Entry,
 ) -> Result<EntryOutcome, String> {
@@ -74,7 +74,7 @@ pub fn run_entry(
     // builds the tab; a declined trust runs nothing on either backend.
     if let (Found::Preset(p), false) = (&found, matches!(gate, crate::trust::Gate::Strip)) {
         let request = crate::backend::ApplyRequest {
-            space_id: workspace_id,
+            space_id,
             cwd: dir,
             preset: Some(&p.name),
             decision,
@@ -100,12 +100,12 @@ pub fn run_entry(
             command: c.command.clone(),
         }),
         Found::Command(c) => {
-            start_tab(backend, workspace_id, dir, &c.name, &c.command)?;
+            start_tab(backend, space_id, dir, &c.name, &c.command)?;
             Ok(EntryOutcome::Done)
         }
         Found::Preset(p) => {
             let root = backend
-                .create_terminal(workspace_id, Some(dir))?
+                .create_terminal(space_id, Some(dir))?
                 .ok_or("herdr did not report the new tab")?;
             crate::layout::apply(backend, &p.layout, dir, &root)?;
             Ok(EntryOutcome::Done)

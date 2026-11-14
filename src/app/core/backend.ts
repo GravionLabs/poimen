@@ -4,11 +4,14 @@
 import type { BackendKind } from "./settings";
 import type { AgentStatus } from "./snapshot";
 
-/** Payload of the `herdr` Tauri event: a herdr event or a poimen connection event. */
+/**
+ * Payload of the `herdr` Tauri event: a backend event or a poimen connection event. An agent
+ * status change is `terminal.agent_status_changed` keyed by `terminal_id` on every backend.
+ */
 export interface BackendEvent {
   kind: string;
   data: {
-    pane_id?: string;
+    terminal_id?: string;
     agent_status?: AgentStatus;
     agent_message?: string;
     agent_message_at?: number;

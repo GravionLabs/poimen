@@ -146,7 +146,7 @@ export class TaskStarter {
       try {
         await this.bridge.invoke("machine_task_tab", {
           name: machine,
-          workspaceId: outcome.workspace_id,
+          spaceId: outcome.space_id,
           dir: cwd,
           tab: plan.tab,
           command: plan.command,
@@ -157,14 +157,12 @@ export class TaskStarter {
       }
     }
     await this.remote.refresh(machine);
-    this.ui.setSplitWorkspace(qualifyId(machine, outcome.workspace_id));
+    this.ui.setSplitWorkspace(qualifyId(machine, outcome.space_id));
     if (!outcome.created) {
       const label = this.remote
         .snapshot()
-        .spaces.find((s) => s.space_id === qualifyId(machine, outcome.workspace_id))?.label;
-      this.spaces.notify(
-        `Opened the existing space "${label ?? outcome.workspace_id}" on ${machine}.`,
-      );
+        .spaces.find((s) => s.space_id === qualifyId(machine, outcome.space_id))?.label;
+      this.spaces.notify(`Opened the existing space "${label ?? outcome.space_id}" on ${machine}.`);
     }
     return true;
   }
@@ -198,7 +196,7 @@ export class TaskStarter {
     const after = async (outcome: SpaceOutcome): Promise<void> => {
       try {
         await this.bridge.invoke("task_tab", {
-          workspaceId: outcome.workspace_id,
+          spaceId: outcome.space_id,
           dir,
           name: plan.tab,
           command: plan.command,

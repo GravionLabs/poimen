@@ -53,10 +53,10 @@ describe("SpaceActions", () => {
   });
 
   it("creates the space with the trimmed directory and label, then closes and re-reads", async () => {
-    tauri.answer("create_space", () => ({ workspace_id: "w2", created: true }));
+    tauri.answer("create_space", () => ({ space_id: "w2", created: true }));
     actions.ask();
     const outcome = await actions.create(" /work/app ", " App ");
-    expect(outcome).toEqual({ workspace_id: "w2", created: true });
+    expect(outcome).toEqual({ space_id: "w2", created: true });
     expect(tauri.calls("create_space")).toEqual([
       { cwd: "/work/app", label: "App", decision: null, command: null },
     ]);
@@ -66,14 +66,14 @@ describe("SpaceActions", () => {
 
   it("keeps a layout warning of the created space for the status bar", async () => {
     tauri.answer("create_space", () => ({
-      workspace_id: "w2",
+      space_id: "w2",
       created: true,
       warnings: ["/work/app/.agents/herdr-layout.json: invalid JSON"],
     }));
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await actions.create("/work/app", "");
     expect(actions.warning()).toBe("/work/app/.agents/herdr-layout.json: invalid JSON");
-    tauri.answer("create_space", () => ({ workspace_id: "w3", created: true }));
+    tauri.answer("create_space", () => ({ space_id: "w3", created: true }));
     await actions.create("/work/lib", "");
     expect(actions.warning()).toBeNull();
   });
@@ -84,7 +84,7 @@ describe("SpaceActions", () => {
       tabs: [],
       terminals: [],
     }));
-    tauri.answer("create_space", () => ({ workspace_id: "w1", created: false }));
+    tauri.answer("create_space", () => ({ space_id: "w1", created: false }));
     const ui = injector.get(UiState);
     await actions.create("/work/app", "");
     expect(ui.splitWorkspace()).toBe("w1");
@@ -95,14 +95,14 @@ describe("SpaceActions", () => {
     const request = { root: "/work/app", files: ["f"], hash: "h1", commands: [] };
     tauri.answer("create_space", (args) =>
       args?.["decision"]
-        ? { workspace_id: "w2", created: true }
-        : { workspace_id: "", created: false, trust: request },
+        ? { space_id: "w2", created: true }
+        : { space_id: "", created: false, trust: request },
     );
     expect(await actions.create("/work/app", "App")).toBeUndefined();
     expect(actions.trust()?.request).toEqual(request);
     expect(tauri.calls("snapshot")).toHaveLength(0);
     const outcome = await actions.answerTrust("trust");
-    expect(outcome?.workspace_id).toBe("w2");
+    expect(outcome?.space_id).toBe("w2");
     expect(tauri.calls("create_space")[1]).toEqual({
       cwd: "/work/app",
       label: "App",
@@ -114,7 +114,7 @@ describe("SpaceActions", () => {
 
   it("cancelling the trust question sends nothing more", async () => {
     const request = { root: "/work/app", files: ["f"], hash: "h1", commands: [] };
-    tauri.answer("create_space", () => ({ workspace_id: "", created: false, trust: request }));
+    tauri.answer("create_space", () => ({ space_id: "", created: false, trust: request }));
     await actions.create("/work/app", "");
     expect(await actions.answerTrust("cancel")).toBeUndefined();
     expect(tauri.calls("create_space")).toHaveLength(1);
@@ -230,7 +230,7 @@ describe("SpaceActions close", () => {
     await actions.requestClose("w2");
     const before = tauri.calls("snapshot").length;
     expect(await actions.confirmClose()).toEqual(["w2:p1", "w2:p2"]);
-    expect(tauri.calls("space_close")).toEqual([{ workspaceId: "w2", focus: "w3" }]);
+    expect(tauri.calls("space_close")).toEqual([{ spaceId: "w2", focus: "w3" }]);
     expect(tauri.calls("snapshot")).toHaveLength(before + 1);
     expect(actions.closing()).toBeNull();
   });
@@ -238,7 +238,7 @@ describe("SpaceActions close", () => {
   it("closes an empty space without a prompt", async () => {
     expect(await actions.requestClose("w3")).toEqual([]);
     expect(actions.closing()).toBeNull();
-    expect(tauri.calls("space_close")).toEqual([{ workspaceId: "w3", focus: "w2" }]);
+    expect(tauri.calls("space_close")).toEqual([{ spaceId: "w3", focus: "w2" }]);
   });
 
   it("closing the last space sends no neighbour", async () => {
@@ -255,7 +255,7 @@ describe("SpaceActions close", () => {
     await injector.get(SpacesStore).refresh();
     const last = injector.get(SpaceActions);
     await last.requestClose("w1");
-    expect(tauri.calls("space_close").at(-1)).toEqual({ workspaceId: "w1", focus: null });
+    expect(tauri.calls("space_close").at(-1)).toEqual({ spaceId: "w1", focus: null });
   });
 
   it("shows herdr's error and reports no closed panes when the close fails", async () => {
@@ -335,7 +335,7 @@ describe("SpaceActions rename", () => {
     actions.askRename("w2");
     const before = tauri.calls("snapshot").length;
     expect(await actions.confirmRename("  Renamed ")).toBe(true);
-    expect(tauri.calls("space_rename")).toEqual([{ workspaceId: "w2", label: "Renamed" }]);
+    expect(tauri.calls("space_rename")).toEqual([{ spaceId: "w2", label: "Renamed" }]);
     expect(tauri.calls("snapshot")).toHaveLength(before + 1);
     expect(actions.renaming()).toBeNull();
     expect(actions.renameError()).toBeNull();

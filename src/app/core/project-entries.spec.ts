@@ -70,7 +70,7 @@ describe("ProjectEntries.run", () => {
     await setup(snapshot(pane("w1:p1", "w1")), { kind: "done" });
     await entries.run(command, "w1", "/work/app");
     expect(tauri.calls("project_run")).toEqual([
-      { workspaceId: "w1", dir: "/work/app", entry: command, decision: null },
+      { spaceId: "w1", dir: "/work/app", entry: command, decision: null },
     ]);
     expect(tauri.calls("agent_prompt")).toEqual([]);
   });
