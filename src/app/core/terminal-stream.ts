@@ -50,9 +50,10 @@ export class TerminalSession {
     void this.bridge.invoke("terminal_input", { id: this.id, text });
   }
 
-  resize(cols: number, rows: number): void {
-    if (this.closed) return;
-    void this.bridge.invoke("terminal_resize", { id: this.id, cols, rows });
+  /** Resolves when the server set the size; rejects when it refused it (`not_controller`). */
+  resize(cols: number, rows: number): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    return this.bridge.invoke<void>("terminal_resize", { id: this.id, cols, rows });
   }
 
   scroll(up: boolean, lines: number): void {

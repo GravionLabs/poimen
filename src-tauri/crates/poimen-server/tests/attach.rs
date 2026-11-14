@@ -299,6 +299,30 @@ fn without_a_controller_a_short_lived_connection_may_resize() {
 
 #[cfg(unix)]
 #[test]
+fn an_observer_resizes_its_terminal_while_nobody_controls_it() {
+    // A split tab's unfocused leaf is an observer; it follows its container while no one
+    // controls the terminal, and every observer sees the new size.
+    let f = fixture("obsresize");
+    let id = f.idle();
+    let mut observer = f.attach(&id, AttachMode::Observe);
+    observer.resize(90, 20).unwrap();
+    let mut out = Vec::new();
+    read_until(&mut observer, &mut out, |e, _| {
+        matches!(
+            e,
+            Event::TerminalResized {
+                cols: 90,
+                rows: 20,
+                ..
+            }
+        )
+    });
+    let listed = f.client.list_terminals(None).unwrap();
+    assert_eq!((listed[0].cols, listed[0].rows), (90, 20));
+}
+
+#[cfg(unix)]
+#[test]
 fn taking_over_the_control_is_explicit_and_reported() {
     let f = fixture("takeover");
     let id = f.run("sleep 30");
