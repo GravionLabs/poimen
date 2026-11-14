@@ -1,5 +1,5 @@
-//! The `poimen-server` backend (ADR 0003, #153): spaces and terminals of the server mapped onto the
-//! tree the frontend builds (`workspaces`, `tabs`, `panes`), live terminals through
+//! The `poimen-server` backend (ADR 0003, #153): spaces, tabs and terminals of the server in the
+//! backend-neutral snapshot (`poimen_core::snapshot`, #586), live terminals through
 //! `terminal.attach`.
 //!
 //! The server owns the PTYs and, since protocol 4, the tabs and split trees of each space (#513):
@@ -30,6 +30,7 @@ use crate::backend::{
 use crate::herdr::{AgentSession, PromptOutcome, ServerInfo};
 use crate::poimen_server;
 use crate::trust;
+use poimen_core::snapshot as snap;
 
 const NO_RENDERED_INPUT: &str = "xterm.js handles the mouse and the scrollback on this backend";
 
@@ -153,35 +154,29 @@ fn text(err: ClientError) -> String {
     err.to_string()
 }
 
-/// The tree the frontend builds from: a space is a workspace, a server tab is a tab with its
-/// terminals as panes (in the order of the tab's split tree, so the first leaf comes first) and
-/// its tree as `root`. A terminal without a leaf (an exited one, or every terminal of a protocol 3
-/// server) is a tab of its own with the terminal's id, so no terminal is lost. Tabs follow the
-/// space's `tabs` order and are numbered by it. Agent status is what the agent's hooks reported
-/// (`unknown` without an agent); a tab and a workspace show their most urgent terminal, and a
-/// workspace carries the space's `cwd` (herdr workspaces have none).
+/// The neutral snapshot of the server's spaces (#586): a server tab is a tab with its terminals in
+/// the order of its split tree (the first leaf first) and the tree as `root`. A terminal without
+/// a leaf (an exited one, or every terminal of a protocol 3 server) is a tab of its own with the
+/// terminal's id, so no terminal is lost. Tabs follow the space's `tabs` order and are numbered by
+/// it. Agent status is what the agent's hooks reported (`unknown` without an agent); a tab and a
+/// space show their most urgent terminal, and a space carries its own `cwd`.
 pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
-    let mut workspaces = Vec::new();
-    let mut tabs = Vec::new();
-    let mut panes = Vec::new();
+    let mut snapshot = Snapshot::default();
     for (i, space) in layout.spaces.iter().enumerate() {
         let own: Vec<&Terminal> = terminals
             .iter()
             .filter(|t| t.space_id == space.id)
             .collect();
-        let mut workspace = json!({
-            "workspace_id": space.id,
-            "label": space.name,
-            "number": i + 1,
-            "agent_status": most_urgent(own.iter().copied()),
+        snapshot.spaces.push(snap::Space {
+            space_id: space.id.clone(),
+            label: space.name.clone(),
+            number: number(i),
+            agent_status: most_urgent(own.iter().copied()),
+            // The space's own directory, so a space without terminals is still found by it.
+            cwd: Some(space.cwd.clone()).filter(|c| !c.is_empty()),
         });
-        // The space's own directory, so a space without terminals is still found by it.
-        if !space.cwd.is_empty() {
-            workspace["cwd"] = json!(space.cwd);
-        }
-        workspaces.push(workspace);
         let mut placed = HashSet::new();
-        let mut number = 0;
+        let mut count = 0;
         for tab in tabs_of(layout, space) {
             let members: Vec<&Terminal> = tab
                 .root
@@ -194,41 +189,45 @@ pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
             if members.is_empty() {
                 continue;
             }
-            number += 1;
-            let mut wire_tab = json!({
-                "tab_id": tab.tab_id,
-                "workspace_id": space.id,
-                "label": tab.name,
-                "number": number,
-                "agent_status": most_urgent(members.iter().copied()),
-                "root": serde_json::to_value(&tab.root).unwrap_or(Value::Null),
+            snapshot.tabs.push(snap::Tab {
+                tab_id: tab.tab_id.clone(),
+                space_id: space.id.clone(),
+                label: tab.name.clone(),
+                number: number(count),
+                agent_status: most_urgent(members.iter().copied()),
+                root: Some(tab.root.clone()),
+                active_terminal: Some(tab.active_terminal.clone()).filter(|t| !t.is_empty()),
             });
-            if !tab.active_terminal.is_empty() {
-                wire_tab["active_terminal"] = json!(tab.active_terminal);
-            }
-            tabs.push(wire_tab);
+            count += 1;
             for terminal in members {
                 placed.insert(terminal.id.as_str());
-                panes.push(wire_pane(terminal, &space.id, &tab.tab_id));
+                snapshot
+                    .terminals
+                    .push(snapshot_terminal(terminal, &space.id, &tab.tab_id));
             }
         }
         for terminal in own.into_iter().filter(|t| !placed.contains(t.id.as_str())) {
-            number += 1;
-            tabs.push(json!({
-                "tab_id": terminal.id,
-                "workspace_id": space.id,
-                "label": terminal.name,
-                "number": number,
-                "agent_status": wire_status(terminal),
-            }));
-            panes.push(wire_pane(terminal, &space.id, &terminal.id));
+            snapshot.tabs.push(snap::Tab {
+                tab_id: terminal.id.clone(),
+                space_id: space.id.clone(),
+                label: terminal.name.clone(),
+                number: number(count),
+                agent_status: status_of(terminal),
+                root: None,
+                active_terminal: None,
+            });
+            count += 1;
+            snapshot
+                .terminals
+                .push(snapshot_terminal(terminal, &space.id, &terminal.id));
         }
     }
-    Snapshot {
-        workspaces: Value::Array(workspaces),
-        tabs: Value::Array(tabs),
-        panes: Value::Array(panes),
-    }
+    snapshot
+}
+
+/// The 1-based number of the record at `index`.
+fn number(index: usize) -> u32 {
+    u32::try_from(index + 1).unwrap_or(u32::MAX)
 }
 
 /// The tabs of `space`: those of its `tabs` order first, then any other tab of the space.
@@ -248,86 +247,76 @@ fn tabs_of<'a>(layout: &'a SpaceList, space: &Space) -> Vec<&'a Tab> {
 }
 
 /// The status of the most urgent terminal, `unknown` for none.
-fn most_urgent<'a>(terminals: impl Iterator<Item = &'a Terminal>) -> &'static str {
-    terminals
-        .map(wire_status)
-        .max_by_key(|s| urgency(s))
-        .unwrap_or("unknown")
+fn most_urgent<'a>(terminals: impl Iterator<Item = &'a Terminal>) -> snap::AgentStatus {
+    snap::AgentStatus::most_urgent(terminals.map(status_of))
 }
 
-/// The pane of a terminal in the shape of herdr's `pane.list`: `agent` (the name the hooks
-/// report, `claude` or `copilot`) and `agent_session.value` are set only when known.
-fn wire_pane(terminal: &Terminal, space_id: &str, tab_id: &str) -> Value {
-    let mut pane = json!({
-        "pane_id": terminal.id,
-        "tab_id": tab_id,
-        "workspace_id": space_id,
-        "cwd": terminal.cwd,
-        "agent_status": wire_status(terminal),
-        "focused": false,
-    });
-    // The name of a terminal is its label only once it was renamed: the default is the directory
-    // name, which the sidebar already shows for a pane without a label.
-    if terminal.name != default_name(&terminal.cwd) {
-        pane["label"] = json!(terminal.name);
-    }
-    if let Some(info) = &terminal.agent {
-        if let Some(agent) = info.agent.as_deref().filter(|a| !a.is_empty()) {
-            pane["agent"] = json!(agent);
-        }
-        if let Some(session) = &info.session_id {
-            pane["agent_session"] = json!({"value": session});
-        }
-        if let Some(message) = &info.message {
-            pane["agent_message"] = json!(message);
-            pane["agent_message_at"] = json!(info.message_at);
-        }
-    }
-    if !terminal.tokens.is_empty() {
-        // The same `tokens` map herdr's `pane.list` has, so `$<name>` row tokens work unchanged.
-        pane["tokens"] = json!(terminal.tokens);
-    }
-    if terminal.survives_restart {
+/// A server terminal in the snapshot: `agent` (the name the hooks report, `claude` or `copilot`)
+/// and `agent_session.value` are set only when known.
+fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap::Terminal {
+    let agent = terminal.agent.as_ref();
+    let message = agent.and_then(|a| a.message.clone());
+    snap::Terminal {
+        terminal_id: terminal.id.clone(),
+        tab_id: tab_id.to_owned(),
+        space_id: space_id.to_owned(),
+        agent: agent
+            .and_then(|a| a.agent.clone())
+            .filter(|a| !a.is_empty()),
+        agent_session: agent
+            .and_then(|a| a.session_id.clone())
+            .map(|value| snap::AgentSessionRef { value: Some(value) }),
+        agent_status: status_of(terminal),
+        agent_message_at: message.as_ref().and(agent.and_then(|a| a.message_at)),
+        agent_message: message,
+        cwd: Some(terminal.cwd.clone()),
+        // The name of a terminal is its label only once it was renamed: the default is the
+        // directory name, which the sidebar already shows for a terminal without a label.
+        label: (terminal.name != default_name(&terminal.cwd)).then(|| terminal.name.clone()),
+        // The same `tokens` map herdr's panes have, so `$<name>` row tokens work unchanged.
+        tokens: terminal.tokens.clone(),
         // The restart confirmation names only the terminals a restart ends.
-        pane["survives_restart"] = json!(true);
-    }
-    if let Some(program) = &terminal.program {
-        pane["program"] = json!(program);
-    }
-    if let (Some(have), Some(bundled)) = (&terminal.host_version, &terminal.host_bundled_version) {
+        survives_restart: terminal.survives_restart,
+        program: terminal.program.clone(),
         // The mark on a terminal whose host is older than the bundled one (#606).
-        pane["host_version"] = json!(have);
-        pane["host_bundled_version"] = json!(bundled);
+        host_version: terminal
+            .host_bundled_version
+            .as_ref()
+            .and(terminal.host_version.clone()),
+        host_bundled_version: terminal
+            .host_version
+            .as_ref()
+            .and(terminal.host_bundled_version.clone()),
+        ..snap::Terminal::default()
     }
-    pane
 }
 
-/// The `agent_status` of the frontend for a terminal.
-fn wire_status(terminal: &Terminal) -> &'static str {
+/// The `agent_status` of the snapshot for a terminal.
+fn status_of(terminal: &Terminal) -> snap::AgentStatus {
     terminal
         .agent
         .as_ref()
-        .map_or("unknown", |a| status_name(a.status))
+        .map_or(snap::AgentStatus::Unknown, |a| snap_status(a.status))
 }
 
+/// The status name of the frontend's events and prompt outcomes (`gone` is `unknown`).
 fn status_name(status: AgentStatus) -> &'static str {
-    match status {
-        AgentStatus::Idle => "idle",
-        AgentStatus::Working => "working",
-        AgentStatus::Blocked => "blocked",
-        AgentStatus::Done => "done",
-        AgentStatus::Gone => "unknown",
+    match snap_status(status) {
+        snap::AgentStatus::Idle => "idle",
+        snap::AgentStatus::Working => "working",
+        snap::AgentStatus::Blocked => "blocked",
+        snap::AgentStatus::Done => "done",
+        snap::AgentStatus::Unknown => "unknown",
     }
 }
 
-/// Orders statuses for the workspace row: blocked first, then working, done, idle.
-fn urgency(status: &str) -> u8 {
+fn snap_status(status: AgentStatus) -> snap::AgentStatus {
     match status {
-        "blocked" => 4,
-        "working" => 3,
-        "done" => 2,
-        "idle" => 1,
-        _ => 0,
+        AgentStatus::Idle => snap::AgentStatus::Idle,
+        AgentStatus::Working => snap::AgentStatus::Working,
+        AgentStatus::Blocked => snap::AgentStatus::Blocked,
+        AgentStatus::Done => snap::AgentStatus::Done,
+        AgentStatus::Gone => snap::AgentStatus::Unknown,
     }
 }
 
@@ -685,14 +674,17 @@ impl Backend for PoimenBackend {
 
     fn agent_session(&self, terminal_id: &str) -> Result<Option<AgentSession>, String> {
         let terminals = self.client.list_terminals(None).map_err(text)?;
-        let panes: Vec<Value> = terminals
+        Ok(terminals
             .iter()
-            .map(|t| wire_pane(t, &t.space_id, &t.id))
-            .collect();
-        Ok(crate::herdr::parse_agent_session(
-            &json!({"panes": panes}),
-            terminal_id,
-        ))
+            .find(|t| t.id == terminal_id)
+            .and_then(|t| {
+                let agent = t.agent.as_ref()?;
+                crate::herdr::session_of(
+                    agent.agent.as_deref(),
+                    agent.session_id.as_deref(),
+                    &t.cwd,
+                )
+            }))
     }
 
     fn agent_transcript(
@@ -910,15 +902,21 @@ mod tests {
         }
     }
 
-    /// The snapshot of a server without tabs (protocol 3): every terminal is a tab of its own.
-    fn snap(spaces: &[Space], terminals: &[Terminal]) -> Snapshot {
-        map_snapshot(
+    /// The snapshot of a server without tabs (protocol 3), as the frontend receives it: every
+    /// terminal is a tab of its own.
+    fn snap(spaces: &[Space], terminals: &[Terminal]) -> Value {
+        wire(
             &SpaceList {
                 spaces: spaces.to_vec(),
                 tabs: Vec::new(),
             },
             terminals,
         )
+    }
+
+    /// The snapshot of `layout` and `terminals` as the frontend receives it.
+    fn wire(layout: &SpaceList, terminals: &[Terminal]) -> Value {
+        serde_json::to_value(map_snapshot(layout, terminals)).unwrap()
     }
 
     fn terminal(id: &str, space_id: &str, name: &str) -> Terminal {
@@ -942,7 +940,7 @@ mod tests {
     }
 
     #[test]
-    fn the_snapshot_maps_spaces_to_workspaces_and_terminals_to_tabs_with_one_pane() {
+    fn without_server_tabs_each_terminal_is_a_tab_of_its_own() {
         let snapshot = snap(
             &[space("s1", "api"), space("s2", "web")],
             &[
@@ -952,24 +950,24 @@ mod tests {
             ],
         );
         assert_eq!(
-            snapshot.workspaces,
+            snapshot["spaces"],
             json!([
-                {"workspace_id": "s1", "label": "api", "number": 1, "agent_status": "unknown", "cwd": "/work/api"},
-                {"workspace_id": "s2", "label": "web", "number": 2, "agent_status": "unknown", "cwd": "/work/web"},
+                {"space_id": "s1", "label": "api", "number": 1, "agent_status": "unknown", "cwd": "/work/api"},
+                {"space_id": "s2", "label": "web", "number": 2, "agent_status": "unknown", "cwd": "/work/web"},
             ])
         );
         assert_eq!(
-            snapshot.tabs,
+            snapshot["tabs"],
             json!([
-                {"tab_id": "t1", "workspace_id": "s1", "label": "zsh", "number": 1, "agent_status": "unknown"},
-                {"tab_id": "t2", "workspace_id": "s1", "label": "tests", "number": 2, "agent_status": "unknown"},
-                {"tab_id": "t3", "workspace_id": "s2", "label": "dev", "number": 1, "agent_status": "unknown"},
+                {"tab_id": "t1", "space_id": "s1", "label": "zsh", "number": 1, "agent_status": "unknown"},
+                {"tab_id": "t2", "space_id": "s1", "label": "tests", "number": 2, "agent_status": "unknown"},
+                {"tab_id": "t3", "space_id": "s2", "label": "dev", "number": 1, "agent_status": "unknown"},
             ])
         );
         assert_eq!(
-            snapshot.panes[1],
+            snapshot["terminals"][1],
             json!({
-                "pane_id": "t2", "tab_id": "t2", "workspace_id": "s1", "cwd": "/work/tests",
+                "terminal_id": "t2", "tab_id": "t2", "space_id": "s1", "cwd": "/work/tests",
                 "agent_status": "unknown", "focused": false,
             })
         );
@@ -1024,14 +1022,14 @@ mod tests {
     }
 
     #[test]
-    fn server_tabs_become_tabs_with_their_terminals_as_panes_in_tree_order() {
+    fn server_tabs_become_tabs_with_their_terminals_in_tree_order() {
         let terminals = [
             terminal("t1", "s1", "agent"),
             terminal("t2", "s1", "shell"),
             terminal("t3", "s1", "tests"),
             terminal("t4", "s1", "logs"),
         ];
-        let snapshot = map_snapshot(&split_layout(), &terminals);
+        let snapshot = wire(&split_layout(), &terminals);
         let ids = |v: &Value, key: &str| {
             v.as_array()
                 .unwrap()
@@ -1040,20 +1038,23 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         // The space's order, numbered by it.
-        assert_eq!(ids(&snapshot.tabs, "tab_id"), ["tab2", "tab1"]);
-        assert_eq!(snapshot.tabs[0]["number"], 1);
-        assert_eq!(snapshot.tabs[1]["number"], 2);
-        assert_eq!(snapshot.tabs[1]["label"], "agent");
+        assert_eq!(ids(&snapshot["tabs"], "tab_id"), ["tab2", "tab1"]);
+        assert_eq!(snapshot["tabs"][0]["number"], 1);
+        assert_eq!(snapshot["tabs"][1]["number"], 2);
+        assert_eq!(snapshot["tabs"][1]["label"], "agent");
         // The panes of a split tab follow its leaves, first leaf first.
-        assert_eq!(ids(&snapshot.panes, "pane_id"), ["t4", "t1", "t3", "t2"]);
         assert_eq!(
-            ids(&snapshot.panes, "tab_id"),
+            ids(&snapshot["terminals"], "terminal_id"),
+            ["t4", "t1", "t3", "t2"]
+        );
+        assert_eq!(
+            ids(&snapshot["terminals"], "tab_id"),
             ["tab2", "tab1", "tab1", "tab1"]
         );
         // The tree and the focused leaf reach the frontend as the server sent them.
-        assert_eq!(snapshot.tabs[1]["active_terminal"], "t1");
+        assert_eq!(snapshot["tabs"][1]["active_terminal"], "t1");
         assert_eq!(
-            snapshot.tabs[1]["root"],
+            snapshot["tabs"][1]["root"],
             json!({"kind": "split", "split_id": "split1", "direction": "right", "ratio": 0.6,
             "children": [
                 {"kind": "terminal", "terminal_id": "t1"},
@@ -1066,7 +1067,7 @@ mod tests {
         );
     }
 
-    /// The fixture the frontend specs read (`core/herdr.spec.ts`): a split tab, a plain tab and an
+    /// The fixture the frontend specs read (`core/snapshot.spec.ts`): a split tab, a plain tab and an
     /// exited terminal without a leaf.
     const SPLIT_SNAPSHOT: &str =
         include_str!("../../src/app/core/fixtures/poimen-snapshot-split-tab.json");
@@ -1112,10 +1113,10 @@ mod tests {
             terminal("t3", "s1", "tests"),
             terminal("t4", "s1", "logs"),
         ];
-        let snapshot = map_snapshot(&split_layout(), &terminals);
-        assert_eq!(snapshot.tabs[0]["agent_status"], "unknown");
-        assert_eq!(snapshot.tabs[1]["agent_status"], "blocked");
-        assert_eq!(snapshot.workspaces[0]["agent_status"], "blocked");
+        let snapshot = wire(&split_layout(), &terminals);
+        assert_eq!(snapshot["tabs"][0]["agent_status"], "unknown");
+        assert_eq!(snapshot["tabs"][1]["agent_status"], "blocked");
+        assert_eq!(snapshot["spaces"][0]["agent_status"], "blocked");
     }
 
     #[test]
@@ -1130,30 +1131,29 @@ mod tests {
             terminal("t4", "s1", "logs"),
             exited,
         ];
-        let snapshot = map_snapshot(&split_layout(), &terminals);
+        let snapshot = wire(&split_layout(), &terminals);
         assert_eq!(
-            snapshot.tabs[2],
-            json!({"tab_id": "t5", "workspace_id": "s1", "label": "build", "number": 3,
+            snapshot["tabs"][2],
+            json!({"tab_id": "t5", "space_id": "s1", "label": "build", "number": 3,
                 "agent_status": "unknown"})
         );
-        assert_eq!(snapshot.panes[4]["pane_id"], "t5");
-        assert_eq!(snapshot.panes[4]["tab_id"], "t5");
+        assert_eq!(snapshot["terminals"][4]["terminal_id"], "t5");
+        assert_eq!(snapshot["terminals"][4]["tab_id"], "t5");
     }
 
     #[test]
     fn leaves_of_terminals_that_are_gone_are_skipped_and_an_empty_tab_is_left_out() {
         // t3 and t4 closed between `space.list` and `terminal.list`.
         let terminals = [terminal("t1", "s1", "agent"), terminal("t2", "s1", "shell")];
-        let snapshot = map_snapshot(&split_layout(), &terminals);
-        assert_eq!(snapshot.tabs.as_array().unwrap().len(), 1);
-        assert_eq!(snapshot.tabs[0]["tab_id"], "tab1");
-        assert_eq!(snapshot.tabs[0]["number"], 1);
-        let panes: Vec<_> = snapshot
-            .panes
+        let snapshot = wire(&split_layout(), &terminals);
+        assert_eq!(snapshot["tabs"].as_array().unwrap().len(), 1);
+        assert_eq!(snapshot["tabs"][0]["tab_id"], "tab1");
+        assert_eq!(snapshot["tabs"][0]["number"], 1);
+        let panes: Vec<_> = snapshot["terminals"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|p| p["pane_id"].as_str().unwrap())
+            .map(|p| p["terminal_id"].as_str().unwrap())
             .collect();
         assert_eq!(panes, ["t1", "t2"]);
     }
@@ -1168,9 +1168,9 @@ mod tests {
             terminal("t3", "s1", "tests"),
             terminal("t4", "s1", "logs"),
         ];
-        let snapshot = map_snapshot(&layout, &terminals);
-        assert_eq!(snapshot.tabs[0]["tab_id"], "tab1");
-        assert_eq!(snapshot.tabs[1]["tab_id"], "tab2");
+        let snapshot = wire(&layout, &terminals);
+        assert_eq!(snapshot["tabs"][0]["tab_id"], "tab1");
+        assert_eq!(snapshot["tabs"][1]["tab_id"], "tab2");
     }
 
     #[test]
@@ -1186,11 +1186,10 @@ mod tests {
             terminal("t3", "s1", "tests"),
             logs,
         ];
-        let snapshot = map_snapshot(&layout, &terminals);
-        let of = |tab: &Value| tab["workspace_id"].as_str().unwrap().to_owned();
+        let snapshot = wire(&layout, &terminals);
+        let of = |tab: &Value| tab["space_id"].as_str().unwrap().to_owned();
         assert_eq!(
-            snapshot
-                .tabs
+            snapshot["tabs"]
                 .as_array()
                 .unwrap()
                 .iter()
@@ -1198,8 +1197,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["s1", "s2"]
         );
-        assert_eq!(snapshot.panes[3]["tab_id"], "tab2");
-        assert_eq!(snapshot.panes[3]["workspace_id"], "s2");
+        assert_eq!(snapshot["terminals"][3]["tab_id"], "tab2");
+        assert_eq!(snapshot["terminals"][3]["space_id"], "s2");
     }
 
     #[test]
@@ -1219,15 +1218,15 @@ mod tests {
     #[test]
     fn an_empty_server_gives_an_empty_snapshot() {
         let snapshot = snap(&[], &[]);
-        assert_eq!(snapshot.workspaces, json!([]));
-        assert_eq!(snapshot.panes, json!([]));
+        assert_eq!(snapshot["spaces"], json!([]));
+        assert_eq!(snapshot["terminals"], json!([]));
     }
 
     #[test]
     fn a_space_without_terminals_keeps_its_directory() {
         let snapshot = snap(&[space("s1", "app-7")], &[]);
-        assert_eq!(snapshot.workspaces[0]["cwd"], "/work/app-7");
-        assert_eq!(snapshot.panes, json!([]));
+        assert_eq!(snapshot["spaces"][0]["cwd"], "/work/app-7");
+        assert_eq!(snapshot["terminals"], json!([]));
     }
 
     #[test]
@@ -1235,13 +1234,13 @@ mod tests {
         let mut s = space("s1", "a");
         s.cwd = String::new();
         let snapshot = snap(&[s], &[]);
-        assert!(snapshot.workspaces[0].get("cwd").is_none());
+        assert!(snapshot["spaces"][0].get("cwd").is_none());
     }
 
     #[test]
     fn a_terminal_of_an_unknown_space_is_left_out() {
         let snapshot = snap(&[space("s1", "a")], &[terminal("t1", "gone", "x")]);
-        assert_eq!(snapshot.tabs, json!([]));
+        assert_eq!(snapshot["tabs"], json!([]));
     }
 
     #[test]
@@ -1249,7 +1248,10 @@ mod tests {
         let mut t = terminal("t1", "s1", "zsh");
         t.status = TerminalStatus::Exited;
         t.exit_code = Some(1);
-        assert_eq!(snap(&[space("s1", "a")], &[t]).panes[0]["pane_id"], "t1");
+        assert_eq!(
+            snap(&[space("s1", "a")], &[t])["terminals"][0]["terminal_id"],
+            "t1"
+        );
     }
 
     #[test]
@@ -1391,9 +1393,12 @@ mod tests {
                 .map(|x| x["agent_status"].as_str().unwrap().to_owned())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(status(&snapshot.panes), ["working", "blocked", "unknown"]);
-        assert_eq!(status(&snapshot.tabs), ["working", "blocked", "unknown"]);
-        assert_eq!(status(&snapshot.workspaces), ["blocked", "unknown"]);
+        assert_eq!(
+            status(&snapshot["terminals"]),
+            ["working", "blocked", "unknown"]
+        );
+        assert_eq!(status(&snapshot["tabs"]), ["working", "blocked", "unknown"]);
+        assert_eq!(status(&snapshot["spaces"]), ["blocked", "unknown"]);
     }
 
     #[test]
@@ -1441,9 +1446,9 @@ mod tests {
             message_at: Some(1700),
         });
         let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
-        assert_eq!(snapshot.panes[0]["agent_message"], "Allow Bash?");
-        assert_eq!(snapshot.panes[0]["agent_message_at"], 1700);
-        assert!(snapshot.panes[1].get("agent_message").is_none());
+        assert_eq!(snapshot["terminals"][0]["agent_message"], "Allow Bash?");
+        assert_eq!(snapshot["terminals"][0]["agent_message_at"], 1700);
+        assert!(snapshot["terminals"][1].get("agent_message").is_none());
     }
 
     #[test]
@@ -1451,8 +1456,8 @@ mod tests {
         let mut t = terminal("t1", "s1", "a");
         t.survives_restart = true;
         let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
-        assert_eq!(snapshot.panes[0]["survives_restart"], true);
-        assert!(snapshot.panes[1].get("survives_restart").is_none());
+        assert_eq!(snapshot["terminals"][0]["survives_restart"], true);
+        assert!(snapshot["terminals"][1].get("survives_restart").is_none());
     }
 
     #[test]
@@ -1461,9 +1466,9 @@ mod tests {
         t.host_version = Some("0.15.0".into());
         t.host_bundled_version = Some("0.16.0".into());
         let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
-        assert_eq!(snapshot.panes[0]["host_version"], "0.15.0");
-        assert_eq!(snapshot.panes[0]["host_bundled_version"], "0.16.0");
-        assert!(snapshot.panes[1].get("host_version").is_none());
+        assert_eq!(snapshot["terminals"][0]["host_version"], "0.15.0");
+        assert_eq!(snapshot["terminals"][0]["host_bundled_version"], "0.16.0");
+        assert!(snapshot["terminals"][1].get("host_version").is_none());
     }
 
     #[test]
@@ -1472,10 +1477,10 @@ mod tests {
         t.tokens = [("deliver_step".to_owned(), "build".to_owned())].into();
         let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
         assert_eq!(
-            snapshot.panes[0]["tokens"],
+            snapshot["terminals"][0]["tokens"],
             json!({"deliver_step": "build"})
         );
-        assert!(snapshot.panes[1].get("tokens").is_none());
+        assert!(snapshot["terminals"][1].get("tokens").is_none());
         let event = backend_event(&Event::TerminalTokensChanged {
             terminal_id: "t1".into(),
             tokens: Default::default(),
@@ -2010,11 +2015,11 @@ mod tests {
     #[test]
     fn the_snapshot_reads_the_server_tabs() {
         let (backend, _) = backend_for("snapshot-tabs", vec![], false);
-        let snapshot = backend.snapshot().unwrap();
+        let snapshot = serde_json::to_value(backend.snapshot().unwrap()).unwrap();
         // tab1 holds t1; the leaves t2 and t3 of tab2 are not in the terminal list (closed).
-        assert_eq!(snapshot.tabs.as_array().unwrap().len(), 1);
-        assert_eq!(snapshot.tabs[0]["tab_id"], "tab1");
-        assert_eq!(snapshot.panes[0]["tab_id"], "tab1");
+        assert_eq!(snapshot["tabs"].as_array().unwrap().len(), 1);
+        assert_eq!(snapshot["tabs"][0]["tab_id"], "tab1");
+        assert_eq!(snapshot["terminals"][0]["tab_id"], "tab1");
     }
 
     #[test]
@@ -2141,7 +2146,9 @@ mod tests {
             vec![],
         );
         let backend = PoimenBackend::new(Client::new(path));
-        let pane = |backend: &PoimenBackend| backend.snapshot().unwrap().panes[0].clone();
+        let pane = |backend: &PoimenBackend| {
+            serde_json::to_value(backend.snapshot().unwrap()).unwrap()["terminals"][0].clone()
+        };
         assert_eq!(pane(&backend)["agent"], "claude");
         assert!(
             pane(&backend).get("label").is_none(),
@@ -2207,7 +2214,7 @@ mod tests {
             message_at: None,
         });
         let plain = terminal("t2", "s1", "zsh");
-        let panes = snap(&[space("s1", "api")], &[with, plain]).panes;
+        let panes = snap(&[space("s1", "api")], &[with, plain])["terminals"].clone();
         assert_eq!(panes[0]["agent"], "copilot");
         assert_eq!(panes[0]["agent_session"]["value"], "s-9");
         assert!(panes[1].get("agent").is_none());

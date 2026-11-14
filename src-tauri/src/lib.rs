@@ -44,7 +44,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde_json::{Value, json};
+use serde_json::json;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
@@ -615,10 +615,7 @@ fn create_space_with(
 ) -> Result<spaces::SpaceOutcome, String> {
     let dir = spaces::resolve_dir(cwd, home)?;
     let snapshot = backend.snapshot()?;
-    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
-    let workspaces = list(&snapshot.workspaces);
-    let panes = list(&snapshot.panes);
-    if let Some(workspace_id) = spaces::find_space(&dir, &workspaces, &panes) {
+    if let Some(workspace_id) = spaces::find_space(&dir, &snapshot) {
         backend.focus_space(&workspace_id)?;
         return Ok(spaces::SpaceOutcome {
             workspace_id,
@@ -628,7 +625,7 @@ fn create_space_with(
             trust: None,
         });
     }
-    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &workspaces);
+    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &snapshot.spaces);
     // poimen-server resolves and builds the layout itself and asks for trust first.
     let request = backend::LayoutRequest {
         cwd: &dir,
@@ -876,15 +873,13 @@ fn rebuild_space_with(
     confirmed: bool,
 ) -> Result<RebuildOutcome, String> {
     let snapshot = backend.snapshot()?;
-    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
-    let of_space = |v: &Value| v["workspace_id"].as_str() == Some(space_id);
-    let Some(space) = list(&snapshot.workspaces).into_iter().find(of_space) else {
+    let Some(space) = snapshot.spaces.iter().find(|s| s.space_id == space_id) else {
         return Ok(RebuildOutcome::NotEmpty);
     };
-    if list(&snapshot.panes).iter().any(of_space) {
+    if snapshot.terminals_of(space_id).next().is_some() {
         return Ok(RebuildOutcome::NotEmpty);
     }
-    let cwd = space["cwd"].as_str().unwrap_or_default().trim();
+    let cwd = space.cwd.as_deref().unwrap_or_default().trim();
     if cwd.is_empty() {
         return Ok(RebuildOutcome::Missing {
             reason: "the space has no directory".into(),
@@ -1338,9 +1333,6 @@ fn remote_create_space(
     command: Option<&str>,
 ) -> Result<spaces::SpaceOutcome, String> {
     let snapshot = backend.snapshot()?;
-    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
-    let workspaces = list(&snapshot.workspaces);
-    let panes = list(&snapshot.panes);
     let outcome =
         |workspace_id: String, created: bool, warnings, setup_started| spaces::SpaceOutcome {
             workspace_id,
@@ -1349,7 +1341,7 @@ fn remote_create_space(
             setup_started,
             trust: None,
         };
-    if let Some(id) = spaces::find_space(cwd, &workspaces, &panes) {
+    if let Some(id) = spaces::find_space(cwd, &snapshot) {
         backend.focus_space(&id)?;
         return Ok(outcome(id, false, Vec::new(), false));
     }
@@ -2723,7 +2715,12 @@ mod build_layout_tests {
     use super::*;
     use crate::backend_fake::FakeBackend;
     use backend::{Snapshot, StreamRecord};
-    use serde_json::json;
+    use serde_json::{Value, json};
+
+    /// A snapshot from its neutral wire shape (missing fields take their defaults).
+    fn snapshot_of(wire: Value) -> Snapshot {
+        serde_json::from_value(wire).unwrap()
+    }
 
     const PROJECT_TEXT: &str = r#"{"layout":{"panes":[{"name":"agent","command":"evil"},
         {"name":"sh","command":"worse","split":{"direction":"down"}}]}}"#;
@@ -2901,11 +2898,10 @@ mod build_layout_tests {
     fn create_space_focuses_an_existing_space_for_the_directory() {
         let fake = FakeBackend::default();
         let dir = tmp_dir();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "w2", "label": "demo", "number": 1 }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "w2:p1", "workspace_id": "w2", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "w2", "label": "demo", "number": 1 }],
+            "terminals": [{ "terminal_id": "w2:p1", "space_id": "w2", "cwd": dir }],
+        }));
         let outcome = create_space_with(&fake, None, &dir, None, None, Some("claude 'x'")).unwrap();
         assert!(!outcome.created);
         assert_eq!(outcome.workspace_id, "w2");
@@ -3169,11 +3165,10 @@ mod build_layout_tests {
     #[test]
     fn remote_create_space_focuses_an_existing_space_and_creates_nothing() {
         let fake = layout_backend(built("s1"));
-        *fake.snapshot.lock().unwrap() = backend::Snapshot {
-            workspaces: serde_json::json!([{"workspace_id": "s7", "label": "x", "cwd": "/srv/wt/app-12"}]),
-            tabs: serde_json::json!([]),
-            panes: serde_json::json!([]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{"space_id": "s7", "label": "x", "cwd": "/srv/wt/app-12"}],
+            "terminals": [],
+        }));
         let out = remote_create_space(&fake, "/srv/wt/app-12", "x", None).unwrap();
         assert!(!out.created);
         assert_eq!(out.workspace_id, "s7");
@@ -3321,11 +3316,10 @@ mod build_layout_tests {
     fn an_existing_space_is_focused_without_asking_a_layout_backend() {
         let fake = layout_backend(built("s9"));
         let dir = tmp_dir();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "s2", "label": "demo", "number": 1 }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "t1", "workspace_id": "s2", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "s2", "label": "demo", "number": 1 }],
+            "terminals": [{ "terminal_id": "t1", "space_id": "s2", "cwd": dir }],
+        }));
         let outcome = create_space_with(&fake, None, &dir, None, None, Some("c")).unwrap();
         assert!(!outcome.created);
         assert_eq!(fake.calls(), ["snapshot", "focus s2"]);
@@ -3433,11 +3427,10 @@ mod build_layout_tests {
     fn a_space_with_terminals_is_left_alone() {
         let dir = tmp_dir();
         let fake = FakeBackend::default();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "s1", "label": "app", "number": 1, "cwd": dir }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "t1", "workspace_id": "s1", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "s1", "label": "app", "number": 1, "cwd": dir }],
+            "terminals": [{ "terminal_id": "t1", "space_id": "s1", "cwd": dir }],
+        }));
         let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
         assert_eq!(out, RebuildOutcome::NotEmpty);
         assert_eq!(fake.calls(), ["snapshot"]);

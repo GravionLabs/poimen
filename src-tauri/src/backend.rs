@@ -108,14 +108,9 @@ pub enum Mode {
 /// Version and protocol of the running backend.
 pub type BackendInfo = ServerInfo;
 
-/// Spaces, tabs and terminals in one read. The records keep the shape the frontend builds its tree
-/// from (`workspaces`, `tabs`, `panes`); a second backend maps its model onto it (#153).
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Snapshot {
-    pub workspaces: Value,
-    pub tabs: Value,
-    pub panes: Value,
-}
+/// Spaces, tabs and terminals in one read, in the backend-neutral shape (#586) every backend maps
+/// its own model onto; the wire shape of the `snapshot` command.
+pub use poimen_core::snapshot::Snapshot;
 
 /// A space that was just created.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -552,11 +547,11 @@ impl<R: Runner + Send + Sync> Backend for HerdrBackend<R> {
     }
 
     fn snapshot(&self) -> Result<Snapshot, String> {
-        Ok(Snapshot {
-            workspaces: self.list("workspace.list", "workspaces")?,
-            tabs: self.list("tab.list", "tabs")?,
-            panes: self.list("pane.list", "panes")?,
-        })
+        Ok(herdr::map_snapshot(
+            &self.list("workspace.list", "workspaces")?,
+            &self.list("tab.list", "tabs")?,
+            &self.list("pane.list", "panes")?,
+        ))
     }
 
     fn create_space(&self, cwd: &str, label: &str) -> Result<NewSpace, String> {

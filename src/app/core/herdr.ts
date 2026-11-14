@@ -174,31 +174,18 @@ export interface Snapshot {
 }
 
 /**
- * The records of the `snapshot` command as the backends deliver them (herdr's workspace.list,
- * tab.list and pane.list shape). Only `toSnapshot` reads them; everything else works on `Snapshot`.
+ * The answer of the `snapshot` and `machine_snapshot` commands (`poimen_core::snapshot::Snapshot`):
+ * already the neutral model, each backend maps its own onto it (herdr in `herdr.rs`). Only
+ * `toSnapshot` reads it; everything else works on `Snapshot`.
  */
-export interface WireSnapshot {
-  workspaces: (Omit<Space, "space_id"> & { workspace_id: string })[];
-  tabs: (Omit<Tab, "space_id"> & { workspace_id: string })[];
-  panes: (Omit<Terminal, "terminal_id" | "space_id"> & {
-    pane_id: string;
-    workspace_id: string;
-  })[];
-}
+export type WireSnapshot = Partial<Snapshot>;
 
-/** Maps the wire shape of the `snapshot` command to the neutral model (ids keep their values). */
-export function toSnapshot(wire: WireSnapshot): Snapshot {
+/** The snapshot of a `snapshot` answer; a missing list is empty. */
+export function toSnapshot(wire: WireSnapshot | null | undefined): Snapshot {
   return {
-    spaces: wire.workspaces.map(({ workspace_id, ...rest }) => ({
-      ...rest,
-      space_id: workspace_id,
-    })),
-    tabs: wire.tabs.map(({ workspace_id, ...rest }) => ({ ...rest, space_id: workspace_id })),
-    terminals: wire.panes.map(({ pane_id, workspace_id, ...rest }) => ({
-      ...rest,
-      terminal_id: pane_id,
-      space_id: workspace_id,
-    })),
+    spaces: wire?.spaces ?? [],
+    tabs: wire?.tabs ?? [],
+    terminals: wire?.terminals ?? [],
   };
 }
 

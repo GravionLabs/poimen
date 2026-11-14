@@ -522,32 +522,40 @@ describe("flow agents", () => {
 });
 
 describe("toSnapshot", () => {
-  it("maps the wire records onto spaces and terminals and keeps the id values", () => {
-    const snapshot = toSnapshot({
-      workspaces: [{ workspace_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+  it("reads the neutral wire records and keeps every field", () => {
+    const wire = {
+      spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" as const }],
       tabs: [
-        { tab_id: "w1:t1", workspace_id: "w1", label: "main", number: 1, agent_status: "idle" },
+        {
+          tab_id: "w1:t1",
+          space_id: "w1",
+          label: "main",
+          number: 1,
+          agent_status: "idle" as const,
+        },
       ],
-      panes: [
-        { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "done", cwd: "/a" },
-      ],
-    });
-    expect(snapshot).toEqual({
-      spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
-      tabs: [{ tab_id: "w1:t1", space_id: "w1", label: "main", number: 1, agent_status: "idle" }],
       terminals: [
-        { terminal_id: "w1:p1", tab_id: "w1:t1", space_id: "w1", agent_status: "done", cwd: "/a" },
+        {
+          terminal_id: "w1:p1",
+          tab_id: "w1:t1",
+          space_id: "w1",
+          agent_status: "done" as const,
+          cwd: "/a",
+          tokens: { deliver_step: "build" },
+          focused: false,
+        },
       ],
-    });
+    };
+    expect(toSnapshot(wire)).toEqual(wire);
   });
 
   it("keeps the directory of a space without terminals (after a server restart)", () => {
     const snapshot = toSnapshot({
-      workspaces: [
-        { workspace_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/work/app" },
+      spaces: [
+        { space_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/work/app" },
       ],
       tabs: [],
-      panes: [],
+      terminals: [],
     });
     expect(snapshot.spaces).toEqual([
       { space_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/work/app" },
@@ -558,11 +566,17 @@ describe("toSnapshot", () => {
   });
 
   it("maps an empty snapshot", () => {
-    expect(toSnapshot({ workspaces: [], tabs: [], panes: [] })).toEqual({
+    expect(toSnapshot({ spaces: [], tabs: [], terminals: [] })).toEqual({
       spaces: [],
       tabs: [],
       terminals: [],
     });
+  });
+
+  it("reads a missing list or a missing answer as empty", () => {
+    expect(toSnapshot({ spaces: [] })).toEqual({ spaces: [], tabs: [], terminals: [] });
+    expect(toSnapshot(null)).toEqual({ spaces: [], tabs: [], terminals: [] });
+    expect(toSnapshot(undefined)).toEqual({ spaces: [], tabs: [], terminals: [] });
   });
 });
 

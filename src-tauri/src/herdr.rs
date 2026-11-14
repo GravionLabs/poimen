@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::backend::SplitDirection;
+use crate::backend::{Snapshot, SplitDirection};
+use poimen_core::snapshot;
 
 #[derive(Debug)]
 pub enum Error {
@@ -325,19 +326,114 @@ pub fn parse_agent_session(result: &Value, pane_id: &str) -> Option<AgentSession
         .as_array()?
         .iter()
         .find(|p| p.get("pane_id").and_then(Value::as_str) == Some(pane_id))?;
-    let agent = match pane.get("agent")?.as_str()? {
+    session_of(
+        pane.get("agent")?.as_str(),
+        pane.get("agent_session")?.get("value")?.as_str(),
+        pane.get("cwd").and_then(Value::as_str).unwrap_or_default(),
+    )
+}
+
+/// The session of the agent `agent` (as a backend names it) with the session id `session`, started
+/// in `cwd`; `None` for an agent without a readable transcript (`codex`, ...), without a session
+/// id or with an unsafe one, and for Claude Code without a directory.
+pub fn session_of(agent: Option<&str>, session: Option<&str>, cwd: &str) -> Option<AgentSession> {
+    let agent = match agent? {
         "claude" => TranscriptAgent::Claude,
         "copilot" => TranscriptAgent::Copilot,
         _ => return None,
     };
-    let session = pane.get("agent_session")?.get("value")?.as_str()?;
-    let cwd = pane.get("cwd").and_then(Value::as_str).unwrap_or_default();
+    let session = session?;
     let needs_cwd = agent == TranscriptAgent::Claude;
     (is_safe_session_id(session) && !(needs_cwd && cwd.is_empty())).then(|| AgentSession {
         agent,
         session: session.to_owned(),
         cwd: cwd.to_owned(),
     })
+}
+
+/// herdr's `workspace.list`, `tab.list` and `pane.list` results (the arrays) mapped onto the
+/// backend-neutral snapshot: a workspace is a space, a pane a terminal (`pane_id` its
+/// `terminal_id`, `workspace_id` its `space_id`); ids keep their values. Only the fields poimen
+/// reads are taken over; a record without its id is skipped, a status poimen does not know is
+/// `unknown`. herdr has no split trees and no space directory, so `root`, `active_terminal` and
+/// `cwd` of a space stay empty.
+pub fn map_snapshot(workspaces: &Value, tabs: &Value, panes: &Value) -> Snapshot {
+    let records = |list: &Value| list.as_array().cloned().unwrap_or_default();
+    let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::to_owned);
+    let number = |v: &Value| {
+        v.get("number")
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .unwrap_or_default()
+    };
+    let status = |v: &Value| {
+        v.get("agent_status")
+            .cloned()
+            .and_then(|s| serde_json::from_value(s).ok())
+            .unwrap_or_default()
+    };
+    let spaces = records(workspaces)
+        .iter()
+        .filter_map(|w| {
+            Some(snapshot::Space {
+                space_id: text(w, "workspace_id")?,
+                label: text(w, "label").unwrap_or_default(),
+                number: number(w),
+                agent_status: status(w),
+                cwd: text(w, "cwd").filter(|c| !c.is_empty()),
+            })
+        })
+        .collect();
+    let tabs = records(tabs)
+        .iter()
+        .filter_map(|t| {
+            Some(snapshot::Tab {
+                tab_id: text(t, "tab_id")?,
+                space_id: text(t, "workspace_id").unwrap_or_default(),
+                label: text(t, "label").unwrap_or_default(),
+                number: number(t),
+                agent_status: status(t),
+                root: None,
+                active_terminal: None,
+            })
+        })
+        .collect();
+    let terminals = records(panes)
+        .iter()
+        .filter_map(|p| {
+            let tokens = p
+                .get("tokens")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned())))
+                .collect();
+            Some(snapshot::Terminal {
+                terminal_id: text(p, "pane_id")?,
+                tab_id: text(p, "tab_id").unwrap_or_default(),
+                space_id: text(p, "workspace_id").unwrap_or_default(),
+                agent: text(p, "agent"),
+                agent_session: p.get("agent_session").filter(|s| s.is_object()).map(|s| {
+                    snapshot::AgentSessionRef {
+                        value: text(s, "value"),
+                    }
+                }),
+                agent_status: status(p),
+                cwd: text(p, "cwd"),
+                foreground_cwd: text(p, "foreground_cwd"),
+                label: text(p, "label"),
+                tokens,
+                terminal_title_stripped: text(p, "terminal_title_stripped"),
+                focused: p.get("focused").and_then(Value::as_bool).unwrap_or(false),
+                ..snapshot::Terminal::default()
+            })
+        })
+        .collect();
+    Snapshot {
+        spaces,
+        tabs,
+        terminals,
+    }
 }
 
 /// The connection to the API socket: a Unix socket, on Windows the named pipe herdr listens on.
@@ -992,5 +1088,53 @@ mod tests {
                 supported: SUPPORTED_PROTOCOL
             })
         );
+    }
+
+    #[test]
+    fn herdrs_lists_map_onto_the_neutral_snapshot() {
+        let workspaces = json!([
+            {"workspace_id": "w1", "label": "api", "number": 1, "agent_status": "blocked",
+             "focused": true},
+            {"label": "no id"}
+        ]);
+        let tabs = json!([
+            {"tab_id": "w1:t1", "workspace_id": "w1", "label": "agent", "number": 1,
+             "agent_status": "blocked"}
+        ]);
+        let panes = json!([
+            {"pane_id": "w1:p1", "tab_id": "w1:t1", "workspace_id": "w1", "agent": "claude",
+             "agent_session": {"source": "herdr:claude", "kind": "id", "value": "abc"},
+             "agent_status": "blocked", "cwd": "/work/api", "foreground_cwd": "/work/api/src",
+             "label": "review", "tokens": {"deliver_step": "build", "n": 3},
+             "terminal_title_stripped": "claude", "focused": true, "revision": 9},
+            {"pane_id": "w1:p2", "tab_id": "w1:t1", "workspace_id": "w1",
+             "agent_status": "thinking"}
+        ]);
+        let snapshot = map_snapshot(&workspaces, &tabs, &panes);
+        assert_eq!(
+            serde_json::to_value(&snapshot).unwrap(),
+            json!({
+                "spaces": [{"space_id": "w1", "label": "api", "number": 1,
+                            "agent_status": "blocked"}],
+                "tabs": [{"tab_id": "w1:t1", "space_id": "w1", "label": "agent", "number": 1,
+                          "agent_status": "blocked"}],
+                "terminals": [
+                    {"terminal_id": "w1:p1", "tab_id": "w1:t1", "space_id": "w1",
+                     "agent": "claude", "agent_session": {"value": "abc"},
+                     "agent_status": "blocked", "cwd": "/work/api",
+                     "foreground_cwd": "/work/api/src", "label": "review",
+                     "tokens": {"deliver_step": "build"}, "terminal_title_stripped": "claude",
+                     "focused": true},
+                    {"terminal_id": "w1:p2", "tab_id": "w1:t1", "space_id": "w1",
+                     "agent_status": "unknown", "focused": false}
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn missing_or_malformed_herdr_lists_give_an_empty_snapshot() {
+        let snapshot = map_snapshot(&Value::Null, &json!({}), &json!([{"tab_id": "x"}, 3]));
+        assert_eq!(snapshot, Snapshot::default());
     }
 }

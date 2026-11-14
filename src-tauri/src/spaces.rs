@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use poimen_core::snapshot::{Snapshot, Space, Terminal};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -36,62 +37,52 @@ fn same_dir(a: &str, b: &str) -> bool {
     trim(a) == trim(b)
 }
 
-fn pane_dir(pane: &Value) -> Option<&str> {
-    ["foreground_cwd", "cwd"]
-        .iter()
-        .filter_map(|k| pane[k].as_str())
-        .find(|s| !s.is_empty())
+fn terminals_of<'a>(
+    space: &'a Space,
+    snapshot: &'a Snapshot,
+) -> impl Iterator<Item = &'a Terminal> {
+    snapshot.terminals_of(&space.space_id)
 }
 
-fn panes_of<'a>(workspace: &Value, panes: &'a [Value]) -> Vec<&'a Value> {
-    let id = workspace["workspace_id"].as_str();
-    panes
+/// The space of `dir`: the first with a terminal exactly in the directory (a terminal in an
+/// ancestor or in a subdirectory does not count), else the first whose own `cwd` (poimen backend)
+/// is exactly the directory, else one labelled with the directory name whose own `cwd` (if any)
+/// and terminals report no directory other than `dir`. `None` when there is none.
+pub fn find_space(dir: &str, snapshot: &Snapshot) -> Option<String> {
+    let id = |s: &Space| s.space_id.clone();
+    let by_terminal = snapshot
+        .spaces
         .iter()
-        .filter(|p| id.is_some() && p["workspace_id"].as_str() == id)
-        .collect()
-}
-
-/// The space of `dir`: the first with a pane exactly in the directory (a pane in an ancestor or in
-/// a subdirectory does not count), else the first whose own `cwd` (poimen backend) is exactly the
-/// directory, else one labelled with the directory name whose own `cwd` (if any) and panes report
-/// no directory other than `dir`. `None` when there is none.
-pub fn find_space(dir: &str, workspaces: &[Value], panes: &[Value]) -> Option<String> {
-    let id = |w: &Value| w["workspace_id"].as_str().map(str::to_owned);
-    let by_pane = workspaces.iter().find(|w| {
-        panes_of(w, panes)
-            .iter()
-            .any(|p| pane_dir(p).is_some_and(|d| same_dir(dir, d)))
-    });
-    if let Some(w) = by_pane {
-        return id(w);
+        .find(|s| terminals_of(s, snapshot).any(|t| t.dir().is_some_and(|d| same_dir(dir, d))));
+    if let Some(s) = by_terminal {
+        return Some(id(s));
     }
     // A space of the poimen backend knows its directory even without terminals.
-    let by_own_dir = workspaces.iter().find(|w| {
-        w["cwd"]
-            .as_str()
+    let by_own_dir = snapshot.spaces.iter().find(|s| {
+        s.cwd
+            .as_deref()
             .is_some_and(|d| !d.is_empty() && same_dir(dir, d))
     });
-    if let Some(w) = by_own_dir {
-        return id(w);
+    if let Some(s) = by_own_dir {
+        return Some(id(s));
     }
     let name = Path::new(dir).file_name()?.to_str()?;
-    workspaces
+    snapshot
+        .spaces
         .iter()
-        .find(|w| {
-            w["label"].as_str() == Some(name)
-                && w["cwd"]
-                    .as_str()
+        .find(|s| {
+            s.label == name
+                && s.cwd
+                    .as_deref()
                     .is_none_or(|d| d.is_empty() || same_dir(dir, d))
-                && panes_of(w, panes)
-                    .iter()
-                    .all(|p| pane_dir(p).is_none_or(|d| same_dir(dir, d)))
+                && terminals_of(s, snapshot).all(|t| t.dir().is_none_or(|d| same_dir(dir, d)))
         })
-        .and_then(id)
+        .map(id)
 }
 
 /// The label of a new space: the wanted one (default: the directory name), or the path relative to
 /// `home` (else the full path) when another space already uses it.
-pub fn space_label(dir: &str, wanted: &str, home: Option<&Path>, workspaces: &[Value]) -> String {
+pub fn space_label(dir: &str, wanted: &str, home: Option<&Path>, spaces: &[Space]) -> String {
     let wanted = wanted.trim();
     let wanted = if wanted.is_empty() {
         Path::new(dir)
@@ -101,10 +92,7 @@ pub fn space_label(dir: &str, wanted: &str, home: Option<&Path>, workspaces: &[V
     } else {
         wanted
     };
-    if !workspaces
-        .iter()
-        .any(|w| w["label"].as_str() == Some(wanted))
-    {
+    if !spaces.iter().any(|s| s.label == wanted) {
         return wanted.to_owned();
     }
     home.and_then(|h| Path::new(dir).strip_prefix(h).ok())
@@ -246,8 +234,22 @@ pub fn list_dirs(input: &str, home: Option<&Path>, limit: usize) -> Vec<String> 
 mod tests {
     use super::*;
 
-    fn ws(id: &str, label: &str) -> Value {
-        json!({ "workspace_id": id, "label": label })
+    fn ws(id: &str, label: &str) -> Space {
+        Space {
+            space_id: id.into(),
+            label: label.into(),
+            ..Space::default()
+        }
+    }
+
+    /// `find_space` over a snapshot of `spaces` and `terminals`.
+    fn find(dir: &str, spaces: &[Space], terminals: &[Terminal]) -> Option<String> {
+        let snapshot = Snapshot {
+            spaces: spaces.to_vec(),
+            tabs: Vec::new(),
+            terminals: terminals.to_vec(),
+        };
+        find_space(dir, &snapshot)
     }
 
     #[test]
@@ -258,18 +260,22 @@ mod tests {
         );
     }
 
-    fn pane(ws: &str, cwd: &str) -> Value {
-        json!({ "workspace_id": ws, "cwd": cwd })
+    fn pane(ws: &str, cwd: &str) -> Terminal {
+        Terminal {
+            space_id: ws.into(),
+            cwd: Some(cwd.into()),
+            ..Terminal::default()
+        }
     }
 
     #[test]
     fn a_space_with_a_pane_in_an_ancestor_directory_does_not_match() {
         let workspaces = [ws("w1", "other"), ws("w2", "app")];
         let panes = [pane("w1", "/work"), pane("w2", "/elsewhere")];
-        assert_eq!(find_space("/work/app", &workspaces, &panes), None);
+        assert_eq!(find("/work/app", &workspaces, &panes), None);
         // Not even through the label: the pane is in another directory.
         let labelled = [ws("w1", "app")];
-        assert_eq!(find_space("/work/app", &labelled, &panes[..1]), None);
+        assert_eq!(find("/work/app", &labelled, &panes[..1]), None);
     }
 
     #[test]
@@ -280,7 +286,7 @@ mod tests {
             pane("w2", "/src/gravionlabs/app"),
         ];
         assert_eq!(
-            find_space("/src/gravionlabs/app", &workspaces, &panes),
+            find("/src/gravionlabs/app", &workspaces, &panes),
             Some("w2".into())
         );
     }
@@ -289,61 +295,59 @@ mod tests {
     fn matches_the_space_with_a_pane_in_the_same_directory() {
         let workspaces = [ws("w1", "other")];
         let panes = [pane("w1", "/work/app/")];
-        assert_eq!(
-            find_space("/work/app", &workspaces, &panes),
-            Some("w1".into())
-        );
+        assert_eq!(find("/work/app", &workspaces, &panes), Some("w1".into()));
     }
 
     #[test]
     fn a_space_with_panes_only_in_a_subdirectory_does_not_match() {
         let workspaces = [ws("w1", "other")];
         let panes = [pane("w1", "/work/app/src")];
-        assert_eq!(find_space("/work/app", &workspaces, &panes), None);
+        assert_eq!(find("/work/app", &workspaces, &panes), None);
         // Not even through the label.
         let labelled = [ws("w1", "app")];
-        assert_eq!(find_space("/work/app", &labelled, &panes), None);
+        assert_eq!(find("/work/app", &labelled, &panes), None);
     }
 
     #[test]
     fn prefers_the_foreground_directory_of_a_pane() {
         let workspaces = [ws("w1", "x")];
-        let panes = [json!({ "workspace_id": "w1", "cwd": "/a", "foreground_cwd": "/work/app" })];
-        assert_eq!(
-            find_space("/work/app", &workspaces, &panes),
-            Some("w1".into())
-        );
+        let panes = [Terminal {
+            foreground_cwd: Some("/work/app".into()),
+            ..pane("w1", "/a")
+        }];
+        assert_eq!(find("/work/app", &workspaces, &panes), Some("w1".into()));
     }
 
     #[test]
     fn a_sibling_with_the_same_prefix_is_not_inside() {
         let workspaces = [ws("w1", "x")];
         let panes = [pane("w1", "/work/app-two")];
-        assert_eq!(find_space("/work/app", &workspaces, &panes), None);
+        assert_eq!(find("/work/app", &workspaces, &panes), None);
     }
 
     #[test]
     fn the_label_fallback_matches_panes_without_a_directory_or_in_dir() {
         let workspaces = [ws("w1", "app")];
-        let mixed = [pane("w1", "/work/app"), json!({ "workspace_id": "w1" })];
-        assert_eq!(
-            find_space("/work/app/", &workspaces, &mixed),
-            Some("w1".into())
-        );
+        let no_dir = Terminal {
+            cwd: None,
+            ..pane("w1", "")
+        };
+        let mixed = [pane("w1", "/work/app"), no_dir];
+        assert_eq!(find("/work/app/", &workspaces, &mixed), Some("w1".into()));
     }
 
-    fn ws_in(id: &str, label: &str, cwd: &str) -> Value {
-        json!({ "workspace_id": id, "label": label, "cwd": cwd })
+    fn ws_in(id: &str, label: &str, cwd: &str) -> Space {
+        Space {
+            cwd: Some(cwd.into()),
+            ..ws(id, label)
+        }
     }
 
     #[test]
     fn matches_a_space_without_panes_by_its_own_directory() {
         // A task space on the poimen backend whose terminals were all closed.
         let workspaces = [ws_in("w1", "#7 Add thing", "/work/app-7/")];
-        assert_eq!(
-            find_space("/work/app-7", &workspaces, &[]),
-            Some("w1".into())
-        );
+        assert_eq!(find("/work/app-7", &workspaces, &[]), Some("w1".into()));
     }
 
     #[test]
@@ -353,46 +357,40 @@ mod tests {
             ws_in("w2", "b", "/work/app-7/src"),
             ws_in("w3", "c", "/work/app-70"),
         ];
-        assert_eq!(find_space("/work/app-7", &workspaces, &[]), None);
+        assert_eq!(find("/work/app-7", &workspaces, &[]), None);
     }
 
     #[test]
     fn a_pane_in_the_directory_wins_over_an_earlier_space_directory() {
         let workspaces = [ws_in("w1", "a", "/work/app"), ws("w2", "b")];
         let panes = [pane("w1", "/elsewhere"), pane("w2", "/work/app")];
-        assert_eq!(
-            find_space("/work/app", &workspaces, &panes),
-            Some("w2".into())
-        );
+        assert_eq!(find("/work/app", &workspaces, &panes), Some("w2".into()));
     }
 
     #[test]
     fn the_label_fallback_skips_a_space_in_another_directory() {
         let workspaces = [ws_in("w1", "app-7", "/other/app-7")];
-        assert_eq!(find_space("/work/app-7", &workspaces, &[]), None);
+        assert_eq!(find("/work/app-7", &workspaces, &[]), None);
     }
 
     #[test]
     fn the_label_fallback_accepts_a_space_with_an_empty_directory() {
         let workspaces = [ws_in("w1", "app-7", "")];
-        assert_eq!(
-            find_space("/work/app-7", &workspaces, &[]),
-            Some("w1".into())
-        );
+        assert_eq!(find("/work/app-7", &workspaces, &[]), Some("w1".into()));
     }
 
     #[test]
     fn a_space_directory_wins_over_the_label_fallback() {
         let workspaces = [ws("w1", "app"), ws_in("w2", "#7 x", "/work/app")];
-        assert_eq!(find_space("/work/app", &workspaces, &[]), Some("w2".into()));
+        assert_eq!(find("/work/app", &workspaces, &[]), Some("w2".into()));
     }
 
     #[test]
     fn falls_back_to_the_label_unless_panes_are_elsewhere() {
         let workspaces = [ws("w1", "app")];
         let elsewhere = [pane("w1", "/other/app")];
-        assert_eq!(find_space("/work/app", &workspaces, &elsewhere), None);
-        assert_eq!(find_space("/work/app", &workspaces, &[]), Some("w1".into()));
+        assert_eq!(find("/work/app", &workspaces, &elsewhere), None);
+        assert_eq!(find("/work/app", &workspaces, &[]), Some("w1".into()));
     }
 
     #[test]

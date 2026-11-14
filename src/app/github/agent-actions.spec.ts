@@ -342,9 +342,9 @@ describe("AgentActions", () => {
       tauri.answer("task_worktree", () => ({ path: "/src/n-1", branch: "feat/1", created: true }));
       tauri.answer("pr_worktree", () => ({ path: "/src/n-pr7", branch: "pr/7", created: true }));
       tauri.answer("snapshot", () => ({
-        workspaces: [],
+        spaces: [],
         tabs: [],
-        panes: [{ pane_id: "root1", workspace_id: "w1" }],
+        terminals: [{ terminal_id: "root1", space_id: "w1" }],
       }));
     });
 

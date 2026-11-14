@@ -18,7 +18,7 @@ import { HerdrStore } from "./herdr-store";
 import { Machines, type MachineStatus } from "./machines";
 import { REMOTE_REFRESH_DEBOUNCE_MS, RemoteSpaces, remoteSnapshot } from "./remote-spaces";
 import { TauriBridge } from "./tauri";
-import { tauri, toWire } from "./tauri.mock";
+import { tauri } from "./tauri.mock";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./tauri.mock")).tauri.invoke,
@@ -120,7 +120,7 @@ describe("RemoteSpaces and the store", () => {
     tauri.reset();
     tauri.answer("list_machines", () => [{ ...connected }]);
     tauri.answer("snapshot", () => snap("idle"));
-    tauri.answer("machine_snapshot", () => toWire(snap("idle")));
+    tauri.answer("machine_snapshot", () => snap("idle"));
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({ providers: [TauriBridge, HerdrStore] });
   });
@@ -149,7 +149,7 @@ describe("RemoteSpaces and the store", () => {
   });
 
   it("counts a blocked remote agent as waiting and keeps it out of the local snapshot", async () => {
-    tauri.answer("machine_snapshot", () => toWire(snap("blocked")));
+    tauri.answer("machine_snapshot", () => snap("blocked"));
     const { store } = await started();
     expect(store.waiting()).toBe(1);
     expect(store.nextWaiting(null)?.terminal_id).toBe("box::t1");
@@ -158,7 +158,7 @@ describe("RemoteSpaces and the store", () => {
 
   it("applies a remote agent status at once and reads the machine again after an event", async () => {
     const { store } = await started();
-    tauri.answer("machine_snapshot", () => toWire(snap("blocked")));
+    tauri.answer("machine_snapshot", () => snap("blocked"));
     tauri.invoke.mockClear();
     tauri.emit("machine:event", {
       machine: "box",
