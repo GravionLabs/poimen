@@ -23,6 +23,7 @@ import {
   type PaneRow,
   type SpaceNode,
   type Space,
+  dropAllowed,
 } from "../core/snapshot";
 import { Attention, canMarkUnread, workspaceUnread } from "../core/attention";
 import { SpacesStore } from "../core/spaces-store";
@@ -55,6 +56,8 @@ export type SpaceData =
       lines: Line[];
       /** Split layout only: the workspace whose terminals are listed. */
       selected?: boolean;
+      /** A linked worktree listed below the space of its repository: indented. */
+      member?: boolean;
     }
   | { kind: "pane"; row: PaneRow; lines: Line[] };
 
@@ -90,6 +93,7 @@ export function spaceNodes(
         workspace: space.workspace,
         status,
         lines: renderRow("workspace", rows.workspace, space, ctx),
+        member: !!space.parent,
       },
       children: space.rows.map((row) => ({
         key: row.pane.terminal_id,
@@ -143,6 +147,7 @@ export function splitSections(
         status: aggregateStatus(space),
         lines: renderRow("workspace", rows.workspace, space, ctx),
         selected: isSelected,
+        member: !!space.parent,
       },
       children: isSelected
         ? space.rows
@@ -489,6 +494,7 @@ export class Sidebar {
   protected dragOver(event: DragEvent, workspaceId: string): void {
     const source = this.dragging();
     if (source === null || source === workspaceId) return;
+    if (!dropAllowed(this.store.spaces(), source, workspaceId)) return;
     event.preventDefault();
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
     this.dropMark.set({ id: workspaceId, after: event.clientY > box.top + box.height / 2 });

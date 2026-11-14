@@ -4,6 +4,7 @@ import {
   orderSpaces,
   orderTabs,
   pathSegments,
+  reorderGrouped,
   reorderIds,
   type Snapshot,
 } from "./snapshot";
@@ -386,8 +387,15 @@ export class SpaceActions {
    */
   reorder(sourceId: string, targetId: string, after: boolean): void {
     if (this.store.sidebarSort() !== "manual") return;
-    const ids = this.store.orderedSpaces().map((s) => s.space_id);
-    const next = reorderIds(ids, sourceId, targetId, after);
+    const nodes = this.store.spaces();
+    const next = nodes.some((n) => n.parent)
+      ? reorderGrouped(nodes, sourceId, targetId, after)
+      : reorderIds(
+          this.store.orderedSpaces().map((s) => s.space_id),
+          sourceId,
+          targetId,
+          after,
+        );
     if (next) this.ui.setSpaceOrder(next);
   }
 
@@ -415,8 +423,10 @@ export class SpaceActions {
   /** Moves a space one step up (`-1`) or down (`1`); at either end, or outside `manual`, nothing happens. */
   shift(spaceId: string, delta: -1 | 1): void {
     if (this.store.sidebarSort() !== "manual") return;
-    const ids = this.store.orderedSpaces().map((s) => s.space_id);
-    const target = ids[ids.indexOf(spaceId) + delta];
+    const nodes = this.store.spaces();
+    const parent = nodes.find((n) => n.workspace.space_id === spaceId)?.parent;
+    const siblings = nodes.filter((n) => n.parent === parent).map((n) => n.workspace.space_id);
+    const target = siblings[siblings.indexOf(spaceId) + delta];
     if (target) this.reorder(spaceId, target, delta === 1);
   }
 

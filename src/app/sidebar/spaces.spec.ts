@@ -358,3 +358,17 @@ describe("renderRow", () => {
     ]);
   });
 });
+
+describe("worktree member row", () => {
+  it("drops the wt prefix of the branch token on a member and keeps it otherwise", () => {
+    const r = row({ branch: "feat/x", worktree: true, dir: "/wt" });
+    const head = space([r]);
+    const member = { ...space([r]), parent: "w0" };
+    const text = (sp: SpaceNode) =>
+      renderRow("workspace", [[{ token: "branch" }]], sp, spaceContext(sp))
+        .flat()
+        .map((s) => s.text);
+    expect(text(head)).toEqual(["wt feat/x"]);
+    expect(text(member)).toEqual(["feat/x"]);
+  });
+});

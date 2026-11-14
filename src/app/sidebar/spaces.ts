@@ -263,7 +263,8 @@ export function renderRow(
       case "notification":
         return pane ? pane.pane.agent_message : ctx.notification;
       case "branch":
-        if (!pane) return ctx.branch ? branchText(ctx.branch, ctx.worktree) : undefined;
+        if (!pane)
+          return ctx.branch ? branchText(ctx.branch, ctx.worktree && !space?.parent) : undefined;
         return pane.branch && pane.branch !== ctx.branch
           ? branchText(pane.branch, pane.worktree)
           : undefined;

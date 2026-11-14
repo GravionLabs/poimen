@@ -126,6 +126,7 @@ describe("parseSettings", () => {
       sidebarRows: DEFAULT_SETTINGS.sidebarRows,
       sidebarLayout: "tree",
       sidebarSort: "manual",
+      sidebarGroupWorktrees: true,
       explorerRoots: ["~"],
       explorerShowHidden: false,
       backend: "poimen",

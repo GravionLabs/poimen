@@ -245,6 +245,8 @@ export interface Settings {
   sidebarLayout: SidebarLayout;
   /** `sidebar.sort`: how the spaces tree is ordered. */
   sidebarSort: SidebarSort;
+  /** `sidebar.groupWorktrees`: list linked worktrees below the space of their repository. */
+  sidebarGroupWorktrees: boolean;
   /** Roots of the explorer; a leading `~` is the home directory (resolved by the backend). */
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
@@ -345,6 +347,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarRows: DEFAULT_SIDEBAR_ROWS,
   sidebarLayout: "tree",
   sidebarSort: "manual",
+  sidebarGroupWorktrees: true,
   explorerRoots: ["~"],
   explorerShowHidden: false,
   backend: "poimen",
@@ -448,6 +451,7 @@ export function parseSettings(raw: unknown): Settings {
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
     sidebarSort: r["sidebarSort"] === "name" ? "name" : "manual",
+    sidebarGroupWorktrees: r["sidebarGroupWorktrees"] !== false,
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     backend: r["backend"] === "herdr" ? "herdr" : "poimen",

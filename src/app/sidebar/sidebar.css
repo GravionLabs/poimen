@@ -125,6 +125,10 @@
   text-decoration: underline;
 }
 
+.space.member {
+  margin-left: 0.75rem;
+}
+
 .space {
   display: flex;
   flex: 1;
