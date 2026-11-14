@@ -21,8 +21,11 @@ use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
 use notify::{RecursiveMode, Watcher};
+
 use serde::Serialize;
 use serde_json::Value;
+
+use crate::copilot;
 
 /// A session id is used as a file or directory name below the agent's transcript root; only
 /// `[A-Za-z0-9_-]+` is accepted, so a value reported by a pane cannot escape that directory.
@@ -741,6 +744,66 @@ pub(crate) fn watch_dir(
     })
 }
 
+/// Why [`open`] found no transcript to follow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenError {
+    /// Not an agent whose transcript can be read (or an unusable session id).
+    NoAgent,
+    /// The agent reported a session but its transcript file is not there (yet).
+    Missing,
+    /// The transcript is there but cannot be opened; carries the reason.
+    Unreadable(String),
+}
+
+/// A followed session of either agent, read incrementally with [`Follow::refresh`].
+pub enum Follow {
+    Claude(Tracker),
+    Copilot(copilot::Tracker),
+}
+
+impl Follow {
+    /// What the files gained since the last call; empty when nothing changed.
+    pub fn refresh(&mut self) -> Vec<Update> {
+        match self {
+            Follow::Claude(t) => t.refresh(),
+            Follow::Copilot(t) => t.refresh(),
+        }
+    }
+}
+
+/// Locates the transcript of the `agent` (`claude` or `copilot`) session `session` below `home`
+/// (`cwd` is the directory it ran in; Claude Code groups its transcripts by it) and prepares to
+/// follow it. This is what a server does for the panes of its machine, with the files of its own
+/// home.
+pub fn open(home: &Path, agent: &str, session: &str, cwd: &str) -> Result<Follow, OpenError> {
+    if !is_safe_session_id(session) {
+        return Err(OpenError::NoAgent);
+    }
+    let (follow, file) = match agent {
+        "claude" => {
+            if cwd.is_empty() {
+                return Err(OpenError::NoAgent);
+            }
+            let dir =
+                locate_project_dir(&projects_root(home), cwd, session).ok_or(OpenError::Missing)?;
+            let tracker = Tracker::new(&dir, session).ok_or(OpenError::NoAgent)?;
+            (
+                Follow::Claude(tracker),
+                dir.join(format!("{session}.jsonl")),
+            )
+        }
+        "copilot" => {
+            let dir = copilot::locate_session_dir(&copilot::sessions_root(home), session)
+                .ok_or(OpenError::Missing)?;
+            let file = dir.join(copilot::EVENTS);
+            (Follow::Copilot(copilot::Tracker::new(&dir)), file)
+        }
+        _ => return Err(OpenError::NoAgent),
+    };
+    File::open(&file).map_err(|e| OpenError::Unreadable(format!("{}: {e}", file.display())))?;
+    Ok(follow)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,6 +835,60 @@ mod tests {
     const CALL: &str = r#"{"type":"assistant","uuid":"a1","timestamp":"2026-11-02T04:07:54.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hm","signature":"x"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"git diff"}}]}}"#;
     const RESULT: &str = r#"{"type":"user","uuid":"u2","timestamp":"2026-11-02T04:07:56.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"1 file changed","is_error":false}]},"toolUseResult":{"stdout":"1 file changed"}}"#;
     const REPORT: &str = r#"{"type":"assistant","uuid":"a2","timestamp":"2026-11-02T04:08:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"All good."}]}}"#;
+
+    #[test]
+    fn open_follows_a_claude_session_found_by_its_directory() {
+        let home = temp_dir("open-claude");
+        let file = projects_root(&home)
+            .join(project_dir_name("/w/repo"))
+            .join("s-1.jsonl");
+        append(&file, &format!("{CALL}\n"));
+        let Ok(mut follow) = open(&home, "claude", "s-1", "/w/repo") else {
+            panic!("expected a follow");
+        };
+        assert!(
+            follow
+                .refresh()
+                .iter()
+                .any(|u| matches!(u, Update::Main { tools: 1, .. }))
+        );
+        assert!(follow.refresh().is_empty());
+    }
+
+    #[test]
+    fn open_follows_a_copilot_session_by_its_id() {
+        let home = temp_dir("open-copilot");
+        let file = copilot::sessions_root(&home)
+            .join("0b7e-c0")
+            .join(copilot::EVENTS);
+        append(&file, include_str!("../fixtures/copilot-events.jsonl"));
+        let Ok(mut follow) = open(&home, "copilot", "0b7e-c0", "") else {
+            panic!("expected a follow");
+        };
+        assert!(
+            follow
+                .refresh()
+                .iter()
+                .any(|u| matches!(u, Update::List { .. }))
+        );
+    }
+
+    #[test]
+    fn open_tells_no_agent_from_missing_and_unreadable() {
+        let home = temp_dir("open-errors");
+        let no_agent = |agent, session, cwd| open(&home, agent, session, cwd).err();
+        assert_eq!(no_agent("codex", "s-1", "/w"), Some(OpenError::NoAgent));
+        assert_eq!(no_agent("claude", "../x", "/w"), Some(OpenError::NoAgent));
+        assert_eq!(no_agent("claude", "s-1", ""), Some(OpenError::NoAgent));
+        assert_eq!(no_agent("claude", "s-1", "/w"), Some(OpenError::Missing));
+        assert_eq!(no_agent("copilot", "s-1", ""), Some(OpenError::Missing));
+        // A directory where the file should be: located by `is_file` it is not, so it is missing.
+        let dir = projects_root(&home)
+            .join(project_dir_name("/w"))
+            .join("s-2.jsonl");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(no_agent("claude", "s-2", "/w"), Some(OpenError::Missing));
+    }
 
     #[test]
     fn project_dir_name_replaces_every_non_alphanumeric_character() {

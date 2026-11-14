@@ -19,13 +19,13 @@ pub mod pipe;
 pub mod transport;
 pub use poimen_protocol as protocol;
 use poimen_protocol::{
-    AttachMode, AttachResult, ErrorCode, Event, MachineCheckResult, PingResult, RepoEnsure,
-    RepoEnsureResult, Request, ServerLine, SetColors, Space, SpaceApplyLayout,
-    SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult, SpaceList, SpaceRename,
-    Tab, TabClose, TabCreate, TabFocus, TabMove, TabRename, TabResizeSplit, TabSplit, TaskIssue,
-    Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
-    TerminalList, TerminalRename, TerminalResize, WorktreeCleanup, WorktreeCleanupResult,
-    WorktreeCreate, WorktreeCreateResult,
+    AgentTranscript, AgentTranscriptResult, AttachMode, AttachResult, ErrorCode, Event,
+    MachineCheckResult, PingResult, RepoEnsure, RepoEnsureResult, Request, ServerLine, SetColors,
+    Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
+    SpaceList, SpaceRename, Tab, TabClose, TabCreate, TabFocus, TabMove, TabRename, TabResizeSplit,
+    TabSplit, TaskIssue, Terminal, TerminalAttach, TerminalClose, TerminalCreate, TerminalDetach,
+    TerminalInput, TerminalList, TerminalRename, TerminalResize, WorktreeCleanup,
+    WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -366,6 +366,24 @@ impl Client {
     /// predates it answers `unknown_method`.
     pub fn machine_check(&self) -> Result<MachineCheckResult, ClientError> {
         self.typed("machine.check", Value::Null, None)
+    }
+
+    /// `agent.transcript` (#698): the updates the agent transcript of `terminal_id` gained since
+    /// the last call of `follower` (all of them for the first call or with `restart`). A server
+    /// that predates it answers `unknown_method`.
+    pub fn agent_transcript(
+        &self,
+        terminal_id: &str,
+        follower: &str,
+        restart: bool,
+    ) -> Result<AgentTranscriptResult, ClientError> {
+        let params = serde_json::to_value(AgentTranscript {
+            terminal_id: terminal_id.to_owned(),
+            follower: follower.to_owned(),
+            restart,
+        })
+        .unwrap_or(Value::Null);
+        self.typed("agent.transcript", params, None)
     }
 
     /// `repo.ensure`: the clone of `owner/repo` under the server's `reposDir`, cloned when absent

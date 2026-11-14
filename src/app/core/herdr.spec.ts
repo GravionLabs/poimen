@@ -584,6 +584,19 @@ describe("transcript empty states", () => {
     );
   });
 
+  it("names why the machine of a remote pane cannot be asked before anything else", () => {
+    expect(
+      transcriptEmptyText(
+        pane({ agent: "claude", agent_session: { value: "s1" } }),
+        "The flow",
+        "mac is offline: timed out",
+      ),
+    ).toBe("The flow is unavailable: mac is offline: timed out.");
+    expect(transcriptEmptyText(pane({ agent: "codex" }), "Subagent output", null)).toBe(
+      `Subagent output is available for ${named} agents. This pane does not run one.`,
+    );
+  });
+
   it("waits for the session of a known agent", () => {
     expect(transcriptEmptyText(pane({ agent: "claude" }), "The flow")).toBe(
       "Waiting for the agent to report its session.",

@@ -319,6 +319,17 @@ pub trait Backend: Send + Sync {
     fn agent_prompt(&self, target: &str, text: &str) -> PromptOutcome;
     /// The agent session of a terminal whose transcript poimen can read.
     fn agent_session(&self, terminal_id: &str) -> Result<Option<AgentSession>, String>;
+    /// The updates the agent transcript of a terminal gained since the last call of `follower`,
+    /// read where the transcript lives (`agent.transcript`, #698). Only the poimen backend can:
+    /// the others read the local files themselves.
+    fn agent_transcript(
+        &self,
+        _terminal_id: &str,
+        _follower: &str,
+        _restart: bool,
+    ) -> Result<poimen_client::protocol::AgentTranscriptResult, String> {
+        Err("this backend cannot read agent transcripts".into())
+    }
     /// Opens a terminal stream; `on_record` gets its records and, last, a `Closed`.
     fn open_stream(
         &self,
