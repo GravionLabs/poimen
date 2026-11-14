@@ -43,6 +43,8 @@ pub struct PoimenBackend {
     client: Client,
     /// The server of a machine (`machines.rs`): reached over SSH, never started or stopped here.
     remote: bool,
+    /// Terminals an agent without hooks was started in: they are prompted without a status.
+    unreported: Mutex<HashSet<String>>,
     next_id: AtomicU32,
     streams: Arc<Mutex<HashMap<u32, Arc<Stream>>>>,
 }
@@ -62,6 +64,7 @@ impl PoimenBackend {
         Self {
             client,
             remote: false,
+            unreported: Mutex::default(),
             next_id: AtomicU32::new(0),
             streams: Arc::default(),
         }
@@ -649,7 +652,11 @@ impl Backend for PoimenBackend {
                 .start_agent(terminal_id, kind, args, agent::START_TIMEOUT)
                 .map(drop)
         } else {
-            self.client.start_unreported(terminal_id, kind, args)
+            self.client
+                .start_unreported(terminal_id, kind, args)
+                .map(|()| {
+                    lock(&self.unreported).insert(terminal_id.to_owned());
+                })
         }
         .map_err(|e| e.to_string())?;
         match name.map(str::trim).filter(|n| !n.is_empty()) {
@@ -674,6 +681,15 @@ impl Backend for PoimenBackend {
             Ok(PromptResult::Stalled) => PromptOutcome::Stalled,
             Ok(PromptResult::Blocked) => PromptOutcome::Blocked,
             Ok(PromptResult::Working) => failed("the agent is working; wait until it is idle"),
+            Ok(PromptResult::NoAgent) if lock(&self.unreported).contains(target) => {
+                // An agent without hooks: type the text, there is no status to wait for.
+                match self.client.prompt_unreported(target, text) {
+                    Ok(()) => PromptOutcome::Started {
+                        status: "unknown".into(),
+                    },
+                    Err(e) => failed(&e.to_string()),
+                }
+            }
             Ok(PromptResult::NoAgent) => failed("no agent reported in this terminal"),
             Err(e) => failed(&e.to_string()),
         }
@@ -2094,6 +2110,19 @@ mod tests {
             PromptOutcome::Failed { .. }
         ));
         assert!(!typed(&log));
+    }
+
+    #[test]
+    fn a_prompt_to_an_agent_started_without_hooks_is_typed() {
+        let (backend, log) = agent_backend("prompt-unreported", None);
+        backend.agent_start("t1", "aider", None, &[]).unwrap();
+        lock(&log).clear();
+        let outcome = backend.agent_prompt("t1", "hi");
+        assert!(
+            matches!(outcome, PromptOutcome::Started { .. }),
+            "{outcome:?}"
+        );
+        assert_eq!(params_of(&log, "terminal.input")["data"], "hi\r");
     }
 
     #[test]

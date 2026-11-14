@@ -135,7 +135,7 @@ Copilot CLI: `poimen-server integration install|uninstall|status copilot [--sett
 
 Gemini CLI (#731): `poimen-server integration install|uninstall|status gemini [--settings <path>]` registers `poimen-server hook gemini` in `~/.gemini/settings.json` (same `hooks.<event>[].hooks[]` shape as Claude Code, entries marked `# poimen-agent-hook`, `timeout` in milliseconds, other settings and hooks kept). Mapping: `SessionStart` idle, `BeforeAgent` and `AfterTool` working, `AfterAgent` done, a `Notification` of type `ToolPermission` blocked (with its `message`), `SessionEnd` gone. Transcripts of Gemini CLI are not read.
 
-Supported agent kinds and what each gives (the table is `integration.rs::KINDS` on the server and `HOOK_AGENTS` in the app's `core/backend.ts`; adding a kind is a mapper module plus one entry in each):
+Supported agent kinds and what each gives (the table is `integration.rs::KINDS` on the server and `HOOK_AGENTS` in the app's `core/backend.ts`; adding a kind is a mapper module plus one entry in each, and one in `poimen_protocol::HOOK_KINDS`; a test checks that `HOOK_KINDS` and `KINDS` list the same kinds):
 
 | Kind      | Status (hooks) | Transcript (Output, Flow) |
 | --------- | -------------- | ------------------------- |
@@ -143,7 +143,7 @@ Supported agent kinds and what each gives (the table is `integration.rs::KINDS` 
 | `copilot` | yes            | yes                       |
 | `gemini`  | yes            | no                        |
 
-Any other harness of the `harnesses` registry can be started and prompted, but has no hooks: its pane shows no status (not an error), and the app's "Start agent" dialog offers only the kinds above on this backend.
+Any other harness of the `harnesses` registry can be started and prompted (the app remembers which terminals it started this way, since the server cannot tell such an agent from a shell), but has no hooks: its pane shows no status (not an error), and the app's "Start agent" dialog offers only the kinds above on this backend.
 
 On Windows the hooks run through PowerShell: Claude Code entries get `"shell": "powershell"` and the command `& '<path of poimen-server.exe>' hook claude # poimen-agent-hook` (single quotes doubled), the Copilot file gets a `powershell` command next to `bash`, and the hook timeout is 5 s instead of 2 (the PowerShell start). A Claude Code without the `shell` field runs the command in Git Bash, where it fails as a non-blocking hook error. `integration status` finds the marker in either form.
 

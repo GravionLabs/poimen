@@ -208,6 +208,15 @@ impl Client {
         Ok(())
     }
 
+    /// Types `text` and Enter into a terminal that runs an agent without hooks (started with
+    /// `start_unreported`): no status is read, none is waited for. The caller knows the terminal
+    /// runs such an agent; the server cannot tell it from a plain shell.
+    pub fn prompt_unreported(&self, terminal_id: &str, text: &str) -> Result<(), AgentError> {
+        self.find_terminal(terminal_id)?;
+        self.input(terminal_id, &format!("{text}\r"))?;
+        Ok(())
+    }
+
     /// Types `text` and Enter into the terminal of the agent, unless the agent is working or
     /// blocked, then waits up to `wait` for it to report `Working` or `Blocked`.
     pub fn prompt_agent(

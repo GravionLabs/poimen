@@ -17,11 +17,12 @@ pub mod host;
 pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
+pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
+
 /// The agent kinds with hooks, the one list of them on the Rust side: `poimen-server`'s
 /// `integration::KINDS` (checked against it by a test) and the app's hook installer use it.
 pub const HOOK_KINDS: [&str; 3] = ["claude", "copilot", "gemini"];
 
-pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
 /// Environment variable set in every terminal: its own id.
 pub const ENV_TERMINAL_ID: &str = "POIMEN_TERMINAL_ID";
 /// Environment variable of `poimen-server integration install`: the absolute path the hooks
