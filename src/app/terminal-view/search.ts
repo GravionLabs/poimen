@@ -51,7 +51,7 @@ export interface Searchable {
 }
 
 /**
- * The terminal view that last had the focus. A view exists only while its tab is visible and
+ * The terminal view that has the focus (cleared when the focus leaves it). A view exists only while its tab is visible and
  * unregisters when it is destroyed, so with the Settings view in front nothing is found.
  */
 @Injectable({ providedIn: "root" })
@@ -66,7 +66,7 @@ export class TerminalSearch {
     if (this.current === view) this.current = null;
   }
 
-  /** Opens the bar of the last focused terminal view; false when there is none. */
+  /** Opens the bar of the focused terminal view; false when there is none. */
   open(): boolean {
     if (!this.current) return false;
     this.current.openSearch();

@@ -957,6 +957,33 @@ describe("TerminalView search (#714)", () => {
     expect(addon().findPrevious).toHaveBeenCalledTimes(1);
   });
 
+  it("searches incrementally while typing", async () => {
+    const { fixture } = await setup("control", pane, true);
+    const v = view(fixture);
+    v.openSearch();
+    v.setQuery("e");
+    expect(addon().findNext).toHaveBeenLastCalledWith(
+      "e",
+      expect.objectContaining({ incremental: true }),
+    );
+  });
+
+  it("is not the search target once the focus left the view", async () => {
+    const { fixture } = await setup("control", pane, true);
+    const hub = TestBed.inject(TerminalSearch);
+    const host = fixture.nativeElement as HTMLElement;
+    host.dispatchEvent(new FocusEvent("focusin"));
+    const inside = document.createElement("button");
+    host.append(inside);
+    host.dispatchEvent(new FocusEvent("focusout", { relatedTarget: inside }));
+    expect(hub.open()).toBe(true);
+    host.dispatchEvent(new FocusEvent("focusout", { relatedTarget: document.body }));
+    expect(hub.open()).toBe(false);
+    host.dispatchEvent(new FocusEvent("focusin"));
+    host.dispatchEvent(new FocusEvent("focusout", { relatedTarget: null }));
+    expect(hub.open()).toBe(false);
+  });
+
   it("reports no results and passes the case and regex toggles", async () => {
     const { fixture } = await setup("control", pane, true);
     const v = view(fixture);

@@ -94,7 +94,11 @@ function ansiColors(
   templateUrl: "./terminal-view.html",
   styleUrl: "./terminal-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { "[class.controlling]": "mode() === 'control'", "(focusin)": "onSearchFocus()" },
+  host: {
+    "[class.controlling]": "mode() === 'control'",
+    "(focusin)": "onSearchFocus()",
+    "(focusout)": "onSearchBlur($event)",
+  },
 })
 export class TerminalView implements OnDestroy, Searchable {
   readonly pane = input.required<Terminal>();
@@ -354,9 +358,16 @@ export class TerminalView implements OnDestroy, Searchable {
     this.search.focused(this);
   }
 
+  /** Focus left this view (not just moved inside it): Cmd/Ctrl+F is not ours any more. */
+  protected onSearchBlur(event: FocusEvent): void {
+    const next = event.relatedTarget;
+    if (next instanceof Node && (event.currentTarget as Node | null)?.contains(next)) return;
+    this.search.gone(this);
+  }
+
   protected setQuery(value: string): void {
     this.searchQuery.set(value);
-    this.find(true);
+    this.find(true, true);
   }
 
   protected toggleCase(): void {

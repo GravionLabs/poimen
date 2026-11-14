@@ -861,6 +861,16 @@ describe("SettingsView categories", () => {
     host.remove();
   });
 
+  it("leaves Ctrl+Shift+F to the terminal search shortcut", () => {
+    const { host } = setup();
+    document.body.append(host);
+    const target = item(host, "p:appearance");
+    target.focus();
+    press(target, "f", { ctrlKey: true, shiftKey: true });
+    expect(document.activeElement).not.toBe(search(host));
+    host.remove();
+  });
+
   it("follows a deep link made while the view is open", () => {
     const { fixture, host } = setup();
     TestBed.inject(UiState).selectSettingsPage("trusted-projects");
