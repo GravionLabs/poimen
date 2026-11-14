@@ -1,10 +1,10 @@
 use poimen_core::agent_actions;
+use poimen_core::{copilot, transcripts};
 mod backend;
 #[cfg(test)]
 mod backend_fake;
 mod changes;
 mod changes_git;
-mod copilot;
 mod deliver;
 use poimen_core::git;
 mod git_sync;
@@ -34,7 +34,6 @@ mod task_start;
 use poimen_core::tasks;
 use poimen_core::templates;
 mod terminal_colors;
-mod transcripts;
 use poimen_core::trust;
 mod updater;
 mod watch;

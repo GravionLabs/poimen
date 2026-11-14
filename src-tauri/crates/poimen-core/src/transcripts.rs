@@ -24,7 +24,14 @@ use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::herdr::is_safe_session_id;
+/// A session id is used as a file or directory name below the agent's transcript root; only
+/// `[A-Za-z0-9_-]+` is accepted, so a value reported by a pane cannot escape that directory.
+pub fn is_safe_session_id(session: &str) -> bool {
+    !session.is_empty()
+        && session
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
 
 /// Longest text kept per block; a transcript can hold whole files and diffs.
 pub(crate) const TEXT_LIMIT: usize = 8000;

@@ -6,6 +6,7 @@
 
 pub mod agent_actions;
 pub mod agent_events;
+pub mod copilot;
 pub mod git;
 pub mod github;
 pub mod gui_path;
@@ -20,5 +21,6 @@ pub mod space_layout;
 pub mod task_start;
 pub mod tasks;
 pub mod templates;
+pub mod transcripts;
 pub mod trust;
 pub mod worktree;

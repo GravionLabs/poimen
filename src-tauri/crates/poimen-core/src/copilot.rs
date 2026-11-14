@@ -23,9 +23,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use crate::herdr::is_safe_session_id;
 use crate::transcripts::{
-    self, Block, Entry, INPUT_LIMIT, MainCall, SubagentInfo, TEXT_LIMIT, Tailer, Update, Usage,
+    self, Block, is_safe_session_id, Entry, INPUT_LIMIT, MainCall, SubagentInfo, TEXT_LIMIT, Tailer, Update, Usage,
     UsageSample, WatchHandle, truncate,
 };
 

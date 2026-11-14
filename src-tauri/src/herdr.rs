@@ -314,14 +314,7 @@ pub struct AgentSession {
     pub cwd: String,
 }
 
-/// A session id is used as a file or directory name below the agent's transcript root; only
-/// `[A-Za-z0-9_-]+` is accepted, so a value reported by a pane cannot escape that directory.
-pub fn is_safe_session_id(session: &str) -> bool {
-    !session.is_empty()
-        && session
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-}
+pub use poimen_core::transcripts::is_safe_session_id;
 
 /// Reads the agent session of `pane_id` out of a `pane.list` result; `None` for another pane, an
 /// agent without a readable transcript (`codex`, ...), or a pane without a session id. Claude
