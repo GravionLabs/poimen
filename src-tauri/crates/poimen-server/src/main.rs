@@ -1,17 +1,13 @@
 //! `poimen-server`: one per user, started by the app (or by hand), stopped by the app only on a confirmed restart or quit (`server.shutdown`).
 //!
-//! Subcommands: `report tokens|clear|agent` (see `report.rs`), `hook claude` / `hook copilot <event>` (run by Claude Code and Copilot CLI, see
-//! `claude.rs` and `copilot.rs`) and `integration install|uninstall|status claude|copilot
-//! [--settings <path>]`.
+//! Subcommands: `report tokens|clear|agent` (see `report.rs`), `hook <kind> [event]` (run by the agents, `claude`, `copilot` or `gemini`; the kinds are in
+//! `integration.rs`) and `integration install|uninstall|status <kind> [--settings <path>]`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use poimen_protocol::CHANNEL;
-use poimen_server::{Config, Server, StartError, claude, copilot, hook, report, stdio};
-
-const USAGE: &str =
-    "usage: poimen-server integration install|uninstall|status claude|copilot [--settings <path>]";
+use poimen_server::{Config, Server, StartError, claude, hook, integration, report, stdio};
 
 const HELP: &str = "\
 usage:
@@ -22,7 +18,8 @@ usage:
   poimen-server report tokens|clear|agent
   poimen-server hook claude
   poimen-server hook copilot <event>
-  poimen-server integration install|uninstall|status claude|copilot [--settings <path>]";
+  poimen-server hook gemini
+  poimen-server integration install|uninstall|status claude|copilot|gemini [--settings <path>]";
 
 /// What the first argument asks for. Pure: no process is started by deciding it.
 #[derive(Debug, PartialEq, Eq)]
@@ -88,14 +85,8 @@ fn subcommand(args: &[String]) -> ExitCode {
             // Never fails and never blocks the agent, whatever happens; a report that does not
             // get through is a line in the hook log (`hook.rs`).
             let env = hook::HookEnv::from_env();
-            match args.get(1).map(String::as_str) {
-                Some("claude") => {
-                    claude::run_hook(std::io::stdin(), &env);
-                }
-                Some("copilot") => {
-                    copilot::run_hook(std::io::stdin(), args.get(2).cloned(), &env);
-                }
-                _ => {}
+            if let Some(kind) = args.get(1).and_then(|n| integration::kind(n)) {
+                (kind.run_hook)(args.get(2).cloned(), &env);
             }
             ExitCode::SUCCESS
         }
@@ -110,67 +101,45 @@ fn subcommand(args: &[String]) -> ExitCode {
 }
 
 fn integration(args: &[String]) -> ExitCode {
-    let (Some(action), Some(agent @ ("claude" | "copilot"))) =
-        (args.first(), args.get(1).map(String::as_str))
+    let (Some(action), Some(kind)) = (args.first(), args.get(1).and_then(|a| integration::kind(a)))
     else {
-        eprintln!("{USAGE}");
+        eprintln!("{}", usage());
         return ExitCode::from(2);
-    };
-    let default = |home: &PathBuf| match agent {
-        "claude" => claude::default_settings_path(home),
-        _ => copilot::default_hook_path(home, CHANNEL),
     };
     let path = match args.get(2).map(String::as_str) {
         Some("--settings") => args.get(3).map(PathBuf::from),
-        None => std::env::home_dir().map(|h| default(&h)),
+        None => std::env::home_dir().map(|h| (kind.default_path)(&h, CHANNEL)),
         _ => None,
     };
     let Some(path) = path else {
-        eprintln!("{USAGE}");
+        eprintln!("{}", usage());
         return ExitCode::from(2);
     };
-    let copilot = agent == "copilot";
     let result = match action.as_str() {
         "install" => claude::hook_exe(
             std::env::var_os(poimen_protocol::ENV_HOOK_EXE),
             std::env::current_exe,
         )
-        .and_then(|exe| {
-            if copilot {
-                copilot::install(&path, &exe, CHANNEL)
-            } else {
-                claude::install(&path, &exe, CHANNEL)
-            }
-        })
+        .and_then(|exe| (kind.install)(&path, &exe, CHANNEL))
         .map(|()| format!("installed in {}", path.display())),
-        "uninstall" => if copilot {
-            copilot::uninstall(&path, CHANNEL)
-        } else {
-            claude::uninstall(&path, CHANNEL)
-        }
-        .map(|removed| {
+        "uninstall" => (kind.uninstall)(&path, CHANNEL).map(|removed| {
             if removed {
                 format!("removed from {}", path.display())
             } else {
                 "nothing to remove".to_owned()
             }
         }),
-        "status" => if copilot {
-            copilot::status(&path, CHANNEL).map(|e| (e, copilot::EVENTS.len()))
-        } else {
-            claude::status(&path, CHANNEL).map(|e| (e, claude::EVENTS.len()))
-        }
-        .map(|(events, all)| {
+        "status" => (kind.status)(&path, CHANNEL).map(|events| {
             if events.is_empty() {
                 "not installed".to_owned()
-            } else if events.len() == all {
+            } else if events.len() == kind.events {
                 "installed".to_owned()
             } else {
                 format!("partially installed: {}", events.join(", "))
             }
         }),
         _ => {
-            eprintln!("{USAGE}");
+            eprintln!("{}", usage());
             return ExitCode::from(2);
         }
     };
@@ -184,6 +153,13 @@ fn integration(args: &[String]) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn usage() -> String {
+    format!(
+        "usage: poimen-server integration install|uninstall|status {} [--settings <path>]",
+        integration::names()
+    )
 }
 
 fn serve() -> ExitCode {
@@ -260,11 +236,18 @@ mod tests {
 
     #[test]
     fn help_lists_the_integration_usage() {
-        assert!(
-            HELP.contains(
-                "integration install|uninstall|status claude|copilot [--settings <path>]"
-            )
-        );
+        assert!(HELP.contains(&format!(
+            "integration install|uninstall|status {} [--settings <path>]",
+            integration::names()
+        )));
+        for kind in integration::KINDS {
+            assert!(
+                HELP.contains(&format!("hook {}", kind.name)),
+                "{}",
+                kind.name
+            );
+        }
+        assert!(HELP.contains("hook copilot <event>"));
         assert!(HELP.contains("hook claude"));
         assert!(HELP.contains("report tokens|clear|agent"));
     }

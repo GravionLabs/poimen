@@ -70,7 +70,7 @@
         Agent
         <select class="cwd" name="kind">
           @for (kind of kinds(); track kind) {
-            <option [value]="kind">{{ kind }}</option>
+            <option [value]="kind">{{ kind }}{{ note(kind) }}</option>
           }
         </select>
       </label>

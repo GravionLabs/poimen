@@ -1,4 +1,5 @@
 import { Injectable, computed, effect, inject, signal, untracked } from "@angular/core";
+import { agentName } from "./backend";
 import { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 import { UiState } from "./ui-state";
@@ -14,14 +15,11 @@ export function missingHooks(statuses: readonly HookStatus[]): string[] {
   return statuses.filter((s) => s.state === "missing" || s.state === "partial").map((s) => s.agent);
 }
 
-const NAMES: Record<string, string> = { claude: "Claude Code", copilot: "GitHub Copilot CLI" };
-
-/** Display name of an agent id. */
-export const agentName = (agent: string): string => NAMES[agent] ?? agent;
+export { agentName };
 
 /**
  * Offers to install the agent hooks (`poimen-server integration install`) once the poimen backend
- * runs and Claude Code or Copilot CLI lack them. "Not now" is remembered in the UI state; nothing
+ * runs and an agent with hooks lacks them. "Not now" is remembered in the UI state; nothing
  * is installed without the click.
  */
 @Injectable({ providedIn: "root" })
