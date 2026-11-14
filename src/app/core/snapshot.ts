@@ -670,31 +670,33 @@ export function buildSpaces(
   pinned: readonly string[] = [],
   keys: SortKeys = {},
 ): SpaceNode[] {
-  const nodes = buildTree(snapshot, order, tabOrder, sort, pinned, keys).map(({ workspace, tabs }) => ({
-    workspace,
-    ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
-    rows: tabs.flatMap(({ tab, panes }) =>
-      panes.map((pane): PaneRow => {
-        const dir = paneDir(pane);
-        const repo = dir ? repos.get(dir) : undefined;
-        return {
-          pane,
-          tab: tab.label,
-          name: rowName(pane, tab.label),
-          agent: agentKind(pane),
-          branch: repo?.branch ?? undefined,
-          worktree: repo?.worktree ?? false,
-          onBase: repo?.on_base ?? false,
-          dirty: repo?.dirty ?? undefined,
-          ahead: repo?.ahead ?? undefined,
-          behind: repo?.behind ?? undefined,
-          pr: dir ? pulls.get(dir) : undefined,
-          dir,
-          text: statusText(pane),
-        };
-      }),
-    ),
-  }));
+  const nodes = buildTree(snapshot, order, tabOrder, sort, pinned, keys).map(
+    ({ workspace, tabs }) => ({
+      workspace,
+      ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
+      rows: tabs.flatMap(({ tab, panes }) =>
+        panes.map((pane): PaneRow => {
+          const dir = paneDir(pane);
+          const repo = dir ? repos.get(dir) : undefined;
+          return {
+            pane,
+            tab: tab.label,
+            name: rowName(pane, tab.label),
+            agent: agentKind(pane),
+            branch: repo?.branch ?? undefined,
+            worktree: repo?.worktree ?? false,
+            onBase: repo?.on_base ?? false,
+            dirty: repo?.dirty ?? undefined,
+            ahead: repo?.ahead ?? undefined,
+            behind: repo?.behind ?? undefined,
+            pr: dir ? pulls.get(dir) : undefined,
+            dir,
+            text: statusText(pane),
+          };
+        }),
+      ),
+    }),
+  );
   return group ? groupWorktrees(nodes) : nodes;
 }
 
