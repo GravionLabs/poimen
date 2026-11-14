@@ -443,6 +443,7 @@ describe("flow agents", () => {
       expect(supportsFlow(pane({ agent })), agent).toBe(true);
       expect(flowSession(pane({ agent, agent_session: session })), agent).toBe("0b7e-c0");
     }
+    expect(supportsFlow(pane({ agent: "gemini" }))).toBe(false);
     expect(flowAgentName(pane({ agent: "claude" }))).toBe("Claude Code");
     expect(flowAgentName(pane({ agent: "copilot" }))).toBe("GitHub Copilot CLI");
   });

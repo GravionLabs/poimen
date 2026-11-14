@@ -51,9 +51,9 @@ describe("PaneDialog start agent (#410)", () => {
     });
   });
 
-  it("offers only claude and copilot on the poimen backend", async () => {
+  it("offers only the kinds with hooks on the poimen backend", async () => {
     const { options } = await setup("poimen");
-    expect(options).toEqual(["claude", "copilot"]);
+    expect(options).toEqual(["claude", "copilot", "gemini"]);
   });
 
   it("offers herdr's full list on the herdr backend", async () => {

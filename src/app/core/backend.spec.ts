@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   agentKinds,
+  agentName,
+  agentSupport,
+  hasTranscripts,
   appVersionLabel,
   backendVersionLabel,
   decodeBase64,
@@ -55,7 +58,7 @@ describe("version labels", () => {
 
 describe("agentKinds", () => {
   it("offers only the kinds that report through hooks on the poimen backend", () => {
-    expect(agentKinds("poimen")).toEqual(["claude", "copilot"]);
+    expect(agentKinds("poimen")).toEqual(["claude", "copilot", "gemini"]);
   });
 
   it("keeps herdr's full list on the herdr backend", () => {
@@ -63,5 +66,18 @@ describe("agentKinds", () => {
     expect(kinds).toHaveLength(24);
     expect(kinds.slice(0, 5)).toEqual(["claude", "codex", "gemini", "opencode", "copilot"]);
     expect(kinds).toContain("muse");
+  });
+});
+
+describe("hook agent kinds", () => {
+  it("names the kinds and what each one gives", () => {
+    expect(agentName("gemini")).toBe("Gemini CLI");
+    expect(agentName("codex")).toBe("codex");
+    expect(agentSupport("claude")).toBe("status, transcript");
+    expect(agentSupport("gemini")).toBe("status");
+    expect(agentSupport("codex")).toBe("no status");
+    expect(hasTranscripts("copilot")).toBe(true);
+    expect(hasTranscripts("gemini")).toBe(false);
+    expect(hasTranscripts("codex")).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 // The backend-neutral model of spaces, tabs and terminals (the `snapshot` command, #586) and the
 // pure helpers on it. Every backend maps its own model onto it in Rust (`poimen_core::snapshot`).
 
+import { HOOK_AGENTS, agentName, hasTranscripts } from "./backend";
 import type { Checks } from "../github/pulls";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
@@ -439,18 +440,10 @@ export function agentKind(pane: Terminal): string | undefined {
   return pane.agent?.trim() || undefined;
 }
 
-/** Agents whose session transcripts poimen reads (Output panel, Flow tab), with their names. */
-const TRANSCRIPT_AGENTS: Readonly<Record<string, string>> = {
-  claude: "Claude Code",
-  copilot: "GitHub Copilot CLI",
-};
-
 /** Display name of the agent of `pane` if its transcripts can be followed (`Claude Code`, ...). */
 export function flowAgentName(pane: Terminal | undefined): string | undefined {
   const kind = pane && agentKind(pane);
-  return kind !== undefined && Object.hasOwn(TRANSCRIPT_AGENTS, kind)
-    ? TRANSCRIPT_AGENTS[kind]
-    : undefined;
+  return kind !== undefined && hasTranscripts(kind) ? agentName(kind) : undefined;
 }
 
 /** Whether the Output panel and the Flow tab can follow the agent of `pane`. */
@@ -668,7 +661,9 @@ export function closeWarning(pane: Terminal | undefined): string {
 }
 
 /** The agents named in the empty states of the Output panel and the Flow tab. */
-export const TRANSCRIPT_AGENTS_LABEL = "Claude Code and GitHub Copilot CLI";
+export const TRANSCRIPT_AGENTS_LABEL = HOOK_AGENTS.filter((a) => a.transcripts)
+  .map((a) => a.name)
+  .join(" and ");
 
 /**
  * Empty-state text of the Output panel and the Flow tab for `pane`; `subject` names the view

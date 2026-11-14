@@ -29,6 +29,7 @@ import {
   type ThemeSetting,
 } from "../core/settings";
 import { Sounds } from "../core/sounds";
+import { HOOK_AGENT_KINDS, agentSupport } from "../core/backend";
 import { HooksOffer, agentName } from "../core/hooks-offer";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
@@ -164,6 +165,8 @@ export class SettingsView {
   protected readonly hooks = inject(HooksOffer);
   private readonly sounds = inject(Sounds);
   protected readonly agentName = agentName;
+  protected readonly agentSupport = agentSupport;
+  protected readonly agentKinds = HOOK_AGENT_KINDS;
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The search text; filters the category tree and highlights the labels on the page. */
