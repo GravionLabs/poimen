@@ -81,6 +81,12 @@ describe("splitSections", () => {
   });
 
   describe("priority mode (#722)", () => {
+    const times = new Map([
+      ["w1:p1", 100],
+      ["w2:p2", 900],
+      ["w3:p1", 500],
+      ["w3:p2", 50],
+    ]);
     const view = (over: Partial<AgentView> = {}): AgentView => ({
       mode: "priority",
       sections: new Map<string, AgentSection>([
@@ -90,12 +96,8 @@ describe("splitSections", () => {
         ["w3:p2", "idle"],
       ]),
       folded: new Set(),
-      changedAt: new Map([
-        ["w1:p1", 100],
-        ["w2:p2", 900],
-        ["w3:p1", 500],
-        ["w3:p2", 50],
-      ]),
+      changedAt: times,
+      orderAt: times,
       now: 1000 + 5 * 60_000,
       ...over,
     });
@@ -126,8 +128,14 @@ describe("splitSections", () => {
       expect(agents.map((n) => n.key)).toEqual(["w3:p1", "w2:p2", "w1:p1", "w3:p2"]);
     });
 
+    it("orders inside a section by the settled times, not the live ones", () => {
+      const held = view({ orderAt: new Map([...times, ["w2:p2", 10]]) });
+      const { agentSections } = splitSections([one, two, three], null, undefined, false, held);
+      expect(agentSections[0].nodes.map((n) => n.key)).toEqual(["w2:p2", "w3:p1"]);
+    });
+
     it("breaks equal times by name", () => {
-      const same = view({ changedAt: new Map() });
+      const same = view({ changedAt: new Map(), orderAt: new Map() });
       const { agentSections } = splitSections([one, two, three], null, undefined, false, same);
       expect(agentSections[0].nodes.map((n) => n.label)).toEqual(["agent-b", "agent-c"]);
     });
@@ -166,7 +174,7 @@ describe("splitSections", () => {
         null,
         undefined,
         false,
-        view({ changedAt: new Map() }),
+        view({ changedAt: new Map(), orderAt: new Map() }),
       );
       expect((agents[0].data as { since?: string }).since).toBeUndefined();
     });
@@ -187,6 +195,7 @@ async function setup(layout: SidebarLayout) {
         useValue: {
           spaces: signal([one, two]),
           agentSections,
+          agentChangedAt: signal(new Map<string, number>()),
           disconnected: signal<string | null>(null),
           ensureBackend: vi.fn(),
         },

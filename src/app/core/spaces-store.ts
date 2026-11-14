@@ -232,10 +232,35 @@ export class SpacesStore {
     }
     return result.keys;
   });
+  private readonly timeTick = signal(0);
+  private readonly timeSettle = new SortSettle<number>(() => Date.now());
+  private timeTimer: ReturnType<typeof setTimeout> | undefined;
+  private shownTimes: ReadonlyMap<string, number> = new Map();
+  private timeMode = false;
+  /**
+   * When each agent's status last changed, as the order inside a section uses it: held back like
+   * the sections (#712, #722), so a change that keeps the section does not reorder at once, and a
+   * held row keeps its place.
+   */
+  readonly agentChangedAt = computed<ReadonlyMap<string, number>>(() => {
+    const mode = this.agentsPriority();
+    const all = this.attention?.changedAt() ?? new Map<string, number>();
+    const live = new Map([...this.liveAgentSections().keys()].map((id) => [id, all.get(id) ?? 0]));
+    this.timeTick();
+    clearTimeout(this.timeTimer);
+    if (this.sortHeld()) return this.shownTimes;
+    const result = this.timeSettle.update(live, mode !== this.timeMode);
+    this.timeMode = mode;
+    this.shownTimes = result.keys;
+    if (result.wait > 0) {
+      this.timeTimer = setTimeout(() => this.timeTick.update((n) => n + 1), result.wait);
+    }
+    return result.keys;
+  });
   /** Terminal ids of the agents in the shown priority order, remote agents after the local ones. */
   private readonly agentOrder = computed<string[]>(() => {
     const sections = this.agentSections();
-    const changedAt = this.attention?.changedAt() ?? new Map<string, number>();
+    const changedAt = this.agentChangedAt();
     const now = Date.now();
     const local = this.spaces().flatMap((s) => s.rows.filter((r) => r.agent));
     const localIds = new Set(local.map((r) => r.pane.terminal_id));
@@ -354,6 +379,7 @@ export class SpacesStore {
       clearTimeout(this.refreshTimer);
       clearTimeout(this.settleTimer);
       clearTimeout(this.agentTimer);
+      clearTimeout(this.timeTimer);
       void this.unlisten?.then((stop) => stop());
     });
   }

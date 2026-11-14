@@ -111,4 +111,40 @@ describe("priority order of the agents (#722)", () => {
     await settings.setSidebarAgents("list");
     expect(store.nextWaiting(null)?.terminal_id).toBe("t-w1");
   });
+
+  describe("change times inside a section", () => {
+    const observe = (a: Status, b: Status, now: number) =>
+      injector.get(Attention).observe(
+        new Map([
+          ["t-w1", a],
+          ["t-w3", b],
+        ]),
+        new Set(),
+        now,
+      );
+
+    it("holds a new time back until the statuses settled", async () => {
+      observe("working", "idle", 100);
+      await settings.setSidebarAgents("priority");
+      expect(store.agentChangedAt().get("t-w1")).toBe(100);
+      observe("blocked", "idle", 500);
+      expect(store.agentChangedAt().get("t-w1")).toBe(100);
+      vi.advanceTimersByTime(SORT_SETTLE_MS + 10);
+      expect(store.agentChangedAt().get("t-w1")).toBe(500);
+    });
+
+    it("keeps the shown time while the pointer is pressed, then applies it", async () => {
+      observe("working", "idle", 100);
+      await settings.setSidebarAgents("priority");
+      expect(store.agentChangedAt().get("t-w1")).toBe(100);
+      store.holdSort(true);
+      observe("blocked", "idle", 500);
+      vi.advanceTimersByTime(SORT_SETTLE_MS + 10);
+      expect(store.agentChangedAt().get("t-w1")).toBe(100);
+      store.holdSort(false);
+      expect(store.agentChangedAt().get("t-w1")).toBe(100);
+      vi.advanceTimersByTime(SORT_SETTLE_MS + 10);
+      expect(store.agentChangedAt().get("t-w1")).toBe(500);
+    });
+  });
 });

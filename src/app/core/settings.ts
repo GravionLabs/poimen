@@ -19,9 +19,9 @@ import {
 } from "../sidebar/spaces";
 
 export type SidebarLayout = "tree" | "split";
-/** `sidebar.sort`: the user's own space order, alphabetical, by attention or by last focus. */
 /** `sidebar.agents`: the Agents section in list order or by priority (#722). */
 export type SidebarAgents = "list" | "priority";
+/** `sidebar.sort`: the user's own space order, alphabetical, by attention or by last focus. */
 export type SidebarSort = "manual" | "name" | "attention" | "recent";
 
 const SIDEBAR_SORTS: readonly SidebarSort[] = ["manual", "name", "attention", "recent"];

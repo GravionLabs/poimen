@@ -373,11 +373,11 @@ export class UiState {
   readonly expandedDirs = signal<ReadonlySet<string>>(new Set(this.initial.expandedDirs));
   /** The workspace selected in the split sidebar layout (UI state, not a setting). */
   readonly splitWorkspace = signal<string | null>(this.initial.splitWorkspace ?? null);
-  /** Shares of the Spaces and Agents sections of the split sidebar layout. */
   /** Folded sections of the priority Agents list (#722). */
   readonly agentSectionsFolded = signal<ReadonlySet<AgentSection>>(
     new Set((this.initial.agentSectionsFolded ?? []) as AgentSection[]),
   );
+  /** Shares of the Spaces and Agents sections of the split sidebar layout. */
   readonly splitSizes = signal<readonly [number, number]>(
     this.initial.splitSizes ?? SPLIT_DEFAULT_SIZES,
   );

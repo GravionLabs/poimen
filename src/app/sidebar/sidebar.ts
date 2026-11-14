@@ -160,6 +160,8 @@ export interface AgentView {
   folded: ReadonlySet<AgentSection>;
   /** When each pane's status last changed (epoch ms). */
   changedAt: ReadonlyMap<string, number>;
+  /** The change times the order inside a section uses (settled like `sections`). */
+  orderAt: ReadonlyMap<string, number>;
   now: number;
 }
 
@@ -251,7 +253,7 @@ export function splitSections(
         (e) => e.row.pane.terminal_id,
         (e) => e.row.name,
         view.sections,
-        view.changedAt,
+        view.orderAt,
         view.now,
       )
     : entries;
@@ -808,6 +810,7 @@ export class Sidebar {
       sections: this.store.agentSections(),
       folded: this.ui.agentSectionsFolded(),
       changedAt: this.attn.changedAt(),
+      orderAt: this.store.agentChangedAt(),
       now: this.now(),
     }),
   );
