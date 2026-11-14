@@ -4,6 +4,9 @@ import { agentKind, type AgentStatus, type SpaceNode, type Terminal } from "./sn
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
   a.size === b.size && [...a].every((id) => b.has(id));
 
+const sameTimes = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>) =>
+  a.size === b.size && [...a].every(([id, t]) => b.get(id) === t);
+
 /** A pane whose agent turned blocked or finished since the previous snapshot. */
 export interface StatusChange {
   paneId: string;
@@ -27,6 +30,12 @@ export class Attention {
   readonly unread = signal<ReadonlySet<string>>(new Set());
   /** Panes with a mark (ringing or unread): what the dock badge counts. */
   readonly count = computed(() => new Set([...this.attention(), ...this.unread()]).size);
+  private readonly _changedAt = signal<ReadonlyMap<string, number>>(new Map());
+  /**
+   * When each pane's status last changed (epoch ms, in memory, #722). A pane first seen counts
+   * from the snapshot that showed it, so after a restart every pane starts at the app start.
+   */
+  readonly changedAt = this._changedAt.asReadonly();
   /** The panes that turned blocked or done in the latest snapshot that had any (a new array each time). */
   readonly lastChanges = signal<readonly StatusChange[]>([]);
 
@@ -41,7 +50,18 @@ export class Attention {
    * Folds a snapshot of pane statuses in; `viewed` are the panes whose tab is on screen. Returns
    * the panes that turned blocked or done (panes seen for the first time do not count).
    */
-  observe(statuses: ReadonlyMap<string, AgentStatus>, viewed: ReadonlySet<string>): StatusChange[] {
+  observe(
+    statuses: ReadonlyMap<string, AgentStatus>,
+    viewed: ReadonlySet<string>,
+    now: number = Date.now(),
+  ): StatusChange[] {
+    const times = new Map(this._changedAt());
+    for (const [id, status] of statuses) {
+      if (!times.has(id) || (this.previous?.has(id) && this.previous.get(id) !== status))
+        times.set(id, now);
+    }
+    for (const id of [...times.keys()]) if (!statuses.has(id)) times.delete(id);
+    if (!sameTimes(times, this._changedAt())) this._changedAt.set(times);
     const changes: StatusChange[] = [];
     const attention = new Set(this.attention());
     const unread = new Set(this.unread());

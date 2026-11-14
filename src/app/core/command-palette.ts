@@ -32,6 +32,8 @@ export interface PoimenCommand {
     | "sortSpacesByAttention"
     | "sortSpacesRecent"
     | "sortSpacesNow"
+    | "agentsByPriority"
+    | "agentsInSpaceOrder"
     | "startTask"
     | "openTerminalHere"
     | "cleanupTasks"
@@ -54,6 +56,8 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "sortSpacesByAttention", title: "Sort Spaces: By Attention" },
   { id: "sortSpacesRecent", title: "Sort Spaces: Most Recent" },
   { id: "sortSpacesNow", title: "Sort Spaces Alphabetically Now" },
+  { id: "agentsByPriority", title: "Agents: By Priority" },
+  { id: "agentsInSpaceOrder", title: "Agents: In Space Order" },
   { id: "closeSpace", title: "Close Space" },
   { id: "closeTab", title: "Close Tab" },
   { id: "closeAll", title: "Close All Tabs" },
@@ -167,6 +171,8 @@ export class CommandPalette {
         c.id === "sortSpacesByAttention" ||
         c.id === "sortSpacesRecent" ||
         c.id === "sortSpacesNow" ||
+        c.id === "agentsByPriority" ||
+        c.id === "agentsInSpaceOrder" ||
         c.id === "startTask" ||
         c.id === "openTerminalHere" ||
         c.id === "cleanupTasks" ||

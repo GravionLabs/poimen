@@ -10,7 +10,8 @@ import { DEFAULT_SETTINGS, SettingsStore, type SidebarLayout } from "../core/set
 import { UI_STORAGE } from "../core/ui-state";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
-import { Sidebar, splitSections } from "./sidebar";
+import { Sidebar, splitSections, type AgentView } from "./sidebar";
+import type { AgentSection } from "../core/agent-priority";
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
 
 const mk = (id: string, label: string, panes: [string, string, boolean][]): SpaceNode => ({
@@ -71,7 +72,104 @@ describe("splitSections", () => {
   });
 
   it("is empty without spaces", () => {
-    expect(splitSections([], null)).toEqual({ spaces: [], agents: [], selectedId: null });
+    expect(splitSections([], null)).toEqual({
+      spaces: [],
+      agents: [],
+      selectedId: null,
+      agentSections: [],
+    });
+  });
+
+  describe("priority mode (#722)", () => {
+    const view = (over: Partial<AgentView> = {}): AgentView => ({
+      mode: "priority",
+      sections: new Map<string, AgentSection>([
+        ["w1:p1", "working"],
+        ["w2:p2", "needs"],
+        ["w3:p1", "needs"],
+        ["w3:p2", "idle"],
+      ]),
+      folded: new Set(),
+      changedAt: new Map([
+        ["w1:p1", 100],
+        ["w2:p2", 900],
+        ["w3:p1", 500],
+        ["w3:p2", 50],
+      ]),
+      now: 1000 + 5 * 60_000,
+      ...over,
+    });
+    const three = mk("w3", "Three", [
+      ["w3:p1", "agent-c", true],
+      ["w3:p2", "agent-d", true],
+    ]);
+
+    it("lists the four sections in order with their counts", () => {
+      const { agentSections } = splitSections([one, two, three], null, undefined, false, view());
+      expect(agentSections.map((s) => [s.title, s.count])).toEqual([
+        ["Needs you", 2],
+        ["Done", 0],
+        ["Working", 1],
+        ["Idle", 1],
+      ]);
+    });
+
+    it("puts the agent whose status changed first first inside a section", () => {
+      const { agentSections, agents } = splitSections(
+        [one, two, three],
+        null,
+        undefined,
+        false,
+        view(),
+      );
+      expect(agentSections[0].nodes.map((n) => n.key)).toEqual(["w3:p1", "w2:p2"]);
+      expect(agents.map((n) => n.key)).toEqual(["w3:p1", "w2:p2", "w1:p1", "w3:p2"]);
+    });
+
+    it("breaks equal times by name", () => {
+      const same = view({ changedAt: new Map() });
+      const { agentSections } = splitSections([one, two, three], null, undefined, false, same);
+      expect(agentSections[0].nodes.map((n) => n.label)).toEqual(["agent-b", "agent-c"]);
+    });
+
+    it("keeps the count of a folded section and drops its rows", () => {
+      const { agentSections } = splitSections(
+        [one, two, three],
+        null,
+        undefined,
+        false,
+        view({ folded: new Set<AgentSection>(["needs"]) }),
+      );
+      expect(agentSections[0]).toMatchObject({ id: "needs", count: 2, folded: true, nodes: [] });
+      expect(agentSections[2].folded).toBe(false);
+    });
+
+    it("shows the time since the last status change on each row, also in list mode", () => {
+      const { agents } = splitSections([one, two, three], null, undefined, false, view());
+      const since = (key: string) =>
+        (agents.find((n) => n.key === key)!.data as { since?: string }).since;
+      expect(since("w2:p2")).toBe("5m");
+      const list = splitSections(
+        [one],
+        null,
+        undefined,
+        false,
+        view({ mode: "list", now: 100 + 2 * 3_600_000 }),
+      );
+      expect((list.agents[0].data as { since?: string }).since).toBe("2h");
+      expect(list.agentSections).toEqual([]);
+    });
+
+    it("has no time for an agent that was never observed", () => {
+      const { agents } = splitSections(
+        [one],
+        null,
+        undefined,
+        false,
+        view({ changedAt: new Map() }),
+      );
+      expect((agents[0].data as { since?: string }).since).toBeUndefined();
+    });
   });
 });
 
@@ -80,17 +178,23 @@ async function setup(layout: SidebarLayout) {
   const setSidebarLayout = vi.fn(async (layout: SidebarLayout) => void layout);
   const settings = signal({ ...DEFAULT_SETTINGS, sidebarLayout: layout });
   const writeError = signal<string | null>(null);
+  const setSidebarAgents = vi.fn(async (mode: string) => void mode);
+  const agentSections = signal(new Map<string, AgentSection>());
   TestBed.configureTestingModule({
     providers: [
       {
         provide: SpacesStore,
         useValue: {
           spaces: signal([one, two]),
+          agentSections,
           disconnected: signal<string | null>(null),
           ensureBackend: vi.fn(),
         },
       },
-      { provide: SettingsStore, useValue: { settings, writeError, setSidebarLayout } },
+      {
+        provide: SettingsStore,
+        useValue: { settings, writeError, setSidebarLayout, setSidebarAgents },
+      },
       { provide: UI_STORAGE, useValue: null },
     ],
   });
@@ -146,6 +250,8 @@ async function setup(layout: SidebarLayout) {
     settings,
     writeError,
     setSidebarLayout,
+    setSidebarAgents,
+    agentSections,
     labels: () =>
       [...root.querySelectorAll('[role="tree"]')].map((e) => e.getAttribute("aria-label")),
   };
@@ -261,4 +367,36 @@ describe("Sidebar in the split layout", () => {
       expect(s.item("shell-a").querySelector(".icon")?.getAttribute("aria-label")).toBe("Terminal");
     },
   );
+});
+
+describe("Agents section (#722)", () => {
+  it("offers by priority in list mode and asks for it on a click", async () => {
+    const s = await setup("split");
+    const button = s.root.querySelector<HTMLButtonElement>(".agents-toggle")!;
+    expect(button.getAttribute("aria-label")).toBe("Agents by priority");
+    button.click();
+    expect(s.setSidebarAgents).toHaveBeenCalledWith("priority");
+    expect(s.root.querySelectorAll(".agent-section")).toHaveLength(0);
+  });
+
+  it("shows the four sections with counts and folds one on a click", async () => {
+    const s = await setup("split");
+    s.settings.update((v) => ({ ...v, sidebarAgents: "priority" }));
+    s.agentSections.set(new Map([["w2:p2", "needs"]]));
+    await s.settle();
+    const heads = [...s.root.querySelectorAll<HTMLElement>(".agent-section")];
+    expect(
+      heads.map((h) => h.textContent!.replace(/\s+/g, "").replace("Needsyou", "Needs you")),
+    ).toEqual(["Needs you1", "Done0", "Working0", "Idle1"]);
+    expect(s.root.querySelector(".agents-toggle")!.getAttribute("aria-label")).toBe(
+      "Agents in space order",
+    );
+    expect(s.root.textContent).toContain("agent-b");
+    heads[0].click();
+    await s.settle();
+    expect(s.root.querySelectorAll(".agent-section")[0].getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(s.root.textContent).not.toContain("agent-b");
+  });
 });

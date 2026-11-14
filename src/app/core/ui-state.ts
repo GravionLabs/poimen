@@ -1,4 +1,5 @@
 import { Injectable, InjectionToken, inject, signal } from "@angular/core";
+import { AGENT_SECTIONS, type AgentSection } from "./agent-priority";
 
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
@@ -115,6 +116,8 @@ export interface LayoutState {
   splitWorkspace?: string;
   /** Shares of the Spaces and Agents sections in the split sidebar layout; they sum to 1. */
   splitSizes?: [number, number];
+  /** Folded sections of the Agents list in `priority` order (`needs`, `done`, `working`, `idle`). */
+  agentSectionsFolded?: string[];
   /** Legacy: plugin panes poimen opened; read once so their tabs can be dropped, never written. */
   pluginPanes?: Record<string, string>;
   /** The bottom panel below the editor area: shown, its height and its selected tab. */
@@ -231,6 +234,7 @@ export function parseLayout(raw: string | null): LayoutState {
       expandedDirs,
       splitWorkspace,
       splitSizes,
+      agentSectionsFolded,
       pluginPanes,
       panelOpen,
       panelHeight,
@@ -304,6 +308,12 @@ export function parseLayout(raw: string | null): LayoutState {
     }
     const sizes = clampSplitSizes(splitSizes);
     if (sizes) state.splitSizes = sizes;
+    if (Array.isArray(agentSectionsFolded)) {
+      const ids = AGENT_SECTIONS.map((s) => s.id as string).filter((id) =>
+        agentSectionsFolded.includes(id),
+      );
+      if (ids.length) state.agentSectionsFolded = ids;
+    }
     if (typeof pluginPanes === "object" && pluginPanes !== null && !Array.isArray(pluginPanes)) {
       state.pluginPanes = Object.fromEntries(
         Object.entries(pluginPanes).filter(
@@ -364,6 +374,10 @@ export class UiState {
   /** The workspace selected in the split sidebar layout (UI state, not a setting). */
   readonly splitWorkspace = signal<string | null>(this.initial.splitWorkspace ?? null);
   /** Shares of the Spaces and Agents sections of the split sidebar layout. */
+  /** Folded sections of the priority Agents list (#722). */
+  readonly agentSectionsFolded = signal<ReadonlySet<AgentSection>>(
+    new Set((this.initial.agentSectionsFolded ?? []) as AgentSection[]),
+  );
   readonly splitSizes = signal<readonly [number, number]>(
     this.initial.splitSizes ?? SPLIT_DEFAULT_SIZES,
   );
@@ -641,6 +655,14 @@ export class UiState {
     this.save();
   }
 
+  /** Folds or opens one section of the priority Agents list. */
+  toggleAgentSection(id: AgentSection): void {
+    const next = new Set(this.agentSectionsFolded());
+    if (!next.delete(id)) next.add(id);
+    this.agentSectionsFolded.set(next);
+    this.save();
+  }
+
   /** Resizes the sections of the split sidebar layout; malformed sizes are ignored. */
   setSplitSizes(sizes: readonly number[]): void {
     const next = clampSplitSizes(sizes);
@@ -708,6 +730,9 @@ export class UiState {
       expandedDirs: [...this.expandedDirs()],
       splitWorkspace: this.splitWorkspace() ?? undefined,
       // Like splitWorkspace: stored only once it differs from the default.
+      agentSectionsFolded: this.agentSectionsFolded().size
+        ? [...this.agentSectionsFolded()]
+        : undefined,
       splitSizes:
         this.splitSizes()[0] === SPLIT_DEFAULT_SIZES[0] ? undefined : [...this.splitSizes()],
       panelOpen: this.panelOpen(),
