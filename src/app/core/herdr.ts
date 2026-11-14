@@ -810,10 +810,17 @@ export const TRANSCRIPT_AGENTS_LABEL = "Claude Code and GitHub Copilot CLI";
 
 /**
  * Empty-state text of the Output panel and the Flow tab for `pane`; `subject` names the view
- * (`Subagent output`, `The flow`). It tells apart a pane without a known agent, a known agent
+ * (`Subagent output`, `The flow`). `block` is why the pane's machine cannot be asked
+ * (`machineBlock`); it comes first. It tells apart a pane without a known agent, a known agent
  * that has not reported its session yet, and a session whose transcript is not found yet.
  */
-export function transcriptEmptyText(pane: Terminal | undefined, subject: string): string {
+export function transcriptEmptyText(
+  pane: Terminal | undefined,
+  subject: string,
+  block: string | null = null,
+): string {
+  // The machine of a remote pane cannot be asked (offline, connecting, unknown; #698).
+  if (block !== null && pane) return `${subject} is unavailable: ${block}.`;
   if (!pane) {
     return `${subject} is available for ${TRANSCRIPT_AGENTS_LABEL} agents. Select a pane that runs one.`;
   }

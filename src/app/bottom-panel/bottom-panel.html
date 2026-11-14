@@ -77,7 +77,7 @@
 </header>
 @if (ui.panelTab() === "output") {
   <div class="body" #box (scroll)="onScroll()">
-    @if (!subagents.supported()) {
+    @if (paneBlock() || !subagents.supported()) {
       <p class="empty">{{ outputEmpty() }}</p>
     } @else if (!subagents.agents().length) {
       <p class="empty">This agent has not started a subagent yet.</p>
@@ -125,7 +125,7 @@
   </div>
 }
 @if (ui.panelTab() === "flow") {
-  @if (!subagents.supported()) {
+  @if (paneBlock() || !subagents.supported()) {
     <p class="empty body">{{ flowEmpty() }}</p>
   } @else {
     @defer {

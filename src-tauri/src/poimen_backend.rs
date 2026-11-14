@@ -695,6 +695,17 @@ impl Backend for PoimenBackend {
         ))
     }
 
+    fn agent_transcript(
+        &self,
+        terminal_id: &str,
+        follower: &str,
+        restart: bool,
+    ) -> Result<wire::AgentTranscriptResult, String> {
+        self.client
+            .agent_transcript(terminal_id, follower, restart)
+            .map_err(text)
+    }
+
     fn open_stream(
         &self,
         request: StreamRequest<'_>,

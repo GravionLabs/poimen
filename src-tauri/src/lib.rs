@@ -1,10 +1,10 @@
 use poimen_core::agent_actions;
+use poimen_core::{copilot, transcripts};
 mod backend;
 #[cfg(test)]
 mod backend_fake;
 mod changes;
 mod changes_git;
-mod copilot;
 mod deliver;
 use poimen_core::git;
 mod git_sync;
@@ -26,6 +26,7 @@ mod poimen_server;
 mod project;
 mod project_edit;
 mod remote_runs;
+mod remote_transcripts;
 mod schemes;
 mod settings;
 mod spaces;
@@ -34,7 +35,6 @@ mod task_start;
 use poimen_core::tasks;
 use poimen_core::templates;
 mod terminal_colors;
-mod transcripts;
 use poimen_core::trust;
 mod updater;
 mod watch;
@@ -61,7 +61,11 @@ struct StartLock(std::sync::Arc<Mutex<()>>);
 /// The running subagent transcript watches by key: one per frontend follower (the output panel,
 /// each visible flow tab), each with at most one watch.
 #[derive(Default)]
-struct SubagentWatch(Mutex<Watches<transcripts::WatchHandle>>);
+struct SubagentWatch(Mutex<Watches<FollowHandle>>);
+
+/// A running transcript follow of either kind (a local file watch, or the poll of a machine's
+/// server); dropping it stops it.
+type FollowHandle = Box<dyn std::any::Any + Send>;
 
 /// The running watches of deliver loop status files by repository root.
 #[derive(Default)]
@@ -2040,15 +2044,40 @@ async fn subagents_watch(
     pane_id: String,
 ) -> Result<bool, String> {
     let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
-    // The session is asked of the pane's own backend. The transcript files of a machine's agent
-    // are on that machine and the server has no request to read them yet, so a remote pane is
-    // never looked up in the local `~/.claude` or `~/.copilot` (#693): nothing is watched.
-    let remote = machines::split_id(&pane_id).0.is_some();
+    // The transcript files of a machine's agent are on that machine: its server reads them
+    // (#698). A remote pane is never looked up in the local `~/.claude` or `~/.copilot` (#693).
+    if machines::split_id(&pane_id).0.is_some() {
+        let routed = machines.route_connected(backend.inner(), &pane_id)?;
+        let (follower, key_for_poll) = (key.clone(), key.clone());
+        let started = tauri::async_runtime::spawn_blocking(move || {
+            remote_transcripts::start(
+                routed.backend,
+                &routed.id,
+                &key_for_poll,
+                remote_transcripts::INTERVAL,
+                move |session, update| {
+                    let event = json!({ "key": follower, "session": session, "update": update });
+                    let _ = app.emit("subagents", event);
+                },
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let handle = match started {
+            remote_transcripts::Started::Following(poller) => {
+                Some(Box::new(poller) as FollowHandle)
+            }
+            remote_transcripts::Started::NotYet => None,
+        };
+        let following = handle.is_some();
+        let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+        return Ok(watches.store(&key, generation, handle) && following);
+    }
     let session = on_routed(backend.inner(), machines.inner(), &pane_id, |b, id| {
         b.agent_session(id)
     })
     .await?;
-    let found = session.filter(|_| !remote).and_then(|s| {
+    let found = session.and_then(|s| {
         let home = home_dir()?;
         let dir = match s.agent {
             herdr::TranscriptAgent::Claude => transcripts::locate_project_dir(
@@ -2073,8 +2102,10 @@ async fn subagents_watch(
         let _ = app.emit("subagents", event);
     };
     let handle = match agent {
-        herdr::TranscriptAgent::Claude => transcripts::watch(&dir, &session, emit)?,
-        herdr::TranscriptAgent::Copilot => copilot::watch(&dir, emit)?,
+        herdr::TranscriptAgent::Claude => {
+            Box::new(transcripts::watch(&dir, &session, emit)?) as FollowHandle
+        }
+        herdr::TranscriptAgent::Copilot => Box::new(copilot::watch(&dir, emit)?) as FollowHandle,
     };
     let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
     // A stale handle is dropped here, which stops its watcher; so is one whose key was unwatched.

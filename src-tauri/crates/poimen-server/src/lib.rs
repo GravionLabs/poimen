@@ -23,6 +23,7 @@ mod store;
 mod stream;
 mod tabs;
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -37,14 +38,15 @@ use alacritty_terminal::vte::ansi::Rgb;
 use emulator::Colors;
 use poimen_core::{repos, worktree};
 use poimen_protocol::{
-    self as proto, AgentInfo, AgentStatus, AttachMode, ClientKind, DetachReason, ErrorCode, Event,
-    EventsSubscribe, PROTOCOL_VERSION, PingResult, RepoEnsure, RepoEnsureResult, Request, Response,
-    ServerShutdown, SetColors, Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose,
-    SpaceCreate, SpaceCreateResult, SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate,
-    TabFocus, TabMove, TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach,
-    TerminalClearTokens, TerminalClose, TerminalCreate, TerminalDetach, TerminalInput,
-    TerminalList, TerminalRename, TerminalReportAgent, TerminalReportTokens, TerminalResize,
-    TerminalStatus, WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
+    self as proto, AgentInfo, AgentStatus, AgentTranscript, AgentTranscriptResult, AttachMode,
+    ClientKind, DetachReason, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult,
+    RepoEnsure, RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space,
+    SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
+    SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabRename,
+    TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose,
+    TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
+    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus, TranscriptState,
+    WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 
@@ -235,6 +237,8 @@ pub(crate) struct Shared {
     runs: Mutex<runs::Runs>,
     /// The repositories of the space and terminal directories, for `runs`.
     run_repos: Mutex<runs::Repos>,
+    /// The transcript readers of `agent.transcript`, per terminal and follower.
+    transcripts: Mutex<HashMap<(String, String), Followed>>,
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
@@ -514,6 +518,7 @@ impl Server {
             subscribers: Mutex::new(Vec::new()),
             runs: Mutex::default(),
             run_repos: Mutex::default(),
+            transcripts: Mutex::default(),
             next_id: AtomicU64::new(next_id),
             socket: config.socket,
             state_file: config.state_file,
@@ -878,6 +883,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             PROTOCOL_VERSION,
             proto::CHANNEL,
         ))),
+        "agent.transcript" => agent_transcript(shared, parsed(request)?),
         "repo.ensure" => repo_ensure(shared, parsed(request)?),
         "worktree.create" => worktree_create(shared, parsed(request)?),
         "worktree.cleanup" => worktree_cleanup(shared, parsed(request)?),
@@ -1819,6 +1825,95 @@ fn terminal_mut<'a>(
         .iter_mut()
         .find(|t| t.info.id == id)
         .ok_or_else(|| not_found("terminal", id))
+}
+
+/// Most transcript readers kept; one per view that follows an agent, so this is never reached by
+/// normal use. A reader past it replaces an arbitrary one, which then starts over (`fresh`).
+const MAX_FOLLOWERS: usize = 64;
+
+/// A transcript reader and the session it follows.
+struct Followed {
+    session: String,
+    follow: poimen_core::transcripts::Follow,
+}
+
+/// `agent.transcript` (#698): the updates the agent transcript of a terminal gained since this
+/// follower's last request, read from the files of this machine (`Config.home`) through
+/// `poimen_core::transcripts`. The agent and session are those the hooks reported; Claude Code
+/// also needs the terminal's directory. `not_found` for an unknown terminal; every other miss is
+/// a `state` of the result, so a client can tell it from a failed request.
+fn agent_transcript(shared: &Shared, p: AgentTranscript) -> ApiResult {
+    use poimen_core::transcripts::{OpenError, open};
+    let (agent, session, cwd, live) = {
+        let mut inner = lock(&shared.inner);
+        let entry = terminal_mut(&mut inner, &p.terminal_id)?;
+        let agent = entry.info.agent.as_ref();
+        let found = (
+            agent.and_then(|a| a.agent.clone()),
+            agent.and_then(|a| a.session_id.clone()),
+            entry.info.cwd.clone(),
+        );
+        let live: HashSet<String> = inner.terminals.iter().map(|t| t.info.id.clone()).collect();
+        (found.0, found.1, found.2, live)
+    };
+    let state = |state, reason: Option<String>| {
+        Ok(json!(AgentTranscriptResult {
+            state,
+            reason,
+            session: None,
+            fresh: false,
+            updates: Vec::new(),
+        }))
+    };
+    let mut followers = lock(&shared.transcripts);
+    followers.retain(|(terminal, _), _| live.contains(terminal));
+    let key = (p.terminal_id, p.follower);
+    let (Some(agent), Some(session)) = (agent, session) else {
+        followers.remove(&key);
+        return state(TranscriptState::NoAgent, None);
+    };
+    let fresh = p.restart || followers.get(&key).is_none_or(|f| f.session != session);
+    if fresh {
+        followers.remove(&key);
+        let Some(home) = shared.home.as_deref() else {
+            return state(TranscriptState::Missing, None);
+        };
+        match open(home, &agent, &session, &cwd) {
+            Ok(follow) => {
+                if followers.len() >= MAX_FOLLOWERS
+                    && let Some(old) = followers.keys().next().cloned()
+                {
+                    followers.remove(&old);
+                }
+                followers.insert(
+                    key.clone(),
+                    Followed {
+                        session: session.clone(),
+                        follow,
+                    },
+                );
+            }
+            Err(OpenError::NoAgent) => return state(TranscriptState::NoAgent, None),
+            Err(OpenError::Missing) => return state(TranscriptState::Missing, None),
+            Err(OpenError::Unreadable(reason)) => {
+                return state(TranscriptState::Unreadable, Some(reason));
+            }
+        }
+    }
+    let followed = followers.get_mut(&key).expect("inserted above or kept");
+    let updates = followed
+        .follow
+        .refresh()
+        .into_iter()
+        .map(|u| json!(u))
+        .collect();
+    Ok(json!(AgentTranscriptResult {
+        state: TranscriptState::Ok,
+        reason: None,
+        session: Some(session),
+        fresh,
+        updates,
+    }))
 }
 
 fn terminal_rename(shared: &Shared, p: TerminalRename) -> ApiResult {

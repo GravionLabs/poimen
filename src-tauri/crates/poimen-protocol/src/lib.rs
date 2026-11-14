@@ -788,6 +788,52 @@ pub struct WorktreeCreateResult {
     pub created: bool,
 }
 
+/// Params of `agent.transcript` (#698): the next updates of the agent transcript of a terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTranscript {
+    pub terminal_id: String,
+    /// Names the reader: the server keeps one position in the transcript per `(terminal_id,
+    /// follower)`, so two views of the same terminal each get every update once.
+    pub follower: String,
+    /// Starts the reader over, so the answer holds everything from the start of the transcript.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restart: bool,
+}
+
+/// What `agent.transcript` found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptState {
+    /// The transcript is followed; `updates` holds what it gained.
+    Ok,
+    /// No agent with a readable transcript (or no session id) is reported in the terminal.
+    NoAgent,
+    /// The agent reported a session but its transcript file is not there (yet).
+    Missing,
+    /// The transcript is there but the server cannot read it; `reason` says why.
+    Unreadable,
+}
+
+/// Result of `agent.transcript`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentTranscriptResult {
+    pub state: TranscriptState,
+    /// Why the transcript is `unreadable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The session the updates belong to (`ok` only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    /// The reader for `(terminal_id, follower)` was created by this request (the first one, a
+    /// `restart`, or after the server lost it): the updates then start at the transcript's start.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fresh: bool,
+    /// The updates since the last request, in the shape of the app's `subagents` event (`kind`
+    /// `list`, `entries` or `main`, see "Agent transcripts" in docs/protocol.md).
+    #[serde(default)]
+    pub updates: Vec<Value>,
+}
+
 /// A merged pull request of `worktree.cleanup`: its head branch and number.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MergedPull {
@@ -1910,6 +1956,36 @@ mod tests {
         assert_eq!(r.left[0].reason, "dirty");
         let none: WorktreeCleanupResult = serde_json::from_value(json!({"path": null})).unwrap();
         assert_eq!(none, WorktreeCleanupResult::default());
+    }
+
+    #[test]
+    fn agent_transcript_request_and_result_wire_shapes() {
+        let p: AgentTranscript =
+            serde_json::from_value(json!({"terminal_id": "t1", "follower": "f1"})).unwrap();
+        assert!(!p.restart);
+        assert_eq!(
+            serde_json::to_value(AgentTranscript { restart: true, ..p }).unwrap(),
+            json!({"terminal_id": "t1", "follower": "f1", "restart": true})
+        );
+        assert!(serde_json::from_value::<AgentTranscript>(json!({"terminal_id": "t1"})).is_err());
+        let r: AgentTranscriptResult = serde_json::from_value(json!({
+            "state": "ok", "session": "s1", "fresh": true,
+            "updates": [{"kind": "main", "calls": [], "tools": 0, "usage": []}]
+        }))
+        .unwrap();
+        assert_eq!(
+            (r.state, r.fresh, r.updates.len()),
+            (TranscriptState::Ok, true, 1)
+        );
+        let r: AgentTranscriptResult =
+            serde_json::from_value(json!({"state": "unreadable", "reason": "denied"})).unwrap();
+        assert_eq!(r.state, TranscriptState::Unreadable);
+        assert_eq!(r.reason.as_deref(), Some("denied"));
+        assert!(r.updates.is_empty() && !r.fresh);
+        assert_eq!(
+            serde_json::to_value(TranscriptState::NoAgent).unwrap(),
+            json!("no_agent")
+        );
     }
 
     #[test]

@@ -682,6 +682,15 @@ pub fn route_id(
 }
 
 impl Machines {
+    /// [`route_id`] over the machines that are connected now: an offline, connecting or unknown
+    /// machine is an error naming it. For requests that must not wait for a connection (#698).
+    pub fn route_connected(&self, local: &Arc<dyn Backend>, id: &str) -> Result<Routed, String> {
+        route_id(id, local, |name| {
+            let backend: Arc<dyn Backend> = self.connected_backend(name)?;
+            Ok(backend)
+        })
+    }
+
     /// [`route_id`] over the configured machines.
     pub fn route(&self, local: &Arc<dyn Backend>, id: &str) -> Result<Routed, String> {
         route_id(id, local, |name| {
@@ -1463,6 +1472,16 @@ mod tests {
         assert!(machines.reconnect("zz").unwrap_err().contains("zz"));
         // Never connected (its link has no steps): no backend for a destructive request.
         assert_eq!(
+            machines
+                .route_connected(
+                    &(Arc::new(crate::backend_fake::FakeBackend::default()) as Arc<dyn Backend>),
+                    "a::1"
+                )
+                .err()
+                .as_deref(),
+            Some("a is not connected")
+        );
+        assert_eq!(
             machines.connected_backend("a").err().as_deref(),
             Some("a is not connected")
         );
@@ -1498,6 +1517,11 @@ mod tests {
         let machines = Machines::default();
         assert!(machines.route(&local, "gone::1").is_err());
         assert!(machines.route(&local, "1").is_ok());
+        assert_eq!(
+            machines.route_connected(&local, "gone::1").err().as_deref(),
+            Some("no machine named \"gone\"")
+        );
+        assert!(machines.route_connected(&local, "1").is_ok());
         assert_eq!(split_id("a::b::c"), (Some("a::b"), "c"));
     }
 
