@@ -153,20 +153,33 @@ export class SpacesStore {
   readonly pulls = this._pulls.asReadonly();
   /** The user's space order (ids); empty without UI state. Spaces outside it follow by number. */
   readonly spaceOrder = computed<readonly string[]>(() => this.ui?.spaceOrder() ?? []);
+  /** The pinned local spaces (ids), shown first in every sort mode (#710). */
+  readonly pinnedSpaces = computed<readonly string[]>(() => this.ui?.pinnedSpaces() ?? []);
   /** `sidebar.sort`: `manual` uses the user's order, `name` sorts alphabetically. */
   readonly sidebarSort = computed<SidebarSort>(
     () => this.settings?.settings().sidebarSort ?? "manual",
   );
   /** The spaces in the user's order; every list, shortcut and neighbour lookup reads this. */
   readonly orderedSpaces = computed(() =>
-    orderSpaces(this._snapshot().spaces, this.spaceOrder(), this.sidebarSort()),
+    orderSpaces(
+      this._snapshot().spaces,
+      this.spaceOrder(),
+      this.sidebarSort(),
+      this.pinnedSpaces(),
+    ),
   );
   /** The user's tab order per space (ids); tabs outside it follow by number. */
   readonly tabOrder = computed<Readonly<Record<string, readonly string[]>>>(
     () => this.ui?.tabOrder() ?? {},
   );
   readonly tree = computed(() =>
-    buildTree(this.snapshot(), this.spaceOrder(), this.tabOrder(), this.sidebarSort()),
+    buildTree(
+      this.snapshot(),
+      this.spaceOrder(),
+      this.tabOrder(),
+      this.sidebarSort(),
+      this.pinnedSpaces(),
+    ),
   );
   readonly spaces = computed(() =>
     buildSpaces(
@@ -177,6 +190,7 @@ export class SpacesStore {
       this.tabOrder(),
       this.sidebarSort(),
       this.settings?.settings().sidebarGroupWorktrees ?? true,
+      this.pinnedSpaces(),
     ),
   );
   /** The spaces of one machine as a tree (`machine` set on every space), last known when offline. */
@@ -287,7 +301,11 @@ export class SpacesStore {
       const snapshot = toSnapshot(await this.bridge.invoke<WireSnapshot>("snapshot"));
       this._snapshot.set(snapshot);
       // Closed spaces leave the stored order (not on an empty read, which may be transient).
-      if (snapshot.spaces.length) this.ui?.pruneSpaceOrder(snapshot.spaces.map((s) => s.space_id));
+      if (snapshot.spaces.length) {
+        const ids = snapshot.spaces.map((s) => s.space_id);
+        this.ui?.pruneSpaceOrder(ids);
+        this.ui?.prunePinnedSpaces(ids);
+      }
       if (snapshot.spaces.length) {
         const alive = new Map<string, string[]>();
         for (const tab of snapshot.tabs) {

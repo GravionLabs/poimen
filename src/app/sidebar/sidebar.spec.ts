@@ -132,6 +132,23 @@ describe("sidebarMenuItems", () => {
     expect(actions("workspace", true)).not.toContain("mark-unread");
   });
 
+  it("offers Pin space or Unpin space on a local space only", () => {
+    const actions = (kind: "workspace" | "pane", pinned: boolean | null) =>
+      sidebarMenuItems(kind, false, false, null, false, pinned).flatMap((g) =>
+        g.items.map((i) => i.action),
+      );
+    expect(actions("workspace", false)).toEqual([
+      "new-terminal",
+      "pin-space",
+      "rename-space",
+      "close-space",
+    ]);
+    expect(actions("workspace", true)).toContain("unpin-space");
+    expect(actions("workspace", true)).not.toContain("pin-space");
+    expect(actions("workspace", null)).not.toContain("pin-space");
+    expect(actions("pane", false)).not.toContain("pin-space");
+  });
+
   it("offers split and close on a pane", () => {
     expect(sidebarMenuItems("pane").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "split-right",

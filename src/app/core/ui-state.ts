@@ -123,6 +123,8 @@ export interface LayoutState {
   recentCommands?: string[];
   /** The user's order of the spaces (`space_id`s); spaces not listed follow by number. */
   spaceOrder?: string[];
+  /** Pinned spaces (`space_id`s), shown first in the tree in every sort mode. */
+  pinnedSpaces?: string[];
   /** The user's order of the tabs (`tab_id`s) per `space_id`; tabs not listed follow by number. */
   tabOrder?: Record<string, string[]>;
   /** How the Changes tab shows a diff: `inline` (unified) or `split` (side by side). */
@@ -231,6 +233,7 @@ export function parseLayout(raw: string | null): LayoutState {
       panelTab,
       recentCommands,
       spaceOrder,
+      pinnedSpaces,
       tabOrder,
       taskMachine,
       changesLayout,
@@ -316,6 +319,10 @@ export function parseLayout(raw: string | null): LayoutState {
       const ids = spaceOrder.filter((k): k is string => typeof k === "string" && k !== "");
       if (ids.length) state.spaceOrder = [...new Set(ids)];
     }
+    if (Array.isArray(pinnedSpaces)) {
+      const ids = pinnedSpaces.filter((k): k is string => typeof k === "string" && k !== "");
+      if (ids.length) state.pinnedSpaces = [...new Set(ids)];
+    }
     if (tabOrder && typeof tabOrder === "object" && !Array.isArray(tabOrder)) {
       const clean: Record<string, string[]> = {};
       for (const [space, list] of Object.entries(tabOrder)) {
@@ -359,6 +366,7 @@ export class UiState {
   /** Keys of the last command palette entries run, newest first (at most 5). */
   /** The user's space order (`space_id`s, persisted). */
   readonly spaceOrder = signal<readonly string[]>(this.initial.spaceOrder ?? []);
+  readonly pinnedSpaces = signal<readonly string[]>(this.initial.pinnedSpaces ?? []);
   /** The user's tab order per space (`tab_id`s, persisted). */
   readonly tabOrder = signal<Readonly<Record<string, readonly string[]>>>(
     this.initial.tabOrder ?? {},
@@ -527,6 +535,24 @@ export class UiState {
     this.save();
   }
 
+  /** Pins or unpins a space. */
+  setSpacePinned(id: string, pinned: boolean): void {
+    const has = this.pinnedSpaces().includes(id);
+    if (has === pinned) return;
+    this.pinnedSpaces.set(
+      pinned ? [...this.pinnedSpaces(), id] : this.pinnedSpaces().filter((p) => p !== id),
+    );
+    this.save();
+  }
+
+  /** Drops the pins of spaces that no longer exist; saves only when something went. */
+  prunePinnedSpaces(existing: readonly string[]): void {
+    const keep = this.pinnedSpaces().filter((id) => existing.includes(id));
+    if (keep.length === this.pinnedSpaces().length) return;
+    this.pinnedSpaces.set(keep);
+    this.save();
+  }
+
   /** Remembers the machine of a task for `dir`; `null` (this Mac) forgets it. */
   setTaskMachine(dir: string, machine: string | null): void {
     const next = { ...this.taskMachine() };
@@ -656,6 +682,7 @@ export class UiState {
       panelTab: this.panelTab(),
       recentCommands: this.recentCommands().length ? [...this.recentCommands()] : undefined,
       spaceOrder: this.spaceOrder().length ? [...this.spaceOrder()] : undefined,
+      pinnedSpaces: this.pinnedSpaces().length ? [...this.pinnedSpaces()] : undefined,
       tabOrder: Object.keys(this.tabOrder()).length
         ? Object.fromEntries(Object.entries(this.tabOrder()).map(([s, t]) => [s, [...t]]))
         : undefined,

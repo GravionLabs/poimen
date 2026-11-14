@@ -30,6 +30,7 @@ const store = {
   snapshot: () => snapshot,
   spaceOrder: () => [],
   sidebarSort: () => "manual",
+  pinnedSpaces: () => [],
 };
 
 async function setup() {

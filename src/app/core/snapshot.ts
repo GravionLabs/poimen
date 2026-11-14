@@ -289,12 +289,28 @@ const byLabel = <T extends { label: string; number: number }>(a: T, b: T) =>
 
 /**
  * The spaces in the user's order: ids of `order` first (in that order), then the others in backend
- * number order (new spaces). Ids of `order` that no longer exist are skipped.
+ * number order (new spaces). Ids of `order` that no longer exist are skipped. Pinned spaces
+ * (`pinned`, #710) come first in every sort mode, ordered among themselves like the rest.
  */
 export function orderSpaces<T extends { space_id: string; label: string; number: number }>(
   spaces: readonly T[],
   order: readonly string[] = [],
   sort: SidebarSort = "manual",
+  pinned: readonly string[] = [],
+): T[] {
+  const ordered = orderUnpinned(spaces, order, sort);
+  if (!pinned.length) return ordered;
+  const pins = new Set(pinned);
+  return [
+    ...ordered.filter((s) => pins.has(s.space_id)),
+    ...ordered.filter((s) => !pins.has(s.space_id)),
+  ];
+}
+
+function orderUnpinned<T extends { space_id: string; label: string; number: number }>(
+  spaces: readonly T[],
+  order: readonly string[],
+  sort: SidebarSort,
 ): T[] {
   if (sort === "name") return [...spaces].sort(byLabel);
   const rank = new Map(order.map((id, i) => [id, i]));
@@ -342,8 +358,9 @@ export function buildTree(
   order: readonly string[] = [],
   tabOrder: TabOrder = {},
   sort: SidebarSort = "manual",
+  pinned: readonly string[] = [],
 ): WorkspaceNode[] {
-  return orderSpaces(snapshot.spaces, order, sort).map((workspace) => ({
+  return orderSpaces(snapshot.spaces, order, sort, pinned).map((workspace) => ({
     workspace,
     tabs: orderTabs(
       snapshot.tabs.filter((tab) => tab.space_id === workspace.space_id),
@@ -586,8 +603,9 @@ export function buildSpaces(
   tabOrder: TabOrder = {},
   sort: SidebarSort = "manual",
   group = false,
+  pinned: readonly string[] = [],
 ): SpaceNode[] {
-  const nodes = buildTree(snapshot, order, tabOrder, sort).map(({ workspace, tabs }) => ({
+  const nodes = buildTree(snapshot, order, tabOrder, sort, pinned).map(({ workspace, tabs }) => ({
     workspace,
     ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
     rows: tabs.flatMap(({ tab, panes }) =>

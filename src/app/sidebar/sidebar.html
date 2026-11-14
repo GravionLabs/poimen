@@ -146,6 +146,9 @@
                       (dblclick)="startEdit(d.workspace.space_id, $event)"
                       >{{ seg.text }}</span
                     >
+                    @if (isPinned(d.workspace.space_id)) {
+                      <span class="pin-mark" title="Pinned" aria-label="Pinned">📌</span>
+                    }
                   }
                 }
                 @case ("state") {

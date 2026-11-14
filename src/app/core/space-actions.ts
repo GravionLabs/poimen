@@ -87,8 +87,9 @@ export function neighbourSpace(
   workspaceId: string,
   order: readonly string[] = [],
   sort: SidebarSort = "manual",
+  pinned: readonly string[] = [],
 ): string | null {
-  const ids = orderSpaces(snapshot.spaces, order, sort).map((w) => w.space_id);
+  const ids = orderSpaces(snapshot.spaces, order, sort, pinned).map((w) => w.space_id);
   const i = ids.indexOf(workspaceId);
   if (i < 0) return null;
   return ids[i + 1] ?? ids[i - 1] ?? null;
@@ -430,6 +431,12 @@ export class SpaceActions {
     if (target) this.reorder(spaceId, target, delta === 1);
   }
 
+  /** Pins a local space to the top of the tree, or unpins it (#710); an unknown id changes nothing. */
+  setPinned(spaceId: string, pinned: boolean): void {
+    if (!this.store.snapshot().spaces.some((s) => s.space_id === spaceId)) return;
+    this.ui.setSpacePinned(spaceId, pinned);
+  }
+
   dismissCloseError(): void {
     this._closeError.set(null);
   }
@@ -454,6 +461,7 @@ export class SpaceActions {
           workspaceId,
           this.store.spaceOrder(),
           this.store.sidebarSort(),
+          this.store.pinnedSpaces(),
         ),
       });
     } catch (err) {
