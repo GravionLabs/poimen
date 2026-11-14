@@ -15,6 +15,7 @@ export const SHORTCUT_ACTIONS = [
   "nextTab",
   "previousTab",
   "showShortcuts",
+  "find",
 ] as const;
 
 export type ShortcutAction = (typeof SHORTCUT_ACTIONS)[number];
@@ -38,6 +39,7 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
   nextTab: "CmdOrCtrl+Alt+Right",
   previousTab: "CmdOrCtrl+Alt+Left",
   showShortcuts: "CmdOrCtrl+/",
+  find: "CmdOrCtrl+Shift+F",
 };
 
 /** Accepts the resolved `shortcuts` of the settings payload; anything else keeps the default. */

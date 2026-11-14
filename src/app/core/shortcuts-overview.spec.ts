@@ -25,6 +25,11 @@ describe("shortcut groups", () => {
     }
   });
 
+  it("binds find to CmdOrCtrl+Shift+F and titles it for the palette", () => {
+    expect(DEFAULT_SHORTCUTS.find).toBe("CmdOrCtrl+Shift+F");
+    expect(shortcutTitle("find")).toBe("Terminal: Find");
+  });
+
   it("binds showShortcuts to CmdOrCtrl+/ and not to a bare ?", () => {
     expect(DEFAULT_SHORTCUTS.showShortcuts).toBe("CmdOrCtrl+/");
   });

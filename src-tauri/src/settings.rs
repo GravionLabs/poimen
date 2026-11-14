@@ -128,6 +128,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("nextTab", "CmdOrCtrl+Alt+Right"),
     ("previousTab", "CmdOrCtrl+Alt+Left"),
     ("showShortcuts", "CmdOrCtrl+/"),
+    ("find", "CmdOrCtrl+Shift+F"),
 ];
 
 pub fn default_shortcuts() -> BTreeMap<String, String> {
@@ -2440,6 +2441,7 @@ mod tests {
         let s = resolve(Some("{}"), none);
         assert_eq!(s.shortcuts, default_shortcuts());
         assert_eq!(s.shortcuts["closeTab"], "CmdOrCtrl+W");
+        assert_eq!(s.shortcuts["find"], "CmdOrCtrl+Shift+F");
     }
 
     #[test]

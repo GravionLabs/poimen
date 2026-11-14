@@ -21,6 +21,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
       "previousTab",
       "splitRight",
       "splitDown",
+      "find",
     ],
   },
   { title: "View", actions: ["toggleSidebar", "toggleOutput", "zoomIn", "zoomOut", "zoomReset"] },

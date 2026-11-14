@@ -53,6 +53,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "nextTab", title: "Next Tab" },
   { id: "previousTab", title: "Previous Tab" },
   { id: "showShortcuts", title: "Keyboard Shortcuts" },
+  { id: "find", title: "Terminal: Find" },
   { id: "openSettings", title: "Open Settings" },
   { id: "openGithub", title: "Open GitHub" },
   { id: "githubInbox", title: "GitHub: Inbox" },

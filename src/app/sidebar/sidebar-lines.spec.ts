@@ -4,8 +4,8 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { SpaceNode } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { SpaceNode } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UI_STORAGE } from "../core/ui-state";
@@ -32,7 +32,7 @@ async function render(workspace: SidebarRows["workspace"]): Promise<HTMLElement>
   TestBed.configureTestingModule({
     providers: [
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: {
           spaces: signal([space]),
           disconnected: signal<string | null>(null),

@@ -16,6 +16,7 @@ import {
 } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -30,6 +31,7 @@ import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
 import { PromptBar } from "../prompt-bar/prompt-bar";
 import { holdsLinkModifier, isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
+import { matchLabel, searchDecorations, TerminalSearch, type Searchable } from "./search";
 import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
@@ -47,7 +49,7 @@ export interface ModeState {
   blocked: string | null;
 }
 
-function cssVar(name: string): string {
+export function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
@@ -92,9 +94,9 @@ function ansiColors(
   templateUrl: "./terminal-view.html",
   styleUrl: "./terminal-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { "[class.controlling]": "mode() === 'control'" },
+  host: { "[class.controlling]": "mode() === 'control'", "(focusin)": "onSearchFocus()" },
 })
-export class TerminalView implements OnDestroy {
+export class TerminalView implements OnDestroy, Searchable {
   readonly pane = input.required<Terminal>();
   /** The mode the tab asks for; `control` is tried without a takeover and may fall back. */
   readonly wanted = input<Mode>("observe");
@@ -114,6 +116,7 @@ export class TerminalView implements OnDestroy {
   private readonly streams = inject(TerminalStreamService);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
+  private readonly search = inject(TerminalSearch);
   private readonly ui = inject(UiState);
   private readonly tauri = inject(TauriBridge);
   private readonly injector = inject(Injector);
@@ -121,6 +124,20 @@ export class TerminalView implements OnDestroy {
 
   private term?: XTerm;
   private fit?: FitAddon;
+  private searchAddon?: SearchAddon;
+  private searchResults?: { dispose(): void };
+  /** The search bar: shown, query, options and the match position the addon reported. */
+  protected readonly searchOpen = signal(false);
+  protected readonly searchQuery = signal("");
+  protected readonly searchCase = signal(false);
+  protected readonly searchRegex = signal(false);
+  protected readonly searchResult = signal({ index: -1, count: 0 });
+  protected readonly searchCounter = computed(() =>
+    matchLabel(this.searchQuery(), this.searchResult().index, this.searchResult().count),
+  );
+  /** Without scrollback in xterm (herdr owns it) only the screen is searched. */
+  protected screenOnly = signal(false);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private session?: TerminalSession;
   /** Whether the stream opened last is emulated; stays after the stream closed (scrollback keeps). */
   private streamEmulated = false;
@@ -182,6 +199,7 @@ export class TerminalView implements OnDestroy {
     if (!this.term) return;
     Object.assign(this.term.options, this.look());
     this.applyScrollback();
+    if (this.searchOpen() && this.searchQuery()) this.find(true, true); // new highlight colors
     // A new font changes the cell size, so cols/rows change without a body resize.
     this.applySize();
   }
@@ -209,6 +227,8 @@ export class TerminalView implements OnDestroy {
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.search.gone(this);
+    this.searchResults?.dispose();
     this.themeObserver?.disconnect();
     this.stop();
   }
@@ -253,6 +273,12 @@ export class TerminalView implements OnDestroy {
     useUnicode11(term);
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const searchAddon = new SearchAddon();
+    term.loadAddon(searchAddon);
+    this.searchAddon = searchAddon;
+    this.searchResults = searchAddon.onDidChangeResults(({ resultIndex, resultCount }) =>
+      this.searchResult.set({ index: resultIndex, count: resultCount }),
+    );
     // xterm marks a hovered link itself (underline, pointer); the view only needs to know about it.
     this.linkHovered = false;
     term.loadAddon(
@@ -271,6 +297,12 @@ export class TerminalView implements OnDestroy {
     // App shortcuts belong to the app: keep xterm from forwarding them to the pane. Only Cmd
     // shortcuts match here; other keys go to the program in the pane.
     term.attachCustomKeyEventHandler((event) => {
+      // Cmd shortcuts only match in a terminal; the find key is not one outside macOS, so it is
+      // taken here and never reaches the PTY.
+      if (event.type === "keydown" && this.keymap.match(event, false) === "find") {
+        this.openSearch();
+        return false;
+      }
       if (this.keymap.match(event, true) !== null) return false;
       return !this.clipboardKey(event);
     });
@@ -293,6 +325,81 @@ export class TerminalView implements OnDestroy {
     this.detachClipboard = this.attachClipboard(this.body().nativeElement);
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(this.body().nativeElement);
+  }
+
+  /** Shows the search bar (a second call selects the query) and moves the focus into it. */
+  openSearch(): void {
+    this.screenOnly.set(!this.streamEmulated);
+    this.searchOpen.set(true);
+    afterNextRender(
+      () => {
+        const input = this.host.nativeElement.querySelector<HTMLInputElement>(".search-input");
+        input?.focus();
+        input?.select();
+      },
+      { injector: this.injector },
+    );
+    if (this.searchQuery()) this.find(true);
+  }
+
+  /** Hides the bar, clears the highlights and gives the focus back to the terminal. */
+  closeSearch(): void {
+    this.searchOpen.set(false);
+    this.searchAddon?.clearDecorations();
+    this.searchResult.set({ index: -1, count: 0 });
+    this.term?.focus();
+  }
+
+  protected onSearchFocus(): void {
+    this.search.focused(this);
+  }
+
+  protected setQuery(value: string): void {
+    this.searchQuery.set(value);
+    this.find(true);
+  }
+
+  protected toggleCase(): void {
+    this.searchCase.update((v) => !v);
+    this.find(true);
+  }
+
+  protected toggleRegex(): void {
+    this.searchRegex.update((v) => !v);
+    this.find(true);
+  }
+
+  /** The next (or previous) match; `incremental` keeps the current one while it still matches. */
+  protected find(forward: boolean, incremental = false): void {
+    const addon = this.searchAddon;
+    if (!addon) return;
+    const query = this.searchQuery();
+    if (!query) {
+      addon.clearDecorations();
+      this.searchResult.set({ index: -1, count: 0 });
+      return;
+    }
+    const options = {
+      caseSensitive: this.searchCase(),
+      regex: this.searchRegex(),
+      incremental,
+      decorations: searchDecorations(cssVar, {
+        selection: this.prefs.settings().colors?.selectionBackground ?? undefined,
+      }),
+    };
+    if (forward) addon.findNext(query, options);
+    else addon.findPrevious(query, options);
+  }
+
+  protected searchKey(event: KeyboardEvent): void {
+    event.stopPropagation(); // never to the PTY or the app shortcuts
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.closeSearch();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      this.find(!event.shiftKey);
+    }
   }
 
   /**
@@ -505,6 +612,7 @@ export class TerminalView implements OnDestroy {
       }
       this.session = session;
       this.streamEmulated = session.emulated;
+      this.screenOnly.set(!session.emulated);
       this.applyScrollback();
       for (const record of early.splice(0)) this.onRecord(session, record);
     } catch (err) {

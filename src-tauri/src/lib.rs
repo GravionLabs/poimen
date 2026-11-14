@@ -2384,7 +2384,7 @@ fn build_menu(
         file.append(&PredefinedMenuItem::quit(app, None)?)?;
     }
     menu.append(&file)?;
-    menu.append(&Submenu::with_items(
+    let edit = Submenu::with_items(
         app,
         "Edit",
         true,
@@ -2397,7 +2397,14 @@ fn build_menu(
             &PredefinedMenuItem::paste(app, None)?,
             &PredefinedMenuItem::select_all(app, None)?,
         ],
-    )?)?;
+    )?;
+    // Cmd chords reach the app through the menu on macOS; elsewhere the terminal view handles
+    // the key itself.
+    if cfg!(target_os = "macos") {
+        edit.append(&sep()?)?;
+        edit.append(&item("find", "Find in Terminal")?)?;
+    }
+    menu.append(&edit)?;
     menu.append(&Submenu::with_items(
         app,
         "View",
