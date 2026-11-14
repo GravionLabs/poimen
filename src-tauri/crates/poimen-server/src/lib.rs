@@ -2272,9 +2272,10 @@ fn running_host<'a>(
         .ok_or_else(|| (ErrorCode::Exited, format!("terminal {id} has exited")))
 }
 
-/// Input and resize belong to the controller. A connection attached to this terminal must be
-/// its controller; a connection that is not attached may send input, and may resize only while
-/// nobody controls.
+/// Input belongs to the controller. A connection attached to this terminal must be its
+/// controller to send it; a connection that is not attached may send input only while nobody
+/// controls. Resize also belongs to observers and to unattached connections while nobody
+/// controls, so the unfocused leaves of a split tab follow their containers.
 fn authorize(
     stream: &TermStream,
     ctx: Option<&Attachment>,
@@ -2283,8 +2284,9 @@ fn authorize(
 ) -> Result<(), (ErrorCode, String)> {
     let denied = |why: &str| Err((ErrorCode::NotController, why.to_string()));
     match ctx.filter(|a| a.terminal_id == terminal_id) {
+        Some(_) if resize && !stream.has_controller() => Ok(()),
         Some(a) if a.mode == AttachMode::Observe => {
-            denied("an observer can neither send input nor resize")
+            denied("an observer can neither send input nor resize a terminal with a controller")
         }
         Some(a) if !stream.is_controller(a.client_id) => denied("the control was taken over"),
         Some(_) => Ok(()),

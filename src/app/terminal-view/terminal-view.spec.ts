@@ -140,7 +140,7 @@ async function setup(wanted: "control" | "observe", target: Terminal = pane, emu
   const session = {
     open: true,
     emulated,
-    resize: vi.fn(),
+    resize: vi.fn(async () => undefined),
     close: vi.fn(),
     input: vi.fn(),
     scroll: vi.fn(),
@@ -536,7 +536,7 @@ describe("TerminalView input mode decision", () => {
         open: true,
         emulated: false,
         close: vi.fn(),
-        resize: vi.fn(),
+        resize: vi.fn(async () => undefined),
         input: vi.fn(),
         scroll: vi.fn(),
         mouse: vi.fn(),
@@ -1064,16 +1064,27 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
     expect(fake.calls).toEqual(["reset", "resize 90x20", "resize 120x40"]);
   });
 
-  it("does not reopen or resize an observer when its container resizes", async () => {
-    const { fixture, settings, session, open, sized } = await setup("observe", pane, true);
-    const before = sized.length;
+  it("sets the PTY size of an unfocused emulated observer when its container resizes", async () => {
+    const { fixture, settings, session, open } = await setup("observe", pane, true);
     fake.nextCols = 100;
     settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
     fixture.detectChanges();
     await fixture.whenStable();
     expect(open).toHaveBeenCalledTimes(1);
-    expect(session.resize).not.toHaveBeenCalled();
-    expect(sized).toHaveLength(before);
+    expect(session.resize).toHaveBeenCalledWith(100, 24);
+  });
+
+  it("renders at the controller's size when the server refuses an observer's resize", async () => {
+    const { fixture, settings, session, sized, send } = await setup("observe", pane, true);
+    await send(0, reset(90, 20));
+    session.resize.mockRejectedValueOnce(new Error("not_controller"));
+    fake.nextCols = 100;
+    settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(session.resize).toHaveBeenCalledWith(100, 24);
+    expect(fake.calls.at(-1)).toBe("resize 90x20");
+    expect(sized.at(-1)).toEqual({ cols: 90, rows: 20 });
   });
 
   it("gives a controller its own size back after the snapshot and tells the server", async () => {

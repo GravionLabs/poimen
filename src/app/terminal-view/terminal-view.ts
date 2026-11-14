@@ -128,6 +128,8 @@ export class TerminalView implements OnDestroy {
   private resizeObserver?: ResizeObserver;
   private resizeTimer?: ReturnType<typeof setTimeout>;
   private size = { cols: 0, rows: 0 };
+  /** The PTY size the server last reported (the controller's, for an observer). */
+  private ptySize = { cols: 0, rows: 0 };
   private destroyed = false;
   private framed = false;
   /** Grid of the last `terminal.frame`; herdr's pane may differ from xterm's during a resize. */
@@ -582,6 +584,7 @@ export class TerminalView implements OnDestroy {
     switch (record.type) {
       case "reset":
         this.framed = true;
+        this.ptySize = { cols: record.cols, rows: record.rows };
         if (this.reattaches > 0) {
           // Attached again after a lost connection.
           this.reattaches = 0;
@@ -608,10 +611,11 @@ export class TerminalView implements OnDestroy {
         this.writeBytes(record.data);
         return;
       case "resized":
+        this.ptySize = { cols: record.cols, rows: record.rows };
         if (!session.emulated) {
           this.frameGrid = { cols: record.cols, rows: record.rows };
         } else if (this.attempt !== "control") {
-          // An observer renders at the controller's size.
+          // An observer renders at the terminal's size, the controller's while one holds it.
           this.term?.resize(record.cols, record.rows);
         }
         return;
@@ -668,19 +672,34 @@ export class TerminalView implements OnDestroy {
   /** Refits, and when cols/rows changed tells the status bar and herdr (resize or reopen). */
   private applySize(): void {
     if (!this.term || !this.fit) return;
-    // An emulated observer renders at the controller's size and is clipped by its container.
-    if (this.session?.emulated && this.attempt !== "control") return;
     this.fit.fit();
     const { cols, rows } = this.term;
     if (cols === this.size.cols && rows === this.size.rows) return;
     this.size = { cols, rows };
     this.sized.emit(this.size);
-    if (!this.session?.open) return;
+    const session = this.session;
+    if (!session?.open) return;
     if (this.attempt === "control") {
-      this.session.resize(cols, rows);
+      void session.resize(cols, rows);
+    } else if (session.emulated) {
+      this.resizeObserved(session, cols, rows);
     } else {
       // Observers have a fixed viewport; reopen as an observer, never retrying control.
       void this.restartStream(false, "observe", true);
     }
+  }
+
+  /**
+   * An emulated observer sets its terminal's PTY size while no controller holds it, so an
+   * unfocused leaf of a split tab follows its container. A refusal means a controller holds the
+   * terminal: the leaf renders at the size the server last reported, the controller's.
+   */
+  private resizeObserved(session: TerminalSession, cols: number, rows: number): void {
+    session.resize(cols, rows).catch(() => {
+      if (this.session !== session || !session.open || this.ptySize.cols === 0) return;
+      this.term?.resize(this.ptySize.cols, this.ptySize.rows);
+      this.size = { ...this.ptySize };
+      this.sized.emit(this.size);
+    });
   }
 }
