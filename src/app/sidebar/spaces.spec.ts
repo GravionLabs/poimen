@@ -259,6 +259,41 @@ describe("renderRow", () => {
     });
   });
 
+  describe("base branch", () => {
+    const lines = [[{ token: "branch" }, { token: "dirty" }, { token: "sync" }]];
+    const ws = (rows: PaneRow[], showBase?: boolean) => {
+      const sp = space(rows);
+      return texts(renderRow("workspace", lines, sp, spaceContext(sp, showBase)));
+    };
+    const base = row({ dir: "/a/b/c", branch: "main", onBase: true, dirty: 2, ahead: 1 });
+
+    it("hides the branch on the base branch but keeps dirty and sync", () => {
+      expect(ws([base, base])).toEqual([["●2", "↑1"]]);
+    });
+
+    it("shows it again with showBaseBranch", () => {
+      expect(ws([base, base], true)).toEqual([["main", "●2", "↑1"]]);
+    });
+
+    it("shows other branches, a detached HEAD stays empty and a worktree keeps its prefix", () => {
+      const feat = row({ dir: "/a/b/c", branch: "feat/x", onBase: false });
+      expect(ws([feat, feat])).toEqual([["feat/x"]]);
+      const wt = row({ dir: "/a/b/c", branch: "feat/x", worktree: true });
+      expect(ws([wt, wt])).toEqual([["wt feat/x"]]);
+      expect(ws([row({ dir: "/a/b/c" })])).toEqual([]);
+    });
+
+    it("leaves the pane rule unchanged", () => {
+      const feat = row({ dir: "/a/b/c", branch: "feat/x" });
+      const sp = space([base, feat]);
+      expect(texts(renderRow("terminal", lines, feat, spaceContext(sp)))).toEqual([["feat/x"]]);
+    });
+
+    it("keeps the branch in the space overview", () => {
+      expect(spaceMeta(spaceContext(space([base, base])))).toBe("main · …/b/c");
+    });
+  });
+
   describe("pr", () => {
     const pull = (over: Partial<BranchPull> = {}): BranchPull => ({
       number: 123,

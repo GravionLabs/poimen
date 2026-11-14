@@ -241,6 +241,8 @@ export interface Settings {
   sidebarRows: SidebarRows;
   /** `sidebar.layout`: the Spaces view as a tree or as two lists (Spaces, Agents). */
   sidebarLayout: SidebarLayout;
+  /** `sidebar.showBaseBranch`: show the branch token on the base branch too. */
+  sidebarShowBaseBranch: boolean;
   /** Roots of the explorer; a leading `~` is the home directory (resolved by the backend). */
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
@@ -318,6 +320,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shortcuts: DEFAULT_SHORTCUTS,
   sidebarRows: DEFAULT_SIDEBAR_ROWS,
   sidebarLayout: "tree",
+  sidebarShowBaseBranch: false,
   explorerRoots: ["~"],
   explorerShowHidden: false,
   backend: "poimen",
@@ -419,6 +422,7 @@ export function parseSettings(raw: unknown): Settings {
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
+    sidebarShowBaseBranch: r["sidebarShowBaseBranch"] === true,
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     backend: r["backend"] === "herdr" ? "herdr" : "poimen",

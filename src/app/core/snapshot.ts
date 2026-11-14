@@ -154,6 +154,8 @@ export interface RepoInfo {
   /** Commits ahead of / behind the upstream; null/absent without upstream. */
   ahead?: number | null;
   behind?: number | null;
+  /** The branch is the base branch of the repository (`git::base_ref`). */
+  on_base?: boolean;
 }
 
 /** The pull request of a branch as `branch_pulls` returns it (`BranchPull` of `github_branches.rs`). */
@@ -489,6 +491,8 @@ export interface PaneRow {
   agent?: string;
   branch?: string;
   worktree: boolean;
+  /** The branch is the repository's base branch. */
+  onBase?: boolean;
   dirty?: number;
   ahead?: number;
   behind?: number;
@@ -527,6 +531,7 @@ export function buildSpaces(
           agent: agentKind(pane),
           branch: repo?.branch ?? undefined,
           worktree: repo?.worktree ?? false,
+          onBase: repo?.on_base ?? false,
           dirty: repo?.dirty ?? undefined,
           ahead: repo?.ahead ?? undefined,
           behind: repo?.behind ?? undefined,

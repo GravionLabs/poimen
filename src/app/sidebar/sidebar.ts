@@ -61,8 +61,13 @@ export type SpaceData =
 const rowType = (row: PaneRow): RowType => (row.agent ? "agent" : "terminal");
 
 /** Texts of the shown tokens of a space and one of its panes: what the filter matches. */
-export function filterValues(space: SpaceNode, row: PaneRow, rows: SidebarRows): string[] {
-  const ctx = spaceContext(space);
+export function filterValues(
+  space: SpaceNode,
+  row: PaneRow,
+  rows: SidebarRows,
+  showBase = false,
+): string[] {
+  const ctx = spaceContext(space, showBase);
   const texts = (lines: Line[]) => lines.flatMap((l) => l.map((s) => s.text));
   return [
     ...texts(renderRow(rowType(row), rows[rowType(row)], row, ctx)),
@@ -77,9 +82,10 @@ const WORKSPACE_PREFIX = "workspace:";
 export function spaceNodes(
   spaces: SpaceNode[],
   rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
+  showBase = false,
 ): HxTreeNode<SpaceData>[] {
   return spaces.map((space) => {
-    const ctx = spaceContext(space);
+    const ctx = spaceContext(space, showBase);
     const status = aggregateStatus(space);
     return {
       key: WORKSPACE_PREFIX + space.workspace.space_id,
@@ -124,11 +130,12 @@ export function splitSections(
   spaces: SpaceNode[],
   selectedId: string | null,
   rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
+  showBase = false,
 ): SplitSections {
   const selected =
     spaces.find((s) => s.workspace.space_id === selectedId) ?? spaces[0] ?? undefined;
   const spaceList = spaces.map<HxTreeNode<SpaceData>>((space) => {
-    const ctx = spaceContext(space);
+    const ctx = spaceContext(space, showBase);
     const isSelected = space === selected;
     return {
       key: WORKSPACE_PREFIX + space.workspace.space_id,
@@ -161,7 +168,7 @@ export function splitSections(
     };
   });
   const agents = spaces.flatMap((space) => {
-    const ctx = spaceContext(space);
+    const ctx = spaceContext(space, showBase);
     return space.rows
       .filter((row) => row.agent)
       .map<HxTreeNode<SpaceData>>((row) => ({
@@ -609,6 +616,7 @@ export class Sidebar {
 
   private readonly settings = inject(SettingsStore);
   private readonly rows = computed(() => this.settings.settings().sidebarRows);
+  private readonly showBase = computed(() => this.settings.settings().sidebarShowBaseBranch);
 
   protected readonly ui = inject(UiState);
   protected readonly layout = computed(() => this.settings.settings().sidebarLayout);
@@ -622,15 +630,20 @@ export class Sidebar {
 
   private readonly filtered = computed(() => {
     const rows = this.rows();
+    const showBase = this.showBase();
     const spaces = this.store.spaces();
     const bySpace = new Map(spaces.flatMap((s) => s.rows.map((r) => [r, s] as const)));
-    return filterSpaces(spaces, this.query(), (row) => filterValues(bySpace.get(row)!, row, rows));
+    return filterSpaces(spaces, this.query(), (row) =>
+      filterValues(bySpace.get(row)!, row, rows, showBase),
+    );
   });
 
-  protected readonly nodes = computed(() => spaceNodes(this.filtered(), this.rows()));
+  protected readonly nodes = computed(() =>
+    spaceNodes(this.filtered(), this.rows(), this.showBase()),
+  );
 
   protected readonly split = computed(() =>
-    splitSections(this.filtered(), this.ui.splitWorkspace(), this.rows()),
+    splitSections(this.filtered(), this.ui.splitWorkspace(), this.rows(), this.showBase()),
   );
 
   protected data(node: HxTreeNode): SpaceData {

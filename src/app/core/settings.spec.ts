@@ -125,6 +125,7 @@ describe("parseSettings", () => {
       shortcuts: DEFAULT_SETTINGS.shortcuts,
       sidebarRows: DEFAULT_SETTINGS.sidebarRows,
       sidebarLayout: "tree",
+      sidebarShowBaseBranch: false,
       explorerRoots: ["~"],
       explorerShowHidden: false,
       backend: "poimen",

@@ -4,8 +4,8 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { SpaceNode } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { SpaceNode } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UI_STORAGE } from "../core/ui-state";
@@ -27,14 +27,21 @@ const space: SpaceNode = {
   ],
 };
 
-async function render(workspace: SidebarRows["workspace"]): Promise<HTMLElement> {
+async function render(
+  workspace: SidebarRows["workspace"],
+  opts: { onBase?: boolean; showBase?: boolean } = {},
+): Promise<HTMLElement> {
+  const node: SpaceNode = {
+    ...space,
+    rows: space.rows.map((r) => ({ ...r, onBase: opts.onBase ?? false })),
+  };
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: {
-          spaces: signal([space]),
+          spaces: signal([node]),
           disconnected: signal<string | null>(null),
           ensureBackend: vi.fn(),
         },
@@ -45,6 +52,7 @@ async function render(workspace: SidebarRows["workspace"]): Promise<HTMLElement>
           settings: signal({
             ...DEFAULT_SETTINGS,
             sidebarRows: { ...DEFAULT_SIDEBAR_ROWS, workspace },
+            sidebarShowBaseBranch: opts.showBase ?? false,
           }),
           writeError: signal(null),
         },
@@ -91,5 +99,17 @@ describe("Sidebar space lines", () => {
       [{ token: "branch" }],
     ]);
     expect(lineClasses(root)).toEqual([false, false]);
+  });
+
+  it("shows the branch token of a space off the base branch", async () => {
+    const root = await render(DEFAULT_SIDEBAR_ROWS.workspace);
+    expect(root.querySelector(".space-main")!.textContent).toContain("feat/x");
+  });
+
+  it("leaves the branch token out on the base branch unless showBaseBranch is set", async () => {
+    const hidden = await render(DEFAULT_SIDEBAR_ROWS.workspace, { onBase: true });
+    expect(hidden.querySelector(".space-main")!.textContent).not.toContain("feat/x");
+    const shown = await render(DEFAULT_SIDEBAR_ROWS.workspace, { onBase: true, showBase: true });
+    expect(shown.querySelector(".space-main")!.textContent).toContain("feat/x");
   });
 });

@@ -23,6 +23,12 @@ describe("sidebar layout setting", () => {
     expect(parseSettings({}).sidebarLayout).toBe("tree");
   });
 
+  it("parses showBaseBranch as a strict boolean, default false", () => {
+    expect(parseSettings({}).sidebarShowBaseBranch).toBe(false);
+    expect(parseSettings({ sidebarShowBaseBranch: true }).sidebarShowBaseBranch).toBe(true);
+    expect(parseSettings({ sidebarShowBaseBranch: "yes" }).sidebarShowBaseBranch).toBe(false);
+  });
+
   it("writes through set_sidebar_layout and applies it at once", async () => {
     const store = create();
     await store.setSidebarLayout("split");

@@ -60,6 +60,8 @@ export interface SpaceContext {
   dir?: string;
   branch?: string;
   worktree: boolean;
+  /** The shared branch is the base branch and `showBaseBranch` is off: the token stays empty. */
+  hideBranch?: boolean;
   /** Shared `dirty` and `sync` token texts (empty when clean/even or not shared). */
   dirty?: string;
   sync?: string;
@@ -107,7 +109,7 @@ export function prTooltip(pr: BranchPull): string {
     .join("\n");
 }
 
-export function spaceContext(space: SpaceNode): SpaceContext {
+export function spaceContext(space: SpaceNode, showBaseBranch = false): SpaceContext {
   const [first, ...rest] = space.rows;
   if (!first) return { worktree: false };
   const same = <K extends "dir" | "branch">(key: K) =>
@@ -119,6 +121,7 @@ export function spaceContext(space: SpaceNode): SpaceContext {
     dir: same("dir"),
     branch,
     worktree: branch !== undefined && first.worktree,
+    hideBranch: !showBaseBranch && branch !== undefined && first.onBase === true,
     dirty: sharedText((r) => dirtyText(r.dirty)),
     sync: sharedText((r) => syncText(r.ahead, r.behind)),
     pr: rest.every((r) => r.pr?.url === first.pr?.url) ? first.pr : undefined,
@@ -263,7 +266,9 @@ export function renderRow(
       case "notification":
         return pane ? pane.pane.agent_message : ctx.notification;
       case "branch":
-        if (!pane) return ctx.branch ? branchText(ctx.branch, ctx.worktree) : undefined;
+        if (!pane) {
+          return ctx.branch && !ctx.hideBranch ? branchText(ctx.branch, ctx.worktree) : undefined;
+        }
         return pane.branch && pane.branch !== ctx.branch
           ? branchText(pane.branch, pane.worktree)
           : undefined;
