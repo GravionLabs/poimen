@@ -220,6 +220,39 @@
                   }
                 </datalist>
               </section>
+              <section aria-label="Sounds">
+                <h2 [class.hit]="hit('Sounds')">Sounds</h2>
+                <p class="hint">
+                  Play a sound when an agent you are not looking at is blocked or done. The file is
+                  optional (up to 1 MiB); without one, a built-in tone plays.
+                </p>
+                @for (kind of soundKinds; track kind.id) {
+                  <div class="fields">
+                    <label class="check" [class.hit]="hit(kind.label)">
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        [checked]="soundOn(kind.id)"
+                        (change)="setSoundOn(kind.id, $event)"
+                      />
+                      {{ kind.label }}
+                    </label>
+                    <label class="field grow" [class.hit]="hit(kind.label)">
+                      {{ kind.label }} file
+                      <input
+                        type="text"
+                        placeholder="Built-in tone"
+                        [value]="soundFile(kind.id)"
+                        (change)="setSoundFile(kind.id, $event)"
+                      />
+                    </label>
+                    <button type="button" class="choice" (click)="testSound(kind.id)">Test</button>
+                  </div>
+                }
+                @if (soundProblem(); as problem) {
+                  <p class="error" role="alert">{{ problem }}</p>
+                }
+              </section>
             </section>
           }
           @case ("explorer") {

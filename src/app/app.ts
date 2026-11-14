@@ -37,6 +37,7 @@ import { Attention } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
+import { Sounds } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
 import { SpacesStore } from "./core/spaces-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
@@ -198,6 +199,7 @@ export class App {
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
+  private readonly sounds = inject(Sounds);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
   protected readonly groupItems = computed(() => {
@@ -305,6 +307,8 @@ export class App {
         const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
         this.center.record(observed, (id) => this.tabTitle(id), Date.now());
+        // Remote agents count like local ones, but nothing plays for a machine that is not connected.
+        this.sounds.notify(observed.filter((c) => this.machines.blockedReason(c.paneId) === null));
       });
     });
     effect(() => {
