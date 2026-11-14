@@ -118,7 +118,9 @@ pub fn install(settings_path: &Path, exe: &Path, channel: Channel) -> Result<(),
     )
 }
 
-/// Removes only our entries; same file shape as Claude Code's.
+/// Removes only our entries; same file shape as Claude Code's. Delegating to
+/// `claude::uninstall` is safe only because `settings_path` is Gemini's own file: the entries
+/// are found by our marker, never by the file's name or location.
 pub fn uninstall(settings_path: &Path, channel: Channel) -> Result<bool, String> {
     crate::claude::uninstall(settings_path, channel)
 }

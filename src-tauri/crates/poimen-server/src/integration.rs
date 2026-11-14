@@ -90,6 +90,28 @@ mod tests {
     }
 
     #[test]
+    fn the_table_matches_the_list_the_app_uses() {
+        let names: Vec<_> = KINDS.iter().map(|k| k.name).collect();
+        assert_eq!(names, poimen_protocol::HOOK_KINDS.to_vec());
+    }
+
+    #[test]
+    fn every_kind_runs_its_hook_silently_outside_a_poimen_terminal() {
+        let env = HookEnv {
+            terminal_id: None,
+            in_poimen: false,
+            foreign: false,
+            socket: PathBuf::from("/nonexistent/poimen/s.sock"),
+            log: None,
+        };
+        // `hook <kind>` and the `hook copilot <event>` form.
+        for k in &KINDS {
+            (k.run_hook)(None, &env);
+        }
+        (kind("copilot").unwrap().run_hook)(Some("sessionStart".into()), &env);
+    }
+
+    #[test]
     fn every_kind_installs_reports_and_removes_in_a_temp_dir() {
         let dir = std::env::temp_dir().join(format!("poimen-kinds-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

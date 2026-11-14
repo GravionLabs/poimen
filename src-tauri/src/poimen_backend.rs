@@ -633,7 +633,8 @@ impl Backend for PoimenBackend {
             .map_err(text)
     }
 
-    /// Runs the agent in the terminal and returns when its `SessionStart` report arrives (30 s).
+    /// Runs the agent in the terminal and returns when its `SessionStart` report arrives (30 s); a kind
+    /// without hooks returns once the command is typed (it shows no status).
     /// A name renames the terminal; without one the terminal keeps its name.
     fn agent_start(
         &self,
@@ -642,9 +643,15 @@ impl Backend for PoimenBackend {
         name: Option<&str>,
         args: &[String],
     ) -> Result<(), String> {
-        self.client
-            .start_agent(terminal_id, kind, args, agent::START_TIMEOUT)
-            .map_err(|e| e.to_string())?;
+        // Only a kind with hooks reports `SessionStart`; any other would time out although it runs.
+        if poimen_protocol::HOOK_KINDS.contains(&kind) {
+            self.client
+                .start_agent(terminal_id, kind, args, agent::START_TIMEOUT)
+                .map(drop)
+        } else {
+            self.client.start_unreported(terminal_id, kind, args)
+        }
+        .map_err(|e| e.to_string())?;
         match name.map(str::trim).filter(|n| !n.is_empty()) {
             Some(name) => self.agent_rename(terminal_id, Some(name)),
             None => Ok(()),

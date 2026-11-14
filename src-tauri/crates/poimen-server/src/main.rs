@@ -247,6 +247,7 @@ mod tests {
                 kind.name
             );
         }
+        assert!(HELP.contains("hook copilot <event>"));
         assert!(HELP.contains("hook claude"));
         assert!(HELP.contains("report tokens|clear|agent"));
     }

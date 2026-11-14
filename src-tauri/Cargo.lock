@@ -3236,6 +3236,7 @@ dependencies = [
  "notify",
  "poimen-client",
  "poimen-core",
+ "poimen-protocol",
  "serde",
  "serde_json",
  "sha2 0.11.1",

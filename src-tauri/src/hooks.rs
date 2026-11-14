@@ -11,7 +11,7 @@ use crate::gui_path;
 use crate::poimen_server::{self, Runner, SystemRunner};
 
 /// The agents `poimen-server integration` knows.
-pub const AGENTS: [&str; 3] = ["claude", "copilot", "gemini"];
+pub const AGENTS: [&str; 3] = poimen_protocol::HOOK_KINDS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]

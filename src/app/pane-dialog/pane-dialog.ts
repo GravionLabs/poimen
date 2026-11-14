@@ -7,7 +7,9 @@ import {
   signal,
 } from "@angular/core";
 import { type Terminal } from "../core/snapshot";
-import { agentKinds } from "../core/backend";
+import { startableKinds, statusNote } from "../core/backend";
+import { TauriBridge } from "../core/tauri";
+import { parseHarnesses } from "../core/settings";
 import { SpacesStore } from "../core/spaces-store";
 import { PaneActions, type PaneClosed } from "../core/pane-actions";
 
@@ -26,8 +28,20 @@ export class PaneDialog {
   readonly closed = output<PaneClosed>();
   private readonly store = inject(SpacesStore);
   /** Only the kinds that can report on the active backend (#410). */
-  protected readonly kinds = computed(() => agentKinds(this.store.backendKind()));
+  private readonly bridge = inject(TauriBridge);
+  private readonly harnessIds = signal<string[]>([]);
+  protected readonly kinds = computed(() =>
+    startableKinds(this.store.backendKind(), this.harnessIds()),
+  );
+  protected readonly note = (kind: string) => statusNote(kind, this.store.backendKind());
   private readonly typed = signal<string | null>(null);
+
+  constructor() {
+    this.bridge
+      .invoke<unknown>("get_harnesses")
+      .then((raw) => this.harnessIds.set(parseHarnesses(raw).map((h) => h.id)))
+      .catch(() => this.harnessIds.set([]));
+  }
 
   protected cwd(fallback: string): string {
     return this.typed() ?? fallback;

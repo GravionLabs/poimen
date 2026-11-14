@@ -156,8 +156,18 @@ export function agentSupport(kind: string): string {
   return a.transcripts ? "status, transcript" : "status";
 }
 
-/** The kinds the "Start agent" dialog offers on `backend`: herdr detects all of `AGENT_KINDS`,
- * the poimen backend only learns of the ones with hooks. */
-export function agentKinds(backend: BackendKind): readonly string[] {
-  return backend === "poimen" ? HOOK_AGENT_KINDS : AGENT_KINDS;
+/** The kinds the "Start agent" dialog offers on `backend`: herdr detects all of `AGENT_KINDS`;
+ * the poimen backend offers the hook kinds plus the other harnesses of the registry
+ * (`harnessIds`), which are started without waiting for a status and show none. */
+export function startableKinds(
+  backend: BackendKind,
+  harnessIds: readonly string[] = [],
+): readonly string[] {
+  if (backend !== "poimen") return AGENT_KINDS;
+  return [...HOOK_AGENT_KINDS, ...harnessIds.filter((id) => !HOOK_AGENT_KINDS.includes(id))];
+}
+
+/** Label suffix of an offered kind: a kind without hooks reports no status. */
+export function statusNote(kind: string, backend: BackendKind): string {
+  return backend === "poimen" && !HOOK_AGENT_KINDS.includes(kind) ? " (no status)" : "";
 }

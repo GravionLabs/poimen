@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentKinds,
+  startableKinds,
+  statusNote,
   agentName,
   agentSupport,
   hasTranscripts,
@@ -56,13 +57,29 @@ describe("version labels", () => {
   });
 });
 
-describe("agentKinds", () => {
+describe("startableKinds", () => {
   it("offers only the kinds that report through hooks on the poimen backend", () => {
-    expect(agentKinds("poimen")).toEqual(["claude", "copilot", "gemini"]);
+    expect(startableKinds("poimen")).toEqual(["claude", "copilot", "gemini"]);
+  });
+
+  it("adds the other harnesses of the registry on the poimen backend, once", () => {
+    expect(startableKinds("poimen", ["claude", "codex", "aider"])).toEqual([
+      "claude",
+      "copilot",
+      "gemini",
+      "codex",
+      "aider",
+    ]);
+  });
+
+  it("labels a kind without hooks as having no status", () => {
+    expect(statusNote("codex", "poimen")).toBe(" (no status)");
+    expect(statusNote("claude", "poimen")).toBe("");
+    expect(statusNote("codex", "herdr")).toBe("");
   });
 
   it("keeps herdr's full list on the herdr backend", () => {
-    const kinds = agentKinds("herdr");
+    const kinds = startableKinds("herdr");
     expect(kinds).toHaveLength(24);
     expect(kinds.slice(0, 5)).toEqual(["claude", "codex", "gemini", "opencode", "copilot"]);
     expect(kinds).toContain("muse");
