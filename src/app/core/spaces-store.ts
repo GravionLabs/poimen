@@ -176,6 +176,7 @@ export class SpacesStore {
       this.spaceOrder(),
       this.tabOrder(),
       this.sidebarSort(),
+      this.settings?.settings().sidebarGroupWorktrees ?? true,
     ),
   );
   /** The spaces of one machine as a tree (`machine` set on every space), last known when offline. */

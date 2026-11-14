@@ -13,8 +13,8 @@ use serde_json::Value;
 
 pub use poimen_core::settings::{
     SidebarRows, SidebarSort, config_path, parse_space_templates, parse_tasks,
-    parse_trusted_projects, resolve_sidebar_rows, resolve_sidebar_sort, revoke_project,
-    trust_project,
+    parse_trusted_projects, resolve_group_worktrees, resolve_sidebar_rows, resolve_sidebar_sort,
+    revoke_project, trust_project,
 };
 use poimen_core::settings::{
     find_value, remove_path_text, root_open, save_with, set_key_text, set_path_text,
@@ -153,6 +153,8 @@ pub struct Settings {
     pub sidebar_layout: String,
     /// `sidebar.sort`: `manual` (default) or `name`.
     pub sidebar_sort: SidebarSort,
+    /// `sidebar.groupWorktrees`: list linked worktrees below the space of their repository.
+    pub sidebar_group_worktrees: bool,
     /// Roots of the explorer (`explorer.roots`, a leading `~` is the home directory).
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
@@ -350,6 +352,7 @@ impl Default for Settings {
             sidebar_rows: SidebarRows::default(),
             sidebar_layout: "tree".into(),
             sidebar_sort: SidebarSort::Manual,
+            sidebar_group_worktrees: true,
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
             backend: "poimen".into(),
@@ -588,6 +591,7 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     if let Some(value) = root.get("sidebar") {
         s.sidebar_rows = resolve_sidebar_rows(value, &mut s.warnings);
         s.sidebar_sort = resolve_sidebar_sort(value, &mut s.warnings);
+        s.sidebar_group_worktrees = resolve_group_worktrees(value, &mut s.warnings);
         match value.get("layout") {
             None => {}
             Some(Value::String(l)) if matches!(l.as_str(), "tree" | "split") => {
@@ -1803,6 +1807,12 @@ mod tests {
         let s = rows(r#"{"sidebar":{"sort":"attention"}}"#);
         assert_eq!(s.sidebar_sort, SidebarSort::Manual);
         assert!(s.warnings[0].contains("sidebar.sort"));
+    }
+
+    #[test]
+    fn group_worktrees_reaches_the_settings() {
+        assert!(rows("{}").sidebar_group_worktrees);
+        assert!(!rows(r#"{"sidebar":{"groupWorktrees":false}}"#).sidebar_group_worktrees);
     }
 
     #[test]

@@ -210,6 +210,20 @@ pub fn resolve_sidebar_sort(sidebar: &Value, warnings: &mut Vec<String>) -> Side
     }
 }
 
+/// `sidebar.groupWorktrees` of the `sidebar` object; absent is `true`, a non-boolean warns and is `true`.
+pub fn resolve_group_worktrees(sidebar: &Value, warnings: &mut Vec<String>) -> bool {
+    match sidebar.get("groupWorktrees") {
+        None => true,
+        Some(Value::Bool(b)) => *b,
+        Some(other) => {
+            warnings.push(format!(
+                "sidebar.groupWorktrees {other} must be true or false; using true"
+            ));
+            true
+        }
+    }
+}
+
 /// Index after a `"..."` string that starts at `i`.
 pub fn skip_string(b: &[u8], mut i: usize) -> usize {
     i += 1;
@@ -840,6 +854,19 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_worktrees_defaults_to_true_and_warns_on_a_wrong_type() {
+        let group = |json: &str| {
+            let v: Value = serde_json::from_str(json).unwrap();
+            let mut w = Vec::new();
+            (resolve_group_worktrees(&v, &mut w), w)
+        };
+        assert_eq!(group("{}"), (true, vec![]));
+        assert_eq!(group(r#"{"groupWorktrees":false}"#), (false, vec![]));
+        let (g, w) = group(r#"{"groupWorktrees":"no"}"#);
+        assert!(g && w[0].contains("sidebar.groupWorktrees"));
+    }
 
     #[test]
     fn sidebar_sort_parses_and_an_unknown_value_warns_as_manual() {

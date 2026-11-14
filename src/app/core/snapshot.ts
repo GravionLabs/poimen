@@ -150,6 +150,8 @@ export interface Terminal {
 export interface RepoInfo {
   branch: string | null;
   worktree: boolean;
+  /** Canonical git common dir: the same for a repository's main checkout and its worktrees. */
+  common_dir?: string;
   /** Changed plus untracked files; null/absent when unknown. */
   dirty?: number | null;
   /** Commits ahead of / behind the upstream; null/absent without upstream. */
@@ -513,6 +515,73 @@ export interface SpaceNode {
   rows: PaneRow[];
   /** Branch and worktree of the space's own directory (`workspace.cwd`), when known. */
   repo?: RepoInfo;
+  /** `space_id` of the head when this space is a linked worktree listed below it. */
+  parent?: string;
+}
+
+/**
+ * Lists the spaces whose directory is a linked worktree directly after the space of the main
+ * checkout of the same repository (`common_dir`), keeping the given order inside heads and
+ * inside members. A group without a main checkout and a space without repository stay flat.
+ */
+export function groupWorktrees(nodes: readonly SpaceNode[]): SpaceNode[] {
+  const heads = new Map<string, SpaceNode>();
+  for (const n of nodes) {
+    const key = n.repo?.common_dir;
+    if (key && !n.repo!.worktree && !heads.has(key)) heads.set(key, n);
+  }
+  const members = new Map<string, SpaceNode[]>();
+  for (const n of nodes) {
+    const key = n.repo?.common_dir;
+    const head = key ? heads.get(key) : undefined;
+    if (!head || !n.repo!.worktree) continue;
+    members.set(head.workspace.space_id, [
+      ...(members.get(head.workspace.space_id) ?? []),
+      { ...n, parent: head.workspace.space_id },
+    ]);
+  }
+  const grouped = new Set([...members.values()].flat().map((m) => m.workspace.space_id));
+  return nodes
+    .filter((n) => !grouped.has(n.workspace.space_id))
+    .flatMap((n) => [n, ...(members.get(n.workspace.space_id) ?? [])]);
+}
+
+/**
+ * Whether dropping `sourceId` on `targetId` is allowed in the grouped list: a member only among
+ * its siblings (same head), a head or flat space on any head or flat space (not on a member).
+ */
+export function dropAllowed(
+  nodes: readonly SpaceNode[],
+  sourceId: string,
+  targetId: string,
+): boolean {
+  const source = nodes.find((n) => n.workspace.space_id === sourceId);
+  const target = nodes.find((n) => n.workspace.space_id === targetId);
+  if (!source || !target) return false;
+  return source.parent === target.parent;
+}
+
+/**
+ * The flat id order after dropping `sourceId` before or after `targetId` in the grouped list
+ * (a head moves with its members), or `null` when refused or nothing changes.
+ */
+export function reorderGrouped(
+  nodes: readonly SpaceNode[],
+  sourceId: string,
+  targetId: string,
+  after: boolean,
+): string[] | null {
+  if (!dropAllowed(nodes, sourceId, targetId)) return null;
+  const source = nodes.find((n) => n.workspace.space_id === sourceId)!;
+  const flat = nodes.map((n) => n.workspace.space_id);
+  if (source.parent) return reorderIds(flat, sourceId, targetId, after);
+  const blocks = new Map<string, string[]>();
+  for (const n of nodes) {
+    const head = n.parent ?? n.workspace.space_id;
+    blocks.set(head, [...(blocks.get(head) ?? []), n.workspace.space_id]);
+  }
+  const heads = reorderIds([...blocks.keys()], sourceId, targetId, after);
+  return heads ? heads.flatMap((h) => blocks.get(h)!) : null;
 }
 
 /** Workspaces with their pane rows (tab label as secondary text), enriched with repo info. */
@@ -523,8 +592,9 @@ export function buildSpaces(
   order: readonly string[] = [],
   tabOrder: TabOrder = {},
   sort: SidebarSort = "manual",
+  group = false,
 ): SpaceNode[] {
-  return buildTree(snapshot, order, tabOrder, sort).map(({ workspace, tabs }) => ({
+  const nodes = buildTree(snapshot, order, tabOrder, sort).map(({ workspace, tabs }) => ({
     workspace,
     ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
     rows: tabs.flatMap(({ tab, panes }) =>
@@ -548,6 +618,7 @@ export function buildSpaces(
       }),
     ),
   }));
+  return group ? groupWorktrees(nodes) : nodes;
 }
 
 /** Keeps rows matching `query` (name, agent, branch, tab, directory, text; every word must match). */
@@ -570,12 +641,20 @@ export function filterSpaces(
       .toLowerCase();
     return words.every((w) => hay.includes(w));
   };
-  return spaces
+  const kept = spaces
     .map((space) => ({
       ...space,
       rows: space.rows.filter((r) => matches(r, space.workspace.label)),
     }))
     .filter((space) => space.rows.length > 0);
+  // A matching worktree space keeps its head, shown without rows when the head itself has none.
+  const shown = new Set(kept.map((s) => s.workspace.space_id));
+  const needed = new Set(kept.flatMap((s) => (s.parent ? [s.parent] : [])));
+  return spaces
+    .filter((s) => shown.has(s.workspace.space_id) || needed.has(s.workspace.space_id))
+    .map(
+      (s) => kept.find((k) => k.workspace.space_id === s.workspace.space_id) ?? { ...s, rows: [] },
+    );
 }
 
 /** Where a split puts the new pane (`pane.split` direction). */

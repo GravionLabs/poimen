@@ -93,6 +93,7 @@
     <span
       class="space"
       [class.chosen]="d.selected"
+      [class.member]="d.member"
       [class.closing]="isClosing(d.workspace.space_id)"
       [attr.aria-busy]="isClosing(d.workspace.space_id) || null"
       [attr.draggable]="canDrag(d.workspace.space_id) ? 'true' : null"

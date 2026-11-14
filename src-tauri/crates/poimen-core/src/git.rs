@@ -14,6 +14,8 @@ pub struct RepoInfo {
     pub branch: Option<String>,
     /// True for a linked worktree (not the main checkout).
     pub worktree: bool,
+    /// Canonical common git dir, shared by the main checkout and its linked worktrees.
+    pub common_dir: String,
     /// Changed plus untracked files; `None` when `git status` failed or timed out.
     pub dirty: Option<u32>,
     /// Commits ahead of the upstream; `None` without upstream or when unknown.
@@ -121,6 +123,7 @@ pub fn parse_rev_parse(output: &str) -> Option<RepoInfo> {
     Some(RepoInfo {
         branch: (head != "HEAD").then(|| head.to_string()),
         worktree: git_dir != common,
+        common_dir: common.to_string(),
         dirty: None,
         ahead: None,
         behind: None,
@@ -141,6 +144,9 @@ pub fn info(dir: &str) -> Option<RepoInfo> {
         return None;
     }
     let mut info = parse_rev_parse(&String::from_utf8_lossy(&out.stdout))?;
+    if let Ok(real) = std::fs::canonicalize(&info.common_dir) {
+        info.common_dir = real.to_string_lossy().into_owned();
+    }
     apply_status(&mut info, status_with(&GitRunner, dir, STATUS_TIMEOUT));
     Some(info)
 }
@@ -282,6 +288,7 @@ mod tests {
             Some(RepoInfo {
                 branch: Some("main".into()),
                 worktree: false,
+                common_dir: "/r/.git".into(),
                 dirty: None,
                 ahead: None,
                 behind: None
@@ -297,6 +304,7 @@ mod tests {
             Some(RepoInfo {
                 branch: Some("feat/x".into()),
                 worktree: true,
+                common_dir: "/r/.git".into(),
                 dirty: None,
                 ahead: None,
                 behind: None
@@ -329,6 +337,39 @@ mod tests {
     #[test]
     fn no_roots_outside_a_repository() {
         assert!(repo_roots(&["/nonexistent-poimen-dir".to_owned()]).is_empty());
+    }
+
+    #[test]
+    fn a_linked_worktree_shares_the_common_dir_of_its_main_checkout() {
+        let tmp = std::env::temp_dir().join(format!("poimen-git-709-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let main = tmp.join("main");
+        let wt = tmp.join("wt");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            let ok = crate::gui_path::command("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "i"]);
+        git(
+            &main,
+            &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()],
+        );
+        let a = info(main.to_str().unwrap()).unwrap();
+        let b = info(wt.to_str().unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(!a.worktree && b.worktree);
+        assert_eq!(a.common_dir, b.common_dir);
+        assert!(a.common_dir.ends_with(".git"));
     }
 
     #[test]
