@@ -336,3 +336,41 @@ describe("pinned spaces (#710)", () => {
     expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).pinnedSpaces).toEqual(["w2"]);
   });
 });
+
+describe("recent spaces (#712)", () => {
+  it("stores the focus time and persists it", () => {
+    const storage = fakeStorage();
+    const ui = stateOn(storage);
+    ui.touchSpace("w1", 100);
+    ui.touchSpace("w2", 200);
+    ui.touchSpace("w1", 300);
+    expect(ui.recentSpaces()).toEqual({ w1: 300, w2: 200 });
+    expect(stateOn(storage).recentSpaces()).toEqual({ w1: 300, w2: 200 });
+  });
+
+  it("keeps the newest 200", () => {
+    const ui = stateOn(fakeStorage());
+    for (let i = 1; i <= 205; i++) ui.touchSpace(`w${i}`, i);
+    const ids = Object.keys(ui.recentSpaces());
+    expect(ids).toHaveLength(200);
+    expect(ids).toContain("w205");
+    expect(ids).not.toContain("w5");
+  });
+
+  it("drops invalid entries on load", () => {
+    const ui = stateOn(
+      fakeStorage(JSON.stringify({ recentSpaces: { w1: 5, w2: "x", "": 3, w3: -1 } })),
+    );
+    expect(ui.recentSpaces()).toEqual({ w1: 5 });
+    expect(stateOn(fakeStorage(JSON.stringify({ recentSpaces: [1] }))).recentSpaces()).toEqual({});
+  });
+
+  it("prunes closed spaces and saves only on a change", () => {
+    const storage = fakeStorage(JSON.stringify({ recentSpaces: { w1: 1, w2: 2 } }));
+    const ui = stateOn(storage);
+    ui.pruneRecentSpaces(["w1", "w2"]);
+    ui.pruneRecentSpaces(["w2"]);
+    expect(ui.recentSpaces()).toEqual({ w2: 2 });
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).recentSpaces).toEqual({ w2: 2 });
+  });
+});

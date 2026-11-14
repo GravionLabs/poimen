@@ -167,13 +167,16 @@ pub fn resolve_sidebar_rows(sidebar: &Value, warnings: &mut Vec<String>) -> Side
     out
 }
 
-/// How the spaces tree is ordered (`sidebar.sort`): the user's own order or alphabetical.
+/// How the spaces tree is ordered (`sidebar.sort`): the user's own order, alphabetical, by the
+/// most urgent agent or by the last focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SidebarSort {
     #[default]
     Manual,
     Name,
+    Attention,
+    Recent,
 }
 
 impl SidebarSort {
@@ -181,14 +184,18 @@ impl SidebarSort {
         match self {
             Self::Manual => "manual",
             Self::Name => "name",
+            Self::Attention => "attention",
+            Self::Recent => "recent",
         }
     }
 
-    /// `manual` or `name`; anything else is `None`.
+    /// `manual`, `name`, `attention` or `recent`; anything else is `None`.
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "manual" => Some(Self::Manual),
             "name" => Some(Self::Name),
+            "attention" => Some(Self::Attention),
+            "recent" => Some(Self::Recent),
             _ => None,
         }
     }
@@ -203,7 +210,7 @@ pub fn resolve_sidebar_sort(sidebar: &Value, warnings: &mut Vec<String>) -> Side
         }
         Some(other) => {
             warnings.push(format!(
-                "sidebar.sort {other} must be \"manual\" or \"name\"; using manual"
+                "sidebar.sort {other} must be \"manual\", \"name\", \"attention\" or \"recent\"; using manual"
             ));
             SidebarSort::Manual
         }
@@ -878,7 +885,9 @@ mod tests {
         assert_eq!(sort("{}"), (SidebarSort::Manual, vec![]));
         assert_eq!(sort(r#"{"sort":"name"}"#).0, SidebarSort::Name);
         assert_eq!(sort(r#"{"sort":"manual"}"#).0, SidebarSort::Manual);
-        let (s, w) = sort(r#"{"sort":"recent"}"#);
+        assert_eq!(sort(r#"{"sort":"attention"}"#).0, SidebarSort::Attention);
+        assert_eq!(sort(r#"{"sort":"recent"}"#).0, SidebarSort::Recent);
+        let (s, w) = sort(r#"{"sort":"newest"}"#);
         assert_eq!(s, SidebarSort::Manual);
         assert!(w[0].contains("sidebar.sort"));
         assert_eq!(sort(r#"{"sort":3}"#).0, SidebarSort::Manual);

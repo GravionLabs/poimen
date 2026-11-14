@@ -19,8 +19,10 @@ import {
 } from "../sidebar/spaces";
 
 export type SidebarLayout = "tree" | "split";
-/** `sidebar.sort`: the user's own space order, or alphabetical. */
-export type SidebarSort = "manual" | "name";
+/** `sidebar.sort`: the user's own space order, alphabetical, by attention or by last focus. */
+export type SidebarSort = "manual" | "name" | "attention" | "recent";
+
+const SIDEBAR_SORTS: readonly SidebarSort[] = ["manual", "name", "attention", "recent"];
 
 export type ThemeSetting = "light" | "dark" | "system";
 
@@ -453,7 +455,7 @@ export function parseSettings(raw: unknown): Settings {
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
-    sidebarSort: r["sidebarSort"] === "name" ? "name" : "manual",
+    sidebarSort: SIDEBAR_SORTS.find((v) => v === r["sidebarSort"]) ?? "manual",
     sidebarGroupWorktrees: r["sidebarGroupWorktrees"] !== false,
     sidebarShowBaseBranch: r["sidebarShowBaseBranch"] === true,
     explorerRoots: parseRoots(r["explorerRoots"]),

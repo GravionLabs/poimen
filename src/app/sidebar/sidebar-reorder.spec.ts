@@ -159,15 +159,23 @@ describe("Sidebar sort", () => {
     expect(items.map((e) => e.textContent?.trim())).toEqual([
       "Manual",
       "✓ By name",
+      "By attention",
+      "Most recent",
       "Sort alphabetically now",
     ]);
-    expect(items.map((e) => e.getAttribute("aria-checked"))).toEqual(["false", "true", null]);
+    expect(items.map((e) => e.getAttribute("aria-checked"))).toEqual([
+      "false",
+      "true",
+      "false",
+      "false",
+      null,
+    ]);
   });
 
   it("sorts alphabetically now from the menu and closes it", async () => {
     const { root, fire, sortNow } = await setup();
     await fire(root.querySelector<HTMLElement>(".sort-toggle")!, "click");
-    await fire(root.querySelectorAll<HTMLElement>(".sort-menu .menu-item")[2], "click");
+    await fire(root.querySelectorAll<HTMLElement>(".sort-menu .menu-item")[4], "click");
     expect(sortNow).toHaveBeenCalledOnce();
     expect(root.querySelector(".sort-menu")).toBeNull();
   });
@@ -177,6 +185,25 @@ describe("Sidebar sort", () => {
     await fire(root.querySelector<HTMLElement>(".sort-toggle")!, "click");
     await fire(root.querySelectorAll<HTMLElement>(".sort-menu .menu-item")[1], "click");
     expect(TestBed.inject(SettingsStore).setSidebarSort).toHaveBeenCalledWith("name");
+  });
+
+  it("writes attention and recent from the menu", async () => {
+    const { root, fire } = await setup();
+    await fire(root.querySelector<HTMLElement>(".sort-toggle")!, "click");
+    await fire(root.querySelectorAll<HTMLElement>(".sort-menu .menu-item")[2], "click");
+    await fire(root.querySelector<HTMLElement>(".sort-toggle")!, "click");
+    await fire(root.querySelectorAll<HTMLElement>(".sort-menu .menu-item")[3], "click");
+    const set = TestBed.inject(SettingsStore).setSidebarSort as unknown as {
+      mock: { calls: unknown[][] };
+    };
+    expect(set.mock.calls).toEqual([["attention"], ["recent"]]);
+  });
+
+  it("turns drag and drop off in attention and recent", async () => {
+    for (const mode of ["attention", "recent"] as const) {
+      const { rowOf } = await setup(mode);
+      expect(rowOf("w1").getAttribute("draggable")).toBeNull();
+    }
   });
 });
 

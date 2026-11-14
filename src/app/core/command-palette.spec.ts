@@ -82,6 +82,8 @@ describe("CommandPalette", () => {
       expect.arrayContaining([
         "sortSpacesManual",
         "sortSpacesByName",
+        "sortSpacesByAttention",
+        "sortSpacesRecent",
         "sortSpacesNow",
         "moveSpaceUp",
       ]),

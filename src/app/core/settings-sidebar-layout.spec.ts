@@ -54,7 +54,9 @@ describe("sidebar sort setting", () => {
 
   it("parses name and falls back to manual", () => {
     expect(parseSettings({ sidebarSort: "name" }).sidebarSort).toBe("name");
-    expect(parseSettings({ sidebarSort: "recent" }).sidebarSort).toBe("manual");
+    expect(parseSettings({ sidebarSort: "attention" }).sidebarSort).toBe("attention");
+    expect(parseSettings({ sidebarSort: "recent" }).sidebarSort).toBe("recent");
+    expect(parseSettings({ sidebarSort: "newest" }).sidebarSort).toBe("manual");
     expect(parseSettings({}).sidebarSort).toBe("manual");
   });
 

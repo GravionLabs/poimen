@@ -151,7 +151,7 @@ pub struct Settings {
     pub sidebar_rows: SidebarRows,
     /// `sidebar.layout`: `tree` (default) or `split`.
     pub sidebar_layout: String,
-    /// `sidebar.sort`: `manual` (default) or `name`.
+    /// `sidebar.sort`: `manual` (default), `name`, `attention` or `recent`.
     pub sidebar_sort: SidebarSort,
     /// `sidebar.groupWorktrees`: list linked worktrees below the space of their repository.
     pub sidebar_group_worktrees: bool,
@@ -908,7 +908,7 @@ pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, Strin
     set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
 }
 
-/// Returns `text` with `sidebar.sort` set to `manual` or `name`, touching nothing else.
+/// Returns `text` with `sidebar.sort` set to one of its four values, touching nothing else.
 pub fn set_sidebar_sort_text(text: &str, sort: &str) -> Result<String, String> {
     let Some(sort) = SidebarSort::parse(sort) else {
         return Err(format!("invalid sidebar sort {sort:?}"));
@@ -1814,7 +1814,11 @@ mod tests {
             rows(r#"{"sidebar":{"sort":"name"}}"#).sidebar_sort,
             SidebarSort::Name
         );
-        let s = rows(r#"{"sidebar":{"sort":"attention"}}"#);
+        assert_eq!(
+            rows(r#"{"sidebar":{"sort":"attention"}}"#).sidebar_sort,
+            SidebarSort::Attention
+        );
+        let s = rows(r#"{"sidebar":{"sort":"newest"}}"#);
         assert_eq!(s.sidebar_sort, SidebarSort::Manual);
         assert!(s.warnings[0].contains("sidebar.sort"));
     }
@@ -1833,7 +1837,12 @@ mod tests {
         assert!(out.contains("\"sort\": \"name\"") || out.contains("\"sort\":\"name\""));
         let again = set_sidebar_sort_text(&out, "manual").unwrap();
         assert!(again.contains("\"manual\"") && !again.contains("\"name\""));
-        assert!(set_sidebar_sort_text("{}", "recent").is_err());
+        assert!(set_sidebar_sort_text("{}", "newest").is_err());
+        assert!(
+            set_sidebar_sort_text("{}", "attention")
+                .unwrap()
+                .contains("\"attention\"")
+        );
         assert!(set_sidebar_sort_text("{\"sidebar\":3}", "name").is_err());
     }
 

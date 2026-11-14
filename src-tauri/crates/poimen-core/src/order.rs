@@ -1,6 +1,9 @@
-//! Ordering shared by the clients: the alphabetical order of `sidebar.sort: "name"`.
+//! Ordering shared by the clients: the alphabetical order of `sidebar.sort: "name"` and the
+//! attention rank of `"attention"`.
 
 use std::cmp::Ordering;
+
+use poimen_protocol::AgentStatus;
 
 /// Compares two texts the way the sidebar sorts by name: case-insensitive, runs of ASCII digits as
 /// numbers (`#9` before `#12`).
@@ -44,9 +47,33 @@ pub fn compare_space_names(a_name: &str, a_id: &str, b_name: &str, b_id: &str) -
     natural_cmp(a_name, b_name).then_with(|| natural_cmp(a_id, b_id))
 }
 
+/// Rank of a space for `sidebar.sort: attention`, from the status of its most urgent agent:
+/// blocked 0, done and unread 1, working 2, idle or done and read 3, no agent 4. `status` is `None`
+/// for a terminal without an agent; `unread` comes from the client's own attention marks.
+pub fn attention_rank(status: Option<AgentStatus>, unread: bool) -> u8 {
+    match status {
+        Some(AgentStatus::Blocked) => 0,
+        Some(AgentStatus::Done) if unread => 1,
+        Some(AgentStatus::Working) => 2,
+        Some(_) => 3, // idle, done and read, gone
+        None => 4,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attention_ranks_follow_the_urgency() {
+        let r = |s, u| attention_rank(s, u);
+        assert_eq!(r(Some(AgentStatus::Blocked), false), 0);
+        assert_eq!(r(Some(AgentStatus::Done), true), 1);
+        assert_eq!(r(Some(AgentStatus::Working), false), 2);
+        assert_eq!(r(Some(AgentStatus::Done), false), 3);
+        assert_eq!(r(Some(AgentStatus::Idle), false), 3);
+        assert_eq!(r(None, false), 4);
+    }
 
     fn sorted(names: &[&str]) -> Vec<String> {
         let mut v: Vec<String> = names.iter().map(|s| (*s).to_owned()).collect();

@@ -293,6 +293,17 @@ export class App {
       const pane = id ? this.pane(id) : undefined;
       this.projectEntries.setDir(pane ? paneDir(pane) : undefined);
     });
+    // The space of the active tab (a pane or the overview) is the one the user focused last (#712).
+    effect(() => {
+      const id = this.editor.activeId();
+      const spaceId = id === null ? null : (spaceOfTab(id) ?? this.pane(id)?.space_id ?? null);
+      if (!spaceId) return;
+      untracked(() => {
+        // Only this Mac's spaces: `recent` falls back to the name for a machine's.
+        if (this.store.snapshot().spaces.some((s) => s.space_id === spaceId))
+          this.ui.touchSpace(spaceId, Date.now());
+      });
+    });
     // Every view shows the hook status combined with the runs a pane started (#540).
     effect(() => this.store.setStatusOf(this.deliver.paneStatus()));
     // Instantiated for its effect: the dock badge follows `Attention.count`.
@@ -528,8 +539,14 @@ export class App {
       if (spaceId) this.spaceActions.shift(spaceId, id === "moveSpaceUp" ? -1 : 1);
       return;
     }
-    if (id === "sortSpacesManual" || id === "sortSpacesByName") {
-      void this.prefs.setSidebarSort(id === "sortSpacesManual" ? "manual" : "name");
+    const sorts = {
+      sortSpacesManual: "manual",
+      sortSpacesByName: "name",
+      sortSpacesByAttention: "attention",
+      sortSpacesRecent: "recent",
+    } as const;
+    if (id in sorts) {
+      void this.prefs.setSidebarSort(sorts[id as keyof typeof sorts]);
       return;
     }
     if (id === "sortSpacesNow") {

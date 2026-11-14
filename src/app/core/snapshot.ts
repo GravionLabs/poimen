@@ -289,6 +289,49 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "bas
 const byLabel = <T extends { label: string; number: number }>(a: T, b: T) =>
   collator.compare(a.label, b.label) || a.number - b.number;
 
+/** What `attention` and `recent` sort by (#712); `manual` and `name` need none of it. */
+export interface SortKeys {
+  /** Attention rank per `space_id` (`spaceAttentionRanks`); lower comes first. */
+  attention?: ReadonlyMap<string, number>;
+  /** When the user last focused each space (epoch ms). */
+  recent?: Readonly<Record<string, number>>;
+}
+
+/** Rank of a space without an agent, and of one the map does not know. */
+export const NO_AGENT_RANK = 4;
+
+/**
+ * Rank of one terminal for `sidebar.sort: attention`: blocked 0, done and unread 1, working 2,
+ * idle or done and read 3, no agent 4.
+ */
+export function attentionRank(terminal: Terminal, unread: ReadonlySet<string>): number {
+  switch (terminal.agent_status) {
+    case "blocked":
+      return 0;
+    case "done":
+      return unread.has(terminal.terminal_id) ? 1 : 3;
+    case "working":
+      return 2;
+    case "idle":
+      return 3;
+    default:
+      return agentKind(terminal) ? 3 : NO_AGENT_RANK;
+  }
+}
+
+/** The rank of each space: its most urgent terminal (`attentionRank`). */
+export function spaceAttentionRanks(
+  terminals: readonly Terminal[],
+  unread: ReadonlySet<string>,
+): Map<string, number> {
+  const ranks = new Map<string, number>();
+  for (const t of terminals) {
+    const rank = attentionRank(t, unread);
+    ranks.set(t.space_id, Math.min(ranks.get(t.space_id) ?? NO_AGENT_RANK, rank));
+  }
+  return ranks;
+}
+
 /**
  * The spaces in the user's order: ids of `order` first (in that order), then the others in backend
  * number order (new spaces). Ids of `order` that no longer exist are skipped. Pinned spaces
@@ -299,8 +342,9 @@ export function orderSpaces<T extends { space_id: string; label: string; number:
   order: readonly string[] = [],
   sort: SidebarSort = "manual",
   pinned: readonly string[] = [],
+  keys: SortKeys = {},
 ): T[] {
-  const ordered = orderUnpinned(spaces, order, sort);
+  const ordered = orderUnpinned(spaces, order, sort, keys);
   if (!pinned.length) return ordered;
   const pins = new Set(pinned);
   return [
@@ -313,8 +357,23 @@ function orderUnpinned<T extends { space_id: string; label: string; number: numb
   spaces: readonly T[],
   order: readonly string[],
   sort: SidebarSort,
+  keys: SortKeys,
 ): T[] {
   if (sort === "name") return [...spaces].sort(byLabel);
+  if (sort === "attention") {
+    const rank = (s: T) => keys.attention?.get(s.space_id) ?? NO_AGENT_RANK;
+    return [...spaces].sort((a, b) => rank(a) - rank(b) || byLabel(a, b));
+  }
+  if (sort === "recent") {
+    const at = (s: T) => keys.recent?.[s.space_id];
+    return [...spaces].sort((a, b) => {
+      const [x, y] = [at(a), at(b)];
+      if (x !== undefined && y !== undefined) return y - x || b.number - a.number;
+      if (x !== undefined) return -1;
+      if (y !== undefined) return 1;
+      return b.number - a.number;
+    });
+  }
   const rank = new Map(order.map((id, i) => [id, i]));
   const known = spaces
     .filter((s) => rank.has(s.space_id))
@@ -361,8 +420,9 @@ export function buildTree(
   tabOrder: TabOrder = {},
   sort: SidebarSort = "manual",
   pinned: readonly string[] = [],
+  keys: SortKeys = {},
 ): WorkspaceNode[] {
-  return orderSpaces(snapshot.spaces, order, sort, pinned).map((workspace) => ({
+  return orderSpaces(snapshot.spaces, order, sort, pinned, keys).map((workspace) => ({
     workspace,
     tabs: orderTabs(
       snapshot.tabs.filter((tab) => tab.space_id === workspace.space_id),
@@ -608,8 +668,9 @@ export function buildSpaces(
   sort: SidebarSort = "manual",
   group = false,
   pinned: readonly string[] = [],
+  keys: SortKeys = {},
 ): SpaceNode[] {
-  const nodes = buildTree(snapshot, order, tabOrder, sort, pinned).map(({ workspace, tabs }) => ({
+  const nodes = buildTree(snapshot, order, tabOrder, sort, pinned, keys).map(({ workspace, tabs }) => ({
     workspace,
     ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
     rows: tabs.flatMap(({ tab, panes }) =>
