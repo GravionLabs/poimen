@@ -4,7 +4,7 @@
 //!
 //! Tokens the TUI has no source for yet (`branch`, `dirty`, `sync`, `pr`) are empty and skipped.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use poimen_client::protocol::{AgentStatus, Space, Tab, Terminal};
 use poimen_client::{Client, ClientError};
@@ -16,6 +16,62 @@ pub struct Model {
     pub spaces: Vec<Space>,
     pub tabs: Vec<Tab>,
     pub terminals: Vec<Terminal>,
+    /// Repository of a space's `cwd` (by directory), for the worktree groups; empty when
+    /// grouping is off. A directory missing here is a flat space.
+    pub repos: HashMap<String, RepoRef>,
+}
+
+/// What the worktree groups need of a directory's repository.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoRef {
+    pub common_dir: String,
+    /// True for a linked worktree, false for the main checkout.
+    pub worktree: bool,
+}
+
+/// Repository info per directory, read once: a failed read (not a repository, or a directory
+/// that does not exist on this machine, as for a remote server) is kept as `None`.
+pub struct RepoCache {
+    known: HashMap<String, Option<RepoRef>>,
+    lookup: fn(&str) -> Option<RepoRef>,
+}
+
+fn git_lookup(dir: &str) -> Option<RepoRef> {
+    poimen_core::git::info(dir).map(|i| RepoRef {
+        common_dir: i.common_dir,
+        worktree: i.worktree,
+    })
+}
+
+impl Default for RepoCache {
+    fn default() -> Self {
+        Self::with_lookup(git_lookup)
+    }
+}
+
+impl RepoCache {
+    pub fn with_lookup(lookup: fn(&str) -> Option<RepoRef>) -> Self {
+        Self {
+            known: HashMap::new(),
+            lookup,
+        }
+    }
+
+    /// The repositories of `dirs` that resolve, reading each directory the first time only.
+    pub fn resolve<'a>(&mut self, dirs: impl Iterator<Item = &'a str>) -> HashMap<String, RepoRef> {
+        let mut out = HashMap::new();
+        for dir in dirs {
+            let lookup = self.lookup;
+            let found = self
+                .known
+                .entry(dir.to_owned())
+                .or_insert_with(|| lookup(dir));
+            if let Some(r) = found {
+                out.insert(dir.to_owned(), r.clone());
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -225,7 +281,48 @@ impl Model {
             spaces: layout.spaces,
             tabs: layout.tabs,
             terminals,
+            repos: HashMap::new(),
         })
+    }
+
+    /// [`Model::load`] plus the repositories of the spaces' directories for the worktree
+    /// groups (`sidebar.groupWorktrees`), read through `cache`.
+    pub fn load_grouped(client: &Client, cache: &mut RepoCache) -> Result<Self, ClientError> {
+        let mut model = Self::load(client)?;
+        model.repos = cache.resolve(model.spaces.iter().map(|s| s.cwd.as_str()));
+        Ok(model)
+    }
+
+    /// Puts the spaces of linked worktrees directly after the space of the main checkout of
+    /// their repository, keeping the given order inside heads and inside members. A group
+    /// without a main checkout and a space without repository stay flat. Returns each space
+    /// with whether it is a member.
+    fn grouped<'a>(&self, spaces: Vec<&'a Space>) -> Vec<(&'a Space, bool)> {
+        let repo = |s: &Space| self.repos.get(&s.cwd);
+        let mut heads: HashMap<&str, &str> = HashMap::new();
+        for s in &spaces {
+            if let Some(r) = repo(s).filter(|r| !r.worktree) {
+                heads.entry(r.common_dir.as_str()).or_insert(s.id.as_str());
+            }
+        }
+        let head_of = |s: &Space| {
+            repo(s)
+                .filter(|r| r.worktree)
+                .and_then(|r| heads.get(r.common_dir.as_str()).copied())
+        };
+        let mut out = Vec::new();
+        for s in &spaces {
+            if head_of(s).is_some() {
+                continue;
+            }
+            out.push((*s, false));
+            for m in &spaces {
+                if head_of(m) == Some(s.id.as_str()) {
+                    out.push((*m, true));
+                }
+            }
+        }
+        out
     }
 
     pub fn terminal(&self, id: &str) -> Option<&Terminal> {
@@ -328,7 +425,8 @@ impl Model {
             }
             SidebarSort::Manual => {}
         }
-        for space in spaces {
+        for (space, member) in self.grouped(spaces) {
+            let base = u16::from(member);
             let tabs = self.tabs_of(space);
             let status = tabs
                 .iter()
@@ -345,17 +443,17 @@ impl Model {
             rows.push(Row {
                 kind: RowKind::Space,
                 terminal_id: None,
-                depth: 0,
+                depth: base,
                 status,
                 lines: render(&workspace, &subject, home),
             });
             for (tab, terms) in tabs {
-                let mut depth = 1;
+                let mut depth = base + 1;
                 if let (Some(tab), true) = (tab, terms.len() > 1) {
                     rows.push(Row {
                         kind: RowKind::Tab,
                         terminal_id: None,
-                        depth: 1,
+                        depth: base + 1,
                         status: None,
                         lines: vec![vec![Segment {
                             kind: SegmentKind::Name,
@@ -364,7 +462,7 @@ impl Model {
                             dim: true,
                         }]],
                     });
-                    depth = 2;
+                    depth = base + 2;
                 }
                 for t in terms {
                     let status = terminal_status(t);
@@ -593,6 +691,7 @@ mod tests {
                 ),
             ],
             terminals: vec![term("t1", "s1", "shell", "/home/u/work"), t2, t3],
+            repos: HashMap::new(),
         }
     }
 
@@ -667,6 +766,143 @@ mod tests {
         assert_eq!(texts(&rows[1]), ["shell"]);
         assert_eq!(texts(&rows[3]), ["▲ claude", "needs approval"]);
         assert_eq!(texts(&rows[4]), ["logs $1.20 pair"]);
+    }
+
+    fn repo_space(id: &str, name: &str, cwd: &str) -> Space {
+        Space {
+            id: id.into(),
+            name: name.into(),
+            cwd: cwd.into(),
+            tabs: vec![],
+            active_tab: None,
+        }
+    }
+
+    fn repo_ref(common: &str, worktree: bool) -> RepoRef {
+        RepoRef {
+            common_dir: common.into(),
+            worktree,
+        }
+    }
+
+    /// Spaces in server order: a worktree of repo A, a flat one, the main of A, a worktree of B
+    /// (no main), another worktree of A, and one more flat.
+    fn grouped_model() -> Model {
+        let mut m = Model {
+            spaces: vec![
+                repo_space("s1", "a-fix", "/w/a-fix"),
+                repo_space("s2", "notes", "/w/notes"),
+                repo_space("s3", "a", "/w/a"),
+                repo_space("s4", "b-fix", "/w/b-fix"),
+                repo_space("s5", "a-feat", "/w/a-feat"),
+            ],
+            ..Model::default()
+        };
+        m.repos.insert("/w/a-fix".into(), repo_ref("/a/.git", true));
+        m.repos.insert("/w/a".into(), repo_ref("/a/.git", false));
+        m.repos.insert("/w/b-fix".into(), repo_ref("/b/.git", true));
+        m.repos
+            .insert("/w/a-feat".into(), repo_ref("/a/.git", true));
+        m
+    }
+
+    fn space_rows(m: &Model, sort: SidebarSort) -> Vec<(String, u16)> {
+        m.rows(&SidebarRows::default(), sort, None)
+            .iter()
+            .filter(|r| r.kind == RowKind::Space)
+            .map(|r| (r.lines[0][1].text.clone(), r.depth))
+            .collect()
+    }
+
+    fn named(rows: &[(&str, u16)]) -> Vec<(String, u16)> {
+        rows.iter().map(|(n, d)| (n.to_string(), *d)).collect()
+    }
+
+    #[test]
+    fn worktree_spaces_follow_their_head_indented_in_manual_order() {
+        assert_eq!(
+            space_rows(&grouped_model(), SidebarSort::Manual),
+            named(&[
+                ("notes", 0),
+                ("a", 0),
+                ("a-fix", 1),
+                ("a-feat", 1),
+                ("b-fix", 0),
+            ])
+        );
+    }
+
+    #[test]
+    fn members_are_ordered_inside_their_head_by_the_sort_mode() {
+        assert_eq!(
+            space_rows(&grouped_model(), SidebarSort::Name),
+            named(&[
+                ("a", 0),
+                ("a-feat", 1),
+                ("a-fix", 1),
+                ("b-fix", 0),
+                ("notes", 0),
+            ])
+        );
+    }
+
+    #[test]
+    fn without_repository_info_every_space_stays_flat() {
+        let mut m = grouped_model();
+        m.repos.clear();
+        let rows = space_rows(&m, SidebarSort::Manual);
+        assert!(rows.iter().all(|(_, d)| *d == 0));
+        assert_eq!(rows[0].0, "a-fix");
+    }
+
+    #[test]
+    fn tabs_and_terminals_of_a_member_sit_one_level_deeper() {
+        let mut m = grouped_model();
+        m.spaces[0].tabs = vec!["ta".into()];
+        m.tabs = vec![tab("ta", "s1", "ta", Node::terminal("x1"))];
+        m.terminals = vec![term("x1", "s1", "sh", "/w/a-fix")];
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        let t = rows.iter().find(|r| r.terminal_id.is_some()).unwrap();
+        assert_eq!(t.depth, 2);
+    }
+
+    #[test]
+    fn step_follows_the_grouped_order() {
+        let mut m = grouped_model();
+        for (i, s) in ["s1", "s2", "s3"].iter().enumerate() {
+            let id = format!("x{i}");
+            let space = m.spaces.iter_mut().find(|sp| sp.id == *s).unwrap();
+            space.tabs = vec![format!("t{i}")];
+            m.tabs.push(tab(
+                &format!("t{i}"),
+                s,
+                &format!("t{i}"),
+                Node::terminal(&id),
+            ));
+            m.terminals.push(term(&id, s, "sh", "/x"));
+        }
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        // Shown order: notes (x1), a (x2), a-fix (x0).
+        assert_eq!(step(&rows, Some("x1"), 1, None).as_deref(), Some("x2"));
+        assert_eq!(step(&rows, Some("x2"), 1, None).as_deref(), Some("x0"));
+    }
+
+    #[test]
+    fn the_cache_reads_a_directory_once_and_keeps_a_failure_flat() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        fn lookup(dir: &str) -> Option<RepoRef> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            (dir == "/w/a").then(|| repo_ref("/a/.git", false))
+        }
+        let mut cache = RepoCache::with_lookup(lookup);
+        let dirs = ["/w/a", "/remote/only"];
+        let first = cache.resolve(dirs.iter().copied());
+        let second = cache.resolve(dirs.iter().copied());
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 1);
+        assert!(first.contains_key("/w/a"));
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2);
     }
 
     #[test]

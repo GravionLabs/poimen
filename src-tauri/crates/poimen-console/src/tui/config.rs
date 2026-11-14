@@ -7,7 +7,9 @@ use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use poimen_core::schemes::Scheme;
-use poimen_core::settings::{SidebarRows, SidebarSort, resolve_sidebar_rows, resolve_sidebar_sort};
+use poimen_core::settings::{
+    SidebarRows, SidebarSort, resolve_group_worktrees, resolve_sidebar_rows, resolve_sidebar_sort,
+};
 
 use serde_json::Value;
 
@@ -301,7 +303,7 @@ impl Keys {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub prefix: KeySpec,
     pub keys: Keys,
@@ -309,9 +311,25 @@ pub struct Config {
     pub rows: SidebarRows,
     /// `sidebar.sort`; `name` orders the spaces alphabetically, `manual` keeps the server order.
     pub sort: SidebarSort,
+    /// `sidebar.groupWorktrees` (default true): spaces of linked worktrees below their repository.
+    pub group_worktrees: bool,
     /// The user scheme `colorSchema` names; `None` uses the colors of the local terminal.
     pub scheme: Option<Scheme>,
     pub warnings: Vec<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            prefix: KeySpec::default(),
+            keys: Keys::default(),
+            rows: SidebarRows::default(),
+            sort: SidebarSort::default(),
+            group_worktrees: true,
+            scheme: None,
+            warnings: Vec::new(),
+        }
+    }
 }
 
 impl Default for KeySpec {
@@ -329,6 +347,7 @@ pub fn parse(root: &Value, schemes: &[Scheme]) -> Config {
     if let Some(sidebar) = root.get("sidebar") {
         c.rows = resolve_sidebar_rows(sidebar, &mut c.warnings);
         c.sort = resolve_sidebar_sort(sidebar, &mut c.warnings);
+        c.group_worktrees = resolve_group_worktrees(sidebar, &mut c.warnings);
     }
     if let Some(name) = scheme_name(root) {
         c.scheme = schemes.iter().find(|s| s.name == name).cloned();
@@ -643,6 +662,15 @@ mod tests {
         let lines = c.rows.terminal.unwrap();
         assert_eq!(lines[0][1].token, "$cost");
         assert!(c.rows.workspace.is_none());
+    }
+
+    #[test]
+    fn group_worktrees_defaults_on_and_the_setting_turns_it_off() {
+        assert!(parse(&json!({}), &[]).group_worktrees);
+        let c = parse(&json!({"sidebar": {"groupWorktrees": false}}), &[]);
+        assert!(!c.group_worktrees);
+        let c = parse(&json!({"sidebar": {"groupWorktrees": "no"}}), &[]);
+        assert!(c.group_worktrees && c.warnings[0].contains("groupWorktrees"));
     }
 
     #[test]
