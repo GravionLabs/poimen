@@ -114,6 +114,7 @@
 <app-task-dialog />
 <app-agent-action-dialog />
 <app-shortcuts-dialog />
+<app-jump-palette (chosen)="jumpTo($event)" />
 <app-command-palette
   (commandChosen)="run($event)"
   (entryChosen)="runEntry($event)"

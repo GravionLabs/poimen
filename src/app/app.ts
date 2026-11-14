@@ -80,6 +80,8 @@ import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { SpaceRebuild } from "./core/space-rebuild";
 import { CommandPalette } from "./core/command-palette";
+import { JumpPalette, type JumpEntry } from "./core/jump-palette";
+import { JumpPaletteView } from "./jump-palette/jump-palette";
 import { ExplorerSelection } from "./core/explorer-selection";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
@@ -142,6 +144,7 @@ const ZOOM_STEP = 1;
     TaskDialog,
     AgentActionDialog,
     PaletteView,
+    JumpPaletteView,
     ShortcutsDialog,
   ],
   templateUrl: "./app.html",
@@ -166,6 +169,7 @@ export class App {
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
+  private readonly jump = inject(JumpPalette);
   protected readonly shortcutsOverview = inject(ShortcutsOverview);
   private readonly subagents = inject(Subagents);
   private readonly tasks = inject(TaskStarter);
@@ -600,6 +604,14 @@ export class App {
       case "commandPalette":
         this.palette.toggle();
         break;
+      case "jump":
+        {
+          const id = this.editor.activeId();
+          this.jump.toggle(
+            id === null ? null : (spaceOfTab(id) ?? this.pane(id)?.space_id ?? null),
+          );
+        }
+        break;
       case "showShortcuts":
         this.shortcutsOverview.open();
         break;
@@ -976,6 +988,14 @@ export class App {
   protected setControl(on: boolean): void {
     const id = this.activePaneId();
     if (id) this.editor.choose(id, on ? "control" : "observe");
+  }
+
+  /** A jump palette entry: focus its pane, else open the overview of its space. */
+  protected jumpTo(entry: JumpEntry): void {
+    if (entry.pane) {
+      this.open(entry.pane);
+      this.focusLeaf(entry.pane.tab_id, entry.pane.terminal_id);
+    } else this.editor.openSpace(entry.spaceId);
   }
 
   /** Opens the next blocked pane after the active one. */
