@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { HerdrStore } from "../core/herdr-store";
-import { paneDir } from "../core/herdr";
+import { SpacesStore } from "../core/spaces-store";
+import { paneDir } from "../core/snapshot";
 import { SettingsStore } from "../core/settings";
 import { SpaceActions } from "../core/space-actions";
 import { UiState } from "../core/ui-state";
@@ -284,7 +284,7 @@ export function keyRange(keys: readonly string[], from: string | null, to: strin
 @Injectable({ providedIn: "root" })
 export class GithubPulls {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly settings = inject(SettingsStore);
   private readonly spaces = inject(SpaceActions);
   private readonly ui = inject(UiState);

@@ -5,8 +5,8 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { EditorTabs } from "../core/editor-tabs";
-import type { Terminal } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { Terminal } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { Deliver } from "../deliver/deliver";
 import { TaskLog } from "../core/task-log";
 import { UiState } from "../core/ui-state";
@@ -71,7 +71,7 @@ describe("BottomPanel empty states", () => {
         },
         { provide: Deliver, useValue: { cards: signal([]), openUrl: vi.fn() } },
         { provide: TaskLog, useValue: { lines: signal([]) } },
-        { provide: HerdrStore, useValue: { panes: signal(panes) } },
+        { provide: SpacesStore, useValue: { panes: signal(panes) } },
       ],
     });
     const fixture = TestBed.createComponent(BottomPanel);

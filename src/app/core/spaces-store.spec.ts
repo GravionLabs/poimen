@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Terminal, Snapshot } from "./herdr";
-import { HerdrStore, REFRESH_DEBOUNCE_MS } from "./herdr-store";
+import type { Terminal, Snapshot } from "./snapshot";
+import { SpacesStore, REFRESH_DEBOUNCE_MS } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -33,16 +33,16 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe("HerdrStore", () => {
+describe("SpacesStore", () => {
   let injector: ReturnType<typeof Injector.create>;
-  let store: HerdrStore;
+  let store: SpacesStore;
 
   beforeEach(() => {
     vi.useFakeTimers();
     tauri.reset();
     tauri.answer("snapshot", () => snapshot(pane("w1:p1")));
-    injector = Injector.create({ providers: [TauriBridge, HerdrStore] });
-    store = injector.get(HerdrStore);
+    injector = Injector.create({ providers: [TauriBridge, SpacesStore] });
+    store = injector.get(SpacesStore);
   });
 
   afterEach(() => {
@@ -244,7 +244,7 @@ describe("HerdrStore", () => {
 
     expect(tauri.unlisten).toHaveBeenCalledWith("herdr");
     expect(tauri.calls("snapshot")).toHaveLength(0);
-    injector = Injector.create({ providers: [TauriBridge, HerdrStore] }); // afterEach destroys again
+    injector = Injector.create({ providers: [TauriBridge, SpacesStore] }); // afterEach destroys again
   });
 
   it("asks the backend to start herdr at start and exposes no failure when it runs", async () => {

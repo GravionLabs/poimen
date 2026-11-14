@@ -4,8 +4,8 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { Terminal, SpaceNode } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { Terminal, SpaceNode } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { SpaceActions } from "../core/space-actions";
@@ -34,7 +34,7 @@ async function setup(message: string | null = null, nodes: SpaceNode[] = spaces)
   TestBed.configureTestingModule({
     providers: [
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: {
           spaces: signal(nodes),
           disconnected: signal<string | null>(message),

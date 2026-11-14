@@ -23,9 +23,9 @@ import {
   type PaneRow,
   type SpaceNode,
   type Space,
-} from "../core/herdr";
+} from "../core/snapshot";
 import { Attention, workspaceUnread } from "../core/attention";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import {
   DEFAULT_SIDEBAR_ROWS,
   aggregateStatus,
@@ -424,7 +424,7 @@ export class Sidebar {
   }
 
   private readonly injector = inject(Injector);
-  protected readonly store = inject(HerdrStore);
+  protected readonly store = inject(SpacesStore);
   protected readonly spaceActions = inject(SpaceActions);
   private readonly attn = inject(Attention);
   private readonly bridge = inject(TauriBridge);

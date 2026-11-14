@@ -1,12 +1,12 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
 import { RemoteSpaces } from "./remote-spaces";
 import { SpaceActions } from "./space-actions";
 import { TaskStarter, remoteStepFailure, stepFailure, type TaskPlan } from "./task-start";
-import { qualifyId, type Snapshot } from "./herdr";
+import { qualifyId, type Snapshot } from "./snapshot";
 import { TauriBridge } from "./tauri";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { tauri } from "./tauri.mock";
@@ -63,7 +63,7 @@ describe("TaskStarter", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         Machines,
         { provide: RemoteSpaces, useFactory: () => fakeRemote },
         { provide: UI_STORAGE, useValue: null },
@@ -300,7 +300,7 @@ describe("TaskStarter", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         Machines,
         { provide: RemoteSpaces, useFactory: () => fakeRemote },
         { provide: UI_STORAGE, useValue: null },

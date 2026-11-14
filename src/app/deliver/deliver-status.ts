@@ -9,7 +9,7 @@
  * Everything here is pure; the Tauri side is `deliver.ts`.
  */
 
-import { qualifyId } from "../core/herdr";
+import { qualifyId } from "../core/snapshot";
 
 /** The legacy status file schema version this build understands. */
 export const SUPPORTED_SCHEMA = 1;

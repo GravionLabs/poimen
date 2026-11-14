@@ -2,8 +2,8 @@ import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts } from "./agent-prompt";
-import type { Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { ProjectEntries, type EntryOutcome } from "./project-entries";
 import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
@@ -48,7 +48,7 @@ describe("ProjectEntries.run", () => {
       providers: [
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         UiState,
         SpaceActions,
         AgentPrompts,
@@ -56,7 +56,7 @@ describe("ProjectEntries.run", () => {
         ProjectEntries,
       ],
     });
-    await injector.get(HerdrStore).refresh();
+    await injector.get(SpacesStore).refresh();
     entries = injector.get(ProjectEntries);
     spaces = injector.get(SpaceActions);
     picker = injector.get(AgentPicker);

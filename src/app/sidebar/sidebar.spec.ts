@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SpaceNode } from "../core/herdr";
+import type { SpaceNode } from "../core/snapshot";
 import {
   filterValues,
   isDoubleClick,

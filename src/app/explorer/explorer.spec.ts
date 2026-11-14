@@ -4,7 +4,7 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { PaneActions } from "../core/pane-actions";
 import { EditorTabs } from "../core/editor-tabs";
 import { ExplorerSelection } from "../core/explorer-selection";
@@ -117,7 +117,7 @@ async function setup(stored?: object, roots: string[] = ["/r"], spaceCwds: strin
       { provide: PaneActions, useValue: { openTerminalIn } },
       { provide: EditorTabs, useValue: { open } },
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: {
           snapshot: signal({ spaces: [], tabs: [], terminals: spaceCwds.map((cwd) => ({ cwd })) }),
         },

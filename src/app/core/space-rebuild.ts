@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from "@angular/core";
-import { emptySpaces, type Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import { emptySpaces, type Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { SpaceActions, type TrustDecision, type TrustRequest } from "./space-actions";
 import { TauriBridge } from "./tauri";
 
@@ -32,7 +32,7 @@ const UNTRUSTED = "the project file is not trusted yet";
 @Injectable({ providedIn: "root" })
 export class SpaceRebuild {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly spaces = inject(SpaceActions);
 
   private readonly _marks = signal<ReadonlyMap<string, RebuildMark>>(new Map());

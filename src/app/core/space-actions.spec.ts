@@ -1,8 +1,8 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
 import { SpaceActions, closeSpaceWarning, dirName, neighbourSpace } from "./space-actions";
-import type { Snapshot } from "./herdr";
+import type { Snapshot } from "./snapshot";
 import { TauriBridge } from "./tauri";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { tauri } from "./tauri.mock";
@@ -36,7 +36,7 @@ describe("SpaceActions", () => {
     injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         { provide: UI_STORAGE, useValue: null },
         UiState,
         SpaceActions,
@@ -206,13 +206,13 @@ describe("SpaceActions close", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         { provide: UI_STORAGE, useValue: null },
         UiState,
         SpaceActions,
       ],
     });
-    await injector.get(HerdrStore).refresh();
+    await injector.get(SpacesStore).refresh();
     tauri.answer("space_close", () => undefined);
     actions = injector.get(SpaceActions);
   });
@@ -246,13 +246,13 @@ describe("SpaceActions close", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         { provide: UI_STORAGE, useValue: null },
         UiState,
         SpaceActions,
       ],
     });
-    await injector.get(HerdrStore).refresh();
+    await injector.get(SpacesStore).refresh();
     const last = injector.get(SpaceActions);
     await last.requestClose("w1");
     expect(tauri.calls("space_close").at(-1)).toEqual({ workspaceId: "w1", focus: null });
@@ -308,13 +308,13 @@ describe("SpaceActions rename", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         { provide: UI_STORAGE, useValue: null },
         UiState,
         SpaceActions,
       ],
     });
-    await injector.get(HerdrStore).refresh();
+    await injector.get(SpacesStore).refresh();
     tauri.answer("space_rename", () => undefined);
     actions = injector.get(SpaceActions);
   });

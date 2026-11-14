@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { SpaceActions } from "./space-actions";
 import { SpaceRebuild, type RebuildOutcome } from "./space-rebuild";
 import { TauriBridge } from "./tauri";
@@ -25,7 +25,7 @@ const restarted = (): Snapshot => ({
 const REQUEST = { root: "/work/app", files: [], hash: "h1", commands: [] };
 
 describe("SpaceRebuild", () => {
-  let store: HerdrStore;
+  let store: SpacesStore;
   let actions: SpaceActions;
   let rebuild: SpaceRebuild;
   let snapshot: Snapshot;
@@ -40,14 +40,14 @@ describe("SpaceRebuild", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         { provide: UI_STORAGE, useValue: null },
         UiState,
         SpaceActions,
         SpaceRebuild,
       ],
     });
-    store = injector.get(HerdrStore);
+    store = injector.get(SpacesStore);
     actions = injector.get(SpaceActions);
     rebuild = injector.get(SpaceRebuild);
     rebuild.start();

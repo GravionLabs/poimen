@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { HerdrStore } from "../core/herdr-store";
-import { spaceRoot } from "../core/herdr";
+import { SpacesStore } from "../core/spaces-store";
+import { spaceRoot } from "../core/snapshot";
 import {
   parseAgentActions,
   parseHarnesses,
@@ -208,7 +208,7 @@ export function summaryText(label: string, summary: RunSummary): string {
 export class AgentActions {
   private readonly bridge = inject(TauriBridge);
   private readonly spaces = inject(SpaceActions);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly pulls = inject(GithubPulls);
   private readonly issues = inject(GithubIssues);
   private readonly ui = inject(UiState);

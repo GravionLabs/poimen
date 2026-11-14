@@ -11,8 +11,8 @@ import {
   workspaceDirs,
   type Terminal,
   type SplitDirection,
-} from "./herdr";
-import { HerdrStore } from "./herdr-store";
+} from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
 import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
@@ -41,7 +41,7 @@ export interface PaneClosed {
 @Injectable({ providedIn: "root" })
 export class PaneActions {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly spaces = inject(SpaceActions);
   private readonly machines = inject(Machines, { optional: true });
 

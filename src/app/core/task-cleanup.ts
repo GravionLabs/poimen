@@ -1,6 +1,6 @@
 import { Injectable, inject } from "@angular/core";
-import { splitId } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import { splitId } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
 import { RemoteSpaces } from "./remote-spaces";
 import { ResultDialog } from "./result-dialog";
@@ -115,7 +115,7 @@ const reasonOf = (err: unknown): string =>
 export class TaskCleanup {
   private readonly bridge = inject(TauriBridge);
   private readonly spaces = inject(SpaceActions);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly log = inject(TaskLog);
   private readonly ui = inject(UiState);
   private readonly dialog = inject(ResultDialog);

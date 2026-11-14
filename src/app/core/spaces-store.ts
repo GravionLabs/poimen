@@ -7,8 +7,6 @@ import {
   paneDir,
   nextWaiting,
   waitingCount,
-  type HerdrEvent,
-  type HerdrInfo,
   type Terminal,
   type AgentStatus,
   type RepoInfo,
@@ -16,15 +14,15 @@ import {
   type WireSnapshot,
   toSnapshot,
   type BranchPull,
-  type AppChannel,
   mergeSnapshots,
-} from "./herdr";
+} from "./snapshot";
+import { type BackendEvent, type BackendInfo, type AppChannel } from "./backend";
 import type { BackendKind } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 import { UiState } from "./ui-state";
 import { RemoteSpaces } from "./remote-spaces";
 
-/** Delay that collapses a burst of herdr events into one re-read. */
+/** Delay that collapses a burst of backend events into one re-read. */
 export const REFRESH_DEBOUNCE_MS = 80;
 
 /** Interval of the repo refresh (dirty state, ahead/behind) while the window is focused. */
@@ -56,12 +54,12 @@ const windowFocused = (): boolean => typeof document !== "undefined" && document
 const EMPTY: Snapshot = { spaces: [], tabs: [], terminals: [] };
 
 /**
- * The herdr state as poimen shows it. herdr owns the state: the snapshot is re-read from herdr,
- * events only invalidate it (see the herdr socket API docs). `pane.agent_status_changed` is applied
- * right away so the status dots react without waiting for the re-read.
+ * The spaces, tabs and terminals of the backend as poimen shows them. The backend owns the state:
+ * the snapshot is re-read from it, events only invalidate it. `pane.agent_status_changed` is
+ * applied right away so the status dots react without waiting for the re-read.
  */
 @Injectable({ providedIn: "root" })
-export class HerdrStore {
+export class SpacesStore {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState, { optional: true });
   private readonly remote = inject(RemoteSpaces, { optional: true });
@@ -73,7 +71,7 @@ export class HerdrStore {
   private readonly _pulls = signal<ReadonlyMap<string, BranchPull>>(new Map());
 
   private readonly _loaded = signal(false);
-  private readonly _info = signal<HerdrInfo | null>(null);
+  private readonly _info = signal<BackendInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
   private readonly _appChannel = signal<AppChannel>("stable");
   private readonly _backend = signal<BackendStatus | null>(null);
@@ -209,7 +207,7 @@ export class HerdrStore {
   /** Subscribes to herdr events and loads the first snapshot. Calling it again does nothing. */
   async start(): Promise<void> {
     if (this.unlisten) return;
-    this.unlisten = this.bridge.listen<HerdrEvent>("herdr", (event) => this.handle(event));
+    this.unlisten = this.bridge.listen<BackendEvent>("herdr", (event) => this.handle(event));
     await this.unlisten;
     void this.readAppVersion();
     void this.readAppChannel();
@@ -333,7 +331,7 @@ export class HerdrStore {
   private async readInfo(): Promise<void> {
     try {
       this._info.set(
-        (await this.bridge.invoke<HerdrInfo | null | undefined>("herdr_info")) ?? null,
+        (await this.bridge.invoke<BackendInfo | null | undefined>("herdr_info")) ?? null,
       );
     } catch {
       this._info.set(null);
@@ -404,7 +402,7 @@ export class HerdrStore {
     });
   }
 
-  private handle(event: HerdrEvent): void {
+  private handle(event: BackendEvent): void {
     switch (event.kind) {
       case "poimen.connected":
         this._watchLost.set(false);

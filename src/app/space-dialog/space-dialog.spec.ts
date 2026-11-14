@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { SpaceDialog } from "./space-dialog";
@@ -36,7 +36,7 @@ async function setup() {
   TestBed.configureTestingModule({
     providers: [
       { provide: TauriBridge, useValue: bridge },
-      { provide: HerdrStore, useValue: store },
+      { provide: SpacesStore, useValue: store },
     ],
   });
   TestBed.overrideComponent(SpaceDialog, {

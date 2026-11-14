@@ -10,11 +10,11 @@ import {
   paneTitle,
   withMachine,
   type Snapshot,
-} from "./herdr";
+} from "./snapshot";
 import { Attention } from "./attention";
 import { DockBadge } from "./dock-badge";
 import { NotificationCenter } from "./notification-center";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
 import { Machines, type MachineStatus } from "./machines";
 import { REMOTE_REFRESH_DEBOUNCE_MS, RemoteSpaces, remoteSnapshot } from "./remote-spaces";
 import { TauriBridge } from "./tauri";
@@ -122,7 +122,7 @@ describe("RemoteSpaces and the store", () => {
     tauri.answer("snapshot", () => snap("idle"));
     tauri.answer("machine_snapshot", () => snap("idle"));
     TestBed.resetTestingModule();
-    TestBed.configureTestingModule({ providers: [TauriBridge, HerdrStore] });
+    TestBed.configureTestingModule({ providers: [TauriBridge, SpacesStore] });
   });
 
   afterEach(() => {
@@ -132,7 +132,7 @@ describe("RemoteSpaces and the store", () => {
   async function started() {
     const machines = TestBed.inject(Machines);
     const remote = TestBed.inject(RemoteSpaces);
-    const store = TestBed.inject(HerdrStore);
+    const store = TestBed.inject(SpacesStore);
     await machines.start();
     await remote.start();
     TestBed.tick();

@@ -1,5 +1,5 @@
 import { Injectable, inject } from "@angular/core";
-import type { Mode, OpenedStream, StreamRecord } from "./herdr";
+import type { Mode, OpenedStream, StreamRecord } from "./backend";
 import { TauriBridge } from "./tauri";
 
 export interface OpenTerminal {

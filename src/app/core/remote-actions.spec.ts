@@ -1,8 +1,8 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPrompts } from "./agent-prompt";
-import type { Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { Machines, machineBlock, type MachineStatus } from "./machines";
 import { PaneActions } from "./pane-actions";
 import { SpaceActions } from "./space-actions";
@@ -91,7 +91,7 @@ describe("actions on remote spaces and terminals (#693)", () => {
         UiState,
         TauriBridge,
         Machines,
-        HerdrStore,
+        SpacesStore,
         SpaceActions,
         PaneActions,
         AgentPrompts,
@@ -101,12 +101,12 @@ describe("actions on remote spaces and terminals (#693)", () => {
     panes = injector.get(PaneActions);
     spaces = injector.get(SpaceActions);
     prompts = injector.get(AgentPrompts);
-    await injector.get(HerdrStore).refresh();
+    await injector.get(SpacesStore).refresh();
     // Only the store's own snapshot read is ignored; the remote ones are given to the actions.
-    vi.spyOn(injector.get(HerdrStore), "pane").mockImplementation((id: string) =>
+    vi.spyOn(injector.get(SpacesStore), "pane").mockImplementation((id: string) =>
       snapshot.terminals.find((t) => t.terminal_id === id),
     );
-    vi.spyOn(injector.get(HerdrStore), "snapshot").mockReturnValue(snapshot);
+    vi.spyOn(injector.get(SpacesStore), "snapshot").mockReturnValue(snapshot);
   });
 
   it("sends a split of a remote terminal with its qualified id, which the app routes to the machine", async () => {

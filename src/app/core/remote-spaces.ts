@@ -7,7 +7,7 @@ import {
   type AgentStatus,
   type Snapshot,
   type WireSnapshot,
-} from "./herdr";
+} from "./snapshot";
 import { Machines, type MachineStatus } from "./machines";
 import { TauriBridge } from "./tauri";
 

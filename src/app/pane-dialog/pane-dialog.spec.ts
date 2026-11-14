@@ -4,7 +4,7 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { PaneActions } from "../core/pane-actions";
 import type { BackendKind } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
@@ -22,7 +22,7 @@ async function setup(backend: BackendKind) {
   TestBed.configureTestingModule({
     providers: [
       { provide: TauriBridge, useValue: bridge },
-      { provide: HerdrStore, useValue: store },
+      { provide: SpacesStore, useValue: store },
     ],
   });
   TestBed.overrideComponent(PaneDialog, {

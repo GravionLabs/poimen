@@ -1,7 +1,7 @@
 import { Injectable, inject } from "@angular/core";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
-import { HerdrStore } from "./herdr-store";
-import { qualifyId } from "./herdr";
+import { SpacesStore } from "./spaces-store";
+import { qualifyId } from "./snapshot";
 import { RemoteSpaces } from "./remote-spaces";
 import { SpaceActions, type SpaceOutcome } from "./space-actions";
 import { TauriBridge } from "./tauri";
@@ -58,7 +58,7 @@ export class TaskStarter {
   private readonly bridge = inject(TauriBridge);
   private readonly picker = inject(TaskPicker);
   private readonly spaces = inject(SpaceActions);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly remote = inject(RemoteSpaces);
   private readonly ui = inject(UiState);
 

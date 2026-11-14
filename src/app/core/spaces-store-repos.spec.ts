@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Terminal, Snapshot } from "./herdr";
-import { HerdrStore, REPOS_REFRESH_MS } from "./herdr-store";
+import type { Terminal, Snapshot } from "./snapshot";
+import { SpacesStore, REPOS_REFRESH_MS } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -26,9 +26,9 @@ const snapshot = (...terminals: Terminal[]): Snapshot => ({
   terminals,
 });
 
-describe("HerdrStore repos", () => {
+describe("SpacesStore repos", () => {
   let injector: ReturnType<typeof Injector.create>;
-  let store: HerdrStore;
+  let store: SpacesStore;
 
   let focused = true;
 
@@ -38,8 +38,8 @@ describe("HerdrStore repos", () => {
     focused = true;
     vi.stubGlobal("window", new EventTarget());
     vi.stubGlobal("document", { hasFocus: () => focused });
-    injector = Injector.create({ providers: [TauriBridge, HerdrStore] });
-    store = injector.get(HerdrStore);
+    injector = Injector.create({ providers: [TauriBridge, SpacesStore] });
+    store = injector.get(SpacesStore);
   });
 
   afterEach(() => {

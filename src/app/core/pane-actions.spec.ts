@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Terminal, Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Terminal, Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { PaneActions } from "./pane-actions";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { SpaceActions } from "./space-actions";
@@ -27,7 +27,7 @@ const pane = (terminal_id: string, over: Partial<Terminal> = {}): Terminal => ({
 describe("PaneActions", () => {
   let current: Snapshot;
   let actions: PaneActions;
-  let store: HerdrStore;
+  let store: SpacesStore;
 
   beforeEach(async () => {
     tauri.reset();
@@ -42,12 +42,12 @@ describe("PaneActions", () => {
         { provide: UI_STORAGE, useValue: null },
         UiState,
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         SpaceActions,
         PaneActions,
       ],
     });
-    store = injector.get(HerdrStore);
+    store = injector.get(SpacesStore);
     actions = injector.get(PaneActions);
     await store.refresh();
   });
@@ -325,7 +325,7 @@ describe("PaneActions split tabs", () => {
         { provide: UI_STORAGE, useValue: null },
         UiState,
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         SpaceActions,
         PaneActions,
       ],

@@ -25,11 +25,10 @@ import {
   tabHeader,
   treeTerminals,
   withMachine,
-  windowTitle,
-  type Mode,
   type Tab,
   type Terminal,
-} from "./core/herdr";
+} from "./core/snapshot";
+import { windowTitle, type Mode } from "./core/backend";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
@@ -39,7 +38,7 @@ import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
 import { Notifications } from "./notifications/notifications";
-import { HerdrStore } from "./core/herdr-store";
+import { SpacesStore } from "./core/spaces-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
@@ -148,7 +147,7 @@ const ZOOM_STEP = 1;
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class App {
-  protected readonly store = inject(HerdrStore);
+  protected readonly store = inject(SpacesStore);
   protected readonly updater = inject(Updater);
   protected readonly serverRestart = inject(ServerRestart);
   private readonly bridge = inject(TauriBridge);

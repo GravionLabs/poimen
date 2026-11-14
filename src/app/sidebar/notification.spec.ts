@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyStatus, type PaneRow, type Snapshot, type SpaceNode } from "../core/herdr";
+import { applyStatus, type PaneRow, type Snapshot, type SpaceNode } from "../core/snapshot";
 import { renderRow, spaceContext } from "./spaces";
 
 const row = (id: string, message?: string, at?: number): PaneRow => ({

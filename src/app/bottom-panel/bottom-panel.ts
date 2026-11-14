@@ -11,9 +11,9 @@ import {
 } from "@angular/core";
 import { FlowView } from "./flow-view";
 import { EditorTabs, tabPaneId } from "../core/editor-tabs";
-import { paneDir, transcriptEmptyText, type Terminal } from "../core/herdr";
+import { paneDir, transcriptEmptyText, type Terminal } from "../core/snapshot";
 import { Deliver } from "../deliver/deliver";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { eventTime, runLabel, runsOfSpace, selectRun, toneStyle } from "./run-events";
 import { TaskLog } from "../core/task-log";
@@ -55,7 +55,7 @@ export class BottomPanel {
   protected readonly subagents = inject(Subagents);
   protected readonly editor = inject(EditorTabs);
   protected readonly taskLog = inject(TaskLog);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   protected readonly deliver = inject(Deliver);
   protected readonly minHeight = PANEL_MIN_HEIGHT;
   protected readonly maxHeight = PANEL_MAX_HEIGHT;

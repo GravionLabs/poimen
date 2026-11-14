@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { AgentPrompts, promptMessage, promptSucceeded } from "../core/agent-prompt";
-import { agentKind, paneDir, type Terminal } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import { agentKind, paneDir, type Terminal } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { TauriBridge } from "../core/tauri";
 import { UiState, type CommentSet, type LineComment } from "../core/ui-state";
 import { buildPrompt, withFile } from "./comment-prompt";
@@ -29,7 +29,7 @@ export function agentsOf(panes: Iterable<Terminal>, dir: string): Terminal[] {
 @Injectable()
 export class LineComments {
   private readonly ui = inject(UiState);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly bridge = inject(TauriBridge);
   private readonly prompts = inject(AgentPrompts);
 

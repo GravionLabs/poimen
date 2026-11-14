@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from "@angular/core";
 import { UiState } from "./ui-state";
-import type { Mode } from "./herdr";
+import type { Mode } from "./backend";
 import {
   groupIds,
   removeGroup,

@@ -6,10 +6,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ACTIVITY_VIEWS } from "../activity-bar/activity-bar";
 import { POIMEN_COMMANDS } from "../core/command-palette";
 import { DELIVER_TAB, EditorTabs, tabKind } from "../core/editor-tabs";
-import type { Terminal } from "../core/herdr";
+import type { Terminal } from "../core/snapshot";
 import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE } from "../core/ui-state";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { Deliver, loopPane, milestoneNumber } from "./deliver";
 import { DeliverView, linkLabel, prLabel, stepText } from "./deliver-view";
@@ -396,7 +396,7 @@ describe("helpers", () => {
       TestBed.resetTestingModule();
       return { deliver: TestBed.inject(Deliver) };
     })();
-    const store = TestBed.inject(HerdrStore);
+    const store = TestBed.inject(SpacesStore);
     vi.spyOn(store, "all").mockReturnValue({
       spaces: [],
       tabs: [],

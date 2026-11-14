@@ -6,8 +6,8 @@ import {
   pathSegments,
   reorderIds,
   type Snapshot,
-} from "./herdr";
-import { HerdrStore } from "./herdr-store";
+} from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
 import type { TemplateHint } from "./space-templates";
 import { TauriBridge } from "./tauri";
@@ -108,7 +108,7 @@ export function closeSpaceWarning(snapshot: Snapshot, workspaceId: string): stri
 @Injectable({ providedIn: "root" })
 export class SpaceActions {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly ui = inject(UiState);
   private readonly machines = inject(Machines, { optional: true });
 
