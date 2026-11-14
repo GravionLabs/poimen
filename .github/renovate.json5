@@ -6,7 +6,7 @@
   baseBranchPatterns: ['release/next'],
   // `chore(deps): ...` keeps dependency updates out of the release notes.
   // Issue titles start with their level (AGENTS.md): the dashboard is a PBI.
-  dependencyDashboard: { title: '[PBI] chore: Dependency Dashboard' },
+  dependencyDashboard: { enabled: true, title: '[PBI] chore: Dependency Dashboard' },
   semanticCommitType: 'chore',
   semanticCommitScope: 'deps',
   timezone: 'Europe/Zurich',
@@ -60,7 +60,8 @@
     },
     {
       // Workflows follow the major tag of the shared workflows on purpose: no digest pin, no major bump.
-      matchPackageNames: ['GravionLabs/ci/**'],
+      matchManagers: ['github-actions'],
+      matchPackageNames: ['GravionLabs/ci', 'GravionLabs/ci/**'],
       pinDigests: false,
       matchUpdateTypes: ['major'],
       enabled: false,
