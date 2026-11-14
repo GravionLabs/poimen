@@ -221,6 +221,8 @@ export interface SidebarMenuAction {
     | "close"
     | "close-space"
     | "rename-space"
+    | "pin-space"
+    | "unpin-space"
     | "start-task"
     | "cleanup-tasks"
     | "show-changes";
@@ -254,6 +256,8 @@ export function sidebarMenuItems(
   blocked: string | null = null,
   /** The row is an agent that is done or idle and not unread (#725). */
   markable = false,
+  /** Whether a local space is pinned (#710); `null` offers no pin entry (pane, remote space). */
+  pinned: boolean | null = null,
 ): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
@@ -269,6 +273,13 @@ export function sidebarMenuItems(
                   { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
                 ]
               : []),
+            ...(pinned === null
+              ? []
+              : [
+                  pinned
+                    ? { action: "unpin-space" as const, label: "Unpin space" }
+                    : { action: "pin-space" as const, label: "Pin space" },
+                ]),
             { action: "rename-space", label: "Rename space..." },
             { action: "close-space", label: "Close space" },
           ]
@@ -392,7 +403,15 @@ export class Sidebar {
         : undefined;
     const older = row !== undefined && olderHost(row) !== null;
     const markable = canMarkUnread(row, this.attn.unread());
-    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id), markable);
+    const local =
+      kind === "workspace" && this.store.snapshot().spaces.some((s) => s.space_id === id);
+    const pinned = local ? this.isPinned(id) : null;
+    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id), markable, pinned);
+  }
+
+  /** Whether the space row shows the pin mark (#710). */
+  protected isPinned(spaceId: string): boolean {
+    return this.store.pinnedSpaces?.().includes(spaceId) ?? false;
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {

@@ -23,6 +23,8 @@ export interface PoimenCommand {
     | "showSpaceOverview"
     | "closeSpace"
     | "renameSpace"
+    | "pinSpace"
+    | "unpinSpace"
     | "moveSpaceUp"
     | "moveSpaceDown"
     | "sortSpacesManual"
@@ -41,6 +43,8 @@ export interface PoimenCommand {
 export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "newTerminal", title: "New Terminal..." },
   { id: "renameSpace", title: "Rename Space..." },
+  { id: "pinSpace", title: "Pin Space" },
+  { id: "unpinSpace", title: "Unpin Space" },
   { id: "moveSpaceUp", title: "Move Space Up" },
   { id: "moveSpaceDown", title: "Move Space Down" },
   { id: "sortSpacesManual", title: "Sort Spaces: Manual" },
@@ -150,6 +154,8 @@ export class CommandPalette {
         c.id === "showSpaceOverview" ||
         c.id === "closeSpace" ||
         c.id === "renameSpace" ||
+        c.id === "pinSpace" ||
+        c.id === "unpinSpace" ||
         c.id === "moveSpaceUp" ||
         c.id === "moveSpaceDown" ||
         c.id === "sortSpacesManual" ||

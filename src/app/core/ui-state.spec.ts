@@ -306,3 +306,33 @@ describe("GitHub empty repositories", () => {
     expect(parseLayout(JSON.stringify({ githubShowEmpty: "yes" })).githubShowEmpty).toBeUndefined();
   });
 });
+
+describe("pinned spaces (#710)", () => {
+  it("pins, unpins and persists", () => {
+    const storage = fakeStorage();
+    const ui = stateOn(storage);
+    ui.setSpacePinned("w1", true);
+    ui.setSpacePinned("w1", true);
+    ui.setSpacePinned("w2", true);
+    expect(ui.pinnedSpaces()).toEqual(["w1", "w2"]);
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).pinnedSpaces).toEqual(["w1", "w2"]);
+    ui.setSpacePinned("w1", false);
+    expect(stateOn(storage).pinnedSpaces()).toEqual(["w2"]);
+  });
+
+  it("validates the stored ids on load", () => {
+    const ui = stateOn(fakeStorage(JSON.stringify({ pinnedSpaces: ["w1", 3, "", "w1", "w2"] })));
+    expect(ui.pinnedSpaces()).toEqual(["w1", "w2"]);
+    expect(stateOn(fakeStorage(JSON.stringify({ pinnedSpaces: "w1" }))).pinnedSpaces()).toEqual([]);
+  });
+
+  it("prunes the pins of closed spaces and saves only on a change", () => {
+    const storage = fakeStorage(JSON.stringify({ pinnedSpaces: ["w1", "w2"] }));
+    const ui = stateOn(storage);
+    ui.prunePinnedSpaces(["w1", "w2", "w3"]);
+    expect(storage.data.get(UI_STATE_KEY)).toContain("w2");
+    ui.prunePinnedSpaces(["w2"]);
+    expect(ui.pinnedSpaces()).toEqual(["w2"]);
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).pinnedSpaces).toEqual(["w2"]);
+  });
+});

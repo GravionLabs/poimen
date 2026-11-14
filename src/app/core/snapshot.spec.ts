@@ -5,6 +5,7 @@ import {
   dropAllowed,
   filterSpaces,
   groupWorktrees,
+  orderSpaces,
   reorderGrouped,
   applyStatus,
   buildTree,
@@ -781,5 +782,54 @@ describe("worktrees below the space of their repository", () => {
     expect(reorderGrouped(nodes, "w4", "w3", true)).toBeNull();
     expect(dropAllowed(nodes, "w2", "w1")).toBe(false);
     expect(dropAllowed(nodes, "w2", "w3")).toBe(true);
+  });
+});
+
+describe("pinned spaces (#710)", () => {
+  const sp = (n: number, label: string) => ({ space_id: `w${n}`, label, number: n });
+  const spaces = [sp(1, "delta"), sp(2, "alpha"), sp(3, "charlie"), sp(4, "bravo")];
+  const ids = (list: { space_id: string }[]) => list.map((s) => s.space_id);
+
+  it("puts pinned spaces first in manual mode, ordered by the manual order", () => {
+    expect(ids(orderSpaces(spaces, ["w4", "w3", "w2", "w1"], "manual", ["w1", "w3"]))).toEqual([
+      "w3",
+      "w1",
+      "w4",
+      "w2",
+    ]);
+  });
+
+  it("puts pinned spaces first in name mode, sorted by name among themselves", () => {
+    expect(ids(orderSpaces(spaces, [], "name", ["w1", "w3"]))).toEqual(["w3", "w1", "w2", "w4"]);
+  });
+
+  it("ignores pins of spaces that do not exist and changes nothing without pins", () => {
+    expect(ids(orderSpaces(spaces, [], "manual", ["gone"]))).toEqual(["w1", "w2", "w3", "w4"]);
+    expect(ids(orderSpaces(spaces, [], "name", []))).toEqual(["w2", "w4", "w3", "w1"]);
+  });
+
+  it("keeps a pinned head with its members and a pinned member first among its siblings", () => {
+    const snapshot: Snapshot = {
+      spaces: [
+        { ...sp(1, "wt-a"), agent_status: "idle", cwd: "/wt-a" },
+        { ...sp(2, "wt-b"), agent_status: "idle", cwd: "/wt-b" },
+        { ...sp(3, "main"), agent_status: "idle", cwd: "/r" },
+        { ...sp(4, "other"), agent_status: "idle", cwd: "/o" },
+      ],
+      tabs: [],
+      terminals: [],
+    };
+    const repo = (worktree: boolean) => ({ branch: "main", worktree, common_dir: "/r/.git" });
+    const repos = new Map([
+      ["/wt-a", repo(true)],
+      ["/wt-b", repo(true)],
+      ["/r", repo(false)],
+    ]);
+    const list = (pinned: string[]) =>
+      buildSpaces(snapshot, repos, new Map(), [], {}, "manual", true, pinned).map(
+        (n) => n.workspace.space_id,
+      );
+    expect(list(["w3"])).toEqual(["w3", "w1", "w2", "w4"]);
+    expect(list(["w2"])).toEqual(["w3", "w2", "w1", "w4"]);
   });
 });
