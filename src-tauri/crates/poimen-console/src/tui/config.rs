@@ -7,7 +7,7 @@ use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use poimen_core::schemes::Scheme;
-use poimen_core::settings::{SidebarRows, resolve_sidebar_rows};
+use poimen_core::settings::{SidebarRows, SidebarSort, resolve_sidebar_rows, resolve_sidebar_sort};
 
 use serde_json::Value;
 
@@ -307,6 +307,8 @@ pub struct Config {
     pub keys: Keys,
     /// `None` per row type keeps the default lines of that type.
     pub rows: SidebarRows,
+    /// `sidebar.sort`; `name` orders the spaces alphabetically, `manual` keeps the server order.
+    pub sort: SidebarSort,
     /// The user scheme `colorSchema` names; `None` uses the colors of the local terminal.
     pub scheme: Option<Scheme>,
     pub warnings: Vec<String>,
@@ -326,6 +328,7 @@ pub fn parse(root: &Value, schemes: &[Scheme]) -> Config {
     }
     if let Some(sidebar) = root.get("sidebar") {
         c.rows = resolve_sidebar_rows(sidebar, &mut c.warnings);
+        c.sort = resolve_sidebar_sort(sidebar, &mut c.warnings);
     }
     if let Some(name) = scheme_name(root) {
         c.scheme = schemes.iter().find(|s| s.name == name).cloned();
@@ -640,6 +643,16 @@ mod tests {
         let lines = c.rows.terminal.unwrap();
         assert_eq!(lines[0][1].token, "$cost");
         assert!(c.rows.workspace.is_none());
+    }
+
+    #[test]
+    fn sidebar_sort_comes_from_the_shared_parser() {
+        assert_eq!(parse(&json!({}), &[]).sort, SidebarSort::Manual);
+        let c = parse(&json!({"sidebar": {"sort": "name"}}), &[]);
+        assert_eq!(c.sort, SidebarSort::Name);
+        let c = parse(&json!({"sidebar": {"sort": "recent"}}), &[]);
+        assert_eq!(c.sort, SidebarSort::Manual);
+        assert_eq!(c.warnings.len(), 1);
     }
 
     #[test]

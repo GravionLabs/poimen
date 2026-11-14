@@ -206,7 +206,9 @@ impl App {
 
     fn refresh(&mut self, client: &Client) -> Result<(), Error> {
         self.model = Model::load(client)?;
-        self.rows = self.model.rows(&self.config.rows, self.home.as_deref());
+        self.rows = self
+            .model
+            .rows(&self.config.rows, self.config.sort, self.home.as_deref());
         Ok(())
     }
 
