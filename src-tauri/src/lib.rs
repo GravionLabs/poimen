@@ -1844,6 +1844,21 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
+/// Writes only `sounds.<kind>` (`blocked` or `done`: `false`, `true` or a file path).
+#[tauri::command]
+fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_sound(&home, &kind, &value)
+}
+
+/// The bytes of the audio file configured for `sounds.<kind>` (#724). The path comes from the
+/// settings, never from the caller; a regular file up to 1 MiB.
+#[tauri::command]
+fn sound_file(kind: String) -> Result<tauri::ipc::Response, String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::read_sound_file(&home, &kind).map(tauri::ipc::Response::new)
+}
+
 /// Writes only `terminal.fontFamily`; the settings watcher emits the change.
 #[tauri::command]
 fn set_terminal_font_family(family: String) -> Result<(), String> {
@@ -2627,6 +2642,8 @@ pub fn run() {
             set_sidebar_layout,
             set_explorer_roots,
             set_explorer_show_hidden,
+            set_sound,
+            sound_file,
             set_spaces_layout,
             set_space_templates,
             resolve_space_template,

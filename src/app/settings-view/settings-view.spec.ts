@@ -746,6 +746,27 @@ describe("SettingsView categories", () => {
     expect(hits).toEqual(["Show hidden folders"]);
   });
 
+  it("writes the sound switches and files on the Appearance page", () => {
+    const { fixture, host } = setup();
+    tauri.answer("set_sound", () => null);
+    const boxes = host.querySelectorAll<HTMLInputElement>('input[role="switch"]');
+    expect(boxes).toHaveLength(2);
+    boxes[0].checked = true;
+    boxes[0].dispatchEvent(new Event("change"));
+    const files = host.querySelectorAll<HTMLInputElement>('input[placeholder="Built-in tone"]');
+    files[1].value = " ~/done.wav ";
+    files[1].dispatchEvent(new Event("change"));
+    fixture.detectChanges();
+    expect(tauri.calls("set_sound")).toEqual([
+      { kind: "blocked", value: true },
+      { kind: "done", value: "~/done.wav" },
+    ]);
+    const tests = [...host.querySelectorAll("button")].filter(
+      (b) => b.textContent!.trim() === "Test",
+    );
+    expect(tests).toHaveLength(2);
+  });
+
   it("has every label of the category list in its page template", () => {
     // Option labels such as the theme's Light/Dark/System live in the component's option lists.
     const html =
