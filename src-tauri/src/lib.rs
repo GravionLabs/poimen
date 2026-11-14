@@ -3764,7 +3764,7 @@ mod build_layout_tests {
 
     #[test]
     fn the_app_package_is_poimen_app_and_the_identity_is_unchanged() {
-        let cargo: toml::Value = include_str!("../Cargo.toml").parse().unwrap();
+        let cargo: toml::Value = toml::from_str(include_str!("../Cargo.toml")).unwrap();
         assert_eq!(cargo["package"]["name"].as_str(), Some("poimen-app"));
         assert_eq!(cargo["package"]["default-run"].as_str(), Some("poimen-app"));
         assert_eq!(cargo["lib"]["name"].as_str(), Some("poimen_lib"));
