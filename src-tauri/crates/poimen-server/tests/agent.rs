@@ -228,7 +228,7 @@ fn an_agent_without_hooks_is_started_without_waiting_and_shows_no_status() {
 
 #[test]
 fn prompt_unreported_in_an_unknown_terminal_is_not_found() {
-    let env = Env::new("prompt-unreported-missing");
+    let env = Env::new("pu-missing");
     let client = env.client();
     let err = client.prompt_unreported("t99", "hi").unwrap_err();
     assert!(matches!(err, AgentError::NotFound(_)));
