@@ -8,7 +8,8 @@ use std::collections::HashSet;
 
 use poimen_client::protocol::{AgentStatus, Space, Tab, Terminal};
 use poimen_client::{Client, ClientError};
-use poimen_core::settings::{RowToken, SidebarRows};
+use poimen_core::order::compare_space_names;
+use poimen_core::settings::{RowToken, SidebarRows, SidebarSort};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Model {
@@ -276,8 +277,8 @@ impl Model {
         out
     }
 
-    /// The sidebar rows, spaces in server order.
-    pub fn rows(&self, config: &SidebarRows, home: Option<&str>) -> Vec<Row> {
+    /// The sidebar rows: spaces in server order for `manual`, by name for `name`.
+    pub fn rows(&self, config: &SidebarRows, sort: SidebarSort, home: Option<&str>) -> Vec<Row> {
         let workspace = config
             .workspace
             .clone()
@@ -291,7 +292,11 @@ impl Model {
             .clone()
             .unwrap_or_else(|| default_lines("terminal"));
         let mut rows = Vec::new();
-        for space in &self.spaces {
+        let mut spaces: Vec<&Space> = self.spaces.iter().collect();
+        if sort == SidebarSort::Name {
+            spaces.sort_by(|a, b| compare_space_names(&a.name, &a.id, &b.name, &b.id));
+        }
+        for space in spaces {
             let tabs = self.tabs_of(space);
             let status = tabs
                 .iter()
@@ -573,7 +578,11 @@ mod tests {
 
     #[test]
     fn rows_list_spaces_tabs_and_terminals_in_order() {
-        let rows = model().rows(&SidebarRows::default(), Some("/home/u"));
+        let rows = model().rows(
+            &SidebarRows::default(),
+            SidebarSort::Manual,
+            Some("/home/u"),
+        );
         let shape: Vec<_> = rows
             .iter()
             .map(|r| (r.kind, r.depth, r.terminal_id.clone()))
@@ -593,7 +602,11 @@ mod tests {
 
     #[test]
     fn default_rows_show_status_agent_and_paths() {
-        let rows = model().rows(&SidebarRows::default(), Some("/home/u"));
+        let rows = model().rows(
+            &SidebarRows::default(),
+            SidebarSort::Manual,
+            Some("/home/u"),
+        );
         // The space takes the highest status of its terminals.
         assert_eq!(texts(&rows[0]), ["▲ work blocked ~/work"]);
         assert_eq!(rows[0].status, Some(AgentStatus::Blocked));
@@ -616,7 +629,7 @@ mod tests {
             ]),
             workspace: Some(vec![tokens(&["name"])]),
         };
-        let rows = model().rows(&config, None);
+        let rows = model().rows(&config, SidebarSort::Manual, None);
         assert_eq!(texts(&rows[0]), ["work"]);
         // `tab` equal to the name is skipped as a repeat.
         assert_eq!(texts(&rows[1]), ["shell"]);
@@ -635,7 +648,7 @@ mod tests {
 
     #[test]
     fn step_moves_between_terminal_rows_and_wraps() {
-        let rows = model().rows(&SidebarRows::default(), None);
+        let rows = model().rows(&SidebarRows::default(), SidebarSort::Manual, None);
         assert_eq!(step(&rows, Some("t1"), 1, None).as_deref(), Some("t2"));
         assert_eq!(step(&rows, Some("t3"), 1, None).as_deref(), Some("t1"));
         assert_eq!(step(&rows, Some("t1"), -1, None).as_deref(), Some("t3"));
@@ -645,6 +658,40 @@ mod tests {
         );
         assert_eq!(step(&rows, Some("gone"), 1, None).as_deref(), Some("t1"));
         assert_eq!(step(&[], None, 1, None), None);
+    }
+
+    #[test]
+    fn name_sort_orders_spaces_and_step_follows_it() {
+        let rows = model().rows(&SidebarRows::default(), SidebarSort::Name, None);
+        // "empty" (s2) before "work" (s1); its terminal-less space has no terminal row.
+        let kinds: Vec<_> = rows.iter().map(|r| r.kind).collect();
+        assert_eq!(kinds[0], RowKind::Space);
+        assert!(
+            texts(&rows[0])[0].contains("empty"),
+            "{:?}",
+            texts(&rows[0])
+        );
+        assert!(texts(&rows[1])[0].contains("work"), "{:?}", texts(&rows[1]));
+        // Terminal rows keep their tab order below the second space; step walks them as shown.
+        assert_eq!(step(&rows, Some("t3"), 1, None).as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn name_sort_moves_a_later_space_first_and_manual_keeps_server_order() {
+        let mut m = model();
+        m.terminals.push(term("t9", "s3", "z", "/srv"));
+        m.spaces.push(Space {
+            id: "s3".into(),
+            name: "Alpha 9".into(),
+            cwd: "/srv".into(),
+            tabs: vec![],
+            active_tab: None,
+        });
+        let by_name = m.rows(&SidebarRows::default(), SidebarSort::Name, None);
+        // Alpha 9, empty, work: t9 comes before t1.
+        assert_eq!(step(&by_name, Some("t9"), 1, None).as_deref(), Some("t1"));
+        let manual = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        assert_eq!(step(&manual, Some("t3"), 1, None).as_deref(), Some("t9"));
     }
 
     #[test]
@@ -659,7 +706,7 @@ mod tests {
     fn terminals_without_a_tab_still_show() {
         let mut m = model();
         m.terminals.push(term("t9", "s2", "loose", "/srv"));
-        let rows = m.rows(&SidebarRows::default(), None);
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
         assert_eq!(rows.last().unwrap().terminal_id.as_deref(), Some("t9"));
     }
 
