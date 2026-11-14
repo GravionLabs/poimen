@@ -145,6 +145,14 @@ h3 {
   text-transform: uppercase;
 }
 
+.harnesses li,
+.agent-actions li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+}
+
 .hint {
   margin: 8px 0;
   font-size: 12px;
