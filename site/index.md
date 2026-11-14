@@ -64,6 +64,10 @@ The Output panel (`Cmd/Ctrl+J`) reads the session transcripts of Claude Code and
 
 <Screenshot src="flow-dark.png" alt="The Flow tab in the bottom panel: a graph with the main agent node (Claude Code, done) connected to a github-issue skill node (done)" caption="The Flow tab draws a run as a graph: the main agent and the skills and subagents it calls, with status per node." />
 
+A longer run shows the nesting: the main agent starts subagents (implement, review, fix), and each subagent lists the skills it called. A node shows its status, duration, tool calls, token usage and the context size at its start.
+
+<Screenshot src="flow-subagents-dark.png" light="flow-subagents-light.png" alt="The Flow tab with a run of one main agent, subagents for implementing, reviewing and fixing, and the skills implementation and code-review nested under them, each with status, duration, tool calls and tokens" caption="A run with subagents and skills nested under the agent that called them (running nodes are outlined, follows the site theme)." />
+
 ### Color schemes
 
 Light, dark or follow the system. Choose a bundled scheme, use the one of your herdr configuration (herdr backend), or drop WezTerm color scheme files into `~/.config/poimen/themes/`; the window chrome is derived from the scheme.
