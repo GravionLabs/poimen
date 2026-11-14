@@ -198,3 +198,30 @@ describe("canMarkUnread", () => {
     expect(canMarkUnread(undefined, none)).toBe(false);
   });
 });
+
+describe("Attention.changedAt (#722)", () => {
+  it("counts a pane first seen from the snapshot that showed it", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working", p2: "idle" }), none, 1000);
+    expect(Object.fromEntries(a.changedAt())).toEqual({ p1: 1000, p2: 1000 });
+  });
+
+  it("moves the time only when the status changes", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working", p2: "idle" }), none, 1000);
+    a.observe(st({ p1: "working", p2: "working" }), none, 2000);
+    a.observe(st({ p1: "working", p2: "working" }), none, 3000);
+    expect(Object.fromEntries(a.changedAt())).toEqual({ p1: 1000, p2: 2000 });
+  });
+
+  it("starts a new pane at its first snapshot and forgets a gone pane", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), none, 1000);
+    a.observe(st({ p2: "idle" }), none, 2000);
+    expect(Object.fromEntries(a.changedAt())).toEqual({ p2: 2000 });
+  });
+
+  it("is empty before the first snapshot", () => {
+    expect(new Attention().changedAt().size).toBe(0);
+  });
+});

@@ -74,3 +74,27 @@ describe("sidebar sort setting", () => {
     expect(store.writeError()).toContain("disk full");
   });
 });
+
+describe("sidebar agents setting (#722)", () => {
+  beforeEach(() => tauri.reset());
+
+  it("parses priority and falls back to list", () => {
+    expect(parseSettings({ sidebarAgents: "priority" }).sidebarAgents).toBe("priority");
+    expect(parseSettings({ sidebarAgents: "newest" }).sidebarAgents).toBe("list");
+    expect(parseSettings({}).sidebarAgents).toBe("list");
+  });
+
+  it("writes through set_sidebar_agents and goes back when the write fails", async () => {
+    const store = create();
+    await store.setSidebarAgents("priority");
+    expect(tauri.calls("set_sidebar_agents")).toEqual([{ mode: "priority" }]);
+    expect(store.settings().sidebarAgents).toBe("priority");
+    tauri.answer("set_sidebar_agents", () => {
+      throw new Error("disk full");
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await store.setSidebarAgents("list");
+    expect(store.settings().sidebarAgents).toBe("priority");
+    expect(store.writeError()).toContain("disk full");
+  });
+});

@@ -255,6 +255,16 @@ describe("nextWaiting", () => {
   it("is undefined when nothing waits", () => {
     expect(nextWaiting([pane({ terminal_id: "b" })], "b")).toBeUndefined();
   });
+  it("follows the shown order when given one", () => {
+    const order = ["c", "b", "a"];
+    expect(nextWaiting(panes, null, order)?.terminal_id).toBe("c");
+    expect(nextWaiting(panes, "c", order)?.terminal_id).toBe("a");
+    expect(nextWaiting(panes, "a", order)?.terminal_id).toBe("c");
+  });
+  it("puts panes outside the order after it", () => {
+    expect(nextWaiting(panes, null, ["c"])?.terminal_id).toBe("c");
+    expect(nextWaiting(panes, "c", ["c"])?.terminal_id).toBe("a");
+  });
 });
 
 describe("tabHeader", () => {

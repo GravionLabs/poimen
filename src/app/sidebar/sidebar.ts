@@ -2,6 +2,7 @@ import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   Directive,
   ElementRef,
   Injector,
@@ -38,7 +39,13 @@ import {
   type RowType,
   type SidebarRows,
 } from "./spaces";
-import { SettingsStore } from "../core/settings";
+import { SettingsStore, type SidebarAgents } from "../core/settings";
+import {
+  AGENT_SECTIONS,
+  formatElapsed,
+  orderAgents,
+  type AgentSection,
+} from "../core/agent-priority";
 import { TauriBridge } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
 import { UiState } from "../core/ui-state";
@@ -60,7 +67,13 @@ export type SpaceData =
       /** A linked worktree listed below the space of its repository: indented. */
       member?: boolean;
     }
-  | { kind: "pane"; row: PaneRow; lines: Line[] };
+  | {
+      kind: "pane";
+      row: PaneRow;
+      lines: Line[];
+      /** Agents section: time since the last status change (`5m`, `2h`, `3d`). */
+      since?: string;
+    };
 
 const rowType = (row: PaneRow): RowType => (row.agent ? "agent" : "terminal");
 
@@ -124,6 +137,32 @@ export interface SplitSections {
   agents: HxTreeNode<SpaceData>[];
   /** The workspace whose panes are listed (the wanted one, else the first). */
   selectedId: string | null;
+  /** `priority` mode only: the agents in their sections, in order (`agents` is the flat list). */
+  agentSections: AgentSectionView[];
+}
+
+/** One section of the Agents list in `priority` mode. */
+export interface AgentSectionView {
+  id: AgentSection;
+  title: string;
+  count: number;
+  folded: boolean;
+  /** The agents of the section; empty while it is folded. */
+  nodes: HxTreeNode<SpaceData>[];
+}
+
+/** What the Agents section needs besides the spaces: order, fold state and the status clock. */
+export interface AgentView {
+  /** `priority` sorts and sections the list; `list` keeps the space order. */
+  mode: SidebarAgents;
+  /** Section of each agent (the settled one); an agent missing here is idle. */
+  sections: ReadonlyMap<string, AgentSection>;
+  folded: ReadonlySet<AgentSection>;
+  /** When each pane's status last changed (epoch ms). */
+  changedAt: ReadonlyMap<string, number>;
+  /** The change times the order inside a section uses (settled like `sections`). */
+  orderAt: ReadonlyMap<string, number>;
+  now: number;
 }
 
 /**
@@ -136,6 +175,7 @@ export function splitSections(
   selectedId: string | null,
   rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
   showBase = false,
+  view?: AgentView,
 ): SplitSections {
   const selected =
     spaces.find((s) => s.workspace.space_id === selectedId) ?? spaces[0] ?? undefined;
@@ -173,34 +213,71 @@ export function splitSections(
         : undefined,
     };
   });
-  const agents = spaces.flatMap((space) => {
+  const entries = spaces.flatMap((space) => {
     const ctx = spaceContext(space, showBase);
     return space.rows
       .filter((row) => row.agent)
-      .map<HxTreeNode<SpaceData>>((row) => ({
-        key: row.pane.terminal_id,
-        label: row.name,
-        leaf: true,
-        data: {
-          kind: "pane",
-          row,
-          lines: [
-            ...renderRow("agent", rows.agent, row, ctx),
-            [
-              {
-                kind: "text",
-                text: space.workspace.label,
-                status: row.pane.agent_status,
-                bold: false,
-                dim: false,
-                sep: false,
-              },
+      .map((row) => ({
+        row,
+        node: {
+          key: row.pane.terminal_id,
+          label: row.name,
+          leaf: true,
+          data: {
+            kind: "pane",
+            row,
+            since: view?.changedAt.has(row.pane.terminal_id)
+              ? formatElapsed(view.now - view.changedAt.get(row.pane.terminal_id)!)
+              : undefined,
+            lines: [
+              ...renderRow("agent", rows.agent, row, ctx),
+              [
+                {
+                  kind: "text",
+                  text: space.workspace.label,
+                  status: row.pane.agent_status,
+                  bold: false,
+                  dim: false,
+                  sep: false,
+                },
+              ],
             ],
-          ],
-        },
+          },
+        } as HxTreeNode<SpaceData>,
       }));
   });
-  return { spaces: spaceList, agents, selectedId: selected?.workspace.space_id ?? null };
+  const priority = view?.mode === "priority";
+  const ordered = priority
+    ? orderAgents(
+        entries,
+        (e) => e.row.pane.terminal_id,
+        (e) => e.row.name,
+        view.sections,
+        view.orderAt,
+        view.now,
+      )
+    : entries;
+  const agentSections = priority
+    ? AGENT_SECTIONS.map<AgentSectionView>(({ id, title }) => {
+        const members = ordered.filter(
+          (e) => (view.sections.get(e.row.pane.terminal_id) ?? "idle") === id,
+        );
+        const folded = view.folded.has(id);
+        return {
+          id,
+          title,
+          count: members.length,
+          folded,
+          nodes: folded ? [] : members.map((e) => e.node),
+        };
+      })
+    : [];
+  return {
+    spaces: spaceList,
+    agents: ordered.map((e) => e.node),
+    selectedId: selected?.workspace.space_id ?? null,
+    agentSections,
+  };
 }
 
 /**
@@ -714,9 +791,37 @@ export class Sidebar {
     spaceNodes(this.filtered(), this.rows(), this.showBase()),
   );
 
-  protected readonly split = computed(() =>
-    splitSections(this.filtered(), this.ui.splitWorkspace(), this.rows(), this.showBase()),
+  /** The clock of the elapsed times in the Agents section; ticks once a minute. */
+  private readonly now = signal(Date.now());
+  protected readonly clock = (() => {
+    const timer = setInterval(() => this.now.set(Date.now()), 60_000);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    return timer;
+  })();
+
+  protected readonly agentsMode = computed(() => this.settings.settings().sidebarAgents);
+  protected readonly otherAgentsMode = computed(() =>
+    this.agentsMode() === "list" ? "priority" : "list",
   );
+
+  protected readonly split = computed(() =>
+    splitSections(this.filtered(), this.ui.splitWorkspace(), this.rows(), this.showBase(), {
+      mode: this.agentsMode(),
+      sections: this.store.agentSections(),
+      folded: this.ui.agentSectionsFolded(),
+      changedAt: this.attn.changedAt(),
+      orderAt: this.store.agentChangedAt(),
+      now: this.now(),
+    }),
+  );
+
+  protected toggleAgentsMode(): void {
+    void this.settings.setSidebarAgents(this.otherAgentsMode());
+  }
+
+  protected toggleAgentSection(id: AgentSection): void {
+    this.ui.toggleAgentSection(id);
+  }
 
   protected data(node: HxTreeNode): SpaceData {
     return node.data as SpaceData;

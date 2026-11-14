@@ -374,3 +374,22 @@ describe("recent spaces (#712)", () => {
     expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).recentSpaces).toEqual({ w2: 2 });
   });
 });
+
+describe("folded agent sections (#722)", () => {
+  it("toggles a section and persists it", () => {
+    const storage = fakeStorage();
+    const ui = stateOn(storage);
+    ui.toggleAgentSection("idle");
+    ui.toggleAgentSection("done");
+    expect([...ui.agentSectionsFolded()].sort()).toEqual(["done", "idle"]);
+    expect([...stateOn(storage).agentSectionsFolded()].sort()).toEqual(["done", "idle"]);
+    ui.toggleAgentSection("idle");
+    expect([...ui.agentSectionsFolded()]).toEqual(["done"]);
+  });
+
+  it("drops unknown ids on load and starts open", () => {
+    const ui = stateOn(fakeStorage(JSON.stringify({ agentSectionsFolded: ["needs", "x", 3] })));
+    expect([...ui.agentSectionsFolded()]).toEqual(["needs"]);
+    expect(stateOn(fakeStorage()).agentSectionsFolded().size).toBe(0);
+  });
+});

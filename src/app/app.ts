@@ -551,6 +551,10 @@ export class App {
       void this.prefs.setSidebarSort(sorts[id as keyof typeof sorts]);
       return;
     }
+    if (id === "agentsByPriority" || id === "agentsInSpaceOrder") {
+      void this.prefs.setSidebarAgents(id === "agentsByPriority" ? "priority" : "list");
+      return;
+    }
     if (id === "sortSpacesNow") {
       this.spaceActions.sortNow();
       return;

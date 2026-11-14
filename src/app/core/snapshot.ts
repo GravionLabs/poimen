@@ -479,8 +479,24 @@ export function waitingCount(panes: Terminal[]): number {
   return panes.filter((pane) => pane.agent_status === "blocked").length;
 }
 
-/** The blocked pane after `activeId` in list order, wrapping around; undefined when none waits. */
-export function nextWaiting(panes: Terminal[], activeId: string | null): Terminal | undefined {
+/**
+ * The blocked pane after `activeId` in list order, wrapping around; undefined when none waits.
+ * With `order` (terminal ids as the Agents section shows them) the panes follow it; panes not in
+ * it come after, in list order.
+ */
+export function nextWaiting(
+  all: Terminal[],
+  activeId: string | null,
+  order?: readonly string[],
+): Terminal | undefined {
+  const position = new Map(order?.map((id, i) => [id, i]));
+  const panes = order
+    ? [...all].sort(
+        (a, b) =>
+          (position.get(a.terminal_id) ?? order.length) -
+          (position.get(b.terminal_id) ?? order.length),
+      )
+    : all;
   const waiting = panes.filter((pane) => pane.agent_status === "blocked");
   if (!waiting.length) return undefined;
   const index = panes.findIndex((pane) => pane.terminal_id === activeId);

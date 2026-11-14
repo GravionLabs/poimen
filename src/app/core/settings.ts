@@ -19,6 +19,8 @@ import {
 } from "../sidebar/spaces";
 
 export type SidebarLayout = "tree" | "split";
+/** `sidebar.agents`: the Agents section in list order or by priority (#722). */
+export type SidebarAgents = "list" | "priority";
 /** `sidebar.sort`: the user's own space order, alphabetical, by attention or by last focus. */
 export type SidebarSort = "manual" | "name" | "attention" | "recent";
 
@@ -247,6 +249,8 @@ export interface Settings {
   sidebarLayout: SidebarLayout;
   /** `sidebar.sort`: how the spaces tree is ordered. */
   sidebarSort: SidebarSort;
+  /** `sidebar.agents`: order of the Agents section. */
+  sidebarAgents: SidebarAgents;
   /** `sidebar.groupWorktrees`: list linked worktrees below the space of their repository. */
   sidebarGroupWorktrees: boolean;
   /** `sidebar.showBaseBranch`: show the branch token on the base branch too. */
@@ -351,6 +355,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarRows: DEFAULT_SIDEBAR_ROWS,
   sidebarLayout: "tree",
   sidebarSort: "manual",
+  sidebarAgents: "list",
   sidebarGroupWorktrees: true,
   sidebarShowBaseBranch: false,
   explorerRoots: ["~"],
@@ -455,6 +460,7 @@ export function parseSettings(raw: unknown): Settings {
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
+    sidebarAgents: r["sidebarAgents"] === "priority" ? "priority" : "list",
     sidebarSort: SIDEBAR_SORTS.find((v) => v === r["sidebarSort"]) ?? "manual",
     sidebarGroupWorktrees: r["sidebarGroupWorktrees"] !== false,
     sidebarShowBaseBranch: r["sidebarShowBaseBranch"] === true,
@@ -551,6 +557,20 @@ export class SettingsStore {
       this._settings.set(previous);
       this._writeError.set(`Cannot save the sidebar sort: ${e}`);
       console.warn(`poimen settings: cannot save sidebar.sort: ${e}`);
+    }
+  }
+
+  /** Writes `sidebar.agents` of config.json and applies it at once; the watcher confirms. */
+  async setSidebarAgents(sidebarAgents: SidebarAgents): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, sidebarAgents });
+    try {
+      await this.bridge.invoke("set_sidebar_agents", { mode: sidebarAgents });
+      this._writeError.set(null);
+    } catch (e) {
+      this._settings.set(previous);
+      this._writeError.set(`Cannot save the agents order: ${e}`);
+      console.warn(`poimen settings: cannot save sidebar.agents: ${e}`);
     }
   }
 

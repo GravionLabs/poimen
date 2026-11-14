@@ -151,6 +151,8 @@ pub struct Settings {
     pub sidebar_rows: SidebarRows,
     /// `sidebar.layout`: `tree` (default) or `split`.
     pub sidebar_layout: String,
+    /// `sidebar.agents`: `list` (default) or `priority`, the order of the Agents section (#722).
+    pub sidebar_agents: String,
     /// `sidebar.sort`: `manual` (default), `name`, `attention` or `recent`.
     pub sidebar_sort: SidebarSort,
     /// `sidebar.groupWorktrees`: list linked worktrees below the space of their repository.
@@ -354,6 +356,7 @@ impl Default for Settings {
             shortcuts: default_shortcuts(),
             sidebar_rows: SidebarRows::default(),
             sidebar_layout: "tree".into(),
+            sidebar_agents: "list".into(),
             sidebar_sort: SidebarSort::Manual,
             sidebar_group_worktrees: true,
             sidebar_show_base_branch: false,
@@ -603,6 +606,15 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
             }
             Some(other) => s.warnings.push(format!(
                 "sidebar.layout {other} must be \"tree\" or \"split\"; using tree"
+            )),
+        }
+        match value.get("agents") {
+            None => {}
+            Some(Value::String(l)) if matches!(l.as_str(), "list" | "priority") => {
+                s.sidebar_agents = l.clone();
+            }
+            Some(other) => s.warnings.push(format!(
+                "sidebar.agents {other} must be \"list\" or \"priority\"; using list"
             )),
         }
         match value.get("showBaseBranch") {
@@ -909,6 +921,14 @@ pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, Strin
     set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
 }
 
+/// Returns `text` with `sidebar.agents` set to `list` or `priority`, touching nothing else.
+pub fn set_sidebar_agents_text(text: &str, mode: &str) -> Result<String, String> {
+    if !matches!(mode, "list" | "priority") {
+        return Err(format!("invalid sidebar agents mode {mode:?}"));
+    }
+    set_path_text(text, &["sidebar", "agents"], &format!("\"{mode}\""))
+}
+
 /// Returns `text` with `sidebar.sort` set to one of its four values, touching nothing else.
 pub fn set_sidebar_sort_text(text: &str, sort: &str) -> Result<String, String> {
     let Some(sort) = SidebarSort::parse(sort) else {
@@ -1021,6 +1041,11 @@ pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
 /// Writes the `colorSchema` setting below `home`, like `save_theme`.
 pub fn save_color_schema(home: &Path, schema: &serde_json::Value) -> Result<(), String> {
     save_with(home, |text| set_color_schema_text(text, schema))
+}
+
+/// Writes `sidebar.agents` below `home`, like `save_sidebar_sort`.
+pub fn save_sidebar_agents(home: &Path, mode: &str) -> Result<(), String> {
+    save_with(home, |text| set_sidebar_agents_text(text, mode))
 }
 
 /// Writes `sidebar.sort` below `home`, like `save_sidebar_layout`.
@@ -1845,6 +1870,31 @@ mod tests {
                 .contains("\"attention\"")
         );
         assert!(set_sidebar_sort_text("{\"sidebar\":3}", "name").is_err());
+    }
+
+    #[test]
+    fn sidebar_agents_reaches_the_settings_and_is_written() {
+        assert_eq!(rows("{}").sidebar_agents, "list");
+        assert_eq!(
+            rows(r#"{"sidebar":{"agents":"priority"}}"#).sidebar_agents,
+            "priority"
+        );
+        let s = rows(r#"{"sidebar":{"agents":"newest"}}"#);
+        assert_eq!(s.sidebar_agents, "list");
+        assert!(s.warnings[0].contains("sidebar.agents"));
+        let text = "{\n  // mine\n  \"sidebar\": { \"layout\": \"split\" }\n}";
+        let out = set_sidebar_agents_text(text, "priority").unwrap();
+        assert!(out.contains("// mine") && out.contains("\"layout\": \"split\""));
+        assert!(
+            out.contains("\"agents\": \"priority\"") || out.contains("\"agents\":\"priority\"")
+        );
+        assert!(set_sidebar_agents_text("{}", "newest").is_err());
+        assert!(set_sidebar_agents_text("{\"sidebar\":3}", "list").is_err());
+        let home = std::env::temp_dir().join(format!("poimen-agents-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        save_sidebar_agents(&home, "priority").unwrap();
+        assert_eq!(load(&home).sidebar_agents, "priority");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
