@@ -2,6 +2,7 @@
 //! base, or reused when the branch already has one. No herdr call, so it works on every backend.
 //! Existing worktrees are never modified: no checkout, reset or file change.
 
+use crate::snapshot::Snapshot;
 use crate::tasks::{TaskVars, expand};
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
@@ -483,18 +484,14 @@ fn canonical(path: &Path) -> PathBuf {
 /// own `cwd` of the poimen backend is in it) and those with only some of their terminals in it.
 /// The space's own `cwd` is matched by containment, as the terminals are, unlike the exact rule of
 /// `spaces::find_space`; it only counts for a space without terminals.
-fn spaces_in(view: &SpaceView, worktree: &Path) -> (Vec<String>, Vec<String>) {
+fn spaces_in(view: &Snapshot, worktree: &Path) -> (Vec<String>, Vec<String>) {
     let root = canonical(worktree);
     let mut seen: Vec<(String, bool, bool)> = Vec::new(); // (space, all in, any in)
-    for pane in view.panes.as_array().into_iter().flatten() {
-        let Some(space) = pane["workspace_id"].as_str() else {
-            continue;
-        };
-        let dir = ["foreground_cwd", "cwd"]
-            .iter()
-            .filter_map(|k| pane[*k].as_str())
-            .find(|d| !d.is_empty());
-        let inside = dir.is_some_and(|d| canonical(Path::new(d)).starts_with(&root));
+    for terminal in &view.terminals {
+        let space = terminal.space_id.as_str();
+        let inside = terminal
+            .dir()
+            .is_some_and(|d| canonical(Path::new(d)).starts_with(&root));
         match seen.iter_mut().find(|s| s.0 == space) {
             Some(s) => {
                 s.1 &= inside;
@@ -503,19 +500,17 @@ fn spaces_in(view: &SpaceView, worktree: &Path) -> (Vec<String>, Vec<String>) {
             None => seen.push((space.to_owned(), inside, inside)),
         }
     }
-    for workspace in view.workspaces.as_array().into_iter().flatten() {
-        let Some(space) = workspace["workspace_id"].as_str() else {
-            continue;
-        };
-        if seen.iter().any(|s| s.0 == space) {
+    for space in &view.spaces {
+        if seen.iter().any(|s| s.0 == space.space_id) {
             continue; // its terminals decide
         }
-        let inside = workspace["cwd"]
-            .as_str()
+        let inside = space
+            .cwd
+            .as_deref()
             .filter(|d| !d.is_empty())
             .is_some_and(|d| canonical(Path::new(d)).starts_with(&root));
         if inside {
-            seen.push((space.to_owned(), true, true));
+            seen.push((space.space_id.clone(), true, true));
         }
     }
     let whole = seen.iter().filter(|s| s.1).map(|s| s.0.clone()).collect();
@@ -578,19 +573,13 @@ fn run_cleanup_command(root: &Path, command: &crate::tasks::Cmd) -> Result<(), S
     ))
 }
 
-/// The spaces of the running backend as the cleanup sees them: `panes` with `workspace_id` and
-/// `cwd`/`foreground_cwd`, `workspaces` with `workspace_id` and `cwd`.
-#[derive(Debug, Clone, Default)]
-pub struct SpaceView {
-    pub panes: serde_json::Value,
-    pub workspaces: serde_json::Value,
-}
-
 /// The spaces the cleanup may close; the app implements it over its `Backend`, poimen-core stays
 /// free of it.
 pub trait Spaces {
-    /// The current spaces and their panes.
-    fn view(&self) -> Result<SpaceView, String>;
+    /// The current spaces and their terminals (the backend's snapshot). The cleanup reads only
+    /// `Space::space_id`/`cwd` and `Terminal::space_id`/`cwd`; the poimen-server implementation
+    /// (`ServerSpaces`) fills just these and leaves the other fields and `tabs` empty.
+    fn view(&self) -> Result<Snapshot, String>;
     /// Closes a space with all its terminals.
     fn close_space(&self, id: &str) -> Result<(), String>;
 }
@@ -1045,13 +1034,13 @@ mod tests {
 
     // --- cleanup of merged tasks ---
 
-    use serde_json::json;
+    use crate::snapshot::{Space, Terminal};
     use std::sync::Mutex;
 
     /// Records `close_space` calls; `fail` makes them fail with `boom`.
     #[derive(Default)]
     struct FakeBackend {
-        snapshot: Mutex<SpaceView>,
+        snapshot: Mutex<Snapshot>,
         calls: Mutex<Vec<String>>,
         fail: Mutex<bool>,
     }
@@ -1066,20 +1055,8 @@ mod tests {
     }
 
     impl Spaces for FakeBackend {
-        fn view(&self) -> Result<SpaceView, String> {
-            let view = self.snapshot.lock().unwrap().clone();
-            Ok(SpaceView {
-                panes: if view.panes.is_null() {
-                    json!([])
-                } else {
-                    view.panes
-                },
-                workspaces: if view.workspaces.is_null() {
-                    json!([])
-                } else {
-                    view.workspaces
-                },
-            })
+        fn view(&self) -> Result<Snapshot, String> {
+            Ok(self.snapshot.lock().unwrap().clone())
         }
         fn close_space(&self, id: &str) -> Result<(), String> {
             if *self.fail.lock().unwrap() {
@@ -1144,9 +1121,13 @@ mod tests {
     fn panes_in(backend: &FakeBackend, panes: &[(&str, &Path)]) {
         let list: Vec<_> = panes
             .iter()
-            .map(|(space, dir)| json!({"workspace_id": space, "cwd": dir.to_str().unwrap()}))
+            .map(|(space, dir)| Terminal {
+                space_id: (*space).to_owned(),
+                cwd: Some(dir.to_str().unwrap().to_owned()),
+                ..Terminal::default()
+            })
             .collect();
-        backend.snapshot.lock().unwrap().panes = json!(list);
+        backend.snapshot.lock().unwrap().terminals = list;
     }
 
     #[test]
@@ -1333,9 +1314,13 @@ mod tests {
     fn empty_spaces_in(backend: &FakeBackend, spaces: &[(&str, &Path)]) {
         let list: Vec<_> = spaces
             .iter()
-            .map(|(id, dir)| json!({"workspace_id": id, "cwd": dir.to_str().unwrap()}))
+            .map(|(id, dir)| Space {
+                space_id: (*id).to_owned(),
+                cwd: Some(dir.to_str().unwrap().to_owned()),
+                ..Space::default()
+            })
             .collect();
-        backend.snapshot.lock().unwrap().workspaces = json!(list);
+        backend.snapshot.lock().unwrap().spaces = list;
     }
 
     #[test]

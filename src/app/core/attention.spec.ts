@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Attention, workspaceUnread } from "./attention";
-import type { AgentStatus, SpaceNode } from "./herdr";
+import type { AgentStatus, SpaceNode } from "./snapshot";
 
 const st = (o: Record<string, AgentStatus>) => new Map(Object.entries(o));
 const none = new Set<string>();

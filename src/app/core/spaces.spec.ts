@@ -8,7 +8,7 @@ import {
   statusText,
   type Terminal,
   type Snapshot,
-} from "./herdr";
+} from "./snapshot";
 
 const pane = (over: Partial<Terminal>): Terminal => ({
   terminal_id: "w1:p1",

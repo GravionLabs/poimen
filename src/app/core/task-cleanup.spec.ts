@@ -1,6 +1,6 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
 import { SpaceActions } from "./space-actions";
 import { Machines } from "./machines";
 import { RemoteSpaces } from "./remote-spaces";
@@ -124,7 +124,7 @@ describe("TaskCleanup", () => {
       providers: [
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         UiState,
         SpaceActions,
         TaskLog,

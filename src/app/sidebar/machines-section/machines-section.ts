@@ -6,8 +6,8 @@ import {
   output,
   signal,
 } from "@angular/core";
-import { rowName, type Terminal, type WorkspaceNode } from "../../core/herdr";
-import { HerdrStore } from "../../core/herdr-store";
+import { rowName, type Terminal, type WorkspaceNode } from "../../core/snapshot";
+import { SpacesStore } from "../../core/spaces-store";
 import { checkPassed, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
 
 /** One line for the last check of a machine: its result, the error, or what is missing. */
@@ -244,7 +244,7 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MachinesSection {
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly machines = inject(Machines);
   /** A terminal of a machine was picked. */
   readonly selected = output<Terminal>();

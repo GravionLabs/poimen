@@ -4,7 +4,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Attention } from "../core/attention";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { tauri } from "../core/tauri.mock";
 import { UI_STATE_KEY, UI_STORAGE, type UiStorage } from "../core/ui-state";
 import type { ChangeList, ChangedFile } from "./changes";
@@ -147,7 +147,7 @@ describe("findings in the Changes tab", () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: UI_STORAGE, useValue: storage },
-        { provide: HerdrStore, useValue: { panes } },
+        { provide: SpacesStore, useValue: { panes } },
         { provide: Attention, useValue: new Attention() },
       ],
     });

@@ -7,7 +7,7 @@ import {
   type AgentStatus,
   type Snapshot,
   type WireSnapshot,
-} from "./herdr";
+} from "./snapshot";
 import { Machines, type MachineStatus } from "./machines";
 import { TauriBridge } from "./tauri";
 
@@ -33,7 +33,7 @@ export function remoteSnapshot(
 export interface MachineEvent {
   machine: string;
   kind: string;
-  data: { pane_id?: string; agent_status?: AgentStatus } | null;
+  data: { terminal_id?: string; agent_status?: AgentStatus } | null;
 }
 
 /**
@@ -88,9 +88,9 @@ export class RemoteSpaces {
 
   private handle(event: MachineEvent): void {
     const { machine, kind, data } = event;
-    if (kind === "pane.agent_status_changed" && data?.pane_id && data.agent_status) {
+    if (kind === "terminal.agent_status_changed" && data?.terminal_id && data.agent_status) {
       const status = data.agent_status;
-      const pane = data.pane_id;
+      const pane = data.terminal_id;
       this.read.update((m) => {
         const snapshot = m.get(machine);
         return snapshot ? new Map(m).set(machine, applyStatus(snapshot, pane, status)) : m;

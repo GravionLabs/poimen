@@ -36,6 +36,7 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::vte::ansi::Rgb;
 use emulator::Colors;
+use poimen_core::snapshot::{self, Snapshot};
 use poimen_core::{repos, worktree};
 use poimen_protocol::{
     self as proto, AgentInfo, AgentStatus, AgentTranscript, AgentTranscriptResult, AttachMode,
@@ -1144,22 +1145,31 @@ fn worktree_cleanup(shared: &Arc<Shared>, p: WorktreeCleanup) -> ApiResult {
 struct ServerSpaces<'a>(&'a Shared);
 
 impl worktree::Spaces for ServerSpaces<'_> {
-    fn view(&self) -> Result<worktree::SpaceView, String> {
+    fn view(&self) -> Result<Snapshot, String> {
         let inner = lock(&self.0.inner);
-        let panes = inner
+        let terminals = inner
             .terminals
             .iter()
-            .map(|t| json!({"workspace_id": t.info.space_id, "cwd": t.info.cwd}))
+            .map(|t| snapshot::Terminal {
+                space_id: t.info.space_id.clone(),
+                cwd: Some(t.info.cwd.clone()),
+                ..snapshot::Terminal::default()
+            })
             .collect();
-        let workspaces = inner
+        let spaces = inner
             .layout
             .spaces
             .iter()
-            .map(|s| json!({"workspace_id": s.id, "cwd": s.cwd}))
+            .map(|s| snapshot::Space {
+                space_id: s.id.clone(),
+                cwd: Some(s.cwd.clone()),
+                ..snapshot::Space::default()
+            })
             .collect();
-        Ok(worktree::SpaceView {
-            panes: Value::Array(panes),
-            workspaces: Value::Array(workspaces),
+        Ok(Snapshot {
+            spaces,
+            terminals,
+            tabs: Vec::new(),
         })
     }
 

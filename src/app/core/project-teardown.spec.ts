@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectTeardown, teardownSummary, type TeardownReport } from "./project-teardown";
 import { ResultDialog } from "./result-dialog";
 import { SpaceActions } from "./space-actions";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 import { UI_STORAGE, UiState } from "./ui-state";
@@ -42,7 +42,7 @@ describe("ProjectTeardown", () => {
       providers: [
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         UiState,
         SpaceActions,
         ResultDialog,

@@ -1,5 +1,5 @@
 import { Injectable, computed, effect, inject, signal, untracked } from "@angular/core";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 import { UiState } from "./ui-state";
 
@@ -27,7 +27,7 @@ export const agentName = (agent: string): string => NAMES[agent] ?? agent;
 @Injectable({ providedIn: "root" })
 export class HooksOffer {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly ui = inject(UiState);
 
   private readonly _missing = signal<string[]>([]);

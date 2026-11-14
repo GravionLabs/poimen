@@ -10,15 +10,15 @@ import {
   paneTitle,
   withMachine,
   type Snapshot,
-} from "./herdr";
+} from "./snapshot";
 import { Attention } from "./attention";
 import { DockBadge } from "./dock-badge";
 import { NotificationCenter } from "./notification-center";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
 import { Machines, type MachineStatus } from "./machines";
 import { REMOTE_REFRESH_DEBOUNCE_MS, RemoteSpaces, remoteSnapshot } from "./remote-spaces";
 import { TauriBridge } from "./tauri";
-import { tauri, toWire } from "./tauri.mock";
+import { tauri } from "./tauri.mock";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./tauri.mock")).tauri.invoke,
@@ -120,9 +120,9 @@ describe("RemoteSpaces and the store", () => {
     tauri.reset();
     tauri.answer("list_machines", () => [{ ...connected }]);
     tauri.answer("snapshot", () => snap("idle"));
-    tauri.answer("machine_snapshot", () => toWire(snap("idle")));
+    tauri.answer("machine_snapshot", () => snap("idle"));
     TestBed.resetTestingModule();
-    TestBed.configureTestingModule({ providers: [TauriBridge, HerdrStore] });
+    TestBed.configureTestingModule({ providers: [TauriBridge, SpacesStore] });
   });
 
   afterEach(() => {
@@ -132,7 +132,7 @@ describe("RemoteSpaces and the store", () => {
   async function started() {
     const machines = TestBed.inject(Machines);
     const remote = TestBed.inject(RemoteSpaces);
-    const store = TestBed.inject(HerdrStore);
+    const store = TestBed.inject(SpacesStore);
     await machines.start();
     await remote.start();
     TestBed.tick();
@@ -149,7 +149,7 @@ describe("RemoteSpaces and the store", () => {
   });
 
   it("counts a blocked remote agent as waiting and keeps it out of the local snapshot", async () => {
-    tauri.answer("machine_snapshot", () => toWire(snap("blocked")));
+    tauri.answer("machine_snapshot", () => snap("blocked"));
     const { store } = await started();
     expect(store.waiting()).toBe(1);
     expect(store.nextWaiting(null)?.terminal_id).toBe("box::t1");
@@ -158,12 +158,12 @@ describe("RemoteSpaces and the store", () => {
 
   it("applies a remote agent status at once and reads the machine again after an event", async () => {
     const { store } = await started();
-    tauri.answer("machine_snapshot", () => toWire(snap("blocked")));
+    tauri.answer("machine_snapshot", () => snap("blocked"));
     tauri.invoke.mockClear();
     tauri.emit("machine:event", {
       machine: "box",
-      kind: "pane.agent_status_changed",
-      data: { pane_id: "t1", agent_status: "blocked" },
+      kind: "terminal.agent_status_changed",
+      data: { terminal_id: "t1", agent_status: "blocked" },
     });
     expect(store.pane("box::t1")?.agent_status).toBe("blocked");
     await vi.advanceTimersByTimeAsync(REMOTE_REFRESH_DEBOUNCE_MS);
@@ -191,8 +191,8 @@ describe("RemoteSpaces and the store", () => {
     attention.observe(statuses(), new Set());
     tauri.emit("machine:event", {
       machine: "box",
-      kind: "pane.agent_status_changed",
-      data: { pane_id: "t1", agent_status: "blocked" },
+      kind: "terminal.agent_status_changed",
+      data: { terminal_id: "t1", agent_status: "blocked" },
     });
     const changes = attention.observe(statuses(), new Set());
     center.record(changes, label, 1);

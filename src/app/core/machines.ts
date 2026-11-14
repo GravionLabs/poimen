@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from "@angular/core";
-import { splitId } from "./herdr";
+import { splitId } from "./snapshot";
 import { parseMachine, type Machine } from "./settings";
 import { TauriBridge } from "./tauri";
 

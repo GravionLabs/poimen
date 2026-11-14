@@ -2,15 +2,15 @@ import { ChangeDetectionStrategy, Component, input, output, signal } from "@angu
 import { SERVER_RESTART_NOTE, errorTitle, type UpdateState } from "../core/updater";
 import type { BackendKind } from "../core/settings";
 import type { BarSummary } from "../deliver/deliver-status";
-import type { ConnectionState } from "../core/herdr-store";
+import type { ConnectionState } from "../core/spaces-store";
 import {
   appVersionLabel,
-  herdrVersionLabel,
+  backendVersionLabel,
   protocolWarning,
   type AppChannel,
-  type HerdrInfo,
+  type BackendInfo,
   type Mode,
-} from "../core/herdr";
+} from "../core/backend";
 
 /** Tooltip of the RC badge. */
 export const CHANNEL_TITLE =
@@ -66,7 +66,7 @@ export class StatusBar {
   /** The release channel of this build; `rc` shows the RC badge and hides the self-update (an RC never updates itself). */
   readonly channel = input<AppChannel>("stable");
   protected readonly channelTitle = CHANNEL_TITLE;
-  readonly info = input<HerdrInfo | null>(null);
+  readonly info = input<BackendInfo | null>(null);
   /** The backend this run talks to; names the connection and the server version. */
   readonly backend = input<BackendKind>("herdr");
   /** A notice such as a pane layout problem of a new space; empty hides it. */
@@ -108,7 +108,7 @@ export class StatusBar {
   protected readonly modeHint = modeTitle;
   protected readonly sizeText = sizeLabel;
   protected readonly appLabel = appVersionLabel;
-  protected readonly herdrLabel = herdrVersionLabel;
+  protected readonly herdrLabel = backendVersionLabel;
   protected readonly warning = protocolWarning;
   protected readonly errTitle = errorTitle;
   /** Whether the notes or the error of the update are shown above the bar. */

@@ -22,14 +22,8 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { useUnicode11 } from "./unicode";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge } from "../core/tauri";
-import {
-  agentKind,
-  decodeBase64,
-  splitId,
-  type Mode,
-  type Terminal,
-  type StreamRecord,
-} from "../core/herdr";
+import { agentKind, splitId, type Terminal } from "../core/snapshot";
+import { decodeBase64, type Mode, type StreamRecord } from "../core/backend";
 import { SettingsStore, defaultTerminalFontFamily, windowsPtyOption } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";

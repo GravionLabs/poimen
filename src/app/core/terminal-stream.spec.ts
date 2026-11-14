@@ -1,6 +1,6 @@
 import { Injector } from "@angular/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { StreamRecord } from "./herdr";
+import type { StreamRecord } from "./backend";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 import { TerminalStreamService, recordOf, type OpenTerminal } from "./terminal-stream";

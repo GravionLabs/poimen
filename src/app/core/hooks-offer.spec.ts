@@ -3,7 +3,7 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { HerdrStore, type BackendStatus } from "./herdr-store";
+import { SpacesStore, type BackendStatus } from "./spaces-store";
 import { HooksOffer, missingHooks, type HookStatus } from "./hooks-offer";
 import { TauriBridge } from "./tauri";
 import { UI_STATE_KEY, UI_STORAGE, parseLayout } from "./ui-state";
@@ -27,7 +27,7 @@ function setup(opts: { kind?: "poimen" | "herdr"; stored?: string } = {}) {
     providers: [
       { provide: TauriBridge, useValue: bridge },
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: { backend, backendKind: signal(opts.kind ?? "poimen") },
       },
       {

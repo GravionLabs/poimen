@@ -4,8 +4,8 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { SpaceNode } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { SpaceNode } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
@@ -27,7 +27,7 @@ async function setup(marks: Record<string, RebuildMark>, spaces: SpaceNode[]) {
   TestBed.configureTestingModule({
     providers: [
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: {
           spaces: signal(spaces),
           disconnected: signal<string | null>(null),

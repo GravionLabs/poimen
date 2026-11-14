@@ -4,8 +4,8 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { BranchPull, SpaceNode } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { BranchPull, SpaceNode } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UI_STORAGE } from "../core/ui-state";
@@ -51,7 +51,7 @@ async function setup(pr: BranchPull) {
   TestBed.configureTestingModule({
     providers: [
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: {
           spaces: signal([space(pr)]),
           disconnected: signal<string | null>(null),

@@ -1,6 +1,6 @@
 import { Injectable, Injector, computed, inject, signal } from "@angular/core";
 import { EditorTabs } from "../core/editor-tabs";
-import type { AgentStatus } from "../core/herdr";
+import type { AgentStatus } from "../core/snapshot";
 import { GithubIssues } from "./issues";
 import { GithubPulls } from "./pulls";
 

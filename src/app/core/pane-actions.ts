@@ -11,8 +11,8 @@ import {
   workspaceDirs,
   type Terminal,
   type SplitDirection,
-} from "./herdr";
-import { HerdrStore } from "./herdr-store";
+} from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
 import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
@@ -41,7 +41,7 @@ export interface PaneClosed {
 @Injectable({ providedIn: "root" })
 export class PaneActions {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly spaces = inject(SpaceActions);
   private readonly machines = inject(Machines, { optional: true });
 
@@ -133,7 +133,7 @@ export class PaneActions {
     if (this.blocked(dialog.workspaceId)) return undefined;
     return this.create(() =>
       this.bridge.invoke<string | null>("terminal_create", {
-        workspaceId: dialog.workspaceId,
+        spaceId: dialog.workspaceId,
         cwd: cwd.trim() || null,
       }),
     );
@@ -150,12 +150,12 @@ export class PaneActions {
     if (spaceId) {
       if (this.blocked(spaceId)) return undefined;
       return this.create(() =>
-        this.bridge.invoke<string | null>("terminal_create", { workspaceId: spaceId, cwd }),
+        this.bridge.invoke<string | null>("terminal_create", { spaceId, cwd }),
       );
     }
     const outcome = await this.spaces.create(cwd, "");
     if (!outcome) return undefined;
-    return spaceRoot(this.store.snapshot(), outcome.workspace_id);
+    return spaceRoot(this.store.snapshot(), outcome.space_id);
   }
 
   /** Splits `paneId`; the new shell starts in the pane's directory. Resolves to the new pane. */
@@ -217,7 +217,7 @@ export class PaneActions {
     if (this.blocked(dialog.paneId)) return undefined;
     const successor = paneSuccessor(this.store.snapshot(), dialog.paneId);
     try {
-      await this.bridge.invoke("pane_close", { paneId: dialog.paneId });
+      await this.bridge.invoke("pane_close", { terminalId: dialog.paneId });
     } catch (err) {
       this._error.set(String(err));
       return undefined;
@@ -239,7 +239,7 @@ export class PaneActions {
     if (this.blocked(dialog.paneId)) return undefined;
     try {
       const created = await this.bridge.invoke<string | null>("pane_restart", {
-        paneId: dialog.paneId,
+        terminalId: dialog.paneId,
       });
       await this.store.refresh();
       return created ? { paneId: dialog.paneId, successor: created } : { paneId: dialog.paneId };
@@ -257,7 +257,7 @@ export class PaneActions {
     if (this.blocked(dialog.paneId)) return false;
     return this.run(() =>
       this.bridge.invoke("agent_start", {
-        paneId: dialog.paneId,
+        terminalId: dialog.paneId,
         kind: kind.trim(),
         name: name.trim() || null,
         args: args.split(/\s+/).filter(Boolean),
@@ -274,7 +274,10 @@ export class PaneActions {
     return this.run(() =>
       dialog.agent
         ? this.bridge.invoke("agent_rename", { target: dialog.paneId, name: name.trim() || null })
-        : this.bridge.invoke("pane_rename", { paneId: dialog.paneId, label: name.trim() || null }),
+        : this.bridge.invoke("pane_rename", {
+            terminalId: dialog.paneId,
+            label: name.trim() || null,
+          }),
     );
   }
 

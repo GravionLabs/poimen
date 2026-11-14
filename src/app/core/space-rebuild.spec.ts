@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { SpaceActions } from "./space-actions";
 import { SpaceRebuild, type RebuildOutcome } from "./space-rebuild";
 import { TauriBridge } from "./tauri";
@@ -25,7 +25,7 @@ const restarted = (): Snapshot => ({
 const REQUEST = { root: "/work/app", files: [], hash: "h1", commands: [] };
 
 describe("SpaceRebuild", () => {
-  let store: HerdrStore;
+  let store: SpacesStore;
   let actions: SpaceActions;
   let rebuild: SpaceRebuild;
   let snapshot: Snapshot;
@@ -40,14 +40,14 @@ describe("SpaceRebuild", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         { provide: UI_STORAGE, useValue: null },
         UiState,
         SpaceActions,
         SpaceRebuild,
       ],
     });
-    store = injector.get(HerdrStore);
+    store = injector.get(SpacesStore);
     actions = injector.get(SpaceActions);
     rebuild = injector.get(SpaceRebuild);
     rebuild.start();
@@ -59,7 +59,7 @@ describe("SpaceRebuild", () => {
   it("rebuilds an empty space on the first snapshot of a session without asking", async () => {
     await store.refresh();
     await settle();
-    expect(calls()).toEqual([{ workspaceId: "s1", decision: null, confirmed: false }]);
+    expect(calls()).toEqual([{ spaceId: "s1", decision: null, confirmed: false }]);
     expect(rebuild.marks().size).toBe(0);
     // The rebuilt space is re-read.
     expect(tauri.calls("snapshot").length).toBeGreaterThanOrEqual(2);
@@ -110,7 +110,7 @@ describe("SpaceRebuild", () => {
     await settle();
     expect(rebuild.marks().get("s1")).toEqual({ kind: "consent", reasons: ["setup runs: pnpm i"] });
     await rebuild.rebuild("s1");
-    expect(calls()[1]).toEqual({ workspaceId: "s1", decision: null, confirmed: true });
+    expect(calls()[1]).toEqual({ spaceId: "s1", decision: null, confirmed: true });
     expect(rebuild.marks().has("s1")).toBe(false);
     expect(actions.warning()).toBe("layout not fully applied: boom");
   });
@@ -130,7 +130,7 @@ describe("SpaceRebuild", () => {
     await rebuild.rebuild("s1");
     await actions.answerTrust("trust");
     expect(calls()[2]).toEqual({
-      workspaceId: "s1",
+      spaceId: "s1",
       decision: { kind: "trust", hash: "h1" },
       confirmed: true,
     });
@@ -139,7 +139,7 @@ describe("SpaceRebuild", () => {
     await rebuild.rebuild("s1");
     await actions.answerTrust("without");
     expect(calls().at(-1)).toEqual({
-      workspaceId: "s1",
+      spaceId: "s1",
       decision: { kind: "without" },
       confirmed: true,
     });

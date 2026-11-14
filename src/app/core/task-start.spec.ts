@@ -1,12 +1,12 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
 import { RemoteSpaces } from "./remote-spaces";
 import { SpaceActions } from "./space-actions";
 import { TaskStarter, remoteStepFailure, stepFailure, type TaskPlan } from "./task-start";
-import { qualifyId, type Snapshot } from "./herdr";
+import { qualifyId, type Snapshot } from "./snapshot";
 import { TauriBridge } from "./tauri";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { tauri } from "./tauri.mock";
@@ -58,12 +58,12 @@ describe("TaskStarter", () => {
       branch: "feat/12-x",
       created: true,
     }));
-    tauri.answer("create_space", () => ({ workspace_id: "w2", created: true }));
+    tauri.answer("create_space", () => ({ space_id: "w2", created: true }));
     tauri.answer("task_tab", () => undefined);
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         Machines,
         { provide: RemoteSpaces, useFactory: () => fakeRemote },
         { provide: UI_STORAGE, useValue: null },
@@ -93,7 +93,7 @@ describe("TaskStarter", () => {
   });
 
   it("an existing space is focused by create_space and nothing else runs", async () => {
-    tauri.answer("create_space", () => ({ workspace_id: "w1", created: false }));
+    tauri.answer("create_space", () => ({ space_id: "w1", created: false }));
     expect(await starter.run("/work/app", CHOICE)).toBe(true);
     expect(tauri.calls("create_space")).toHaveLength(1);
     expect(tauri.calls("task_tab")).toEqual([]);
@@ -110,7 +110,7 @@ describe("TaskStarter", () => {
       { cwd: "/work/app", label: null, decision: null, command: null },
     ]);
     expect(tauri.calls("task_tab")).toEqual([
-      { workspaceId: "w2", dir: "/work/app", name: "#12 plain", command: "sh -c 'x'" },
+      { spaceId: "w2", dir: "/work/app", name: "#12 plain", command: "sh -c 'x'" },
     ]);
   });
 
@@ -158,8 +158,8 @@ describe("TaskStarter", () => {
     const request = { root: "/work/app-12", files: ["f"], hash: "h1", commands: [] };
     tauri.answer("create_space", (args) =>
       args?.["decision"]
-        ? { workspace_id: "w2", created: true }
-        : { workspace_id: "", created: false, trust: request },
+        ? { space_id: "w2", created: true }
+        : { space_id: "", created: false, trust: request },
     );
     expect(await starter.run("/work/app", CHOICE)).toBe(true);
     expect(spaces.warning()).toBeNull();
@@ -177,14 +177,14 @@ describe("TaskStarter", () => {
     const request = { root: "/work/app", files: ["f"], hash: "h1", commands: [] };
     tauri.answer("create_space", (args) =>
       args?.["decision"]
-        ? { workspace_id: "w2", created: true }
-        : { workspace_id: "", created: false, trust: request },
+        ? { space_id: "w2", created: true }
+        : { space_id: "", created: false, trust: request },
     );
     expect(await starter.run("/work/app", CHOICE)).toBe(true);
     expect(tauri.calls("task_tab")).toEqual([]);
     await spaces.answerTrust("without");
     expect(tauri.calls("task_tab")).toEqual([
-      { workspaceId: "w2", dir: "/work/app", name: "#12 agent", command: "claude 'x'" },
+      { spaceId: "w2", dir: "/work/app", name: "#12 agent", command: "claude 'x'" },
     ]);
   });
 
@@ -199,7 +199,7 @@ describe("TaskStarter", () => {
         branch: "feat/12-x",
         created: true,
       }));
-      tauri.answer("machine_create_space", () => ({ workspace_id: "s3", created: true }));
+      tauri.answer("machine_create_space", () => ({ space_id: "s3", created: true }));
       tauri.answer("machine_task_tab", () => undefined);
     });
 
@@ -228,12 +228,12 @@ describe("TaskStarter", () => {
         { name: "dev", cwd: "/srv/o/r", label: null, command: null },
       ]);
       expect(tauri.calls("machine_task_tab")).toEqual([
-        { name: "dev", workspaceId: "s3", dir: "/srv/o/r", tab: "#12 plain", command: "sh -c 'x'" },
+        { name: "dev", spaceId: "s3", dir: "/srv/o/r", tab: "#12 plain", command: "sh -c 'x'" },
       ]);
     });
 
     it("an existing space is focused and says so", async () => {
-      tauri.answer("machine_create_space", () => ({ workspace_id: "s7", created: false }));
+      tauri.answer("machine_create_space", () => ({ space_id: "s7", created: false }));
       remoteSpaces = [
         { space_id: qualifyId("dev", "s7"), label: "#12 Add picker" } as Snapshot["spaces"][number],
       ];
@@ -300,7 +300,7 @@ describe("TaskStarter", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         Machines,
         { provide: RemoteSpaces, useFactory: () => fakeRemote },
         { provide: UI_STORAGE, useValue: null },

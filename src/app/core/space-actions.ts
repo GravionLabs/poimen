@@ -6,8 +6,8 @@ import {
   pathSegments,
   reorderIds,
   type Snapshot,
-} from "./herdr";
-import { HerdrStore } from "./herdr-store";
+} from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { Machines } from "./machines";
 import type { TemplateHint } from "./space-templates";
 import { TauriBridge } from "./tauri";
@@ -15,7 +15,7 @@ import { UiState } from "./ui-state";
 
 /** Answer of the `create_space` command. */
 export interface SpaceOutcome {
-  workspace_id: string;
+  space_id: string;
   /** False when an existing space for the directory was focused instead. */
   created: boolean;
   /** Why the pane layout of a new space was not (fully) applied, or the setup not started. */
@@ -108,7 +108,7 @@ export function closeSpaceWarning(snapshot: Snapshot, workspaceId: string): stri
 @Injectable({ providedIn: "root" })
 export class SpaceActions {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly ui = inject(UiState);
   private readonly machines = inject(Machines, { optional: true });
 
@@ -259,7 +259,7 @@ export class SpaceActions {
       this._warning.set(warnings.length > 0 ? warnings.join("; ") : null);
       for (const w of warnings) console.warn(`poimen space layout: ${w}`);
       await this.store.refresh();
-      if (!outcome.created) this.announceExisting(outcome.workspace_id);
+      if (!outcome.created) this.announceExisting(outcome.space_id);
       if (after) await after(outcome);
       return outcome;
     } catch (err) {
@@ -335,7 +335,7 @@ export class SpaceActions {
       return false;
     }
     try {
-      await this.bridge.invoke("space_rename", { workspaceId, label });
+      await this.bridge.invoke("space_rename", { spaceId: workspaceId, label });
     } catch (err) {
       this._renameError.set(String(err));
       return false;
@@ -423,7 +423,7 @@ export class SpaceActions {
     this.markClosing(workspaceId, true);
     try {
       await this.bridge.invoke("space_close", {
-        workspaceId,
+        spaceId: workspaceId,
         focus: neighbourSpace(snapshot, workspaceId, this.store.spaceOrder()),
       });
     } catch (err) {

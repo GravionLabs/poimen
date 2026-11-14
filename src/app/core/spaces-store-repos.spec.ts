@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Terminal, Snapshot } from "./herdr";
-import { HerdrStore, REPOS_REFRESH_MS } from "./herdr-store";
+import type { Terminal, Snapshot } from "./snapshot";
+import { SpacesStore, REPOS_REFRESH_MS } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -26,9 +26,9 @@ const snapshot = (...terminals: Terminal[]): Snapshot => ({
   terminals,
 });
 
-describe("HerdrStore repos", () => {
+describe("SpacesStore repos", () => {
   let injector: ReturnType<typeof Injector.create>;
-  let store: HerdrStore;
+  let store: SpacesStore;
 
   let focused = true;
 
@@ -38,8 +38,8 @@ describe("HerdrStore repos", () => {
     focused = true;
     vi.stubGlobal("window", new EventTarget());
     vi.stubGlobal("document", { hasFocus: () => focused });
-    injector = Injector.create({ providers: [TauriBridge, HerdrStore] });
-    store = injector.get(HerdrStore);
+    injector = Injector.create({ providers: [TauriBridge, SpacesStore] });
+    store = injector.get(SpacesStore);
   });
 
   afterEach(() => {
@@ -101,8 +101,8 @@ describe("HerdrStore repos", () => {
     expect(tauri.calls("repo_info")).toHaveLength(2);
 
     tauri.emit("herdr", {
-      kind: "pane.agent_status_changed",
-      data: { pane_id: "w1:p1", agent_status: "done" },
+      kind: "terminal.agent_status_changed",
+      data: { terminal_id: "w1:p1", agent_status: "done" },
     });
     await vi.advanceTimersByTimeAsync(100);
     expect(tauri.calls("repo_info")).toHaveLength(3);
@@ -120,8 +120,8 @@ describe("HerdrStore repos", () => {
       expect(tauri.calls("repo_info")).toHaveLength(1);
 
       tauri.emit("herdr", {
-        kind: "pane.agent_status_changed",
-        data: { pane_id: "w1:p1", agent_status },
+        kind: "terminal.agent_status_changed",
+        data: { terminal_id: "w1:p1", agent_status },
       });
       await vi.advanceTimersByTimeAsync(100);
 
@@ -138,8 +138,8 @@ describe("HerdrStore repos", () => {
       focused = false;
 
       tauri.emit("herdr", {
-        kind: "pane.agent_status_changed",
-        data: { pane_id: "w1:p1", agent_status },
+        kind: "terminal.agent_status_changed",
+        data: { terminal_id: "w1:p1", agent_status },
       });
       await vi.advanceTimersByTimeAsync(100);
 
@@ -153,8 +153,8 @@ describe("HerdrStore repos", () => {
     await store.start();
 
     tauri.emit("herdr", {
-      kind: "pane.agent_status_changed",
-      data: { pane_id: "w1:p1", agent_status: "working" },
+      kind: "terminal.agent_status_changed",
+      data: { terminal_id: "w1:p1", agent_status: "working" },
     });
     await vi.advanceTimersByTimeAsync(100);
 

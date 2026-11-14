@@ -5,8 +5,8 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { EditorTabs } from "../core/editor-tabs";
-import type { PaneRow, SpaceNode } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { PaneRow, SpaceNode } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { PaneActions } from "../core/pane-actions";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
@@ -55,7 +55,7 @@ function setup(rows: PaneRow[], spaceId = "w1", file?: string) {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
-      { provide: HerdrStore, useValue: { spaces } },
+      { provide: SpacesStore, useValue: { spaces } },
       { provide: EditorTabs, useValue: editor },
       { provide: PaneActions, useValue: paneActions },
       { provide: TauriBridge, useValue: bridge },

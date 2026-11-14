@@ -3,8 +3,8 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { buildTree, qualifySnapshot, type Snapshot } from "../../core/herdr";
-import { HerdrStore } from "../../core/herdr-store";
+import { buildTree, qualifySnapshot, type Snapshot } from "../../core/snapshot";
+import { SpacesStore } from "../../core/spaces-store";
 import { Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
 import { MachinesSection, checkNote, machineNote } from "./machines-section";
 
@@ -38,7 +38,7 @@ function setup(
         useValue: { machines: signal([status]), checks: signal(checks), reconnect, check },
       },
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: {
           remoteTree: () => buildTree(qualifySnapshot("box", snap, status.state !== "connected")),
         },

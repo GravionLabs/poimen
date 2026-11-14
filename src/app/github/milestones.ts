@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { paneDir } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import { paneDir } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { GithubFilter } from "./github-filter";
@@ -49,7 +49,7 @@ export interface MilestoneSelection {
 @Injectable({ providedIn: "root" })
 export class GithubMilestones {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly settings = inject(SettingsStore);
   private readonly ui = inject(UiState);
   private readonly filter = inject(GithubFilter);

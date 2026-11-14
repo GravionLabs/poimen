@@ -1,7 +1,7 @@
 import { Injectable, inject } from "@angular/core";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
-import { HerdrStore } from "./herdr-store";
-import { qualifyId } from "./herdr";
+import { SpacesStore } from "./spaces-store";
+import { qualifyId } from "./snapshot";
 import { RemoteSpaces } from "./remote-spaces";
 import { SpaceActions, type SpaceOutcome } from "./space-actions";
 import { TauriBridge } from "./tauri";
@@ -58,7 +58,7 @@ export class TaskStarter {
   private readonly bridge = inject(TauriBridge);
   private readonly picker = inject(TaskPicker);
   private readonly spaces = inject(SpaceActions);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly remote = inject(RemoteSpaces);
   private readonly ui = inject(UiState);
 
@@ -146,7 +146,7 @@ export class TaskStarter {
       try {
         await this.bridge.invoke("machine_task_tab", {
           name: machine,
-          workspaceId: outcome.workspace_id,
+          spaceId: outcome.space_id,
           dir: cwd,
           tab: plan.tab,
           command: plan.command,
@@ -157,14 +157,12 @@ export class TaskStarter {
       }
     }
     await this.remote.refresh(machine);
-    this.ui.setSplitWorkspace(qualifyId(machine, outcome.workspace_id));
+    this.ui.setSplitWorkspace(qualifyId(machine, outcome.space_id));
     if (!outcome.created) {
       const label = this.remote
         .snapshot()
-        .spaces.find((s) => s.space_id === qualifyId(machine, outcome.workspace_id))?.label;
-      this.spaces.notify(
-        `Opened the existing space "${label ?? outcome.workspace_id}" on ${machine}.`,
-      );
+        .spaces.find((s) => s.space_id === qualifyId(machine, outcome.space_id))?.label;
+      this.spaces.notify(`Opened the existing space "${label ?? outcome.space_id}" on ${machine}.`);
     }
     return true;
   }
@@ -198,7 +196,7 @@ export class TaskStarter {
     const after = async (outcome: SpaceOutcome): Promise<void> => {
       try {
         await this.bridge.invoke("task_tab", {
-          workspaceId: outcome.workspace_id,
+          spaceId: outcome.space_id,
           dir,
           name: plan.tab,
           command: plan.command,

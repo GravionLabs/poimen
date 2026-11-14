@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from "@angular/core";
-import { rowName } from "../core/herdr";
+import { rowName } from "../core/snapshot";
 import type { LineComment } from "../core/ui-state";
 import { commentLocation } from "./comment-prompt";
 import { LineComments } from "./line-comments";

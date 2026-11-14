@@ -4,7 +4,7 @@ import {
   type BranchPull,
   type PaneRow,
   type SpaceNode,
-} from "../core/herdr";
+} from "../core/snapshot";
 import { checksText } from "../github/pulls";
 
 /** State word shown next to the name; `undefined` while herdr reports no known state. */

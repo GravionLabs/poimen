@@ -11,8 +11,8 @@ import { GithubPulls } from "../github/pulls";
 import { CommandPalette, POIMEN_COMMANDS } from "./command-palette";
 import { ProjectEntries } from "./project-entries";
 import { SpaceActions } from "./space-actions";
-import type { Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { Keymap } from "./keymap";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { SettingsStore } from "./settings";
@@ -45,7 +45,7 @@ describe("CommandPalette", () => {
       providers: [
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         SettingsStore,
         Keymap,
         UiState,
@@ -62,7 +62,7 @@ describe("CommandPalette", () => {
         CommandPalette,
       ],
     });
-    await injector.get(HerdrStore).refresh();
+    await injector.get(SpacesStore).refresh();
     palette = injector.get(CommandPalette);
     project = injector.get(ProjectEntries);
   });

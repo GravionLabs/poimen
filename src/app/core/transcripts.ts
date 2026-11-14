@@ -420,7 +420,7 @@ export class Subagents {
     try {
       const watching = await this.bridge.invoke<boolean>("subagents_watch", {
         key: this.key,
-        paneId,
+        terminalId: paneId,
       });
       if (generation !== this.generation) return;
       this._supported.set(watching === true);

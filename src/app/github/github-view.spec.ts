@@ -578,7 +578,7 @@ describe("pull request worktrees", () => {
     tauri.answer("worktree_branches", (args) =>
       args?.["dir"] === "/src/n" ? [{ path: "/src/n-pr1", branch: "pr/1" }] : [],
     );
-    tauri.answer("create_space", () => ({ workspace_id: "w1" }));
+    tauri.answer("create_space", () => ({ space_id: "w1" }));
     const fixture = await render();
     const el: HTMLElement = fixture.nativeElement;
     expect(el.querySelector("[data-testid=check-out]")).toBeNull();
@@ -590,7 +590,7 @@ describe("pull request worktrees", () => {
   it("checks out a pull request without a worktree through pr_worktree", async () => {
     tauri.answer("worktree_branches", () => []);
     tauri.answer("pr_worktree", () => ({ path: "/src/n-pr1", branch: "pr/1", created: true }));
-    tauri.answer("create_space", () => ({ workspace_id: "w1" }));
+    tauri.answer("create_space", () => ({ space_id: "w1" }));
     const fixture = await render();
     const el: HTMLElement = fixture.nativeElement;
     expect(el.querySelector("[data-testid=open-space]")).toBeNull();

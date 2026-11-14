@@ -1,7 +1,7 @@
 import { Injectable, computed, effect, inject, signal, untracked } from "@angular/core";
 import { Attention } from "../core/attention";
-import { HerdrStore } from "../core/herdr-store";
-import { paneDir } from "../core/herdr";
+import { SpacesStore } from "../core/spaces-store";
+import { paneDir } from "../core/snapshot";
 import { TauriBridge } from "../core/tauri";
 
 /** What is compared: the working tree against the merge base with the base branch, or `HEAD`. */
@@ -92,7 +92,7 @@ export function isWithin(dir: string, root: string): boolean {
 @Injectable()
 export class Changes {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly attention = inject(Attention);
 
   readonly dir = signal("");

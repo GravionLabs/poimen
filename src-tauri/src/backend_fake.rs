@@ -35,11 +35,7 @@ impl Default for FakeBackend {
         Self {
             calls: Mutex::default(),
             fail_on: Mutex::default(),
-            snapshot: Mutex::new(Snapshot {
-                workspaces: json!([]),
-                tabs: json!([]),
-                panes: json!([]),
-            }),
+            snapshot: Mutex::new(Snapshot::default()),
             records: Mutex::default(),
             emulated: false,
             laid_out: Mutex::default(),

@@ -11,8 +11,8 @@ import {
   untracked,
 } from "@angular/core";
 import { FlowView } from "../bottom-panel/flow-view";
-import { flowSession, transcriptEmptyText } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import { flowSession, transcriptEmptyText } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { Subagents } from "../core/transcripts";
 
@@ -54,7 +54,7 @@ import { Subagents } from "../core/transcripts";
 })
 export class FlowTab {
   protected readonly subagents = inject(Subagents);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   /** The pane whose agent run the tab shows. */
   readonly paneId = input.required<string>();
   /** A subagent node was clicked: show its transcript. */

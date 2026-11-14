@@ -1,8 +1,8 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPrompts } from "./agent-prompt";
-import type { Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { Machines, machineBlock, type MachineStatus } from "./machines";
 import { PaneActions } from "./pane-actions";
 import { SpaceActions } from "./space-actions";
@@ -91,7 +91,7 @@ describe("actions on remote spaces and terminals (#693)", () => {
         UiState,
         TauriBridge,
         Machines,
-        HerdrStore,
+        SpacesStore,
         SpaceActions,
         PaneActions,
         AgentPrompts,
@@ -101,12 +101,12 @@ describe("actions on remote spaces and terminals (#693)", () => {
     panes = injector.get(PaneActions);
     spaces = injector.get(SpaceActions);
     prompts = injector.get(AgentPrompts);
-    await injector.get(HerdrStore).refresh();
+    await injector.get(SpacesStore).refresh();
     // Only the store's own snapshot read is ignored; the remote ones are given to the actions.
-    vi.spyOn(injector.get(HerdrStore), "pane").mockImplementation((id: string) =>
+    vi.spyOn(injector.get(SpacesStore), "pane").mockImplementation((id: string) =>
       snapshot.terminals.find((t) => t.terminal_id === id),
     );
-    vi.spyOn(injector.get(HerdrStore), "snapshot").mockReturnValue(snapshot);
+    vi.spyOn(injector.get(SpacesStore), "snapshot").mockReturnValue(snapshot);
   });
 
   it("sends a split of a remote terminal with its qualified id, which the app routes to the machine", async () => {
@@ -123,14 +123,14 @@ describe("actions on remote spaces and terminals (#693)", () => {
     await panes.confirmRename("x");
     panes.askClose("box::p1");
     await panes.confirmClose();
-    expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "box::1", cwd: "/r" }]);
-    expect(tauri.calls("pane_rename")).toEqual([{ paneId: "box::p1", label: "x" }]);
-    expect(tauri.calls("pane_close")).toEqual([{ paneId: "box::p1" }]);
+    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "box::1", cwd: "/r" }]);
+    expect(tauri.calls("pane_rename")).toEqual([{ terminalId: "box::p1", label: "x" }]);
+    expect(tauri.calls("pane_close")).toEqual([{ terminalId: "box::p1" }]);
   });
 
   it("sends rename and close of a remote space with its qualified id", async () => {
     expect(await spaces.rename("box::1", "Renamed")).toBe(true);
-    expect(tauri.calls("space_rename")).toEqual([{ workspaceId: "box::1", label: "Renamed" }]);
+    expect(tauri.calls("space_rename")).toEqual([{ spaceId: "box::1", label: "Renamed" }]);
     await spaces.requestClose("box::1");
     expect(tauri.calls("space_close").length).toBe(0);
   });

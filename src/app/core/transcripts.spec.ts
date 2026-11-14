@@ -175,7 +175,9 @@ describe("Subagents", () => {
     tauri.answer("subagents_watch", () => true);
     const s = create();
     await s.follow("w1:p1", "S");
-    expect(tauri.calls("subagents_watch")).toEqual([{ key: expect.any(String), paneId: "w1:p1" }]);
+    expect(tauri.calls("subagents_watch")).toEqual([
+      { key: expect.any(String), terminalId: "w1:p1" },
+    ]);
     expect(s.supported()).toBe(true);
     send("S", { kind: "list", agents: [info()] });
     send("S", {

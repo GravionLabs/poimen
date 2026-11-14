@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { agentKind, paneDir, type AgentStatus, type Terminal } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import { agentKind, paneDir, type AgentStatus, type Terminal } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge, type Unlisten } from "../core/tauri";
@@ -71,7 +71,7 @@ export function milestoneNumber(subject: Pick<Subject, "id" | "title">): number 
 @Injectable({ providedIn: "root" })
 export class Deliver {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly tasks = inject(TaskStarter);
   private readonly machines = inject(Machines);
 

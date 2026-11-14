@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { HerdrStore, type BackendStatus } from "./herdr-store";
+import { SpacesStore, type BackendStatus } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 
 /** What the open confirmation will do: restart an outdated server, or stop it and quit. */
@@ -33,7 +33,7 @@ function errorText(error: unknown): string {
 @Injectable({ providedIn: "root" })
 export class ServerRestart {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
 
   private readonly _later = signal(false);
   private readonly _action = signal<ServerAction | null>(null);

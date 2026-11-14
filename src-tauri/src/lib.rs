@@ -44,7 +44,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde_json::{Value, json};
+use serde_json::json;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
@@ -178,9 +178,9 @@ async fn pane_split(
 async fn pane_close(
     backend: State<'_, Shared>,
     machines: State<'_, SharedMachines>,
-    pane_id: String,
+    terminal_id: String,
 ) -> Result<(), String> {
-    on_routed(backend.inner(), machines.inner(), &pane_id, |b, id| {
+    on_routed(backend.inner(), machines.inner(), &terminal_id, |b, id| {
         b.close_terminal(id)
     })
     .await
@@ -192,13 +192,13 @@ async fn pane_close(
 async fn pane_restart(
     backend: State<'_, Shared>,
     machines: State<'_, SharedMachines>,
-    pane_id: String,
+    terminal_id: String,
 ) -> Result<Option<String>, String> {
-    let created = on_routed(backend.inner(), machines.inner(), &pane_id, |b, id| {
+    let created = on_routed(backend.inner(), machines.inner(), &terminal_id, |b, id| {
         b.restart_terminal(id)
     })
     .await?;
-    Ok(created.map(|id| qualify_like(&pane_id, id)))
+    Ok(created.map(|id| qualify_like(&terminal_id, id)))
 }
 
 /// Closes a tab with all its terminals (`tab.close` on the poimen backend). The UI confirms first.
@@ -270,17 +270,17 @@ async fn tab_focus(
 async fn space_close(
     backend: State<'_, Shared>,
     machines: State<'_, SharedMachines>,
-    workspace_id: String,
+    space_id: String,
     focus: Option<String>,
 ) -> Result<(), String> {
     // The neighbour to focus afterwards counts only on the same backend.
-    let machine = machines::split_id(&workspace_id).0.map(str::to_owned);
+    let machine = machines::split_id(&space_id).0.map(str::to_owned);
     let focus =
         focus.filter(|id| !id.is_empty() && machines::split_id(id).0.map(str::to_owned) == machine);
     on_routed(
         backend.inner(),
         machines.inner(),
-        &workspace_id,
+        &space_id,
         move |b, id| {
             b.close_space(id)?;
             if let Some(next) = focus {
@@ -297,7 +297,7 @@ async fn space_close(
 async fn space_rename(
     backend: State<'_, Shared>,
     machines: State<'_, SharedMachines>,
-    workspace_id: String,
+    space_id: String,
     label: String,
 ) -> Result<(), String> {
     let label = label.trim().to_owned();
@@ -307,7 +307,7 @@ async fn space_rename(
     on_routed(
         backend.inner(),
         machines.inner(),
-        &workspace_id,
+        &space_id,
         move |b, id| b.rename_space(id, &label),
     )
     .await
@@ -318,14 +318,17 @@ async fn space_rename(
 async fn agent_start(
     backend: State<'_, Shared>,
     machines: State<'_, SharedMachines>,
-    pane_id: String,
+    terminal_id: String,
     kind: String,
     name: Option<String>,
     args: Vec<String>,
 ) -> Result<(), String> {
-    on_routed(backend.inner(), machines.inner(), &pane_id, move |b, id| {
-        b.agent_start(id, &kind, name.as_deref(), &args)
-    })
+    on_routed(
+        backend.inner(),
+        machines.inner(),
+        &terminal_id,
+        move |b, id| b.agent_start(id, &kind, name.as_deref(), &args),
+    )
     .await
 }
 
@@ -363,12 +366,15 @@ async fn agent_prompt(
 async fn pane_rename(
     backend: State<'_, Shared>,
     machines: State<'_, SharedMachines>,
-    pane_id: String,
+    terminal_id: String,
     label: Option<String>,
 ) -> Result<(), String> {
-    on_routed(backend.inner(), machines.inner(), &pane_id, move |b, id| {
-        b.rename_terminal(id, label.as_deref())
-    })
+    on_routed(
+        backend.inner(),
+        machines.inner(),
+        &terminal_id,
+        move |b, id| b.rename_terminal(id, label.as_deref()),
+    )
     .await
 }
 
@@ -515,17 +521,17 @@ async fn task_issues(
 async fn terminal_create(
     backend: State<'_, Shared>,
     machines: State<'_, SharedMachines>,
-    workspace_id: String,
+    space_id: String,
     cwd: Option<String>,
 ) -> Result<Option<String>, String> {
     let created = on_routed(
         backend.inner(),
         machines.inner(),
-        &workspace_id,
+        &space_id,
         move |b, id| b.create_terminal(id, cwd.as_deref()),
     )
     .await?;
-    Ok(created.map(|id| qualify_like(&workspace_id, id)))
+    Ok(created.map(|id| qualify_like(&space_id, id)))
 }
 
 /// The space template that applies to `dir`; `origin` is read only when a template matches by
@@ -615,20 +621,17 @@ fn create_space_with(
 ) -> Result<spaces::SpaceOutcome, String> {
     let dir = spaces::resolve_dir(cwd, home)?;
     let snapshot = backend.snapshot()?;
-    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
-    let workspaces = list(&snapshot.workspaces);
-    let panes = list(&snapshot.panes);
-    if let Some(workspace_id) = spaces::find_space(&dir, &workspaces, &panes) {
-        backend.focus_space(&workspace_id)?;
+    if let Some(space_id) = spaces::find_space(&dir, &snapshot) {
+        backend.focus_space(&space_id)?;
         return Ok(spaces::SpaceOutcome {
-            workspace_id,
+            space_id,
             created: false,
             warnings: Vec::new(),
             setup_started: false,
             trust: None,
         });
     }
-    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &workspaces);
+    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &snapshot.spaces);
     // poimen-server resolves and builds the layout itself and asks for trust first.
     let request = backend::LayoutRequest {
         cwd: &dir,
@@ -639,7 +642,7 @@ fn create_space_with(
     if let Some(result) = backend.create_space_with_layout(request) {
         return match result? {
             backend::LaidOut::Trust(request) => Ok(spaces::SpaceOutcome {
-                workspace_id: String::new(),
+                space_id: String::new(),
                 created: false,
                 warnings: Vec::new(),
                 setup_started: false,
@@ -652,7 +655,7 @@ fn create_space_with(
             } => {
                 backend.focus_space(&space_id)?;
                 Ok(spaces::SpaceOutcome {
-                    workspace_id: space_id,
+                    space_id,
                     created: true,
                     warnings,
                     setup_started,
@@ -673,7 +676,7 @@ fn create_space_with(
     let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
         trust::Gate::Ask(request) => {
             return Ok(spaces::SpaceOutcome {
-                workspace_id: String::new(),
+                space_id: String::new(),
                 created: false,
                 warnings: Vec::new(),
                 setup_started: false,
@@ -690,8 +693,8 @@ fn create_space_with(
         }
     };
     let created = backend.create_space(&dir, &label)?;
-    let workspace_id = created.space_id.clone();
-    backend.focus_space(&workspace_id)?;
+    let space_id = created.space_id.clone();
+    backend.focus_space(&space_id)?;
     let (agent_command, user_layout, mut warnings) = layout_inputs(&dir, user.as_ref(), home);
     warnings.extend(build_layout(
         backend,
@@ -703,10 +706,10 @@ fn create_space_with(
         root_command,
         agent_command.as_deref(),
     ));
-    let (setup_started, warning) = run_setup(backend, &workspace_id, &dir, &sources, allow);
+    let (setup_started, warning) = run_setup(backend, &space_id, &dir, &sources, allow);
     warnings.extend(warning);
     Ok(spaces::SpaceOutcome {
-        workspace_id,
+        space_id,
         created: true,
         warnings,
         setup_started,
@@ -876,15 +879,13 @@ fn rebuild_space_with(
     confirmed: bool,
 ) -> Result<RebuildOutcome, String> {
     let snapshot = backend.snapshot()?;
-    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
-    let of_space = |v: &Value| v["workspace_id"].as_str() == Some(space_id);
-    let Some(space) = list(&snapshot.workspaces).into_iter().find(of_space) else {
+    let Some(space) = snapshot.spaces.iter().find(|s| s.space_id == space_id) else {
         return Ok(RebuildOutcome::NotEmpty);
     };
-    if list(&snapshot.panes).iter().any(of_space) {
+    if snapshot.terminals_of(space_id).next().is_some() {
         return Ok(RebuildOutcome::NotEmpty);
     }
-    let cwd = space["cwd"].as_str().unwrap_or_default().trim();
+    let cwd = space.cwd.as_deref().unwrap_or_default().trim();
     if cwd.is_empty() {
         return Ok(RebuildOutcome::Missing {
             reason: "the space has no directory".into(),
@@ -981,12 +982,12 @@ fn rebuild_space_with(
 #[tauri::command]
 async fn rebuild_space(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    space_id: String,
     decision: Option<trust::Decision>,
     confirmed: bool,
 ) -> Result<RebuildOutcome, String> {
     on_backend(backend.inner(), move |b| {
-        rebuild_space_with(b, home_dir().as_deref(), &workspace_id, decision, confirmed)
+        rebuild_space_with(b, home_dir().as_deref(), &space_id, decision, confirmed)
     })
     .await
 }
@@ -996,7 +997,7 @@ async fn rebuild_space(
 /// the space. Returns whether it started and the warning, if any.
 fn run_setup(
     backend: &dyn Backend,
-    workspace_id: &str,
+    space_id: &str,
     dir: &str,
     sources: &trust::Sources,
     allow_project_commands: bool,
@@ -1008,7 +1009,7 @@ fn run_setup(
     let Some(command) = project::setup_of(project) else {
         return (false, None);
     };
-    match project::start_setup(backend, workspace_id, dir, &command) {
+    match project::start_setup(backend, space_id, dir, &command) {
         Ok(()) => (true, None),
         Err(e) => (false, Some(format!("setup not started: {e}"))),
     }
@@ -1078,12 +1079,12 @@ async fn project_entries(dir: String) -> project::Entries {
     .unwrap_or_default()
 }
 
-/// Runs a palette entry of the project file in the space `workspace_id` (a user action). Goes
+/// Runs a palette entry of the project file in the space `space_id` (a user action). Goes
 /// through `trust::gate` with the one read of the file; an untrusted file answers `ask`.
 #[tauri::command]
 async fn project_run(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    space_id: String,
     dir: String,
     entry: project::Entry,
     decision: Option<trust::Decision>,
@@ -1103,7 +1104,7 @@ async fn project_run(
             &trusted,
             decision.as_ref(),
             &persist,
-            &workspace_id,
+            &space_id,
             &dir,
             &entry,
         )
@@ -1232,14 +1233,14 @@ async fn machine_create_space(
 async fn machine_task_tab(
     machines: State<'_, SharedMachines>,
     name: String,
-    workspace_id: String,
+    space_id: String,
     dir: String,
     tab: String,
     command: String,
 ) -> Result<(), String> {
     let backend: Shared = machines.backend(&name)?;
     on_backend(&backend, move |b| {
-        task_start::start_tab(b, &workspace_id, &dir, &tab, &command)
+        task_start::start_tab(b, &space_id, &dir, &tab, &command)
     })
     .await
 }
@@ -1338,18 +1339,14 @@ fn remote_create_space(
     command: Option<&str>,
 ) -> Result<spaces::SpaceOutcome, String> {
     let snapshot = backend.snapshot()?;
-    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
-    let workspaces = list(&snapshot.workspaces);
-    let panes = list(&snapshot.panes);
-    let outcome =
-        |workspace_id: String, created: bool, warnings, setup_started| spaces::SpaceOutcome {
-            workspace_id,
-            created,
-            warnings,
-            setup_started,
-            trust: None,
-        };
-    if let Some(id) = spaces::find_space(cwd, &workspaces, &panes) {
+    let outcome = |space_id: String, created: bool, warnings, setup_started| spaces::SpaceOutcome {
+        space_id,
+        created,
+        warnings,
+        setup_started,
+        trust: None,
+    };
+    if let Some(id) = spaces::find_space(cwd, &snapshot) {
         backend.focus_space(&id)?;
         return Ok(outcome(id, false, Vec::new(), false));
     }
@@ -1712,13 +1709,13 @@ async fn project_teardown(dir: String) -> Result<project::TeardownReport, String
 #[tauri::command]
 async fn task_tab(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    space_id: String,
     dir: String,
     name: String,
     command: String,
 ) -> Result<(), String> {
     on_backend(backend.inner(), move |b| {
-        task_start::start_tab(b, &workspace_id, &dir, &name, &command)
+        task_start::start_tab(b, &space_id, &dir, &name, &command)
     })
     .await
 }
@@ -2032,7 +2029,7 @@ async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, 
 }
 
 /// Starts following the subagent transcripts of the Claude Code or GitHub Copilot CLI agent in
-/// `pane_id` (replacing the previous watch); updates arrive as `subagents` events. `false` when the
+/// `terminal_id` (replacing the previous watch); updates arrive as `subagents` events. `false` when the
 /// pane has no such session or its transcript is not found; nothing is watched then. Read-only.
 #[tauri::command]
 async fn subagents_watch(
@@ -2041,13 +2038,13 @@ async fn subagents_watch(
     machines: State<'_, SharedMachines>,
     watch: State<'_, SubagentWatch>,
     key: String,
-    pane_id: String,
+    terminal_id: String,
 ) -> Result<bool, String> {
     let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
     // The transcript files of a machine's agent are on that machine: its server reads them
     // (#698). A remote pane is never looked up in the local `~/.claude` or `~/.copilot` (#693).
-    if machines::split_id(&pane_id).0.is_some() {
-        let routed = machines.route_connected(backend.inner(), &pane_id)?;
+    if machines::split_id(&terminal_id).0.is_some() {
+        let routed = machines.route_connected(backend.inner(), &terminal_id)?;
         let (follower, key_for_poll) = (key.clone(), key.clone());
         let started = tauri::async_runtime::spawn_blocking(move || {
             remote_transcripts::start(
@@ -2073,7 +2070,7 @@ async fn subagents_watch(
         let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
         return Ok(watches.store(&key, generation, handle) && following);
     }
-    let session = on_routed(backend.inner(), machines.inner(), &pane_id, |b, id| {
+    let session = on_routed(backend.inner(), machines.inner(), &terminal_id, |b, id| {
         b.agent_session(id)
     })
     .await?;
@@ -2723,7 +2720,12 @@ mod build_layout_tests {
     use super::*;
     use crate::backend_fake::FakeBackend;
     use backend::{Snapshot, StreamRecord};
-    use serde_json::json;
+    use serde_json::{Value, json};
+
+    /// A snapshot from its neutral wire shape (missing fields take their defaults).
+    fn snapshot_of(wire: Value) -> Snapshot {
+        serde_json::from_value(wire).unwrap()
+    }
 
     const PROJECT_TEXT: &str = r#"{"layout":{"panes":[{"name":"agent","command":"evil"},
         {"name":"sh","command":"worse","split":{"direction":"down"}}]}}"#;
@@ -2887,7 +2889,7 @@ mod build_layout_tests {
         let dir = tmp_dir();
         let outcome = create_space_with(&fake, None, &dir, Some("demo"), None, None).unwrap();
         assert!(outcome.created && outcome.trust.is_none());
-        assert_eq!(outcome.workspace_id, "w9");
+        assert_eq!(outcome.space_id, "w9");
         let calls = fake.calls();
         assert_eq!(calls[0], "snapshot");
         assert_eq!(calls[1], format!("create_space {dir} demo"));
@@ -2901,14 +2903,13 @@ mod build_layout_tests {
     fn create_space_focuses_an_existing_space_for_the_directory() {
         let fake = FakeBackend::default();
         let dir = tmp_dir();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "w2", "label": "demo", "number": 1 }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "w2:p1", "workspace_id": "w2", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "w2", "label": "demo", "number": 1 }],
+            "terminals": [{ "terminal_id": "w2:p1", "space_id": "w2", "cwd": dir }],
+        }));
         let outcome = create_space_with(&fake, None, &dir, None, None, Some("claude 'x'")).unwrap();
         assert!(!outcome.created);
-        assert_eq!(outcome.workspace_id, "w2");
+        assert_eq!(outcome.space_id, "w2");
         // Focused only: no layout, no command.
         assert_eq!(fake.calls(), ["snapshot", "focus w2"]);
     }
@@ -2933,7 +2934,7 @@ mod build_layout_tests {
         let outcome =
             create_space_with(&fake, None, &dir, Some("#12 Add picker"), None, Some("c")).unwrap();
         assert!(!outcome.created);
-        assert_eq!(outcome.workspace_id, "s3");
+        assert_eq!(outcome.space_id, "s3");
         assert_eq!(fake.calls(), ["snapshot", "focus s3"]);
     }
 
@@ -3158,7 +3159,7 @@ mod build_layout_tests {
         let fake = layout_backend(built("s1"));
         let out = remote_create_space(&fake, "/srv/wt/app-12", "#12 x", Some("claude")).unwrap();
         assert!(out.created);
-        assert_eq!(out.workspace_id, "s1");
+        assert_eq!(out.space_id, "s1");
         let calls = fake.calls();
         assert!(
             calls.contains(&"create_space_with_layout /srv/wt/app-12 #12 x - claude".to_string()),
@@ -3169,14 +3170,13 @@ mod build_layout_tests {
     #[test]
     fn remote_create_space_focuses_an_existing_space_and_creates_nothing() {
         let fake = layout_backend(built("s1"));
-        *fake.snapshot.lock().unwrap() = backend::Snapshot {
-            workspaces: serde_json::json!([{"workspace_id": "s7", "label": "x", "cwd": "/srv/wt/app-12"}]),
-            tabs: serde_json::json!([]),
-            panes: serde_json::json!([]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{"space_id": "s7", "label": "x", "cwd": "/srv/wt/app-12"}],
+            "terminals": [],
+        }));
         let out = remote_create_space(&fake, "/srv/wt/app-12", "x", None).unwrap();
         assert!(!out.created);
-        assert_eq!(out.workspace_id, "s7");
+        assert_eq!(out.space_id, "s7");
         assert!(!fake.calls().iter().any(|c| c.starts_with("create_space")));
     }
 
@@ -3232,7 +3232,7 @@ mod build_layout_tests {
         assert_eq!(
             outcome,
             spaces::SpaceOutcome {
-                workspace_id: "s9".into(),
+                space_id: "s9".into(),
                 created: true,
                 warnings: vec!["layout: pane x could not be split".into()],
                 setup_started: true,
@@ -3300,7 +3300,7 @@ mod build_layout_tests {
         let dir = tmp_dir();
         let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
         assert!(!outcome.created);
-        assert_eq!(outcome.workspace_id, "");
+        assert_eq!(outcome.space_id, "");
         assert_eq!(outcome.trust, Some(request));
         assert_eq!(fake.calls().len(), 2, "no focus: {:?}", fake.calls());
     }
@@ -3321,11 +3321,10 @@ mod build_layout_tests {
     fn an_existing_space_is_focused_without_asking_a_layout_backend() {
         let fake = layout_backend(built("s9"));
         let dir = tmp_dir();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "s2", "label": "demo", "number": 1 }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "t1", "workspace_id": "s2", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "s2", "label": "demo", "number": 1 }],
+            "terminals": [{ "terminal_id": "t1", "space_id": "s2", "cwd": dir }],
+        }));
         let outcome = create_space_with(&fake, None, &dir, None, None, Some("c")).unwrap();
         assert!(!outcome.created);
         assert_eq!(fake.calls(), ["snapshot", "focus s2"]);
@@ -3433,11 +3432,10 @@ mod build_layout_tests {
     fn a_space_with_terminals_is_left_alone() {
         let dir = tmp_dir();
         let fake = FakeBackend::default();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "s1", "label": "app", "number": 1, "cwd": dir }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "t1", "workspace_id": "s1", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "s1", "label": "app", "number": 1, "cwd": dir }],
+            "terminals": [{ "terminal_id": "t1", "space_id": "s1", "cwd": dir }],
+        }));
         let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
         assert_eq!(out, RebuildOutcome::NotEmpty);
         assert_eq!(fake.calls(), ["snapshot"]);

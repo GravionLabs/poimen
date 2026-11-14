@@ -6,8 +6,8 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { goToNextChunk, goToPreviousChunk } from "@codemirror/merge";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Attention } from "../core/attention";
-import type { AgentStatus, Terminal } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { AgentStatus, Terminal } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { tauri } from "../core/tauri.mock";
 import { UI_STATE_KEY, UI_STORAGE, type UiStorage } from "../core/ui-state";
 import {
@@ -108,7 +108,7 @@ async function render(dir = "/repo") {
   TestBed.configureTestingModule({
     providers: [
       { provide: UI_STORAGE, useValue: storage },
-      { provide: HerdrStore, useValue: { panes } },
+      { provide: SpacesStore, useValue: { panes } },
       { provide: Attention, useValue: attention },
     ],
   });
@@ -275,7 +275,7 @@ describe("Changes tab", () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: UI_STORAGE, useValue: storage },
-        { provide: HerdrStore, useValue: { panes } },
+        { provide: SpacesStore, useValue: { panes } },
         { provide: Attention, useValue: attention },
       ],
     });
@@ -303,7 +303,7 @@ describe("Changes service", () => {
     tauri.answer("changes_file", (args) => CONTENT[args?.["path"] as string]);
     TestBed.configureTestingModule({
       providers: [
-        { provide: HerdrStore, useValue: { panes } },
+        { provide: SpacesStore, useValue: { panes } },
         { provide: Attention, useValue: attention },
         Changes,
       ],
