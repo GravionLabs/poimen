@@ -247,6 +247,8 @@ export interface Settings {
   sidebarSort: SidebarSort;
   /** `sidebar.groupWorktrees`: list linked worktrees below the space of their repository. */
   sidebarGroupWorktrees: boolean;
+  /** `sidebar.showBaseBranch`: show the branch token on the base branch too. */
+  sidebarShowBaseBranch: boolean;
   /** Roots of the explorer; a leading `~` is the home directory (resolved by the backend). */
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
@@ -348,6 +350,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarLayout: "tree",
   sidebarSort: "manual",
   sidebarGroupWorktrees: true,
+  sidebarShowBaseBranch: false,
   explorerRoots: ["~"],
   explorerShowHidden: false,
   backend: "poimen",
@@ -452,6 +455,7 @@ export function parseSettings(raw: unknown): Settings {
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
     sidebarSort: r["sidebarSort"] === "name" ? "name" : "manual",
     sidebarGroupWorktrees: r["sidebarGroupWorktrees"] !== false,
+    sidebarShowBaseBranch: r["sidebarShowBaseBranch"] === true,
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     backend: r["backend"] === "herdr" ? "herdr" : "poimen",
