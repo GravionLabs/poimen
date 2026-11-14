@@ -665,20 +665,38 @@ describe("SettingsView categories", () => {
     tauri.answer("hooks_status", () => [
       { agent: "claude", state: "missing" },
       { agent: "copilot", state: "installed" },
+      { agent: "gemini", state: "missing" },
     ]);
     await TestBed.inject(HooksOffer).refresh();
     fixture.detectChanges();
     const rows = [...host.querySelectorAll("ul.harnesses li")].map((li) =>
       li.textContent!.replace(/\s+/g, " ").trim(),
     );
-    expect(rows).toEqual(["Claude Codemissing Install hooks", "GitHub Copilot CLIinstalled"]);
+    expect(rows).toEqual([
+      "Claude Codemissing Install hooks",
+      "GitHub Copilot CLIinstalled",
+      "Gemini CLImissing Install hooks",
+    ]);
     const buttons = [...host.querySelectorAll("button")].filter(
       (b) => b.textContent!.trim() === "Install hooks",
     );
-    expect(buttons).toHaveLength(1);
+    expect(buttons).toHaveLength(2);
     buttons[0].click();
     await fixture.whenStable();
     expect(tauri.calls("hooks_install")).toEqual([{ agent: "claude" }]);
+  });
+
+  it("lists the supported agent kinds and what each gives on the Agents page", () => {
+    const { host } = setup(undefined, undefined, "agents");
+    const rows = [...host.querySelectorAll("ul[aria-label='Supported agents'] li")].map((li) =>
+      li.textContent!.replace(/\s+/g, " ").trim(),
+    );
+    expect(rows).toEqual([
+      "Claude Codestatus, transcript",
+      "GitHub Copilot CLIstatus, transcript",
+      "Gemini CLIstatus",
+    ]);
+    expect(host.textContent).toContain("show no status");
   });
 
   it("restores the collapsed groups from the stored state", () => {

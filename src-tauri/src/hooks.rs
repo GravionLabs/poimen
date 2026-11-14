@@ -11,7 +11,7 @@ use crate::gui_path;
 use crate::poimen_server::{self, Runner, SystemRunner};
 
 /// The agents `poimen-server integration` knows.
-pub const AGENTS: [&str; 2] = ["claude", "copilot"];
+pub const AGENTS: [&str; 3] = poimen_protocol::HOOK_KINDS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn status_asks_for_both_agents() {
+    fn status_asks_for_every_agent() {
         let exec = fake(Ok("not installed\n"));
         let all = status_all(&exec);
         assert_eq!(
@@ -168,11 +168,19 @@ mod tests {
                     agent: "copilot".into(),
                     state: HookState::Missing
                 },
+                HookStatus {
+                    agent: "gemini".into(),
+                    state: HookState::Missing
+                },
             ]
         );
         assert_eq!(
             *exec.calls.borrow(),
-            ["integration status claude", "integration status copilot"]
+            [
+                "integration status claude",
+                "integration status copilot",
+                "integration status gemini"
+            ]
         );
     }
 

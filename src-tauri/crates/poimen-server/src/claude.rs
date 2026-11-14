@@ -298,14 +298,29 @@ fn strip(groups: &mut Vec<Value>, channel: Channel) -> bool {
 /// Registers the hook for every event in `settings_path`, replacing earlier entries of ours and
 /// keeping everything else (the entries of the other channel too). Idempotent.
 pub fn install(settings_path: &Path, exe: &Path, channel: Channel) -> Result<(), String> {
+    install_events(
+        settings_path,
+        &EVENTS,
+        &hook_entry(exe, cfg!(windows), channel),
+        channel,
+    )
+}
+
+/// [`install`] for any agent whose settings file has the `hooks.<event>[].hooks[]` shape (Claude
+/// Code, Gemini CLI): `entry` under every one of `events`.
+pub(crate) fn install_events(
+    settings_path: &Path,
+    events: &[&str],
+    entry: &Value,
+    channel: Channel,
+) -> Result<(), String> {
     let mut settings = read_settings(settings_path)?;
     let hooks = settings
         .entry("hooks")
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or("\"hooks\" in settings.json is not an object; left untouched")?;
-    let entry = hook_entry(exe, cfg!(windows), channel);
-    for event in EVENTS {
+    for event in events.iter().copied() {
         let groups = hooks
             .entry(event)
             .or_insert_with(|| Value::Array(Vec::new()))
@@ -345,9 +360,19 @@ pub fn uninstall(settings_path: &Path, channel: Channel) -> Result<bool, String>
 
 /// The events of [`EVENTS`] that have our hook, with its binary present, in `settings_path`.
 pub fn status(settings_path: &Path, channel: Channel) -> Result<Vec<&'static str>, String> {
+    status_events(settings_path, &EVENTS, channel)
+}
+
+/// [`status`] for the events `events` of any settings file of that shape.
+pub(crate) fn status_events(
+    settings_path: &Path,
+    events: &[&'static str],
+    channel: Channel,
+) -> Result<Vec<&'static str>, String> {
     let settings = read_settings(settings_path)?;
-    Ok(EVENTS
-        .into_iter()
+    Ok(events
+        .iter()
+        .copied()
         .filter(|event| {
             settings
                 .get("hooks")

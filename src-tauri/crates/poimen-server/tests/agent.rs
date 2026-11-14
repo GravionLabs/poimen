@@ -198,3 +198,46 @@ fn start_in_an_unknown_terminal_is_not_found() {
     let err = client.start_agent("t99", "true", &[], LONG).unwrap_err();
     assert!(matches!(err, AgentError::NotFound(_)));
 }
+
+#[test]
+fn an_agent_without_hooks_is_started_without_waiting_and_shows_no_status() {
+    let env = Env::new("unreported");
+    let client = env.client();
+    let id = env.terminal(&client);
+    let marker = env.dir.join("started");
+
+    let started = Instant::now();
+    client
+        .start_unreported(&id, "touch", &[marker.display().to_string()])
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    wait_until("the typed command", || marker.exists());
+    assert_eq!(status(&client, &id), None);
+    // Hook kinds and plain shells stay refused ...
+    assert!(matches!(
+        client.prompt_agent(&id, "hi", LONG).unwrap(),
+        PromptResult::NoAgent
+    ));
+    // ... a hook-less agent is prompted by the caller that started it.
+    let typed = env.dir.join("prompted");
+    client
+        .prompt_unreported(&id, &format!("touch {}", typed.display()))
+        .unwrap();
+    wait_until("the prompt typed", || typed.exists());
+}
+
+#[test]
+fn prompt_unreported_in_an_unknown_terminal_is_not_found() {
+    let env = Env::new("pu-missing");
+    let client = env.client();
+    let err = client.prompt_unreported("t99", "hi").unwrap_err();
+    assert!(matches!(err, AgentError::NotFound(_)));
+}
+
+#[test]
+fn start_unreported_in_an_unknown_terminal_is_not_found() {
+    let env = Env::new("unreported-missing");
+    let client = env.client();
+    let err = client.start_unreported("t99", "true", &[]).unwrap_err();
+    assert!(matches!(err, AgentError::NotFound(_)));
+}

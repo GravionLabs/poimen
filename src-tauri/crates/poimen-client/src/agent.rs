@@ -186,6 +186,37 @@ impl Client {
         }
     }
 
+    /// Runs `program args` for an agent without hooks, which never reports: returns right after
+    /// the command line is typed, without waiting. The terminal then shows no agent status. A
+    /// terminal that already has an agent is refused before anything is typed.
+    pub fn start_unreported(
+        &self,
+        terminal_id: &str,
+        program: &str,
+        args: &[String],
+    ) -> Result<(), AgentError> {
+        let terminal = self.find_terminal(terminal_id)?;
+        if terminal.agent.is_some() {
+            return Err(AgentError::AlreadyRunning);
+        }
+        let kind = terminal
+            .program
+            .as_deref()
+            .map_or(ShellKind::Posix, ShellKind::of);
+        let line = command_line(program, args, kind).ok_or(AgentError::UnsupportedShell)?;
+        self.input(terminal_id, &format!("{line}\r"))?;
+        Ok(())
+    }
+
+    /// Types `text` and Enter into a terminal that runs an agent without hooks (started with
+    /// `start_unreported`): no status is read, none is waited for. The caller knows the terminal
+    /// runs such an agent; the server cannot tell it from a plain shell.
+    pub fn prompt_unreported(&self, terminal_id: &str, text: &str) -> Result<(), AgentError> {
+        self.find_terminal(terminal_id)?;
+        self.input(terminal_id, &format!("{text}\r"))?;
+        Ok(())
+    }
+
     /// Types `text` and Enter into the terminal of the agent, unless the agent is working or
     /// blocked, then waits up to `wait` for it to report `Working` or `Blocked`.
     pub fn prompt_agent(

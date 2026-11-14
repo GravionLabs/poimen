@@ -1,0 +1,10 @@
+{
+  "session_id": "g1",
+  "transcript_path": "/home/u/.gemini/tmp/abc/chats/session.json",
+  "cwd": "/w",
+  "hook_event_name": "Notification",
+  "timestamp": "2026-11-14T10:00:00Z",
+  "notification_type": "ToolPermission",
+  "message": "Gemini wants to run:\n rm -rf build\u0007 Allow?",
+  "details": {"type": "exec", "title": "Shell"}
+}
