@@ -1,0 +1,66 @@
+@if (palette.isOpen()) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Close the jump palette"
+    (click)="dismiss()"
+  ></button>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Jump to">
+    <div class="search">
+      <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="6.5" cy="6.5" r="4.5" />
+        <path d="M10 10l4.5 4.5" />
+      </svg>
+      <input
+        #field
+        class="query"
+        type="text"
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="jump-list"
+        placeholder="Jump to an agent or space"
+        [value]="palette.query()"
+        (input)="type($event)"
+        (keydown)="key($event)"
+      />
+    </div>
+    <ul id="jump-list" role="listbox">
+      @for (row of palette.rows(); track row.key) {
+        @if (row.type === "heading") {
+          <li class="heading" role="presentation">{{ row.label }}</li>
+        } @else {
+          <li
+            role="option"
+            [class.selected]="row.index === palette.selected()"
+            [class.disabled]="row.entry.disabled"
+            [attr.aria-selected]="row.index === palette.selected()"
+            [attr.aria-disabled]="row.entry.disabled ? true : null"
+            [attr.title]="row.entry.disabled"
+          >
+            <button
+              type="button"
+              tabindex="-1"
+              (click)="choose(row.entry)"
+              (mousemove)="palette.hover(row.index)"
+            >
+              <span class="title">
+                @for (part of parts(row.entry.title, row.positions); track $index) {
+                  @if (part.hit) {
+                    <mark>{{ part.text }}</mark>
+                  } @else {
+                    <span>{{ part.text }}</span>
+                  }
+                }
+              </span>
+              <span class="detail">{{ row.entry.disabled ?? row.entry.detail }}</span>
+            </button>
+          </li>
+        }
+      } @empty {
+        <li class="empty" role="presentation">Nothing to jump to</li>
+      }
+    </ul>
+    <p class="footer">↑↓ navigate · ↵ jump · Esc close</p>
+  </div>
+}

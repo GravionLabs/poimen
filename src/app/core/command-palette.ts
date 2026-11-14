@@ -64,6 +64,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "zoomIn", title: "Zoom In" },
   { id: "zoomOut", title: "Zoom Out" },
   { id: "zoomReset", title: "Reset Zoom" },
+  { id: "jump", title: "Jump to…" },
   { id: "nextWaiting", title: "Next Waiting Agent" },
   { id: "toggleOutput", title: "Toggle Output Panel" },
   { id: "nextTab", title: "Next Tab" },

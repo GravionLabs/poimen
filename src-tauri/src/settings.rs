@@ -210,6 +210,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("zoomOut", "CmdOrCtrl+-"),
     ("zoomReset", "CmdOrCtrl+0"),
     ("commandPalette", "CmdOrCtrl+Shift+P"),
+    ("jump", "CmdOrCtrl+K"),
     ("nextWaiting", "CmdOrCtrl+Shift+A"),
     ("nextTab", "CmdOrCtrl+Alt+Right"),
     ("previousTab", "CmdOrCtrl+Alt+Left"),
@@ -2718,6 +2719,8 @@ mod tests {
         assert_eq!(s.shortcuts, default_shortcuts());
         assert_eq!(s.shortcuts["closeTab"], "CmdOrCtrl+W");
         assert_eq!(s.shortcuts["find"], "CmdOrCtrl+Shift+F");
+        assert_eq!(s.shortcuts["jump"], "CmdOrCtrl+K");
+        assert_eq!(s.shortcuts["toggleOutput"], "CmdOrCtrl+J");
     }
 
     #[test]

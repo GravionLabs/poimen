@@ -2432,6 +2432,8 @@ fn build_menu(
         "View",
         true,
         &[
+            &item("jump", "Jump to…")?,
+            &sep()?,
             &item("toggleSidebar", "Toggle Sidebar")?,
             &item("toggleOutput", "Toggle Output Panel")?,
             &sep()?,
