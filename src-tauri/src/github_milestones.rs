@@ -19,7 +19,7 @@ pub struct Milestone {
     pub due_on: Option<String>,
     pub open: u64,
     pub closed: u64,
-    /// The lowest versioned milestone (`x.y.z`, `M<n>`, `M<n> (x.y.z)`) with open issues.
+    /// The lowest versioned milestone (`x.y.z`, `M<n>`, `M<n>.<m>`, `M<n> (x.y.z)`) with open issues.
     pub current: bool,
 }
 
@@ -54,22 +54,36 @@ pub fn parse_version(title: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
-/// `M<n>` or `M<n> (x.y.z)` as the sprint number; anything else is not a sprint milestone.
-pub fn parse_sprint(title: &str) -> Option<u64> {
+/// `M<n>`, `M<n>.<m>` (inserted between two sprints) or either with ` (x.y.z)` or a name
+/// (`M015.1 Sidebar organization`) as the sprint number and the insert number (0 without one); anything else is not a sprint milestone.
+pub fn parse_sprint(title: &str) -> Option<(u64, u64)> {
     let t = title.trim();
     let rest = t.strip_prefix('M').or_else(|| t.strip_prefix('m'))?;
     let (digits, tail) = match rest.split_once(' ') {
         Some((d, tail)) => (d, Some(tail.trim())),
         None => (rest, None),
     };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    let (major, minor) = match digits.split_once('.') {
+        Some((major, minor)) => (major, Some(minor)),
+        None => (digits, None),
+    };
+    let numeric = |d: &str| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit());
+    if !numeric(major) || !minor.is_none_or(numeric) {
         return None;
     }
     if let Some(tail) = tail {
-        let version = tail.strip_prefix('(')?.strip_suffix(')')?;
-        parse_version(version)?;
+        if tail.starts_with('(') {
+            parse_version(tail.strip_prefix('(')?.strip_suffix(')')?)?;
+        } else if !tail.chars().next().is_some_and(char::is_alphabetic) {
+            // A name (`M015.1 Sidebar organization`) is fine; a bare number or version is not.
+            return None;
+        }
     }
-    digits.parse().ok()
+    let minor = match minor {
+        Some(m) => m.parse().ok()?,
+        None => 0,
+    };
+    Some((major.parse().ok()?, minor))
 }
 
 /// Sort key of a versioned milestone: legacy `x.y.z` before `M<n>`, each numerically.
@@ -77,7 +91,7 @@ fn rank(title: &str) -> Option<(u8, u64, u64, u64)> {
     if let Some((x, y, z)) = parse_version(title) {
         return Some((0, x, y, z));
     }
-    parse_sprint(title).map(|n| (1, n, 0, 0))
+    parse_sprint(title).map(|(n, m)| (1, n, m, 0))
 }
 
 /// Milestones by version ascending (numerically, so 1.10.0 follows 1.2.0 and M10 follows M2;
@@ -182,11 +196,19 @@ mod tests {
 
     #[test]
     fn sprint_titles_parse_with_an_optional_version() {
-        assert_eq!(parse_sprint("M2"), Some(2));
-        assert_eq!(parse_sprint("M10 (0.9.0)"), Some(10));
+        assert_eq!(parse_sprint("M2"), Some((2, 0)));
+        assert_eq!(parse_sprint("M10 (0.9.0)"), Some((10, 0)));
+        assert_eq!(parse_sprint("M015.1"), Some((15, 1)));
+        assert_eq!(parse_sprint("M15.2 (1.4.0)"), Some((15, 2)));
+        assert_eq!(parse_sprint("M015.1 Sidebar organization"), Some((15, 1)));
+        assert_eq!(parse_sprint("M001 Dependencies and security"), Some((1, 0)));
         for bad in [
             "M",
             "M2x",
+            "M2.",
+            "M2.x",
+            "M.1",
+            "M2.1.1",
             "M2 0.9.0",
             "M2 (0.9)",
             "M2 ()",
@@ -231,6 +253,23 @@ mod tests {
             .map(|m| m.title.as_str())
             .collect();
         assert_eq!(current, ["M3"]);
+    }
+
+    #[test]
+    fn an_inserted_sprint_sorts_between_its_neighbours_and_can_be_current() {
+        let m = parse_milestones(
+            r#"[{"number":3,"title":"M016","open_issues":1,"closed_issues":0},
+                {"number":2,"title":"M015.1","open_issues":2,"closed_issues":0},
+                {"number":1,"title":"M015","open_issues":0,"closed_issues":4}]"#,
+        )
+        .unwrap();
+        assert_eq!(titles(&m), ["M015", "M015.1", "M016"]);
+        let current: Vec<&str> = m
+            .iter()
+            .filter(|m| m.current)
+            .map(|m| m.title.as_str())
+            .collect();
+        assert_eq!(current, ["M015.1"]);
     }
 
     #[test]
