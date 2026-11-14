@@ -852,3 +852,65 @@ fn an_empty_notification_list_says_so_and_escape_closes_it() {
     wait_until("closed", || !t.text().contains("no notifications"));
     assert_eq!(t.detach(), Outcome::Detached);
 }
+
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let out = poimen_core::gui_path::command("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {out:?}");
+}
+
+#[test]
+fn a_linked_worktree_space_is_listed_below_its_repository() {
+    let f = fixture("worktrees");
+    let main = f.dir.join("repo");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(
+        &main,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    );
+    let wt = f.dir.join("repo-wt");
+    git(
+        &main,
+        &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()],
+    );
+    let path = |p: &std::path::Path| p.canonicalize().unwrap().display().to_string();
+    // The worktree space is created first, so only the grouping puts it below the head.
+    f.client.create_space("Awt", &path(&wt)).unwrap();
+    f.client.create_space("Zmain", &path(&main)).unwrap();
+
+    let mut cache = poimen_console::tui::sidebar::RepoCache::default();
+    let model = Model::load_grouped(&f.client, &mut cache).unwrap();
+    let rows: Vec<_> = model
+        .rows(
+            &SidebarRows::default(),
+            poimen_core::settings::SidebarSort::Name,
+            None,
+        )
+        .iter()
+        .filter(|r| r.kind == RowKind::Space)
+        .map(|r| (r.lines[0][1].text.clone(), r.depth))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("work".to_string(), 0),
+            ("Zmain".to_string(), 0),
+            ("Awt".to_string(), 1)
+        ]
+    );
+}
