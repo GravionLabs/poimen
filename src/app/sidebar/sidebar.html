@@ -84,8 +84,9 @@
       (contextmenu)="openMenu($event, 'workspace', d.workspace.space_id)"
     >
       <span class="main space-main">
-        @for (line of d.lines; track $index) {
-          <span class="line">
+        @let underDot = d.lines[0]?.[0]?.kind === "dot";
+        @for (line of d.lines; track $index; let first = $first) {
+          <span class="line" [class.under-dot]="underDot && !first">
             @for (seg of line; track $index) {
               @switch (seg.kind) {
                 @case ("dot") {

@@ -67,6 +67,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - Plugin system with a sandboxed worker and view contexts; supersedes ADR 0005's "no plugin system now" in part (proposed, [ADR 0007](docs/adr/0007-plugin-system-with-sandboxed-worker-and-view-contexts.md)).
 - Remote machines over `poimen-server stdio` through SSH, no open port and no stored secret (proposed, [ADR 0008](docs/adr/0008-remote-machines-over-ssh.md)).
 - Terminals owned by a stable `poimen-pty-host` per terminal, so a server update or crash keeps them (accepted, [ADR 0009](docs/adr/0009-terminal-ownership-in-a-stable-pty-host-server-updates-without-losing-terminals.md)). Numbered 0007 until 2026-11-09, when it collided with the plugin ADR.
+- Shells in a terminal panel at the bottom of the app by default, agents in editor tabs; the placement (`editor`/`panel`) is a server-owned tab field, splits stay (proposed, [ADR 0010](docs/adr/0010-terminal-panel-for-shells-in-the-app.md)).
 
 ## Verification
 
