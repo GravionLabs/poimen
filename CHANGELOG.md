@@ -5,6 +5,54 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.18.0] — 2026-11-14
+
+### Bug Fixes
+- **remote**: Never connect a machine that was stopped while connecting
+- **remote**: Check an already connected machine when the list is read
+- **core**: Use the platform separator in repo and worktree paths (#282)
+- **terminal-view**: Unfocused split pane follows its container (#702)
+- **sidebar**: Align the space's second line and use the border color for splitters (#686)
+- **sidebar**: Align the space's second line with its name
+- **sidebar**: Import the renamed snapshot and spaces-store modules in sidebar-lines.spec (#704) (#705)
+
+
+### Documentation
+- Resolve AGENTS.md after rebase
+- Describe the backend-neutral snapshot
+- **adr**: Propose a terminal panel for shells in the app (ADR 0010)
+
+
+### Features
+- **remote**: Machines in the settings and an SSH connection per machine (#279) (#688)
+- **client**: Connect through a connector over a pipe
+- **remote**: Machines in the settings and an SSH connection per machine
+- **remote**: Machine check for prerequisites (#281) (#690)
+- **remote**: Machine check for prerequisites (#281)
+- **remote**: Check machine in the machine's context menu with the check result (#281)
+- **server**: Repo.ensure and worktree.create for remote tasks (#282) (#691)
+- **server**: Repo.ensure and worktree.create for remote tasks (#282)
+- **sidebar**: Remote machines and their spaces in the sidebar (#280) (#694)
+- **sidebar**: Remote machines and their spaces in the sidebar
+- **sidebar**: Machine check in the context menu, fix duplicate Machines in app.ts (#280)
+- **events**: Progress events of remote runs in the Deliver panel and Events tab (#692) (#696)
+- **tasks**: Start a task on a remote machine (#283) (#695)
+- **tasks**: Clean up merged task worktrees on a remote machine (#284) (#697)
+- **server**: Worktree.cleanup for merged tasks on a remote machine (#284)
+- **tasks**: Clean up merged tasks on connected machines (#284)
+- **sidebar**: Actions and agent features on remote spaces (#693) (#699)
+- **server**: Agent flow and transcripts of remote panes (#698) (#700)
+- **server**: Agent flow and transcripts of remote panes (#698)
+
+
+### Refactoring
+- **core**: Move transcripts and copilot logs into poimen-core (#698)
+- **app**: Backend-neutral snapshot wire shape and model (#586) (#701)
+- **app**: Backend-neutral snapshot wire type
+- **app**: Move the neutral model to core/snapshot.ts
+- **app**: Neutral ids in SpaceOutcome, agent status event and command args
+
+
 ## [0.17.0] — 2026-11-12
 
 ### Bug Fixes
@@ -26,6 +74,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - **adr**: Record the observed ConPTY result of the host check (#602)
 - Poimen sends no system notifications (#676)
+- Update CHANGELOG.md for v0.17.0 [skip ci]
 
 
 ### Features
