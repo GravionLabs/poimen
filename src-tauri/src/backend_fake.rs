@@ -1,7 +1,10 @@
 //! A fake `Backend` for tests of the command layer: it records every call as a line of text and
 //! answers from what the test set up. It never starts a process or touches a socket.
 
+use std::collections::VecDeque;
 use std::sync::Mutex;
+
+use poimen_client::protocol::{AgentTranscriptResult, TranscriptState};
 
 use serde_json::json;
 
@@ -23,6 +26,8 @@ pub struct FakeBackend {
     /// What `create_space_with_layout` and `apply_layout` answer; `None`: the fake does not
     /// build layouts (herdr).
     pub laid_out: Mutex<Option<LaidOut>>,
+    /// What the next `agent_transcript` calls answer, in order; then `no_agent`.
+    pub transcripts: Mutex<VecDeque<Result<AgentTranscriptResult, String>>>,
 }
 
 impl Default for FakeBackend {
@@ -30,14 +35,11 @@ impl Default for FakeBackend {
         Self {
             calls: Mutex::default(),
             fail_on: Mutex::default(),
-            snapshot: Mutex::new(Snapshot {
-                workspaces: json!([]),
-                tabs: json!([]),
-                panes: json!([]),
-            }),
+            snapshot: Mutex::new(Snapshot::default()),
             records: Mutex::default(),
             emulated: false,
             laid_out: Mutex::default(),
+            transcripts: Mutex::default(),
         }
     }
 }
@@ -235,6 +237,27 @@ impl Backend for FakeBackend {
     fn agent_session(&self, terminal_id: &str) -> Result<Option<AgentSession>, String> {
         self.record(format!("agent_session {terminal_id}"))?;
         Ok(None)
+    }
+
+    fn agent_transcript(
+        &self,
+        terminal_id: &str,
+        follower: &str,
+        restart: bool,
+    ) -> Result<AgentTranscriptResult, String> {
+        self.record(format!(
+            "agent_transcript {terminal_id} {follower} {restart}"
+        ))?;
+        let next = self.transcripts.lock().unwrap().pop_front();
+        next.unwrap_or_else(|| {
+            Ok(AgentTranscriptResult {
+                state: TranscriptState::NoAgent,
+                reason: None,
+                session: None,
+                fresh: false,
+                updates: Vec::new(),
+            })
+        })
     }
 
     fn open_stream(

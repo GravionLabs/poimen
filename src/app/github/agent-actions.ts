@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { HerdrStore } from "../core/herdr-store";
-import { spaceRoot } from "../core/herdr";
+import { SpacesStore } from "../core/spaces-store";
+import { spaceRoot } from "../core/snapshot";
 import {
   parseAgentActions,
   parseHarnesses,
@@ -208,7 +208,7 @@ export function summaryText(label: string, summary: RunSummary): string {
 export class AgentActions {
   private readonly bridge = inject(TauriBridge);
   private readonly spaces = inject(SpaceActions);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly pulls = inject(GithubPulls);
   private readonly issues = inject(GithubIssues);
   private readonly ui = inject(UiState);
@@ -403,7 +403,7 @@ export class AgentActions {
     if (where === "worktree") return this.runInWorktrees(action, first.root, groups);
     let summary: RunSummary | null = null;
     const after = async (outcome: SpaceOutcome): Promise<void> => {
-      summary = await this.startAll(action, first.root, outcome.workspace_id, groups, diffOnly);
+      summary = await this.startAll(action, first.root, outcome.space_id, groups, diffOnly);
       await this.store.refresh();
       this.spaces.notify(summaryText(action.label, summary));
     };
@@ -518,15 +518,15 @@ export class AgentActions {
     outcome: SpaceOutcome,
   ): Promise<void> {
     let paneId: string | null | undefined = outcome.created
-      ? spaceRoot(this.store.snapshot(), outcome.workspace_id)?.terminal_id
+      ? spaceRoot(this.store.snapshot(), outcome.space_id)?.terminal_id
       : null;
     paneId ??= await this.bridge.invoke<string | null>("terminal_create", {
-      workspaceId: outcome.workspace_id,
+      spaceId: outcome.space_id,
       cwd: path,
     });
     if (!paneId) throw new Error("the terminal tab was not created");
     await this.bridge.invoke("agent_start", {
-      paneId,
+      terminalId: paneId,
       kind: group.launch.kind,
       name: `${action.label} ${numbers(group.targets).replaceAll(",", "")}`,
       args: group.launch.args,
@@ -555,12 +555,12 @@ export class AgentActions {
     const results = await Promise.allSettled(
       groups.map(async ({ launch, targets }) => {
         const paneId = await this.bridge.invoke<string | null>("terminal_create", {
-          workspaceId,
+          spaceId: workspaceId,
           cwd: root,
         });
         if (!paneId) throw new Error("the terminal tab was not created");
         await this.bridge.invoke("agent_start", {
-          paneId,
+          terminalId: paneId,
           kind: launch.kind,
           name: `${diffOnly ? "review" : action.label} ${numbers(targets).replaceAll(",", "")}`,
           args: launch.args,

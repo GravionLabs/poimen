@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Terminal, Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Terminal, Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { PaneActions } from "./pane-actions";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { SpaceActions } from "./space-actions";
@@ -27,7 +27,7 @@ const pane = (terminal_id: string, over: Partial<Terminal> = {}): Terminal => ({
 describe("PaneActions", () => {
   let current: Snapshot;
   let actions: PaneActions;
-  let store: HerdrStore;
+  let store: SpacesStore;
 
   beforeEach(async () => {
     tauri.reset();
@@ -42,12 +42,12 @@ describe("PaneActions", () => {
         { provide: UI_STORAGE, useValue: null },
         UiState,
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         SpaceActions,
         PaneActions,
       ],
     });
-    store = injector.get(HerdrStore);
+    store = injector.get(SpacesStore);
     actions = injector.get(PaneActions);
     await store.refresh();
   });
@@ -84,7 +84,7 @@ describe("PaneActions", () => {
       tauri.answer("pane_restart", () => "w1:p9");
       actions.askRestart("w1:p1");
       const result = await actions.confirmRestart();
-      expect(tauri.calls("pane_restart")).toEqual([{ paneId: "w1:p1" }]);
+      expect(tauri.calls("pane_restart")).toEqual([{ terminalId: "w1:p1" }]);
       expect(result).toEqual({ paneId: "w1:p1", successor: "w1:p9" });
       expect(actions.dialog()).toBeNull();
     });
@@ -123,7 +123,7 @@ describe("PaneActions", () => {
     });
     actions.askNew("w1");
     const created = await actions.confirmNew("  /tmp ");
-    expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w1", cwd: "/tmp" }]);
+    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w1", cwd: "/tmp" }]);
     expect(created?.terminal_id).toBe("w1:p3");
     expect(actions.dialog()).toBeNull();
   });
@@ -132,7 +132,7 @@ describe("PaneActions", () => {
     tauri.answer("terminal_create", () => null);
     actions.askNew("w1");
     expect(await actions.confirmNew("")).toBeUndefined();
-    expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w1", cwd: null }]);
+    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w1", cwd: null }]);
   });
 
   it("splits in the pane's own directory", async () => {
@@ -158,7 +158,7 @@ describe("PaneActions", () => {
     expect(actions.dialog()).toMatchObject({ kind: "agent", paneId: "w1:p1" });
     expect(await actions.confirmStartAgent(" codex ", " helper ", "--fast")).toBe(true);
     expect(tauri.calls("agent_start")).toEqual([
-      { paneId: "w1:p1", kind: "codex", name: "helper", args: ["--fast"] },
+      { terminalId: "w1:p1", kind: "codex", name: "helper", args: ["--fast"] },
     ]);
     expect(actions.dialog()).toBeNull();
   });
@@ -167,7 +167,7 @@ describe("PaneActions", () => {
     actions.askStartAgent("w1:p1");
     await actions.confirmStartAgent("claude", "", "  --model   opus ");
     expect(tauri.calls("agent_start")).toEqual([
-      { paneId: "w1:p1", kind: "claude", name: null, args: ["--model", "opus"] },
+      { terminalId: "w1:p1", kind: "claude", name: null, args: ["--model", "opus"] },
     ]);
   });
 
@@ -175,7 +175,7 @@ describe("PaneActions", () => {
     actions.askStartAgent("w1:p1");
     expect(await actions.confirmStartAgent("claude", " ", "")).toBe(true);
     expect(tauri.calls("agent_start")).toEqual([
-      { paneId: "w1:p1", kind: "claude", name: null, args: [] },
+      { terminalId: "w1:p1", kind: "claude", name: null, args: [] },
     ]);
     actions.askStartAgent("w1:p1");
     expect(await actions.confirmStartAgent(" ", "", "")).toBe(false);
@@ -206,8 +206,8 @@ describe("PaneActions", () => {
     actions.askRename("w1:p1");
     await actions.confirmRename("  ");
     expect(tauri.calls("pane_rename")).toEqual([
-      { paneId: "w1:p1", label: "build" },
-      { paneId: "w1:p1", label: null },
+      { terminalId: "w1:p1", label: "build" },
+      { terminalId: "w1:p1", label: null },
     ]);
   });
 
@@ -240,7 +240,7 @@ describe("PaneActions", () => {
     });
     actions.askClose("w1:p1");
     expect(await actions.confirmClose()).toEqual({ paneId: "w1:p1" });
-    expect(tauri.calls("pane_close")).toEqual([{ paneId: "w1:p1" }]);
+    expect(tauri.calls("pane_close")).toEqual([{ terminalId: "w1:p1" }]);
     expect(store.pane("w1:p1")).toBeUndefined();
   });
 
@@ -295,12 +295,12 @@ describe("PaneActions", () => {
       const created = pane("w1:p3", { cwd: "/work/app/src" });
       tauri.answer("snapshot", () => ({ ...current, terminals: [...current.terminals, created] }));
       const result = await actions.openTerminalIn("/work/app/src");
-      expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w1", cwd: "/work/app/src" }]);
+      expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w1", cwd: "/work/app/src" }]);
       expect(result?.terminal_id).toBe("w1:p3");
     });
 
     it("creates a space for the directory when no space contains it", async () => {
-      tauri.answer("create_space", () => ({ workspace_id: "w2", created: true }));
+      tauri.answer("create_space", () => ({ space_id: "w2", created: true }));
       const fresh = pane("w2:p1", { space_id: "w2", cwd: "/other" });
       tauri.answer("snapshot", () => ({ ...current, terminals: [...current.terminals, fresh] }));
       const result = await actions.openTerminalIn("/other");
@@ -325,7 +325,7 @@ describe("PaneActions split tabs", () => {
         { provide: UI_STORAGE, useValue: null },
         UiState,
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         SpaceActions,
         PaneActions,
       ],

@@ -1,4 +1,4 @@
-import { agentKind, type AgentStatus, type SpaceNode } from "../core/herdr";
+import { agentKind, type AgentStatus, type SpaceNode } from "../core/snapshot";
 
 /** One pane of a space as the overview lists it. */
 export interface OverviewRow {

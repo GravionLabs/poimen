@@ -1,11 +1,10 @@
 use poimen_core::agent_actions;
-mod agent_events;
+use poimen_core::{copilot, transcripts};
 mod backend;
 #[cfg(test)]
 mod backend_fake;
 mod changes;
 mod changes_git;
-mod copilot;
 mod deliver;
 use poimen_core::git;
 mod git_sync;
@@ -21,10 +20,13 @@ mod hooks;
 mod layout;
 #[cfg(test)]
 mod live;
+mod machines;
 mod poimen_backend;
 mod poimen_server;
 mod project;
 mod project_edit;
+mod remote_runs;
+mod remote_transcripts;
 mod schemes;
 mod settings;
 mod spaces;
@@ -33,7 +35,6 @@ mod task_start;
 use poimen_core::tasks;
 use poimen_core::templates;
 mod terminal_colors;
-mod transcripts;
 use poimen_core::trust;
 mod updater;
 mod watch;
@@ -43,7 +44,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde_json::{Value, json};
+use serde_json::json;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
@@ -60,7 +61,11 @@ struct StartLock(std::sync::Arc<Mutex<()>>);
 /// The running subagent transcript watches by key: one per frontend follower (the output panel,
 /// each visible flow tab), each with at most one watch.
 #[derive(Default)]
-struct SubagentWatch(Mutex<Watches<transcripts::WatchHandle>>);
+struct SubagentWatch(Mutex<Watches<FollowHandle>>);
+
+/// A running transcript follow of either kind (a local file watch, or the poll of a machine's
+/// server); dropping it stops it.
+type FollowHandle = Box<dyn std::any::Any + Send>;
 
 /// The running watches of deliver loop status files by repository root.
 #[derive(Default)]
@@ -124,6 +129,27 @@ async fn on_backend<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
+/// Runs `f` on the backend `id` addresses (#693): the machine of a qualified id (`<machine>::<id>`),
+/// else the local one, with the id on that backend. An offline machine fails; the local backend is
+/// never the fallback for a machine's id.
+async fn on_routed<T: Send + 'static>(
+    local: &Shared,
+    machines: &SharedMachines,
+    id: &str,
+    f: impl FnOnce(&dyn Backend, &str) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let routed = machines.route(local, id)?;
+    on_backend(&routed.backend, move |b| f(b, &routed.id)).await
+}
+
+/// `new`, an id returned by a backend, in the form of `origin`, the id the request addressed.
+fn qualify_like(origin: &str, new: String) -> String {
+    match machines::split_id(origin).0 {
+        Some(machine) => format!("{machine}::{new}"),
+        None => new,
+    }
+}
+
 /// Workspaces, tabs and panes in one call; the frontend rebuilds its tree from it.
 #[tauri::command]
 async fn snapshot(backend: State<'_, Shared>) -> Result<backend::Snapshot, String> {
@@ -134,20 +160,30 @@ async fn snapshot(backend: State<'_, Shared>) -> Result<backend::Snapshot, Strin
 #[tauri::command]
 async fn pane_split(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     target: String,
     direction: SplitDirection,
     cwd: Option<String>,
 ) -> Result<Option<String>, String> {
-    on_backend(backend.inner(), move |b| {
-        b.split(&target, direction, cwd.as_deref(), None)
+    let origin = target.clone();
+    let created = on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
+        b.split(id, direction, cwd.as_deref(), None)
     })
-    .await
+    .await?;
+    Ok(created.map(|id| qualify_like(&origin, id)))
 }
 
 /// Closes a pane. The UI confirms first; the backend ends the pane's process.
 #[tauri::command]
-async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| b.close_terminal(&pane_id)).await
+async fn pane_close(
+    backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
+    terminal_id: String,
+) -> Result<(), String> {
+    on_routed(backend.inner(), machines.inner(), &terminal_id, |b, id| {
+        b.close_terminal(id)
+    })
+    .await
 }
 
 /// Restarts a terminal on the bundled PTY host: a new terminal with the same directory, program
@@ -155,21 +191,34 @@ async fn pane_close(backend: State<'_, Shared>, pane_id: String) -> Result<(), S
 #[tauri::command]
 async fn pane_restart(
     backend: State<'_, Shared>,
-    pane_id: String,
+    machines: State<'_, SharedMachines>,
+    terminal_id: String,
 ) -> Result<Option<String>, String> {
-    on_backend(backend.inner(), move |b| b.restart_terminal(&pane_id)).await
+    let created = on_routed(backend.inner(), machines.inner(), &terminal_id, |b, id| {
+        b.restart_terminal(id)
+    })
+    .await?;
+    Ok(created.map(|id| qualify_like(&terminal_id, id)))
 }
 
 /// Closes a tab with all its terminals (`tab.close` on the poimen backend). The UI confirms first.
 #[tauri::command]
-async fn tab_close(backend: State<'_, Shared>, tab_id: String) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| b.close_tab(&tab_id)).await
+async fn tab_close(
+    backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
+    tab_id: String,
+) -> Result<(), String> {
+    on_routed(backend.inner(), machines.inner(), &tab_id, |b, id| {
+        b.close_tab(id)
+    })
+    .await
 }
 
 /// Renames a tab (`tab.rename` on the poimen backend); a blank name is rejected.
 #[tauri::command]
 async fn tab_rename(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     tab_id: String,
     name: String,
 ) -> Result<(), String> {
@@ -177,19 +226,23 @@ async fn tab_rename(
     if name.is_empty() {
         return Err("The name of a tab cannot be empty.".into());
     }
-    on_backend(backend.inner(), move |b| b.rename_tab(&tab_id, &name)).await
+    on_routed(backend.inner(), machines.inner(), &tab_id, move |b, id| {
+        b.rename_tab(id, &name)
+    })
+    .await
 }
 
 /// Sets the ratio of a split of a tab (`tab.resize_split` on the poimen backend).
 #[tauri::command]
 async fn tab_resize_split(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     tab_id: String,
     split_id: String,
     ratio: f64,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.resize_split(&tab_id, &split_id, ratio)
+    on_routed(backend.inner(), machines.inner(), &tab_id, move |b, id| {
+        b.resize_split(id, &split_id, ratio)
     })
     .await
 }
@@ -198,10 +251,16 @@ async fn tab_resize_split(
 #[tauri::command]
 async fn tab_focus(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     tab_id: String,
     terminal_id: String,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| b.focus_tab(&tab_id, &terminal_id)).await
+    // The terminal is of the tab's machine: its own id is what the machine's server knows.
+    let terminal = machines::split_id(&terminal_id).1.to_owned();
+    on_routed(backend.inner(), machines.inner(), &tab_id, move |b, id| {
+        b.focus_tab(id, &terminal)
+    })
+    .await
 }
 
 /// Closes a space with all its panes; only on an explicit user action (the UI confirms first when
@@ -210,16 +269,26 @@ async fn tab_focus(
 #[tauri::command]
 async fn space_close(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    machines: State<'_, SharedMachines>,
+    space_id: String,
     focus: Option<String>,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.close_space(&workspace_id)?;
-        if let Some(id) = focus.filter(|id| !id.is_empty()) {
-            let _ = b.focus_space(&id);
-        }
-        Ok(())
-    })
+    // The neighbour to focus afterwards counts only on the same backend.
+    let machine = machines::split_id(&space_id).0.map(str::to_owned);
+    let focus =
+        focus.filter(|id| !id.is_empty() && machines::split_id(id).0.map(str::to_owned) == machine);
+    on_routed(
+        backend.inner(),
+        machines.inner(),
+        &space_id,
+        move |b, id| {
+            b.close_space(id)?;
+            if let Some(next) = focus {
+                let _ = b.focus_space(machines::split_id(&next).1);
+            }
+            Ok(())
+        },
+    )
     .await
 }
 
@@ -227,16 +296,20 @@ async fn space_close(
 #[tauri::command]
 async fn space_rename(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    machines: State<'_, SharedMachines>,
+    space_id: String,
     label: String,
 ) -> Result<(), String> {
     let label = label.trim().to_owned();
     if label.is_empty() {
         return Err("The name of a space cannot be empty.".into());
     }
-    on_backend(backend.inner(), move |b| {
-        b.rename_space(&workspace_id, &label)
-    })
+    on_routed(
+        backend.inner(),
+        machines.inner(),
+        &space_id,
+        move |b, id| b.rename_space(id, &label),
+    )
     .await
 }
 
@@ -244,14 +317,18 @@ async fn space_rename(
 #[tauri::command]
 async fn agent_start(
     backend: State<'_, Shared>,
-    pane_id: String,
+    machines: State<'_, SharedMachines>,
+    terminal_id: String,
     kind: String,
     name: Option<String>,
     args: Vec<String>,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.agent_start(&pane_id, &kind, name.as_deref(), &args)
-    })
+    on_routed(
+        backend.inner(),
+        machines.inner(),
+        &terminal_id,
+        move |b, id| b.agent_start(id, &kind, name.as_deref(), &args),
+    )
     .await
 }
 
@@ -259,11 +336,12 @@ async fn agent_start(
 #[tauri::command]
 async fn agent_rename(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     target: String,
     name: Option<String>,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.agent_rename(&target, name.as_deref())
+    on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
+        b.agent_rename(id, name.as_deref())
     })
     .await
 }
@@ -273,22 +351,30 @@ async fn agent_rename(
 #[tauri::command]
 async fn agent_prompt(
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     target: String,
     text: String,
 ) -> Result<herdr::PromptOutcome, String> {
-    on_backend(backend.inner(), move |b| Ok(b.agent_prompt(&target, &text))).await
+    on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
+        Ok(b.agent_prompt(id, &text))
+    })
+    .await
 }
 
 /// Renames a pane; an empty label clears it.
 #[tauri::command]
 async fn pane_rename(
     backend: State<'_, Shared>,
-    pane_id: String,
+    machines: State<'_, SharedMachines>,
+    terminal_id: String,
     label: Option<String>,
 ) -> Result<(), String> {
-    on_backend(backend.inner(), move |b| {
-        b.rename_terminal(&pane_id, label.as_deref())
-    })
+    on_routed(
+        backend.inner(),
+        machines.inner(),
+        &terminal_id,
+        move |b, id| b.rename_terminal(id, label.as_deref()),
+    )
     .await
 }
 
@@ -434,13 +520,18 @@ async fn task_issues(
 #[tauri::command]
 async fn terminal_create(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    machines: State<'_, SharedMachines>,
+    space_id: String,
     cwd: Option<String>,
 ) -> Result<Option<String>, String> {
-    on_backend(backend.inner(), move |b| {
-        b.create_terminal(&workspace_id, cwd.as_deref())
-    })
-    .await
+    let created = on_routed(
+        backend.inner(),
+        machines.inner(),
+        &space_id,
+        move |b, id| b.create_terminal(id, cwd.as_deref()),
+    )
+    .await?;
+    Ok(created.map(|id| qualify_like(&space_id, id)))
 }
 
 /// The space template that applies to `dir`; `origin` is read only when a template matches by
@@ -530,20 +621,17 @@ fn create_space_with(
 ) -> Result<spaces::SpaceOutcome, String> {
     let dir = spaces::resolve_dir(cwd, home)?;
     let snapshot = backend.snapshot()?;
-    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
-    let workspaces = list(&snapshot.workspaces);
-    let panes = list(&snapshot.panes);
-    if let Some(workspace_id) = spaces::find_space(&dir, &workspaces, &panes) {
-        backend.focus_space(&workspace_id)?;
+    if let Some(space_id) = spaces::find_space(&dir, &snapshot) {
+        backend.focus_space(&space_id)?;
         return Ok(spaces::SpaceOutcome {
-            workspace_id,
+            space_id,
             created: false,
             warnings: Vec::new(),
             setup_started: false,
             trust: None,
         });
     }
-    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &workspaces);
+    let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &snapshot.spaces);
     // poimen-server resolves and builds the layout itself and asks for trust first.
     let request = backend::LayoutRequest {
         cwd: &dir,
@@ -554,7 +642,7 @@ fn create_space_with(
     if let Some(result) = backend.create_space_with_layout(request) {
         return match result? {
             backend::LaidOut::Trust(request) => Ok(spaces::SpaceOutcome {
-                workspace_id: String::new(),
+                space_id: String::new(),
                 created: false,
                 warnings: Vec::new(),
                 setup_started: false,
@@ -567,7 +655,7 @@ fn create_space_with(
             } => {
                 backend.focus_space(&space_id)?;
                 Ok(spaces::SpaceOutcome {
-                    workspace_id: space_id,
+                    space_id,
                     created: true,
                     warnings,
                     setup_started,
@@ -588,7 +676,7 @@ fn create_space_with(
     let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
         trust::Gate::Ask(request) => {
             return Ok(spaces::SpaceOutcome {
-                workspace_id: String::new(),
+                space_id: String::new(),
                 created: false,
                 warnings: Vec::new(),
                 setup_started: false,
@@ -605,8 +693,8 @@ fn create_space_with(
         }
     };
     let created = backend.create_space(&dir, &label)?;
-    let workspace_id = created.space_id.clone();
-    backend.focus_space(&workspace_id)?;
+    let space_id = created.space_id.clone();
+    backend.focus_space(&space_id)?;
     let (agent_command, user_layout, mut warnings) = layout_inputs(&dir, user.as_ref(), home);
     warnings.extend(build_layout(
         backend,
@@ -618,10 +706,10 @@ fn create_space_with(
         root_command,
         agent_command.as_deref(),
     ));
-    let (setup_started, warning) = run_setup(backend, &workspace_id, &dir, &sources, allow);
+    let (setup_started, warning) = run_setup(backend, &space_id, &dir, &sources, allow);
     warnings.extend(warning);
     Ok(spaces::SpaceOutcome {
-        workspace_id,
+        space_id,
         created: true,
         warnings,
         setup_started,
@@ -791,15 +879,13 @@ fn rebuild_space_with(
     confirmed: bool,
 ) -> Result<RebuildOutcome, String> {
     let snapshot = backend.snapshot()?;
-    let list = |value: &Value| value.as_array().cloned().unwrap_or_default();
-    let of_space = |v: &Value| v["workspace_id"].as_str() == Some(space_id);
-    let Some(space) = list(&snapshot.workspaces).into_iter().find(of_space) else {
+    let Some(space) = snapshot.spaces.iter().find(|s| s.space_id == space_id) else {
         return Ok(RebuildOutcome::NotEmpty);
     };
-    if list(&snapshot.panes).iter().any(of_space) {
+    if snapshot.terminals_of(space_id).next().is_some() {
         return Ok(RebuildOutcome::NotEmpty);
     }
-    let cwd = space["cwd"].as_str().unwrap_or_default().trim();
+    let cwd = space.cwd.as_deref().unwrap_or_default().trim();
     if cwd.is_empty() {
         return Ok(RebuildOutcome::Missing {
             reason: "the space has no directory".into(),
@@ -896,12 +982,12 @@ fn rebuild_space_with(
 #[tauri::command]
 async fn rebuild_space(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    space_id: String,
     decision: Option<trust::Decision>,
     confirmed: bool,
 ) -> Result<RebuildOutcome, String> {
     on_backend(backend.inner(), move |b| {
-        rebuild_space_with(b, home_dir().as_deref(), &workspace_id, decision, confirmed)
+        rebuild_space_with(b, home_dir().as_deref(), &space_id, decision, confirmed)
     })
     .await
 }
@@ -911,7 +997,7 @@ async fn rebuild_space(
 /// the space. Returns whether it started and the warning, if any.
 fn run_setup(
     backend: &dyn Backend,
-    workspace_id: &str,
+    space_id: &str,
     dir: &str,
     sources: &trust::Sources,
     allow_project_commands: bool,
@@ -923,7 +1009,7 @@ fn run_setup(
     let Some(command) = project::setup_of(project) else {
         return (false, None);
     };
-    match project::start_setup(backend, workspace_id, dir, &command) {
+    match project::start_setup(backend, space_id, dir, &command) {
         Ok(()) => (true, None),
         Err(e) => (false, Some(format!("setup not started: {e}"))),
     }
@@ -993,12 +1079,12 @@ async fn project_entries(dir: String) -> project::Entries {
     .unwrap_or_default()
 }
 
-/// Runs a palette entry of the project file in the space `workspace_id` (a user action). Goes
+/// Runs a palette entry of the project file in the space `space_id` (a user action). Goes
 /// through `trust::gate` with the one read of the file; an untrusted file answers `ask`.
 #[tauri::command]
 async fn project_run(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    space_id: String,
     dir: String,
     entry: project::Entry,
     decision: Option<trust::Decision>,
@@ -1018,7 +1104,7 @@ async fn project_run(
             &trusted,
             decision.as_ref(),
             &persist,
-            &workspace_id,
+            &space_id,
             &dir,
             &entry,
         )
@@ -1052,6 +1138,290 @@ struct BackendKind(&'static str);
 #[tauri::command]
 fn backend_kind(kind: State<'_, BackendKind>) -> &'static str {
     kind.0
+}
+
+type SharedMachines = std::sync::Arc<machines::Machines>;
+
+/// The machines of the settings with their connection state (#279).
+#[tauri::command]
+fn list_machines(machines: State<'_, SharedMachines>) -> Vec<machines::MachineStatus> {
+    machines.list()
+}
+
+/// Tries to connect an offline or incompatible machine at once.
+#[tauri::command]
+fn reconnect_machine(machines: State<'_, SharedMachines>, name: String) -> Result<(), String> {
+    machines.reconnect(&name)
+}
+
+/// What a connected machine has for tasks (git, gh and its login, agents, hooks) and the command
+/// to fix each gap (#281); fails while the machine is not connected. Nothing is run or installed
+/// by poimen beyond the read-only checks of the machine's own server.
+#[tauri::command]
+async fn machine_check(
+    machines: State<'_, SharedMachines>,
+    name: String,
+) -> Result<poimen_client::protocol::MachineCheckResult, String> {
+    let backend = machines.backend(&name)?;
+    tauri::async_runtime::spawn_blocking(move || backend.machine_check())
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The spaces of a machine's server; fails while the machine is not connected.
+#[tauri::command]
+async fn machine_snapshot(
+    machines: State<'_, SharedMachines>,
+    name: String,
+) -> Result<backend::Snapshot, String> {
+    let backend: Shared = machines.backend(&name)?;
+    on_backend(&backend, |b| b.snapshot()).await
+}
+
+/// `repo.ensure` on a machine: its clone of `owner/repo`, cloned when absent (#283).
+#[tauri::command]
+async fn machine_repo_ensure(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    owner: String,
+    repo: String,
+) -> Result<poimen_client::protocol::RepoEnsureResult, String> {
+    let backend = machines.backend(&name)?;
+    tauri::async_runtime::spawn_blocking(move || backend.ensure_repo(&owner, &repo))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// `worktree.create` on a machine: the worktree of a task issue in its clone (#283).
+#[tauri::command]
+async fn machine_worktree_create(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    repo_dir: String,
+    issue: poimen_client::protocol::TaskIssue,
+    mode: String,
+) -> Result<poimen_client::protocol::WorktreeCreateResult, String> {
+    let backend = machines.backend(&name)?;
+    tauri::async_runtime::spawn_blocking(move || backend.create_worktree(&repo_dir, issue, &mode))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Creates the space of a task on a machine, or focuses its existing space for `cwd`.
+#[tauri::command]
+async fn machine_create_space(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    cwd: String,
+    label: Option<String>,
+    command: Option<String>,
+) -> Result<spaces::SpaceOutcome, String> {
+    let backend: Shared = machines.backend(&name)?;
+    on_backend(&backend, move |b| {
+        remote_create_space(
+            b,
+            &cwd,
+            label.as_deref().unwrap_or_default(),
+            command.as_deref(),
+        )
+    })
+    .await
+}
+
+/// A tab with a command in a space of a machine (a task mode without a worktree).
+#[tauri::command]
+async fn machine_task_tab(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    space_id: String,
+    dir: String,
+    tab: String,
+    command: String,
+) -> Result<(), String> {
+    let backend: Shared = machines.backend(&name)?;
+    on_backend(&backend, move |b| {
+        task_start::start_tab(b, &space_id, &dir, &tab, &command)
+    })
+    .await
+}
+
+/// "Clean up merged tasks" on a machine (#284): the merged pull requests come from the local `gh`
+/// for the GitHub repository of the local clone at `dir`; the git work runs on the machine's
+/// server (`worktree.cleanup` in its clone of that repository, the rules of #192). Only while the
+/// machine is `connected`. Destructive, so only on a user action.
+#[tauri::command]
+async fn machine_task_cleanup(
+    machines: State<'_, SharedMachines>,
+    name: String,
+    dir: String,
+    focused_space: Option<String>,
+    skip_teardown: Option<bool>,
+) -> Result<worktree::CleanupReport, String> {
+    let backend = machines.connected_backend(&name)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = worktree::main_worktree(std::path::Path::new(&dir))?;
+        let repo = github::repo_of(&root)
+            .ok_or_else(|| "the repository has no GitHub origin".to_owned())?;
+        let merged = worktree::merged_prs(&github::SystemRunner, &repo)?;
+        let result = backend.cleanup_worktrees(remote_cleanup_params(
+            &repo,
+            &merged,
+            focused_space,
+            skip_teardown == Some(true),
+        ))?;
+        Ok(remote_cleanup_report(result))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The `worktree.cleanup` request for `repo` and its merged pull requests.
+fn remote_cleanup_params(
+    repo: &github::Repo,
+    merged: &[worktree::MergedPr],
+    focused_space: Option<String>,
+    skip_teardown: bool,
+) -> poimen_client::protocol::WorktreeCleanup {
+    poimen_client::protocol::WorktreeCleanup {
+        owner: repo.owner.clone(),
+        repo: repo.name.clone(),
+        merged: merged
+            .iter()
+            .map(|m| poimen_client::protocol::MergedPull {
+                branch: m.branch.clone(),
+                number: m.number,
+            })
+            .collect(),
+        focused_space,
+        skip_teardown,
+    }
+}
+
+/// A machine's `worktree.cleanup` result as the report of the local `task_cleanup`.
+fn remote_cleanup_report(
+    result: poimen_client::protocol::WorktreeCleanupResult,
+) -> worktree::CleanupReport {
+    worktree::CleanupReport {
+        removed: result
+            .removed
+            .into_iter()
+            .map(|r| worktree::Removed {
+                path: r.path,
+                branch: r.branch,
+                pr: r.pr,
+                branch_deleted: r.branch_deleted,
+                note: r.note,
+            })
+            .collect(),
+        left: result
+            .left
+            .into_iter()
+            .map(|l| worktree::Left {
+                path: l.path,
+                branch: l.branch,
+                pr: l.pr,
+                reason: l.reason,
+                command: l.command,
+            })
+            .collect(),
+        teardown_untrusted: result.teardown_untrusted,
+    }
+}
+
+/// The body of `machine_create_space`, against the backend of a machine. `cwd` is a path on that
+/// machine, so it is not checked here: an existing space for it is focused and nothing is created;
+/// else the server builds the layout. A project file that needs trust is an error (the dialog
+/// shows the local file only).
+fn remote_create_space(
+    backend: &dyn Backend,
+    cwd: &str,
+    label: &str,
+    command: Option<&str>,
+) -> Result<spaces::SpaceOutcome, String> {
+    let snapshot = backend.snapshot()?;
+    let outcome = |space_id: String, created: bool, warnings, setup_started| spaces::SpaceOutcome {
+        space_id,
+        created,
+        warnings,
+        setup_started,
+        trust: None,
+    };
+    if let Some(id) = spaces::find_space(cwd, &snapshot) {
+        backend.focus_space(&id)?;
+        return Ok(outcome(id, false, Vec::new(), false));
+    }
+    let request = backend::LayoutRequest {
+        cwd,
+        label,
+        decision: None,
+        command,
+    };
+    match backend.create_space_with_layout(request) {
+        None => Err("the machine's server cannot build a layout".into()),
+        Some(result) => match result? {
+            backend::LaidOut::Trust(_) => Err(
+                "the project file of this repository is not trusted on the machine; \
+                 open the repository there once to trust it"
+                    .into(),
+            ),
+            backend::LaidOut::Created {
+                space_id,
+                warnings,
+                setup_started,
+            } => {
+                backend.focus_space(&space_id)?;
+                Ok(outcome(space_id, true, warnings, setup_started))
+            }
+        },
+    }
+}
+
+/// Starts, keeps or stops the machine connections for `configs`; state changes go to the
+/// frontend as `machine:state_changed`, the runs of a machine (`run.events`, #692) as `deliver`
+/// with its name, every other event as `machine:event`.
+fn sync_machines(
+    machines: &machines::Machines,
+    configs: &[machines::MachineConfig],
+    handle: &tauri::AppHandle,
+) {
+    let runs = handle
+        .state::<std::sync::Arc<remote_runs::RemoteRuns>>()
+        .inner()
+        .clone();
+    machines.sync(configs, |config| {
+        let handle = handle.clone();
+        machines::Machine::start(
+            config.clone(),
+            std::sync::Arc::new(machines::SshConnector::new(&config.ssh)),
+            {
+                let handle = handle.clone();
+                move |status| {
+                    let _ = handle.emit("machine:state_changed", status);
+                }
+            },
+            {
+                let handle = handle.clone();
+                let machine = config.name.clone();
+                let runs = runs.clone();
+                move |event| {
+                    // Progress events of the machine's runs go to the Deliver panel (#692).
+                    if event.kind == "run.events" {
+                        if let Some(payload) = runs.apply(&machine, &event.data, deliver::now_secs())
+                        {
+                            let _ = handle.emit("deliver", payload);
+                        }
+                        return;
+                    }
+                    let _ = handle.emit(
+                        "machine:event",
+                        serde_json::json!({"machine": machine, "kind": event.kind, "data": event.data}),
+                    );
+                }
+            },
+        )
+    });
+    let names: Vec<&str> = configs.iter().map(|c| c.name.as_str()).collect();
+    runs.retain(&names);
 }
 
 /// Gives `poimen-server` the colors of the active scheme (`foreground`, `background`, `cursor`,
@@ -1288,7 +1658,7 @@ async fn task_plan(
 }
 
 /// Removes the worktrees, spaces and local branches of the repository of `dir` whose pull request
-/// is merged (see `worktree::cleanup`). The first task mode with a `cleanup` command replaces the
+/// is merged (see `worktree::cleanup_merged`). The first task mode with a `cleanup` command replaces the
 /// built-in removal. `focused_space` is never touched. Destructive, so only on a user action.
 #[tauri::command]
 async fn task_cleanup(
@@ -1304,46 +1674,14 @@ async fn task_cleanup(
             .ok_or_else(|| "the repository has no GitHub origin".to_owned())?;
         let merged = worktree::merged_prs(&github::SystemRunner, &repo)?;
         let settings = get_settings();
-        let root_str = root.to_string_lossy().into_owned();
-        let sources = trust::Sources::read(&root_str);
-        let resolved = tasks::for_project(&settings.tasks, &sources, &settings.trusted_projects);
-        let mode = resolved
-            .modes
-            .modes
-            .iter()
-            .find_map(|m| m.cleanup.clone())
-            .map_or(
-                worktree::CleanupMode::Builtin,
-                worktree::CleanupMode::Command,
-            );
-        // The project's teardown runs in each worktree first, only for a trusted project file.
-        let command = match project::teardown_plan(&sources, &settings.trusted_projects) {
-            project::TeardownPlan::Run(command) => Some(command),
-            project::TeardownPlan::Untrusted if skip_teardown != Some(true) => {
-                return Ok(worktree::CleanupReport {
-                    teardown_untrusted: true,
-                    ..Default::default()
-                });
-            }
-            _ => None,
-        };
-        let teardown = command.map(|command| {
-            move |worktree: &std::path::Path| -> Result<(), String> {
-                let result = project::run_teardown(&project::SystemRunner, &command, worktree)?;
-                if result.success() {
-                    Ok(())
-                } else {
-                    Err(result.failure_text())
-                }
-            }
-        });
-        worktree::cleanup(
+        worktree::cleanup_merged(
             &root,
             &merged,
-            &mode,
-            backend.as_ref(),
+            &settings.tasks,
+            &settings.trusted_projects,
+            &worktree::BackendSpaces(backend.as_ref()),
             focused_space.as_deref(),
-            teardown.as_ref().map(|t| t as &worktree::Teardown<'_>),
+            skip_teardown == Some(true),
         )
     })
     .await
@@ -1371,13 +1709,13 @@ async fn project_teardown(dir: String) -> Result<project::TeardownReport, String
 #[tauri::command]
 async fn task_tab(
     backend: State<'_, Shared>,
-    workspace_id: String,
+    space_id: String,
     dir: String,
     name: String,
     command: String,
 ) -> Result<(), String> {
     on_backend(backend.inner(), move |b| {
-        task_start::start_tab(b, &workspace_id, &dir, &name, &command)
+        task_start::start_tab(b, &space_id, &dir, &name, &command)
     })
     .await
 }
@@ -1691,21 +2029,51 @@ async fn repo_info(dirs: Vec<String>) -> Result<HashMap<String, git::RepoInfo>, 
 }
 
 /// Starts following the subagent transcripts of the Claude Code or GitHub Copilot CLI agent in
-/// `pane_id` (replacing the previous watch); updates arrive as `subagents` events. `false` when the
+/// `terminal_id` (replacing the previous watch); updates arrive as `subagents` events. `false` when the
 /// pane has no such session or its transcript is not found; nothing is watched then. Read-only.
 #[tauri::command]
 async fn subagents_watch(
     app: AppHandle,
     backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
     watch: State<'_, SubagentWatch>,
     key: String,
-    pane_id: String,
+    terminal_id: String,
 ) -> Result<bool, String> {
     let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
-    let session = {
-        let pane_id = pane_id.clone();
-        on_backend(backend.inner(), move |b| b.agent_session(&pane_id)).await?
-    };
+    // The transcript files of a machine's agent are on that machine: its server reads them
+    // (#698). A remote pane is never looked up in the local `~/.claude` or `~/.copilot` (#693).
+    if machines::split_id(&terminal_id).0.is_some() {
+        let routed = machines.route_connected(backend.inner(), &terminal_id)?;
+        let (follower, key_for_poll) = (key.clone(), key.clone());
+        let started = tauri::async_runtime::spawn_blocking(move || {
+            remote_transcripts::start(
+                routed.backend,
+                &routed.id,
+                &key_for_poll,
+                remote_transcripts::INTERVAL,
+                move |session, update| {
+                    let event = json!({ "key": follower, "session": session, "update": update });
+                    let _ = app.emit("subagents", event);
+                },
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let handle = match started {
+            remote_transcripts::Started::Following(poller) => {
+                Some(Box::new(poller) as FollowHandle)
+            }
+            remote_transcripts::Started::NotYet => None,
+        };
+        let following = handle.is_some();
+        let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+        return Ok(watches.store(&key, generation, handle) && following);
+    }
+    let session = on_routed(backend.inner(), machines.inner(), &terminal_id, |b, id| {
+        b.agent_session(id)
+    })
+    .await?;
     let found = session.and_then(|s| {
         let home = home_dir()?;
         let dir = match s.agent {
@@ -1731,8 +2099,10 @@ async fn subagents_watch(
         let _ = app.emit("subagents", event);
     };
     let handle = match agent {
-        herdr::TranscriptAgent::Claude => transcripts::watch(&dir, &session, emit)?,
-        herdr::TranscriptAgent::Copilot => copilot::watch(&dir, emit)?,
+        herdr::TranscriptAgent::Claude => {
+            Box::new(transcripts::watch(&dir, &session, emit)?) as FollowHandle
+        }
+        herdr::TranscriptAgent::Copilot => Box::new(copilot::watch(&dir, emit)?) as FollowHandle,
     };
     let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
     // A stale handle is dropped here, which stops its watcher; so is one whose key was unwatched.
@@ -1816,6 +2186,7 @@ fn channel_messages(record: &backend::StreamRecord, emulated: bool) -> Vec<Invok
 /// global event, so no record is lost or mixed up before the view has its id). The result says
 /// whether the stream is emulated (raw PTY bytes) or rendered (finished frames).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn open_terminal(
     backend: State<'_, Shared>,
     mode: Mode,
@@ -1823,8 +2194,16 @@ fn open_terminal(
     cols: u16,
     rows: u16,
     takeover: bool,
+    machine: Option<String>,
     on_record: Channel<InvokeResponseBody>,
+    machines: State<'_, SharedMachines>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
 ) -> Result<backend::OpenedStream, String> {
+    // A terminal of a machine opens over that machine's backend (never started by poimen).
+    let backend: Shared = match &machine {
+        Some(name) => machines.backend(name)?,
+        None => backend.inner().clone(),
+    };
     let request = StreamRequest {
         mode,
         target: &target,
@@ -1833,44 +2212,74 @@ fn open_terminal(
         takeover,
     };
     let emulated = backend.emulated();
-    backend.open_stream(
+    let opened = backend.open_stream(
         request,
         Box::new(move |_, record| {
             for message in channel_messages(&record, emulated) {
                 let _ = on_record.send(message);
             }
         }),
-    )
+    )?;
+    if machine.is_none() {
+        return Ok(opened);
+    }
+    Ok(backend::OpenedStream {
+        id: remote.add(backend, opened.id),
+        ..opened
+    })
+}
+
+/// The backend and stream id a stream command works on: a machine's stream by its mapped id, else
+/// the local backend.
+fn stream_of(backend: &Shared, remote: &machines::RemoteStreams, id: u32) -> (Shared, u32) {
+    if id >= machines::REMOTE_STREAM_BASE
+        && let Some(found) = remote.get(id)
+    {
+        return found;
+    }
+    (backend.clone(), id)
 }
 
 #[tauri::command]
-fn terminal_input(backend: State<'_, Shared>, id: u32, text: String) -> Result<(), String> {
+fn terminal_input(
+    backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
+    id: u32,
+    text: String,
+) -> Result<(), String> {
+    let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_input(id, &text)
 }
 
 #[tauri::command]
 fn terminal_resize(
     backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
     id: u32,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_resize(id, cols, rows)
 }
 
 #[tauri::command]
 fn terminal_scroll(
     backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
     id: u32,
     up: bool,
     lines: u16,
 ) -> Result<(), String> {
+    let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_scroll(id, up, lines)
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn terminal_mouse(
     backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
     id: u32,
     action: String,
     button: String,
@@ -1878,11 +2287,23 @@ fn terminal_mouse(
     row: u16,
     modifiers: u8,
 ) -> Result<(), String> {
+    let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_mouse(id, &action, &button, column, row, modifiers)
 }
 
 #[tauri::command]
-fn close_terminal(backend: State<'_, Shared>, id: u32) {
+fn close_terminal(
+    backend: State<'_, Shared>,
+    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
+    id: u32,
+) {
+    let (backend, id) = if id >= machines::REMOTE_STREAM_BASE {
+        remote
+            .remove(id)
+            .unwrap_or_else(|| (backend.inner().clone(), id))
+    } else {
+        (backend.inner().clone(), id)
+    };
     backend.close_stream(id);
 }
 
@@ -2075,6 +2496,9 @@ pub fn run() {
         .manage(DeliverWatch::default())
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
+        .manage(SharedMachines::default())
+        .manage(std::sync::Arc::new(machines::RemoteStreams::default()))
+        .manage(std::sync::Arc::new(remote_runs::RemoteRuns::default()))
         .setup(move |app| {
             let handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
@@ -2097,9 +2521,12 @@ pub fn run() {
             }
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
+                let machines = app.state::<SharedMachines>().inner().clone();
+                sync_machines(&machines, &settings::load(&home).machines, &handle);
                 std::thread::spawn(move || {
                     settings::watch(&home, std::time::Duration::from_secs(1), |s| {
                         let _ = handle.emit("settings", s);
+                        sync_machines(&machines, &s.machines, &handle);
                         // Menu items carry the accelerators; rebuild them on the main thread.
                         let (app, shortcuts) = (handle.clone(), s.shortcuts.clone());
                         let _ = handle.run_on_main_thread(move || {
@@ -2124,6 +2551,15 @@ pub fn run() {
             restart_server,
             quit_and_stop_server,
             backend_kind,
+            list_machines,
+            reconnect_machine,
+            machine_snapshot,
+            machine_repo_ensure,
+            machine_worktree_create,
+            machine_create_space,
+            machine_task_tab,
+            machine_task_cleanup,
+            machine_check,
             set_terminal_colors,
             hooks_status,
             hooks_install,
@@ -2284,7 +2720,12 @@ mod build_layout_tests {
     use super::*;
     use crate::backend_fake::FakeBackend;
     use backend::{Snapshot, StreamRecord};
-    use serde_json::json;
+    use serde_json::{Value, json};
+
+    /// A snapshot from its neutral wire shape (missing fields take their defaults).
+    fn snapshot_of(wire: Value) -> Snapshot {
+        serde_json::from_value(wire).unwrap()
+    }
 
     const PROJECT_TEXT: &str = r#"{"layout":{"panes":[{"name":"agent","command":"evil"},
         {"name":"sh","command":"worse","split":{"direction":"down"}}]}}"#;
@@ -2448,7 +2889,7 @@ mod build_layout_tests {
         let dir = tmp_dir();
         let outcome = create_space_with(&fake, None, &dir, Some("demo"), None, None).unwrap();
         assert!(outcome.created && outcome.trust.is_none());
-        assert_eq!(outcome.workspace_id, "w9");
+        assert_eq!(outcome.space_id, "w9");
         let calls = fake.calls();
         assert_eq!(calls[0], "snapshot");
         assert_eq!(calls[1], format!("create_space {dir} demo"));
@@ -2462,14 +2903,13 @@ mod build_layout_tests {
     fn create_space_focuses_an_existing_space_for_the_directory() {
         let fake = FakeBackend::default();
         let dir = tmp_dir();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "w2", "label": "demo", "number": 1 }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "w2:p1", "workspace_id": "w2", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "w2", "label": "demo", "number": 1 }],
+            "terminals": [{ "terminal_id": "w2:p1", "space_id": "w2", "cwd": dir }],
+        }));
         let outcome = create_space_with(&fake, None, &dir, None, None, Some("claude 'x'")).unwrap();
         assert!(!outcome.created);
-        assert_eq!(outcome.workspace_id, "w2");
+        assert_eq!(outcome.space_id, "w2");
         // Focused only: no layout, no command.
         assert_eq!(fake.calls(), ["snapshot", "focus w2"]);
     }
@@ -2494,7 +2934,7 @@ mod build_layout_tests {
         let outcome =
             create_space_with(&fake, None, &dir, Some("#12 Add picker"), None, Some("c")).unwrap();
         assert!(!outcome.created);
-        assert_eq!(outcome.workspace_id, "s3");
+        assert_eq!(outcome.space_id, "s3");
         assert_eq!(fake.calls(), ["snapshot", "focus s3"]);
     }
 
@@ -2670,6 +3110,94 @@ mod build_layout_tests {
         assert!(fake.calls().is_empty());
     }
 
+    // Clean up merged tasks on a machine (#284).
+
+    #[test]
+    fn remote_cleanup_sends_the_local_merged_pulls_and_maps_the_report_back() {
+        let repo = github::Repo {
+            owner: "o".into(),
+            name: "app".into(),
+        };
+        let merged = [worktree::MergedPr {
+            branch: "feat/7-x".into(),
+            number: 70,
+        }];
+        let p = remote_cleanup_params(&repo, &merged, Some("s1".into()), true);
+        assert_eq!((p.owner.as_str(), p.repo.as_str()), ("o", "app"));
+        assert_eq!(p.merged[0].branch, "feat/7-x");
+        assert_eq!(p.merged[0].number, 70);
+        assert_eq!(p.focused_space.as_deref(), Some("s1"));
+        assert!(p.skip_teardown);
+
+        let result: poimen_client::protocol::WorktreeCleanupResult =
+            serde_json::from_value(serde_json::json!({
+                "path": "/srv/o/app",
+                "removed": [{"path": "/srv/o/app-7", "branch": "feat/7-x", "pr": 70,
+                             "branch_deleted": false, "note": "branch kept: protected"}],
+                "left": [{"path": "/srv/o/app-8", "branch": "feat/8-y", "pr": 80,
+                          "reason": "it has uncommitted or untracked changes", "command": "c"}],
+                "teardown_untrusted": false
+            }))
+            .unwrap();
+        let report = serde_json::to_value(remote_cleanup_report(result)).unwrap();
+        assert_eq!(
+            report,
+            serde_json::json!({
+                "removed": [{"path": "/srv/o/app-7", "branch": "feat/7-x", "pr": 70,
+                             "branchDeleted": false, "note": "branch kept: protected"}],
+                "left": [{"path": "/srv/o/app-8", "branch": "feat/8-y", "pr": 80,
+                          "reason": "it has uncommitted or untracked changes", "command": "c"}],
+                "teardownUntrusted": false
+            })
+        );
+    }
+
+    // Spaces on a machine (#283).
+
+    #[test]
+    fn remote_create_space_builds_the_layout_without_checking_the_local_disk() {
+        let fake = layout_backend(built("s1"));
+        let out = remote_create_space(&fake, "/srv/wt/app-12", "#12 x", Some("claude")).unwrap();
+        assert!(out.created);
+        assert_eq!(out.space_id, "s1");
+        let calls = fake.calls();
+        assert!(
+            calls.contains(&"create_space_with_layout /srv/wt/app-12 #12 x - claude".to_string()),
+            "{calls:?}"
+        );
+    }
+
+    #[test]
+    fn remote_create_space_focuses_an_existing_space_and_creates_nothing() {
+        let fake = layout_backend(built("s1"));
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{"space_id": "s7", "label": "x", "cwd": "/srv/wt/app-12"}],
+            "terminals": [],
+        }));
+        let out = remote_create_space(&fake, "/srv/wt/app-12", "x", None).unwrap();
+        assert!(!out.created);
+        assert_eq!(out.space_id, "s7");
+        assert!(!fake.calls().iter().any(|c| c.starts_with("create_space")));
+    }
+
+    #[test]
+    fn remote_create_space_refuses_an_untrusted_project_and_a_failing_server() {
+        let ask = backend::LaidOut::Trust(trust::TrustRequest {
+            root: "/r".into(),
+            files: Vec::new(),
+            hash: "h".into(),
+            commands: Vec::new(),
+        });
+        let err = remote_create_space(&layout_backend(ask), "/r", "l", None).unwrap_err();
+        assert!(err.contains("not trusted"), "{err}");
+        let fake = layout_backend(built("s1"));
+        fake.fail_on("create_space_with_layout");
+        assert_eq!(
+            remote_create_space(&fake, "/r", "l", None),
+            Err("boom".into())
+        );
+    }
+
     // A backend that builds the layout itself (poimen-server's `space.create`).
 
     fn layout_backend(answer: backend::LaidOut) -> FakeBackend {
@@ -2704,7 +3232,7 @@ mod build_layout_tests {
         assert_eq!(
             outcome,
             spaces::SpaceOutcome {
-                workspace_id: "s9".into(),
+                space_id: "s9".into(),
                 created: true,
                 warnings: vec!["layout: pane x could not be split".into()],
                 setup_started: true,
@@ -2772,7 +3300,7 @@ mod build_layout_tests {
         let dir = tmp_dir();
         let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
         assert!(!outcome.created);
-        assert_eq!(outcome.workspace_id, "");
+        assert_eq!(outcome.space_id, "");
         assert_eq!(outcome.trust, Some(request));
         assert_eq!(fake.calls().len(), 2, "no focus: {:?}", fake.calls());
     }
@@ -2793,11 +3321,10 @@ mod build_layout_tests {
     fn an_existing_space_is_focused_without_asking_a_layout_backend() {
         let fake = layout_backend(built("s9"));
         let dir = tmp_dir();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "s2", "label": "demo", "number": 1 }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "t1", "workspace_id": "s2", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "s2", "label": "demo", "number": 1 }],
+            "terminals": [{ "terminal_id": "t1", "space_id": "s2", "cwd": dir }],
+        }));
         let outcome = create_space_with(&fake, None, &dir, None, None, Some("c")).unwrap();
         assert!(!outcome.created);
         assert_eq!(fake.calls(), ["snapshot", "focus s2"]);
@@ -2905,11 +3432,10 @@ mod build_layout_tests {
     fn a_space_with_terminals_is_left_alone() {
         let dir = tmp_dir();
         let fake = FakeBackend::default();
-        *fake.snapshot.lock().unwrap() = Snapshot {
-            workspaces: json!([{ "workspace_id": "s1", "label": "app", "number": 1, "cwd": dir }]),
-            tabs: json!([]),
-            panes: json!([{ "pane_id": "t1", "workspace_id": "s1", "cwd": dir }]),
-        };
+        *fake.snapshot.lock().unwrap() = snapshot_of(json!({
+            "spaces": [{ "space_id": "s1", "label": "app", "number": 1, "cwd": dir }],
+            "terminals": [{ "terminal_id": "t1", "space_id": "s1", "cwd": dir }],
+        }));
         let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
         assert_eq!(out, RebuildOutcome::NotEmpty);
         assert_eq!(fake.calls(), ["snapshot"]);
@@ -3092,6 +3618,12 @@ mod build_layout_tests {
         let err = rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap_err();
         assert_eq!(err, "boom");
         assert_eq!(fake.calls(), ["snapshot"]);
+    }
+
+    #[test]
+    fn a_returned_id_is_qualified_like_the_id_the_request_addressed() {
+        assert_eq!(qualify_like("box::3", "9".into()), "box::9");
+        assert_eq!(qualify_like("3", "9".into()), "9");
     }
 
     #[test]

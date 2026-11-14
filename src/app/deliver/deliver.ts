@@ -1,6 +1,7 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { agentKind, paneDir, type AgentStatus, type Terminal } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import { agentKind, paneDir, type AgentStatus, type Terminal } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
+import { Machines } from "../core/machines";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge, type Unlisten } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
@@ -12,6 +13,7 @@ import {
   type DeliverRead,
   type DeliverStatus,
   type Subject,
+  withMachines,
 } from "./deliver-status";
 import { effectiveStatus, runsByTerminal } from "./pane-status";
 
@@ -24,6 +26,8 @@ const CLOCK_MS = 30_000;
 interface DeliverEventPayload {
   root: string;
   read: DeliverRead;
+  /** The machine of a remote repository (#692); absent on this Mac. */
+  machine?: string;
 }
 
 /** Position of a card among `cards` by key; cards not there come after all others. */
@@ -60,16 +64,29 @@ export function milestoneNumber(subject: Pick<Subject, "id" | "title">): number 
  * The deliver runs of the repositories of the open spaces: the backend watches each repository's
  * progress events (`.agents/events` of the common dir, else the legacy
  * `.agents/deliver-loop/status.json`; `deliver_watch`) and pushes `deliver` events; this keeps one
- * card per run.
+ * card per run. Runs of the machines (#692) arrive the same way with the machine name: their cards
+ * are keyed and labelled by machine, stay with the last known state while it is offline and go
+ * when it is removed from the settings.
  */
 @Injectable({ providedIn: "root" })
 export class Deliver {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly tasks = inject(TaskStarter);
+  private readonly machines = inject(Machines);
 
-  /** One card per run (progress events) or status file, in the order they appeared. */
-  readonly cards = signal<readonly DeliverCard[]>([]);
+  /** Every card received, local and remote, in the order they appeared. */
+  private readonly received = signal<readonly DeliverCard[]>([]);
+  /**
+   * One card per run (progress events) or status file, in the order they appeared; remote cards
+   * only of configured machines, marked `offline` while theirs is not connected.
+   */
+  readonly cards = computed(() =>
+    withMachines(
+      this.received(),
+      new Map(this.machines.machines().map((m) => [m.name, m.state] as const)),
+    ),
+  );
   /** The clock of the age texts. */
   readonly now = signal(Date.now());
   /** The compact status bar item; `null` without a running loop. */
@@ -97,7 +114,7 @@ export class Deliver {
   /** Starts listening for `deliver` events and the clock; returns what stops both. */
   start(): () => void {
     this.listening ??= this.bridge.listen<DeliverEventPayload>("deliver", (e) =>
-      this.apply(e.root, e.read),
+      this.apply(e.root, e.read, e.machine),
     );
     this.timer ??= setInterval(() => this.now.set(Date.now()), CLOCK_MS);
     return () => {
@@ -118,7 +135,10 @@ export class Deliver {
         dirs: [...new Set(dirs)],
       });
       const keep = new Set(roots);
-      this.cards.update((cards) => cards.filter((c) => keep.has(c.root)));
+      // The machines' repositories are not watched here.
+      this.received.update((cards) =>
+        cards.filter((c) => c.machine !== undefined || keep.has(c.root)),
+      );
     } catch (error) {
       // Try again with the next change of the spaces.
       this.watchedKey = undefined;
@@ -126,14 +146,15 @@ export class Deliver {
     }
   }
 
-  /** Applies one read of a repository: its cards. */
-  apply(root: string, read: DeliverRead): void {
-    const before = this.cards().filter((c) => c.root === root);
-    const next = cardsOf(root, read);
-    this.cards.update((cards) => {
-      const rest = cards.filter((c) => c.root !== root);
+  /** Applies one read of a repository (on `machine`, else on this Mac): its cards. */
+  apply(root: string, read: DeliverRead, machine?: string): void {
+    const same = (c: DeliverCard) => c.root === root && c.machine === machine;
+    const before = this.received().filter(same);
+    const next = cardsOf(root, read, machine);
+    this.received.update((cards) => {
+      const rest = cards.filter((c) => !same(c));
       // Keep the place of a card that is only updated; new cards come last.
-      const at = cards.findIndex((c) => c.root === root);
+      const at = cards.findIndex(same);
       const placed = [...next].sort(
         (x, y) => index(before, x) - index(before, y) || next.indexOf(x) - next.indexOf(y),
       );
@@ -148,12 +169,13 @@ export class Deliver {
 
   /**
    * The terminal of a run: the one named by `host["poimen.terminal"]` when it is open, else an
-   * agent pane of the run's harness inside the repository.
+   * agent pane of the run's harness inside the repository; a remote run only finds a terminal of
+   * its machine (qualified ids).
    */
   paneOf(card: DeliverCard): string | undefined {
     if (card.state.kind !== "ok") return undefined;
     const { host, harness } = card.state.status;
-    const terminals = this.store.snapshot().terminals;
+    const terminals = this.store.all().terminals.filter((t) => t.machine === card.machine);
     const named = host["poimen.terminal"];
     if (named && terminals.some((t) => t.terminal_id === named)) return named;
     return loopPane(terminals, card.root, harness ?? "");
@@ -163,8 +185,10 @@ export class Deliver {
    * Starts `deliver-loop` for the milestone: the task mode named {@link DELIVER_MODE} (no
    * worktree: a tab in the space of the repository), with the milestone number as `{nr}`.
    */
-  startLoop(status: DeliverStatus, root: string): Promise<boolean> {
+  startLoop(status: DeliverStatus, root: string, machine?: string): Promise<boolean> {
     const milestone = status.subject;
+    // Tasks on a machine are started from its spaces (#693), not from here.
+    if (machine !== undefined) return Promise.resolve(false);
     // Only a run on a milestone has a loop to start.
     if (milestone?.kind !== "github.milestone") return Promise.resolve(false);
     return this.tasks.run(root, {

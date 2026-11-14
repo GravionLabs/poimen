@@ -4,8 +4,8 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { Terminal, SpaceNode } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { Terminal, SpaceNode } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { DEFAULT_SETTINGS, SettingsStore, type SidebarLayout } from "../core/settings";
 import { UI_STORAGE } from "../core/ui-state";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
@@ -83,7 +83,7 @@ async function setup(layout: SidebarLayout) {
   TestBed.configureTestingModule({
     providers: [
       {
-        provide: HerdrStore,
+        provide: SpacesStore,
         useValue: {
           spaces: signal([one, two]),
           disconnected: signal<string | null>(null),

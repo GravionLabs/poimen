@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, input, signal } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { AgentPrompts, promptMessage, promptSucceeded } from "../core/agent-prompt";
-import type { Terminal } from "../core/herdr";
+import type { Terminal } from "../core/snapshot";
 
 /** A one-line input that sends a prompt to the agent of a pane; works in a read-only tab. */
 @Component({

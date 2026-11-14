@@ -14,8 +14,8 @@ import {
   FZoomDirective,
   provideFFlow,
 } from "@foblex/flow";
-import { flowAgentName } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import { flowAgentName } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { UiState } from "../core/ui-state";
 import { buildFlowGraph, flowDuration, flowTooltip, type FlowNode } from "../core/flow-graph";
 import { FLOW_NODE_HEIGHT, FLOW_NODE_WIDTH, layoutFlow } from "../core/flow-layout";
@@ -39,7 +39,7 @@ const FIT_PADDING = 24;
 })
 export class FlowView {
   private readonly subagents = inject(Subagents);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly ui = inject(UiState);
   /** Clock for the durations of running nodes. */
   readonly now = input.required<number>();

@@ -84,8 +84,9 @@
       (contextmenu)="openMenu($event, 'workspace', d.workspace.space_id)"
     >
       <span class="main space-main">
-        @for (line of d.lines; track $index) {
-          <span class="line">
+        @let underDot = d.lines[0]?.[0]?.kind === "dot";
+        @for (line of d.lines; track $index; let first = $first) {
+          <span class="line" [class.under-dot]="underDot && !first">
             @for (seg of line; track $index) {
               @switch (seg.kind) {
                 @case ("dot") {
@@ -330,6 +331,9 @@
     </span>
   }
 </ng-template>
+@if (machines.machines().length) {
+  <h2 class="local-title">This Mac</h2>
+}
 @if (layout() === "tree") {
   <hx-tree
     #tree
@@ -403,6 +407,7 @@
     </ng-template>
   </app-split-pane>
 }
+<app-machines-section (selected)="selected.emit($event)" />
 @if (menuAt(); as at) {
   <button
     type="button"
@@ -430,7 +435,14 @@
           <div class="menu-heading" aria-hidden="true">{{ group.label }}</div>
         }
         @for (item of group.items; track item.action) {
-          <button type="button" role="menuitem" class="menu-item" (click)="choose(item.action)">
+          <button
+            type="button"
+            role="menuitem"
+            class="menu-item"
+            [disabled]="!!item.disabled"
+            [attr.title]="item.disabled ?? null"
+            (click)="choose(item.action)"
+          >
             {{ item.label }}
           </button>
         }

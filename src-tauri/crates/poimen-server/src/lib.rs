@@ -8,6 +8,7 @@
 //! persist in `server.json` (`store.rs`); a new server adopts the hosts of that list (#604) and
 //! drops the leaves whose terminal did not come back.
 
+pub mod check;
 pub mod claude;
 pub mod copilot;
 mod create;
@@ -16,11 +17,13 @@ pub mod hook;
 mod host;
 mod pty;
 pub mod report;
+mod runs;
 pub mod stdio;
 mod store;
 mod stream;
 mod tabs;
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -33,14 +36,18 @@ use std::time::{Duration, Instant};
 
 use alacritty_terminal::vte::ansi::Rgb;
 use emulator::Colors;
+use poimen_core::snapshot::{self, Snapshot};
+use poimen_core::{repos, worktree};
 use poimen_protocol::{
-    self as proto, AgentInfo, AgentStatus, AttachMode, ClientKind, DetachReason, ErrorCode, Event,
-    EventsSubscribe, PROTOCOL_VERSION, PingResult, Request, Response, ServerShutdown, SetColors,
-    Space, SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
+    self as proto, AgentInfo, AgentStatus, AgentTranscript, AgentTranscriptResult, AttachMode,
+    ClientKind, DetachReason, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult,
+    RepoEnsure, RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space,
+    SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
     SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabRename,
     TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose,
     TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
-    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus,
+    TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus, TranscriptState,
+    WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
 };
 use serde_json::{Value, json};
 
@@ -213,6 +220,8 @@ struct Subscriber {
     /// The client said what it is. Only these get `server.clients_changed`: an older client
     /// cannot parse the event and would resync in a loop.
     declared: bool,
+    /// It asked for `run_events` ([`Event::RunEvents`], #692).
+    runs: bool,
     tx: Sender<Event>,
 }
 
@@ -224,12 +233,21 @@ fn notify_declared(subs: &mut Vec<Subscriber>, event: &Event) {
 pub(crate) struct Shared {
     inner: Mutex<Inner>,
     subscribers: Mutex<Vec<Subscriber>>,
+    /// The run files followed for the subscriptions with `run_events`. Taken before
+    /// `subscribers`, so a new subscription gets the replay and then every later event once.
+    runs: Mutex<runs::Runs>,
+    /// The repositories of the space and terminal directories, for `runs`.
+    run_repos: Mutex<runs::Repos>,
+    /// The transcript readers of `agent.transcript`, per terminal and follower.
+    transcripts: Mutex<HashMap<(String, String), Followed>>,
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
     scrollback: usize,
     home: Option<PathBuf>,
     pty_host: PtyHost,
+    /// What `repo.ensure` clones with: the real `gh`, or a fake set by tests ([`Server::set_gh`]).
+    gh: RwLock<Arc<dyn repos::Gh>>,
     /// The scheme colors for terminal queries, shared with every terminal's stream.
     colors: Arc<RwLock<Colors>>,
     /// Run once the terminals are ended after `server.shutdown`; the binary exits the process.
@@ -256,9 +274,23 @@ impl Shared {
         kinds
     }
 
-    /// Registers a subscription and tells the others; the new one learns from `ping`.
-    fn add_subscriber(&self, kind: ClientKind, declared: bool, tx: Sender<Event>) -> u64 {
+    /// Registers a subscription and tells the others; the new one learns from `ping`. One that
+    /// asks for `runs` first gets the events of the followed runs from the start.
+    fn add_subscriber(
+        &self,
+        kind: ClientKind,
+        declared: bool,
+        runs: bool,
+        tx: Sender<Event>,
+    ) -> u64 {
         let id = NEXT_SUBSCRIBER.fetch_add(1, Ordering::Relaxed);
+        // Held until the subscription is listed, so no run event falls between the two.
+        let followed = runs.then(|| lock(&self.runs));
+        if let Some(followed) = &followed {
+            for event in followed.replay() {
+                let _ = tx.send(event);
+            }
+        }
         let mut subs = lock(&self.subscribers);
         let event = Event::ServerClientsChanged {
             clients: {
@@ -273,9 +305,47 @@ impl Shared {
             id,
             kind,
             declared,
+            runs,
             tx,
         });
         id
+    }
+
+    /// Reads what the run files of the spaces' repositories gained and sends it to the
+    /// subscriptions with `run_events`; without one, the followed files are forgotten (#692).
+    fn follow_runs(&self) {
+        let wanted = || lock(&self.subscribers).iter().any(|s| s.runs);
+        {
+            // Under the lock, so a subscription that comes meanwhile is never cleared away.
+            let mut followed = lock(&self.runs);
+            if !wanted() {
+                followed.clear();
+                return;
+            }
+        }
+        let dirs: Vec<String> = {
+            let inner = lock(&self.inner);
+            let mut dirs: Vec<String> = inner.layout.spaces.iter().map(|s| s.cwd.clone()).collect();
+            for t in &inner.terminals {
+                if t.info.status == TerminalStatus::Running && !dirs.contains(&t.info.cwd) {
+                    dirs.push(t.info.cwd.clone());
+                }
+            }
+            dirs
+        };
+        let repos = lock(&self.run_repos).resolve(&dirs, Instant::now(), poimen_core::git::roots);
+        let mut followed = lock(&self.runs);
+        // Checked again under the lock: a subscription that came meanwhile got the replay of what
+        // is kept, so it is only dropped while there is none.
+        if !wanted() {
+            followed.clear();
+            return;
+        }
+        let events = followed.scan(&repos, std::time::SystemTime::now());
+        let mut subs = lock(&self.subscribers);
+        for event in events {
+            subs.retain(|s| !s.runs || s.tx.send(event.clone()).is_ok());
+        }
     }
 
     /// Drops a subscription (ending its event loop) and tells the rest.
@@ -447,12 +517,16 @@ impl Server {
                 terminals: Vec::new(),
             }),
             subscribers: Mutex::new(Vec::new()),
+            runs: Mutex::default(),
+            run_repos: Mutex::default(),
+            transcripts: Mutex::default(),
             next_id: AtomicU64::new(next_id),
             socket: config.socket,
             state_file: config.state_file,
             scrollback: config.scrollback,
             home: config.home,
             pty_host: config.pty_host,
+            gh: RwLock::new(Arc::new(repos::SystemGh)),
             colors: Arc::default(),
             on_shutdown: Mutex::new(None),
             stopped: AtomicBool::new(false),
@@ -494,6 +568,12 @@ impl Server {
         *lock(&self.shared.on_shutdown) = Some(Box::new(f));
     }
 
+    /// Replaces the `gh` that `repo.ensure` clones with (tests map `gh repo clone` onto a local
+    /// origin, so they need no network).
+    pub fn set_gh(&self, gh: Arc<dyn repos::Gh>) {
+        *self.shared.gh.write().unwrap_or_else(|e| e.into_inner()) = gh;
+    }
+
     /// Accepts connections forever, one thread each.
     pub fn serve(self) {
         let shared = Arc::clone(&self.shared);
@@ -501,6 +581,13 @@ impl Server {
             loop {
                 thread::sleep(TOKEN_SWEEP);
                 shared.expire_tokens();
+            }
+        });
+        let runs = Arc::clone(&self.shared);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(runs::POLL);
+                runs.follow_runs();
             }
         });
         for stream in self.listener.incoming() {
@@ -584,7 +671,7 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
             let declared = info.client.is_some();
             let kind = info.client.map_or(ClientKind::Unknown, |c| c.kind);
             let (tx, rx) = mpsc::channel();
-            let id = shared.add_subscriber(kind, declared, tx);
+            let id = shared.add_subscriber(kind, declared, info.run_events, tx);
             // The client sends nothing more; the end of its side of the connection removes
             // the subscription, which also ends the loop below.
             let reader = stream.clone();
@@ -791,6 +878,16 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             pid: std::process::id(),
             clients: shared.client_kinds(),
         })),
+        "machine.check" => Ok(json!(check::run(
+            &check::System,
+            env!("CARGO_PKG_VERSION"),
+            PROTOCOL_VERSION,
+            proto::CHANNEL,
+        ))),
+        "agent.transcript" => agent_transcript(shared, parsed(request)?),
+        "repo.ensure" => repo_ensure(shared, parsed(request)?),
+        "worktree.create" => worktree_create(shared, parsed(request)?),
+        "worktree.cleanup" => worktree_cleanup(shared, parsed(request)?),
         "space.list" => {
             let inner = lock(&shared.inner);
             Ok(json!(SpaceList {
@@ -927,6 +1024,165 @@ fn space_create(shared: &Arc<Shared>, p: SpaceCreate) -> ApiResult {
     let (mut created, typing) = build_space(shared, name, build)?;
     type_commands(typing, &mut created);
     Ok(json!(SpaceCreateResult::Created(created)))
+}
+
+/// `repo.ensure` (#282): the clone of `owner/repo` under `reposDir` of the user config, cloned
+/// with `gh repo clone` when absent and fetched when present; anything else at its path is
+/// `conflict` and stays untouched. Runs on the connection's thread, without the server lock.
+fn repo_ensure(shared: &Arc<Shared>, p: RepoEnsure) -> ApiResult {
+    let home = shared.home.as_deref();
+    let template = repos::user_repos_dir(home);
+    let gh = Arc::clone(&shared.gh.read().unwrap_or_else(|e| e.into_inner()));
+    match repos::ensure(gh.as_ref(), home, &template, p.owner.trim(), p.repo.trim()) {
+        Ok(done) => Ok(json!(RepoEnsureResult {
+            path: done.path,
+            cloned: done.cloned,
+        })),
+        Err(repos::EnsureError::Invalid(m)) => Err((ErrorCode::InvalidParams, m)),
+        Err(repos::EnsureError::Occupied(m)) => Err((ErrorCode::Conflict, m)),
+        Err(repos::EnsureError::Failed(m)) => Err((ErrorCode::Internal, m)),
+    }
+}
+
+/// `worktree.create` (#282): `task_worktree` of #190 through `poimen_core::worktree`, with the
+/// task modes of the user config and the trusted project file.
+fn worktree_create(shared: &Arc<Shared>, p: WorktreeCreate) -> ApiResult {
+    if !Path::new(&p.repo_dir).is_dir() {
+        return Err((
+            ErrorCode::InvalidParams,
+            format!("{} is not a directory", p.repo_dir),
+        ));
+    }
+    let issue = worktree::Issue {
+        nr: p.issue.nr,
+        title: p.issue.title,
+        url: p.issue.url,
+    };
+    match worktree::task_worktree(shared.home.as_deref(), &p.repo_dir, &issue, &p.mode) {
+        Ok(wt) => Ok(json!(WorktreeCreateResult {
+            path: wt.path,
+            branch: wt.branch,
+            created: wt.created,
+        })),
+        Err(worktree::TaskWorktreeError::UnknownMode(m)) => Err((ErrorCode::InvalidParams, m)),
+        Err(worktree::TaskWorktreeError::Failed(m)) => Err((ErrorCode::Internal, m)),
+    }
+}
+
+/// `worktree.cleanup` (#284): "Clean up merged tasks" of #192 in the clone of `owner/repo` under
+/// `reposDir`, through `poimen_core::worktree::cleanup_merged` with the task modes and trusted
+/// projects of the user config of this machine. Spaces of this server inside a removed worktree
+/// are closed like `space.close`. No clone is `{path: null}` and nothing happens; anything else at
+/// the path is `conflict`. Runs on the connection's thread, the server lock taken only to read or
+/// close spaces.
+fn worktree_cleanup(shared: &Arc<Shared>, p: WorktreeCleanup) -> ApiResult {
+    let home = shared.home.as_deref();
+    let template = repos::user_repos_dir(home);
+    let path = match repos::locate(home, &template, p.owner.trim(), p.repo.trim()) {
+        Ok(Some(path)) => path,
+        Ok(None) => return Ok(json!(WorktreeCleanupResult::default())),
+        Err(repos::EnsureError::Invalid(m)) => return Err((ErrorCode::InvalidParams, m)),
+        Err(repos::EnsureError::Occupied(m)) => return Err((ErrorCode::Conflict, m)),
+        Err(repos::EnsureError::Failed(m)) => return Err((ErrorCode::Internal, m)),
+    };
+    let root = worktree::main_worktree(&path).map_err(|e| (ErrorCode::Internal, e))?;
+    let config = home
+        .and_then(|h| std::fs::read_to_string(poimen_core::settings::config_path(h)).ok())
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .unwrap_or(Value::Null);
+    let user = poimen_core::tasks::user_modes(&config, &mut Vec::new());
+    let trusted = home
+        .map(poimen_core::settings::trusted_projects)
+        .unwrap_or_default();
+    let merged: Vec<worktree::MergedPr> = p
+        .merged
+        .into_iter()
+        .map(|m| worktree::MergedPr {
+            branch: m.branch,
+            number: m.number,
+        })
+        .collect();
+    let report = worktree::cleanup_merged(
+        &root,
+        &merged,
+        &user,
+        &trusted,
+        &ServerSpaces(shared),
+        p.focused_space.as_deref(),
+        p.skip_teardown,
+    )
+    .map_err(|e| (ErrorCode::Internal, e))?;
+    Ok(json!(WorktreeCleanupResult {
+        path: Some(path.to_string_lossy().into_owned()),
+        removed: report
+            .removed
+            .into_iter()
+            .map(|r| proto::CleanupRemoved {
+                path: r.path,
+                branch: r.branch,
+                pr: r.pr,
+                branch_deleted: r.branch_deleted,
+                note: r.note,
+            })
+            .collect(),
+        left: report
+            .left
+            .into_iter()
+            .map(|l| proto::CleanupLeft {
+                path: l.path,
+                branch: l.branch,
+                pr: l.pr,
+                reason: l.reason,
+                command: l.command,
+            })
+            .collect(),
+        teardown_untrusted: report.teardown_untrusted,
+    }))
+}
+
+/// The spaces of this server as the cleanup sees them: every terminal with its space and start
+/// directory, every space with its own `cwd`.
+struct ServerSpaces<'a>(&'a Shared);
+
+impl worktree::Spaces for ServerSpaces<'_> {
+    fn view(&self) -> Result<Snapshot, String> {
+        let inner = lock(&self.0.inner);
+        let terminals = inner
+            .terminals
+            .iter()
+            .map(|t| snapshot::Terminal {
+                space_id: t.info.space_id.clone(),
+                cwd: Some(t.info.cwd.clone()),
+                ..snapshot::Terminal::default()
+            })
+            .collect();
+        let spaces = inner
+            .layout
+            .spaces
+            .iter()
+            .map(|s| snapshot::Space {
+                space_id: s.id.clone(),
+                cwd: Some(s.cwd.clone()),
+                ..snapshot::Space::default()
+            })
+            .collect();
+        Ok(Snapshot {
+            spaces,
+            terminals,
+            tabs: Vec::new(),
+        })
+    }
+
+    fn close_space(&self, id: &str) -> Result<(), String> {
+        space_close(
+            self.0,
+            SpaceClose {
+                space_id: id.to_owned(),
+            },
+        )
+        .map(|_| ())
+        .map_err(|(_, m)| m)
+    }
 }
 
 /// `space.apply_layout`: the resolved layout of the space (or a preset of its project file)
@@ -1581,6 +1837,95 @@ fn terminal_mut<'a>(
         .ok_or_else(|| not_found("terminal", id))
 }
 
+/// Most transcript readers kept; one per view that follows an agent, so this is never reached by
+/// normal use. A reader past it replaces an arbitrary one, which then starts over (`fresh`).
+const MAX_FOLLOWERS: usize = 64;
+
+/// A transcript reader and the session it follows.
+struct Followed {
+    session: String,
+    follow: poimen_core::transcripts::Follow,
+}
+
+/// `agent.transcript` (#698): the updates the agent transcript of a terminal gained since this
+/// follower's last request, read from the files of this machine (`Config.home`) through
+/// `poimen_core::transcripts`. The agent and session are those the hooks reported; Claude Code
+/// also needs the terminal's directory. `not_found` for an unknown terminal; every other miss is
+/// a `state` of the result, so a client can tell it from a failed request.
+fn agent_transcript(shared: &Shared, p: AgentTranscript) -> ApiResult {
+    use poimen_core::transcripts::{OpenError, open};
+    let (agent, session, cwd, live) = {
+        let mut inner = lock(&shared.inner);
+        let entry = terminal_mut(&mut inner, &p.terminal_id)?;
+        let agent = entry.info.agent.as_ref();
+        let found = (
+            agent.and_then(|a| a.agent.clone()),
+            agent.and_then(|a| a.session_id.clone()),
+            entry.info.cwd.clone(),
+        );
+        let live: HashSet<String> = inner.terminals.iter().map(|t| t.info.id.clone()).collect();
+        (found.0, found.1, found.2, live)
+    };
+    let state = |state, reason: Option<String>| {
+        Ok(json!(AgentTranscriptResult {
+            state,
+            reason,
+            session: None,
+            fresh: false,
+            updates: Vec::new(),
+        }))
+    };
+    let mut followers = lock(&shared.transcripts);
+    followers.retain(|(terminal, _), _| live.contains(terminal));
+    let key = (p.terminal_id, p.follower);
+    let (Some(agent), Some(session)) = (agent, session) else {
+        followers.remove(&key);
+        return state(TranscriptState::NoAgent, None);
+    };
+    let fresh = p.restart || followers.get(&key).is_none_or(|f| f.session != session);
+    if fresh {
+        followers.remove(&key);
+        let Some(home) = shared.home.as_deref() else {
+            return state(TranscriptState::Missing, None);
+        };
+        match open(home, &agent, &session, &cwd) {
+            Ok(follow) => {
+                if followers.len() >= MAX_FOLLOWERS
+                    && let Some(old) = followers.keys().next().cloned()
+                {
+                    followers.remove(&old);
+                }
+                followers.insert(
+                    key.clone(),
+                    Followed {
+                        session: session.clone(),
+                        follow,
+                    },
+                );
+            }
+            Err(OpenError::NoAgent) => return state(TranscriptState::NoAgent, None),
+            Err(OpenError::Missing) => return state(TranscriptState::Missing, None),
+            Err(OpenError::Unreadable(reason)) => {
+                return state(TranscriptState::Unreadable, Some(reason));
+            }
+        }
+    }
+    let followed = followers.get_mut(&key).expect("inserted above or kept");
+    let updates = followed
+        .follow
+        .refresh()
+        .into_iter()
+        .map(|u| json!(u))
+        .collect();
+    Ok(json!(AgentTranscriptResult {
+        state: TranscriptState::Ok,
+        reason: None,
+        session: Some(session),
+        fresh,
+        updates,
+    }))
+}
+
 fn terminal_rename(shared: &Shared, p: TerminalRename) -> ApiResult {
     let name = require_name(&p.name)?;
     let mut inner = lock(&shared.inner);
@@ -1927,9 +2272,10 @@ fn running_host<'a>(
         .ok_or_else(|| (ErrorCode::Exited, format!("terminal {id} has exited")))
 }
 
-/// Input and resize belong to the controller. A connection attached to this terminal must be
-/// its controller; a connection that is not attached may send input, and may resize only while
-/// nobody controls.
+/// Input belongs to the controller. A connection attached to this terminal must be its
+/// controller to send it; a connection that is not attached may send input only while nobody
+/// controls. Resize also belongs to observers and to unattached connections while nobody
+/// controls, so the unfocused leaves of a split tab follow their containers.
 fn authorize(
     stream: &TermStream,
     ctx: Option<&Attachment>,
@@ -1938,8 +2284,9 @@ fn authorize(
 ) -> Result<(), (ErrorCode, String)> {
     let denied = |why: &str| Err((ErrorCode::NotController, why.to_string()));
     match ctx.filter(|a| a.terminal_id == terminal_id) {
+        Some(_) if resize && !stream.has_controller() => Ok(()),
         Some(a) if a.mode == AttachMode::Observe => {
-            denied("an observer can neither send input nor resize")
+            denied("an observer can neither send input nor resize a terminal with a controller")
         }
         Some(a) if !stream.is_controller(a.client_id) => denied("the control was taken over"),
         Some(_) => Ok(()),

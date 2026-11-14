@@ -4,8 +4,12 @@
  * state of `run-state.schema.json` plus `tone`, `host`, `agent` and `events`). Displays are core
  * readers: nothing here reads a profile, and a run shows from the core alone. Fallback during the
  * migration: the legacy `.agents/deliver-loop/status.json` (`schemaVersion: 1`), mapped onto the
- * same shape by {@link fromLegacy}. Everything here is pure; the Tauri side is `deliver.ts`.
+ * same shape by {@link fromLegacy}. Runs of a remote machine (#692) come the same way, folded by
+ * the app from the events its `poimen-server` forwards, with the machine name on each card.
+ * Everything here is pure; the Tauri side is `deliver.ts`.
  */
+
+import { qualifyId } from "../core/snapshot";
 
 /** The legacy status file schema version this build understands. */
 export const SUPPORTED_SCHEMA = 1;
@@ -136,6 +140,10 @@ export interface DeliverCard {
   root: string;
   run: string;
   state: CardState;
+  /** The machine the repository is on (#692); absent on this Mac. `root` is a path there. */
+  machine?: string;
+  /** The machine is not connected: the card shows the last known state. */
+  offline?: boolean;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -446,9 +454,12 @@ export function fromLegacy(value: unknown): DeliverStatus | string {
   };
 }
 
-/** The key of a card: the repository and the run. */
-export const cardKey = (card: Pick<DeliverCard, "root" | "run">): string =>
-  `${card.root}\n${card.run}`;
+/**
+ * The key of a card: the repository and the run, qualified by the machine of a remote one, so the
+ * same run id (or path) on two machines and this Mac stays three cards.
+ */
+export const cardKey = (card: Pick<DeliverCard, "root" | "run" | "machine">): string =>
+  `${card.machine === undefined ? card.root : qualifyId(card.machine, card.root)}\n${card.run}`;
 
 function card(root: string, status: DeliverStatus | string): DeliverCard {
   return typeof status === "string"
@@ -456,8 +467,49 @@ function card(root: string, status: DeliverStatus | string): DeliverCard {
     : { root, run: status.run, state: { kind: "ok", status } };
 }
 
-/** The cards of a `deliver` event: none for a repository without runs, one per run of its events. */
-export function cardsOf(root: string, read: DeliverRead): DeliverCard[] {
+/**
+ * A card of `machine`: the machine set, and the terminal its run names qualified like the
+ * terminals of the machine's snapshot (`qualifySnapshot`), so it never matches a terminal of this
+ * Mac or of another machine.
+ */
+function onMachine(card: DeliverCard, machine: string): DeliverCard {
+  if (card.state.kind !== "ok") return { ...card, machine };
+  const { status } = card.state;
+  const terminal = status.host["poimen.terminal"];
+  const host = terminal
+    ? { ...status.host, "poimen.terminal": qualifyId(machine, terminal) }
+    : status.host;
+  return { ...card, machine, state: { kind: "ok", status: { ...status, host } } };
+}
+
+/**
+ * The cards of a `deliver` event: none for a repository without runs, one per run of its events.
+ * With `machine` the repository is on that machine (#692).
+ */
+export function cardsOf(root: string, read: DeliverRead, machine?: string): DeliverCard[] {
+  const cards = localCards(root, read);
+  return machine === undefined ? cards : cards.map((c) => onMachine(c, machine));
+}
+
+/**
+ * The cards as shown: a remote card while its machine is listed, marked `offline` while that
+ * machine is not connected (its last known state stays); `states` maps each configured machine to
+ * its connection state.
+ */
+export function withMachines(
+  cards: readonly DeliverCard[],
+  states: ReadonlyMap<string, string>,
+): DeliverCard[] {
+  return cards.flatMap((c) => {
+    if (c.machine === undefined) return [c];
+    const state = states.get(c.machine);
+    if (state === undefined) return [];
+    const offline = state !== "connected";
+    return [c.offline === offline ? c : { ...c, offline }];
+  });
+}
+
+function localCards(root: string, read: DeliverRead): DeliverCard[] {
   switch (read.kind) {
     case "missing":
       return [];
@@ -599,7 +651,7 @@ export interface BarSummary {
  * missed; the warning mark follows the tone.
  */
 export function barSummary(cards: readonly DeliverCard[], now: number): BarSummary | null {
-  const active: DeliverStatus[] = [];
+  const active: (DeliverStatus & { machine?: string })[] = [];
   for (const c of cards) {
     if (c.state.kind !== "ok") continue;
     const state = runState(c.state.status, now);
@@ -609,11 +661,13 @@ export function barSummary(cards: readonly DeliverCard[], now: number): BarSumma
         needsAttention(c.state.status) &&
         now - Date.parse(c.state.status.updated) < STALE_MS)
     )
-      active.push(c.state.status);
+      active.push(
+        c.machine === undefined ? c.state.status : { ...c.state.status, machine: c.machine },
+      );
   }
   if (active.length === 0) return null;
-  const label = (s: DeliverStatus) =>
-    `${runTitle(s)}${s.progress ? ` ${s.progress.done}/${s.progress.total}` : ""}`;
+  const label = (s: DeliverStatus & { machine?: string }) =>
+    `${s.machine ? `${s.machine}: ` : ""}${runTitle(s)}${s.progress ? ` ${s.progress.done}/${s.progress.total}` : ""}`;
   const warning = active.some(needsAttention);
   const title = active
     .map((s) => {

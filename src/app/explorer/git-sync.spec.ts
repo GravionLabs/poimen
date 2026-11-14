@@ -2,7 +2,7 @@
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { GitSync, outcomeText, progressText, summaryText, type SyncSummary } from "./git-sync";
@@ -54,7 +54,7 @@ function setup(invoke: (cmd: string, args: unknown) => unknown) {
         },
       },
       { provide: SpaceActions, useValue: { notify } },
-      { provide: HerdrStore, useValue: { refreshRepos } },
+      { provide: SpacesStore, useValue: { refreshRepos } },
     ],
   });
   return { sync: TestBed.inject(GitSync), notify, refreshRepos, unlisten };

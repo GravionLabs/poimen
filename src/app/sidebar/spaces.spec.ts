@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentStatus, BranchPull, Terminal, PaneRow, SpaceNode } from "../core/herdr";
+import type { AgentStatus, BranchPull, Terminal, PaneRow, SpaceNode } from "../core/snapshot";
 import {
   aggregateStatus,
   paneDetail,

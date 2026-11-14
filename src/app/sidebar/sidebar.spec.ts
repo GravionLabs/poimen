@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SpaceNode } from "../core/herdr";
+import type { SpaceNode } from "../core/snapshot";
 import {
   filterValues,
   isDoubleClick,
@@ -195,5 +195,18 @@ describe("menuTarget", () => {
     expect(menuTarget(labels, 0, "Tab")).toBeNull();
     expect(menuTarget(labels, 0, " ")).toBeNull();
     expect(menuTarget([], -1, "ArrowDown")).toBeNull();
+  });
+});
+
+describe("sidebarMenuItems on an offline machine (#693)", () => {
+  it("disables every entry with the reason", () => {
+    const items = sidebarMenuItems("pane", false, false, "lab is offline").flatMap((g) => g.items);
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((i) => i.disabled === "lab is offline")).toBe(true);
+  });
+
+  it("leaves the entries enabled otherwise", () => {
+    const items = sidebarMenuItems("workspace").flatMap((g) => g.items);
+    expect(items.some((i) => i.disabled)).toBe(false);
   });
 });

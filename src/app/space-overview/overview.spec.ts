@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PaneRow, SpaceNode, Terminal } from "../core/herdr";
+import type { PaneRow, SpaceNode, Terminal } from "../core/snapshot";
 import { activityText, overviewRows, spaceDirectory, spacePullUrl } from "./overview";
 
 const row = (id: string, over: Partial<PaneRow> = {}, pane: Partial<Terminal> = {}): PaneRow => ({

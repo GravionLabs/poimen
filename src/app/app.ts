@@ -18,23 +18,27 @@ import {
   olderHost,
   olderHostNote,
   paneDir,
+  paneTitle,
   rowName,
+  splitId,
   supportsFlow,
   tabHeader,
   treeTerminals,
-  windowTitle,
-  type Mode,
+  withMachine,
   type Tab,
   type Terminal,
-} from "./core/herdr";
+} from "./core/snapshot";
+import { windowTitle, type Mode } from "./core/backend";
 import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
+import { Machines } from "./core/machines";
+import { RemoteSpaces } from "./core/remote-spaces";
 import { Attention } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
 import { Notifications } from "./notifications/notifications";
-import { HerdrStore } from "./core/herdr-store";
+import { SpacesStore } from "./core/spaces-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
@@ -143,13 +147,14 @@ const ZOOM_STEP = 1;
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class App {
-  protected readonly store = inject(HerdrStore);
+  protected readonly store = inject(SpacesStore);
   protected readonly updater = inject(Updater);
   protected readonly serverRestart = inject(ServerRestart);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
   private readonly userSchemes = inject(UserSchemes);
+  private readonly machines = inject(Machines);
   private readonly terminalColors = inject(TerminalColorSync);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
@@ -190,12 +195,13 @@ export class App {
 
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
+  private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
   protected readonly groupItems = computed(() => {
-    const snap = this.store.snapshot();
+    const snap = this.store.all();
     this.store.panes();
     const ringing = this.attention.attention();
     const unread = this.attention.unread();
@@ -241,6 +247,8 @@ export class App {
             ? snap.spaces.find((w) => w.space_id === pane.space_id)?.label
             : undefined;
           const header = tabHeader(workspace, pane ? rowName(pane, tabLabel) : paneId);
+          if (pane?.machine)
+            header.group = `${pane.machine}: ${header.group ?? ""}`.replace(/: $/, "");
           if (flowOf !== null) {
             return {
               id: tab.paneId,
@@ -257,7 +265,7 @@ export class App {
             attention: ringing.has(tab.paneId),
             unread: unread.has(tab.paneId),
             note: this.hostNote(pane),
-            title: `${header.title}${tab.pinned ? "" : " (preview)"}`,
+            title: `${withMachine(header.title, pane?.machine)}${tab.pinned ? "" : " (preview)"}`,
           };
         }),
       ]),
@@ -347,7 +355,9 @@ export class App {
     });
     void this.prefs.start();
     void this.userSchemes.start();
+    void this.machines.start();
     void this.store.start().then(() => this.dropMissing());
+    void this.remoteSpaces.start();
     void this.seedDefaults();
   }
 
@@ -391,7 +401,10 @@ export class App {
   /** After the first snapshot, closes restored tabs whose pane is gone, and says so. */
   private dropMissing(): void {
     if (this.store.connectionError() !== null) return;
-    const gone = this.editor.prune(new Set(this.store.panes().keys()));
+    // A machine's terminals are not read yet (or the machine is offline): their tabs stay.
+    const alive = new Set(this.store.panes().keys());
+    for (const id of this.editor.openIds()) if (splitId(id).machine) alive.add(id);
+    const gone = this.editor.prune(alive);
     if (gone.length === 0) return;
     this.notice.set(
       gone.length === 1
@@ -911,12 +924,8 @@ export class App {
 
   /** Space and name of a pane, as its tab shows them. */
   private tabTitle(id: string): string {
-    const snap = this.store.snapshot();
     const pane = this.pane(id);
-    if (!pane) return id;
-    const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
-    const workspace = snap.spaces.find((w) => w.space_id === pane.space_id)?.label;
-    return tabHeader(workspace, rowName(pane, tabLabel)).title;
+    return pane ? paneTitle(this.store.all(), pane) : id;
   }
 
   private pane(id: string): Terminal | undefined {

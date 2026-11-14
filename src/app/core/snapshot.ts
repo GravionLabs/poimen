@@ -1,7 +1,7 @@
-// Shapes of herdr's workspace.list / tab.list / pane.list results (only the fields poimen uses).
+// The backend-neutral model of spaces, tabs and terminals (the `snapshot` command, #586) and the
+// pure helpers on it. Every backend maps its own model onto it in Rust (`poimen_core::snapshot`).
 
 import type { Checks } from "../github/pulls";
-import type { BackendKind } from "./settings";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
@@ -15,6 +15,8 @@ export interface Space {
    * terminals across a server restart); herdr workspaces have none.
    */
   cwd?: string;
+  /** The machine the space lives on (remote spaces only, #280); its ids are qualified. */
+  machine?: string;
 }
 
 export interface Tab {
@@ -30,6 +32,8 @@ export interface Tab {
   root?: TabTree;
   /** The focused leaf of the tab, shared by every client (poimen backend). */
   active_terminal?: string;
+  /** The machine of a remote tab (#280). */
+  machine?: string;
 }
 
 /**
@@ -137,6 +141,8 @@ export interface Terminal {
   host_bundled_version?: string;
   terminal_title_stripped?: string;
   focused?: boolean;
+  /** The machine of a remote terminal (#280). */
+  machine?: string;
 }
 
 /** Branch and worktree flag of a directory (answer of the `repo_info` command). */
@@ -168,78 +174,95 @@ export interface Snapshot {
 }
 
 /**
- * The records of the `snapshot` command as the backends deliver them (herdr's workspace.list,
- * tab.list and pane.list shape). Only `toSnapshot` reads them; everything else works on `Snapshot`.
+ * The answer of the `snapshot` and `machine_snapshot` commands (`poimen_core::snapshot::Snapshot`):
+ * already the neutral model, each backend maps its own onto it (herdr in `herdr.rs`). Only
+ * `toSnapshot` reads it; everything else works on `Snapshot`.
  */
-export interface WireSnapshot {
-  workspaces: (Omit<Space, "space_id"> & { workspace_id: string })[];
-  tabs: (Omit<Tab, "space_id"> & { workspace_id: string })[];
-  panes: (Omit<Terminal, "terminal_id" | "space_id"> & {
-    pane_id: string;
-    workspace_id: string;
-  })[];
+export type WireSnapshot = Partial<Snapshot>;
+
+/** The snapshot of a `snapshot` answer; a missing list is empty. */
+export function toSnapshot(wire: WireSnapshot | null | undefined): Snapshot {
+  return {
+    spaces: wire?.spaces ?? [],
+    tabs: wire?.tabs ?? [],
+    terminals: wire?.terminals ?? [],
+  };
 }
 
-/** Maps the wire shape of the `snapshot` command to the neutral model (ids keep their values). */
-export function toSnapshot(wire: WireSnapshot): Snapshot {
+const QUALIFIER = "::";
+
+/** The id of `id` on `machine`: ids of two machines (and of this Mac) never collide. */
+export function qualifyId(machine: string, id: string): string {
+  return `${machine}${QUALIFIER}${id}`;
+}
+
+/** The machine and the machine's own id of an id from `qualifyId`; a local id has no machine. */
+export function splitId(id: string): { machine?: string; id: string } {
+  const at = id.lastIndexOf(QUALIFIER);
+  return at < 0 ? { id } : { machine: id.slice(0, at), id: id.slice(at + QUALIFIER.length) };
+}
+
+function qualifyTree(machine: string, tree: TabTree): TabTree {
+  return tree.kind === "terminal"
+    ? { ...tree, terminal_id: qualifyId(machine, tree.terminal_id) }
+    : {
+        ...tree,
+        children: [qualifyTree(machine, tree.children[0]), qualifyTree(machine, tree.children[1])],
+      };
+}
+
+/**
+ * A snapshot read from `machine` with every id qualified and `machine` set on each record. With
+ * `stale` the machine is not reachable: its agents report `unknown`, so no old status rings.
+ */
+export function qualifySnapshot(machine: string, snapshot: Snapshot, stale = false): Snapshot {
   return {
-    spaces: wire.workspaces.map(({ workspace_id, ...rest }) => ({
-      ...rest,
-      space_id: workspace_id,
+    spaces: snapshot.spaces.map((s) => ({
+      ...s,
+      machine,
+      space_id: qualifyId(machine, s.space_id),
+      ...(stale ? { agent_status: "unknown" as const } : {}),
     })),
-    tabs: wire.tabs.map(({ workspace_id, ...rest }) => ({ ...rest, space_id: workspace_id })),
-    terminals: wire.panes.map(({ pane_id, workspace_id, ...rest }) => ({
-      ...rest,
-      terminal_id: pane_id,
-      space_id: workspace_id,
+    tabs: snapshot.tabs.map((t) => ({
+      ...t,
+      machine,
+      tab_id: qualifyId(machine, t.tab_id),
+      space_id: qualifyId(machine, t.space_id),
+      ...(t.root ? { root: qualifyTree(machine, t.root) } : {}),
+      ...(t.active_terminal ? { active_terminal: qualifyId(machine, t.active_terminal) } : {}),
+      ...(stale ? { agent_status: "unknown" as const } : {}),
+    })),
+    terminals: snapshot.terminals.map((p) => ({
+      ...p,
+      machine,
+      terminal_id: qualifyId(machine, p.terminal_id),
+      tab_id: qualifyId(machine, p.tab_id),
+      space_id: qualifyId(machine, p.space_id),
+      ...(stale ? { agent_status: "unknown" as const } : {}),
     })),
   };
 }
 
-/** Payload of the `herdr` Tauri event: a herdr event or a poimen connection event. */
-export interface HerdrEvent {
-  kind: string;
-  data: {
-    pane_id?: string;
-    agent_status?: AgentStatus;
-    agent_message?: string;
-    agent_message_at?: number;
-    reason?: string;
-  } | null;
+/** Appends `extra` to `base` (disjoint ids; spaces with the same name stay two spaces). */
+export function mergeSnapshots(base: Snapshot, extra: readonly Snapshot[]): Snapshot {
+  if (extra.length === 0) return base;
+  return {
+    spaces: [...base.spaces, ...extra.flatMap((s) => s.spaces)],
+    tabs: [...base.tabs, ...extra.flatMap((s) => s.tabs)],
+    terminals: [...base.terminals, ...extra.flatMap((s) => s.terminals)],
+  };
 }
 
-/** How a terminal view attaches: as one of many observers or as the single controller. */
-export type Mode = "observe" | "control";
+/** A tab or window title with the machine name in front when the pane is remote. */
+export function withMachine(title: string, machine: string | undefined): string {
+  return machine ? `${machine}: ${title}` : title;
+}
 
-/**
- * One record of a terminal stream (sent through the channel of `open_terminal`), the same
- * for every backend. `bytes` is base64.
- */
-export type StreamRecord =
-  | { type: "reset"; cols: number; rows: number; bytes: string }
-  | { type: "output"; bytes: string }
-  | { type: "resized"; cols: number; rows: number }
-  | { type: "controller"; attached: boolean }
-  | {
-      type: "closed";
-      reason: string;
-      exit_code?: number;
-      /**
-       * Set when the reason is more than text; `controller_held`: another client is the
-       * controller; `exited`: the process ended (`exit_code` says how) and its last screen stays;
-       * `lost`: the connection to the server ended (a restart or a crash), the terminal may come
-       * back with the next server.
-       */
-      code?: "controller_held" | "exited" | "lost";
-    }
-  /** Raw PTY bytes of an emulated stream (an `ArrayBuffer` over the channel). */
-  | { type: "bytes"; data: Uint8Array };
-
-/** What `open_terminal` answers: the stream id and whether the stream is emulated. */
-export interface OpenedStream {
-  id: number;
-  /** Raw PTY bytes (xterm.js tracks the modes) rather than finished frames. */
-  emulated: boolean;
+/** Space and name of a pane as its tab title shows them, with the machine name for a remote pane. */
+export function paneTitle(snap: Snapshot, pane: Terminal): string {
+  const tabLabel = snap.tabs.find((t) => t.tab_id === pane.tab_id)?.label;
+  const workspace = snap.spaces.find((w) => w.space_id === pane.space_id)?.label;
+  return withMachine(tabHeader(workspace, rowName(pane, tabLabel)).title, pane.machine);
 }
 
 export interface TabNode {
@@ -374,7 +397,7 @@ export function nextWaiting(panes: Terminal[], activeId: string | null): Termina
 }
 
 /**
- * Applies a pane.agent_status_changed event without a full refresh. A notification text replaces
+ * Applies a terminal.agent_status_changed event without a full refresh. A notification text replaces
  * the kept one; without one the text stays, except when the agent turns `working` or ends
  * (`unknown`).
  */
@@ -544,46 +567,6 @@ export function filterSpaces(
     .filter((space) => space.rows.length > 0);
 }
 
-export function decodeBase64(text: string): Uint8Array {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-/** The herdr version and protocol reported by `ping`; `supported` is the protocol poimen is written for. */
-export interface HerdrInfo {
-  version: string;
-  /** Absent when herdr reports a version but no protocol: nothing to check. */
-  protocol?: number | null;
-  supported: number;
-}
-
-/** `backend herdr <version>`, or `backend herdr ?` when unreachable or too old to report it; `backend` names another server. */
-export function herdrVersionLabel(info: HerdrInfo | null | undefined, backend = "herdr"): string {
-  return info?.version ? `backend ${backend} ${info.version}` : `backend ${backend} ?`;
-}
-
-/** The release channel of the build (`app_channel`): `rc` is the "Poimen RC" app installed beside the stable one. */
-export type AppChannel = "stable" | "rc";
-
-/** The window title: `poimen`, `poimen RC` on rc, with ` (<n> waiting)` while agents wait. */
-export function windowTitle(channel: AppChannel, waiting: number): string {
-  const name = channel === "rc" ? "poimen RC" : "poimen";
-  return waiting > 0 ? `${name} (${waiting} waiting)` : name;
-}
-
-/** `frontend poimen <version>`, or `frontend poimen ?` until the build version is known. */
-export function appVersionLabel(version: string | null | undefined): string {
-  return version ? `frontend poimen ${version}` : "frontend poimen ?";
-}
-
-/** The tooltip warning for a herdr protocol other than the supported one; empty when it matches or is unknown. */
-export function protocolWarning(info: HerdrInfo | null | undefined, backend = "herdr"): string {
-  if (!info || info.protocol == null || info.protocol === info.supported) return "";
-  return `${backend} protocol ${info.protocol}, poimen supports ${info.supported}`;
-}
-
 /** Where a split puts the new pane (`pane.split` direction). */
 export type SplitDirection = "right" | "down";
 
@@ -684,54 +667,22 @@ export function closeWarning(pane: Terminal | undefined): string {
   return `The ${agent} agent in the pane ends.`;
 }
 
-/** Agent kinds `agent.start` supports (`herdr agent start --help`). */
-export const AGENT_KINDS = [
-  "claude",
-  "codex",
-  "gemini",
-  "opencode",
-  "copilot",
-  "cursor",
-  "pi",
-  "devin",
-  "agy",
-  "cline",
-  "omp",
-  "mastracode",
-  "kimi",
-  "kiro",
-  "droid",
-  "amp",
-  "grok",
-  "hermes",
-  "kilo",
-  "qodercli",
-  "qwen",
-  "letta",
-  "maki",
-  "muse",
-] as const;
-
-/** Agent kinds that report their state through the poimen hooks
- * (`poimen-server integration install claude|copilot`); `start_agent` waits for their
- * `SessionStart`, so any other kind would time out although it runs. */
-export const HOOK_AGENT_KINDS = ["claude", "copilot"] as const;
-
-/** The kinds the "Start agent" dialog offers on `backend`: herdr detects all of `AGENT_KINDS`,
- * the poimen backend only learns of the ones with hooks. */
-export function agentKinds(backend: BackendKind): readonly string[] {
-  return backend === "poimen" ? HOOK_AGENT_KINDS : AGENT_KINDS;
-}
-
 /** The agents named in the empty states of the Output panel and the Flow tab. */
 export const TRANSCRIPT_AGENTS_LABEL = "Claude Code and GitHub Copilot CLI";
 
 /**
  * Empty-state text of the Output panel and the Flow tab for `pane`; `subject` names the view
- * (`Subagent output`, `The flow`). It tells apart a pane without a known agent, a known agent
+ * (`Subagent output`, `The flow`). `block` is why the pane's machine cannot be asked
+ * (`machineBlock`); it comes first. It tells apart a pane without a known agent, a known agent
  * that has not reported its session yet, and a session whose transcript is not found yet.
  */
-export function transcriptEmptyText(pane: Terminal | undefined, subject: string): string {
+export function transcriptEmptyText(
+  pane: Terminal | undefined,
+  subject: string,
+  block: string | null = null,
+): string {
+  // The machine of a remote pane cannot be asked (offline, connecting, unknown; #698).
+  if (block !== null && pane) return `${subject} is unavailable: ${block}.`;
   if (!pane) {
     return `${subject} is available for ${TRANSCRIPT_AGENTS_LABEL} agents. Select a pane that runs one.`;
   }

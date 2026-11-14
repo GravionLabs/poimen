@@ -11,8 +11,9 @@ import {
   untracked,
 } from "@angular/core";
 import { FlowView } from "../bottom-panel/flow-view";
-import { flowSession, transcriptEmptyText } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import { flowSession, transcriptEmptyText } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
+import { Machines } from "../core/machines";
 import { Subagents } from "../core/transcripts";
 
 /**
@@ -24,7 +25,7 @@ import { Subagents } from "../core/transcripts";
   imports: [FlowView],
   providers: [Subagents],
   template: `
-    @if (!subagents.supported()) {
+    @if (paneBlock() || !subagents.supported()) {
       <p class="empty">{{ emptyText() }}</p>
     } @else {
       @defer {
@@ -53,13 +54,16 @@ import { Subagents } from "../core/transcripts";
 })
 export class FlowTab {
   protected readonly subagents = inject(Subagents);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   /** The pane whose agent run the tab shows. */
   readonly paneId = input.required<string>();
   /** A subagent node was clicked: show its transcript. */
   readonly openAgent = output<string>();
+  private readonly machines = inject(Machines);
+  /** Why the machine of a remote pane cannot be asked for its transcripts (#698). */
+  protected readonly paneBlock = computed(() => this.machines.blockedReason(this.paneId()));
   protected readonly emptyText = computed(() =>
-    transcriptEmptyText(this.store.panes().get(this.paneId()), "The flow"),
+    transcriptEmptyText(this.store.panes().get(this.paneId()), "The flow", this.paneBlock()),
   );
 
   /** Clock for the durations of running nodes. */

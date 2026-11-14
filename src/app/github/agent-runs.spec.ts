@@ -3,7 +3,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorTabs } from "../core/editor-tabs";
-import type { AgentStatus } from "../core/herdr";
+import type { AgentStatus } from "../core/snapshot";
 import { UI_STORAGE } from "../core/ui-state";
 import { AgentRuns, advance, type AgentRun } from "./agent-runs";
 import { GithubIssues } from "./issues";

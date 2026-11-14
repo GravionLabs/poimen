@@ -1,5 +1,5 @@
 import { Injectable, computed, signal } from "@angular/core";
-import type { AgentStatus, SpaceNode } from "./herdr";
+import type { AgentStatus, SpaceNode } from "./snapshot";
 
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
   a.size === b.size && [...a].every((id) => b.has(id));

@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildTree, orderTabs, type Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import { buildTree, orderTabs, type Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -70,7 +70,7 @@ describe("orderTabs", () => {
 
 describe("tab order in the app", () => {
   let data: Map<string, string>;
-  let store: HerdrStore;
+  let store: SpacesStore;
   let actions: SpaceActions;
   let ui: UiState;
   const start = () => {
@@ -81,13 +81,13 @@ describe("tab order in the app", () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         { provide: UI_STORAGE, useValue: storage },
         UiState,
         SpaceActions,
       ],
     });
-    store = injector.get(HerdrStore);
+    store = injector.get(SpacesStore);
     actions = injector.get(SpaceActions);
     ui = injector.get(UiState);
   };

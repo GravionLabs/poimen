@@ -1,5 +1,5 @@
 import { Injectable, inject } from "@angular/core";
-import type { Mode, OpenedStream, StreamRecord } from "./herdr";
+import type { Mode, OpenedStream, StreamRecord } from "./backend";
 import { TauriBridge } from "./tauri";
 
 export interface OpenTerminal {
@@ -10,6 +10,8 @@ export interface OpenTerminal {
   rows: number;
   /** Replaces the current controller (control mode only). */
   takeover: boolean;
+  /** The machine whose backend runs the terminal (#280); absent for this Mac. */
+  machine?: string;
 }
 
 /** A mouse command for a rendered stream; `modifiers` combines Shift = 1, Ctrl = 2, Alt = 4. */
@@ -48,9 +50,10 @@ export class TerminalSession {
     void this.bridge.invoke("terminal_input", { id: this.id, text });
   }
 
-  resize(cols: number, rows: number): void {
-    if (this.closed) return;
-    void this.bridge.invoke("terminal_resize", { id: this.id, cols, rows });
+  /** Resolves when the server set the size; rejects when it refused it (`not_controller`). */
+  resize(cols: number, rows: number): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    return this.bridge.invoke<void>("terminal_resize", { id: this.id, cols, rows });
   }
 
   scroll(up: boolean, lines: number): void {

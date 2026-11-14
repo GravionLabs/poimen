@@ -23,9 +23,9 @@ import {
   type PaneRow,
   type SpaceNode,
   type Space,
-} from "../core/herdr";
+} from "../core/snapshot";
 import { Attention, workspaceUnread } from "../core/attention";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import {
   DEFAULT_SIDEBAR_ROWS,
   aggregateStatus,
@@ -42,6 +42,8 @@ import { isGithubUrl } from "../github/pulls";
 import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
+import { Machines } from "../core/machines";
+import { MachinesSection } from "./machines-section/machines-section";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 
 /** What a tree node carries back to the template. */
@@ -222,6 +224,8 @@ export interface SidebarMenuAction {
 export interface SidebarMenuItem {
   action: SidebarMenuAction["action"];
   label: string;
+  /** Why the entry cannot be used (its machine is not connected, #693); set means disabled. */
+  disabled?: string;
 }
 
 /** A group of context menu entries; `label` is the heading, `null` for the built-in group. */
@@ -240,6 +244,8 @@ export function sidebarMenuItems(
   repo = false,
   /** The terminal runs on an older PTY host: it offers a restart on the new one. */
   outdatedHost = false,
+  /** The row is on a machine that is not connected: every entry is disabled with this reason. */
+  blocked: string | null = null,
 ): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
@@ -269,7 +275,11 @@ export function sidebarMenuItems(
             { action: "close", label: "Close pane..." },
           ],
   };
-  return [builtin];
+  return [
+    blocked
+      ? { ...builtin, items: builtin.items.map((item) => ({ ...item, disabled: blocked })) }
+      : builtin,
+  ];
 }
 
 /**
@@ -333,6 +343,7 @@ export class SpaceEditFocus {
     HxInput,
     NgTemplateOutlet,
     SplitPane,
+    MachinesSection,
   ],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
@@ -340,6 +351,7 @@ export class SpaceEditFocus {
   host: { "[class.split]": "layout() === 'split'" },
 })
 export class Sidebar {
+  protected readonly machines = inject(Machines);
   /** Ids of the panes that have an open view. */
   readonly openIds = input<ReadonlySet<string>>(new Set());
   /** Id of the pane whose tab is active in the editor. */
@@ -370,7 +382,7 @@ export class Sidebar {
           .flatMap((n) => n.rows)
           .find((r) => r.pane.terminal_id === id)?.pane,
       ) !== null;
-    return sidebarMenuItems(kind, repo, older);
+    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id));
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
@@ -405,12 +417,14 @@ export class Sidebar {
 
   protected choose(action: SidebarMenuAction["action"]): void {
     const at = this.menuAt();
+    // A disabled entry (offline machine) does nothing, and never reaches another backend.
+    if (at && this.machines.blockedReason(at.id)) return;
     this.closeMenu();
     if (at) this.menuAction.emit({ kind: at.kind, id: at.id, action });
   }
 
   private readonly injector = inject(Injector);
-  protected readonly store = inject(HerdrStore);
+  protected readonly store = inject(SpacesStore);
   protected readonly spaceActions = inject(SpaceActions);
   private readonly attn = inject(Attention);
   private readonly bridge = inject(TauriBridge);

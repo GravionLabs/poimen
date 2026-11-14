@@ -11,9 +11,10 @@ import {
 } from "@angular/core";
 import { FlowView } from "./flow-view";
 import { EditorTabs, tabPaneId } from "../core/editor-tabs";
-import { paneDir, transcriptEmptyText, type Terminal } from "../core/herdr";
+import { paneDir, transcriptEmptyText, type Terminal } from "../core/snapshot";
 import { Deliver } from "../deliver/deliver";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
+import { Machines } from "../core/machines";
 import { eventTime, runLabel, runsOfSpace, selectRun, toneStyle } from "./run-events";
 import { TaskLog } from "../core/task-log";
 import {
@@ -54,7 +55,7 @@ export class BottomPanel {
   protected readonly subagents = inject(Subagents);
   protected readonly editor = inject(EditorTabs);
   protected readonly taskLog = inject(TaskLog);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   protected readonly deliver = inject(Deliver);
   protected readonly minHeight = PANEL_MIN_HEIGHT;
   protected readonly maxHeight = PANEL_MAX_HEIGHT;
@@ -71,14 +72,26 @@ export class BottomPanel {
     const paneId = active === null ? null : tabPaneId(active);
     return paneId ? this.store.panes().get(paneId) : undefined;
   });
+  private readonly machines = inject(Machines);
+  /** Why the machine of a remote active pane cannot be asked for its transcripts (#698). */
+  protected readonly paneBlock = computed(() => {
+    const id = this.activePane()?.terminal_id;
+    return id === undefined ? null : this.machines.blockedReason(id);
+  });
   protected readonly outputEmpty = computed(() =>
-    transcriptEmptyText(this.activePane(), "Subagent output"),
+    transcriptEmptyText(this.activePane(), "Subagent output", this.paneBlock()),
   );
-  protected readonly flowEmpty = computed(() => transcriptEmptyText(this.activePane(), "The flow"));
+  protected readonly flowEmpty = computed(() =>
+    transcriptEmptyText(this.activePane(), "The flow", this.paneBlock()),
+  );
 
   /** The runs of the active space's repository, the one chosen for the Events tab and its rows. */
   protected readonly spaceRuns = computed(() =>
-    runsOfSpace(this.deliver.cards(), paneDir(this.activePane() ?? ({} as Terminal))),
+    runsOfSpace(
+      this.deliver.cards(),
+      paneDir(this.activePane() ?? ({} as Terminal)),
+      this.activePane()?.machine,
+    ),
   );
   private readonly pickedRun = signal<string | null>(null);
   protected readonly run = computed(() =>

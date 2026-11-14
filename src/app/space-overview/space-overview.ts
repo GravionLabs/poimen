@@ -11,7 +11,7 @@ import {
 } from "@angular/core";
 import { SpaceActions, type TrustRequest } from "../core/space-actions";
 import { EditorTabs } from "../core/editor-tabs";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { PaneActions } from "../core/pane-actions";
 import { TauriBridge } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
@@ -55,7 +55,7 @@ export class SpaceOverview {
   /** Delete (close) the space. */
   readonly deleteRequested = output<string>();
 
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly editor = inject(EditorTabs);
   private readonly paneActions = inject(PaneActions);
   private readonly bridge = inject(TauriBridge);

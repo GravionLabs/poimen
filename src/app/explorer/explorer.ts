@@ -14,7 +14,7 @@ import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
 import { EditorTabs } from "../core/editor-tabs";
 import { ExplorerSelection } from "../core/explorer-selection";
 import { PaneActions } from "../core/pane-actions";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { SpaceActions } from "../core/space-actions";
 import { SettingsStore } from "../core/settings";
 import { TaskStarter } from "../core/task-start";
@@ -106,7 +106,7 @@ export class Explorer {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState);
   private readonly settings = inject(SettingsStore);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly spaceActions = inject(SpaceActions);
   private readonly tasks = inject(TaskStarter);
   private readonly editor = inject(EditorTabs);

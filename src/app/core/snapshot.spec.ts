@@ -1,13 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  appVersionLabel,
-  windowTitle,
-  herdrVersionLabel,
-  protocolWarning,
   applyStatus,
   buildTree,
-  decodeBase64,
   flowAgentName,
   flowSession,
   nextWaiting,
@@ -18,7 +13,6 @@ import {
   transcriptEmptyText,
   toSnapshot,
   waitingCount,
-  agentKinds,
   closeWarning,
   olderHost,
   olderHostNote,
@@ -36,7 +30,7 @@ import {
   type Terminal,
   type Snapshot,
   type WireSnapshot,
-} from "./herdr";
+} from "./snapshot";
 
 /** The poimen backend's snapshot of a split tab (`map_snapshot` checks it on the Rust side). */
 const splitWire = (): WireSnapshot =>
@@ -235,13 +229,6 @@ describe("status", () => {
   });
 });
 
-describe("decodeBase64", () => {
-  it("decodes ANSI bytes including non-ASCII", () => {
-    // "\x1b[2J" followed by "λ" (UTF-8 0xCE 0xBB)
-    expect(Array.from(decodeBase64("G1sySs67"))).toEqual([0x1b, 0x5b, 0x32, 0x4a, 0xce, 0xbb]);
-  });
-});
-
 describe("nextWaiting", () => {
   const panes = [
     pane({ terminal_id: "a", agent_status: "blocked" }),
@@ -285,42 +272,6 @@ describe("tabHeader", () => {
       title: "claude",
     });
     expect(tabHeader("  ", "claude").group).toBeUndefined();
-  });
-});
-
-describe("windowTitle", () => {
-  it("names the RC build and the waiting agents", () => {
-    expect(windowTitle("stable", 0)).toBe("poimen");
-    expect(windowTitle("stable", 2)).toBe("poimen (2 waiting)");
-    expect(windowTitle("rc", 0)).toBe("poimen RC");
-    expect(windowTitle("rc", 1)).toBe("poimen RC (1 waiting)");
-  });
-});
-
-describe("version labels", () => {
-  const info = { version: "0.9.5", protocol: 22, supported: 22 };
-  it("names the versions", () => {
-    expect(herdrVersionLabel(info)).toBe("backend herdr 0.9.5");
-    expect(appVersionLabel("0.2.0")).toBe("frontend poimen 0.2.0");
-  });
-  it("shows ? when unknown", () => {
-    expect(herdrVersionLabel({ version: "0.1", supported: 22 })).toBe("backend herdr 0.1");
-    expect(herdrVersionLabel(null)).toBe("backend herdr ?");
-    expect(herdrVersionLabel(undefined)).toBe("backend herdr ?");
-    expect(herdrVersionLabel({ ...info, version: "0.9.0" }, "poimen")).toBe("backend poimen 0.9.0");
-    expect(herdrVersionLabel(null, "poimen")).toBe("backend poimen ?");
-    expect(protocolWarning({ ...info, protocol: 1, supported: 2 }, "poimen")).toBe(
-      "poimen protocol 1, poimen supports 2",
-    );
-    expect(appVersionLabel(null)).toBe("frontend poimen ?");
-  });
-  it("warns only on a protocol mismatch", () => {
-    expect(protocolWarning(info)).toBe("");
-    expect(protocolWarning(null)).toBe("");
-    expect(protocolWarning({ version: "0.1", supported: 22 })).toBe("");
-    expect(protocolWarning({ ...info, protocol: 23 })).toBe(
-      "herdr protocol 23, poimen supports 22",
-    );
   });
 });
 
@@ -433,19 +384,6 @@ describe("spaceContaining", () => {
   });
 });
 
-describe("agentKinds", () => {
-  it("offers only the kinds that report through hooks on the poimen backend", () => {
-    expect(agentKinds("poimen")).toEqual(["claude", "copilot"]);
-  });
-
-  it("keeps herdr's full list on the herdr backend", () => {
-    const kinds = agentKinds("herdr");
-    expect(kinds).toHaveLength(24);
-    expect(kinds.slice(0, 5)).toEqual(["claude", "codex", "gemini", "opencode", "copilot"]);
-    expect(kinds).toContain("muse");
-  });
-});
-
 describe("olderHost", () => {
   const host = (have?: string, bundled?: string) =>
     olderHost({ host_version: have, host_bundled_version: bundled });
@@ -522,32 +460,40 @@ describe("flow agents", () => {
 });
 
 describe("toSnapshot", () => {
-  it("maps the wire records onto spaces and terminals and keeps the id values", () => {
-    const snapshot = toSnapshot({
-      workspaces: [{ workspace_id: "w1", label: "One", number: 1, agent_status: "idle" }],
+  it("reads the neutral wire records and keeps every field", () => {
+    const wire = {
+      spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" as const }],
       tabs: [
-        { tab_id: "w1:t1", workspace_id: "w1", label: "main", number: 1, agent_status: "idle" },
+        {
+          tab_id: "w1:t1",
+          space_id: "w1",
+          label: "main",
+          number: 1,
+          agent_status: "idle" as const,
+        },
       ],
-      panes: [
-        { pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1", agent_status: "done", cwd: "/a" },
-      ],
-    });
-    expect(snapshot).toEqual({
-      spaces: [{ space_id: "w1", label: "One", number: 1, agent_status: "idle" }],
-      tabs: [{ tab_id: "w1:t1", space_id: "w1", label: "main", number: 1, agent_status: "idle" }],
       terminals: [
-        { terminal_id: "w1:p1", tab_id: "w1:t1", space_id: "w1", agent_status: "done", cwd: "/a" },
+        {
+          terminal_id: "w1:p1",
+          tab_id: "w1:t1",
+          space_id: "w1",
+          agent_status: "done" as const,
+          cwd: "/a",
+          tokens: { deliver_step: "build" },
+          focused: false,
+        },
       ],
-    });
+    };
+    expect(toSnapshot(wire)).toEqual(wire);
   });
 
   it("keeps the directory of a space without terminals (after a server restart)", () => {
     const snapshot = toSnapshot({
-      workspaces: [
-        { workspace_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/work/app" },
+      spaces: [
+        { space_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/work/app" },
       ],
       tabs: [],
-      panes: [],
+      terminals: [],
     });
     expect(snapshot.spaces).toEqual([
       { space_id: "s1", label: "app", number: 1, agent_status: "unknown", cwd: "/work/app" },
@@ -558,9 +504,47 @@ describe("toSnapshot", () => {
   });
 
   it("maps an empty snapshot", () => {
-    expect(toSnapshot({ workspaces: [], tabs: [], panes: [] })).toEqual({
+    expect(toSnapshot({ spaces: [], tabs: [], terminals: [] })).toEqual({
       spaces: [],
       tabs: [],
+      terminals: [],
+    });
+  });
+
+  it("reads a missing list or a missing answer as empty", () => {
+    expect(toSnapshot({ spaces: [] })).toEqual({ spaces: [], tabs: [], terminals: [] });
+    expect(toSnapshot(null)).toEqual({ spaces: [], tabs: [], terminals: [] });
+    expect(toSnapshot(undefined)).toEqual({ spaces: [], tabs: [], terminals: [] });
+  });
+
+  it("reads each missing list as empty and keeps the lists that are there", () => {
+    const space = { space_id: "s1", label: "api", number: 1, agent_status: "idle" as const };
+    const tab = {
+      tab_id: "s1:1",
+      space_id: "s1",
+      label: "1",
+      number: 1,
+      agent_status: "idle" as const,
+    };
+    const terminal = {
+      terminal_id: "t1",
+      tab_id: "s1:1",
+      space_id: "s1",
+      agent_status: "idle" as const,
+    };
+    expect(toSnapshot({ tabs: [tab], terminals: [terminal] })).toEqual({
+      spaces: [],
+      tabs: [tab],
+      terminals: [terminal],
+    });
+    expect(toSnapshot({ spaces: [space], terminals: [terminal] })).toEqual({
+      spaces: [space],
+      tabs: [],
+      terminals: [terminal],
+    });
+    expect(toSnapshot({ spaces: [space], tabs: [tab] })).toEqual({
+      spaces: [space],
+      tabs: [tab],
       terminals: [],
     });
   });
@@ -581,6 +565,19 @@ describe("transcript empty states", () => {
   it("asks to select a pane when there is no pane", () => {
     expect(transcriptEmptyText(undefined, "Subagent output")).toBe(
       `Subagent output is available for ${named} agents. Select a pane that runs one.`,
+    );
+  });
+
+  it("names why the machine of a remote pane cannot be asked before anything else", () => {
+    expect(
+      transcriptEmptyText(
+        pane({ agent: "claude", agent_session: { value: "s1" } }),
+        "The flow",
+        "mac is offline: timed out",
+      ),
+    ).toBe("The flow is unavailable: mac is offline: timed out.");
+    expect(transcriptEmptyText(pane({ agent: "codex" }), "Subagent output", null)).toBe(
+      `Subagent output is available for ${named} agents. This pane does not run one.`,
     );
   });
 

@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { paneDir } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import { paneDir } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
@@ -239,7 +239,7 @@ export interface RepoTree {
 @Injectable({ providedIn: "root" })
 export class GithubIssues {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly settings = inject(SettingsStore);
   private readonly ui = inject(UiState);
   private readonly milestones = inject(GithubMilestones);

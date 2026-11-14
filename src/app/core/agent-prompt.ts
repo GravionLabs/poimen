@@ -1,4 +1,5 @@
 import { Injectable, inject } from "@angular/core";
+import { Machines } from "./machines";
 import { TauriBridge } from "./tauri";
 
 /** What happened to a prompt (wire type of the `agent_prompt` command; shapes live in `herdr.rs`). */
@@ -39,9 +40,13 @@ export function promptSucceeded(outcome: PromptOutcome): boolean {
 @Injectable({ providedIn: "root" })
 export class AgentPrompts {
   private readonly bridge = inject(TauriBridge);
+  private readonly machines = inject(Machines, { optional: true });
 
   /** Submits `text` to the agent in pane `target`; a transport failure becomes a `failed` outcome. */
   async send(target: string, text: string): Promise<PromptOutcome> {
+    // An agent of an offline machine is never prompted through another backend (#693).
+    const blocked = this.machines?.blockedReason(target) ?? null;
+    if (blocked) return { kind: "failed", message: blocked };
     try {
       return await this.bridge.invoke<PromptOutcome>("agent_prompt", { target, text });
     } catch (err) {

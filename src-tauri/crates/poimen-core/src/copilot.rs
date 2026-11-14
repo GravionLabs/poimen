@@ -23,10 +23,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
-use crate::herdr::is_safe_session_id;
 use crate::transcripts::{
     self, Block, Entry, INPUT_LIMIT, MainCall, SubagentInfo, TEXT_LIMIT, Tailer, Update, Usage,
-    UsageSample, WatchHandle, truncate,
+    UsageSample, WatchHandle, is_safe_session_id, truncate,
 };
 
 /// `~/.copilot/session-state`.
@@ -44,7 +43,7 @@ pub fn locate_session_dir(root: &Path, session: &str) -> Option<PathBuf> {
     dir.join(EVENTS).is_file().then_some(dir)
 }
 
-const EVENTS: &str = "events.jsonl";
+pub(crate) const EVENTS: &str = "events.jsonl";
 
 fn text<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or_default()

@@ -22,6 +22,19 @@
         [value]="picker.query()"
         (input)="input($event)"
       />
+      @if (picker.machines().length > 0) {
+        <select
+          class="mode"
+          aria-label="Machine"
+          title="Where the task runs"
+          (change)="machine($event)"
+        >
+          <option value="" [selected]="picker.machine() === null">This Mac</option>
+          @for (name of picker.machines(); track name) {
+            <option [value]="name" [selected]="picker.machine() === name">{{ name }}</option>
+          }
+        </select>
+      }
       @if (picker.modes().length > 0) {
         <button type="button" class="mode" title="Switch mode (Tab)" (click)="picker.toggleMode()">
           {{ picker.modeName() }}

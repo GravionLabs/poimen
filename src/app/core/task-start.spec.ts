@@ -1,9 +1,12 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
+import { Machines } from "./machines";
+import { RemoteSpaces } from "./remote-spaces";
 import { SpaceActions } from "./space-actions";
-import { TaskStarter, stepFailure, type TaskPlan } from "./task-start";
+import { TaskStarter, remoteStepFailure, stepFailure, type TaskPlan } from "./task-start";
+import { qualifyId, type Snapshot } from "./snapshot";
 import { TauriBridge } from "./tauri";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { tauri } from "./tauri.mock";
@@ -14,6 +17,13 @@ vi.mock("@tauri-apps/api/core", async () => ({
 vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./tauri.mock")).tauri.listen,
 }));
+
+/** The spaces read from machine `dev` (a stand-in for `RemoteSpaces`, which needs a live app). */
+let remoteSpaces: Snapshot["spaces"] = [];
+const fakeRemote = {
+  refresh: async (): Promise<void> => {},
+  snapshot: () => ({ spaces: remoteSpaces, tabs: [], terminals: [] }),
+};
 
 const CHOICE: TaskChoice = {
   number: 12,
@@ -36,9 +46,11 @@ function plan(over: Partial<TaskPlan> = {}): TaskPlan {
 describe("TaskStarter", () => {
   let starter: TaskStarter;
   let spaces: SpaceActions;
+  let ui: UiState;
 
   beforeEach(() => {
     tauri.reset();
+    remoteSpaces = [];
     tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
     tauri.answer("task_plan", () => plan());
     tauri.answer("task_worktree", () => ({
@@ -46,12 +58,14 @@ describe("TaskStarter", () => {
       branch: "feat/12-x",
       created: true,
     }));
-    tauri.answer("create_space", () => ({ workspace_id: "w2", created: true }));
+    tauri.answer("create_space", () => ({ space_id: "w2", created: true }));
     tauri.answer("task_tab", () => undefined);
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
+        Machines,
+        { provide: RemoteSpaces, useFactory: () => fakeRemote },
         { provide: UI_STORAGE, useValue: null },
         UiState,
         SpaceActions,
@@ -61,6 +75,7 @@ describe("TaskStarter", () => {
     });
     starter = injector.get(TaskStarter);
     spaces = injector.get(SpaceActions);
+    ui = injector.get(UiState);
   });
 
   it("creates the worktree, then the space on its path with label and command", async () => {
@@ -78,7 +93,7 @@ describe("TaskStarter", () => {
   });
 
   it("an existing space is focused by create_space and nothing else runs", async () => {
-    tauri.answer("create_space", () => ({ workspace_id: "w1", created: false }));
+    tauri.answer("create_space", () => ({ space_id: "w1", created: false }));
     expect(await starter.run("/work/app", CHOICE)).toBe(true);
     expect(tauri.calls("create_space")).toHaveLength(1);
     expect(tauri.calls("task_tab")).toEqual([]);
@@ -95,7 +110,7 @@ describe("TaskStarter", () => {
       { cwd: "/work/app", label: null, decision: null, command: null },
     ]);
     expect(tauri.calls("task_tab")).toEqual([
-      { workspaceId: "w2", dir: "/work/app", name: "#12 plain", command: "sh -c 'x'" },
+      { spaceId: "w2", dir: "/work/app", name: "#12 plain", command: "sh -c 'x'" },
     ]);
   });
 
@@ -143,8 +158,8 @@ describe("TaskStarter", () => {
     const request = { root: "/work/app-12", files: ["f"], hash: "h1", commands: [] };
     tauri.answer("create_space", (args) =>
       args?.["decision"]
-        ? { workspace_id: "w2", created: true }
-        : { workspace_id: "", created: false, trust: request },
+        ? { space_id: "w2", created: true }
+        : { space_id: "", created: false, trust: request },
     );
     expect(await starter.run("/work/app", CHOICE)).toBe(true);
     expect(spaces.warning()).toBeNull();
@@ -162,22 +177,132 @@ describe("TaskStarter", () => {
     const request = { root: "/work/app", files: ["f"], hash: "h1", commands: [] };
     tauri.answer("create_space", (args) =>
       args?.["decision"]
-        ? { workspace_id: "w2", created: true }
-        : { workspace_id: "", created: false, trust: request },
+        ? { space_id: "w2", created: true }
+        : { space_id: "", created: false, trust: request },
     );
     expect(await starter.run("/work/app", CHOICE)).toBe(true);
     expect(tauri.calls("task_tab")).toEqual([]);
     await spaces.answerTrust("without");
     expect(tauri.calls("task_tab")).toEqual([
-      { workspaceId: "w2", dir: "/work/app", name: "#12 agent", command: "claude 'x'" },
+      { spaceId: "w2", dir: "/work/app", name: "#12 agent", command: "claude 'x'" },
     ]);
+  });
+
+  describe("on a machine", () => {
+    const REMOTE: TaskChoice = { ...CHOICE, machine: "dev" };
+
+    beforeEach(() => {
+      tauri.answer("github_repo", () => ({ owner: "o", name: "r" }));
+      tauri.answer("machine_repo_ensure", () => ({ path: "/srv/o/r", cloned: true }));
+      tauri.answer("machine_worktree_create", () => ({
+        path: "/srv/o/r-12",
+        branch: "feat/12-x",
+        created: true,
+      }));
+      tauri.answer("machine_create_space", () => ({ space_id: "s3", created: true }));
+      tauri.answer("machine_task_tab", () => undefined);
+    });
+
+    it("ensures the clone, creates the worktree and the space on the machine and focuses it", async () => {
+      expect(await starter.run("/work/app", REMOTE)).toBe(true);
+      expect(tauri.calls("machine_repo_ensure")).toEqual([{ name: "dev", owner: "o", repo: "r" }]);
+      expect(tauri.calls("machine_worktree_create")).toEqual([
+        { name: "dev", repoDir: "/srv/o/r", issue: ISSUE, mode: "agent" },
+      ]);
+      expect(tauri.calls("machine_create_space")).toEqual([
+        { name: "dev", cwd: "/srv/o/r-12", label: "#12 Add picker", command: "claude 'x'" },
+      ]);
+      expect(tauri.calls("machine_task_tab")).toEqual([]);
+      expect(tauri.calls("task_worktree")).toEqual([]);
+      expect(tauri.calls("create_space")).toEqual([]);
+      expect(ui.splitWorkspace()).toBe(qualifyId("dev", "s3"));
+    });
+
+    it("a mode without a worktree runs in a tab at the clone root", async () => {
+      tauri.answer("task_plan", () =>
+        plan({ worktree: false, command: "sh -c 'x'", tab: "#12 plain" }),
+      );
+      expect(await starter.run("/work/app", { ...REMOTE, mode: "plain" })).toBe(true);
+      expect(tauri.calls("machine_worktree_create")).toEqual([]);
+      expect(tauri.calls("machine_create_space")).toEqual([
+        { name: "dev", cwd: "/srv/o/r", label: null, command: null },
+      ]);
+      expect(tauri.calls("machine_task_tab")).toEqual([
+        { name: "dev", spaceId: "s3", dir: "/srv/o/r", tab: "#12 plain", command: "sh -c 'x'" },
+      ]);
+    });
+
+    it("an existing space is focused and says so", async () => {
+      tauri.answer("machine_create_space", () => ({ space_id: "s7", created: false }));
+      remoteSpaces = [
+        { space_id: qualifyId("dev", "s7"), label: "#12 Add picker" } as Snapshot["spaces"][number],
+      ];
+      expect(await starter.run("/work/app", REMOTE)).toBe(true);
+      expect(ui.splitWorkspace()).toBe(qualifyId("dev", "s7"));
+      expect(spaces.warning()).toBe('Opened the existing space "#12 Add picker" on dev.');
+      expect(tauri.calls("machine_task_tab")).toEqual([]);
+    });
+
+    it("an offline machine fails at the clone step, naming it, and creates nothing", async () => {
+      tauri.answer("machine_repo_ensure", () => {
+        throw "machine dev is offline";
+      });
+      expect(await starter.run("/work/app", REMOTE)).toBe(false);
+      expect(spaces.warning()).toBe("Start task on dev: clone failed: machine dev is offline");
+      expect(tauri.calls("machine_worktree_create")).toEqual([]);
+      expect(tauri.calls("machine_create_space")).toEqual([]);
+    });
+
+    it("a failed clone names the machine and the step and creates no space", async () => {
+      tauri.answer("machine_repo_ensure", () => {
+        throw "git clone: permission denied";
+      });
+      expect(await starter.run("/work/app", REMOTE)).toBe(false);
+      expect(spaces.warning()).toBe(
+        "Start task on dev: clone failed: git clone: permission denied",
+      );
+      expect(tauri.calls("machine_create_space")).toEqual([]);
+    });
+
+    it("a repository without a GitHub origin cannot be cloned", async () => {
+      tauri.answer("github_repo", () => null);
+      expect(await starter.run("/work/app", REMOTE)).toBe(false);
+      expect(spaces.warning()).toContain("Start task on dev: clone failed");
+      expect(tauri.calls("machine_repo_ensure")).toEqual([]);
+    });
+
+    it("a failed worktree or space names the step and stops", async () => {
+      tauri.answer("machine_worktree_create", () => {
+        throw "path exists";
+      });
+      expect(await starter.run("/work/app", REMOTE)).toBe(false);
+      expect(spaces.warning()).toBe("Start task on dev: git worktree failed: path exists");
+      expect(tauri.calls("machine_create_space")).toEqual([]);
+      tauri.answer("machine_worktree_create", () => ({ path: "/p", branch: "b", created: true }));
+      tauri.answer("machine_create_space", () => {
+        throw "not trusted";
+      });
+      expect(await starter.run("/work/app", REMOTE)).toBe(false);
+      expect(spaces.warning()).toBe("Start task on dev: space failed: not trusted");
+    });
+
+    it("a failed tab names the step", async () => {
+      tauri.answer("task_plan", () => plan({ worktree: false }));
+      tauri.answer("machine_task_tab", () => {
+        throw "no tab";
+      });
+      expect(await starter.run("/work/app", REMOTE)).toBe(false);
+      expect(spaces.warning()).toBe("Start task on dev: terminal tab failed: no tab");
+    });
   });
 
   it("does nothing when the picker is cancelled", async () => {
     const injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
+        Machines,
+        { provide: RemoteSpaces, useFactory: () => fakeRemote },
         { provide: UI_STORAGE, useValue: null },
         UiState,
         SpaceActions,
@@ -190,6 +315,12 @@ describe("TaskStarter", () => {
     picker.cancel();
     expect(await started).toBe(false);
     expect(tauri.calls("task_plan")).toEqual([]);
+  });
+});
+
+describe("remoteStepFailure", () => {
+  it("names the machine in front of the step", () => {
+    expect(remoteStepFailure("dev", "clone", "no")).toBe("Start task on dev: clone failed: no");
   });
 });
 

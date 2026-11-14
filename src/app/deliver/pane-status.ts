@@ -1,4 +1,4 @@
-import type { AgentStatus } from "../core/herdr";
+import type { AgentStatus } from "../core/snapshot";
 import { runState, type DeliverCard, type DeliverStatus } from "./deliver-status";
 
 /** The key of `run.started`'s `host` that names the terminal a run belongs to. */

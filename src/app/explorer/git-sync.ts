@@ -1,5 +1,5 @@
 import { Injectable, inject } from "@angular/core";
-import { HerdrStore } from "../core/herdr-store";
+import { SpacesStore } from "../core/spaces-store";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 
@@ -50,7 +50,7 @@ export function progressText(done: number, total: number): string {
 export class GitSync {
   private readonly bridge = inject(TauriBridge);
   private readonly actions = inject(SpaceActions);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
 
   async fetch(dir: string): Promise<void> {
     await this.single("Fetch", "git_fetch", dir);

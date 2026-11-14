@@ -12,7 +12,8 @@ import {
   inject,
   signal,
 } from "@angular/core";
-import { olderHost, treeTerminals, type Mode, type Terminal, type TabTree } from "../core/herdr";
+import { olderHost, treeTerminals, type Terminal, type TabTree } from "../core/snapshot";
+import { type Mode } from "../core/backend";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { TerminalView } from "../terminal-view/terminal-view";
 

@@ -3,8 +3,8 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentStatus, Terminal } from "../core/herdr";
-import { HerdrStore } from "../core/herdr-store";
+import type { AgentStatus, Terminal } from "../core/snapshot";
+import { SpacesStore } from "../core/spaces-store";
 import { tauri } from "../core/tauri.mock";
 import { UI_STATE_KEY, UI_STORAGE, UiState, parseLayout, type UiStorage } from "../core/ui-state";
 import { MAX_PROMPT_LENGTH } from "./comment-prompt";
@@ -57,7 +57,7 @@ function service(): LineComments {
   TestBed.configureTestingModule({
     providers: [
       { provide: UI_STORAGE, useValue: storage },
-      { provide: HerdrStore, useValue: { panes } },
+      { provide: SpacesStore, useValue: { panes } },
       LineComments,
     ],
   });

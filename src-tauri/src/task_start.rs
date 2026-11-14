@@ -7,12 +7,12 @@ pub use poimen_core::task_start::*;
 /// Opens the tab `name` in the space at `dir` and runs `command` in it.
 pub fn start_tab(
     backend: &dyn Backend,
-    workspace_id: &str,
+    space_id: &str,
     dir: &str,
     name: &str,
     command: &str,
 ) -> Result<(), String> {
-    crate::project::start_tab(backend, workspace_id, dir, name, command)
+    crate::project::start_tab(backend, space_id, dir, name, command)
 }
 
 #[cfg(test)]

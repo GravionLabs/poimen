@@ -3,7 +3,7 @@ import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { HerdrStore, type BackendStatus } from "./herdr-store";
+import { SpacesStore, type BackendStatus } from "./spaces-store";
 import { ServerRestart, serverNotice } from "./server-restart";
 import { TauriBridge } from "./tauri";
 
@@ -32,7 +32,7 @@ function setup(
   TestBed.configureTestingModule({
     providers: [
       { provide: TauriBridge, useValue: { invoke } },
-      { provide: HerdrStore, useValue: store },
+      { provide: SpacesStore, useValue: store },
     ],
   });
   return { restart: TestBed.inject(ServerRestart), invoke, ensureBackend, backend };

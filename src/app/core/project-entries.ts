@@ -1,8 +1,8 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts, promptMessage, promptSucceeded } from "./agent-prompt";
-import { agentKind } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import { agentKind } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { SpaceActions, type TrustDecision, type TrustRequest } from "./space-actions";
 import { TauriBridge } from "./tauri";
 
@@ -34,7 +34,7 @@ const NONE: ProjectEntryList = { commands: [], presets: [], locked: false };
 @Injectable({ providedIn: "root" })
 export class ProjectEntries {
   private readonly bridge = inject(TauriBridge);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
   private readonly spaces = inject(SpaceActions);
   private readonly prompts = inject(AgentPrompts);
   private readonly picker = inject(AgentPicker);
@@ -79,7 +79,7 @@ export class ProjectEntries {
     let outcome: EntryOutcome;
     try {
       outcome = await this.bridge.invoke<EntryOutcome>("project_run", {
-        workspaceId,
+        spaceId: workspaceId,
         dir,
         entry,
         decision,

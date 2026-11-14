@@ -1,7 +1,7 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildTree, orderSpaces, reorderIds, type Snapshot } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import { buildTree, orderSpaces, reorderIds, type Snapshot } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { SpaceActions, neighbourSpace } from "./space-actions";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -109,7 +109,7 @@ function fakeStorage(): UiStorage & { data: Map<string, string> } {
 describe("space order in the app", () => {
   let storage: ReturnType<typeof fakeStorage>;
   let injector: Injector;
-  let store: HerdrStore;
+  let store: SpacesStore;
   let actions: SpaceActions;
   let ui: UiState;
 
@@ -117,13 +117,13 @@ describe("space order in the app", () => {
     injector = Injector.create({
       providers: [
         TauriBridge,
-        HerdrStore,
+        SpacesStore,
         { provide: UI_STORAGE, useValue: storage },
         UiState,
         SpaceActions,
       ],
     });
-    store = injector.get(HerdrStore);
+    store = injector.get(SpacesStore);
     actions = injector.get(SpaceActions);
     ui = injector.get(UiState);
   };

@@ -169,7 +169,7 @@ describe("AgentActions", () => {
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: null }] });
     tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
-    tauri.answer("create_space", () => ({ workspace_id: "w1", created: true }));
+    tauri.answer("create_space", () => ({ space_id: "w1", created: true }));
     let pane = 0;
     tauri.answer("terminal_create", () => `p${++pane}`);
     tauri.answer("agent_start", () => undefined);
@@ -259,9 +259,9 @@ describe("AgentActions", () => {
     expect(tauri.calls("create_space")).toEqual([
       { cwd: "/src/n", label: null, decision: null, command: null },
     ]);
-    expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w1", cwd: "/src/n" }]);
+    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w1", cwd: "/src/n" }]);
     expect(tauri.calls("agent_start")).toEqual([
-      { paneId: "p1", kind: "claude", name: "Review #7", args: ["prompt 7"] },
+      { terminalId: "p1", kind: "claude", name: "Review #7", args: ["prompt 7"] },
     ]);
     expect(summary).toEqual({ started: [7], failed: [] });
     expect(spaces.warning()).toBe("Review: started #7");
@@ -274,8 +274,8 @@ describe("AgentActions", () => {
       false,
     );
     expect(tauri.calls("agent_start")).toEqual([
-      { paneId: "p1", kind: "claude", name: "Review #1", args: ["prompt 1"] },
-      { paneId: "p2", kind: "claude", name: "Review #2", args: ["prompt 2"] },
+      { terminalId: "p1", kind: "claude", name: "Review #1", args: ["prompt 1"] },
+      { terminalId: "p2", kind: "claude", name: "Review #2", args: ["prompt 2"] },
     ]);
     expect(summary?.started).toEqual([1, 2]);
   });
@@ -285,14 +285,14 @@ describe("AgentActions", () => {
     const once = action({ id: "review", label: "Review", on: "pr", batch: "once" });
     const summary = await actions.request(once, [pullTarget(pull(1)), pullTarget(pull(2))], false);
     expect(tauri.calls("agent_start")).toEqual([
-      { paneId: "p1", kind: "claude", name: "Review #1 #2", args: ["do 1 2"] },
+      { terminalId: "p1", kind: "claude", name: "Review #1 #2", args: ["do 1 2"] },
     ]);
     expect(summary).toEqual({ started: [1, 2], failed: [] });
   });
 
   it("a failed start does not stop the others and the summary lists both", async () => {
     tauri.answer("agent_start", (args) => {
-      if (args?.["paneId"] === "p2") throw "claude did not start";
+      if (args?.["terminalId"] === "p2") throw "claude did not start";
       return undefined;
     });
     const rows = [1, 2, 3].map((n) => pullTarget(pull(n)));
@@ -342,9 +342,9 @@ describe("AgentActions", () => {
       tauri.answer("task_worktree", () => ({ path: "/src/n-1", branch: "feat/1", created: true }));
       tauri.answer("pr_worktree", () => ({ path: "/src/n-pr7", branch: "pr/7", created: true }));
       tauri.answer("snapshot", () => ({
-        workspaces: [],
+        spaces: [],
         tabs: [],
-        panes: [{ pane_id: "root1", workspace_id: "w1" }],
+        terminals: [{ terminal_id: "root1", space_id: "w1" }],
       }));
     });
 
@@ -362,7 +362,7 @@ describe("AgentActions", () => {
       ]);
       expect(tauri.calls("terminal_create")).toEqual([]);
       expect(tauri.calls("agent_start")).toEqual([
-        { paneId: "root1", kind: "claude", name: "Work #1", args: ["prompt 1"] },
+        { terminalId: "root1", kind: "claude", name: "Work #1", args: ["prompt 1"] },
       ]);
       expect(summary).toEqual({ started: [1], failed: [] });
       expect(spaces.warning()).toBe("Work: started #1");
@@ -376,16 +376,16 @@ describe("AgentActions", () => {
       expect(tauri.calls("create_space")).toEqual([
         { cwd: "/src/n-pr7", label: "PR #7 pr 7", decision: null, command: null },
       ]);
-      expect(tauri.calls("agent_start")[0]).toMatchObject({ paneId: "root1" });
+      expect(tauri.calls("agent_start")[0]).toMatchObject({ terminalId: "root1" });
       expect(summary).toEqual({ started: [7], failed: [] });
     });
 
     it("an existing space is focused and the agent starts in a new tab there", async () => {
-      tauri.answer("create_space", () => ({ workspace_id: "w9", created: false }));
+      tauri.answer("create_space", () => ({ space_id: "w9", created: false }));
       const summary = await actions.request(wt(), [ISSUE_T(1)], false);
-      expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w9", cwd: "/src/n-1" }]);
+      expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w9", cwd: "/src/n-1" }]);
       expect(tauri.calls("agent_start")).toEqual([
-        { paneId: "p1", kind: "claude", name: "Work #1", args: ["prompt 1"] },
+        { terminalId: "p1", kind: "claude", name: "Work #1", args: ["prompt 1"] },
       ]);
       expect(summary?.started).toEqual([1]);
     });
@@ -502,7 +502,7 @@ describe("AgentActions", () => {
       expect(tauri.calls("agent_action_plan")[0]).toMatchObject({ suffix: DIFF_ONLY_SUFFIX });
       expect(tauri.calls("task_worktree")).toEqual([]);
       expect(tauri.calls("pr_worktree")).toEqual([]);
-      expect(tauri.calls("terminal_create")).toEqual([{ workspaceId: "w1", cwd: "/src/n" }]);
+      expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w1", cwd: "/src/n" }]);
       expect(tauri.calls("agent_start")[0]).toMatchObject({ name: "review #5" });
     });
 
@@ -526,7 +526,7 @@ describe("AgentActions", () => {
 
     it("a multi-select starts one agent per PR and one failure leaves the others", async () => {
       tauri.answer("agent_start", (args) => {
-        if (args?.["paneId"] === "p2") throw "claude did not start";
+        if (args?.["terminalId"] === "p2") throw "claude did not start";
         return undefined;
       });
       await actions.request(rev(), rows(1, 2, 3), false);

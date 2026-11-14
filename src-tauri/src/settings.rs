@@ -98,6 +98,8 @@ pub struct Settings {
     /// `get_agent_actions`); not sent to the frontend.
     #[serde(skip)]
     pub agent_actions: Vec<crate::agent_actions::Spec>,
+    /// The remote machines (`machines`); invalid entries are skipped with a warning.
+    pub machines: Vec<crate::machines::MachineConfig>,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -276,6 +278,7 @@ impl Default for Settings {
             tasks: crate::tasks::TaskModes::default(),
             harnesses: crate::harness::default_harnesses(),
             agent_actions: Vec::new(),
+            machines: Vec::new(),
             home: None,
             warnings: Vec::new(),
         }
@@ -545,6 +548,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("github") {
         resolve_github(value, &mut s);
+    }
+    if let Some(value) = root.get("machines") {
+        s.machines = crate::machines::parse(value, &mut s.warnings);
     }
 
     if let Some(ui) = root.get("ui") {
@@ -1084,6 +1090,26 @@ mod tests {
 
     fn rows(json: &str) -> Settings {
         resolve(Some(json), none)
+    }
+
+    #[test]
+    fn machines_load_and_an_invalid_one_is_a_warning() {
+        let s = rows(
+            r#"{"machines":[{"name":"box","ssh":"box"},{"name":"bad","ssh":"-x"}],
+                "theme":"dark"}"#,
+        );
+        assert_eq!(s.theme, "dark");
+        let names: Vec<&str> = s.machines.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["box"]);
+        assert_eq!(s.machines[0].repos_dir, "~/Source/{owner}/{repo}");
+        assert_eq!(s.warnings.len(), 1, "{:?}", s.warnings);
+        assert!(
+            s.warnings[0].starts_with("machines[1]:"),
+            "{}",
+            s.warnings[0]
+        );
+        let wire = serde_json::to_value(&s).unwrap();
+        assert_eq!(wire["machines"][0]["reposDir"], "~/Source/{owner}/{repo}");
     }
 
     #[test]

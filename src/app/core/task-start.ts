@@ -1,14 +1,18 @@
 import { Injectable, inject } from "@angular/core";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
-import { HerdrStore } from "./herdr-store";
+import { SpacesStore } from "./spaces-store";
+import { qualifyId } from "./snapshot";
+import { RemoteSpaces } from "./remote-spaces";
 import { SpaceActions, type SpaceOutcome } from "./space-actions";
 import { TauriBridge } from "./tauri";
+import { UiState } from "./ui-state";
 
 /** The steps of starting a task; a failure names the one that failed. */
-export type TaskStep = "mode" | "worktree" | "space" | "tab";
+export type TaskStep = "mode" | "clone" | "worktree" | "space" | "tab";
 
 const STEP_NAMES: Record<TaskStep, string> = {
   mode: "task mode",
+  clone: "clone",
   worktree: "git worktree",
   space: "space",
   tab: "terminal tab",
@@ -38,6 +42,11 @@ export function stepFailure(step: TaskStep, reason: unknown): string {
   return `Start task: ${STEP_NAMES[step]} failed: ${text}`;
 }
 
+/** The message of a failed step of a task on `machine`: names the machine and the step. */
+export function remoteStepFailure(machine: string, step: TaskStep, reason: unknown): string {
+  return stepFailure(step, reason).replace("Start task:", `Start task on ${machine}:`);
+}
+
 /**
  * Starts a task end to end: the picker, then for a mode with a worktree the worktree and a space
  * on it that runs the mode's command in its root pane (an existing space is only focused), else a
@@ -49,7 +58,9 @@ export class TaskStarter {
   private readonly bridge = inject(TauriBridge);
   private readonly picker = inject(TaskPicker);
   private readonly spaces = inject(SpaceActions);
-  private readonly store = inject(HerdrStore);
+  private readonly store = inject(SpacesStore);
+  private readonly remote = inject(RemoteSpaces);
+  private readonly ui = inject(UiState);
 
   /** Opens the picker for the repository at `dir` (issue `preselect` highlighted); resolves to whether a task was started. */
   async start(dir: string, preselect?: number): Promise<boolean> {
@@ -70,8 +81,90 @@ export class TaskStarter {
     } catch (err) {
       return this.fail("mode", err);
     }
+    if (choice.machine) return this.onMachine(choice.machine, dir, issue, choice.mode, plan);
     if (plan.worktree) return this.inWorktree(dir, issue, choice.mode, plan);
     return this.inTab(dir, plan);
+  }
+
+  /**
+   * The task on a machine: its clone (`repo.ensure`), then the worktree of a mode with one (else
+   * the clone root), then the space (an existing one is only focused) and, without a worktree, the
+   * tab with the command. Every step runs on the machine's server; a failed step names the
+   * machine and creates nothing after it. The issue list stays local (`dir` is the local clone).
+   */
+  private async onMachine(
+    machine: string,
+    dir: string,
+    issue: { nr: number; title: string; url: string },
+    mode: string,
+    plan: TaskPlan,
+  ): Promise<boolean> {
+    const fail = (step: TaskStep, reason: unknown): false => {
+      this.spaces.notify(remoteStepFailure(machine, step, reason));
+      return false;
+    };
+    let cwd: string;
+    try {
+      const repo = await this.bridge.invoke<{ owner: string; name: string } | null>("github_repo", {
+        dir,
+      });
+      if (!repo) throw new Error("the repository has no GitHub origin to clone from");
+      const ensured = await this.bridge.invoke<{ path: string }>("machine_repo_ensure", {
+        name: machine,
+        owner: repo.owner,
+        repo: repo.name,
+      });
+      cwd = ensured.path;
+    } catch (err) {
+      return fail("clone", err);
+    }
+    if (plan.worktree) {
+      try {
+        const worktree = await this.bridge.invoke<TaskWorktree>("machine_worktree_create", {
+          name: machine,
+          repoDir: cwd,
+          issue,
+          mode,
+        });
+        cwd = worktree.path;
+      } catch (err) {
+        return fail("worktree", err);
+      }
+    }
+    let outcome: SpaceOutcome;
+    try {
+      outcome = await this.bridge.invoke<SpaceOutcome>("machine_create_space", {
+        name: machine,
+        cwd,
+        label: plan.worktree ? plan.label : null,
+        command: plan.worktree ? plan.command : null,
+      });
+    } catch (err) {
+      return fail("space", err);
+    }
+    if (!plan.worktree) {
+      try {
+        await this.bridge.invoke("machine_task_tab", {
+          name: machine,
+          spaceId: outcome.space_id,
+          dir: cwd,
+          tab: plan.tab,
+          command: plan.command,
+        });
+      } catch (err) {
+        await this.remote.refresh(machine);
+        return fail("tab", err);
+      }
+    }
+    await this.remote.refresh(machine);
+    this.ui.setSplitWorkspace(qualifyId(machine, outcome.space_id));
+    if (!outcome.created) {
+      const label = this.remote
+        .snapshot()
+        .spaces.find((s) => s.space_id === qualifyId(machine, outcome.space_id))?.label;
+      this.spaces.notify(`Opened the existing space "${label ?? outcome.space_id}" on ${machine}.`);
+    }
+    return true;
   }
 
   private async inWorktree(
@@ -103,7 +196,7 @@ export class TaskStarter {
     const after = async (outcome: SpaceOutcome): Promise<void> => {
       try {
         await this.bridge.invoke("task_tab", {
-          workspaceId: outcome.workspace_id,
+          spaceId: outcome.space_id,
           dir,
           name: plan.tab,
           command: plan.command,

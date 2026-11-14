@@ -704,6 +704,196 @@ pub struct PingResult {
     pub clients: Vec<ClientKind>,
 }
 
+/// The outcome of one check of `machine.check`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckStatus {
+    Ok,
+    /// Something tasks need is missing.
+    Missing,
+    /// Something optional is missing (one of two agents, a hook integration).
+    Warning,
+}
+
+/// One check of `machine.check`: `id` is `server`, `git`, `gh`, `gh_auth`, `claude`, `copilot`,
+/// `hooks_claude` or `hooks_copilot`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineCheckItem {
+    pub id: String,
+    pub status: CheckStatus,
+    /// What was found (a path, a version) or why it failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// The command to run on the machine to fix it; poimen never runs it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix: Option<String>,
+}
+
+/// Result of `machine.check` (since protocol 6, additive).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MachineCheckResult {
+    pub version: String,
+    pub protocol: u32,
+    pub checks: Vec<MachineCheckItem>,
+}
+
+impl MachineCheckResult {
+    /// No check is `missing` (warnings do not count).
+    pub fn ok(&self) -> bool {
+        self.checks.iter().all(|c| c.status != CheckStatus::Missing)
+    }
+}
+
+/// Params of `repo.ensure` (#282): the GitHub repository `owner/repo`, at its path under
+/// `reposDir` of the server's user config.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoEnsure {
+    pub owner: String,
+    pub repo: String,
+}
+
+/// Result of `repo.ensure`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoEnsureResult {
+    /// The repository's path on the server's machine.
+    pub path: String,
+    /// `true`: cloned now; `false`: an existing clone, fetched.
+    pub cloned: bool,
+}
+
+/// The issue of `worktree.create`; its fields fill the task mode's templates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskIssue {
+    pub nr: u64,
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+/// Params of `worktree.create` (#282): the worktree of `issue` for task mode `mode` of the
+/// repository of `repo_dir`, as `task_worktree` of the app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeCreate {
+    pub repo_dir: String,
+    pub issue: TaskIssue,
+    pub mode: String,
+}
+
+/// Result of `worktree.create`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeCreateResult {
+    pub path: String,
+    pub branch: String,
+    /// `false` when an existing worktree of the branch was returned.
+    pub created: bool,
+}
+
+/// Params of `agent.transcript` (#698): the next updates of the agent transcript of a terminal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTranscript {
+    pub terminal_id: String,
+    /// Names the reader: the server keeps one position in the transcript per `(terminal_id,
+    /// follower)`, so two views of the same terminal each get every update once.
+    pub follower: String,
+    /// Starts the reader over, so the answer holds everything from the start of the transcript.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub restart: bool,
+}
+
+/// What `agent.transcript` found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptState {
+    /// The transcript is followed; `updates` holds what it gained.
+    Ok,
+    /// No agent with a readable transcript (or no session id) is reported in the terminal.
+    NoAgent,
+    /// The agent reported a session but its transcript file is not there (yet).
+    Missing,
+    /// The transcript is there but the server cannot read it; `reason` says why.
+    Unreadable,
+}
+
+/// Result of `agent.transcript`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentTranscriptResult {
+    pub state: TranscriptState,
+    /// Why the transcript is `unreadable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The session the updates belong to (`ok` only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    /// The reader for `(terminal_id, follower)` was created by this request (the first one, a
+    /// `restart`, or after the server lost it): the updates then start at the transcript's start.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fresh: bool,
+    /// The updates since the last request, in the shape of the app's `subagents` event (`kind`
+    /// `list`, `entries` or `main`, see "Agent transcripts" in docs/protocol.md).
+    #[serde(default)]
+    pub updates: Vec<Value>,
+}
+
+/// A merged pull request of `worktree.cleanup`: its head branch and number.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergedPull {
+    pub branch: String,
+    pub number: u64,
+}
+
+/// Params of `worktree.cleanup` (#284): "Clean up merged tasks" in the clone of `owner/repo`
+/// under `reposDir` of the server's user config. `merged` comes from the client's `gh`; only the
+/// git work runs on the server's machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeCleanup {
+    pub owner: String,
+    pub repo: String,
+    pub merged: Vec<MergedPull>,
+    /// A space of this server that is never touched (the client's focused one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused_space: Option<String>,
+    /// Remove without the project's teardown when the project file is not trusted.
+    #[serde(default)]
+    pub skip_teardown: bool,
+}
+
+/// A worktree `worktree.cleanup` removed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupRemoved {
+    pub path: String,
+    pub branch: String,
+    pub pr: u64,
+    pub branch_deleted: bool,
+    /// Why the branch was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// A worktree `worktree.cleanup` left, with the reason and the command to remove it by hand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CleanupLeft {
+    pub path: String,
+    pub branch: String,
+    pub pr: u64,
+    pub reason: String,
+    pub command: String,
+}
+
+/// Result of `worktree.cleanup`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeCleanupResult {
+    /// The clone on the server's machine; `None` when there is none (nothing to clean up).
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub removed: Vec<CleanupRemoved>,
+    #[serde(default)]
+    pub left: Vec<CleanupLeft>,
+    /// The project file has a teardown but is not trusted on that machine: nothing was removed.
+    #[serde(default)]
+    pub teardown_untrusted: bool,
+}
+
 /// What a client is, said on `events.subscribe` (ADR 0006).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -728,6 +918,11 @@ pub struct ClientInfo {
 pub struct EventsSubscribe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<ClientInfo>,
+    /// Asks for the progress events of the runs in the repositories of the server's spaces
+    /// ([`Event::RunEvents`], #692): first the events of the recent runs from the start, then the
+    /// new ones. Off by default, so a client that does not ask never sees the event.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub run_events: bool,
 }
 
 /// `space.create`. With `layout` (the default) the server resolves the layout of `cwd` (project
@@ -1166,6 +1361,15 @@ pub enum Event {
     /// carries the kinds now connected, sorted.
     #[serde(rename = "server.clients_changed")]
     ServerClientsChanged { clients: Vec<ClientKind> },
+    /// Progress events of a run (agent-events, jsonl-file binding) in the repository at `root`,
+    /// as written to `<git-common-dir>/.agents/events/<run>.jsonl`: complete lines, JSON objects,
+    /// in file order and unchanged. Only to subscriptions with `run_events`.
+    #[serde(rename = "run.events")]
+    RunEvents {
+        root: String,
+        run: String,
+        events: Vec<Value>,
+    },
     #[serde(rename = "agent.status_changed")]
     AgentStatusChanged {
         terminal_id: String,
@@ -1210,6 +1414,43 @@ mod tests {
         // A kind of a newer client is read as unknown, not refused.
         let p: EventsSubscribe = params(&r).unwrap();
         assert_eq!(p.client.unwrap().kind, ClientKind::Unknown);
+    }
+
+    #[test]
+    fn subscribe_asks_for_run_events_only_when_set() {
+        let r = parse_request(
+            r#"{"id":"1","method":"events.subscribe","params":{"client":{"kind":"app","pid":7},"run_events":true}}"#,
+        )
+        .unwrap();
+        let p: EventsSubscribe = params(&r).unwrap();
+        assert!(p.run_events);
+        let r = parse_request(r#"{"id":"1","method":"events.subscribe","params":{}}"#).unwrap();
+        assert!(!params::<EventsSubscribe>(&r).unwrap().run_events);
+        // Off is not sent, so an older server sees the params it knows.
+        assert_eq!(
+            serde_json::to_value(EventsSubscribe::default()).unwrap(),
+            json!({})
+        );
+    }
+
+    #[test]
+    fn run_events_wire_shape() {
+        let line = r#"{"event":"run.events","data":{"root":"/home/me/api","run":"r1","events":[{"v":1,"seq":1,"type":"run.started"}]}}"#;
+        let ServerLine::Event(e) = parse_server_line(line).unwrap() else {
+            panic!("not an event");
+        };
+        assert_eq!(
+            e,
+            Event::RunEvents {
+                root: "/home/me/api".into(),
+                run: "r1".into(),
+                events: vec![json!({"v":1,"seq":1,"type":"run.started"})],
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            serde_json::from_str::<Value>(line).unwrap()
+        );
     }
 
     #[test]
@@ -1655,6 +1896,129 @@ mod tests {
             unix_env(None, None, Some("jk")).path(stable),
             PathBuf::from("/tmp/poimen-jk/server.sock")
         );
+    }
+
+    #[test]
+    fn machine_check_result_parses_and_ok_ignores_warnings() {
+        let r: MachineCheckResult = serde_json::from_value(json!({
+            "version": "0.18.0", "protocol": 6,
+            "checks": [
+                {"id": "git", "status": "ok"},
+                {"id": "copilot", "status": "warning", "detail": "x", "fix": "copilot"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(r.checks[1].status, CheckStatus::Warning);
+        assert_eq!(r.checks[1].fix.as_deref(), Some("copilot"));
+        assert_eq!(r.checks[0].detail, None);
+        assert!(r.ok());
+        let bad: MachineCheckResult = serde_json::from_value(json!({
+            "version": "1", "protocol": 6, "checks": [{"id": "gh", "status": "missing"}]
+        }))
+        .unwrap();
+        assert!(!bad.ok());
+        assert!(
+            serde_json::from_value::<MachineCheckItem>(json!({"id": "x", "status": "bogus"}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn worktree_cleanup_parses() {
+        let p: WorktreeCleanup = serde_json::from_value(json!({
+            "owner": "o", "repo": "app",
+            "merged": [{"branch": "feat/7-x", "number": 12}]
+        }))
+        .unwrap();
+        assert_eq!(p.merged[0].number, 12);
+        assert_eq!(p.focused_space, None);
+        assert!(!p.skip_teardown);
+        assert!(
+            serde_json::from_value::<WorktreeCleanup>(json!({"owner": "o", "repo": "app"}))
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<WorktreeCleanup>(json!({
+                "owner": "o", "repo": "app", "merged": [{"branch": "b"}]
+            }))
+            .is_err()
+        );
+        let r: WorktreeCleanupResult = serde_json::from_value(json!({
+            "path": "/s/o/app",
+            "removed": [{"path": "/s/o/app-7", "branch": "feat/7-x", "pr": 12, "branch_deleted": true}],
+            "left": [{"path": "/s/o/app-8", "branch": "feat/8-y", "pr": 13,
+                      "reason": "dirty", "command": "git worktree remove x"}],
+            "teardown_untrusted": false
+        }))
+        .unwrap();
+        assert_eq!(r.removed[0].note, None);
+        assert!(r.removed[0].branch_deleted);
+        assert_eq!(r.left[0].reason, "dirty");
+        let none: WorktreeCleanupResult = serde_json::from_value(json!({"path": null})).unwrap();
+        assert_eq!(none, WorktreeCleanupResult::default());
+    }
+
+    #[test]
+    fn agent_transcript_request_and_result_wire_shapes() {
+        let p: AgentTranscript =
+            serde_json::from_value(json!({"terminal_id": "t1", "follower": "f1"})).unwrap();
+        assert!(!p.restart);
+        assert_eq!(
+            serde_json::to_value(AgentTranscript { restart: true, ..p }).unwrap(),
+            json!({"terminal_id": "t1", "follower": "f1", "restart": true})
+        );
+        assert!(serde_json::from_value::<AgentTranscript>(json!({"terminal_id": "t1"})).is_err());
+        let r: AgentTranscriptResult = serde_json::from_value(json!({
+            "state": "ok", "session": "s1", "fresh": true,
+            "updates": [{"kind": "main", "calls": [], "tools": 0, "usage": []}]
+        }))
+        .unwrap();
+        assert_eq!(
+            (r.state, r.fresh, r.updates.len()),
+            (TranscriptState::Ok, true, 1)
+        );
+        let r: AgentTranscriptResult =
+            serde_json::from_value(json!({"state": "unreadable", "reason": "denied"})).unwrap();
+        assert_eq!(r.state, TranscriptState::Unreadable);
+        assert_eq!(r.reason.as_deref(), Some("denied"));
+        assert!(r.updates.is_empty() && !r.fresh);
+        assert_eq!(
+            serde_json::to_value(TranscriptState::NoAgent).unwrap(),
+            json!("no_agent")
+        );
+    }
+
+    #[test]
+    fn repo_and_worktree_requests_parse() {
+        let p: RepoEnsure =
+            serde_json::from_value(json!({"owner": "GravionLabs", "repo": "poimen"})).unwrap();
+        assert_eq!(
+            (p.owner.as_str(), p.repo.as_str()),
+            ("GravionLabs", "poimen")
+        );
+        assert!(serde_json::from_value::<RepoEnsure>(json!({"owner": "o"})).is_err());
+        let r: RepoEnsureResult =
+            serde_json::from_value(json!({"path": "/s/o/r", "cloned": true})).unwrap();
+        assert!(r.cloned);
+
+        let w: WorktreeCreate = serde_json::from_value(json!({
+            "repo_dir": "/s/o/r", "issue": {"nr": 7, "title": "feat: X"}, "mode": "agent"
+        }))
+        .unwrap();
+        assert_eq!(w.issue.nr, 7);
+        assert_eq!(w.issue.url, "");
+        assert!(
+            serde_json::from_value::<WorktreeCreate>(json!({
+                "repo_dir": "/r", "issue": {"title": "x"}, "mode": "agent"
+            }))
+            .is_err()
+        );
+        let r: WorktreeCreateResult = serde_json::from_value(
+            json!({"path": "/s/o/r-7", "branch": "feat/7-x", "created": false}),
+        )
+        .unwrap();
+        assert_eq!(r.branch, "feat/7-x");
+        assert!(!r.created);
     }
 
     #[test]

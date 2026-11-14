@@ -5,7 +5,7 @@ import { getTestBed, TestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentPrompts, type PromptOutcome } from "../core/agent-prompt";
-import type { Terminal } from "../core/herdr";
+import type { Terminal } from "../core/snapshot";
 import { PromptBar } from "./prompt-bar";
 
 const pane: Terminal = {

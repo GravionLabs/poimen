@@ -3,8 +3,8 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorTabs, flowTab } from "./editor-tabs";
-import type { Snapshot, TabTree, Terminal } from "./herdr";
-import { HerdrStore } from "./herdr-store";
+import type { Snapshot, TabTree, Terminal } from "./snapshot";
+import { SpacesStore } from "./spaces-store";
 import { PaneActions } from "./pane-actions";
 import { UI_STORAGE } from "./ui-state";
 import { tauri } from "./tauri.mock";
@@ -36,7 +36,7 @@ beforeAll(() => {
  */
 describe("closing a leaf of a split tab", () => {
   let current: Snapshot;
-  let store: HerdrStore;
+  let store: SpacesStore;
   let actions: PaneActions;
   let tabs: EditorTabs;
 
@@ -66,7 +66,7 @@ describe("closing a leaf of a split tab", () => {
     tauri.answer("snapshot", () => current);
     // As the server answers after the close: the pane is gone, the tab has one leaf left.
     tauri.answer("pane_close", (args) => {
-      const paneId = args?.["paneId"];
+      const paneId = args?.["terminalId"];
       const rest = current.terminals.filter((p) => p.terminal_id !== paneId);
       current = {
         ...current,
@@ -84,7 +84,7 @@ describe("closing a leaf of a split tab", () => {
     });
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: null }] });
-    store = TestBed.inject(HerdrStore);
+    store = TestBed.inject(SpacesStore);
     actions = TestBed.inject(PaneActions);
     tabs = TestBed.inject(EditorTabs);
     await store.refresh();

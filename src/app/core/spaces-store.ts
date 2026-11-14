@@ -7,8 +7,6 @@ import {
   paneDir,
   nextWaiting,
   waitingCount,
-  type HerdrEvent,
-  type HerdrInfo,
   type Terminal,
   type AgentStatus,
   type RepoInfo,
@@ -16,13 +14,15 @@ import {
   type WireSnapshot,
   toSnapshot,
   type BranchPull,
-  type AppChannel,
-} from "./herdr";
+  mergeSnapshots,
+} from "./snapshot";
+import { type BackendEvent, type BackendInfo, type AppChannel } from "./backend";
 import type { BackendKind } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 import { UiState } from "./ui-state";
+import { RemoteSpaces } from "./remote-spaces";
 
-/** Delay that collapses a burst of herdr events into one re-read. */
+/** Delay that collapses a burst of backend events into one re-read. */
 export const REFRESH_DEBOUNCE_MS = 80;
 
 /** Interval of the repo refresh (dirty state, ahead/behind) while the window is focused. */
@@ -54,14 +54,15 @@ const windowFocused = (): boolean => typeof document !== "undefined" && document
 const EMPTY: Snapshot = { spaces: [], tabs: [], terminals: [] };
 
 /**
- * The herdr state as poimen shows it. herdr owns the state: the snapshot is re-read from herdr,
- * events only invalidate it (see the herdr socket API docs). `pane.agent_status_changed` is applied
- * right away so the status dots react without waiting for the re-read.
+ * The spaces, tabs and terminals of the backend as poimen shows them. The backend owns the state:
+ * the snapshot is re-read from it, events only invalidate it. `terminal.agent_status_changed` is
+ * applied right away so the status dots react without waiting for the re-read.
  */
 @Injectable({ providedIn: "root" })
-export class HerdrStore {
+export class SpacesStore {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState, { optional: true });
+  private readonly remote = inject(RemoteSpaces, { optional: true });
 
   private readonly _snapshot = signal<Snapshot>(EMPTY);
   private readonly _connectionError = signal<string | null>(null);
@@ -70,7 +71,7 @@ export class HerdrStore {
   private readonly _pulls = signal<ReadonlyMap<string, BranchPull>>(new Map());
 
   private readonly _loaded = signal(false);
-  private readonly _info = signal<HerdrInfo | null>(null);
+  private readonly _info = signal<BackendInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
   private readonly _appChannel = signal<AppChannel>("stable");
   private readonly _backend = signal<BackendStatus | null>(null);
@@ -96,6 +97,14 @@ export class HerdrStore {
     });
     return changed ? { ...raw, terminals } : raw;
   });
+  /**
+   * This Mac's snapshot with the spaces of the machines (#280) after it, their ids qualified by
+   * the machine name. Attention, notifications, the dock badge and the tab bar read this; the
+   * space tree and every space command work on `snapshot`.
+   */
+  readonly all = computed(() =>
+    mergeSnapshots(this.snapshot(), this.remote ? [this.remote.snapshot()] : []),
+  );
   /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
   readonly loaded = this._loaded.asReadonly();
   /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
@@ -153,10 +162,22 @@ export class HerdrStore {
   readonly spaces = computed(() =>
     buildSpaces(this.snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
   );
-  readonly waiting = computed(() => waitingCount(this.snapshot().terminals));
-  readonly panes = computed(
-    () => new Map(this.snapshot().terminals.map((p) => [p.terminal_id, p])),
-  );
+  /** The spaces of one machine as a tree (`machine` set on every space), last known when offline. */
+  remoteTree(machine: string) {
+    return this.remoteTrees().get(machine) ?? [];
+  }
+  private readonly remoteTrees = computed(() => {
+    const snapshot = this.remote?.snapshot();
+    if (!snapshot) return new Map<string, ReturnType<typeof buildTree>>();
+    const trees = new Map<string, ReturnType<typeof buildTree>>();
+    for (const node of buildTree(snapshot)) {
+      const name = node.workspace.machine!;
+      trees.set(name, [...(trees.get(name) ?? []), node]);
+    }
+    return trees;
+  });
+  readonly waiting = computed(() => waitingCount(this.all().terminals));
+  readonly panes = computed(() => new Map(this.all().terminals.map((p) => [p.terminal_id, p])));
 
   /** Sets how a pane's hook status is combined with its runs; `App` wires `Deliver.paneStatus`. */
   setStatusOf(fn: (terminalId: string, hook: AgentStatus) => AgentStatus): void {
@@ -186,7 +207,7 @@ export class HerdrStore {
   /** Subscribes to herdr events and loads the first snapshot. Calling it again does nothing. */
   async start(): Promise<void> {
     if (this.unlisten) return;
-    this.unlisten = this.bridge.listen<HerdrEvent>("herdr", (event) => this.handle(event));
+    this.unlisten = this.bridge.listen<BackendEvent>("herdr", (event) => this.handle(event));
     await this.unlisten;
     void this.readAppVersion();
     void this.readAppChannel();
@@ -227,7 +248,7 @@ export class HerdrStore {
 
   /** The next blocked pane after `activeId`, wrapping around. */
   nextWaiting(activeId: string | null): Terminal | undefined {
-    return nextWaiting(this.snapshot().terminals, activeId);
+    return nextWaiting(this.all().terminals, activeId);
   }
 
   pane(paneId: string): Terminal | undefined {
@@ -310,7 +331,7 @@ export class HerdrStore {
   private async readInfo(): Promise<void> {
     try {
       this._info.set(
-        (await this.bridge.invoke<HerdrInfo | null | undefined>("herdr_info")) ?? null,
+        (await this.bridge.invoke<BackendInfo | null | undefined>("herdr_info")) ?? null,
       );
     } catch {
       this._info.set(null);
@@ -381,7 +402,7 @@ export class HerdrStore {
     });
   }
 
-  private handle(event: HerdrEvent): void {
+  private handle(event: BackendEvent): void {
     switch (event.kind) {
       case "poimen.connected":
         this._watchLost.set(false);
@@ -394,12 +415,12 @@ export class HerdrStore {
         // The server may come back restarted: its spaces, and the terminals whose hosts it adopted.
         this.freshSession = true;
         return;
-      case "pane.agent_status_changed":
-        if (event.data?.pane_id && event.data.agent_status) {
+      case "terminal.agent_status_changed":
+        if (event.data?.terminal_id && event.data.agent_status) {
           this._snapshot.update((s) =>
             applyStatus(
               s,
-              event.data!.pane_id!,
+              event.data!.terminal_id!,
               event.data!.agent_status!,
               event.data!.agent_message
                 ? {
