@@ -2,6 +2,7 @@
 // pure helpers on it. Every backend maps its own model onto it in Rust (`poimen_core::snapshot`).
 
 import type { Checks } from "../github/pulls";
+import type { SidebarSort } from "./settings";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
@@ -277,14 +278,22 @@ export interface WorkspaceNode {
 
 const byNumber = <T extends { number: number }>(a: T, b: T) => a.number - b.number;
 
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+/** Alphabetical by label with numbers in numeric order (`#9` before `#12`); ties by backend number. */
+const byLabel = <T extends { label: string; number: number }>(a: T, b: T) =>
+  collator.compare(a.label, b.label) || a.number - b.number;
+
 /**
  * The spaces in the user's order: ids of `order` first (in that order), then the others in backend
  * number order (new spaces). Ids of `order` that no longer exist are skipped.
  */
-export function orderSpaces<T extends { space_id: string; number: number }>(
+export function orderSpaces<T extends { space_id: string; label: string; number: number }>(
   spaces: readonly T[],
   order: readonly string[] = [],
+  sort: SidebarSort = "manual",
 ): T[] {
+  if (sort === "name") return [...spaces].sort(byLabel);
   const rank = new Map(order.map((id, i) => [id, i]));
   const known = spaces
     .filter((s) => rank.has(s.space_id))
@@ -329,8 +338,9 @@ export function buildTree(
   snapshot: Snapshot,
   order: readonly string[] = [],
   tabOrder: TabOrder = {},
+  sort: SidebarSort = "manual",
 ): WorkspaceNode[] {
-  return orderSpaces(snapshot.spaces, order).map((workspace) => ({
+  return orderSpaces(snapshot.spaces, order, sort).map((workspace) => ({
     workspace,
     tabs: orderTabs(
       snapshot.tabs.filter((tab) => tab.space_id === workspace.space_id),
@@ -512,8 +522,9 @@ export function buildSpaces(
   pulls: ReadonlyMap<string, BranchPull> = new Map(),
   order: readonly string[] = [],
   tabOrder: TabOrder = {},
+  sort: SidebarSort = "manual",
 ): SpaceNode[] {
-  return buildTree(snapshot, order, tabOrder).map(({ workspace, tabs }) => ({
+  return buildTree(snapshot, order, tabOrder, sort).map(({ workspace, tabs }) => ({
     workspace,
     ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
     rows: tabs.flatMap(({ tab, panes }) =>

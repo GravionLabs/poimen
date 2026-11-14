@@ -12,8 +12,9 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub use poimen_core::settings::{
-    SidebarRows, config_path, parse_space_templates, parse_tasks, parse_trusted_projects,
-    resolve_sidebar_rows, revoke_project, trust_project,
+    SidebarRows, SidebarSort, config_path, parse_space_templates, parse_tasks,
+    parse_trusted_projects, resolve_sidebar_rows, resolve_sidebar_sort, revoke_project,
+    trust_project,
 };
 use poimen_core::settings::{
     find_value, remove_path_text, root_open, save_with, set_key_text, set_path_text,
@@ -150,6 +151,8 @@ pub struct Settings {
     pub sidebar_rows: SidebarRows,
     /// `sidebar.layout`: `tree` (default) or `split`.
     pub sidebar_layout: String,
+    /// `sidebar.sort`: `manual` (default) or `name`.
+    pub sidebar_sort: SidebarSort,
     /// Roots of the explorer (`explorer.roots`, a leading `~` is the home directory).
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
@@ -346,6 +349,7 @@ impl Default for Settings {
             shortcuts: default_shortcuts(),
             sidebar_rows: SidebarRows::default(),
             sidebar_layout: "tree".into(),
+            sidebar_sort: SidebarSort::Manual,
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
             backend: "poimen".into(),
@@ -583,6 +587,7 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("sidebar") {
         s.sidebar_rows = resolve_sidebar_rows(value, &mut s.warnings);
+        s.sidebar_sort = resolve_sidebar_sort(value, &mut s.warnings);
         match value.get("layout") {
             None => {}
             Some(Value::String(l)) if matches!(l.as_str(), "tree" | "split") => {
@@ -889,6 +894,18 @@ pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, Strin
     set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
 }
 
+/// Returns `text` with `sidebar.sort` set to `manual` or `name`, touching nothing else.
+pub fn set_sidebar_sort_text(text: &str, sort: &str) -> Result<String, String> {
+    let Some(sort) = SidebarSort::parse(sort) else {
+        return Err(format!("invalid sidebar sort {sort:?}"));
+    };
+    set_path_text(
+        text,
+        &["sidebar", "sort"],
+        &format!("\"{}\"", sort.as_str()),
+    )
+}
+
 /// Returns `text` with `spaces.layout` set to `layout` after validating it like the settings
 /// loader does; other keys, comments and formatting stay.
 pub fn set_spaces_layout_text(text: &str, layout: &Value) -> Result<String, String> {
@@ -989,6 +1006,11 @@ pub fn save_theme(home: &Path, theme: &str) -> Result<(), String> {
 /// Writes the `colorSchema` setting below `home`, like `save_theme`.
 pub fn save_color_schema(home: &Path, schema: &serde_json::Value) -> Result<(), String> {
     save_with(home, |text| set_color_schema_text(text, schema))
+}
+
+/// Writes `sidebar.sort` below `home`, like `save_sidebar_layout`.
+pub fn save_sidebar_sort(home: &Path, sort: &str) -> Result<(), String> {
+    save_with(home, |text| set_sidebar_sort_text(text, sort))
 }
 
 /// Writes `sidebar.layout` below `home`, like `save_theme`.
@@ -1769,6 +1791,41 @@ mod tests {
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
         let tokens = s.sidebar_rows.agent.expect("row kept");
         assert_eq!(tokens[1][0].token, "notification");
+    }
+
+    #[test]
+    fn sidebar_sort_reaches_the_settings() {
+        assert_eq!(rows("{}").sidebar_sort, SidebarSort::Manual);
+        assert_eq!(
+            rows(r#"{"sidebar":{"sort":"name"}}"#).sidebar_sort,
+            SidebarSort::Name
+        );
+        let s = rows(r#"{"sidebar":{"sort":"attention"}}"#);
+        assert_eq!(s.sidebar_sort, SidebarSort::Manual);
+        assert!(s.warnings[0].contains("sidebar.sort"));
+    }
+
+    #[test]
+    fn set_sidebar_sort_keeps_comments_and_other_keys() {
+        let text = "{\n  // mine\n  \"sidebar\": { \"layout\": \"split\" }\n}";
+        let out = set_sidebar_sort_text(text, "name").unwrap();
+        assert!(out.contains("// mine") && out.contains("\"layout\": \"split\""));
+        assert!(out.contains("\"sort\": \"name\"") || out.contains("\"sort\":\"name\""));
+        let again = set_sidebar_sort_text(&out, "manual").unwrap();
+        assert!(again.contains("\"manual\"") && !again.contains("\"name\""));
+        assert!(set_sidebar_sort_text("{}", "recent").is_err());
+        assert!(set_sidebar_sort_text("{\"sidebar\":3}", "name").is_err());
+    }
+
+    #[test]
+    fn save_sidebar_sort_round_trips() {
+        let home = std::env::temp_dir().join(format!("poimen-sort-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        save_sidebar_sort(&home, "name").unwrap();
+        assert_eq!(load(&home).sidebar_sort, SidebarSort::Name);
+        save_sidebar_sort(&home, "manual").unwrap();
+        assert_eq!(load(&home).sidebar_sort, SidebarSort::Manual);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

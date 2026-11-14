@@ -1,6 +1,7 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildTree, orderSpaces, reorderIds, type Snapshot } from "./snapshot";
+import { SettingsStore } from "./settings";
 import { SpacesStore } from "./spaces-store";
 import { SpaceActions, neighbourSpace } from "./space-actions";
 import { TauriBridge } from "./tauri";
@@ -117,6 +118,7 @@ describe("space order in the app", () => {
     injector = Injector.create({
       providers: [
         TauriBridge,
+        SettingsStore,
         SpacesStore,
         { provide: UI_STORAGE, useValue: storage },
         UiState,
@@ -181,5 +183,94 @@ describe("space order in the app", () => {
     actions.reorder("w3", "w1", false);
     expect(store.tree().map((n) => n.workspace.space_id)).toEqual(["w3", "w1", "w2"]);
     expect(neighbourSpace(store.snapshot(), "w3", store.spaceOrder())).toBe("w1");
+  });
+});
+
+describe("orderSpaces by name", () => {
+  const named = (id: string, label: string, number: number) => ({ ...space(id, number), label });
+
+  it("sorts labels with numbers in numeric order, ignoring case", () => {
+    const list = [
+      named("a", "#12 beta", 1),
+      named("b", "#9 alpha", 2),
+      named("c", "apple", 3),
+      named("d", "Banana", 4),
+    ];
+    expect(ids(orderSpaces(list, ["d"], "name"))).toEqual(["b", "a", "c", "d"]);
+  });
+
+  it("breaks ties by backend number and does not touch the input", () => {
+    const list = [named("a", "same", 2), named("b", "SAME", 1)];
+    expect(ids(orderSpaces(list, [], "name"))).toEqual(["b", "a"]);
+    expect(ids(list)).toEqual(["a", "b"]);
+  });
+
+  it("keeps the manual order in manual mode", () => {
+    const list = [named("a", "z", 1), named("b", "a", 2)];
+    expect(ids(orderSpaces(list, ["a", "b"], "manual"))).toEqual(["a", "b"]);
+  });
+
+  it("finds the neighbour in name order and buildTree follows it", () => {
+    const snapshot: Snapshot = {
+      spaces: [named("a", "c", 1), named("b", "a", 2), named("c", "b", 3)],
+      tabs: [],
+      terminals: [],
+    };
+    expect(buildTree(snapshot, [], {}, "name").map((n) => n.workspace.space_id)).toEqual([
+      "b",
+      "c",
+      "a",
+    ]);
+    expect(neighbourSpace(snapshot, "b", [], "name")).toBe("c");
+  });
+});
+
+describe("sorting spaces by name in the app", () => {
+  let store: SpacesStore;
+  let actions: SpaceActions;
+  let settings: SettingsStore;
+  let ui: UiState;
+
+  beforeEach(async () => {
+    tauri.reset();
+    const names: Record<string, string> = { w1: "#12 b", w2: "#9 a", w3: "c" };
+    tauri.answer("snapshot", () => {
+      const s = snap("w1", "w2", "w3");
+      return { ...s, spaces: s.spaces.map((x) => ({ ...x, label: names[x.space_id] })) };
+    });
+    const injector = Injector.create({
+      providers: [
+        TauriBridge,
+        SettingsStore,
+        SpacesStore,
+        { provide: UI_STORAGE, useValue: null },
+        UiState,
+        SpaceActions,
+      ],
+    });
+    store = injector.get(SpacesStore);
+    actions = injector.get(SpaceActions);
+    settings = injector.get(SettingsStore);
+    ui = injector.get(UiState);
+    await store.refresh();
+  });
+
+  const listed = () => store.spaces().map((s) => s.workspace.space_id);
+
+  it("lists by name in name mode and ignores drops and shifts", async () => {
+    await settings.setSidebarSort("name");
+    expect(listed()).toEqual(["w2", "w1", "w3"]);
+    actions.reorder("w3", "w2", false);
+    actions.shift("w3", -1);
+    expect(listed()).toEqual(["w2", "w1", "w3"]);
+    expect(ui.spaceOrder()).toEqual([]);
+  });
+
+  it("sorts now: stores the by-name order and returns to manual", async () => {
+    await settings.setSidebarSort("name");
+    actions.sortNow();
+    expect(ui.spaceOrder()).toEqual(["w2", "w1", "w3"]);
+    await vi.waitFor(() => expect(settings.settings().sidebarSort).toBe("manual"));
+    expect(listed()).toEqual(["w2", "w1", "w3"]);
   });
 });

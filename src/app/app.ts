@@ -522,6 +522,14 @@ export class App {
       if (spaceId) this.spaceActions.shift(spaceId, id === "moveSpaceUp" ? -1 : 1);
       return;
     }
+    if (id === "sortSpacesManual" || id === "sortSpacesByName") {
+      void this.prefs.setSidebarSort(id === "sortSpacesManual" ? "manual" : "name");
+      return;
+    }
+    if (id === "sortSpacesNow") {
+      this.spaceActions.sortNow();
+      return;
+    }
     if (id === "closeSpace") {
       const paneId = this.activePaneId();
       this.closeSpace(paneId ? this.pane(paneId)?.space_id : undefined);

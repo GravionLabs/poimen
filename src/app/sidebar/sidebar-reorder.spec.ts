@@ -6,7 +6,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { SpaceNode } from "../core/snapshot";
 import { SpacesStore } from "../core/spaces-store";
-import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
+import { DEFAULT_SETTINGS, SettingsStore, type SidebarSort } from "../core/settings";
 import { SpaceActions } from "../core/space-actions";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
@@ -27,13 +27,17 @@ const node = (id: string, n: number): SpaceNode => ({
   })),
 });
 
-async function setup() {
+async function setup(sort: SidebarSort = "manual") {
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
       {
         provide: SettingsStore,
-        useValue: { settings: signal(DEFAULT_SETTINGS), writeError: signal(null) },
+        useValue: {
+          settings: signal({ ...DEFAULT_SETTINGS, sidebarSort: sort }),
+          writeError: signal(null),
+          setSidebarSort: vi.fn(async () => {}),
+        },
       },
       {
         provide: SpacesStore,
@@ -79,7 +83,8 @@ async function setup() {
     await settle();
     return event;
   };
-  return { fixture, root, reorder, reorderTabs, rowOf, fire, settle };
+  const sortNow = vi.spyOn(TestBed.inject(SpaceActions), "sortNow").mockImplementation(() => {});
+  return { fixture, root, sortNow, reorder, reorderTabs, rowOf, fire, settle };
 }
 
 describe("Sidebar space drag and drop", () => {
@@ -131,6 +136,44 @@ describe("Sidebar space drag and drop", () => {
     await fire(rowOf("w2"), "dragover", 5);
     await fire(rowOf("w2"), "drop");
     expect(reorder).not.toHaveBeenCalled();
+  });
+});
+
+describe("Sidebar sort", () => {
+  it("turns drag and drop of spaces off outside manual", async () => {
+    const { rowOf, fire, reorder } = await setup("name");
+    expect(rowOf("w1").getAttribute("draggable")).toBeNull();
+    const start = await fire(rowOf("w1"), "dragstart");
+    expect(start.defaultPrevented).toBe(true);
+    await fire(rowOf("w2"), "drop");
+    expect(reorder).not.toHaveBeenCalled();
+  });
+
+  it("opens the sort menu with the active mode checked", async () => {
+    const { root, fire } = await setup("name");
+    await fire(root.querySelector<HTMLElement>(".sort-toggle")!, "click");
+    const items = [...root.querySelectorAll<HTMLElement>(".sort-menu [role^=menuitem]")];
+    expect(items.map((e) => e.textContent?.trim())).toEqual([
+      "Manual",
+      "✓ By name",
+      "Sort alphabetically now",
+    ]);
+    expect(items.map((e) => e.getAttribute("aria-checked"))).toEqual(["false", "true", null]);
+  });
+
+  it("sorts alphabetically now from the menu and closes it", async () => {
+    const { root, fire, sortNow } = await setup();
+    await fire(root.querySelector<HTMLElement>(".sort-toggle")!, "click");
+    await fire(root.querySelectorAll<HTMLElement>(".sort-menu .menu-item")[2], "click");
+    expect(sortNow).toHaveBeenCalledOnce();
+    expect(root.querySelector(".sort-menu")).toBeNull();
+  });
+
+  it("writes the chosen mode", async () => {
+    const { root, fire } = await setup();
+    await fire(root.querySelector<HTMLElement>(".sort-toggle")!, "click");
+    await fire(root.querySelectorAll<HTMLElement>(".sort-menu .menu-item")[1], "click");
+    expect(TestBed.inject(SettingsStore).setSidebarSort).toHaveBeenCalledWith("name");
   });
 });
 

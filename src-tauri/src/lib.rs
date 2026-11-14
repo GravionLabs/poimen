@@ -1830,6 +1830,13 @@ fn set_sidebar_layout(layout: String) -> Result<(), String> {
     settings::save_sidebar_layout(&home, &layout)
 }
 
+/// Writes only `sidebar.sort` (`manual` or `name`); the settings watcher emits the change.
+#[tauri::command]
+fn set_sidebar_sort(sort: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_sidebar_sort(&home, &sort)
+}
+
 /// Writes only `explorer.roots` (paths under the home directory as `~/…`); the watcher emits it.
 #[tauri::command]
 fn set_explorer_roots(roots: Vec<String>) -> Result<(), String> {
@@ -2640,6 +2647,7 @@ pub fn run() {
             set_theme,
             set_color_schema,
             set_sidebar_layout,
+            set_sidebar_sort,
             set_explorer_roots,
             set_explorer_show_hidden,
             set_sound,

@@ -167,6 +167,49 @@ pub fn resolve_sidebar_rows(sidebar: &Value, warnings: &mut Vec<String>) -> Side
     out
 }
 
+/// How the spaces tree is ordered (`sidebar.sort`): the user's own order or alphabetical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarSort {
+    #[default]
+    Manual,
+    Name,
+}
+
+impl SidebarSort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Name => "name",
+        }
+    }
+
+    /// `manual` or `name`; anything else is `None`.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "manual" => Some(Self::Manual),
+            "name" => Some(Self::Name),
+            _ => None,
+        }
+    }
+}
+
+/// `sidebar.sort` of the `sidebar` object; absent is `manual`, an unknown value warns and is `manual`.
+pub fn resolve_sidebar_sort(sidebar: &Value, warnings: &mut Vec<String>) -> SidebarSort {
+    match sidebar.get("sort") {
+        None => SidebarSort::Manual,
+        Some(Value::String(s)) if SidebarSort::parse(s).is_some() => {
+            SidebarSort::parse(s).unwrap_or_default()
+        }
+        Some(other) => {
+            warnings.push(format!(
+                "sidebar.sort {other} must be \"manual\" or \"name\"; using manual"
+            ));
+            SidebarSort::Manual
+        }
+    }
+}
+
 /// Index after a `"..."` string that starts at `i`.
 pub fn skip_string(b: &[u8], mut i: usize) -> usize {
     i += 1;
@@ -797,6 +840,23 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_sort_parses_and_an_unknown_value_warns_as_manual() {
+        let sort = |json: &str| {
+            let mut w = Vec::new();
+            let v: Value = serde_json::from_str(json).unwrap();
+            (resolve_sidebar_sort(&v, &mut w), w)
+        };
+        assert_eq!(sort("{}"), (SidebarSort::Manual, vec![]));
+        assert_eq!(sort(r#"{"sort":"name"}"#).0, SidebarSort::Name);
+        assert_eq!(sort(r#"{"sort":"manual"}"#).0, SidebarSort::Manual);
+        let (s, w) = sort(r#"{"sort":"recent"}"#);
+        assert_eq!(s, SidebarSort::Manual);
+        assert!(w[0].contains("sidebar.sort"));
+        assert_eq!(sort(r#"{"sort":3}"#).0, SidebarSort::Manual);
+        assert_eq!(SidebarSort::Name.as_str(), "name");
+    }
 
     #[test]
     fn the_rc_channel_has_its_own_config_dir() {
