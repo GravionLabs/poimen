@@ -4,6 +4,7 @@ import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
 import { ProjectEntries, type ProjectEntry } from "./project-entries";
 import type { ShortcutAction } from "./shortcuts";
+import { SettingsStore } from "./settings";
 import { UiState } from "./ui-state";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
@@ -24,6 +25,9 @@ export interface PoimenCommand {
     | "renameSpace"
     | "moveSpaceUp"
     | "moveSpaceDown"
+    | "sortSpacesManual"
+    | "sortSpacesByName"
+    | "sortSpacesNow"
     | "startTask"
     | "openTerminalHere"
     | "cleanupTasks"
@@ -39,6 +43,9 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "renameSpace", title: "Rename Space..." },
   { id: "moveSpaceUp", title: "Move Space Up" },
   { id: "moveSpaceDown", title: "Move Space Down" },
+  { id: "sortSpacesManual", title: "Sort Spaces: Manual" },
+  { id: "sortSpacesByName", title: "Sort Spaces: By Name" },
+  { id: "sortSpacesNow", title: "Sort Spaces Alphabetically Now" },
   { id: "closeSpace", title: "Close Space" },
   { id: "closeTab", title: "Close Tab" },
   { id: "closeAll", title: "Close All Tabs" },
@@ -111,6 +118,7 @@ export const GITHUB_GROUP = "GitHub";
 export class CommandPalette {
   private readonly keymap = inject(Keymap);
   private readonly ui = inject(UiState);
+  private readonly settings = inject(SettingsStore);
   private readonly project = inject(ProjectEntries);
   private readonly agentActions = inject(AgentActions);
 
@@ -122,7 +130,11 @@ export class CommandPalette {
   readonly query = this._query.asReadonly();
 
   private readonly all = computed<PaletteItem[]>(() => [
-    ...POIMEN_COMMANDS.map((c): PaletteItem => ({
+    ...POIMEN_COMMANDS.filter(
+      (c) =>
+        this.settings.settings().sidebarSort === "manual" ||
+        (c.id !== "moveSpaceUp" && c.id !== "moveSpaceDown"),
+    ).map((c): PaletteItem => ({
       key: `command:${c.id}`,
       title: c.title,
       shortcut:
@@ -140,6 +152,9 @@ export class CommandPalette {
         c.id === "renameSpace" ||
         c.id === "moveSpaceUp" ||
         c.id === "moveSpaceDown" ||
+        c.id === "sortSpacesManual" ||
+        c.id === "sortSpacesByName" ||
+        c.id === "sortSpacesNow" ||
         c.id === "startTask" ||
         c.id === "openTerminalHere" ||
         c.id === "cleanupTasks" ||

@@ -404,7 +404,9 @@ export class Sidebar {
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const items = [
+      ...menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]'),
+    ];
     const current = items.findIndex((e) => e === document.activeElement);
     const to = menuTarget(
       items.map((e) => e.textContent?.trim() ?? ""),
@@ -469,9 +471,9 @@ export class Sidebar {
   /** Where the dragged space would land: before or after `id`. */
   protected readonly dropMark = signal<{ id: string; after: boolean } | null>(null);
 
-  /** Dragging reorders the complete list, so it is off while a filter hides spaces. */
+  /** Dragging reorders the complete list, so it is off while a filter hides spaces or outside `manual`. */
   protected canDrag(workspaceId: string): boolean {
-    return this.query().trim() === "" && this.editing() !== workspaceId;
+    return this.sort() === "manual" && this.query().trim() === "" && this.editing() !== workspaceId;
   }
 
   protected dragStart(event: DragEvent, workspaceId: string): void {
@@ -620,6 +622,21 @@ export class Sidebar {
   protected readonly writeError = this.settings.writeError;
   /** The layout a click on the toggle switches to. */
   protected readonly otherLayout = computed(() => (this.layout() === "tree" ? "split" : "tree"));
+
+  protected readonly sort = computed(() => this.settings.settings().sidebarSort);
+  /** Where the sort menu of the header is open (below its button); `null` when closed. */
+  protected readonly sortMenuAt = signal<{ x: number; y: number } | null>(null);
+
+  protected openSortMenu(event: MouseEvent): void {
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.sortMenuAt.set({ x: box.left, y: box.bottom + 2 });
+  }
+
+  protected chooseSort(choice: "manual" | "name" | "now"): void {
+    this.sortMenuAt.set(null);
+    if (choice === "now") this.spaceActions.sortNow();
+    else void this.settings.setSidebarSort(choice);
+  }
 
   protected toggleLayout(): void {
     void this.settings.setSidebarLayout(this.otherLayout());

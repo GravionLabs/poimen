@@ -19,6 +19,8 @@ import {
 } from "../sidebar/spaces";
 
 export type SidebarLayout = "tree" | "split";
+/** `sidebar.sort`: the user's own space order, or alphabetical. */
+export type SidebarSort = "manual" | "name";
 
 export type ThemeSetting = "light" | "dark" | "system";
 
@@ -241,6 +243,8 @@ export interface Settings {
   sidebarRows: SidebarRows;
   /** `sidebar.layout`: the Spaces view as a tree or as two lists (Spaces, Agents). */
   sidebarLayout: SidebarLayout;
+  /** `sidebar.sort`: how the spaces tree is ordered. */
+  sidebarSort: SidebarSort;
   /** Roots of the explorer; a leading `~` is the home directory (resolved by the backend). */
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
@@ -340,6 +344,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shortcuts: DEFAULT_SHORTCUTS,
   sidebarRows: DEFAULT_SIDEBAR_ROWS,
   sidebarLayout: "tree",
+  sidebarSort: "manual",
   explorerRoots: ["~"],
   explorerShowHidden: false,
   backend: "poimen",
@@ -442,6 +447,7 @@ export function parseSettings(raw: unknown): Settings {
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
     sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
+    sidebarSort: r["sidebarSort"] === "name" ? "name" : "manual",
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     backend: r["backend"] === "herdr" ? "herdr" : "poimen",
@@ -521,6 +527,20 @@ export class SettingsStore {
       this._settings.set(previous);
       this._writeError.set(`Cannot save the sidebar layout: ${e}`);
       console.warn(`poimen settings: cannot save sidebar.layout: ${e}`);
+    }
+  }
+
+  /** Writes `sidebar.sort` of config.json and applies it at once; the watcher confirms. */
+  async setSidebarSort(sidebarSort: SidebarSort): Promise<void> {
+    const previous = this._settings();
+    this._settings.set({ ...previous, sidebarSort });
+    try {
+      await this.bridge.invoke("set_sidebar_sort", { sort: sidebarSort });
+      this._writeError.set(null);
+    } catch (e) {
+      this._settings.set(previous);
+      this._writeError.set(`Cannot save the sidebar sort: ${e}`);
+      console.warn(`poimen settings: cannot save sidebar.sort: ${e}`);
     }
   }
 

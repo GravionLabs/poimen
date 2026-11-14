@@ -37,6 +37,7 @@ const snapshot: Snapshot = {
 describe("CommandPalette", () => {
   let palette: CommandPalette;
   let project: ProjectEntries;
+  let settings: SettingsStore;
 
   beforeEach(async () => {
     tauri.reset();
@@ -65,6 +66,7 @@ describe("CommandPalette", () => {
     await injector.get(SpacesStore).refresh();
     palette = injector.get(CommandPalette);
     project = injector.get(ProjectEntries);
+    settings = injector.get(SettingsStore);
   });
 
   it("lists the poimen commands in order and nothing else", () => {
@@ -72,6 +74,23 @@ describe("CommandPalette", () => {
     const items = palette.items();
     expect(items[0]).toMatchObject({ command: "newTerminal" });
     expect(items.map((i) => i.command)).toEqual(POIMEN_COMMANDS.map((c) => c.id));
+  });
+
+  it("offers the sort commands, and Move Space only in manual mode", async () => {
+    palette.open();
+    expect(palette.items().map((i) => i.command)).toEqual(
+      expect.arrayContaining([
+        "sortSpacesManual",
+        "sortSpacesByName",
+        "sortSpacesNow",
+        "moveSpaceUp",
+      ]),
+    );
+    await settings.setSidebarSort("name");
+    const commands = palette.items().map((i) => i.command);
+    expect(commands).toContain("sortSpacesNow");
+    expect(commands).not.toContain("moveSpaceUp");
+    expect(commands).not.toContain("moveSpaceDown");
   });
 
   it("offers no plugin entries", () => {

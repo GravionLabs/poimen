@@ -17,7 +17,7 @@ import {
   mergeSnapshots,
 } from "./snapshot";
 import { type BackendEvent, type BackendInfo, type AppChannel } from "./backend";
-import type { BackendKind } from "./settings";
+import { SettingsStore, type BackendKind, type SidebarSort } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 import { UiState } from "./ui-state";
 import { RemoteSpaces } from "./remote-spaces";
@@ -63,6 +63,7 @@ export class SpacesStore {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState, { optional: true });
   private readonly remote = inject(RemoteSpaces, { optional: true });
+  private readonly settings = inject(SettingsStore, { optional: true });
 
   private readonly _snapshot = signal<Snapshot>(EMPTY);
   private readonly _connectionError = signal<string | null>(null);
@@ -152,15 +153,30 @@ export class SpacesStore {
   readonly pulls = this._pulls.asReadonly();
   /** The user's space order (ids); empty without UI state. Spaces outside it follow by number. */
   readonly spaceOrder = computed<readonly string[]>(() => this.ui?.spaceOrder() ?? []);
+  /** `sidebar.sort`: `manual` uses the user's order, `name` sorts alphabetically. */
+  readonly sidebarSort = computed<SidebarSort>(
+    () => this.settings?.settings().sidebarSort ?? "manual",
+  );
   /** The spaces in the user's order; every list, shortcut and neighbour lookup reads this. */
-  readonly orderedSpaces = computed(() => orderSpaces(this._snapshot().spaces, this.spaceOrder()));
+  readonly orderedSpaces = computed(() =>
+    orderSpaces(this._snapshot().spaces, this.spaceOrder(), this.sidebarSort()),
+  );
   /** The user's tab order per space (ids); tabs outside it follow by number. */
   readonly tabOrder = computed<Readonly<Record<string, readonly string[]>>>(
     () => this.ui?.tabOrder() ?? {},
   );
-  readonly tree = computed(() => buildTree(this.snapshot(), this.spaceOrder(), this.tabOrder()));
+  readonly tree = computed(() =>
+    buildTree(this.snapshot(), this.spaceOrder(), this.tabOrder(), this.sidebarSort()),
+  );
   readonly spaces = computed(() =>
-    buildSpaces(this.snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
+    buildSpaces(
+      this.snapshot(),
+      this._repos(),
+      this._pulls(),
+      this.spaceOrder(),
+      this.tabOrder(),
+      this.sidebarSort(),
+    ),
   );
   /** The spaces of one machine as a tree (`machine` set on every space), last known when offline. */
   remoteTree(machine: string) {
@@ -170,7 +186,8 @@ export class SpacesStore {
     const snapshot = this.remote?.snapshot();
     if (!snapshot) return new Map<string, ReturnType<typeof buildTree>>();
     const trees = new Map<string, ReturnType<typeof buildTree>>();
-    for (const node of buildTree(snapshot)) {
+    // Remote spaces have no manual order: server order, or by name in `name` mode.
+    for (const node of buildTree(snapshot, [], {}, this.sidebarSort())) {
       const name = node.workspace.machine!;
       trees.set(name, [...(trees.get(name) ?? []), node]);
     }
