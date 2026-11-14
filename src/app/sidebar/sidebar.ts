@@ -24,7 +24,7 @@ import {
   type SpaceNode,
   type Space,
 } from "../core/snapshot";
-import { Attention, workspaceUnread } from "../core/attention";
+import { Attention, canMarkUnread, workspaceUnread } from "../core/attention";
 import { SpacesStore } from "../core/spaces-store";
 import {
   DEFAULT_SIDEBAR_ROWS,
@@ -212,6 +212,7 @@ export interface SidebarMenuAction {
     | "start-agent"
     | "rename"
     | "restart"
+    | "mark-unread"
     | "close"
     | "close-space"
     | "rename-space"
@@ -246,6 +247,8 @@ export function sidebarMenuItems(
   outdatedHost = false,
   /** The row is on a machine that is not connected: every entry is disabled with this reason. */
   blocked: string | null = null,
+  /** The row is an agent that is done or idle and not unread (#725). */
+  markable = false,
 ): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
@@ -265,6 +268,7 @@ export function sidebarMenuItems(
             { action: "close-space", label: "Close space" },
           ]
         : [
+            ...(markable ? [{ action: "mark-unread" as const, label: "Mark as unread" }] : []),
             { action: "split-right", label: "Split right" },
             { action: "split-down", label: "Split down" },
             { action: "start-agent", label: "Start agent..." },
@@ -374,15 +378,16 @@ export class Sidebar {
   } | null>(null);
   protected menuItems(kind: SidebarMenuAction["kind"], id: string) {
     const repo = kind === "workspace" && spaceRepoDir(this.store.spaces(), id) !== undefined;
-    const older =
-      kind === "pane" &&
-      olderHost(
-        this.store
-          .spaces()
-          .flatMap((n) => n.rows)
-          .find((r) => r.pane.terminal_id === id)?.pane,
-      ) !== null;
-    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id));
+    const row =
+      kind === "pane"
+        ? this.store
+            .spaces()
+            .flatMap((n) => n.rows)
+            .find((r) => r.pane.terminal_id === id)?.pane
+        : undefined;
+    const older = row !== undefined && olderHost(row) !== null;
+    const markable = canMarkUnread(row, this.attn.unread());
+    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id), markable);
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {

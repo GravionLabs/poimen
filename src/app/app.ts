@@ -33,7 +33,7 @@ import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
 import { RemoteSpaces } from "./core/remote-spaces";
-import { Attention } from "./core/attention";
+import { Attention, canMarkUnread } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
@@ -479,6 +479,13 @@ export class App {
       else this.spaceActions.notify("Show Space Overview: there is no focused space");
       return;
     }
+    if (id === "markUnread") {
+      const paneId = this.activePaneId();
+      const pane = paneId ? this.pane(paneId) : undefined;
+      if (canMarkUnread(pane, this.attention.unread())) this.attention.markUnread(pane.terminal_id);
+      else this.spaceActions.notify("Mark as unread: the active pane is not an idle or done agent");
+      return;
+    }
     if (id === "showChanges") {
       this.showChangesOfActiveSpace();
       return;
@@ -718,7 +725,9 @@ export class App {
   }
 
   protected paneAction(paneId: string, action: string): void {
-    if (action === "split-right" || action === "split-down") {
+    if (action === "mark-unread") {
+      this.attention.markUnread(paneId);
+    } else if (action === "split-right" || action === "split-down") {
       const direction = action === "split-right" ? "right" : "down";
       void this.paneActions.split(paneId, direction).then((pane) => pane && this.open(pane, true));
     } else if (action === "start-agent") {
@@ -766,6 +775,12 @@ export class App {
       { action: "pane-split-right", label: "New pane to the right" },
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
+      {
+        action: "pane-mark-unread",
+        label: "Mark as unread",
+        appliesTo: (id) =>
+          tabKind(id) === "pane" && canMarkUnread(this.pane(id), this.attention.unread()),
+      },
       { action: "pane-rename", label: "Rename pane..." },
       {
         action: "pane-restart",
