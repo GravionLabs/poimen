@@ -23,3 +23,31 @@ dl.facts dt {
 dl.facts dd {
   margin: 0;
 }
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.title-edit {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+}
+.title-edit input {
+  flex: 1;
+  min-width: 0;
+}
+.body-edit textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: monospace;
+}
+.body-edit .tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.body-edit .tabs [aria-pressed="true"] {
+  font-weight: 600;
+}

@@ -533,6 +533,45 @@ async fn github_issue_detail(
         })?
 }
 
+/// Edits an issue (title, body, labels, assignees, milestone). A new body is written only when
+/// GitHub still holds the body the pane loaded, unless the user chose to overwrite.
+#[tauri::command]
+async fn github_issue_edit(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+    edit: github_issues::IssueEdit,
+) -> Result<github_issues::EditOutcome, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        github_issues::run_edit(&client, &root, number, &edit)
+    })
+    .await
+    .map_err(|e| github::GhError::Other {
+        message: e.to_string(),
+    })?
+}
+
+/// Closes an issue (completed or not planned) or reopens it. Explicit user input only.
+#[tauri::command]
+async fn github_issue_action(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+    action: github_issues::IssueAction,
+) -> Result<(), github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        github_issues::run_action(&client, &root, number, action)
+    })
+    .await
+    .map_err(|e| github::GhError::Other {
+        message: e.to_string(),
+    })?
+}
+
 /// Issues of the GitHub repositories among `dirs` with parent links and linked pull requests (open
 /// ones, or the closed ones with `closed`), up to 300 per repository. Read-only.
 #[tauri::command]
@@ -2503,6 +2542,8 @@ pub fn run() {
             branch_pulls,
             github_issues,
             github_issue_detail,
+            github_issue_edit,
+            github_issue_action,
             github_milestones,
             task_issues,
             github_repo,

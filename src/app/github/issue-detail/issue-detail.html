@@ -3,7 +3,42 @@
   <aside class="pane" aria-label="Issue detail" tabindex="-1" data-testid="issue-detail">
     <header class="head">
       <div class="title">
-        <h2>{{ h.title || "Issue #" + h.number }}</h2>
+        @if (issues.titleDraft() !== null) {
+          <form
+            class="title-edit"
+            data-testid="title-form"
+            (submit)="$event.preventDefault(); issues.saveTitle()"
+          >
+            <input
+              type="text"
+              aria-label="Title"
+              data-testid="title-input"
+              [value]="issues.titleDraft()"
+              (input)="setTitle($any($event.target).value)"
+              (keydown.escape)="issues.cancelTitle()"
+            />
+            <button type="submit" data-testid="title-save" [disabled]="issues.busy()">Save</button>
+            <button type="button" data-testid="title-cancel" (click)="issues.cancelTitle()">
+              Cancel
+            </button>
+          </form>
+        } @else {
+          <h2>{{ h.title || "Issue #" + h.number }}</h2>
+          @if (issues.detail(); as d) {
+            @if (canEdit(d)) {
+              <button
+                type="button"
+                class="icon-btn"
+                title="Edit title"
+                aria-label="Edit title"
+                data-testid="title-edit"
+                (click)="issues.startTitle()"
+              >
+                ✎
+              </button>
+            }
+          }
+        }
         <button
           type="button"
           class="icon-btn"
@@ -44,7 +79,7 @@
           ↗
         </button>
       </div>
-      <!-- Action bar: agent actions; later actions (close, label, ...) go here, see viewerCanUpdate. -->
+      <!-- Action bar: agent actions and, with viewerCanUpdate, close and reopen. -->
       <div class="actions" role="toolbar" aria-label="Issue actions" data-testid="actions">
         @if (startable(); as issue) {
           <button type="button" data-testid="start-task" (click)="startTask(issue)">
@@ -62,6 +97,37 @@
             {{ o.action.label }}
           </button>
         }
+        @if (issues.detail(); as d) {
+          @if (canEdit(d)) {
+            @if (d.state === "OPEN") {
+              <button
+                type="button"
+                data-testid="issue-close-completed"
+                [disabled]="issues.busy()"
+                (click)="issues.act('completed')"
+              >
+                {{ actionLabels.completed }}
+              </button>
+              <button
+                type="button"
+                data-testid="issue-close-not-planned"
+                [disabled]="issues.busy()"
+                (click)="issues.act('not_planned')"
+              >
+                {{ actionLabels.not_planned }}
+              </button>
+            } @else {
+              <button
+                type="button"
+                data-testid="issue-reopen"
+                [disabled]="issues.busy()"
+                (click)="issues.act('reopen')"
+              >
+                {{ actionLabels.reopen }}
+              </button>
+            }
+          }
+        }
       </div>
     </header>
     @if (errorMessage(); as message) {
@@ -71,6 +137,34 @@
     } @else if (issues.detail(); as d) {
       <section aria-labelledby="id-meta">
         <h3 id="id-meta">Details</h3>
+        @if (canEdit(d)) {
+          <div class="people" data-testid="issue-people">
+            <app-chip-picker
+              label="Labels"
+              [selected]="d.labels"
+              [options]="issues.labelOptions()"
+              [disabled]="issues.busy()"
+              (add)="issues.editMeta({ addLabels: [$event] })"
+              (remove)="issues.editMeta({ removeLabels: [$event] })"
+            />
+            <app-chip-picker
+              label="Assignees"
+              [selected]="d.assignees"
+              [options]="d.assignableUsers"
+              [disabled]="issues.busy()"
+              (add)="issues.editMeta({ addAssignees: [$event] })"
+              (remove)="issues.editMeta({ removeAssignees: [$event] })"
+            />
+            <app-chip-picker
+              label="Milestone"
+              [selected]="d.milestone ? [d.milestone] : []"
+              [options]="issues.milestoneOptions()"
+              [disabled]="issues.busy()"
+              (add)="issues.editMeta({ milestone: $event })"
+              (remove)="issues.editMeta({ removeMilestone: true })"
+            />
+          </div>
+        }
         <dl class="facts" data-testid="detail-meta">
           <dt>State</dt>
           <dd data-testid="detail-state">
@@ -126,8 +220,71 @@
         </dl>
       </section>
       <section aria-labelledby="id-desc">
-        <h3 id="id-desc">Description</h3>
-        @if (d.body.trim()) {
+        <h3 id="id-desc">
+          Description
+          @if (canEdit(d) && issues.bodyDraft() === null) {
+            <button type="button" class="link" data-testid="body-edit" (click)="issues.startBody()">
+              Edit
+            </button>
+          }
+        </h3>
+        @if (issues.bodyDraft() !== null) {
+          <div class="body-edit" data-testid="body-form">
+            <div class="tabs" role="group" aria-label="Editor mode">
+              <button
+                type="button"
+                data-testid="body-mode-edit"
+                [attr.aria-pressed]="!issues.previewing()"
+                (click)="issues.previewing.set(false)"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                data-testid="body-mode-preview"
+                [attr.aria-pressed]="issues.previewing()"
+                (click)="issues.previewing.set(true)"
+              >
+                Preview
+              </button>
+            </div>
+            @if (issues.previewing()) {
+              <div class="markdown" data-testid="body-preview" [innerHTML]="preview()"></div>
+            } @else {
+              <textarea
+                rows="12"
+                aria-label="Description"
+                data-testid="body-input"
+                [value]="issues.bodyDraft()"
+                (input)="setBody($any($event.target).value)"
+              ></textarea>
+            }
+            @if (issues.conflict() !== null) {
+              <div class="problem" role="alert" data-testid="body-conflict">
+                The description changed on GitHub since you opened it.
+                <button type="button" data-testid="body-overwrite" (click)="issues.saveBody(true)">
+                  Overwrite
+                </button>
+                <button type="button" data-testid="body-reload" (click)="issues.reloadBody()">
+                  Reload
+                </button>
+              </div>
+            }
+            <div class="actions">
+              <button
+                type="button"
+                data-testid="body-save"
+                [disabled]="issues.busy() || issues.conflict() !== null"
+                (click)="issues.saveBody()"
+              >
+                Save
+              </button>
+              <button type="button" data-testid="body-cancel" (click)="issues.cancelBody()">
+                Cancel
+              </button>
+            </div>
+          </div>
+        } @else if (d.body.trim()) {
           <div class="markdown" data-testid="detail-body" [innerHTML]="body()"></div>
         } @else {
           <p class="hint">No description.</p>

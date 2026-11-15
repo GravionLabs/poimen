@@ -1,12 +1,20 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { paneDir } from "../core/snapshot";
+import { SpaceActions } from "../core/space-actions";
 import { SpacesStore } from "../core/spaces-store";
 import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
 import { GithubFilter } from "./github-filter";
 import { GithubMilestones } from "./milestones";
-import { REFRESH_MIN_MS, ghErrorOf, isGithubUrl, type Checks, type GhError } from "./pulls";
+import {
+  REFRESH_MIN_MS,
+  errorText,
+  ghErrorOf,
+  isGithubUrl,
+  type Checks,
+  type GhError,
+} from "./pulls";
 
 /** A pull request linked to an issue (`LinkedPr` of `github_issues.rs`). */
 export interface LinkedPr {
@@ -213,6 +221,36 @@ export interface IssueDetail {
   subIssues: RelatedIssue[];
   pullRequests: ClosingPr[];
   viewerCanUpdate: boolean;
+  /** Logins the assignee picker offers. */
+  assignableUsers: string[];
+}
+
+/** What `github_issue_edit` changes (`IssueEdit` of `github_issues.rs`). */
+export interface IssueEdit {
+  title?: string;
+  body?: string;
+  expectedBody?: string;
+  overwrite?: boolean;
+  addLabels?: string[];
+  removeLabels?: string[];
+  addAssignees?: string[];
+  removeAssignees?: string[];
+  milestone?: string;
+  removeMilestone?: boolean;
+}
+
+/** A state change of an issue (`IssueAction` of `github_issues.rs`). */
+export type IssueAction = "completed" | "not_planned" | "reopen";
+
+export const ISSUE_ACTION_LABELS: Record<IssueAction, string> = {
+  completed: "Close as completed",
+  not_planned: "Close as not planned",
+  reopen: "Reopen",
+};
+
+/** Whether the edit controls are shown: only when GitHub says the viewer may update the issue. */
+export function canEditIssue(detail: Pick<IssueDetail, "viewerCanUpdate">): boolean {
+  return detail.viewerCanUpdate;
 }
 
 /** The key of an issue over all repositories: `owner/name#number`. */
@@ -244,6 +282,7 @@ export class GithubIssues {
   private readonly ui = inject(UiState);
   private readonly milestones = inject(GithubMilestones);
   private readonly filter = inject(GithubFilter);
+  private readonly spaces = inject(SpaceActions);
 
   private readonly _result = signal<RepoIssues[] | null>(null);
   private readonly _loading = signal(false);
@@ -379,6 +418,7 @@ export class GithubIssues {
     const key = issueKey(repo, number);
     this._selected.set({ repo, number });
     this._cursor.set(key);
+    this.resetEdit();
     this._detailKey.set(key);
     this._detail.set(null);
     this._detailError.set(null);
@@ -388,7 +428,10 @@ export class GithubIssues {
         root,
         number,
       });
-      if (this._detailKey() === key) this._detail.set(detail);
+      if (this._detailKey() === key) {
+        this._detail.set(detail);
+        if (detail.viewerCanUpdate) void this.loadOptions(key, root);
+      }
     } catch (err) {
       if (this._detailKey() === key) this._detailError.set(ghErrorOf(err));
     } finally {
@@ -397,10 +440,180 @@ export class GithubIssues {
   }
 
   closeDetail(): void {
+    this.resetEdit();
     this._detailKey.set(null);
     this._detail.set(null);
     this._detailError.set(null);
     this._detailLoading.set(false);
+  }
+
+  /** Label names and milestone titles of the repository of the open issue, for the pickers. */
+  readonly labelOptions = signal<string[]>([]);
+  readonly milestoneOptions = signal<string[]>([]);
+  /** The title being edited, null while it is not. */
+  readonly titleDraft = signal<string | null>(null);
+  /** The description being edited, null while it is not; `previewing` shows it rendered. */
+  readonly bodyDraft = signal<string | null>(null);
+  readonly previewing = signal(false);
+  /** The body the draft started from; a save is checked against it, even after a reload. */
+  private bodyBase = "";
+  /** The body on GitHub when it changed since the pane loaded it (Overwrite or Reload). */
+  readonly conflict = signal<string | null>(null);
+  private readonly _busy = signal(false);
+  readonly busy = this._busy.asReadonly();
+
+  private resetEdit(): void {
+    this.titleDraft.set(null);
+    this.bodyDraft.set(null);
+    this.previewing.set(false);
+    this.conflict.set(null);
+    this.labelOptions.set([]);
+    this.milestoneOptions.set([]);
+  }
+
+  private async loadOptions(key: string, root: string): Promise<void> {
+    const [labels, milestones] = await Promise.all([
+      this.bridge.invoke<string[]>("github_labels", { root }).catch(() => []),
+      this.bridge
+        .invoke<{ status: string; milestones?: { title: string }[] }[]>("github_milestones", {
+          dirs: [root],
+        })
+        .catch(() => []),
+    ]);
+    if (this._detailKey() !== key) return;
+    this.labelOptions.set(labels ?? []);
+    this.milestoneOptions.set(
+      (milestones ?? [])
+        .flatMap((r) => (r.status === "ok" ? (r.milestones ?? []) : []))
+        .map((m) => m.title),
+    );
+  }
+
+  startTitle(): void {
+    const d = this._detail();
+    if (d && canEditIssue(d)) this.titleDraft.set(d.title);
+  }
+
+  cancelTitle(): void {
+    this.titleDraft.set(null);
+  }
+
+  /** Writes the title; a blank or unchanged one is not sent. */
+  async saveTitle(): Promise<boolean> {
+    const d = this._detail();
+    const title = this.titleDraft()?.trim();
+    if (!d || !canEditIssue(d) || title === undefined) return false;
+    if (title === "" || title === d.title) {
+      this.titleDraft.set(null);
+      return false;
+    }
+    const done = await this.write("Edit", (root) => this.edit(root, d, { title }));
+    if (done) this.titleDraft.set(null);
+    return done;
+  }
+
+  startBody(): void {
+    const d = this._detail();
+    if (!d || !canEditIssue(d)) return;
+    this.conflict.set(null);
+    this.previewing.set(false);
+    this.bodyBase = d.body;
+    this.bodyDraft.set(d.body);
+  }
+
+  cancelBody(): void {
+    this.bodyDraft.set(null);
+    this.previewing.set(false);
+    this.conflict.set(null);
+  }
+
+  /**
+   * Writes the description. The backend re-reads it first: when it changed on GitHub since the pane
+   * loaded it, nothing is written and `conflict` holds the current text until the user picks
+   * Overwrite (`overwrite`) or Reload (`reloadBody`).
+   */
+  async saveBody(overwrite = false): Promise<boolean> {
+    const d = this._detail();
+    const body = this.bodyDraft();
+    if (!d || !canEditIssue(d) || body === null) return false;
+    const done = await this.write("Edit", (root) =>
+      this.edit(root, d, { body, expectedBody: this.bodyBase, overwrite }),
+    );
+    if (done) this.cancelBody();
+    return done;
+  }
+
+  /** Takes the text found on GitHub as the new baseline and drops the draft. */
+  reloadBody(): void {
+    const current = this.conflict();
+    if (current === null) return;
+    this._detail.update((d) => (d ? { ...d, body: current } : d));
+    this.cancelBody();
+  }
+
+  /** Adds and removes labels, assignees or the milestone; nothing to change is not sent. */
+  async editMeta(change: IssueEdit): Promise<boolean> {
+    const d = this._detail();
+    if (!d || !canEditIssue(d)) return false;
+    if (!Object.values(change).some((v) => (Array.isArray(v) ? v.length > 0 : Boolean(v)))) {
+      return false;
+    }
+    return this.write("Edit", (root) => this.edit(root, d, change));
+  }
+
+  /** Closes with a reason or reopens. */
+  async act(action: IssueAction): Promise<boolean> {
+    const d = this._detail();
+    if (!d || !canEditIssue(d)) return false;
+    if ((action === "reopen") !== (d.state === "CLOSED")) return false;
+    return this.write(ISSUE_ACTION_LABELS[action], (root) =>
+      this.bridge.invoke("github_issue_action", { root, number: d.number, action }),
+    );
+  }
+
+  private async edit(root: string, d: IssueDetail, change: IssueEdit): Promise<boolean> {
+    const out = await this.bridge.invoke<
+      { status: "saved" } | { status: "conflict"; current: string }
+    >("github_issue_edit", { root, number: d.number, edit: change });
+    if (out.status === "conflict") {
+      this.conflict.set(out.current);
+      return false;
+    }
+    return true;
+  }
+
+  /** Runs one write, then reloads the tree and the pane; a failure is a notification. */
+  private async write(
+    label: string,
+    fn: (root: string) => Promise<boolean | unknown>,
+  ): Promise<boolean> {
+    const key = this._detailKey();
+    const at = key === null ? -1 : key.lastIndexOf("#");
+    if (key === null || at < 0 || this._busy()) return false;
+    const repo = key.slice(0, at);
+    const number = Number(key.slice(at + 1));
+    const root = (this._result() ?? []).find(
+      (r) => r.repo.toLowerCase() === repo.toLowerCase(),
+    )?.root;
+    if (root === undefined) return false;
+    this._busy.set(true);
+    try {
+      if ((await fn(root)) === false) return false;
+    } catch (err) {
+      const e = ghErrorOf(err);
+      this.spaces.notify(`${label} #${number}: ${typeof e === "string" ? e : errorText(e)}`);
+      return false;
+    } finally {
+      this._busy.set(false);
+    }
+    await this.load(true);
+    if (this._detailKey() === key) {
+      const draft = { title: this.titleDraft(), body: this.bodyDraft() };
+      await this.openDetail(repo, number);
+      this.titleDraft.set(draft.title);
+      this.bodyDraft.set(draft.body);
+    }
+    return true;
   }
 
   /** True when `repo` was read, so its issues can open in the pane. */

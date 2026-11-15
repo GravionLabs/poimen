@@ -2,7 +2,16 @@ import { ChangeDetectionStrategy, Component, HostListener, computed, inject } fr
 import { UiState } from "../../core/ui-state";
 import { AgentRuns } from "../agent-runs";
 import { AgentActions, issueTarget, type ActionTarget } from "../agent-actions";
-import { GithubIssues, issueKey, issueLevel, levelBadge, type ClosingPr } from "../issues";
+import { ChipPicker } from "../chip-picker/chip-picker";
+import {
+  GithubIssues,
+  ISSUE_ACTION_LABELS,
+  canEditIssue,
+  issueKey,
+  issueLevel,
+  levelBadge,
+  type ClosingPr,
+} from "../issues";
 import { renderMarkdown } from "../markdown";
 import { GithubPulls, errorText, isGithubUrl } from "../pulls";
 import { IssueTasks } from "../issue-task";
@@ -16,6 +25,7 @@ import { IssueTasks } from "../issue-task";
   selector: "app-issue-detail",
   templateUrl: "./issue-detail.html",
   styleUrl: "./issue-detail.css",
+  imports: [ChipPicker],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IssueDetailPane {
@@ -25,6 +35,9 @@ export class IssueDetailPane {
   protected readonly isGithubUrl = isGithubUrl;
   protected readonly levelBadge = levelBadge;
   protected readonly body = computed(() => renderMarkdown(this.issues.detail()?.body ?? ""));
+  protected readonly canEdit = canEditIssue;
+  protected readonly actionLabels = ISSUE_ACTION_LABELS;
+  protected readonly preview = computed(() => renderMarkdown(this.issues.bodyDraft() ?? ""));
   protected readonly errorMessage = computed(() => {
     const err = this.issues.detailError();
     return err === null ? null : typeof err === "string" ? err : errorText(err);
@@ -94,6 +107,14 @@ export class IssueDetailPane {
     if (!link) return;
     event.preventDefault();
     void this.issues.openUrl(link.getAttribute("href") ?? "");
+  }
+
+  protected setTitle(value: string): void {
+    this.issues.titleDraft.set(value);
+  }
+
+  protected setBody(value: string): void {
+    this.issues.bodyDraft.set(value);
   }
 
   protected stateLabel(state: string): string {
