@@ -611,6 +611,41 @@ pub fn config_path(home: &Path) -> PathBuf {
     config_dir(home).join("config.json")
 }
 
+/// Parses `layouts[]` (ADR 0011): `{name, tabs}` with a unique `name`; invalid entries warn and
+/// are skipped, so the rest loads. `panes[]` is accepted in place of `tabs[]`.
+pub fn parse_layouts(value: &Value, warnings: &mut Vec<String>) -> Vec<crate::layout::NamedLayout> {
+    let Some(list) = value.as_array() else {
+        warnings.push("layouts must be an array".into());
+        return Vec::new();
+    };
+    let mut out: Vec<crate::layout::NamedLayout> = Vec::new();
+    for (i, entry) in list.iter().enumerate() {
+        let name = entry["name"].as_str().map(str::trim).unwrap_or_default();
+        if name.is_empty() {
+            warnings.push(format!(
+                "layouts[{i}].name must be a non-empty string; ignored"
+            ));
+            continue;
+        }
+        let at = format!("layouts[{name}]");
+        if out.iter().any(|l| l.name == name) {
+            warnings.push(format!("{at}: duplicate name; the first one wins"));
+            continue;
+        }
+        match crate::layout::parse_tabs_value(entry) {
+            Ok((layout, w)) => {
+                warnings.extend(w.into_iter().map(|w| format!("{at}: {w}")));
+                out.push(crate::layout::NamedLayout {
+                    name: name.to_owned(),
+                    layout,
+                });
+            }
+            Err(e) => warnings.push(format!("{at}: {e}; ignored")),
+        }
+    }
+    out
+}
+
 /// Parses `spaceTemplates[]`: `name` (unique), `match.dir` and/or `match.remote`, `agent`, optional `model` and `layout`.
 /// Invalid entries warn and are skipped. The agent is checked against `harnesses` at use.
 pub fn parse_space_templates(
@@ -693,10 +728,15 @@ pub fn parse_space_templates(
                 }
             },
         };
-        let layout = match obj.get("layout") {
-            None => None,
+        let (layout, layout_name) = match obj.get("layout") {
+            None => (None, None),
+            Some(Value::String(n)) if !n.trim().is_empty() => (None, Some(n.trim().to_owned())),
+            Some(Value::String(_)) => {
+                warnings.push(format!("{at}.layout: a name must not be empty; ignored"));
+                continue;
+            }
             Some(l) => match crate::layout::parse_layout_value(l) {
-                Ok(l) => Some(l),
+                Ok(l) => (Some(l), None),
                 Err(e) => {
                     warnings.push(format!("{at}.layout: {e}; ignored"));
                     continue;
@@ -710,6 +750,7 @@ pub fn parse_space_templates(
             agent,
             model,
             layout,
+            layout_name,
         });
     }
     out

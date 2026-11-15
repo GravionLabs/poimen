@@ -113,11 +113,17 @@ export class SpaceTemplatesEditor {
   );
   protected readonly matchLabel = matchLabel;
 
+  /** The panes of an inline layout; a layout name has none to edit here. */
+  protected inlineLayout(l: SpaceTemplate["layout"]): SpaceLayout | null {
+    return typeof l === "string" ? null : l;
+  }
+
   /**
    * The layout a template uses, in words: its own panes, else `spaces.layout`, else the built-in
    * default, each with its source in brackets.
    */
   protected layoutText(t: SpaceTemplate): string {
+    if (typeof t.layout === "string") return `layout "${t.layout}"`;
     if (t.layout) return panesText(t.layout);
     const shared = this.settings().spacesLayout;
     if (shared) return `${panesText(shared)} (spaces.layout)`;
@@ -175,7 +181,7 @@ export class SpaceTemplatesEditor {
   }
 
   private open(index: number | null, draft: SpaceTemplate, asDefault = false): void {
-    this.source.set(draft.layout ? "custom" : "none");
+    this.source.set(draft.layout && typeof draft.layout !== "string" ? "custom" : "none");
     this.presets.set([]);
     this.editing.set({ index, draft, asDefault });
     void this.loadPresets();
@@ -294,7 +300,7 @@ export class SpaceTemplatesEditor {
 
   private changePanes(change: (panes: SpaceLayout["panes"]) => SpaceLayout["panes"]): void {
     const layout = this.editing()?.draft.layout;
-    if (!layout) return;
+    if (!layout || typeof layout === "string") return;
     this.source.set("custom");
     this.patch({ layout: { panes: change(layout.panes) } });
   }

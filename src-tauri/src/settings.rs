@@ -76,6 +76,29 @@ pub struct Sounds {
 /// Largest audio file `sound_file` reads.
 pub const MAX_SOUND_BYTES: u64 = 1024 * 1024;
 
+/// `layouts[]` (ADR 0011) warns like the server's loader does, and a template naming a layout that
+/// neither `layouts[]` nor `spaces.layout` (as `default`) provides warns too.
+fn resolve_layout_names(root: &Value, s: &mut Settings) {
+    let mut names: Vec<String> = Vec::new();
+    if let Some(value) = root.get("layouts") {
+        names = poimen_core::settings::parse_layouts(value, &mut s.warnings)
+            .into_iter()
+            .map(|l| l.name)
+            .collect();
+    }
+    if s.spaces_layout.is_some() {
+        names.push(crate::layout::DEFAULT_NAME.to_owned());
+    }
+    for t in &s.space_templates {
+        if let Some(n) = t.layout_name.as_ref().filter(|n| !names.contains(n)) {
+            s.warnings.push(format!(
+                "spaceTemplates[{}].layout: unknown layout \"{n}\"; the default layout is used",
+                t.name
+            ));
+        }
+    }
+}
+
 fn resolve_sounds(value: &Value, warnings: &mut Vec<String>) -> Sounds {
     let mut sounds = Sounds::default();
     let Some(obj) = value.as_object() else {
@@ -646,6 +669,7 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     if let Some(value) = root.get("spaceTemplates") {
         s.space_templates = parse_space_templates(value, &mut s.warnings);
     }
+    resolve_layout_names(&root, &mut s);
     if let Some(value) = root.get("tasks") {
         resolve_tasks(value, &mut s);
     }
@@ -1225,6 +1249,25 @@ mod tests {
         );
         let wire = serde_json::to_value(&s).unwrap();
         assert_eq!(wire["machines"][0]["reposDir"], "~/Source/{owner}/{repo}");
+    }
+
+    #[test]
+    fn layouts_and_template_layout_names_reach_the_settings_warnings() {
+        let s = rows(
+            r#"{"layouts":[
+              {"name":"review","tabs":[{"name":"t","panes":[{"name":"main"}]}]},
+              {"name":"review","tabs":[{"name":"t","panes":[{"name":"main"}]}]},
+              {"tabs":[]}],
+             "spaceTemplates":[
+              {"name":"ok","agent":"claude","layout":"review"},
+              {"name":"bad","match":{"dir":"/x"},"agent":"claude","layout":"nope"}]}"#,
+        );
+        let w = s.warnings.join("\n");
+        assert!(w.contains("layouts[review]: duplicate name"), "{w}");
+        assert!(w.contains("layouts[2].name"), "{w}");
+        assert!(w.contains("unknown layout \"nope\""), "{w}");
+        assert!(!w.contains("unknown layout \"review\""), "{w}");
+        assert_eq!(s.warnings.len(), 3, "{w}");
     }
 
     #[test]
@@ -2214,6 +2257,16 @@ mod tests {
         save_space_templates(&home, &serde_json::json!([])).unwrap();
         assert!(load(&home).space_templates.is_empty());
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn saving_templates_keeps_a_layout_name_reference_as_a_string() {
+        let t = serde_json::json!([{"name": "a", "agent": "claude", "layout": "review"}]);
+        let out = set_space_templates_text("{}", &t).unwrap();
+        let back: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(back["spaceTemplates"][0]["layout"], "review");
+        let bad = serde_json::json!([{"name": "a", "agent": "claude", "layout": 3}]);
+        assert!(set_space_templates_text("{}", &bad).is_err());
     }
 
     #[test]

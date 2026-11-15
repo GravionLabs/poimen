@@ -321,6 +321,25 @@ fn without_a_project_file_the_user_layout_is_built_without_asking() {
 }
 
 #[test]
+fn a_template_that_names_a_layout_builds_its_tabs_end_to_end() {
+    let env = Env::new("named");
+    let dir = env.repo("other");
+    env.write_config(&format!(
+        r#"{{"layouts": [{{"name": "duo", "tabs": [
+              {{"name": "first", "command": "{}", "children": [{{"name": "second"}}]}}]}}],
+            "spaceTemplates": [{{"name": "t", "agent": "claude", "layout": "duo",
+              "match": {{"dir": {dir:?}}}}}]}}"#,
+        marker("first-ran")
+    ));
+    let client = env.start();
+    let space = created(create(&client, &dir, None));
+    let names: Vec<_> = space.tabs.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["first", "second"]);
+    wait_for_file(&env.dir.join("other/first-ran"));
+    client.close_space(&space.space.id).unwrap();
+}
+
+#[test]
 fn layout_false_creates_an_empty_space() {
     let env = Env::new("empty");
     env.project("repo", &project_file());
