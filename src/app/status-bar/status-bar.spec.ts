@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
-import { Component } from "@angular/core";
+import { Component, type WritableSignal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { SERVER_RESTART_NOTE, type UpdateState } from "../core/updater";
 import type { BarSummary } from "../deliver/deliver-status";
-import { CHANNEL_TITLE, connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
+import {
+  CHANNEL_TITLE,
+  StatusBar,
+  connectionLabel,
+  modeLabel,
+  modeTitle,
+  sizeLabel,
+} from "./status-bar";
 
 beforeAll(() => {
   try {
@@ -83,6 +90,7 @@ describe("mode button", () => {
     let deliverClicks = 0;
     let shown = 0;
     let opened = 0;
+    let closed = 0;
     @Component({
       selector: "app-host",
       template: readFileSync("src/app/status-bar/status-bar.html", "utf8"),
@@ -99,6 +107,7 @@ describe("mode button", () => {
       channelTitle = CHANNEL_TITLE;
       update = () => update;
       detailsOpen = () => update.kind === "available";
+      closeDetails = () => closed++;
       serverNotice = () => server;
       restartServer = { emit: () => serverClicks.push("restart") };
       laterServer = { emit: () => serverClicks.push("later") };
@@ -140,8 +149,20 @@ describe("mode button", () => {
       shown: () => shown,
       opened: () => opened,
       deliverClicks: () => deliverClicks,
+      closed: () => closed,
     };
   };
+
+  it("closes the update details with the close button", () => {
+    const { root, closed } = render("control", null, true, null, null, {
+      kind: "available",
+      info: { version: "1.2.3", notes: "n" },
+    } as UpdateState);
+    const close = root.querySelector<HTMLButtonElement>(".update-details .close-details")!;
+    expect(close.getAttribute("aria-label")).toBe("Close");
+    close.click();
+    expect(closed()).toBe(1);
+  });
 
   it("shows the running deliver loops and opens the panel on a click", () => {
     const { root, deliverClicks } = render("control", null, true, {
@@ -290,5 +311,46 @@ describe("mode button", () => {
     expect(button.title).toContain("controller held");
     button.click();
     expect(emitted).toEqual([]);
+  });
+});
+
+describe("update details popover", () => {
+  const make = () => {
+    TestBed.resetTestingModule();
+    const bar = TestBed.runInInjectionContext(() => new StatusBar());
+    const open = bar as unknown as { detailsOpen: WritableSignal<boolean> };
+    open.detailsOpen.set(true);
+    return { bar, open };
+  };
+
+  it("has an opaque background from a token other popups use", () => {
+    const css = readFileSync("src/app/status-bar/status-bar.css", "utf8");
+    const rule = /\.update-details \{[^}]*\}/.exec(css)![0];
+    expect(rule).toContain("background: var(--h-content-background);");
+    expect(rule).not.toContain("--h-surface-color");
+  });
+
+  it("closes on Escape", () => {
+    const { bar, open } = make();
+    bar.closeDetails();
+    expect(open.detailsOpen()).toBe(false);
+  });
+
+  it("closes on a click outside", () => {
+    const { bar, open } = make();
+    bar.onDocumentClick({ target: document.body } as unknown as Event);
+    expect(open.detailsOpen()).toBe(false);
+  });
+
+  it("stays open on a click inside the details or on the update button", () => {
+    const { bar, open } = make();
+    for (const cls of ["update-details", "update-button"]) {
+      const el = document.createElement("div");
+      el.className = cls;
+      const inner = document.createElement("span");
+      el.append(inner);
+      bar.onDocumentClick({ target: inner } as unknown as Event);
+      expect(open.detailsOpen()).toBe(true);
+    }
   });
 });

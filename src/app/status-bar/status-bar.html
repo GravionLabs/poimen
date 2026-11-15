@@ -1,6 +1,15 @@
 <footer class="bar" role="status">
   @if (detailsOpen() && (update().kind === "available" || update().kind === "error")) {
     <section class="update-details" aria-label="Update">
+      <button
+        type="button"
+        class="close-details"
+        aria-label="Close"
+        title="Close"
+        (click)="closeDetails()"
+      >
+        ×
+      </button>
       @if ($any(update()).step; as step) {
         <h3 class="failed">{{ errTitle(step) }}</h3>
         <pre class="message">{{ $any(update()).message }}</pre>
