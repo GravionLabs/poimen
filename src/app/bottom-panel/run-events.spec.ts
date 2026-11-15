@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { clockText, parseStatus, runTitle, type DeliverCard } from "../deliver/deliver-status";
 import {
   eventTime,
+  pickHolds,
+  pickRunOf,
   runLabel,
   runsOfSpace,
   selectRun,
@@ -10,11 +12,18 @@ import {
   type RunChoice,
 } from "./run-events";
 
-function card(run: string, updated: string, terminal?: string, root = "/repo"): DeliverCard {
+function card(
+  run: string,
+  updated: string,
+  terminal?: string,
+  root = "/repo",
+  started = updated,
+  state: "running" | "finished" = "running",
+): DeliverCard {
   const status = parseStatus({
     v: 1,
     run,
-    status: "running",
+    status: state,
     tasks: [],
     finished: {},
     attentions: [],
@@ -24,6 +33,7 @@ function card(run: string, updated: string, terminal?: string, root = "/repo"): 
     tone: "neutral",
     host: terminal ? { "poimen.terminal": terminal } : {},
     events: [
+      { type: "run.started", tone: "neutral", ts: started },
       { type: "step.finished", tone: "info", task: "t5", step: "implement", ts: updated },
       { type: "bogus-row-without-tone" },
       "not a row",
@@ -33,6 +43,8 @@ function card(run: string, updated: string, terminal?: string, root = "/repo"): 
   return { root, run, state: { kind: "ok", status } };
 }
 
+const NOW = Date.parse("2026-11-07T13:00:00.000Z");
+
 describe("runs of a space", () => {
   const cards = [
     card("old", "2026-11-07T10:00:00.000Z", "t1"),
@@ -41,55 +53,119 @@ describe("runs of a space", () => {
   ];
 
   it("lists only the runs of the repository around the directory", () => {
-    expect(runsOfSpace(cards, "/repo/sub").map((r) => r.status.run)).toEqual(["old", "new"]);
+    expect(runsOfSpace(cards, "/repo/sub").map((r) => r.status.run)).toEqual(["new", "old"]);
     expect(runsOfSpace(cards, undefined)).toEqual([]);
     expect(runsOfSpace(cards, "/repository")).toEqual([]);
   });
 
   it("selects the run whose host terminal is the active terminal", () => {
     const runs = runsOfSpace(cards, "/repo");
-    expect(selectRun(runs, "t1", null)?.status.run).toBe("old");
+    expect(selectRun(runs, "t1", null, NOW)?.status.run).toBe("old");
   });
 
   it("falls back to the latest run when no terminal matches", () => {
     const runs = runsOfSpace(cards, "/repo");
-    expect(selectRun(runs, "t9", null)?.status.run).toBe("new");
+    expect(selectRun(runs, "t9", null, NOW)?.status.run).toBe("new");
   });
 
   it("lets the picker win and ignores a stale pick", () => {
     const runs = runsOfSpace(cards, "/repo");
-    expect(selectRun(runs, "t2", runs[0]!.key)?.status.run).toBe("old");
-    expect(selectRun(runs, "t2", "gone")?.status.run).toBe("new");
+    expect(selectRun(runs, "t2", pickRunOf(runs, runs[1]!.key), NOW)?.status.run).toBe("old");
+    expect(selectRun(runs, "t2", { key: "gone", seen: 0 }, NOW)?.status.run).toBe("new");
   });
 
-  it("picks the same run for the terminal in any card order", () => {
-    const mk = (run: string, updated: string, status: "running" | "finished") => {
-      const c = card(run, updated, "t7");
-      if (c.state.kind === "ok") c.state.status.status = status;
-      return c;
-    };
+  it("lists the runs newest first by start, updated breaking the tie", () => {
     const list = [
-      mk("a", "2026-11-07T10:00:00.000Z", "running"),
-      mk("b", "2026-11-07T12:00:00.000Z", "finished"),
-      mk("c", "2026-11-07T11:00:00.000Z", "running"),
-      mk("d", "2026-11-07T11:00:00.000Z", "running"),
+      card("a", "2026-11-07T12:30:00.000Z", "t7", "/repo", "2026-11-07T10:00:00.000Z"),
+      card("b", "2026-11-07T11:00:00.000Z", "t7", "/repo", "2026-11-07T11:00:00.000Z"),
+      card("c", "2026-11-07T11:30:00.000Z", "t7", "/repo", "2026-11-07T11:00:00.000Z"),
     ];
-    for (const order of [list, [...list].reverse(), [list[2]!, list[0]!, list[3]!, list[1]!]]) {
-      const runs = runsOfSpace(order, "/repo");
-      expect(selectRun(runs, "t7", null)?.status.run).toBe("c");
-      expect(selectRun(runs, "t9", null)?.status.run).toBe("c");
+    for (const order of [list, [...list].reverse()]) {
+      expect(runsOfSpace(order, "/repo").map((r) => r.status.run)).toEqual(["c", "b", "a"]);
     }
   });
 
+  it("shows the running run of the terminal with the latest update, then its latest run", () => {
+    const stale = card(
+      "stale",
+      "2026-11-07T08:00:00.000Z",
+      "t7",
+      "/repo",
+      "2026-11-07T07:00:00.000Z",
+    );
+    const done = card(
+      "done",
+      "2026-11-07T11:30:00.000Z",
+      "t7",
+      "/repo",
+      "2026-11-07T11:00:00.000Z",
+      "finished",
+    );
+    const run1 = card(
+      "run1",
+      "2026-11-07T12:10:00.000Z",
+      "t7",
+      "/repo",
+      "2026-11-07T09:00:00.000Z",
+    );
+    const run2 = card(
+      "run2",
+      "2026-11-07T12:40:00.000Z",
+      "t7",
+      "/repo",
+      "2026-11-07T08:30:00.000Z",
+    );
+    const other = card(
+      "other",
+      "2026-11-07T12:50:00.000Z",
+      "t8",
+      "/repo",
+      "2026-11-07T12:50:00.000Z",
+    );
+    const list = [stale, done, run1, run2, other];
+    for (const order of [list, [...list].reverse()]) {
+      const run = (id: string | null) =>
+        selectRun(runsOfSpace(order, "/repo"), id, null, NOW)?.status.run;
+      expect(run("t7")).toBe("run2");
+      // No running run left: the latest run of the terminal, not the stale one before it.
+      const noRunning = order.filter(
+        (c) => c.run === "stale" || c.run === "done" || c.run === "other",
+      );
+      expect(selectRun(runsOfSpace(noRunning, "/repo"), "t7", null, NOW)?.status.run).toBe("done");
+      // Another terminal, or none: the latest run of the repository.
+      expect(run("t9")).toBe("other");
+      expect(run(null)).toBe("other");
+    }
+  });
+
+  it("drops a pick when a run starts after it, when it is gone or the repository changes", () => {
+    const a = card("a", "2026-11-07T10:00:00.000Z", "t1");
+    const b = card("b", "2026-11-07T11:00:00.000Z", "t1");
+    const runs = runsOfSpace([a, b], "/repo");
+    const older = pickRunOf(runs, runs[1]!.key);
+    expect(pickHolds(runs, older)).toBe(true);
+    expect(selectRun(runs, "t1", older, NOW)?.status.run).toBe("a");
+    const later = runsOfSpace([a, b, card("c", "2026-11-07T12:00:00.000Z", "t1")], "/repo");
+    expect(pickHolds(later, older)).toBe(false);
+    expect(selectRun(later, "t1", older, NOW)?.status.run).toBe("c");
+    expect(pickHolds(runsOfSpace([b], "/repo"), older)).toBe(false);
+    expect(pickHolds(runsOfSpace([a, b], "/elsewhere"), older)).toBe(false);
+    expect(pickHolds(runs, null)).toBe(false);
+  });
+
   it("has no run for a space without runs", () => {
-    expect(selectRun([], "t1", null)).toBeUndefined();
+    expect(selectRun([], "t1", null, NOW)).toBeUndefined();
   });
 
   it("keeps valid event rows and drops malformed ones", () => {
-    const events = runsOfSpace(cards, "/repo")[0]!.status.events;
-    expect(events.map((e) => e.type)).toEqual(["step.finished", "bogus-row-without-tone"]);
-    expect(events[0]).toMatchObject({ tone: "info", task: "t5", step: "implement" });
-    expect(events[1]!.tone).toBe("neutral");
+    const events = runsOfSpace(cards, "/repo")[1]!.status.events;
+    expect(events.map((e) => e.type)).toEqual([
+      "run.started",
+      "step.finished",
+      "bogus-row-without-tone",
+    ]);
+    expect(events[1]).toMatchObject({ tone: "info", task: "t5", step: "implement" });
+    expect(events[2]!.tone).toBe("neutral");
   });
 });
 
@@ -108,7 +184,7 @@ describe("runs of a remote space (#692)", () => {
     expect(onBox[0]!.key).not.toBe(runsOfSpace(cards, "/repo")[0]!.key);
     expect(runsOfSpace(cards, "/repo", "gpu")).toEqual([]);
     // The remote run is found by the qualified terminal of the machine's snapshot.
-    expect(selectRun(onBox, "box::t1", null)?.status.updated).toBe("2026-11-07T11:00:00.000Z");
+    expect(selectRun(onBox, "box::t1", null, NOW)?.status.updated).toBe("2026-11-07T11:00:00.000Z");
   });
 
   it("labels a remote run with its machine and an offline one as offline", () => {
