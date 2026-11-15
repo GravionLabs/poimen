@@ -350,8 +350,6 @@ jobs:
     needs: [test, release, prerelease]
     if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) && contains(fromJSON('["success","skipped"]'), needs.prerelease.result) }}
     runs-on: ${{ matrix.os }}
-    # Only the Windows leg reads the signing secrets (#672); the other legs have no environment (empty string).
-    environment: ${{ matrix.environment || '' }}
     permissions:
       contents: write # upload the assets to the release
     env:
@@ -440,6 +438,8 @@ jobs:
     needs: [test, release, prerelease]
     if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) && contains(fromJSON('["success","skipped"]'), needs.prerelease.result) }}
     runs-on: ${{ matrix.os }}
+    # Only the Windows leg reads the signing secrets (#672); the other legs have no environment (empty string).
+    environment: ${{ matrix.environment || '' }}
     permissions:
       contents: write # upload the assets to the release
     env:
