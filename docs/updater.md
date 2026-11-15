@@ -35,7 +35,7 @@ was removed from the release; the signature does not match the public key.
 ## Signing
 
 Update packages are signed with a Tauri updater key. This is separate from operating system code
-signing, which the installers do not have yet (#45).
+signing of the macOS bundle (see [releasing.md](releasing.md)).
 
 - The public key is `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`; the endpoint is
   `https://github.com/GravionLabs/poimen/releases/latest/download/latest.json`.
