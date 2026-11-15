@@ -1,202 +1,356 @@
 <div class="page">
   <header>
-    <h1>Deliver</h1>
-    <span class="hint">Live state of the agent runs of the open spaces</span>
+    <h1>Runs</h1>
+    <span class="hint">Agent runs (deliver loops and sessions) of the open repositories.</span>
   </header>
   @if (deliver.cards().length === 0) {
     <p class="hint" data-testid="empty">
-      No run found. A run reports its progress to <code>.agents/events/&lt;run&gt;.jsonl</code> in
-      the git directory of its repository (agent-events); it appears here as soon as the file
-      exists.
+      No run yet. A run starts when an agent reports agent-events to
+      <code>.agents/events/&lt;run&gt;.jsonl</code> in the git directory of its repository, for
+      example a deliver loop started with "Start task" in the <code>deliver-loop</code> mode; it
+      appears here as soon as the file exists.
     </p>
   }
-  @for (card of deliver.cards(); track cardKey(card)) {
-    @if (card.state.kind === "events-version") {
-      <section class="card" data-testid="card">
-        <h2 class="mono">{{ where(card) }}</h2>
+  @for (card of problems(); track cardKey(card)) {
+    <section class="card" data-testid="problem">
+      <h2 class="mono">{{ where(card) }}</h2>
+      @if (card.state.kind === "events-version") {
         <p class="hint" data-testid="events-version">
           Some events use version {{ $any(card.state).version }}, which this version of poimen does
           not know (it reads version {{ eventsVersion }}). Update poimen to see those runs.
         </p>
-      </section>
-    } @else if (card.state.kind === "unsupported") {
-      <section class="card" data-testid="card">
-        <h2 class="mono">{{ where(card) }}</h2>
+      } @else if (card.state.kind === "unsupported") {
         <p class="hint" data-testid="unsupported">
           This status file uses schema version {{ $any(card.state).version }}, which this version of
           poimen does not know (it reads version {{ supported }}). Update poimen to see this run.
         </p>
-      </section>
-    } @else if (card.state.kind === "invalid") {
-      <section class="card" data-testid="card">
-        <h2 class="mono">{{ where(card) }}</h2>
+      } @else {
         <p class="problem" role="alert" data-testid="invalid">
           The run cannot be shown: {{ $any(card.state).error }}
         </p>
-      </section>
-    } @else {
-      @let s = $any(card.state).status;
-      @let state = runState(s);
-      <section
-        class="card state-{{ state }} tone-{{ s.tone }}"
-        [class.offline]="card.offline"
-        data-testid="card"
-        [attr.data-tone]="s.tone"
-        [attr.data-machine]="card.machine ?? null"
-      >
-        @if (card.machine) {
-          <p class="machine" data-testid="machine">
-            <span class="mono">{{ card.machine }}</span>
-            @if (card.offline) {
-              <span class="offline-mark" data-testid="offline">offline, last known state</span>
-            }
-          </p>
-        }
-        <div class="card-head">
-          <h2>
-            @if (s.subject?.url; as url) {
-              <button type="button" class="link" (click)="deliver.openUrl(url)">
-                {{ s.subject.title }}
-              </button>
-            } @else {
-              <span>{{ title(s, card.root) }}</span>
-            }
-          </h2>
-          <span class="state" data-testid="state">{{ stateText(s) }}</span>
-        </div>
-        @if (s.progress; as p) {
-          <div
-            class="bar"
-            role="progressbar"
-            aria-label="Progress"
-            [attr.aria-valuenow]="p.done"
-            aria-valuemin="0"
-            [attr.aria-valuemax]="p.total"
-          >
-            <div class="fill" [style.width.%]="percent(p)"></div>
-          </div>
-          <p class="progress" data-testid="progress">{{ progressText(p) }}</p>
-        }
+      }
+    </section>
+  }
 
-        @if (s.tasks.length > 0) {
-          <h3>Open</h3>
-          <ul data-testid="tasks">
-            @for (t of s.tasks; track t.task) {
-              <li class="current" data-testid="task">
-                @if (t.subject.url; as url) {
-                  <button type="button" class="link" (click)="deliver.openUrl(url)">
-                    {{ t.subject.title }}
-                  </button>
-                } @else {
-                  <span>{{ t.subject.title }}</span>
-                }
-                @if (t.step; as step) {
-                  <span class="step" data-testid="step">{{ stepText(step) }}</span>
-                  @if (step.text) {
-                    <span class="hint">{{ step.text }}</span>
-                  }
-                }
-                @if (t.progress; as p) {
-                  <span class="hint" data-testid="task-progress">{{ progressText(p) }}</span>
-                }
-                @for (l of t.links; track l.url) {
-                  <button type="button" class="link" (click)="deliver.openUrl(l.url)">
-                    {{ linkLabel(l) }}
-                  </button>
-                }
-              </li>
-            }
-          </ul>
-        }
+  @if (sections().running.length > 0) {
+    <section class="section" data-testid="running" aria-labelledby="runs-running">
+      <h2 id="runs-running" class="section-title">Running now</h2>
+      @for (g of sections().running; track g.key) {
+        <ng-container *ngTemplateOutlet="groupTpl; context: { $implicit: g, live: true }" />
+      }
+    </section>
+  }
 
-        @if (needsYou(s).length > 0) {
-          <h3>Needs you</h3>
-          <ul data-testid="needs-you">
-            @for (a of needsYou(s); track a.id) {
-              <li>
-                {{ a.reason }}
-                @for (l of a.links; track l.url) {
-                  <button type="button" class="link" (click)="deliver.openUrl(l.url)">
-                    {{ linkLabel(l) }}
-                  </button>
-                }
-              </li>
-            }
-          </ul>
-        }
-        @if (notices(s).length > 0) {
-          <h3>Attention</h3>
-          <ul data-testid="notices">
-            @for (a of notices(s); track a.id) {
-              <li>
-                {{ a.reason }}
-                @for (l of a.links; track l.url) {
-                  <button type="button" class="link" (click)="deliver.openUrl(l.url)">
-                    {{ linkLabel(l) }}
-                  </button>
-                }
-              </li>
-            }
-          </ul>
-        }
-        @if (s.finished.length > 0) {
-          <h3>Finished</h3>
-          <ul data-testid="finished">
-            @for (t of s.finished; track t.task) {
-              <li [class]="'outcome-' + t.outcome">
-                @if (t.subject.url; as url) {
-                  <button type="button" class="link" (click)="deliver.openUrl(url)">
-                    {{ t.subject.title }}
-                  </button>
-                } @else {
-                  <span>{{ t.subject.title }}</span>
-                }
-                <span class="hint">{{ t.outcome }}{{ t.reason ? ": " + t.reason : "" }}</span>
-                @for (l of t.links; track l.url) {
-                  <button type="button" class="link" (click)="deliver.openUrl(l.url)">
-                    {{ linkLabel(l) }}
-                  </button>
-                }
-              </li>
-            }
-          </ul>
-        }
-        @if (s.links.length > 0) {
-          <p class="release" data-testid="links">
-            Links
-            @for (l of s.links; track l.url) {
+  @if (needsYou().length > 0) {
+    <section class="section" data-testid="needs-you" aria-labelledby="runs-needs-you">
+      <h2 id="runs-needs-you" class="section-title">Needs you</h2>
+      <ul class="needs">
+        @for (item of needsYou(); track item.key) {
+          <li data-testid="need">
+            <span class="group-name">{{ title(item.run.status, item.group.root) }}</span>
+            <span>{{ outcomeText(item.attention) }}</span>
+            @for (l of item.attention.links; track l.url) {
               <button type="button" class="link" (click)="deliver.openUrl(l.url)">
                 {{ linkLabel(l) }}
               </button>
             }
-          </p>
+          </li>
         }
+      </ul>
+    </section>
+  }
 
-        <footer>
-          <span class="hint mono">{{ agentText(s) }}{{ where(card) }}</span>
-          <span class="actions">
-            @if (s.subject?.url; as url) {
-              <button type="button" data-testid="open-subject" (click)="deliver.openUrl(url)">
-                Open {{ subjectLabel(s) }}
-              </button>
-            }
-            @if (deliver.paneOf(card); as pane) {
-              <button type="button" data-testid="focus" (click)="paneChosen.emit(pane)">
-                Focus terminal
-              </button>
-            }
-            @if (!card.machine && state !== "running" && s.subject?.kind === "github.milestone") {
-              <button
-                type="button"
-                data-testid="start"
-                (click)="deliver.startLoop(s, card.root, card.machine)"
-              >
-                Start loop
-              </button>
-            }
-          </span>
-        </footer>
-      </section>
-    }
+  @if (sections().history.length > 0) {
+    <section class="section" data-testid="history" aria-labelledby="runs-history">
+      <h2 id="runs-history" class="section-title">History</h2>
+      @for (g of sections().history; track g.key) {
+        <ng-container *ngTemplateOutlet="groupTpl; context: { $implicit: g, live: false }" />
+      }
+    </section>
   }
 </div>
+
+<ng-template #groupTpl let-g let-live="live">
+  @let head = newest(g);
+  @let open = groupOpen(g);
+  <article
+    class="card group tone-{{ head.tone }}"
+    [class.offline]="g.offline"
+    [class.cursor]="cursor() === g.key"
+    data-testid="group"
+    [attr.data-tone]="head.tone"
+    [attr.data-machine]="g.machine ?? null"
+  >
+    @if (g.machine) {
+      <p class="machine" data-testid="machine">
+        <span class="mono">{{ g.machine }}</span>
+        @if (g.offline) {
+          <span class="offline-mark" data-testid="offline">offline, last known state</span>
+        }
+      </p>
+    }
+    <div class="card-head">
+      <button
+        type="button"
+        class="toggle"
+        data-testid="group-toggle"
+        [attr.data-row]="g.key"
+        [attr.aria-expanded]="open"
+        (click)="toggleGroup(g)"
+      >
+        <span class="chevron" aria-hidden="true">{{ open ? "▾" : "▸" }}</span>
+        <span class="group-name">{{ title(head, g.root) }}</span>
+        <span class="hint">{{ g.runs.length === 1 ? "1 run" : g.runs.length + " runs" }}</span>
+      </button>
+      <span class="state" data-testid="state">{{ stateText(head) }}</span>
+    </div>
+    @if (head.progress; as p) {
+      <div
+        class="bar"
+        role="progressbar"
+        aria-label="Progress"
+        [attr.aria-valuenow]="p.done"
+        aria-valuemin="0"
+        [attr.aria-valuemax]="p.total"
+      >
+        <div class="fill" [style.width.%]="percent(p)"></div>
+      </div>
+      <p class="progress" data-testid="progress">{{ progressText(p) }}</p>
+    }
+
+    @if (live) {
+      @let run = running(g)!;
+      @for (t of run.status.tasks.slice(0, 1); track t.task) {
+        <div class="current" data-testid="current">
+          @if (t.subject.url; as url) {
+            <button type="button" class="link" (click)="deliver.openUrl(url)">
+              {{ t.subject.title }}
+            </button>
+          } @else {
+            <span>{{ t.subject.title }}</span>
+          }
+          @if (t.step; as s) {
+            <span class="step" data-testid="step">{{ stepText(s) }}</span>
+            @if (step(s); as pos) {
+              <div
+                class="bar step-bar"
+                role="progressbar"
+                aria-label="Step"
+                [attr.aria-valuenow]="pos.n"
+                aria-valuemin="0"
+                [attr.aria-valuemax]="pos.total"
+              >
+                <div
+                  class="fill"
+                  [style.width.%]="percent({ done: pos.n, total: pos.total })"
+                ></div>
+              </div>
+            }
+            @if (s.text) {
+              <span class="hint" data-testid="step-text">{{ s.text }}</span>
+            }
+          }
+        </div>
+      }
+      <p class="hint" data-testid="age">last event {{ age(run.status) }}</p>
+    }
+
+    <footer>
+      <span class="hint mono">{{ agentText(head) }}{{ where(g) }}</span>
+      <span class="actions">
+        @if (live) {
+          @if (paneOf(g); as pane) {
+            <button
+              type="button"
+              class="primary"
+              data-testid="focus"
+              (click)="paneChosen.emit(pane)"
+            >
+              Focus terminal
+            </button>
+          }
+        }
+        @if (g.subject?.url; as url) {
+          <button type="button" data-testid="open-subject" (click)="deliver.openUrl(url)">
+            Open {{ subjectLabel(g) }}
+          </button>
+        }
+        @if (canStart(g)) {
+          <button type="button" data-testid="start" (click)="startLoop(g)">Start loop</button>
+        }
+      </span>
+    </footer>
+
+    @if (open) {
+      <ol class="timeline" data-testid="timeline">
+        @for (r of g.runs; track r.key; let i = $index) {
+          @let tl = line(g, i);
+          @let lineOpen = runOpen(r);
+          <li
+            class="line tone-{{ r.status.tone }}"
+            [class.cursor]="cursor() === r.key"
+            data-testid="line"
+            [attr.data-tone]="r.status.tone"
+          >
+            <div class="line-head">
+              <button
+                type="button"
+                class="toggle"
+                data-testid="line-toggle"
+                [attr.data-row]="r.key"
+                [attr.aria-expanded]="lineOpen"
+                (click)="toggleRun(r)"
+              >
+                <span class="chevron" aria-hidden="true">{{ lineOpen ? "▾" : "▸" }}</span>
+                <span class="mono" data-testid="span">{{ tl.span }}</span>
+                <span class="outcome" data-testid="outcome">{{ tl.outcome }}</span>
+              </button>
+              @for (l of tl.prs; track l.url) {
+                <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                  {{ linkLabel(l) }}
+                </button>
+              }
+              @for (c of lineCounts(tl); track c) {
+                <span class="hint" data-testid="count">{{ c }}</span>
+              }
+              @for (n of tl.notes; track $index) {
+                <span class="hint note" data-testid="note">{{ n }}</span>
+              }
+            </div>
+            @if (lineOpen) {
+              <div class="details" data-testid="details">
+                @if (isRunning(r)) {
+                  @if (r.status.tasks.length > 0) {
+                    <h3>Open</h3>
+                    <ul data-testid="tasks">
+                      @for (t of r.status.tasks; track t.task) {
+                        <li data-testid="task">
+                          <span>{{ t.subject.title }}</span>
+                          @if (t.step; as s) {
+                            <span class="step">{{ stepText(s) }}</span>
+                          }
+                          @if (t.progress; as p) {
+                            <span class="hint" data-testid="task-progress">{{
+                              progressText(p)
+                            }}</span>
+                          }
+                        </li>
+                      }
+                    </ul>
+                  }
+                } @else {
+                  @let left = leftOpen(g, i);
+                  @if (left.length > 0) {
+                    <h3>Left open</h3>
+                    <ul data-testid="left-open">
+                      @for (t of left; track t.task.task) {
+                        <li data-testid="left-task">
+                          @if (t.task.subject.url; as url) {
+                            <button type="button" class="link" (click)="deliver.openUrl(url)">
+                              {{ t.task.subject.title }}
+                            </button>
+                          } @else {
+                            <span>{{ t.task.subject.title }}</span>
+                          }
+                          @if (t.waiting) {
+                            <span class="hint" data-testid="waiting">waiting for merge</span>
+                            @if (t.pr; as pr) {
+                              <button type="button" class="link" (click)="deliver.openUrl(pr.url)">
+                                {{ linkLabel(pr) }}
+                              </button>
+                            }
+                          } @else {
+                            <span class="hint">left open</span>
+                            @if (t.task.step; as s) {
+                              <span class="hint">at {{ stepText(s) }}</span>
+                            }
+                          }
+                        </li>
+                      }
+                    </ul>
+                  }
+                }
+                @if (alerts(r.status).length > 0) {
+                  <h3>Attention</h3>
+                  <ul data-testid="alerts">
+                    @for (a of alerts(r.status); track a.id) {
+                      <li>
+                        {{ outcomeText(a) }}
+                        @for (l of a.links; track l.url) {
+                          <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                            {{ linkLabel(l) }}
+                          </button>
+                        }
+                      </li>
+                    }
+                  </ul>
+                }
+                @if (r.status.finished.length > 0) {
+                  <h3>Finished</h3>
+                  <ul data-testid="finished">
+                    @for (t of r.status.finished; track t.task) {
+                      <li>
+                        @if (t.subject.url; as url) {
+                          <button type="button" class="link" (click)="deliver.openUrl(url)">
+                            {{ t.subject.title }}
+                          </button>
+                        } @else {
+                          <span>{{ t.subject.title }}</span>
+                        }
+                        <span class="hint"
+                          >{{ t.outcome }}{{ outcomeText(t) ? ": " + outcomeText(t) : "" }}</span
+                        >
+                        @for (l of t.links; track l.url) {
+                          <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                            {{ linkLabel(l) }}
+                          </button>
+                        }
+                      </li>
+                    }
+                  </ul>
+                }
+                @if (r.status.links.length > 0) {
+                  <p class="links" data-testid="links">
+                    Links
+                    @for (l of r.status.links; track l.url) {
+                      <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                        {{ linkLabel(l) }}
+                      </button>
+                    }
+                  </p>
+                }
+                @if (r.status.events.length > 0) {
+                  <h3>Events</h3>
+                  <ul class="events" data-testid="events">
+                    @for (e of r.status.events; track $index) {
+                      <li class="event {{ toneStyle(e.tone).class }}" data-testid="event">
+                        <span class="mono">{{ eventTime(e.ts) }}</span>
+                        <span class="icon" aria-hidden="true">{{ toneStyle(e.tone).icon }}</span>
+                        <span>{{ e.type }}</span>
+                        @if (e.task) {
+                          <span class="hint">{{ e.task }}</span>
+                        }
+                        @if (e.step) {
+                          <span class="hint">{{ e.step }}</span>
+                        }
+                        @if (e.outcome) {
+                          <span class="hint">{{ e.outcome }}</span>
+                        }
+                        @if (e.link; as url) {
+                          <button type="button" class="link" (click)="deliver.openUrl(url)">
+                            {{ prLabel(url) }}
+                          </button>
+                        }
+                      </li>
+                    }
+                  </ul>
+                }
+                <p class="hint mono">{{ r.status.run }}</p>
+              </div>
+            }
+          </li>
+        }
+      </ol>
+    }
+  </article>
+</ng-template>

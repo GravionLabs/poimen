@@ -1,0 +1,273 @@
+[
+  {
+    "v": 1,
+    "run": "20261107-080000-loop",
+    "status": "finished",
+    "outcome": "failed",
+    "reason": "deliver.partial",
+    "subject": {
+      "kind": "github.milestone",
+      "id": "GravionLabs/demo#14",
+      "title": "M014.1 Runs view",
+      "url": "https://github.com/GravionLabs/demo/milestone/14"
+    },
+    "progress": { "done": 1, "total": 7, "label": "issues" },
+    "tasks": [
+      {
+        "task": "t101",
+        "subject": {
+          "kind": "github.issue",
+          "id": "GravionLabs/demo#101",
+          "title": "#101 Group runs",
+          "url": "https://github.com/GravionLabs/demo/issues/101"
+        },
+        "step": { "name": "implement", "n": 2, "total": 3 }
+      }
+    ],
+    "finished": {
+      "succeeded": [
+        {
+          "task": "t100",
+          "subject": {
+            "kind": "github.issue",
+            "id": "GravionLabs/demo#100",
+            "title": "#100 Parse runs"
+          },
+          "links": [
+            { "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/200" }
+          ]
+        }
+      ],
+      "failed": [],
+      "cancelled": [],
+      "skipped": []
+    },
+    "attentions": [],
+    "needsYou": false,
+    "links": [{ "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/200" }],
+    "gaps": [],
+    "lastSeq": 9,
+    "updated": "2026-11-07T09:00:00.000Z",
+    "tone": "neutral",
+    "host": { "poimen.terminal": "t7" },
+    "agent": { "harness": "claude" },
+    "events": [
+      { "seq": 1, "ts": "2026-11-07T08:00:00.000Z", "type": "run.started", "tone": "neutral" },
+      {
+        "seq": 9,
+        "ts": "2026-11-07T09:00:00.000Z",
+        "type": "run.finished",
+        "tone": "neutral",
+        "outcome": "failed"
+      }
+    ]
+  },
+  {
+    "v": 1,
+    "run": "20261107-100000-loop",
+    "status": "finished",
+    "outcome": "failed",
+    "reason": "deliver.partial",
+    "text": "2 of 4 PBIs delivered",
+    "subject": {
+      "kind": "github.milestone",
+      "id": "GravionLabs/demo#14",
+      "title": "M014.1 Runs view",
+      "url": "https://github.com/GravionLabs/demo/milestone/14"
+    },
+    "progress": { "done": 2, "total": 7, "label": "issues" },
+    "tasks": [
+      {
+        "task": "t102",
+        "subject": {
+          "kind": "github.issue",
+          "id": "GravionLabs/demo#102",
+          "title": "#102 Timeline",
+          "url": "https://github.com/GravionLabs/demo/issues/102"
+        },
+        "step": { "name": "merge", "text": "waiting for checks" },
+        "links": [{ "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/202" }]
+      }
+    ],
+    "finished": {
+      "succeeded": [
+        {
+          "task": "t101",
+          "subject": {
+            "kind": "github.issue",
+            "id": "GravionLabs/demo#101",
+            "title": "#101 Group runs"
+          },
+          "links": [
+            { "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/201" }
+          ]
+        }
+      ],
+      "failed": [],
+      "cancelled": [],
+      "skipped": [
+        {
+          "task": "t103",
+          "subject": {
+            "kind": "github.issue",
+            "id": "GravionLabs/demo#103",
+            "title": "#103 Keyboard"
+          },
+          "reason": "blocked"
+        }
+      ]
+    },
+    "attentions": [],
+    "needsYou": false,
+    "links": [
+      { "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/201" },
+      { "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/202" }
+    ],
+    "gaps": [],
+    "lastSeq": 20,
+    "updated": "2026-11-07T11:00:00.000Z",
+    "tone": "neutral",
+    "host": {},
+    "events": [
+      { "seq": 1, "ts": "2026-11-07T10:00:00.000Z", "type": "run.started", "tone": "neutral" },
+      {
+        "seq": 12,
+        "ts": "2026-11-07T10:40:00.000Z",
+        "type": "step.finished",
+        "tone": "success",
+        "task": "t102",
+        "step": "pr",
+        "link": "https://github.com/GravionLabs/demo/pull/202"
+      },
+      {
+        "seq": 13,
+        "ts": "2026-11-07T10:41:00.000Z",
+        "type": "step.started",
+        "tone": "neutral",
+        "task": "t102",
+        "step": "merge: waiting for checks"
+      },
+      {
+        "seq": 20,
+        "ts": "2026-11-07T11:00:00.000Z",
+        "type": "run.finished",
+        "tone": "neutral",
+        "outcome": "failed"
+      }
+    ]
+  },
+  {
+    "v": 1,
+    "run": "20261107-120000-loop",
+    "status": "abandoned",
+    "subject": {
+      "kind": "github.milestone",
+      "id": "GravionLabs/demo#14",
+      "title": "M014.1 Runs view",
+      "url": "https://github.com/GravionLabs/demo/milestone/14"
+    },
+    "progress": { "done": 3, "total": 7, "label": "issues" },
+    "tasks": [
+      {
+        "task": "t104",
+        "subject": {
+          "kind": "github.issue",
+          "id": "GravionLabs/demo#104",
+          "title": "#104 Needs you section",
+          "url": "https://github.com/GravionLabs/demo/issues/104"
+        },
+        "step": { "name": "review", "n": 1, "total": 2 }
+      }
+    ],
+    "finished": { "succeeded": [], "failed": [], "cancelled": [], "skipped": [] },
+    "attentions": [
+      {
+        "id": "a1",
+        "task": "t104",
+        "reason": "decision.open",
+        "text": "Decide whether #104 ships in M014.1",
+        "needsYou": true,
+        "links": [{ "rel": "issue", "url": "https://github.com/GravionLabs/demo/issues/104" }]
+      }
+    ],
+    "needsYou": true,
+    "links": [],
+    "gaps": [],
+    "lastSeq": 6,
+    "updated": "2026-11-07T12:30:00.000Z",
+    "tone": "neutral",
+    "host": {},
+    "events": [
+      { "seq": 1, "ts": "2026-11-07T12:00:00.000Z", "type": "run.started", "tone": "neutral" },
+      {
+        "seq": 6,
+        "ts": "2026-11-07T12:30:00.000Z",
+        "type": "attention",
+        "tone": "warning",
+        "task": "t104"
+      }
+    ]
+  },
+  {
+    "v": 1,
+    "run": "20261108-080000-loop",
+    "status": "finished",
+    "outcome": "failed",
+    "reason": "deliver.partial",
+    "subject": {
+      "kind": "github.milestone",
+      "id": "GravionLabs/demo#14",
+      "title": "M014.1 Runs view",
+      "url": "https://github.com/GravionLabs/demo/milestone/14"
+    },
+    "progress": { "done": 4, "total": 7, "label": "issues" },
+    "tasks": [],
+    "finished": {
+      "succeeded": [
+        {
+          "task": "t105",
+          "subject": {
+            "kind": "github.issue",
+            "id": "GravionLabs/demo#105",
+            "title": "#105 Tone colors"
+          },
+          "links": [
+            { "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/205" }
+          ]
+        }
+      ],
+      "failed": [
+        {
+          "task": "t106",
+          "subject": {
+            "kind": "github.issue",
+            "id": "GravionLabs/demo#106",
+            "title": "#106 Start loop"
+          },
+          "reason": "ci.red",
+          "text": "CI stayed red"
+        }
+      ],
+      "cancelled": [],
+      "skipped": []
+    },
+    "attentions": [],
+    "needsYou": false,
+    "links": [{ "rel": "pull-request", "url": "https://github.com/GravionLabs/demo/pull/205" }],
+    "gaps": [],
+    "lastSeq": 30,
+    "updated": "2026-11-08T09:30:00.000Z",
+    "tone": "warning",
+    "host": {},
+    "events": [
+      { "seq": 1, "ts": "2026-11-08T08:00:00.000Z", "type": "run.started", "tone": "neutral" },
+      {
+        "seq": 30,
+        "ts": "2026-11-08T09:30:00.000Z",
+        "type": "run.finished",
+        "tone": "warning",
+        "outcome": "failed"
+      }
+    ]
+  }
+]

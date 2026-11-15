@@ -85,7 +85,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "githubPulls", title: "GitHub: Pull requests" },
   { id: "githubIssues", title: "GitHub: Issues" },
   { id: "githubMilestones", title: "GitHub: Milestones" },
-  { id: "openDeliver", title: "Open Deliver" },
+  { id: "openDeliver", title: "Open Runs" },
   { id: "showChanges", title: "Show Changes" },
   { id: "markUnread", title: "Mark Agent as Unread" },
   { id: "showSpaceOverview", title: "Show Space Overview" },
