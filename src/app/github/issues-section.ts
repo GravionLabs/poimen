@@ -11,12 +11,14 @@ import {
   type Level,
   type StateFilter,
 } from "./issues";
+import { IssueFormPane } from "./issue-form/issue-form";
 import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
 
 /** The "Issues" section of the GitHub tab: the issue tree per repository with linked pull requests. */
 @Component({
   selector: "app-github-issues",
   templateUrl: "./issues-section.html",
+  imports: [IssueFormPane],
   styleUrl: "./issues-section.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

@@ -1,0 +1,31 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+}
+h3 {
+  font-size: 13px;
+  margin: 0;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: monospace;
+}
+.tabs,
+.buttons {
+  display: flex;
+  gap: 4px;
+}
+.tabs [aria-pressed="true"] {
+  font-weight: 600;
+}

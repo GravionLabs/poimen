@@ -99,6 +99,22 @@
         }
         @if (issues.detail(); as d) {
           @if (canEdit(d)) {
+            <button
+              type="button"
+              data-testid="add-sub-issue"
+              [disabled]="issues.busy()"
+              (click)="issues.openForm(h.repo, h.number)"
+            >
+              Add sub-issue
+            </button>
+            <button
+              type="button"
+              data-testid="change-parent"
+              [disabled]="issues.busy()"
+              (click)="issues.parentQuery.set(issues.parentQuery() === null ? '' : null)"
+            >
+              Change parent
+            </button>
             @if (d.state === "OPEN") {
               <button
                 type="button"
@@ -163,6 +179,33 @@
               (add)="issues.editMeta({ milestone: $event })"
               (remove)="issues.editMeta({ removeMilestone: true })"
             />
+          </div>
+        }
+        @if (issues.parentQuery() !== null) {
+          <div class="parent-picker" data-testid="parent-picker">
+            <input
+              type="search"
+              aria-label="Search the new parent by number or title"
+              placeholder="Number or title"
+              data-testid="parent-search"
+              [value]="issues.parentQuery()"
+              (input)="issues.parentQuery.set($any($event.target).value)"
+            />
+            <ul class="list">
+              @for (c of issues.parentOptions(); track c.number) {
+                <li>
+                  <button
+                    type="button"
+                    class="link"
+                    data-testid="parent-option"
+                    [disabled]="issues.busy()"
+                    (click)="issues.changeParent(c.number)"
+                  >
+                    #{{ c.number }} {{ c.title }}
+                  </button>
+                </li>
+              }
+            </ul>
           </div>
         }
         <dl class="facts" data-testid="detail-meta">

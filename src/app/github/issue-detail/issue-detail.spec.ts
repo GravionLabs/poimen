@@ -14,6 +14,7 @@ import { MilestonesSection } from "../milestones-section";
 import { GithubPulls } from "../pulls";
 import { PullDetailPane } from "../pull-detail/pull-detail";
 import { ChipPicker } from "../chip-picker/chip-picker";
+import { IssueFormPane } from "../issue-form/issue-form";
 import { IssueDetailPane } from "./issue-detail";
 
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
@@ -131,6 +132,7 @@ async function render(detail: () => unknown = () => DETAIL) {
   withTemplate(PullDetailPane, "pull-detail/pull-detail.html");
   withTemplate(ChipPicker, "chip-picker/chip-picker.html");
   withTemplate(IssueDetailPane, "issue-detail/issue-detail.html");
+  withTemplate(IssueFormPane, "issue-form/issue-form.html");
   TestBed.inject(UiState).selectGithubPage("issues");
   const fixture = TestBed.createComponent(GithubView);
   await fixture.whenStable();
@@ -209,7 +211,7 @@ describe("issue detail pane", () => {
     expect(q(el, "[data-testid=detail-assignees]")!.textContent).toContain("octocat");
     expect(q(el, "[data-testid=detail-milestone]")!.textContent).toContain("M2");
     // Closed issue: its task button and Reopen (the viewer may update).
-    expect(q(el, "[data-testid=actions]")!.children).toHaveLength(2);
+    expect(q(el, "[data-testid=actions]")!.children).toHaveLength(4);
     expect(q(el, "[data-testid=start-task]")!.textContent!.trim()).toBe("Start task…");
     expect(q(el, "[data-testid=issue-reopen]")).not.toBeNull();
     const subs = el.querySelectorAll<HTMLButtonElement>("[data-testid=detail-sub]");
@@ -304,6 +306,8 @@ describe("issue detail editing", () => {
       "issue-close-completed",
       "issue-close-not-planned",
       "issue-reopen",
+      "add-sub-issue",
+      "change-parent",
     ]) {
       expect(q(el, `[data-testid=${id}]`), id).toBeNull();
     }
@@ -478,5 +482,84 @@ describe("issue detail editing", () => {
     await settle(fixture);
     expect(tauri.calls("github_issues").length).toBe(1);
     expect(tauri.calls("github_issue_detail").length).toBe(1);
+  });
+  it("creates an issue from the + of a repository and opens its pane", async () => {
+    tauri.answer("github_issue_create", () => ({
+      number: 1,
+      url: "https://github.com/o/n/issues/1",
+    }));
+    const { fixture, el } = await open();
+    q(el, "[data-testid=detail-close]")!.click();
+    q(el, "[data-testid=new-issue]")!.click();
+    fixture.detectChanges();
+    expect(q(el, "[data-testid=form-create]")!.hasAttribute("disabled")).toBe(true);
+    type(el, "[data-testid=form-title]", "  Brand new ");
+    type(el, "[data-testid=form-body]", "Text");
+    fixture.detectChanges();
+    q(el, "[data-testid=form-create]")!.click();
+    await settle(fixture);
+    expect(tauri.calls("github_issue_create")).toEqual([
+      {
+        root: "/src/n",
+        issue: { title: "Brand new", body: "Text", labels: [], milestone: null, parent: null },
+      },
+    ]);
+    expect(q(el, "[data-testid=issue-form]")).toBeNull();
+    expect(tauri.calls("github_issue_detail").at(-1)).toEqual({ root: "/src/n", number: 1 });
+    expect(q(el, "[data-testid=issue-detail]")).not.toBeNull();
+  });
+
+  it("opens the sub-issue form from the pane and sends the parent", async () => {
+    tauri.answer("github_issue_create", () => ({
+      number: 2,
+      url: "https://github.com/o/n/issues/2",
+    }));
+    const { fixture, el } = await open();
+    q(el, "[data-testid=add-sub-issue]")!.click();
+    fixture.detectChanges();
+    expect(q(el, "[data-testid=issue-form] h3")!.textContent).toContain("sub-issue of #1");
+    type(el, "[data-testid=form-title]", "Child");
+    fixture.detectChanges();
+    q(el, "[data-testid=form-create]")!.click();
+    await settle(fixture);
+    expect(
+      (tauri.calls("github_issue_create")[0] as { issue: { parent: number } }).issue.parent,
+    ).toBe(1);
+  });
+
+  it("keeps the form and notifies when the creation fails", async () => {
+    tauri.answer("github_issue_create", () => {
+      throw { kind: "other", message: "boom" };
+    });
+    const { fixture, el } = await open();
+    q(el, "[data-testid=new-issue]")!.click();
+    fixture.detectChanges();
+    type(el, "[data-testid=form-title]", "Child");
+    fixture.detectChanges();
+    q(el, "[data-testid=form-create]")!.click();
+    await settle(fixture);
+    expect(q(el, "[data-testid=issue-form]")).not.toBeNull();
+    expect(tauri.calls("github_issues").length).toBe(1);
+  });
+
+  it("changes the parent: search by number or title, then the backend call", async () => {
+    tauri.answer("github_issue_change_parent", () => null);
+    const { fixture, el } = await open();
+    q(el, "[data-testid=change-parent]")!.click();
+    fixture.detectChanges();
+    const names = () =>
+      [...el.querySelectorAll("[data-testid=parent-option]")].map((b) => b.textContent!.trim());
+    expect(names()).toEqual(["#2 title 2"]);
+    type(el, "[data-testid=parent-search]", "#9");
+    fixture.detectChanges();
+    expect(names()).toEqual([]);
+    type(el, "[data-testid=parent-search]", "2");
+    fixture.detectChanges();
+    q(el, "[data-testid=parent-option]")!.click();
+    await settle(fixture);
+    expect(tauri.calls("github_issue_change_parent")).toEqual([
+      { root: "/src/n", number: 1, oldParent: 9, newParent: 2 },
+    ]);
+    expect(q(el, "[data-testid=parent-picker]")).toBeNull();
   });
 });

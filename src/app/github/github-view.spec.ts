@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IssueFormPane } from "./issue-form/issue-form";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
@@ -109,6 +110,9 @@ async function render(result: PullsResult = RESULT, page: GithubPage | null = "p
       styleUrl: undefined,
       template: readFileSync("src/app/github/github-view.html", "utf8"),
     },
+  });
+  TestBed.overrideComponent(IssueFormPane, {
+    set: { templateUrl: undefined, styleUrl: undefined, template: "" },
   });
   TestBed.overrideComponent(IssuesSection, {
     set: {

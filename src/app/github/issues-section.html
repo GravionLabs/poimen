@@ -57,7 +57,24 @@
       </p>
     }
     @for (tree of issues.trees(); track tree.root) {
-      <h3 class="mono">{{ tree.repo }}</h3>
+      <h3 class="mono">
+        {{ tree.repo }}
+        <button
+          type="button"
+          class="icon-btn"
+          title="New issue"
+          data-testid="new-issue"
+          [attr.aria-label]="'New issue in ' + tree.repo"
+          (click)="issues.openForm(tree.repo)"
+        >
+          +
+        </button>
+      </h3>
+      @if (issues.form(); as f) {
+        @if (f.repo === tree.repo) {
+          <app-issue-form />
+        }
+      }
       @if (tree.count === 0) {
         <p class="hint" data-testid="issues-empty">No issues match.</p>
       }
