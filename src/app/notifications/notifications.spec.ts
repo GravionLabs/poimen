@@ -58,4 +58,16 @@ describe("Notifications", () => {
     el.querySelector<HTMLButtonElement>(".mark")!.click();
     expect(center.unread()).toBe(0);
   });
+
+  it("a click on a run entry reveals its repository instead of a pane", async () => {
+    const { fixture, center, chosen, el } = setup();
+    const runs: { root: string; machine?: string }[] = [];
+    fixture.componentInstance.runChosen.subscribe((r) => runs.push(r));
+    center.recordRuns([{ root: "/r", label: "M1", message: "M1: merge" }], 1);
+    await fixture.whenStable();
+    el.querySelector<HTMLButtonElement>(".entry")!.click();
+    expect(runs).toEqual([{ root: "/r" }]);
+    expect(chosen).toEqual([]);
+    expect(center.unread()).toBe(0);
+  });
 });
