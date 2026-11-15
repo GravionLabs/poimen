@@ -5,6 +5,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.20.1] — 2026-11-15
+
+### Bug Fixes
+- **release**: The macOS notarization fails and the Windows signing blocks every release (#826) (#825)
+- **release**: Notarize with the API key when the Apple ID variables are unset (#791)
+- **release**: Remove the Windows Authenticode signing (#791)
+
+
+### Documentation
+- **release**: The macOS notarization fails and the Windows signing blocks every release (#826) (#825)
+
+
 ## [0.20.0] — 2026-11-15
 
 ### Bug Fixes
@@ -36,6 +48,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **adr**: MCP server for agent sessions (#612) (#804)
 - **adr**: Take the Paperclip plugin spec into ADR 0007 (#786) (#787)
 - **protocol**: The Start agent dialog also offers the harnesses of the registry (#768) (#812)
+- Update CHANGELOG.md for v0.20.0 [skip ci]
 
 
 ### Features
