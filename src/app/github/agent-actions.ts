@@ -248,6 +248,8 @@ export class AgentActions {
       return row ? [pullTarget(row)] : [];
     }
     if (this.ui.githubPage() === "issues") {
+      const marked = this.issues.markedIssues();
+      if (marked.length > 0) return marked.map((m) => issueTarget(m.repo, m.root, m.issue));
       const sel = this.issues.detailIssue();
       const root = (this.issues.result() ?? []).find((r) => r.repo === sel?.repo)?.root;
       return sel && root ? [issueTarget(sel.repo, root, sel.issue)] : [];

@@ -8,6 +8,7 @@ import { UI_STATE_KEY, UI_STORAGE, UiState, parseLayout } from "../core/ui-state
 import { tauri } from "../core/tauri.mock";
 import {
   GithubIssues,
+  bulkSummary,
   NO_ISSUE_FILTER,
   buildTree,
   childLevel,
@@ -25,6 +26,7 @@ import {
   type RepoIssues,
 } from "./issues";
 import { IssuesSection } from "./issues-section";
+import { SpaceActions } from "../core/space-actions";
 
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -437,5 +439,95 @@ describe("new issue form (#341)", () => {
     expect(nums("another")).toEqual([5]);
     expect(nums("child")).toEqual([]);
     expect(parentCandidates(all, 1, null, "", 1)).toHaveLength(1);
+  });
+});
+
+describe("bulk selection and actions (#342)", () => {
+  const TWO: RepoIssues[] = [
+    {
+      root: "/src/n",
+      repo: "o/n",
+      status: "ok",
+      truncated: false,
+      issues: [issue(1), issue(2), issue(3), issue(4)],
+    },
+    {
+      root: "/src/m",
+      repo: "o/m",
+      status: "ok",
+      truncated: false,
+      issues: [issue(9)],
+    },
+  ];
+
+  async function setup() {
+    tauri.reset();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [{ provide: UI_STORAGE, useValue: null }] });
+    tauri.answer("github_issues", () => TWO);
+    const issues = TestBed.inject(GithubIssues);
+    const notify = vi.fn<(text: string) => void>();
+    vi.spyOn(TestBed.inject(SpaceActions), "notify").mockImplementation(notify as never);
+    await issues.load();
+    return { issues, notify };
+  }
+  afterEach(() => TestBed.resetTestingModule());
+
+  it("toggles single issues and marks a range since the anchor", async () => {
+    const { issues } = await setup();
+    issues.mark("o/n#1");
+    issues.mark("o/n#3", "range");
+    expect(issues.markedIssues().map((m) => m.issue.number)).toEqual([1, 2, 3]);
+    issues.mark("o/n#2");
+    expect(issues.markedIssues().map((m) => m.issue.number)).toEqual([1, 3]);
+  });
+
+  it("limits the selection to one repository", async () => {
+    const { issues } = await setup();
+    issues.mark("o/n#1");
+    expect(issues.markDisabled("o/m")).toBe(true);
+    expect(issues.markDisabled("o/n")).toBe(false);
+    issues.mark("o/m#9");
+    expect([...issues.marked()]).toEqual(["o/n#1"]);
+    issues.clearMarked();
+    expect(issues.markDisabled("o/m")).toBe(false);
+  });
+
+  it("runs one request per issue in order and keeps going after a failure", async () => {
+    const { issues, notify } = await setup();
+    tauri.answer("github_issue_edit", (a) => {
+      if (a?.["number"] === 2) throw "boom";
+      return { status: "saved" };
+    });
+    issues.mark("o/n#1");
+    issues.mark("o/n#3", "range");
+    const r = await issues.bulkEdit({ addLabels: ["bug"] });
+    expect(r.done).toEqual([1, 3]);
+    expect(r.failed).toEqual([{ number: 2, error: "boom" }]);
+    expect(tauri.calls("github_issue_edit").map((c) => (c as { number: number }).number)).toEqual([
+      1, 2, 3,
+    ]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0]).toBe(
+      "Bulk add label bug: 2 done (#1, #3), 1 failed (#2: boom)",
+    );
+    expect(issues.marked().size).toBe(0);
+  });
+
+  it("closes with the reason", async () => {
+    const { issues } = await setup();
+    tauri.answer("github_issue_action", () => undefined);
+    issues.mark("o/n#4");
+    await issues.bulkClose("not_planned");
+    expect(tauri.calls("github_issue_action")).toEqual([
+      { root: "/src/n", number: 4, action: "not_planned" },
+    ]);
+  });
+
+  it("formats the summary", () => {
+    expect(bulkSummary("x", { done: [1], failed: [] })).toBe("Bulk x: 1 done (#1)");
+    expect(bulkSummary("x", { done: [], failed: [{ number: 5, error: "e" }] })).toBe(
+      "Bulk x: 0 done, 1 failed (#5: e)",
+    );
   });
 });

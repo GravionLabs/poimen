@@ -3,6 +3,7 @@ import { AgentRuns } from "./agent-runs";
 import { AgentActions, issueTarget } from "./agent-actions";
 import {
   GithubIssues,
+  issueKey,
   type Issue,
   LEVELS,
   issueProgress,
@@ -35,10 +36,37 @@ export class IssuesSection {
   protected readonly checksText = checksText;
   protected readonly isGithubUrl = isGithubUrl;
 
-  /** The `⋯` button or the context menu of an issue row. */
+  /** The `⋯` button or the context menu of an issue row; on a marked row, for the whole selection. */
   protected openRowMenu(event: MouseEvent, repo: string, root: string, issue: Issue): void {
     event.preventDefault();
-    this.agentActions.openMenu([issueTarget(repo, root, issue)], event.clientX, event.clientY);
+    const marked = this.issues.markedIssues();
+    const targets =
+      marked.length > 1 && marked.some((m) => m.repo === repo && m.issue.number === issue.number)
+        ? marked.map((m) => issueTarget(m.repo, m.root, m.issue))
+        : [issueTarget(repo, root, issue)];
+    this.agentActions.openMenu(targets, event.clientX, event.clientY);
+  }
+
+  /** The checkbox: Shift marks the range since the last click. */
+  protected onCheck(event: MouseEvent, repo: string, number: number): void {
+    this.issues.mark(issueKey(repo, number), event.shiftKey ? "range" : "toggle");
+    void this.issues.loadBulkOptions();
+  }
+
+  protected async bulkMilestone(title: string): Promise<void> {
+    if (title) await this.issues.bulkEdit({ milestone: title });
+  }
+
+  protected async bulkAddLabel(name: string): Promise<void> {
+    if (name) await this.issues.bulkEdit({ addLabels: [name] });
+  }
+
+  protected async bulkRemoveLabel(name: string): Promise<void> {
+    if (name) await this.issues.bulkEdit({ removeLabels: [name] });
+  }
+
+  protected async bulkClose(reason: string): Promise<void> {
+    if (reason === "completed" || reason === "not_planned") await this.issues.bulkClose(reason);
   }
 
   constructor() {
@@ -58,6 +86,10 @@ export class IssuesSection {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       this.issues.moveCursor(event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === " " && this.issues.cursor()) {
+      event.preventDefault();
+      this.issues.mark(this.issues.cursor()!, event.shiftKey ? "range" : "toggle");
+      void this.issues.loadBulkOptions();
     } else if (event.key === "Enter" && this.issues.cursor()) {
       event.preventDefault();
       this.issues.openCursor();
@@ -70,7 +102,14 @@ export class IssuesSection {
       return;
     }
     const row = event.target.closest<HTMLElement>("li.row[data-number]");
-    if (row) void this.issues.openDetail(row.dataset["repo"] ?? "", Number(row.dataset["number"]));
+    if (!row) return;
+    // Cmd/Ctrl-click and Shift-click select instead of opening the pane.
+    if (event.metaKey || event.ctrlKey || event.shiftKey) {
+      const repo = row.dataset["repo"] ?? "";
+      this.onCheck(event, repo, Number(row.dataset["number"]));
+      return;
+    }
+    void this.issues.openDetail(row.dataset["repo"] ?? "", Number(row.dataset["number"]));
   }
 
   protected value(event: Event): string {
