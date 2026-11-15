@@ -43,6 +43,11 @@ function expandHome(dir: string, home: string | null): string | null {
   return dir;
 }
 
+/** Pane names of a layout, in order, joined for display. */
+function panesText(layout: SpaceLayout): string {
+  return layout.panes.map((p) => p.name).join(" · ");
+}
+
 function value(event: Event): string {
   return (event.target as HTMLInputElement | HTMLSelectElement).value;
 }
@@ -103,6 +108,18 @@ export class SpaceTemplatesEditor {
     this.harnesses().find((h) => h.id === this.editing()?.draft.agent),
   );
   protected readonly matchLabel = matchLabel;
+
+  /**
+   * The layout a template uses, in words: its own panes, else `spaces.layout`, else the built-in
+   * default, each with its source in brackets.
+   */
+  protected layoutText(t: SpaceTemplate): string {
+    if (t.layout) return panesText(t.layout);
+    const shared = this.settings().spacesLayout;
+    if (shared) return `${panesText(shared)} (spaces.layout)`;
+    const built = this.builtIn();
+    return built ? `${panesText(built)} (built-in)` : "built-in";
+  }
 
   constructor() {
     void this.store.defaultSpacesLayout().then((l) => this.builtIn.set(l));

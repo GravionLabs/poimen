@@ -391,6 +391,65 @@ describe("SpaceTemplatesEditor", () => {
     });
   });
 
+  describe("polish", () => {
+    const SHARED = {
+      panes: [
+        { name: "claude", command: "claude", split: null },
+        { name: "shell", command: null, split: null },
+      ],
+    };
+    const cellText = (row: Element | null | undefined, cls: string) =>
+      row?.querySelector(`.${cls}`)?.textContent?.replace(/\s+/g, " ").trim();
+
+    it("shows the layout the default uses, labelled Default, not the template name", async () => {
+      const { host } = await setup([DEFAULT_TEMPLATE], { spacesLayout: SHARED });
+      const row = host.querySelector("[data-testid=default-template]");
+      expect(row?.querySelector("strong")?.textContent).toBe("Default");
+      expect(row?.textContent).not.toContain("default default");
+      expect(cellText(row, "layout")).toBe("claude · shell (spaces.layout)");
+    });
+
+    it("shows the built-in default when the default has no spaces.layout", async () => {
+      const { host } = await setup([DEFAULT_TEMPLATE]);
+      const row = host.querySelector("[data-testid=default-template]");
+      expect(cellText(row, "layout")).toBe("agent · shell (built-in)");
+    });
+
+    it("shows the default's own panes without a source", async () => {
+      const own = { ...DEFAULT_TEMPLATE, layout: SHARED };
+      const { host } = await setup([own], { spacesLayout: null });
+      const row = host.querySelector("[data-testid=default-template]");
+      expect(cellText(row, "layout")).toBe("claude · shell");
+    });
+
+    it("gives each template row its layout cell, from spaces.layout when it has none", async () => {
+      const { host } = await setup([WORK], { spacesLayout: SHARED });
+      const rows = host.querySelectorAll("li.template-row");
+      expect(cellText(rows[1], "layout")).toBe("claude · shell (spaces.layout)");
+    });
+
+    it("puts the short hint before the list and the long explanation below it", async () => {
+      const { host } = await setup([WORK, DEFAULT_TEMPLATE]);
+      const text = host.textContent ?? "";
+      const short = text.indexOf(
+        "Every new space that no other template matches uses the default.",
+      );
+      const long = text.indexOf("A template gives a new space an agent");
+      expect(short).toBeGreaterThan(-1);
+      expect(short).toBeLessThan(text.indexOf("Work"));
+      expect(long).toBeGreaterThan(text.indexOf("Work"));
+    });
+
+    it("renders the rows as grid cells in the order name, match, agent, layout, actions", async () => {
+      const { host } = await setup([WORK]);
+      const row = host.querySelector("li.template-row");
+      const classes = [...(row?.children ?? [])].map(
+        (c) => c.tagName.toLowerCase() + (c.className ? "." + c.className : ""),
+      );
+      expect(classes).toEqual(["strong", "span.path", "span.agent", "span.layout", "span.actions"]);
+    });
+  });
+
   it("shows the backend warnings about spaceTemplates only", async () => {
     const { host } = await setup([], {
       warnings: ["spaceTemplates[x].match needs dir or remote; ignored", "tasks: other"],
