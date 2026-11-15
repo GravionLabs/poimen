@@ -816,6 +816,12 @@ describe("SettingsView categories", () => {
     expect(tests).toHaveLength(2);
   });
 
+  it("lays out Fonts and Sounds rows in shared grids", () => {
+    const { host } = setup();
+    expect(host.querySelectorAll(".fields.aligned")).toHaveLength(2);
+    expect(host.querySelectorAll(".fields.sound-row")).toHaveLength(2);
+  });
+
   it("previews an import on the Export & import page and writes only on Import", async () => {
     const { fixture, host } = setup(undefined, undefined, "transfer");
     vi.spyOn(TestBed.inject(TauriBridge), "pickJsonFile").mockResolvedValue("/tmp/in.json");
