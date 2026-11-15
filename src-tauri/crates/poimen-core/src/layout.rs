@@ -247,6 +247,414 @@ impl Layout {
     }
 }
 
+/// A node of a tab's split tree (ADR 0011), as in the server protocol; `split_id` is the server's.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Node {
+    Terminal {
+        name: Option<String>,
+        command: Option<String>,
+        cwd: Option<String>,
+    },
+    Split {
+        direction: SplitDirection,
+        /// The share of the first child.
+        ratio: f64,
+        children: Box<[Node; 2]>,
+    },
+}
+
+/// App-only placement of a tab in an editor group (the TUI and the server ignore it).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Place {
+    pub direction: SplitDirection,
+    /// A tab of the same layout; `None` is the parent tab (the first tab for a top-level one).
+    pub of: Option<String>,
+    pub ratio: f64,
+}
+
+/// One tab of a layout. A flat tab (one terminal) is read as a `root` leaf.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Tab {
+    pub name: Option<String>,
+    pub root: Node,
+    pub children: Vec<Tab>,
+    pub place: Option<Place>,
+}
+
+/// An entry of `layouts[]` in the user config.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NamedLayout {
+    pub name: String,
+    pub layout: TabLayout,
+}
+
+/// The name `spaces.layout` is read as.
+pub const DEFAULT_NAME: &str = "default";
+
+/// A layout in the shape of the server model: tabs, each with a split tree and child tabs.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TabLayout {
+    pub tabs: Vec<Tab>,
+}
+
+impl Layout {
+    /// The `panes[]` layout as one tab (ADR 0011): the first pane is the root leaf, every later
+    /// pane replaces the leaf named by `split.from` with a split of that leaf and the new pane.
+    pub fn to_tabs(&self) -> TabLayout {
+        let leaf = |p: &PaneSpec| Node::Terminal {
+            name: Some(p.name.clone()),
+            command: p.command.clone(),
+            cwd: None,
+        };
+        let mut root = self.panes.first().map(leaf).unwrap_or(Node::Terminal {
+            name: None,
+            command: None,
+            cwd: None,
+        });
+        for pane in self.panes.iter().skip(1) {
+            if let Some(s) = &pane.split {
+                replace_leaf(&mut root, &s.from, s.direction, s.ratio, leaf(pane));
+            }
+        }
+        TabLayout {
+            tabs: vec![Tab {
+                name: self.panes.first().map(|p| p.name.clone()),
+                root,
+                children: Vec::new(),
+                place: None,
+            }],
+        }
+    }
+}
+
+fn replace_leaf(
+    node: &mut Node,
+    from: &str,
+    direction: SplitDirection,
+    ratio: f64,
+    new: Node,
+) -> Option<Node> {
+    match node {
+        Node::Terminal { name, .. } if name.as_deref() == Some(from) => {
+            let old = std::mem::replace(
+                node,
+                Node::Terminal {
+                    name: None,
+                    command: None,
+                    cwd: None,
+                },
+            );
+            *node = Node::Split {
+                direction,
+                ratio,
+                children: Box::new([old, new]),
+            };
+            None
+        }
+        Node::Terminal { .. } => Some(new),
+        Node::Split { children, .. } => {
+            let [a, b] = &mut **children;
+            let back = replace_leaf(a, from, direction, ratio, new)?;
+            replace_leaf(b, from, direction, ratio, back)
+        }
+    }
+}
+
+/// The built-in default as tabs (ADR 0011).
+pub fn default_tabs() -> TabLayout {
+    default_layout().to_tabs()
+}
+
+fn opt_text(raw: &Value, key: &str, at: &str) -> Result<Option<String>, String> {
+    match &raw[key] {
+        Value::Null => Ok(None),
+        Value::String(s) => Ok(Some(s.trim().to_owned()).filter(|s| !s.is_empty())),
+        _ => Err(format!("{at}: \"{key}\" must be a string")),
+    }
+}
+
+fn parse_node(raw: &Value, at: &str) -> Result<Node, String> {
+    match raw["kind"].as_str() {
+        Some("terminal") => Ok(Node::Terminal {
+            name: opt_text(raw, "name", at)?,
+            command: opt_text(raw, "command", at)?,
+            cwd: opt_text(raw, "cwd", at)?,
+        }),
+        Some("split") => {
+            let direction = match raw["direction"].as_str() {
+                Some("right") => SplitDirection::Right,
+                Some("down") => SplitDirection::Down,
+                _ => return Err(format!("{at}: direction must be \"right\" or \"down\"")),
+            };
+            let ratio = match raw.get("ratio") {
+                None | Some(Value::Null) => 0.5,
+                Some(r) => r
+                    .as_f64()
+                    .filter(|r| *r > 0.0 && *r < 1.0)
+                    .ok_or(format!("{at}: ratio must be between 0 and 1"))?,
+            };
+            let kids = raw["children"]
+                .as_array()
+                .filter(|c| c.len() == 2)
+                .ok_or(format!("{at}: a split needs exactly two children"))?;
+            Ok(Node::Split {
+                direction,
+                ratio,
+                children: Box::new([parse_node(&kids[0], at)?, parse_node(&kids[1], at)?]),
+            })
+        }
+        _ => Err(format!("{at}: node kind must be \"terminal\" or \"split\"")),
+    }
+}
+
+fn parse_place(raw: &Value, at: &str) -> Result<Place, String> {
+    let direction = match raw["direction"].as_str() {
+        Some("right") => SplitDirection::Right,
+        Some("down") => SplitDirection::Down,
+        _ => {
+            return Err(format!(
+                "{at}: place.direction must be \"right\" or \"down\""
+            ));
+        }
+    };
+    let ratio = match raw.get("ratio") {
+        None | Some(Value::Null) => 0.5,
+        Some(r) => r
+            .as_f64()
+            .filter(|r| *r > 0.0 && *r < 1.0)
+            .ok_or(format!("{at}: place.ratio must be between 0 and 1"))?,
+    };
+    let of = opt_text(raw, "of", at)?;
+    Ok(Place {
+        direction,
+        of,
+        ratio,
+    })
+}
+
+fn parse_tab(raw: &Value, index: usize, warnings: &mut Vec<String>) -> Result<Tab, String> {
+    if !raw.is_object() {
+        return Err(format!("tab {}: expected an object", index + 1));
+    }
+    let name = opt_text(raw, "name", &format!("tab {}", index + 1))?;
+    let at = match &name {
+        Some(n) => format!("tab \"{n}\""),
+        None => format!("tab {}", index + 1),
+    };
+    let flat = ["command", "cwd"].iter().any(|k| !raw[*k].is_null());
+    let root = if raw.get("root").is_some_and(|r| !r.is_null()) {
+        if flat {
+            return Err(format!(
+                "{at}: use either \"command\"/\"cwd\" or \"root\", not both"
+            ));
+        }
+        parse_node(&raw["root"], &at)?
+    } else {
+        Node::Terminal {
+            name: name.clone(),
+            command: opt_text(raw, "command", &at)?,
+            cwd: opt_text(raw, "cwd", &at)?,
+        }
+    };
+    let place = match raw.get("place") {
+        None | Some(Value::Null) => None,
+        Some(p) => match parse_place(p, &at) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                warnings.push(format!("{e}; place ignored"));
+                None
+            }
+        },
+    };
+    let children = match raw.get("children") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(c) => parse_tabs_list(c, warnings)?,
+    };
+    Ok(Tab {
+        name,
+        root,
+        children,
+        place,
+    })
+}
+
+fn parse_tabs_list(raw: &Value, warnings: &mut Vec<String>) -> Result<Vec<Tab>, String> {
+    let list = raw.as_array().ok_or("\"tabs\" must be a list")?;
+    list.iter()
+        .enumerate()
+        .map(|(i, t)| parse_tab(t, i, warnings))
+        .collect()
+}
+
+/// Names the `place.of` of tabs that point nowhere, or that form a cycle, and drops those places.
+fn check_places(tabs: &mut [Tab], warnings: &mut Vec<String>) {
+    // (name, parent index) of every tab in document order.
+    fn flatten(
+        tabs: &[Tab],
+        parent: Option<usize>,
+        out: &mut Vec<(Option<String>, Option<usize>)>,
+    ) {
+        for t in tabs {
+            let me = out.len();
+            out.push((t.name.clone(), parent));
+            flatten(&t.children, Some(me), out);
+        }
+    }
+    fn places<'a>(tabs: &'a mut [Tab], out: &mut Vec<&'a mut Option<Place>>) {
+        for t in tabs {
+            out.push(&mut t.place);
+            places(&mut t.children, out);
+        }
+    }
+    let mut info = Vec::new();
+    flatten(tabs, None, &mut info);
+    let target = |i: usize, of: &Option<String>| -> Option<usize> {
+        match of {
+            Some(n) => info.iter().position(|(m, _)| m.as_deref() == Some(n)),
+            None => info[i].1.or(if i == 0 { None } else { Some(0) }),
+        }
+    };
+    let mut wanted: Vec<Option<Option<String>>> = Vec::new();
+    let mut slots = Vec::new();
+    places(tabs, &mut slots);
+    for slot in &slots {
+        wanted.push(slot.as_ref().map(|p| p.of.clone()));
+    }
+    let mut drop = vec![false; wanted.len()];
+    for (i, of) in wanted.iter().enumerate() {
+        let Some(of) = of else { continue };
+        let label = info[i]
+            .0
+            .clone()
+            .unwrap_or_else(|| format!("tab {}", i + 1));
+        if let Some(n) = of
+            && target(i, of).is_none()
+        {
+            warnings.push(format!(
+                "tab \"{label}\": place.of \"{n}\" is not a tab of the layout; place ignored"
+            ));
+            drop[i] = true;
+            continue;
+        }
+        let mut at = i;
+        for _ in 0..=info.len() {
+            let Some(Some(next_of)) = wanted.get(at) else {
+                break;
+            };
+            match target(at, next_of) {
+                Some(n) if n == i => {
+                    warnings.push(format!("tab \"{label}\": place is a cycle; place ignored"));
+                    drop[i] = true;
+                    break;
+                }
+                Some(n) => at = n,
+                None => break,
+            }
+        }
+    }
+    for (slot, d) in slots.iter_mut().zip(drop) {
+        if d {
+            **slot = None;
+        }
+    }
+}
+
+/// Validates a layout object in either shape: `tabs[]` (ADR 0011) or today's `panes[]`, which is
+/// converted. Invalid `place`s warn and are dropped; anything else invalid is an `Err`.
+pub fn parse_tabs_value(data: &Value) -> Result<(TabLayout, Vec<String>), String> {
+    let mut warnings = Vec::new();
+    if data.get("tabs").is_none() {
+        return parse_layout_value(data).map(|l| (l.to_tabs(), warnings));
+    }
+    let mut tabs = parse_tabs_list(&data["tabs"], &mut warnings)?;
+    if tabs.is_empty() {
+        return Err("\"tabs\" must be a non-empty list".into());
+    }
+    check_places(&mut tabs, &mut warnings);
+    Ok((TabLayout { tabs }, warnings))
+}
+
+impl TabLayout {
+    /// The same layout with `command` on the first terminal of the first tab (the root terminal).
+    pub fn with_root_command(&self, command: &str) -> TabLayout {
+        fn first(node: &mut Node) -> &mut Node {
+            match node {
+                Node::Split { children, .. } => first(&mut children[0]),
+                leaf => leaf,
+            }
+        }
+        let mut out = self.clone();
+        if let Some(tab) = out.tabs.first_mut()
+            && let Node::Terminal { command: c, .. } = first(&mut tab.root)
+        {
+            *c = Some(command.to_owned());
+        }
+        out
+    }
+
+    /// The same tabs and splits with no command to type.
+    pub fn without_commands(&self) -> TabLayout {
+        fn strip(node: &mut Node) {
+            match node {
+                Node::Terminal { command, .. } => *command = None,
+                Node::Split { children, .. } => children.iter_mut().for_each(strip),
+            }
+        }
+        fn tabs(list: &mut [Tab]) {
+            for t in list {
+                strip(&mut t.root);
+                tabs(&mut t.children);
+            }
+        }
+        let mut out = self.clone();
+        tabs(&mut out.tabs);
+        out
+    }
+}
+
+/// [`resolve_origin`] in the tab shape: the project file and the deprecated file (both `panes[]`
+/// or `tabs[]`), else `config` (the template's layout or `spaces.layout`), else the built-in
+/// default. `panes[]` layouts are converted on read.
+pub fn resolve_origin_tabs(
+    project: Option<(&str, &str)>,
+    legacy: Option<(&str, &str)>,
+    config: Option<&TabLayout>,
+) -> Result<(TabLayout, Vec<String>, bool), String> {
+    if let Some((path, text)) = project
+        && let Ok(data) = serde_json::from_str::<Value>(text)
+        && !data["layout"].is_null()
+    {
+        return parse_tabs_value(&data["layout"])
+            .map(|(l, w)| (l, w, true))
+            .map_err(|e| format!("{path}: layout: {e}"));
+    }
+    if let Some((path, text)) = legacy {
+        let data: Value =
+            serde_json::from_str(text).map_err(|_| format!("{path}: invalid JSON"))?;
+        let (layout, mut warnings) = parse_tabs_value(&data).map_err(|e| format!("{path}: {e}"))?;
+        warnings.push(format!(
+            "{path} is deprecated; move it to \"layout\" in {}",
+            crate::project::PROJECT_FILE
+        ));
+        return Ok((layout, warnings, true));
+    }
+    Ok((
+        config.cloned().unwrap_or_else(default_tabs),
+        Vec::new(),
+        false,
+    ))
+}
+
+/// [`resolve_origin_tabs`] without the origin.
+pub fn resolve_tabs(
+    project: Option<(&str, &str)>,
+    legacy: Option<(&str, &str)>,
+    config: Option<&TabLayout>,
+) -> Result<(TabLayout, Vec<String>), String> {
+    resolve_origin_tabs(project, legacy, config).map(|(l, w, _)| (l, w))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,5 +827,183 @@ mod tests {
             err.starts_with(FILE) && err.contains("non-empty list"),
             "{err}"
         );
+    }
+
+    fn leaf(name: &str, command: Option<&str>) -> Node {
+        Node::Terminal {
+            name: Some(name.into()),
+            command: command.map(str::to_owned),
+            cwd: None,
+        }
+    }
+
+    #[test]
+    fn the_default_panes_convert_to_the_default_tab_of_the_adr() {
+        let tabs = default_layout().to_tabs();
+        assert_eq!(tabs.tabs.len(), 1);
+        assert_eq!(tabs.tabs[0].name.as_deref(), Some("agent"));
+        assert_eq!(
+            tabs.tabs[0].root,
+            Node::Split {
+                direction: SplitDirection::Right,
+                ratio: 0.6,
+                children: Box::new([
+                    leaf("agent", Some("claude")),
+                    Node::Split {
+                        direction: SplitDirection::Down,
+                        ratio: 0.5,
+                        children: Box::new([leaf("tests", None), leaf("shell", None)]),
+                    },
+                ]),
+            }
+        );
+    }
+
+    #[test]
+    fn a_split_from_the_first_pane_nests_inside_the_earlier_split() {
+        let l = parse_layout(
+            r#"{"panes":[{"name":"a"},
+                {"name":"b","split":{"direction":"right"}},
+                {"name":"c","split":{"from":"a","direction":"down","ratio":0.3}}]}"#,
+        )
+        .unwrap();
+        let Node::Split { children, .. } = &l.to_tabs().tabs[0].root else {
+            panic!("split");
+        };
+        assert_eq!(
+            children[0],
+            Node::Split {
+                direction: SplitDirection::Down,
+                ratio: 0.3,
+                children: Box::new([leaf("a", None), leaf("c", None)]),
+            }
+        );
+        assert_eq!(children[1], leaf("b", None));
+    }
+
+    #[test]
+    fn one_pane_is_a_flat_tab() {
+        let (l, w) =
+            parse_tabs_value(&serde_json::json!({"panes":[{"name":"solo","command":"vim"}]}))
+                .unwrap();
+        assert!(w.is_empty());
+        assert_eq!(l.tabs[0].root, leaf("solo", Some("vim")));
+    }
+
+    #[test]
+    fn tabs_parse_flat_split_and_nested_with_place() {
+        let (l, w) = parse_tabs_value(&serde_json::json!({"tabs":[
+            {"name":"claude","command":"claude","children":[
+                {"name":"Terminal","place":{"direction":"right","ratio":0.6}},
+                {"name":"Logs","place":{"direction":"down","of":"Terminal"}}]},
+            {"name":"review","root":{"kind":"split","direction":"down","children":[
+                {"kind":"terminal","command":"copilot"},{"kind":"terminal","cwd":"sub"}]}}
+        ]}))
+        .unwrap();
+        assert!(w.is_empty(), "{w:?}");
+        assert_eq!(l.tabs.len(), 2);
+        assert_eq!(l.tabs[0].root, leaf("claude", Some("claude")));
+        let kids = &l.tabs[0].children;
+        assert_eq!(kids[0].place.as_ref().unwrap().ratio, 0.6);
+        assert_eq!(
+            kids[1].place.as_ref().unwrap().of.as_deref(),
+            Some("Terminal")
+        );
+        let Node::Split {
+            ratio, children, ..
+        } = &l.tabs[1].root
+        else {
+            panic!("split");
+        };
+        assert_eq!(*ratio, 0.5);
+        assert_eq!(
+            children[1],
+            Node::Terminal {
+                name: None,
+                command: None,
+                cwd: Some("sub".into())
+            }
+        );
+    }
+
+    #[test]
+    fn invalid_tabs_are_errors_naming_the_tab() {
+        let err = |v: Value| parse_tabs_value(&v).unwrap_err();
+        assert!(err(serde_json::json!({"tabs":[]})).contains("non-empty"));
+        let both = err(serde_json::json!({"tabs":[{"name":"x","command":"a",
+            "root":{"kind":"terminal"}}]}));
+        assert!(
+            both.contains("\"x\"") && both.contains("not both"),
+            "{both}"
+        );
+        assert!(
+            err(
+                serde_json::json!({"tabs":[{"root":{"kind":"split","direction":"up",
+            "children":[]}}]})
+            )
+            .contains("direction")
+        );
+        assert!(
+            err(
+                serde_json::json!({"tabs":[{"root":{"kind":"split","direction":"right",
+            "ratio":1.0,"children":[{"kind":"terminal"},{"kind":"terminal"}]}}]})
+            )
+            .contains("ratio")
+        );
+        assert!(
+            err(
+                serde_json::json!({"tabs":[{"root":{"kind":"split","direction":"right",
+            "children":[{"kind":"terminal"}]}}]})
+            )
+            .contains("two children")
+        );
+    }
+
+    #[test]
+    fn a_bad_place_warns_and_is_ignored_while_the_tab_stays() {
+        let (l, w) = parse_tabs_value(&serde_json::json!({"tabs":[
+            {"name":"a","children":[
+                {"name":"b","place":{"direction":"right","of":"nowhere"}},
+                {"name":"c","place":{"direction":"sideways"}},
+                {"name":"d","place":{"direction":"right","of":"e"}},
+                {"name":"e","place":{"direction":"down","of":"d"}}]}]}))
+        .unwrap();
+        assert_eq!(w.len(), 4, "{w:?}");
+        assert!(l.tabs[0].children[0].place.is_none());
+        assert!(l.tabs[0].children[1].place.is_none());
+        assert_eq!(l.tabs[0].children.len(), 4);
+    }
+
+    #[test]
+    fn resolve_tabs_converts_panes_of_project_file_and_prefers_it_to_config() {
+        let project = r#"{"layout":{"panes":[{"name":"p"}]}}"#;
+        let config = parse_tabs_value(&serde_json::json!({"tabs":[{"name":"cfg"}]}))
+            .unwrap()
+            .0;
+        let (l, _, from_project) =
+            resolve_origin_tabs(Some(("p.json", project)), None, Some(&config)).unwrap();
+        assert!(from_project);
+        assert_eq!(l.tabs[0].name.as_deref(), Some("p"));
+        let (l, _, from_project) = resolve_origin_tabs(None, None, Some(&config)).unwrap();
+        assert!(!from_project);
+        assert_eq!(l, config);
+        assert_eq!(resolve_tabs(None, None, None).unwrap().0, default_tabs());
+        let err =
+            resolve_tabs(Some(("p.json", r#"{"layout":{"tabs":[]}}"#)), None, None).unwrap_err();
+        assert!(err.starts_with("p.json: layout:"), "{err}");
+    }
+
+    #[test]
+    fn root_command_and_stripping_work_on_tabs() {
+        let t = default_tabs().with_root_command("copilot");
+        let Node::Split { children, .. } = &t.tabs[0].root else {
+            panic!()
+        };
+        assert_eq!(children[0], leaf("agent", Some("copilot")));
+        let t = t.without_commands();
+        let Node::Split { children, .. } = &t.tabs[0].root else {
+            panic!()
+        };
+        assert_eq!(children[0], leaf("agent", None));
     }
 }

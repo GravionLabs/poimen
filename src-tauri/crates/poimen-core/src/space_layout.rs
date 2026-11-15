@@ -9,9 +9,9 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::harness::{self, Harness};
-use crate::layout::{self, Layout};
+use crate::layout::{self, Layout, NamedLayout, TabLayout};
 use crate::remote::{self, Remote};
-use crate::settings::{config_path, parse_space_templates, parse_trusted_projects};
+use crate::settings::{config_path, parse_layouts, parse_space_templates, parse_trusted_projects};
 use crate::templates::{self, Template};
 use crate::trust::Sources;
 
@@ -21,6 +21,8 @@ pub struct UserSpaces {
     pub trusted: BTreeMap<String, String>,
     pub templates: Vec<Template>,
     pub spaces_layout: Option<Layout>,
+    /// `layouts[]` (ADR 0011).
+    pub layouts: Vec<NamedLayout>,
     pub harnesses: Vec<Harness>,
     pub warnings: Vec<String>,
 }
@@ -31,6 +33,7 @@ impl Default for UserSpaces {
             trusted: BTreeMap::new(),
             templates: Vec::new(),
             spaces_layout: None,
+            layouts: Vec::new(),
             harnesses: harness::default_harnesses(),
             warnings: Vec::new(),
         }
@@ -60,6 +63,15 @@ impl UserSpaces {
                     .push(format!("spaces.layout: {e}; using the default layout")),
             }
         }
+        if let Some(v) = root.get("layouts") {
+            s.layouts = parse_layouts(v, &mut s.warnings);
+            if s.spaces_layout.is_some() && s.layouts.iter().any(|l| l.name == layout::DEFAULT_NAME)
+            {
+                s.warnings.push(
+                    "spaces.layout is ignored: layouts[] has a layout named \"default\"".into(),
+                );
+            }
+        }
         if let Some(v) = root.get("spaceTemplates") {
             s.templates = parse_space_templates(v, &mut s.warnings);
         }
@@ -67,6 +79,45 @@ impl UserSpaces {
             s.harnesses = harness::resolve(v, &mut s.warnings);
         }
         s
+    }
+
+    /// The layout named `name`: `layouts[]`, else `spaces.layout` for `default` (read on the fly,
+    /// the file is never migrated).
+    pub fn layout_named(&self, name: &str) -> Option<TabLayout> {
+        self.layouts
+            .iter()
+            .find(|l| l.name == name)
+            .map(|l| l.layout.clone())
+            .or_else(|| {
+                (name == layout::DEFAULT_NAME)
+                    .then(|| self.spaces_layout.as_ref().map(Layout::to_tabs))
+                    .flatten()
+            })
+    }
+
+    /// The user layout for a space whose matching template is `template`: its inline layout, else
+    /// the layout it names (an unknown name warns and falls through), else the template's absent
+    /// layout or none: the layout `default`. `None` is the built-in default.
+    pub fn layout_for(
+        &self,
+        template: Option<&Template>,
+        warnings: &mut Vec<String>,
+    ) -> Option<TabLayout> {
+        if let Some(t) = template {
+            if let Some(l) = &t.layout {
+                return Some(l.to_tabs());
+            }
+            if let Some(n) = &t.layout_name {
+                match self.layout_named(n) {
+                    Some(l) => return Some(l),
+                    None => warnings.push(format!(
+                        "template \"{}\": unknown layout \"{n}\"; using the default",
+                        t.name
+                    )),
+                }
+            }
+        }
+        self.layout_named(layout::DEFAULT_NAME)
     }
 
     /// Reads `config.json` under `home` now (it is the only source, so every new space reads it
@@ -120,6 +171,25 @@ pub fn inputs(
         .and_then(|t| t.layout.clone())
         .or_else(|| spaces_layout.cloned());
     (agent_command, user_layout, warnings)
+}
+
+/// The template's agent command and the user layout in the tab shape (ADR 0011) for a space of
+/// `dir`, with the warnings of the template and of an unknown layout name.
+pub fn inputs_tabs(
+    dir: &str,
+    user: &UserSpaces,
+    home: Option<&Path>,
+    available: impl Fn(&str) -> bool,
+) -> (Option<String>, Option<TabLayout>, Vec<String>) {
+    let template = template_for(dir, &user.templates, home);
+    let mut warnings = Vec::new();
+    let agent_command = template.and_then(|t| {
+        templates::agent_command(t, &user.harnesses, &available)
+            .map_err(|w| warnings.push(w))
+            .ok()
+    });
+    let layout = user.layout_for(template, &mut warnings);
+    (agent_command, layout, warnings)
 }
 
 /// The layout a new space gets from the already read project `sources` with the resolution
@@ -236,6 +306,7 @@ mod tests {
             agent: agent.into(),
             model: None,
             layout,
+            layout_name: None,
         }
     }
 
@@ -329,5 +400,100 @@ mod tests {
             err.contains(".poimen/config.json") && err.contains("non-empty"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn layouts_load_skip_invalid_and_duplicates_and_templates_refer_by_name() {
+        let u = UserSpaces::parse(
+            r#"{
+              "layouts": [
+                {"name": "review", "tabs": [{"name": "r", "command": "copilot"}]},
+                {"name": "review", "tabs": [{"name": "dup"}]},
+                {"name": "bad", "tabs": []},
+                {"tabs": [{"name": "nameless"}]},
+                {"name": "old", "panes": [{"name": "p"}]}
+              ],
+              "spaceTemplates": [
+                {"name": "t", "agent": "claude", "layout": "review"},
+                {"name": "u", "match": {"dir": "/u"}, "agent": "claude", "layout": {"panes": [{"name": "inl"}]}}
+              ]
+            }"#,
+        );
+        let names: Vec<_> = u.layouts.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["review", "old"]);
+        assert_eq!(u.warnings.len(), 3, "{:?}", u.warnings);
+        assert_eq!(u.templates[0].layout_name.as_deref(), Some("review"));
+        assert!(u.templates[0].layout.is_none());
+        assert_eq!(u.templates[1].layout.as_ref().unwrap().panes[0].name, "inl");
+        let mut w = Vec::new();
+        let l = u.layout_for(Some(&u.templates[0]), &mut w).unwrap();
+        assert_eq!(l.tabs[0].name.as_deref(), Some("r"));
+        assert!(w.is_empty());
+        let l = u.layout_for(Some(&u.templates[1]), &mut w).unwrap();
+        assert_eq!(l.tabs[0].name.as_deref(), Some("inl"));
+    }
+
+    #[test]
+    fn an_unknown_layout_name_warns_and_falls_back_to_spaces_layout_then_the_default() {
+        let u = UserSpaces::parse(
+            r#"{"spaces": {"layout": {"panes": [{"name": "legacy"}]}},
+                "spaceTemplates": [{"name": "t", "agent": "claude", "layout": "nope"}]}"#,
+        );
+        let mut w = Vec::new();
+        let l = u.layout_for(Some(&u.templates[0]), &mut w).unwrap();
+        assert_eq!(l.tabs[0].name.as_deref(), Some("legacy"));
+        assert!(w[0].contains("unknown layout \"nope\""), "{w:?}");
+        let none = UserSpaces::parse(
+            r#"{"spaceTemplates": [{"name": "t", "agent": "a", "layout": "nope"}]}"#,
+        );
+        assert_eq!(
+            none.layout_for(Some(&none.templates[0]), &mut Vec::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn spaces_layout_is_the_layout_default_and_layouts_default_wins_with_a_warning() {
+        let old = UserSpaces::parse(r#"{"spaces": {"layout": {"panes": [{"name": "legacy"}]}}}"#);
+        assert!(old.warnings.is_empty());
+        assert_eq!(
+            old.layout_named("default").unwrap().tabs[0].name.as_deref(),
+            Some("legacy")
+        );
+        assert_eq!(old.layout_named("other"), None);
+        let both = UserSpaces::parse(
+            r#"{"spaces": {"layout": {"panes": [{"name": "legacy"}]}},
+                "layouts": [{"name": "default", "tabs": [{"name": "new"}]}]}"#,
+        );
+        assert_eq!(
+            both.layout_named("default").unwrap().tabs[0]
+                .name
+                .as_deref(),
+            Some("new")
+        );
+        assert!(
+            both.warnings[0].contains("spaces.layout is ignored"),
+            "{:?}",
+            both.warnings
+        );
+    }
+
+    #[test]
+    fn inputs_tabs_take_the_template_layout_over_default_and_nothing_is_rewritten() {
+        let home = std::env::temp_dir().join(format!("poimen-609-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
+        let text = r#"{"spaces": {"layout": {"panes": [{"name": "legacy"}]}},
+            "layouts": [{"name": "review", "tabs": [{"name": "r"}]}],
+            "spaceTemplates": [{"name": "w", "match": {"dir": "/work"}, "agent": "claude", "layout": "review"}]}"#;
+        std::fs::write(config_path(&home), text).unwrap();
+        let u = UserSpaces::load(&home);
+        let (_, l, w) = inputs_tabs("/work/app", &u, None, |_| true);
+        assert_eq!(l.unwrap().tabs[0].name.as_deref(), Some("r"));
+        assert!(w.is_empty(), "{w:?}");
+        let (_, l, _) = inputs_tabs("/elsewhere", &u, None, |_| true);
+        assert_eq!(l.unwrap().tabs[0].name.as_deref(), Some("legacy"));
+        assert_eq!(std::fs::read_to_string(config_path(&home)).unwrap(), text);
+        std::fs::remove_dir_all(&home).unwrap();
     }
 }
