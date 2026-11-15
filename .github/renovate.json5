@@ -1,75 +1,75 @@
 // Renovate keeps npm packages (root and site/), Cargo crates (src-tauri) and GitHub Actions current: a few grouped pull
 // requests a week against release/next, gated by CI, merged by a person (no automerge). See AGENTS.md "CI and releases".
 {
-  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-  extends: ['config:recommended', ':semanticCommits', ':dependencyDashboard'],
-  baseBranchPatterns: ['release/next'],
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended", ":semanticCommits", ":dependencyDashboard"],
+  baseBranchPatterns: ["release/next"],
   // `chore(deps): ...` keeps dependency updates out of the release notes.
   // Issue titles start with their level (AGENTS.md): the dashboard is a PBI.
-  dependencyDashboard: { enabled: true, title: '[PBI] chore: Dependency Dashboard' },
-  semanticCommitType: 'chore',
-  semanticCommitScope: 'deps',
-  timezone: 'Europe/Zurich',
-  schedule: ['before 6am on monday'],
-  lockFileMaintenance: { enabled: true, schedule: ['before 6am on the first day of the month'] },
+  dependencyDashboard: { enabled: true, title: "[PBI] chore: Dependency Dashboard" },
+  semanticCommitType: "chore",
+  semanticCommitScope: "deps",
+  timezone: "Europe/Zurich",
+  schedule: ["before 6am on monday"],
+  lockFileMaintenance: { enabled: true, schedule: ["before 6am on the first day of the month"] },
   // Raise the range in package.json to the new version instead of leaving it as it was.
-  rangeStrategy: 'bump',
+  rangeStrategy: "bump",
   automerge: false,
-  labels: ['dependencies'],
-  enabledManagers: ['npm', 'cargo', 'github-actions'],
+  labels: ["dependencies"],
+  enabledManagers: ["npm", "cargo", "github-actions"],
   // The vendored copy of portable-pty is changed by hand (src-tauri/vendor/portable-pty/POIMEN.md).
-  ignorePaths: ['src-tauri/vendor/**', '**/node_modules/**', '**/target/**'],
+  ignorePaths: ["src-tauri/vendor/**", "**/node_modules/**", "**/target/**"],
   // A known vulnerability gets a pull request at once, outside the schedule.
-  vulnerabilityAlerts: { enabled: true, labels: ['security'], schedule: ['at any time'] },
+  vulnerabilityAlerts: { enabled: true, labels: ["security"], schedule: ["at any time"] },
   osvVulnerabilityAlerts: true,
   packageRules: [
     {
       // Rust patch and minor updates in one pull request; majors stay separate.
-      groupName: 'rust',
-      matchManagers: ['cargo'],
-      matchUpdateTypes: ['minor', 'patch'],
+      groupName: "rust",
+      matchManagers: ["cargo"],
+      matchUpdateTypes: ["minor", "patch"],
     },
     {
-      groupName: 'angular',
+      groupName: "angular",
       // Angular pins the range of TypeScript it supports: they move together.
-      matchPackageNames: ['@angular/**', '@angular-devkit/**', '@schematics/angular', 'typescript'],
+      matchPackageNames: ["@angular/**", "@angular-devkit/**", "@schematics/angular", "typescript"],
     },
-    { groupName: 'xterm', matchPackageNames: ['@xterm/**'] },
-    { groupName: 'codemirror', matchPackageNames: ['@codemirror/**', '@lezer/**'] },
+    { groupName: "xterm", matchPackageNames: ["@xterm/**"] },
+    { groupName: "codemirror", matchPackageNames: ["@codemirror/**", "@lezer/**"] },
     {
       // The Tauri crates and the npm packages release together.
-      groupName: 'tauri',
-      matchPackageNames: ['tauri', 'tauri-*', '@tauri-apps/**'],
+      groupName: "tauri",
+      matchPackageNames: ["tauri", "tauri-*", "@tauri-apps/**"],
     },
     {
       // Packages the repository pins to an exact version (no range in package.json) keep it.
-      matchManagers: ['npm'],
+      matchManagers: ["npm"],
       matchPackageNames: [
-        '@codemirror/**',
-        '@lezer/highlight',
-        '@dagrejs/dagre',
-        '@foblex/flow',
-        '@gravionlabs/helix-ui',
-        '@xterm/addon-search',
-        '@xterm/addon-unicode11',
-        '@xterm/headless',
-        'dompurify',
-        'marked',
+        "@codemirror/**",
+        "@lezer/highlight",
+        "@dagrejs/dagre",
+        "@foblex/flow",
+        "@gravionlabs/helix-ui",
+        "@xterm/addon-search",
+        "@xterm/addon-unicode11",
+        "@xterm/headless",
+        "dompurify",
+        "marked",
       ],
-      rangeStrategy: 'pin',
+      rangeStrategy: "pin",
     },
     {
       // Workflows follow the major tag of the shared workflows on purpose: no digest pin, no major bump.
-      matchManagers: ['github-actions'],
-      matchPackageNames: ['GravionLabs/ci', 'GravionLabs/ci/**'],
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["GravionLabs/ci", "GravionLabs/ci/**"],
       pinDigests: false,
-      matchUpdateTypes: ['major'],
+      matchUpdateTypes: ["major"],
       enabled: false,
     },
     {
       // Majors get their own pull requests, labelled, and a person decides.
-      matchUpdateTypes: ['major'],
-      addLabels: ['major'],
+      matchUpdateTypes: ["major"],
+      addLabels: ["major"],
     },
   ],
 }
