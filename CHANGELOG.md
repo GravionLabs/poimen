@@ -5,6 +5,55 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.19.0] — 2026-11-15
+
+### Bug Fixes
+- **notifications**: No sound for viewed panes, mixed batches follow enabled sounds (#724)
+- **github**: Current milestone for names and insert numbers (#738) (#739)
+- **server**: Umlauts are garbled when copying in a poimen terminal (no UTF-8 locale) (#741)
+- **settings**: Spaces between the parts of the Backend and Agents list rows (#749) (#750)
+- **agents**: One hook-kind list per side and start agents without hooks (#731)
+- **agent**: Prompt an agent started without hooks (#731)
+- **agent**: Prompt an agent started without hooks (#731)
+- **sidebar**: Keep the branch token of a worktree and of mixed spaces on the base branch (#711)
+- **terminal-view**: Open the search only while a terminal view has the focus (#714)
+- **sidebar**: Settle the order inside the Agents sections (#722)
+- **ci**: Set the dashboard title in the object form and match GravionLabs/ci workflows (Refs #729)
+- **ci**: Format renovate.json5 with Prettier (#765) (#766)
+- **status-bar**: Make the update popover opaque and closable (#732) (#764)
+
+
+### Documentation
+- **site**: Screenshots of a Flow run with subagents and skills (#733)
+
+
+### Features
+- **notifications**: Sound when an agent is blocked or done (#724) (#734)
+- **notifications**: Sound when an agent is blocked or done (#724)
+- **sidebar**: Mark an agent as unread (#725) (#735)
+- **sidebar**: Sort spaces by name with the sidebar.sort setting (#753)
+- **console**: The TUI sidebar follows sidebar.sort (#754)
+- **sidebar**: Worktrees below the space of their repository (#709) (#755)
+- **server**: Support further agent harness types (#731) (#751)
+- **server**: Support further agent harness types, Gemini CLI first (#731)
+- **sidebar**: Pin spaces to the top (#710) (#756)
+- **sidebar**: The branch token hides the default branch (#711) (#757)
+- **sidebar**: The branch token hides the default branch (#711)
+- **sidebar**: Sort spaces by attention and by recent activity (#712) (#758)
+- **sidebar**: Sort spaces by attention and by recent activity (#712)
+- **terminal-view**: Search in screen and scrollback (#714) (#759)
+- **terminal-view**: Search in screen and scrollback (#714)
+- **sidebar**: Priority order of the Agents section (#722) (#760)
+- **sidebar**: Priority order of the Agents section (#722)
+- **app**: Jump palette for agents and spaces (#723) (#761)
+- **console**: Worktrees below the space of their repository in the TUI (#726) (#762)
+
+
+### Security
+- **ci**: Renovate, Dependabot alerts, secret scanning and CodeQL (#729) (#763)
+- **ci**: Renovate, Dependabot alerts, secret scanning and CodeQL (#729) (#763)
+
+
 ## [0.18.0] — 2026-11-14
 
 ### Bug Fixes
@@ -21,6 +70,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Resolve AGENTS.md after rebase
 - Describe the backend-neutral snapshot
 - **adr**: Propose a terminal panel for shells in the app (ADR 0010)
+- Update CHANGELOG.md for v0.18.0 [skip ci]
 
 
 ### Features
