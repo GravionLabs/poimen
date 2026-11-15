@@ -189,6 +189,8 @@ impl TerminalEntry {
             endpoint: host.endpoint().to_path_buf(),
             seq: host.seq(),
             agent: self.info.agent.clone(),
+            osc: self.osc.is_some(),
+            hook_agent: self.hook_agent.clone(),
             agent_seq: self.agent_seq,
             tokens,
         })
@@ -1957,7 +1959,7 @@ fn adopted(
             exit_code: None,
             program: t.program,
             args: t.args,
-            agent: t.agent,
+            agent: t.agent.clone(),
             tokens: visible,
             survives_restart: true,
             host_version: Some(handle.version().to_string()),
@@ -1966,8 +1968,8 @@ fn adopted(
         host: Some(handle),
         stream,
         agent_seq: t.agent_seq,
-        osc: None,
-        hook_agent: None,
+        osc: t.osc.then(|| t.agent.clone()).flatten(),
+        hook_agent: t.hook_agent.clone(),
         tokens,
     }
 }
@@ -2111,11 +2113,12 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     {
         Some(text) => (Some(text), Some(now_millis())),
         None if p.status == AgentStatus::Working => (None, None),
-        None => entry
-            .info
-            .agent
-            .as_ref()
-            .map_or((None, None), |a| (a.message.clone(), a.message_at)),
+        None => if entry.osc.is_some() {
+            entry.hook_agent.as_ref()
+        } else {
+            entry.info.agent.as_ref()
+        }
+        .map_or((None, None), |a| (a.message.clone(), a.message_at)),
     };
     let next = (p.status != AgentStatus::Gone).then(|| AgentInfo {
         status: p.status,

@@ -672,27 +672,7 @@ impl Scanner {
                         self.state = State::Esc;
                     }
                 }
-                State::Esc => {
-                    self.state = match b {
-                        b'[' => {
-                            self.params.clear();
-                            State::Csi
-                        }
-                        b']' | b'P' | b'_' | b'^' | b'X' => {
-                            self.collect = b == b']';
-                            self.spoiled = false;
-                            self.body.clear();
-                            State::Str
-                        }
-                        b'c' => {
-                            hits.push(Hit::Reset);
-                            hits.push(Hit::Ris);
-                            State::Ground
-                        }
-                        0x1b => State::Esc,
-                        _ => State::Ground,
-                    };
-                }
+                State::Esc => self.state = self.esc(b, &mut hits),
                 State::Csi => match b {
                     0x20..=0x3f => {
                         if self.params.len() < 64 {
@@ -717,21 +697,40 @@ impl Scanner {
                     _ => self.collect_byte(b),
                 },
                 State::StrEsc => {
-                    self.state = if b == b'\\' {
+                    if b == b'\\' {
                         self.finish(&mut hits);
-                        State::Ground
+                        self.state = State::Ground;
                     } else {
-                        self.spoiled = true;
-                        State::Str
-                    };
-                    if b == b'[' {
-                        self.params.clear();
-                        self.state = State::Csi;
+                        // ESC inside a string aborts it and starts a new sequence.
+                        self.state = self.esc(b, &mut hits);
                     }
                 }
             }
         }
         hits
+    }
+
+    /// The byte after ESC: the state it leads to.
+    fn esc(&mut self, b: u8, hits: &mut Vec<Hit>) -> State {
+        match b {
+            b'[' => {
+                self.params.clear();
+                State::Csi
+            }
+            b']' | b'P' | b'_' | b'^' | b'X' => {
+                self.collect = b == b']';
+                self.spoiled = false;
+                self.body.clear();
+                State::Str
+            }
+            b'c' => {
+                hits.push(Hit::Reset);
+                hits.push(Hit::Ris);
+                State::Ground
+            }
+            0x1b => State::Esc,
+            _ => State::Ground,
+        }
     }
 
     /// Keeps the start of an OSC string: 7501 up to its limit, anything else only as far as it
@@ -1167,6 +1166,11 @@ mod tests {
         assert!(reports(b"\x1b]7500;state=idle\x07").is_empty());
         assert!(reports(b"\x1b]7501;state=idle\x18").is_empty());
         assert!(reports(b"\x1b]7501;state=idle\x1bxy\x07").is_empty());
+        // An aborted report does not swallow the next one.
+        assert_eq!(
+            reports(b"\x1b]7501;state=idle\x1b]7501;state=done\x07").len(),
+            1
+        );
         assert!(reports(b"\x1b]7501;state=idle").is_empty());
     }
 

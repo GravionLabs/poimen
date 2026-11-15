@@ -50,6 +50,12 @@ pub(crate) struct StoredTerminal {
     pub(crate) seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) agent: Option<AgentInfo>,
+    /// `agent` is the status the program reported with OSC 7501 (#681); `hook_agent` is the
+    /// status of the hooks meanwhile.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) osc: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) hook_agent: Option<AgentInfo>,
     /// The `seq` of the last accepted agent report, so a stale report stays dropped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) agent_seq: Option<u64>,
@@ -308,6 +314,8 @@ mod tests {
                 message: Some("Allow Bash?".into()),
                 message_at: Some(1_700_000_000_000),
             }),
+            osc: false,
+            hook_agent: None,
             agent_seq: Some(17),
             tokens: vec![StoredToken {
                 name: "deliver_step".into(),
