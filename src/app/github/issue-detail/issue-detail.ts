@@ -5,6 +5,7 @@ import { AgentActions, issueTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues, issueKey, issueLevel, levelBadge, type ClosingPr } from "../issues";
 import { renderMarkdown } from "../markdown";
 import { GithubPulls, errorText, isGithubUrl } from "../pulls";
+import { IssueTasks } from "../issue-task";
 
 /**
  * The detail pane of the selected issue: description, labels, assignees, milestone, sub-issues
@@ -39,6 +40,16 @@ export class IssueDetailPane {
     return sel && root ? [issueTarget(sel.repo, root, sel.issue)] : [];
   });
   protected readonly offered = computed(() => this.agentActions.offered(this.targets()));
+  protected readonly issueTasks = inject(IssueTasks);
+  /** The open issue, or null: only an open issue gets "Start task…" or "Open space". */
+  protected readonly startable = computed<ActionTarget | null>(() => {
+    const [t] = this.targets();
+    return t?.state === "open" ? t : null;
+  });
+
+  protected startTask(issue: ActionTarget): void {
+    void this.issueTasks.start(issue.root, issue.number);
+  }
 
   /** What the header shows: the list row while the detail loads, then the detail. */
   protected readonly head = computed(() => {

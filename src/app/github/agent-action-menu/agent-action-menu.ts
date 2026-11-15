@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
-import { AgentActions } from "../agent-actions";
+import { AgentActions, type ActionTarget } from "../agent-actions";
+import { IssueTasks } from "../issue-task";
 
 /**
  * The popup of the agent actions of a row (the `⋯` button or the context menu). Shift+click on an
@@ -13,10 +14,21 @@ import { AgentActions } from "../agent-actions";
 })
 export class AgentActionMenu {
   protected readonly actions = inject(AgentActions);
+  protected readonly issueTasks = inject(IssueTasks);
+  /** The open issue of the menu: it gets "Start task…" or "Open space" above the agent actions. */
+  protected readonly openIssue = computed<ActionTarget | null>(() => {
+    const t = this.actions.menu()?.targets ?? [];
+    return t.length === 1 && t[0].kind === "issue" && t[0].state === "open" ? t[0] : null;
+  });
   protected readonly offered = computed(() => {
     const m = this.actions.menu();
     return m ? this.actions.offered(m.targets) : [];
   });
+
+  protected startTask(issue: ActionTarget): void {
+    this.actions.closeMenu();
+    void this.issueTasks.start(issue.root, issue.number);
+  }
 
   @HostListener("document:keydown.escape")
   protected onEscape(): void {

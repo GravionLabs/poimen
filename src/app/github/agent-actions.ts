@@ -14,6 +14,7 @@ import { UiState } from "../core/ui-state";
 import { AgentRuns } from "./agent-runs";
 import { GithubIssues, issueLevel, type Issue } from "./issues";
 import { GithubPulls, type PullRow } from "./pulls";
+import { IssueTasks } from "./issue-task";
 
 /** Where the agent of an action runs: the repository root or a worktree of the issue or PR. */
 export type RunWhere = "root" | "worktree" | "diff";
@@ -213,6 +214,7 @@ export class AgentActions {
   private readonly issues = inject(GithubIssues);
   private readonly ui = inject(UiState);
   private readonly runs = inject(AgentRuns);
+  private readonly issueTasks = inject(IssueTasks);
 
   private readonly byRoot = signal<ReadonlyMap<string, readonly AgentAction[]>>(new Map());
   private readonly _dialog = signal<ActionDialog | null>(null);
@@ -256,6 +258,7 @@ export class AgentActions {
       ...(this.issues.result() ?? []).map((r) => r.root),
     ];
     for (const root of roots) void this.load(root);
+    void this.issueTasks.load(roots);
   }
 
   /** Reads the actions of the repository at `root` (defaults, user and trusted project file). */

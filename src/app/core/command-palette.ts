@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { AgentActions } from "../github/agent-actions";
+import { IssueTasks } from "../github/issue-task";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
 import { ProjectEntries, type ProjectEntry } from "./project-entries";
@@ -16,6 +17,7 @@ export interface PoimenCommand {
     | "githubInbox"
     | "githubPulls"
     | "githubIssues"
+    | "startIssueTask"
     | "githubMilestones"
     | "openDeliver"
     | "showChanges"
@@ -135,6 +137,7 @@ export class CommandPalette {
   private readonly settings = inject(SettingsStore);
   private readonly project = inject(ProjectEntries);
   private readonly agentActions = inject(AgentActions);
+  private readonly issueTasks = inject(IssueTasks);
 
   private readonly _open = signal(false);
   private readonly _query = signal("");
@@ -181,12 +184,14 @@ export class CommandPalette {
         c.id === "projectTeardown" ||
         c.id === "quitAndStopServer" ||
         c.id === "projectEntry" ||
-        c.id === "agentAction"
+        c.id === "agentAction" ||
+        c.id === "startIssueTask"
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
     })),
     ...this.projectItems(),
+    ...this.issueTaskItems(),
     ...this.agentActions.entries().map((e): PaletteItem => ({
       key: `agentAction:${e.action.id}`,
       title: e.title,
@@ -258,6 +263,20 @@ export class CommandPalette {
   readonly selected = computed(() =>
     Math.max(0, Math.min(this._selected(), this.items().length - 1)),
   );
+
+  /** "Start task…" or "Open space" for the open issue the GitHub view shows. */
+  private issueTaskItems(): PaletteItem[] {
+    const [t] = this.agentActions.current();
+    if (!t || t.kind !== "issue" || t.state !== "open") return [];
+    return [
+      {
+        key: "startIssueTask",
+        title: `GitHub: ${this.issueTasks.label(t.root, t.number)} #${t.number}`,
+        shortcut: "",
+        command: "startIssueTask",
+      },
+    ];
+  }
 
   /** Opens the palette with an empty query. */
   open(): void {

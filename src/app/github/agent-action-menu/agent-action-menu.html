@@ -8,6 +8,18 @@
     [style.left.px]="m.x"
     [style.top.px]="m.y"
   >
+    @if (openIssue(); as issue) {
+      <li role="none">
+        <button
+          type="button"
+          role="menuitem"
+          data-testid="menu-start-task"
+          (click)="startTask(issue)"
+        >
+          {{ issueTasks.label(issue.root, issue.number) }}
+        </button>
+      </li>
+    }
     @for (o of offered(); track o.action.id) {
       <li role="none">
         <button
