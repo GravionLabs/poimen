@@ -14,6 +14,7 @@ const load = (name: string): DeliverStatus => {
 /** Running, linked to terminal t7, needs the user (fixture). */
 const MILESTONE = load("milestone");
 const NOW = Date.parse(MILESTONE.updated) + 2 * 60_000;
+const tasks0 = MILESTONE.tasks[0] ?? ({} as DeliverStatus["tasks"][number]);
 const quiet: DeliverStatus = { ...MILESTONE, needsYou: false };
 const finished: DeliverStatus = { ...quiet, status: "finished", outcome: "succeeded" };
 
@@ -23,8 +24,20 @@ describe("effectiveStatus", () => {
     expect(effectiveStatus("idle", [quiet], NOW)).toBe("working");
   });
 
-  it("is blocked when the run needs the user or the hook is blocked", () => {
-    expect(effectiveStatus("done", [MILESTONE], NOW)).toBe("blocked");
+  it("keeps working while a gate waits for the human and the run has open tasks", () => {
+    const busy = { ...MILESTONE, tasks: [{ ...tasks0 }] };
+    expect(busy.needsYou).toBe(true);
+    expect(effectiveStatus("working", [busy], NOW)).toBe("working");
+    expect(effectiveStatus("done", [busy], NOW)).toBe("working");
+  });
+
+  it("is blocked when only a gate for the human is left or the hook is blocked", () => {
+    const gate = { ...MILESTONE, tasks: [] };
+    expect(effectiveStatus("working", [gate], NOW)).toBe("blocked");
+    expect(effectiveStatus("done", [gate], NOW)).toBe("blocked");
+    expect(effectiveStatus("blocked", [{ ...MILESTONE, tasks: [{ ...tasks0 }] }], NOW)).toBe(
+      "blocked",
+    );
     expect(effectiveStatus("blocked", [quiet], NOW)).toBe("blocked");
   });
 
