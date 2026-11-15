@@ -28,6 +28,7 @@ import {
 import { allPages, SETTINGS_GROUPS } from "./settings-categories";
 import { SpaceLayoutEditor } from "./space-layout-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
+import { SettingsImportPanel } from "./settings-import-panel";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -148,6 +149,13 @@ function setup(
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/settings-view/space-layout-editor.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(SettingsImportPanel, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/settings-view/settings-import-panel.html", "utf8"),
     },
   });
   TestBed.overrideComponent(SpaceTemplatesEditor, {
@@ -656,6 +664,8 @@ describe("SettingsView categories", () => {
       "Server",
       "Machines",
       "Agents",
+      "General",
+      "Export & import",
     ]);
     expect(crumb(host)).toBe("Workspace › Explorer");
     expect(item(host, "p:explorer").getAttribute("aria-selected")).toBe("true");
@@ -740,7 +750,7 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(11);
+    expect(titles(host)).toHaveLength(13);
   });
 
   it("opens the removed notifications page as Appearance, without notification switches (#676)", () => {
@@ -806,6 +816,72 @@ describe("SettingsView categories", () => {
     expect(tests).toHaveLength(2);
   });
 
+  it("previews an import on the Export & import page and writes only on Import", async () => {
+    const { fixture, host } = setup(undefined, undefined, "transfer");
+    vi.spyOn(TestBed.inject(TauriBridge), "pickJsonFile").mockResolvedValue("/tmp/in.json");
+    tauri.answer("settings_import_plan", (args) => ({
+      added: [],
+      changed: [{ path: "theme", before: "dark", after: "light" }],
+      removed: args?.["mode"] === "replace" ? [{ path: "sidebar.layout", before: "split" }] : [],
+      invalid: [{ path: "terminal.fontSize", reason: "terminal.fontSize 1 must be a number" }],
+      skipped: [{ path: "trustedProjects", reason: "per machine, never imported" }],
+    }));
+    tauri.answer("settings_import_apply", () => ({
+      added: [],
+      changed: [{ path: "theme" }],
+      removed: [{ path: "sidebar.layout" }],
+      invalid: [],
+      skipped: [],
+    }));
+    const settle = async () => {
+      await fixture.whenStable();
+      await new Promise((resolve) => setTimeout(resolve));
+      fixture.detectChanges();
+    };
+    const button = (text: string) =>
+      [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+        (b) => b.textContent!.trim() === text,
+      )!;
+    button("Import settings…").click();
+    await settle();
+    const preview = host.querySelector('[aria-label="Import preview"]')!;
+    expect(preview.querySelector('[aria-label="Changed"]')!.textContent).toContain("theme");
+    expect(preview.querySelector('[aria-label="Invalid"]')!.textContent).toContain(
+      "terminal.fontSize",
+    );
+    expect(preview.querySelector('[aria-label="Skipped"]')!.textContent).toContain(
+      "trustedProjects",
+    );
+    expect(preview.querySelector('[aria-label="Removed"]')).toBeNull();
+    button("Replace").click();
+    await settle();
+    expect(preview.querySelector('[aria-label="Removed"]')!.textContent).toContain(
+      "sidebar.layout",
+    );
+    expect(tauri.calls("settings_import_apply")).toEqual([]);
+    button("Import").click();
+    await settle();
+    expect(tauri.calls("settings_import_apply")).toEqual([
+      { path: "/tmp/in.json", mode: "replace", scope: "all" },
+    ]);
+    expect(host.querySelector('[aria-label="Import preview"]')).toBeNull();
+    expect(host.querySelector('[role="status"]')!.textContent).toContain(
+      "0 added, 1 changed, 1 removed",
+    );
+  });
+
+  it("exports the settings to the file chosen in the save dialog", async () => {
+    const { fixture, host } = setup(undefined, undefined, "transfer");
+    vi.spyOn(TestBed.inject(TauriBridge), "pickSaveFile").mockResolvedValue("/tmp/out.json");
+    tauri.answer("settings_export", () => null);
+    [...host.querySelectorAll<HTMLButtonElement>("button")]
+      .find((b) => b.textContent!.trim() === "Export settings…")!
+      .click();
+    await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(tauri.calls("settings_export")).toEqual([{ path: "/tmp/out.json", template: null }]);
+  });
+
   it("has every label of the category list in its page template", () => {
     // Option labels such as the theme's Light/Dark/System live in the component's option lists.
     const html =
@@ -851,8 +927,8 @@ describe("SettingsView categories", () => {
     press(node("g:appearance-behavior"), "ArrowRight");
     expect(document.activeElement).toBe(node("p:appearance"));
     press(node("p:appearance"), "End");
-    expect(document.activeElement).toBe(node("p:agents"));
-    press(node("p:agents"), "Home");
+    expect(document.activeElement).toBe(node("p:transfer"));
+    press(node("p:transfer"), "Home");
     expect(document.activeElement).toBe(node("g:appearance-behavior"));
     host.remove();
   });

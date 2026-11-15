@@ -27,6 +27,7 @@ mod remote_runs;
 mod remote_transcripts;
 mod schemes;
 mod settings;
+mod settings_transfer;
 mod spaces;
 mod task_start;
 use poimen_core::tasks;
@@ -1090,6 +1091,50 @@ async fn rebuild_space(
         rebuild_space_with(b, home_dir().as_deref(), &space_id, decision, confirmed)
     })
     .await
+}
+
+/// Exports the user settings (without `trustedProjects`) to `path`, a file chosen in the save
+/// dialog; `template` exports only that space template.
+#[tauri::command]
+async fn settings_export(path: String, template: Option<String>) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        settings_transfer::export(&home, std::path::Path::new(&path), template.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What importing the settings file `path` would add, change and remove, and what it leaves out;
+/// writes nothing.
+#[tauri::command]
+async fn settings_import_plan(
+    path: String,
+    mode: settings_transfer::Mode,
+    scope: settings_transfer::Scope,
+) -> Result<settings_transfer::Plan, String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        settings_transfer::import_plan(&home, std::path::Path::new(&path), mode, scope)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Imports the settings file `path` (the plan made again right before the write); the settings
+/// watcher emits the change.
+#[tauri::command]
+async fn settings_import_apply(
+    path: String,
+    mode: settings_transfer::Mode,
+    scope: settings_transfer::Scope,
+) -> Result<settings_transfer::Plan, String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        settings_transfer::import_apply(&home, std::path::Path::new(&path), mode, scope)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Revokes the trust of the project file of `root`; the settings watcher emits the change.
@@ -2699,6 +2744,9 @@ pub fn run() {
             set_space_templates,
             resolve_space_template,
             revoke_project,
+            settings_export,
+            settings_import_plan,
+            settings_import_apply,
             remove_spaces_layout,
             default_spaces_layout,
             seed_space_defaults,

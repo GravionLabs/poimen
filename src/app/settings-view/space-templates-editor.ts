@@ -25,6 +25,8 @@ import {
   type SpaceTemplate,
 } from "../core/space-templates";
 import { TauriBridge } from "../core/tauri";
+import { SettingsTransfer } from "../core/settings-transfer";
+import { SettingsImportPanel } from "./settings-import-panel";
 
 /** Where the layout of the draft started: none, a source, or edited by hand. */
 type LayoutSource = "none" | "default" | "user" | "custom" | `preset:${string}`;
@@ -58,6 +60,7 @@ function value(event: Event): string {
  */
 @Component({
   selector: "app-space-templates-editor",
+  imports: [SettingsImportPanel],
   templateUrl: "./space-templates-editor.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -65,6 +68,7 @@ function value(event: Event): string {
 export class SpaceTemplatesEditor {
   private readonly store = inject(SettingsStore);
   private readonly bridge = inject(TauriBridge);
+  protected readonly transfer = inject(SettingsTransfer);
 
   protected readonly settings = this.store.settings;
   protected readonly writeError = this.store.writeError;
@@ -131,6 +135,16 @@ export class SpaceTemplatesEditor {
         .then((raw) => this.harnesses.set(parseHarnesses(raw)))
         .catch(() => this.harnesses.set([]));
     });
+  }
+
+  /** Exports the template `name` (with its layout) to a file chosen in the save dialog. */
+  protected exportTemplate(name: string): void {
+    void this.transfer.export(name);
+  }
+
+  /** Picks a file and shows which templates it adds or changes; nothing is written yet. */
+  protected importTemplate(): void {
+    void this.transfer.choose("template");
   }
 
   protected add(): void {

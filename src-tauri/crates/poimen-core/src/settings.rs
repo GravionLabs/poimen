@@ -444,16 +444,74 @@ pub fn remove_path_text(text: &str, path: &[&str]) -> Result<String, String> {
     if b.get(after) == Some(&b',') {
         // Not the last entry: drop the entry, its comma and the whitespace before it.
         let from = trim_ws_back(b, key_start);
-        return Ok(format!("{}{}", &text[..from], &text[after + 1..]));
+        let rest = &text[after + 1..];
+        let gap = line_break(text, from, key_start, rest);
+        return Ok(format!("{}{gap}{rest}", &text[..from]));
     }
-    // The last entry: drop the comma before it, if any.
+    // The last entry: drop the comma before it, if any, and keep the comments between that comma
+    // and the entry (like the comments above a middle entry, which stay too).
     let before = trim_ws_back(b, key_start);
-    let from = if before > 0 && b[before - 1] == b',' {
-        before - 1
+    let rest = &text[stop..];
+    let gap = line_break(text, before, key_start, rest);
+    match separator_before(b, open, key_start) {
+        Some(comma) => Ok(format!(
+            "{}{}{gap}{rest}",
+            &text[..comma],
+            &text[comma + 1..before]
+        )),
+        None => Ok(format!("{}{gap}{rest}", &text[..before])),
+    }
+}
+
+/// The whitespace `text[end..key_start]` when the kept text ends in a `//` comment at `end` and
+/// `rest` does not start on a new line (the comment would swallow it), else nothing.
+fn line_break<'a>(text: &'a str, end: usize, key_start: usize, rest: &str) -> &'a str {
+    let rest_breaks = rest
+        .trim_start_matches([' ', '\t'])
+        .starts_with(['\n', '\r']);
+    if !rest_breaks && line_comment_ends_at(text.as_bytes(), end) {
+        &text[end..key_start]
     } else {
-        before
-    };
-    Ok(format!("{}{}", &text[..from], &text[stop..]))
+        ""
+    }
+}
+
+/// Whether a `//` comment (outside a string) runs up to `end` on its line. A `//` inside a block
+/// comment counts too, which only keeps a line break that was not needed.
+fn line_comment_ends_at(b: &[u8], end: usize) -> bool {
+    let mut i = b[..end]
+        .iter()
+        .rposition(|&c| c == b'\n')
+        .map_or(0, |n| n + 1);
+    while i < end {
+        match b[i] {
+            b'"' => i = skip_string(b, i),
+            b'/' if b.get(i + 1) == Some(&b'/') => return true,
+            _ => i += 1,
+        }
+    }
+    false
+}
+
+/// The comma that separates the entry whose key starts at `key_start` from the entry before it,
+/// in the object opening at `open`; `None` for the first entry. Comments between them are skipped.
+fn separator_before(b: &[u8], open: usize, key_start: usize) -> Option<usize> {
+    let (mut i, mut comma) = (open + 1, None);
+    loop {
+        i = skip_trivia(b, i);
+        if i >= key_start {
+            return comma;
+        }
+        match b[i] {
+            b',' => {
+                comma = Some(i);
+                i += 1;
+            }
+            b':' => i = value_end(b, skip_trivia(b, i + 1)),
+            b'"' => i = skip_string(b, i),
+            _ => i += 1,
+        }
+    }
 }
 
 /// Returns `text` with `trustedProjects` replaced by `projects`, touching nothing else (comments
@@ -861,6 +919,83 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn removed(text: &str, path: &[&str]) -> String {
+        remove_path_text(text, path).unwrap()
+    }
+
+    #[test]
+    fn remove_path_drops_a_middle_entry_and_keeps_its_comment() {
+        let text = "{\n  \"a\": 1,\n  // about b\n  \"b\": 2,\n  \"c\": 3\n}";
+        assert_eq!(
+            removed(text, &["b"]),
+            "{\n  \"a\": 1,\n  // about b\n  \"c\": 3\n}"
+        );
+    }
+
+    #[test]
+    fn remove_path_drops_the_last_entry_and_the_comma_before_its_comment() {
+        let text = "{\n  \"a\": 1,\n  // about b\n  \"b\": 2\n}";
+        assert_eq!(removed(text, &["b"]), "{\n  \"a\": 1\n  // about b\n}");
+        let block = "{ \"a\": [1, 2], /* b, c */ \"b\": { \"x\": \"y,\" } }";
+        assert_eq!(removed(block, &["b"]), "{ \"a\": [1, 2] /* b, c */ }");
+        let commas = "{ \"a\": \"1,2\", // x, y\n \"b\": 2 }";
+        assert_eq!(removed(commas, &["b"]), "{ \"a\": \"1,2\" // x, y\n  }");
+        let middle = "{ \"a\": 1, // x\n \"b\": 2, \"c\": 3 }";
+        assert_eq!(removed(middle, &["b"]), "{ \"a\": 1, // x\n  \"c\": 3 }");
+    }
+
+    #[test]
+    fn remove_path_drops_a_last_nested_entry_next_to_comments() {
+        let text = r#"{
+  "trustedProjects": { "/r": "h" },
+  "sidebar": {
+    // about layout
+    "layout": "tree",
+    // about agents
+    "agents": "list"
+  }
+}"#;
+        let next = removed(text, &["sidebar", "agents"]);
+        assert_eq!(
+            next,
+            r#"{
+  "trustedProjects": { "/r": "h" },
+  "sidebar": {
+    // about layout
+    "layout": "tree"
+    // about agents
+  }
+}"#
+        );
+        assert_eq!(
+            removed(&next, &["sidebar", "layout"]),
+            r#"{
+  "trustedProjects": { "/r": "h" },
+  "sidebar": {
+    // about layout
+    // about agents
+  }
+}"#
+        );
+    }
+
+    #[test]
+    fn remove_path_of_the_only_entry_or_a_missing_key() {
+        assert_eq!(removed("{ // only\n \"a\": 1 }", &["a"]), "{ // only\n  }");
+        assert_eq!(removed("{ \"a\": 1 }", &["b"]), "{ \"a\": 1 }");
+        assert_eq!(removed("{ \"a\": 1 }", &["b", "c"]), "{ \"a\": 1 }");
+    }
+
+    #[test]
+    fn remove_path_errors_on_a_non_object_text_or_parent() {
+        assert!(remove_path_text("[]", &["a"]).is_err());
+        assert!(remove_path_text("{ \"a\": 1 }", &[]).is_err());
+        assert_eq!(
+            remove_path_text("{ \"a\": 1 }", &["a", "c"]),
+            Err("a in config.json is not an object".into())
+        );
+    }
 
     #[test]
     fn group_worktrees_defaults_to_true_and_warns_on_a_wrong_type() {

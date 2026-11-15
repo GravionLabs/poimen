@@ -2,7 +2,7 @@ import { Injectable } from "@angular/core";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 /** Stops a listener started with {@link TauriBridge.listen}. */
@@ -39,6 +39,18 @@ export class TauriBridge {
   async pickDirectory(): Promise<string | null> {
     const dir = await open({ directory: true, multiple: false });
     return typeof dir === "string" ? dir : null;
+  }
+
+  /** The native open dialog for a JSON file; the chosen path, or `null` when cancelled. */
+  async pickJsonFile(): Promise<string | null> {
+    const file = await open({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
+    return typeof file === "string" ? file : null;
+  }
+
+  /** The native save dialog for a JSON file named `defaultPath`; the path, or `null` when cancelled. */
+  async pickSaveFile(defaultPath: string): Promise<string | null> {
+    const file = await save({ defaultPath, filters: [{ name: "JSON", extensions: ["json"] }] });
+    return typeof file === "string" ? file : null;
   }
 
   /** Calls `handler` with the payload of every `event`; resolves once the listener is registered. */

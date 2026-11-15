@@ -25,6 +25,15 @@
           </button>
           <button
             type="button"
+            class="btn"
+            aria-label="Export default"
+            [disabled]="transfer.busy()"
+            (click)="exportTemplate(d.name)"
+          >
+            Export…
+          </button>
+          <button
+            type="button"
             class="icon-btn"
             aria-label="Remove default"
             title="Remove"
@@ -59,6 +68,15 @@
           </button>
           <button
             type="button"
+            class="btn"
+            [attr.aria-label]="'Export ' + item.t.name"
+            [disabled]="transfer.busy()"
+            (click)="exportTemplate(item.t.name)"
+          >
+            Export…
+          </button>
+          <button
+            type="button"
             class="icon-btn"
             [attr.aria-label]="'Remove ' + item.t.name"
             title="Remove"
@@ -76,6 +94,18 @@
     wins: directory and remote, then remote, then the longest directory. A template with neither is
     the default for every other directory.
   </p>
+  <div class="actions">
+    <button type="button" class="btn" [disabled]="transfer.busy()" (click)="importTemplate()">
+      Import template…
+    </button>
+  </div>
+  @if (transfer.error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+  @if (transfer.message(); as message) {
+    <p class="hint" role="status">{{ message }}</p>
+  }
+  <app-settings-import-panel scope="template" />
   @if (editing(); as e) {
     <form
       class="template-form"
