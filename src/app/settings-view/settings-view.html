@@ -164,7 +164,7 @@
               </section>
               <section aria-label="Fonts">
                 <h2>Fonts</h2>
-                <div class="fields">
+                <div class="fields aligned">
                   <label class="field grow" [class.hit]="hit('Terminal font family')">
                     Terminal font family
                     <input
@@ -187,7 +187,7 @@
                     />
                   </label>
                 </div>
-                <div class="fields">
+                <div class="fields aligned">
                   <label class="field grow" [class.hit]="hit('UI font family')">
                     UI font family
                     <input
@@ -227,7 +227,7 @@
                   optional (up to 1 MiB); without one, a built-in tone plays.
                 </p>
                 @for (kind of soundKinds; track kind.id) {
-                  <div class="fields">
+                  <div class="fields sound-row">
                     <label class="check" [class.hit]="hit(kind.label)">
                       <input
                         type="checkbox"
