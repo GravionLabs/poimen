@@ -57,6 +57,11 @@ pub struct Output {
 pub trait Runner {
     /// Runs `gh` with `args`. `ErrorKind::NotFound` means `gh` is not installed.
     fn gh(&self, args: &[String]) -> io::Result<Output>;
+    /// Runs `gh` with `args` and `input` on its standard input (a body that must not go through
+    /// argv). A runner that cannot do this answers `ErrorKind::Unsupported`.
+    fn gh_input(&self, _args: &[String], _input: &str) -> io::Result<Output> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
     /// Wall-clock time since the Unix epoch.
     fn now(&self) -> Duration;
 }
@@ -65,46 +70,11 @@ pub struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn gh(&self, args: &[String]) -> io::Result<Output> {
-        let path = gui_path::child_path();
-        let program = gui_path::resolve_program("gh", &path)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "gh not found"))?;
-        let mut child = gui_path::command(program)
-            .args(args)
-            .env("PATH", &path)
-            .env("GH_PROMPT_DISABLED", "1")
-            .env("NO_COLOR", "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        let read = |pipe: Option<Box<dyn io::Read + Send>>| {
-            std::thread::spawn(move || {
-                let mut buf = Vec::new();
-                if let Some(mut pipe) = pipe {
-                    let _ = pipe.read_to_end(&mut buf);
-                }
-                String::from_utf8_lossy(&buf).into_owned()
-            })
-        };
-        let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
-        let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
-        let deadline = Instant::now() + GH_TIMEOUT;
-        let status = loop {
-            if let Some(status) = child.try_wait()? {
-                break status;
-            }
-            if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::new(io::ErrorKind::TimedOut, "gh timed out"));
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        Ok(Output {
-            code: status.code(),
-            stdout: stdout.join().unwrap_or_default(),
-            stderr: stderr.join().unwrap_or_default(),
-        })
+        run_gh(args, None)
+    }
+
+    fn gh_input(&self, args: &[String], input: &str) -> io::Result<Output> {
+        run_gh(args, Some(input))
     }
 
     fn now(&self) -> Duration {
@@ -112,6 +82,60 @@ impl Runner for SystemRunner {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
     }
+}
+
+fn run_gh(args: &[String], input: Option<&str>) -> io::Result<Output> {
+    let path = gui_path::child_path();
+    let program = gui_path::resolve_program("gh", &path)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "gh not found"))?;
+    let mut child = gui_path::command(program)
+        .args(args)
+        .env("PATH", &path)
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("NO_COLOR", "1")
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    if let (Some(text), Some(mut pipe)) = (input, child.stdin.take()) {
+        let text = text.to_owned();
+        // A thread, so a large body cannot block on a full pipe; dropping `pipe` closes it.
+        std::thread::spawn(move || {
+            let _ = io::Write::write_all(&mut pipe, text.as_bytes());
+        });
+    }
+    let read = |pipe: Option<Box<dyn io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        })
+    };
+    let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
+    let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
+    let deadline = Instant::now() + GH_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "gh timed out"));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    Ok(Output {
+        code: status.code(),
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
 }
 
 /// `owner/name` of a GitHub remote URL; `None` for any other host.
@@ -264,6 +288,8 @@ pub struct Client<R: Runner> {
     runner: R,
     cache_dir: PathBuf,
     graphql_cache: Mutex<HashMap<String, (Duration, Value)>>,
+    /// Bumped by every write; a GraphQL answer read before it is not cached.
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl Client<SystemRunner> {
@@ -278,19 +304,107 @@ impl<R: Runner> Client<R> {
             runner,
             cache_dir,
             graphql_cache: Mutex::new(HashMap::new()),
+            generation: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Runs a read-only `gh` command (`argv` without the program name) uncached, leaving the
+    /// caches alone. Returns stdout; errors map through `map_error`.
+    pub fn read(&self, argv: &[String]) -> Result<String, GhError> {
+        let out = self.run(argv)?;
+        if out.code == Some(0) {
+            Ok(out.stdout)
+        } else {
+            Err(self.classify(None, None, &out.stderr))
+        }
+    }
+
+    /// Runs a writing `gh` command (`argv` without the program name) without touching the caches,
+    /// then drops the GraphQL cache and the REST disk entries of `repo`, whatever the outcome (a
+    /// failed write may have changed something). Returns stdout; errors map through `map_error`.
+    pub fn mutate(&self, repo: &Repo, argv: &[String]) -> Result<String, GhError> {
+        let result = self.run(argv);
+        self.invalidate(repo);
+        let out = result?;
+        if out.code == Some(0) {
+            Ok(out.stdout)
+        } else {
+            Err(self.classify(None, None, &out.stderr))
+        }
+    }
+
+    /// Like [`mutate`](Self::mutate) with `input` on standard input (a body of any length).
+    pub fn mutate_input(
+        &self,
+        repo: &Repo,
+        argv: &[String],
+        input: &str,
+    ) -> Result<String, GhError> {
+        let result = self
+            .runner
+            .gh_input(argv, input)
+            .map_err(|e| self.io_error(&e));
+        self.invalidate(repo);
+        let out = result?;
+        if out.code == Some(0) {
+            Ok(out.stdout)
+        } else {
+            Err(self.classify(None, None, &out.stderr))
+        }
+    }
+
+    /// Runs a reading `gh` command (`argv` without the program name) straight to GitHub, never
+    /// from or into a cache; for a check that needs the current state. Returns stdout.
+    pub fn read_fresh(&self, argv: &[String]) -> Result<String, GhError> {
+        let out = self.run(argv)?;
+        if out.code == Some(0) {
+            Ok(out.stdout)
+        } else {
+            Err(self.classify(None, None, &out.stderr))
+        }
+    }
+
+    fn io_error(&self, e: &io::Error) -> GhError {
+        if e.kind() == io::ErrorKind::NotFound {
+            GhError::GhMissing
+        } else {
+            GhError::Other {
+                message: e.to_string(),
+            }
+        }
+    }
+
+    /// Drops every cached answer that may describe `repo`.
+    fn invalidate(&self, repo: &Repo) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut cache) = self.graphql_cache.lock() {
+            cache.clear();
+        }
+        let prefix = format!("repos/{}/{}", repo.owner, repo.name).to_lowercase();
+        let Ok(dir) = std::fs::read_dir(&self.cache_dir) else {
+            return;
+        };
+        for file in dir.flatten() {
+            let path = file.path();
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(entry) = serde_json::from_str::<DiskEntry>(&text) else {
+                continue;
+            };
+            let lower = entry.path.trim_start_matches('/').to_lowercase();
+            if lower == prefix
+                || lower.starts_with(&format!("{prefix}/"))
+                || lower.starts_with(&format!("{prefix}?"))
+            {
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
 
     fn run(&self, args: &[String]) -> Result<Output, GhError> {
-        self.runner.gh(args).map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                GhError::GhMissing
-            } else {
-                GhError::Other {
-                    message: e.to_string(),
-                }
-            }
-        })
+        self.runner.gh(args).map_err(|e| self.io_error(&e))
     }
 
     /// Turns a failed call into an error; asks `gh auth status` when the failure looks like
@@ -398,6 +512,7 @@ impl<R: Runner> Client<R> {
     pub fn graphql(&self, query: &str, vars: &Value) -> Result<Value, GhError> {
         let key = format!("{query}\u{0}{vars}");
         let now = self.runner.now();
+        let generation = self.generation.load(std::sync::atomic::Ordering::SeqCst);
         if let Ok(cache) = self.graphql_cache.lock()
             && let Some((at, value)) = cache.get(&key)
             && now.saturating_sub(*at) < CACHE_TTL
@@ -431,7 +546,9 @@ impl<R: Runner> Client<R> {
         let value: Value = serde_json::from_str(&out.stdout).map_err(|e| GhError::Other {
             message: format!("unreadable GraphQL answer: {e}"),
         })?;
-        if let Ok(mut cache) = self.graphql_cache.lock() {
+        if let Ok(mut cache) = self.graphql_cache.lock()
+            && generation == self.generation.load(std::sync::atomic::Ordering::SeqCst)
+        {
             cache.insert(key, (now, value.clone()));
         }
         Ok(value)
@@ -523,6 +640,121 @@ pub fn open_issues<R: Runner>(client: &Client<R>, repo: &Repo) -> Result<Vec<Ope
     Ok(all)
 }
 
+/// The ids of the workflow runs to re-run, from a `actions/runs?head_sha=` answer: the newest run
+/// of each workflow, when it is completed and failed (`failure` or `timed_out`). Runs come newest
+/// first, so an older failed run of a workflow that passed since is left alone.
+pub fn failed_run_ids(body: &str) -> Result<Vec<u64>, GhError> {
+    let v: Value = serde_json::from_str(body).map_err(|e| GhError::Other {
+        message: format!("unexpected GitHub answer: {e}"),
+    })?;
+    let runs = v["workflow_runs"].as_array().ok_or(GhError::Other {
+        message: "unexpected GitHub answer".into(),
+    })?;
+    let mut seen = std::collections::HashSet::new();
+    let mut ids = Vec::new();
+    for run in runs {
+        let (Some(id), Some(workflow)) = (run["id"].as_u64(), run["workflow_id"].as_u64()) else {
+            continue;
+        };
+        if !seen.insert(workflow) {
+            continue;
+        }
+        let failed = run["status"] == "completed"
+            && matches!(run["conclusion"].as_str(), Some("failure" | "timed_out"));
+        if failed {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Failed workflow runs of commit `sha` in `repo` (REST `actions/runs?head_sha=` through the
+/// cached `rest`); reused by the re-run of failed checks.
+pub fn failed_runs<R: Runner>(
+    client: &Client<R>,
+    repo: &Repo,
+    sha: &str,
+) -> Result<Vec<u64>, GhError> {
+    if sha.is_empty() || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(GhError::Other {
+            message: "no commit to look up runs for".into(),
+        });
+    }
+    let path = format!(
+        "repos/{}/{}/actions/runs?head_sha={sha}&per_page=100",
+        repo.owner, repo.name
+    );
+    failed_run_ids(&client.rest(&path)?)
+}
+
+/// The most of one run's failed log that is kept: its last 200 KB.
+pub const LOG_LIMIT_PER_RUN: usize = 200 * 1024;
+
+/// The last `max` bytes of `log` (from a character boundary, after a marker line when cut): the
+/// end of a failed log holds the error.
+pub fn trim_log(log: &str, max: usize) -> String {
+    if log.len() <= max {
+        return log.to_owned();
+    }
+    let mut start = log.len() - max;
+    while !log.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("[... {start} earlier bytes trimmed ...]\n{}", &log[start..])
+}
+
+/// `gh run view <id> --log-failed` argv.
+pub fn run_log_argv(repo: &Repo, run_id: u64) -> Vec<String> {
+    vec![
+        "run".into(),
+        "view".into(),
+        run_id.to_string(),
+        "--log-failed".into(),
+        "-R".into(),
+        format!("{}/{}", repo.owner, repo.name),
+    ]
+}
+
+/// The failed logs of the failed runs of commit `sha`, each trimmed to its last
+/// `LOG_LIMIT_PER_RUN` bytes under a `=== run <id> ===` line. No failed run is an error; a run
+/// whose log cannot be read is named in the text, and the error is returned only when no run
+/// gave a log.
+pub fn failed_logs<R: Runner>(
+    client: &Client<R>,
+    repo: &Repo,
+    sha: &str,
+) -> Result<String, GhError> {
+    let runs = failed_runs(client, repo, sha)?;
+    if runs.is_empty() {
+        return Err(GhError::Other {
+            message: "no failed run found for the last commit".into(),
+        });
+    }
+    let mut text = String::new();
+    let mut first_error = None;
+    let mut read = 0;
+    for id in runs {
+        text.push_str(&format!("=== run {id} ===\n"));
+        match client.read(&run_log_argv(repo, id)) {
+            Ok(log) => {
+                read += 1;
+                text.push_str(&trim_log(&log, LOG_LIMIT_PER_RUN));
+            }
+            Err(e) => {
+                text.push_str("(the log could not be read)");
+                first_error.get_or_insert(e);
+            }
+        }
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+    match first_error {
+        Some(e) if read == 0 => Err(e),
+        _ => Ok(text),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,6 +765,7 @@ mod tests {
     struct Fake {
         answers: RefCell<VecDeque<io::Result<Output>>>,
         calls: RefCell<Vec<Vec<String>>>,
+        inputs: RefCell<Vec<String>>,
         clock: Cell<Duration>,
     }
 
@@ -544,6 +777,10 @@ mod tests {
                 .pop_front()
                 .expect("unexpected gh call")
         }
+        fn gh_input(&self, args: &[String], input: &str) -> io::Result<Output> {
+            self.inputs.borrow_mut().push(input.to_owned());
+            self.gh(args)
+        }
         fn now(&self) -> Duration {
             self.clock.get()
         }
@@ -553,6 +790,7 @@ mod tests {
         Fake {
             answers: RefCell::new(answers.into()),
             calls: RefCell::new(vec![]),
+            inputs: RefCell::new(vec![]),
             clock: Cell::new(Duration::from_secs(1_000_000)),
         }
     }
@@ -862,6 +1100,102 @@ mod tests {
     }
 
     #[test]
+    fn mutate_runs_uncached_and_drops_the_caches_of_that_repository() {
+        let dir = temp_dir("mutate");
+        let f = fake(vec![
+            out(0, OK, ""),             // rest of repo o/n
+            out(0, OK, ""),             // rest of repo o/other
+            out(0, "{\"data\":1}", ""), // graphql
+            out(0, "done\n", ""),       // mutate
+            out(0, OK, ""),             // rest o/n again
+            out(0, "{\"data\":2}", ""), // graphql again
+            out(0, "done\n", ""),       // second mutate is not cached
+        ]);
+        let c = Client::new(&f, dir.clone());
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        c.rest("repos/o/n/milestones").unwrap();
+        c.rest("repos/o/other/milestones").unwrap();
+        c.graphql("q", &json!({})).unwrap();
+        let argv: Vec<String> = vec!["pr".into(), "ready".into(), "1".into()];
+        assert_eq!(c.mutate(&r, &argv).unwrap(), "done\n");
+        assert_eq!(f.calls.borrow()[3], argv);
+        // Fresh after the write; the other repository stays cached.
+        c.rest("repos/o/n/milestones").unwrap();
+        c.rest("repos/o/other/milestones").unwrap();
+        assert_eq!(c.graphql("q", &json!({})).unwrap(), json!({"data": 2}));
+        assert_eq!(f.calls.borrow().len(), 6);
+        c.mutate(&r, &argv).unwrap();
+        assert_eq!(f.calls.borrow().len(), 7);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mutate_input_sends_the_body_on_stdin_not_in_argv_and_invalidates() {
+        let f = fake(vec![
+            out(0, "ok\n", ""),
+            out(1, "", "gh: Not Found (HTTP 404)"),
+        ]);
+        let c = Client::new(&f, temp_dir("mutate-in"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        let body = "line\n".repeat(100_000);
+        let argv = vec![
+            "issue".to_string(),
+            "edit".into(),
+            "--body-file".into(),
+            "-".into(),
+        ];
+        assert_eq!(c.mutate_input(&r, &argv, &body).unwrap(), "ok\n");
+        assert_eq!(f.inputs.borrow()[0], body);
+        assert_eq!(f.calls.borrow()[0], argv);
+        assert_eq!(c.mutate_input(&r, &argv, "x"), Err(GhError::NotFound));
+    }
+
+    #[test]
+    fn read_fresh_runs_every_time_and_maps_errors() {
+        let f = fake(vec![
+            out(0, "a", ""),
+            out(0, "b", ""),
+            out(1, "", "gh: Not Found (HTTP 404)"),
+        ]);
+        let c = Client::new(&f, temp_dir("fresh"));
+        let argv = vec!["issue".to_string(), "view".into()];
+        assert_eq!(c.read_fresh(&argv).unwrap(), "a");
+        assert_eq!(c.read_fresh(&argv).unwrap(), "b");
+        assert_eq!(c.read_fresh(&argv), Err(GhError::NotFound));
+    }
+
+    #[test]
+    fn mutate_errors_map_and_still_invalidate() {
+        let f = fake(vec![
+            out(0, "{\"data\":1}", ""),
+            out(1, "", "error connecting to api.github.com"),
+            out(1, "", "GraphQL: Pull request is not mergeable\nmore"),
+            out(0, "{\"data\":2}", ""),
+        ]);
+        let c = Client::new(&f, temp_dir("mutate-err"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        c.graphql("q", &json!({})).unwrap();
+        let argv: Vec<String> = vec!["pr".into(), "close".into(), "1".into()];
+        assert_eq!(c.mutate(&r, &argv), Err(GhError::Offline));
+        assert_eq!(
+            c.mutate(&r, &argv),
+            Err(GhError::Other {
+                message: "GraphQL: Pull request is not mergeable".into()
+            })
+        );
+        assert_eq!(c.graphql("q", &json!({})).unwrap(), json!({"data": 2}));
+    }
+
+    #[test]
     fn graphql_failures_map_to_errors() {
         let f = fake(vec![out(1, "", "error connecting to api.github.com")]);
         let c = Client::new(&f, temp_dir("gqlerr"));
@@ -938,5 +1272,93 @@ mod tests {
         let f = fake(vec![out(1, "", "gh: command failed: HTTP 404")]);
         let _ = std::fs::remove_dir_all(dir);
         assert!(open_issues(&Client::new(&f, temp_dir("open-issues-err")), &r).is_err());
+    }
+    #[test]
+    fn failed_runs_are_the_newest_failed_run_per_workflow() {
+        let body = include_str!("../fixtures/github-actions-runs.json");
+        assert_eq!(failed_run_ids(body).unwrap(), vec![102, 105]);
+        assert_eq!(
+            failed_run_ids(r#"{"workflow_runs":[]}"#).unwrap(),
+            Vec::<u64>::new()
+        );
+        assert!(failed_run_ids("{}").is_err());
+        assert!(failed_run_ids("nope").is_err());
+    }
+
+    #[test]
+    fn failed_runs_ask_for_the_sha_and_refuse_a_bad_one() {
+        let body = include_str!("../fixtures/github-actions-runs.json");
+        let f = fake(vec![out(
+            0,
+            &format!(
+                "HTTP/2.0 200 OK\r\nEtag: W/\"r\"\r\n\r\n{}",
+                body.replace('\n', " ")
+            ),
+            "",
+        )]);
+        let c = Client::new(&f, temp_dir("runs"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        assert_eq!(failed_runs(&c, &r, "abc123").unwrap(), vec![102, 105]);
+        assert!(
+            f.calls.borrow()[0]
+                .contains(&"repos/o/n/actions/runs?head_sha=abc123&per_page=100".to_string())
+        );
+        assert!(failed_runs(&c, &r, "abc; rm").is_err());
+        assert!(failed_runs(&c, &r, "").is_err());
+    }
+
+    #[test]
+    fn trim_log_keeps_the_end_on_a_character_boundary() {
+        assert_eq!(trim_log("short", 10), "short");
+        let t = trim_log("abcdefghij", 4);
+        assert!(t.ends_with("\nghij"), "{t}");
+        assert!(t.starts_with("[... 6 earlier bytes trimmed ...]"));
+        // "é" is two bytes; a cut inside it moves forward.
+        let t = trim_log("aéé", 3);
+        assert!(t.ends_with("\né"), "{t}");
+        let big = "x".repeat(LOG_LIMIT_PER_RUN + 5000);
+        assert!(trim_log(&big, LOG_LIMIT_PER_RUN).len() < LOG_LIMIT_PER_RUN + 100);
+    }
+
+    #[test]
+    fn failed_logs_read_each_failed_run_of_the_sha() {
+        let body = include_str!("../fixtures/github-actions-runs.json");
+        let runs = format!(
+            "HTTP/2.0 200 OK\r\nEtag: W/\"r\"\r\n\r\n{}",
+            body.replace('\n', " ")
+        );
+        let f = fake(vec![
+            out(0, &runs, ""),
+            out(0, "log of 102\n", ""),
+            out(0, &"y".repeat(LOG_LIMIT_PER_RUN + 10), ""),
+        ]);
+        let c = Client::new(&f, temp_dir("logs"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        let text = failed_logs(&c, &r, "abc123").unwrap();
+        assert!(text.starts_with("=== run 102 ===\nlog of 102\n=== run 105 ===\n[... 10 earlier"));
+        let calls = f.calls.borrow();
+        assert_eq!(
+            calls[1],
+            ["run", "view", "102", "--log-failed", "-R", "o/n"]
+        );
+        assert_eq!(calls[2][2], "105");
+    }
+
+    #[test]
+    fn failed_logs_without_runs_or_logs_are_errors() {
+        let none = "HTTP/2.0 200 OK\r\nEtag: W/\"r\"\r\n\r\n{\"workflow_runs\":[]}";
+        let f = fake(vec![out(0, none, "")]);
+        let c = Client::new(&f, temp_dir("nologs"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        assert!(failed_logs(&c, &r, "abc123").is_err());
     }
 }

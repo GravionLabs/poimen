@@ -100,7 +100,7 @@ describe("SpacesStore repos", () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(tauri.calls("repo_info")).toHaveLength(2);
 
-    tauri.emit("herdr", {
+    tauri.emit("backend", {
       kind: "terminal.agent_status_changed",
       data: { terminal_id: "w1:p1", agent_status: "done" },
     });
@@ -119,7 +119,7 @@ describe("SpacesStore repos", () => {
       await store.start();
       expect(tauri.calls("repo_info")).toHaveLength(1);
 
-      tauri.emit("herdr", {
+      tauri.emit("backend", {
         kind: "terminal.agent_status_changed",
         data: { terminal_id: "w1:p1", agent_status },
       });
@@ -137,7 +137,7 @@ describe("SpacesStore repos", () => {
       await store.start();
       focused = false;
 
-      tauri.emit("herdr", {
+      tauri.emit("backend", {
         kind: "terminal.agent_status_changed",
         data: { terminal_id: "w1:p1", agent_status },
       });
@@ -152,7 +152,7 @@ describe("SpacesStore repos", () => {
     tauri.answer("repo_info", () => ({}));
     await store.start();
 
-    tauri.emit("herdr", {
+    tauri.emit("backend", {
       kind: "terminal.agent_status_changed",
       data: { terminal_id: "w1:p1", agent_status: "working" },
     });

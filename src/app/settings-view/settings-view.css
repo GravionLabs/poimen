@@ -257,6 +257,47 @@ h3 {
   border-top: 1px solid var(--h-content-border-color);
 }
 
+/* Template rows align their cells in columns; below 720 px each row wraps to two lines. */
+.template-grid .template-row {
+  display: grid;
+  grid-template-columns:
+    minmax(80px, 1fr) minmax(120px, 1.4fr) minmax(110px, 1fr) minmax(140px, 1.6fr)
+    auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
+}
+
+.template-grid .template-row > strong,
+.template-grid .template-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-grid .layout {
+  font-size: 12px;
+  color: var(--h-text-muted-color);
+}
+
+@media (max-width: 720px) {
+  .template-grid .template-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .template-grid .template-row > .path,
+  .template-grid .template-row > .agent,
+  .template-grid .template-row > .layout {
+    grid-column: 1 / -1;
+  }
+
+  .template-grid .template-row > .actions {
+    grid-row: 1;
+    grid-column: 2;
+  }
+}
+
 .path {
   flex: 1;
   min-width: 0;
@@ -438,6 +479,50 @@ h3 {
   margin: 8px 0;
 }
 
+.fields.aligned {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  align-items: end;
+  gap: 8px 12px;
+}
+
+.fields.aligned .field.grow,
+.fields.aligned .field.ratio {
+  min-width: 0;
+}
+
+.fields.aligned .field input {
+  width: 100%;
+}
+
+.fields.sound-row {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr) 72px;
+  align-items: end;
+  gap: 8px 12px;
+}
+
+.fields.sound-row .check {
+  height: 26px;
+  margin: 0;
+}
+
+.fields.sound-row .field.grow {
+  min-width: 0;
+}
+
+.fields.sound-row .choice {
+  width: 100%;
+  height: 26px;
+}
+
+@media (max-width: 520px) {
+  .fields.aligned,
+  .fields.sound-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .agent {
   font-size: 12px;
   color: var(--h-text-muted-color);
@@ -448,4 +533,32 @@ h3 {
   padding: 8px 10px;
   border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
+}
+
+.import-plan {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+}
+
+.import-plan h3 {
+  overflow-wrap: anywhere;
+}
+
+.import-plan .diff {
+  margin: 4px 0 8px;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.import-plan .diff span {
+  color: var(--h-text-muted-color);
+  overflow-wrap: anywhere;
+}
+
+.import-plan .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }

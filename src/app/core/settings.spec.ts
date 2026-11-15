@@ -131,9 +131,8 @@ describe("parseSettings", () => {
       sidebarShowBaseBranch: false,
       explorerRoots: ["~"],
       explorerShowHidden: false,
-      backend: "poimen",
+      claudeClassicRenderer: false,
       scrollback: 10000,
-      herdrAutoStart: true,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       spaceTemplates: [
         { name: "w", dir: "~/src", remote: null, agent: "claude", model: "opus", layout: null },
@@ -174,11 +173,10 @@ describe("parseSettings", () => {
     expect(parseSettings({}).machines).toEqual([]);
   });
 
-  it("reads the backend and falls back to poimen for anything else", () => {
-    expect(parseSettings({ backend: "poimen" }).backend).toBe("poimen");
-    expect(parseSettings({ backend: "herdr" }).backend).toBe("herdr");
-    expect(parseSettings({ backend: "tmux" }).backend).toBe("poimen");
-    expect(parseSettings({}).backend).toBe("poimen");
+  it("reads the classic renderer option and defaults it to off", () => {
+    expect(parseSettings({}).claudeClassicRenderer).toBe(false);
+    expect(parseSettings({ claudeClassicRenderer: true }).claudeClassicRenderer).toBe(true);
+    expect(parseSettings({ claudeClassicRenderer: "yes" }).claudeClassicRenderer).toBe(false);
   });
 
   it("reads the scrollback and keeps 10000 for a value that is not a whole number from 0", () => {
@@ -325,14 +323,6 @@ describe("theme cycle and persistence", () => {
     await store.start();
     tauri.emit("settings", { ...DEFAULT_SETTINGS, theme: "light" });
     expect(store.settings().theme).toBe("light");
-  });
-});
-
-describe("herdrAutoStart", () => {
-  it("is on unless the backend says false", () => {
-    expect(parseSettings({}).herdrAutoStart).toBe(true);
-    expect(parseSettings({ herdrAutoStart: false }).herdrAutoStart).toBe(false);
-    expect(parseSettings({ herdrAutoStart: "no" }).herdrAutoStart).toBe(true);
   });
 });
 

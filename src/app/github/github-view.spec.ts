@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IssueFormPane } from "./issue-form/issue-form";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
@@ -13,6 +14,7 @@ import { GithubView } from "./github-view";
 import { IssuesSection } from "./issues-section";
 import { IssueDetailPane } from "./issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail/pull-detail";
+import { ChipPicker } from "./chip-picker/chip-picker";
 import { GithubIssues } from "./issues";
 import { MilestonesSection } from "./milestones-section";
 import { InboxSection } from "./inbox-section";
@@ -109,6 +111,9 @@ async function render(result: PullsResult = RESULT, page: GithubPage | null = "p
       template: readFileSync("src/app/github/github-view.html", "utf8"),
     },
   });
+  TestBed.overrideComponent(IssueFormPane, {
+    set: { templateUrl: undefined, styleUrl: undefined, template: "" },
+  });
   TestBed.overrideComponent(IssuesSection, {
     set: {
       templateUrl: undefined,
@@ -128,6 +133,13 @@ async function render(result: PullsResult = RESULT, page: GithubPage | null = "p
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/github/milestones-section.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(ChipPicker, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/chip-picker/chip-picker.html", "utf8"),
     },
   });
   TestBed.overrideComponent(PullDetailPane, {

@@ -44,10 +44,19 @@
   }
   @if (ui.panelTab() === "events" && spaceRuns().length) {
     <select class="picker" aria-label="Run" (change)="pickRun($event)">
-      @for (r of spaceRuns(); track r.key) {
-        <option [value]="r.key" [selected]="r.key === run()?.key">
-          {{ runLabel(r, now()) }}
-        </option>
+      @for (g of groups(); track g.key) {
+        <optgroup [label]="groupTitle(g)">
+          @if (g.runs.length > 1) {
+            <option [value]="allPrefix + g.key" [selected]="allGroup()?.key === g.key">
+              All runs ({{ g.runs.length }})
+            </option>
+          }
+          @for (r of g.runs; track r.key) {
+            <option [value]="r.key" [selected]="!allGroup() && r.key === run()?.key">
+              {{ runLabel(r, now()) }}
+            </option>
+          }
+        </optgroup>
       }
     </select>
   }
@@ -140,7 +149,11 @@
         No run in this space yet. An agent run (agent-events) reports its progress here.
       </p>
     } @else {
-      @if (run(); as current) {
+      @if (allGroup(); as group) {
+        <div class="run-line" data-testid="run-line">
+          {{ groupTitle(group) }} · all {{ group.runs.length }} runs
+        </div>
+      } @else if (run(); as current) {
         <div class="run-line" data-testid="run-line">{{ runLabel(current, now()) }}</div>
       }
       <div class="event head" [style.grid-template-columns]="eventGrid()" data-testid="event-head">
@@ -205,24 +218,68 @@
         <span class="col">Result</span>
         <span></span>
       </div>
-      @for (row of rows(); track $index) {
-        <div
-          class="event"
-          [style.grid-template-columns]="eventGrid()"
-          [class]="toneStyle(row.tone).class"
-          [class.attention]="toneStyle(row.tone).attention"
-        >
-          <span class="icon" aria-hidden="true">{{ toneStyle(row.tone).icon }}</span>
-          <span class="time">{{ eventTime(row.ts) }}</span>
-          <span class="issue">{{ row.task ?? "" }}</span>
-          <span class="step">{{ row.step ?? row.type }}</span>
-          <span class="result">{{ row.outcome ?? "" }}</span>
-          @if (row.link; as url) {
-            <a class="pr" title="Open pull request" [href]="url" (click)="openPr($event, url)"
-              >link</a
-            >
+      @for (item of rows(); track $index) {
+        @if (item.kind === "separator") {
+          <div class="run-separator" data-testid="run-separator">
+            <span class="time">{{ item.start }}</span>
+            <span>{{ item.state }}{{ item.outcome ? " · " + item.outcome : "" }}</span>
+          </div>
+        } @else if (item.kind === "skipped") {
+          <div
+            class="event tone-neutral fold"
+            [style.grid-template-columns]="eventGrid()"
+            data-testid="skipped-fold"
+          >
+            <span class="icon" aria-hidden="true">·</span>
+            <span class="time">{{ eventTime(item.ts) }}</span>
+            <span class="issue">
+              <button
+                type="button"
+                class="fold-toggle"
+                [attr.aria-expanded]="openFolds().has(item.key)"
+                (click)="toggleFold(item.key)"
+              >
+                {{ openFolds().has(item.key) ? "▾" : "▸" }} {{ item.label }}
+              </button>
+            </span>
+            <span class="step"></span>
+            <span class="result">skipped</span>
+          </div>
+          @if (openFolds().has(item.key)) {
+            @for (t of item.tasks; track $index) {
+              <div
+                class="event tone-neutral fold-task"
+                [style.grid-template-columns]="eventGrid()"
+                data-testid="skipped-task"
+              >
+                <span class="icon" aria-hidden="true"></span>
+                <span class="time"></span>
+                <span class="issue">{{ t.task }}</span>
+                <span class="step">{{ t.subject }}{{ t.text ? ": " + t.text : "" }}</span>
+                <span class="result">{{ t.reason }}</span>
+              </div>
+            }
           }
-        </div>
+        } @else {
+          @let row = item.row;
+          <div
+            class="event"
+            [style.grid-template-columns]="eventGrid()"
+            [class]="toneStyle(row.tone).class"
+            [class.attention]="toneStyle(row.tone).attention"
+          >
+            <span class="icon" aria-hidden="true">{{ toneStyle(row.tone).icon }}</span>
+            <span class="time">{{ eventTime(row.ts) }}</span>
+            <span class="issue">{{ row.task ?? "" }}</span>
+            <span class="step">{{ row.step ?? row.type }}</span>
+            <span class="result">{{ row.outcome ?? "" }}</span>
+            @if (row.link; as url) {
+              <a class="pr" title="Open pull request" [href]="url" (click)="openPr($event, url)"
+                >link</a
+              >
+            }
+          </div>
+        }
       }
     }
   </div>

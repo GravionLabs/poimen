@@ -6,6 +6,7 @@
 {"number":232,"title":"Issues tree","url":"https://github.com/o/n/issues/232","state":"OPEN",
  "labels":{"nodes":[{"name":"pbi"},{"name":"needs-refinement"}]},"assignees":{"nodes":[{"login":"jkaufmann"}]},"milestone":null,
  "parent":{"number":10,"repository":{"nameWithOwner":"o/n"}},"subIssuesSummary":{"total":0,"completed":0},
+ "blockedBy":{"nodes":[{"number":231,"state":"OPEN"},{"number":230,"state":"CLOSED"}]},
  "closedByPullRequestsReferences":{"nodes":[
   {"number":400,"url":"https://github.com/o/n/pull/400","state":"MERGED","headRefName":"x",
    "commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS","contexts":{"checkRunCountsByState":[{"state":"SUCCESS","count":3}],"statusContextCountsByState":[]}}}}]}},

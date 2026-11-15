@@ -12,6 +12,7 @@ pub const USAGE: &str = "usage: poimen [<command>]\n\
   new <space> [--name <n>] [-- cmd..] a new terminal in a space (id or name); prints its id\n\
   send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)\n\
   prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked\n\
+  mcp                                 a stdio MCP server with read-only tools for agents\n\
   -V, --version                       prints the version\n\
   attach [--control [--takeover]] <terminal>\n\
                                       shows a terminal; observes by default, --control sends your\n\
@@ -57,6 +58,8 @@ pub enum Request {
 pub enum Command {
     Attach(AttachArgs),
     Request(Request),
+    /// A stdio MCP server (ADR 0012).
+    Mcp,
     /// No arguments: the TUI.
     Tui,
     Help,
@@ -75,6 +78,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "-h" | "--help" | "help" => Ok(Command::Help),
         "-V" | "--version" => Ok(Command::Version),
         "attach" => parse_attach(rest),
+        "mcp" => no_more(rest, 0).map(|()| Command::Mcp),
         "ls" => {
             let (json, pos) = switch(rest, "--json")?;
             no_more(&pos, 0)?;
@@ -235,6 +239,13 @@ mod tests {
 
     fn p(args: &[&str]) -> Result<Command, String> {
         parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn mcp_takes_no_arguments() {
+        assert_eq!(p(&["mcp"]), Ok(Command::Mcp));
+        assert!(p(&["mcp", "x"]).is_err());
+        assert_eq!(p(&["mcp", "--help"]), Ok(Command::Help));
     }
 
     #[test]

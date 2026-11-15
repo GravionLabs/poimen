@@ -15,10 +15,10 @@ export const PANEL_DEFAULT_HEIGHT = 260;
 /** Tabs of the bottom panel: subagent transcripts (Output) and the run as a graph (Flow). */
 export const PANEL_TABS = ["output", "flow", "events", "log"] as const;
 export const DEFAULT_PANEL_TAB = "output";
+/** How many spaces keep a focus time. */
+export const RECENT_SPACES_LIMIT = 200;
 /** How many run command palette entries are remembered as "Recent". */
-export /** How many spaces keep a focus time. */
-const RECENT_SPACES_LIMIT = 200;
-const RECENT_COMMANDS_LIMIT = 5;
+export const RECENT_COMMANDS_LIMIT = 5;
 export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
@@ -144,6 +144,8 @@ export interface LayoutState {
   lineComments?: Record<string, CommentSet>;
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
   collapsedIssues?: Record<string, number[]>;
+  /** Per repository root, the subject group whose events the Events tab merges (#780). */
+  eventsAll?: Record<string, string>;
   /** Per repository directory, the machine a task was last started on (absent: this Mac). */
   taskMachine?: Record<string, string>;
   /** The selected sub-page of the GitHub tab (`pulls`, `issues` or `milestones`). */
@@ -154,6 +156,12 @@ export interface LayoutState {
   settingsPage?: string;
   /** Ids of the collapsed groups of the settings category tree. */
   settingsCollapsed?: string[];
+  /** Keys of the expanded subject groups of the Runs view (collapsed is the default). */
+  expandedRunGroups?: string[];
+  /** Keys of the expanded timeline lines (runs) of the Runs view. */
+  expandedRuns?: string[];
+  /** Keys (`owner/repo#title`) of the expanded milestones of the Runs overview (#585). */
+  expandedMilestones?: string[];
   /** The user answered "Not now" to the offer to install the agent hooks of the poimen backend. */
   hooksOfferDismissed?: boolean;
   /** Agents whose hooks were seen installed; a dismissed offer returns when one goes missing. */
@@ -211,6 +219,22 @@ export function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
+/** How many expanded groups and runs of the Runs view are kept; the oldest fall off. */
+export const EXPANDED_RUNS_LIMIT = 200;
+
+/** Distinct non-empty strings, the newest {@link EXPANDED_RUNS_LIMIT}; `undefined` when none. */
+function parseKeys(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const keys = [...new Set(value.filter((k): k is string => typeof k === "string" && k !== ""))];
+  return keys.length ? keys.slice(-EXPANDED_RUNS_LIMIT) : undefined;
+}
+
+/** `keys` with `key` added last (keeping the newest {@link EXPANDED_RUNS_LIMIT}) or removed. */
+function withKey(keys: ReadonlySet<string>, key: string, add: boolean): ReadonlySet<string> {
+  const rest = [...keys].filter((k) => k !== key);
+  return new Set(add ? [...rest, key].slice(-EXPANDED_RUNS_LIMIT) : rest);
+}
+
 /** Reads stored layout JSON; anything missing or malformed falls back to the defaults. */
 export function parseLayout(raw: string | null): LayoutState {
   const state: LayoutState = {
@@ -245,6 +269,7 @@ export function parseLayout(raw: string | null): LayoutState {
       recentSpaces,
       tabOrder,
       taskMachine,
+      eventsAll,
       changesLayout,
       flowDirection,
       eventColumns,
@@ -254,10 +279,19 @@ export function parseLayout(raw: string | null): LayoutState {
       githubShowEmpty,
       settingsPage,
       settingsCollapsed,
+      expandedRunGroups,
+      expandedRuns,
+      expandedMilestones,
       hooksOfferDismissed,
       hooksSeen,
       defaultsSeeded,
     } = data as Record<string, unknown>;
+    const runGroups = parseKeys(expandedRunGroups);
+    if (runGroups) state.expandedRunGroups = runGroups;
+    const runs = parseKeys(expandedRuns);
+    if (runs) state.expandedRuns = runs;
+    const milestones = parseKeys(expandedMilestones);
+    if (milestones) state.expandedMilestones = milestones;
     const comments = parseLineComments(lineComments);
     if (Object.keys(comments).length) state.lineComments = comments;
     if (changesLayout === "inline" || changesLayout === "split")
@@ -284,6 +318,12 @@ export function parseLayout(raw: string | null): LayoutState {
         Object.entries(taskMachine).filter(([, m]) => typeof m === "string" && m),
       );
       if (Object.keys(clean).length) state.taskMachine = clean;
+    }
+    if (eventsAll && typeof eventsAll === "object" && !Array.isArray(eventsAll)) {
+      const clean = Object.fromEntries(
+        Object.entries(eventsAll).filter(([, k]) => typeof k === "string" && k),
+      );
+      if (Object.keys(clean).length) state.eventsAll = clean;
     }
     if (isGithubPage(githubPage)) state.githubPage = githubPage;
     if (githubShowEmpty === true) state.githubShowEmpty = true;
@@ -401,6 +441,8 @@ export class UiState {
   );
   /** The machine a task was last started on per repository directory (persisted). */
   readonly taskMachine = signal<Readonly<Record<string, string>>>(this.initial.taskMachine ?? {});
+  /** The subject group whose runs the Events tab shows together, per repository root. */
+  readonly eventsAll = signal<Readonly<Record<string, string>>>(this.initial.eventsAll ?? {});
   readonly recentCommands = signal<readonly string[]>(this.initial.recentCommands ?? []);
   /** Collapsed nodes of the GitHub issue tree per repository (expanded is the default). */
   readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
@@ -432,6 +474,15 @@ export class UiState {
   /** Collapsed groups of the settings category tree. */
   readonly settingsCollapsed = signal<ReadonlySet<string>>(
     new Set(this.initial.settingsCollapsed ?? []),
+  );
+  /** Expanded subject groups of the Runs view (persisted). */
+  readonly expandedRunGroups = signal<ReadonlySet<string>>(
+    new Set(this.initial.expandedRunGroups ?? []),
+  );
+  /** Expanded timeline lines of the Runs view (persisted). */
+  readonly expandedRuns = signal<ReadonlySet<string>>(new Set(this.initial.expandedRuns ?? []));
+  readonly expandedMilestones = signal<ReadonlySet<string>>(
+    new Set(this.initial.expandedMilestones ?? []),
   );
   /** Whether the hooks offer was declined; it is not shown again. */
   readonly hooksOfferDismissed = signal(this.initial.hooksOfferDismissed === true);
@@ -507,6 +558,24 @@ export class UiState {
     if (collapsed) next.add(id);
     else next.delete(id);
     this.settingsCollapsed.set(next);
+    this.save();
+  }
+
+  /** Expands or collapses a subject group of the Runs view. */
+  setRunGroupExpanded(key: string, expanded: boolean): void {
+    this.expandedRunGroups.set(withKey(this.expandedRunGroups(), key, expanded));
+    this.save();
+  }
+
+  /** Expands or collapses a milestone of the Runs overview. */
+  setMilestoneExpanded(key: string, expanded: boolean): void {
+    this.expandedMilestones.set(withKey(this.expandedMilestones(), key, expanded));
+    this.save();
+  }
+
+  /** Expands or collapses a timeline line (a run) of the Runs view. */
+  setRunExpanded(key: string, expanded: boolean): void {
+    this.expandedRuns.set(withKey(this.expandedRuns(), key, expanded));
     this.save();
   }
 
@@ -606,6 +675,15 @@ export class UiState {
     if (machine) next[dir] = machine;
     else delete next[dir];
     this.taskMachine.set(next);
+    this.save();
+  }
+
+  /** Shows all runs of the subject group `key` in `root`; `null` goes back to a single run. */
+  setEventsAll(root: string, key: string | null): void {
+    const next = { ...this.eventsAll() };
+    if (key) next[root] = key;
+    else delete next[root];
+    this.eventsAll.set(next);
     this.save();
   }
 
@@ -748,6 +826,7 @@ export class UiState {
         ? Object.fromEntries(Object.entries(this.tabOrder()).map(([s, t]) => [s, [...t]]))
         : undefined,
       taskMachine: Object.keys(this.taskMachine()).length ? { ...this.taskMachine() } : undefined,
+      eventsAll: Object.keys(this.eventsAll()).length ? { ...this.eventsAll() } : undefined,
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,
@@ -759,6 +838,11 @@ export class UiState {
       lineComments: Object.keys(this.lineComments()).length ? this.lineComments() : undefined,
       settingsPage: this.settingsPage() ?? undefined,
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
+      expandedRunGroups: this.expandedRunGroups().size ? [...this.expandedRunGroups()] : undefined,
+      expandedRuns: this.expandedRuns().size ? [...this.expandedRuns()] : undefined,
+      expandedMilestones: this.expandedMilestones().size
+        ? [...this.expandedMilestones()]
+        : undefined,
       hooksOfferDismissed: this.hooksOfferDismissed() ? true : undefined,
       hooksSeen: this.hooksSeen().length ? [...this.hooksSeen()] : undefined,
       defaultsSeeded: this.defaultsSeeded() ? true : undefined,

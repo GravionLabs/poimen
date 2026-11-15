@@ -5,7 +5,8 @@ import { SettingsStore } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { GithubFilter } from "./github-filter";
 import { UiState } from "../core/ui-state";
-import { REFRESH_MIN_MS, isGithubUrl, type GhError } from "./pulls";
+import { SpaceActions } from "../core/space-actions";
+import { REFRESH_MIN_MS, errorText, ghErrorOf, isGithubUrl, type GhError } from "./pulls";
 
 /** A milestone as `github_milestones` returns it (`Milestone` of `github_milestones.rs`). */
 export interface Milestone {
@@ -13,6 +14,7 @@ export interface Milestone {
   title: string;
   url: string;
   dueOn: string | null;
+  description: string;
   open: number;
   closed: number;
   /** The lowest versioned milestone (`x.y.z`, `M<n>` or `M<n> (x.y.z)`) with open issues. */
@@ -39,6 +41,21 @@ export function dueText(dueOn: string | null): string {
   return dueOn ? `Due ${dueOn.slice(0, 10)}` : "No due date";
 }
 
+/** The open step of a milestone write: a form (create, edit) or a confirmation (close). */
+export interface MilestoneCompose {
+  kind: "create" | "edit" | "close";
+  root: string;
+  repo: string;
+  /** Milestone number, for edit and close. */
+  number: number | null;
+  title: string;
+  description: string;
+  /** `YYYY-MM-DD` or empty. */
+  dueOn: string;
+  /** Open issues of the milestone to close. */
+  open: number;
+}
+
 /** The selected milestone of one repository; it filters that repository's issue tree. */
 export interface MilestoneSelection {
   repo: string;
@@ -53,6 +70,7 @@ export class GithubMilestones {
   private readonly settings = inject(SettingsStore);
   private readonly ui = inject(UiState);
   private readonly filter = inject(GithubFilter);
+  private readonly spaces = inject(SpaceActions);
 
   private readonly _result = signal<RepoMilestones[] | null>(null);
   private readonly _loading = signal(false);
@@ -122,6 +140,94 @@ export class GithubMilestones {
     } finally {
       this._loading.set(false);
     }
+  }
+
+  readonly compose = signal<MilestoneCompose | null>(null);
+  private readonly _busy = signal(false);
+  readonly busy = this._busy.asReadonly();
+
+  /** Opens the create form with `M<n+1>` suggested from the repository's milestones. */
+  async openCreate(root: string, repo: string): Promise<void> {
+    let title = "";
+    try {
+      title = (await this.bridge.invoke<string>("github_milestone_title", { root })) ?? "";
+    } catch {
+      // No suggestion; the title stays empty.
+    }
+    this.compose.set({
+      kind: "create",
+      root,
+      repo,
+      number: null,
+      title,
+      description: "",
+      dueOn: "",
+      open: 0,
+    });
+  }
+
+  openEdit(root: string, repo: string, m: Milestone): void {
+    this.compose.set({
+      kind: "edit",
+      root,
+      repo,
+      number: m.number,
+      title: m.title,
+      description: m.description,
+      dueOn: m.dueOn ? m.dueOn.slice(0, 10) : "",
+      open: m.open,
+    });
+  }
+
+  /** Close asks first; the dialog names the open issues, if any. */
+  openClose(root: string, repo: string, m: Milestone): void {
+    this.compose.set({
+      kind: "close",
+      root,
+      repo,
+      number: m.number,
+      title: m.title,
+      description: "",
+      dueOn: "",
+      open: m.open,
+    });
+  }
+
+  cancel(): void {
+    this.compose.set(null);
+  }
+
+  /** Sends the open write; on success the milestones reload, on failure a notification names it. */
+  async submit(): Promise<boolean> {
+    const c = this.compose();
+    if (!c || this._busy()) return false;
+    const number = c.number ?? 0;
+    const write =
+      c.kind === "close"
+        ? { kind: "close", number }
+        : {
+            kind: c.kind === "create" ? "create" : "update",
+            ...(c.kind === "edit" ? { number } : {}),
+            title: c.title,
+            description: c.description,
+            dueOn: c.dueOn.trim() || null,
+          };
+    this._busy.set(true);
+    try {
+      await this.bridge.invoke("github_milestone_write", { root: c.root, write });
+    } catch (err) {
+      const e = ghErrorOf(err);
+      const verb = c.kind === "create" ? "Create" : c.kind === "edit" ? "Edit" : "Close";
+      this.spaces.notify(
+        `${verb} milestone ${c.title}: ${typeof e === "string" ? e : errorText(e)}`,
+      );
+      return false;
+    } finally {
+      this._busy.set(false);
+    }
+    this.compose.set(null);
+    await this.load(true);
+    return true;
   }
 
   async openUrl(url: string): Promise<void> {

@@ -51,6 +51,12 @@ describe("HooksDialog", () => {
     expect(offer.dismiss).toHaveBeenCalled();
   });
 
+  it("says that the same step registers the MCP server and how to remove it", () => {
+    const text = setup(["claude"]).root.querySelector(".mcp")?.textContent ?? "";
+    expect(text).toContain("poimen mcp");
+    expect(text).toContain("integration uninstall");
+  });
+
   it("says that running agents pick up the hooks only after a restart", () => {
     expect(setup(["copilot"]).root.querySelector(".restart")?.textContent).toContain(
       "start it again",

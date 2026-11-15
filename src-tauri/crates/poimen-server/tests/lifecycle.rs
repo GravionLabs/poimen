@@ -283,6 +283,33 @@ fn a_real_shell_gets_its_environment_input_and_resize() {
     assert_eq!((listed[0].cols, listed[0].rows), (100, 30));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_terminal_gets_the_requested_env_but_cannot_override_poimens_variables() {
+    let env = Env::new("extra-env");
+    let client = start(&env.config());
+    let space = client.create_space("work", &env.work()).unwrap();
+    let terminal = client
+        .create_terminal(&TerminalCreate {
+            env: std::collections::BTreeMap::from([
+                ("CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN".into(), "1".into()),
+                ("POIMEN_TERMINAL_ID".into(), "forged".into()),
+            ]),
+            ..sh(&space.id)
+        })
+        .unwrap();
+    client
+        .input(
+            &terminal.id,
+            "echo \"$CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN|$POIMEN_TERMINAL_ID\" > env2.txt\n",
+        )
+        .unwrap();
+    assert_eq!(
+        wait_for_file(&env.dir.join("work").join("env2.txt")).trim_end(),
+        format!("1|{}", terminal.id)
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn a_real_cmd_gets_its_environment_input_and_resize() {

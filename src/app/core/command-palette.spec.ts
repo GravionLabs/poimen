@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPicker } from "./agent-picker";
 import { AgentPrompts } from "./agent-prompt";
 import { AgentActions } from "../github/agent-actions";
+import { IssueTasks } from "../github/issue-task";
 import { AgentRuns } from "../github/agent-runs";
 import { GithubFilter } from "../github/github-filter";
 import { GithubIssues } from "../github/issues";
@@ -60,6 +61,7 @@ describe("CommandPalette", () => {
         GithubIssues,
         AgentRuns,
         AgentActions,
+        { provide: IssueTasks, useValue: { load: async () => {}, label: () => "Start task…" } },
         CommandPalette,
       ],
     });

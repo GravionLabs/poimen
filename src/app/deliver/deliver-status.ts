@@ -73,6 +73,8 @@ export interface FinishedTask {
   outcome: Outcome;
   subject: Subject;
   reason: string | null;
+  /** The human sentence of the outcome (#622); `reason` is the machine-readable code. */
+  text: string | null;
   links: Link[];
 }
 
@@ -80,6 +82,10 @@ export interface Attention {
   id: string;
   task: string | null;
   reason: string;
+  /** The human sentence (#622), shown instead of `reason` when present. */
+  text: string | null;
+  /** The tone of the attention when the run state carries it; see {@link attentionTone}. */
+  tone: Tone | null;
   needsYou: boolean;
   links: Link[];
 }
@@ -94,6 +100,12 @@ export interface RunEventRow {
   step: string | null;
   outcome: string | null;
   link: string | null;
+  /** Core `reason` of the event (#781). */
+  reason?: string | null;
+  /** Core `text` of the event. */
+  text?: string | null;
+  /** Title (else id) of the event's `subject`. */
+  subject?: string | null;
 }
 
 /** A run as the panel shows it: the core run state plus tone and host. */
@@ -103,6 +115,8 @@ export interface DeliverStatus {
   /** `succeeded`, `failed` or `cancelled` once the run finished. */
   outcome: string | null;
   reason: string | null;
+  /** The human sentence of the outcome (#622), shown instead of `reason` when present. */
+  text: string | null;
   /** What the run as a whole works on (a milestone, a release). */
   subject: Subject | null;
   progress: Progress | null;
@@ -218,7 +232,16 @@ function finishedTasks(v: unknown): FinishedTask[] {
       const id = str(t["task"]);
       const sub = subject(t["subject"]);
       return id && sub
-        ? [{ task: id, outcome, subject: sub, reason: str(t["reason"]), links: links(t["links"]) }]
+        ? [
+            {
+              task: id,
+              outcome,
+              subject: sub,
+              reason: str(t["reason"]),
+              text: str(t["text"]),
+              links: links(t["links"]),
+            },
+          ]
         : [];
     });
   });
@@ -235,6 +258,8 @@ function attentions(v: unknown): Attention[] {
         id,
         task: str(a["task"]),
         reason: str(a["reason"]) ?? "",
+        text: str(a["text"]),
+        tone: isTone(a["tone"]) ? a["tone"] : null,
         needsYou: a["needsYou"] === true,
         links: links(a["links"]),
       },
@@ -256,6 +281,9 @@ function eventRows(value: unknown): RunEventRow[] {
       step: str(v["step"]),
       outcome: str(v["outcome"]),
       link: str(v["link"]),
+      reason: str(v["reason"]),
+      text: str(v["text"]),
+      subject: str(v["subject"]),
     });
   }
   return rows;
@@ -282,6 +310,7 @@ export function parseStatus(value: unknown): DeliverStatus | string {
     status: status as RunStatus,
     outcome: str(value["outcome"]),
     reason: str(value["reason"]),
+    text: str(value["text"]),
     subject: subject(value["subject"]),
     progress: progress(value["progress"]),
     tasks: tasks(value["tasks"]),
@@ -391,6 +420,7 @@ export function fromLegacy(value: unknown): DeliverStatus | string {
             outcome: "succeeded" as const,
             subject: issue(d["pbi"], "", d["url"]),
             reason: null,
+            text: null,
             links: pr ? [{ rel: "pull-request", url: pr, title: null }] : [],
           },
         ];
@@ -401,6 +431,8 @@ export function fromLegacy(value: unknown): DeliverStatus | string {
       id: `${label}-${i.number}`,
       task: null,
       reason: `#${i.number} ${i.reason}`,
+      text: null,
+      tone: null,
       needsYou: needs,
       links: [{ rel: "issue", url: i.url, title: null }],
     }));
@@ -431,6 +463,7 @@ export function fromLegacy(value: unknown): DeliverStatus | string {
     status: finished ? "finished" : state === "abandoned" ? "abandoned" : "running",
     outcome: finished ? outcome : null,
     reason: finished && state !== "done" ? state : null,
+    text: null,
     subject: ms
       ? {
           kind: "github.milestone",
@@ -571,7 +604,8 @@ export function ageText(iso: string, now: number): string {
 /** The line under the title: "running, updated 3 min ago", "finished 12 min ago", ... */
 export function stateText(status: DeliverStatus, now: number): string {
   const age = ageText(status.updated, now);
-  const why = status.reason ? `: ${status.reason}` : "";
+  const said = outcomeText(status);
+  const why = said ? `: ${said}` : "";
   switch (runState(status, now)) {
     case "running":
       return `running, updated ${age}`;
@@ -608,12 +642,16 @@ export function stepText(step: Step): string {
     : step.name;
 }
 
-/** `HH:MM` of an ISO timestamp in local time; empty when it is missing or not a date. */
-export function clockText(ts: string | null | undefined): string {
-  const date = ts ? new Date(ts) : null;
-  if (!date || Number.isNaN(date.getTime())) return "";
+/** `HH:MM` of a date in local time; empty when it is not a valid date. */
+function clockOf(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "";
   const two = (n: number) => String(n).padStart(2, "0");
   return `${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+/** `HH:MM` of an ISO timestamp in local time; empty when it is missing or not a date. */
+export function clockText(ts: string | null | undefined): string {
+  return ts ? clockOf(new Date(ts)) : "";
 }
 
 /** The last segment of a path (either separator), without a trailing separator. */
@@ -681,4 +719,288 @@ export function barSummary(cards: readonly DeliverCard[], now: number): BarSumma
       ? `${warning ? "⚠" : "▶"} ${label(active[0])}`
       : `${warning ? "⚠" : "▶"} ${active.length} runs`;
   return { text, title, warning };
+}
+
+// The Runs view (#584): runs grouped by subject, a timeline of each group's runs.
+
+/** What a run, task or attention says: the human `text` (#622) when present, else `reason`. */
+export const outcomeText = (said: { text: string | null; reason: string | null }): string | null =>
+  said.text ?? (said.reason || null);
+
+/**
+ * The tone of an attention: its own when the run state carries it, else the tone of the
+ * `attention` events of the same task when they all agree (the core state has no tone per
+ * attention today), else `warning`, so an attention whose tone is unknown is still listed.
+ */
+export function attentionTone(attention: Attention, status: DeliverStatus): Tone {
+  if (attention.tone) return attention.tone;
+  const tones = new Set(
+    status.events
+      .filter((e) => e.type === "attention" && e.task === attention.task)
+      .map((e) => e.tone),
+  );
+  return tones.size === 1 ? [...tones][0]! : "warning";
+}
+
+/** Whether an attention belongs in "Attention": it needs the user, or its tone is warning/danger. */
+export function isAlert(attention: Attention, status: DeliverStatus): boolean {
+  if (attention.needsYou) return true;
+  const tone = attentionTone(attention, status);
+  return tone === "warning" || tone === "danger";
+}
+
+/**
+ * When a run started: the `ts` of its first event that is a date; `null` without one (a legacy
+ * status file, or only malformed `ts`).
+ */
+export const startedAt = (status: DeliverStatus): string | null =>
+  status.events.find((e) => e.ts && !Number.isNaN(Date.parse(e.ts)))?.ts ?? null;
+
+/** A run of a group with the key of its card. */
+export interface GroupRun {
+  key: string;
+  card: DeliverCard;
+  status: DeliverStatus;
+}
+
+/**
+ * The runs of one subject in one repository: key = repository (qualified by its machine) +
+ * `subject.kind` + `subject.id`; a run without a subject is a group of its own.
+ */
+export interface RunGroup {
+  key: string;
+  root: string;
+  machine?: string;
+  offline?: boolean;
+  subject: Subject | null;
+  /** Newest first (by start, then by last update). */
+  runs: GroupRun[];
+  /** The newest `updated` of its runs, epoch ms. */
+  updated: number;
+}
+
+const startOf = (status: DeliverStatus): number => Date.parse(startedAt(status) ?? status.updated);
+
+/** The group key of a readable card. */
+export function groupKey(card: DeliverCard): string {
+  const where = card.machine === undefined ? card.root : qualifyId(card.machine, card.root);
+  if (card.state.kind !== "ok") return `${where}\n\n\n${card.run}`;
+  const { subject, run } = card.state.status;
+  return subject
+    ? `${where}\n${subject.kind}\n${subject.id || subject.title}`
+    : `${where}\n\n\n${run}`;
+}
+
+/** The groups of the readable cards, in the order their first run appeared. */
+export function groupRuns(cards: readonly DeliverCard[]): RunGroup[] {
+  const groups = new Map<string, RunGroup>();
+  for (const card of cards) {
+    if (card.state.kind !== "ok") continue;
+    const { status } = card.state;
+    const key = groupKey(card);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        key,
+        root: card.root,
+        ...(card.machine === undefined ? {} : { machine: card.machine }),
+        ...(card.offline ? { offline: true } : {}),
+        subject: status.subject,
+        runs: [],
+        updated: 0,
+      };
+      groups.set(key, group);
+    }
+    group.runs.push({ key: cardKey(card), card, status });
+    group.updated = Math.max(group.updated, Date.parse(status.updated));
+  }
+  for (const group of groups.values()) {
+    group.runs.sort(
+      (a, b) =>
+        startOf(b.status) - startOf(a.status) ||
+        Date.parse(b.status.updated) - Date.parse(a.status.updated),
+    );
+    // The newest run names the subject (a later run may carry a better title).
+    group.subject = group.runs[0]?.status.subject ?? null;
+  }
+  return [...groups.values()];
+}
+
+/** The newest run of a group that is `running` and not stale. */
+export const runningRun = (group: RunGroup, now: number): GroupRun | undefined =>
+  group.runs.find((r) => runState(r.status, now) === "running");
+
+/** The sections of the view: groups with a running run, and the history; each by last update. */
+export interface RunSections {
+  running: RunGroup[];
+  history: RunGroup[];
+}
+
+export function runSections(groups: readonly RunGroup[], now: number): RunSections {
+  const byUpdate = [...groups].sort((a, b) => b.updated - a.updated);
+  return {
+    running: byUpdate.filter((g) => runningRun(g, now)),
+    history: byUpdate.filter((g) => !runningRun(g, now)),
+  };
+}
+
+/** One entry of "Needs you": a `needsYou` attention with its group and run. */
+export interface NeedsYouItem {
+  key: string;
+  group: RunGroup;
+  run: GroupRun;
+  attention: Attention;
+}
+
+/**
+ * The `needsYou` attentions of all runs, newest run first; the same task and reason in a group is
+ * listed once (the deliver loop asks again in every run).
+ */
+export function needsYouItems(groups: readonly RunGroup[]): NeedsYouItem[] {
+  const seen = new Set<string>();
+  const items: NeedsYouItem[] = [];
+  for (const group of groups)
+    for (const run of group.runs)
+      for (const attention of run.status.attentions) {
+        if (!attention.needsYou) continue;
+        const key = `${group.key}\n${attention.task ?? ""}\n${outcomeText(attention) ?? ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push({ key, group, run, attention });
+      }
+  return items;
+}
+
+const subjectId = (subject: Subject): string => `${subject.kind}\n${subject.id || subject.title}`;
+
+/** Whether a link is a pull request: its `rel`, or a `/pull/<n>` URL. */
+export const isPullLink = (l: Link): boolean =>
+  l.rel === "pull-request" || /\/pull\/\d+\/?$/.test(l.url);
+
+/** A task a finished or abandoned run did not finish. */
+export interface LeftTask {
+  task: OpenTask;
+  /** Its last step is `merge`: done but for the merge of its pull request. */
+  waiting: boolean;
+  /** Its pull request, when it has one. */
+  pr: Link | null;
+}
+
+/**
+ * The open tasks the run at `index` of the group left open: none while it runs (they are open),
+ * and none whose subject a later run of the group took up (started or finished), so a task shows
+ * once, in its newest run.
+ */
+export function leftOpen(group: RunGroup, index: number, now: number): LeftTask[] {
+  const run = group.runs[index];
+  if (!run || runState(run.status, now) === "running") return [];
+  const later = new Set(
+    group.runs
+      .slice(0, index)
+      .flatMap((r) => [...r.status.tasks, ...r.status.finished].map((t) => subjectId(t.subject))),
+  );
+  return run.status.tasks
+    .filter((t) => !later.has(subjectId(t.subject)))
+    .map((task) => ({
+      task,
+      waiting: task.step?.name === "merge",
+      pr: task.links.find(isPullLink) ?? null,
+    }));
+}
+
+/** One line of a group's timeline. */
+export interface TimelineLine {
+  /** `08:00–09:30`, with the date in front when it is not today; `08:00–now` while it runs. */
+  span: string;
+  /** `running`, `stale`, `abandoned`, or the outcome with its text (`failed: CI stayed red`). */
+  outcome: string;
+  /** The pull requests the run opened (or linked). */
+  prs: Link[];
+  skipped: number;
+  leftOpen: number;
+  waiting: number;
+  /** What its `success` and `info` attentions said ("PR opened"). */
+  notes: string[];
+}
+
+const two = (n: number) => String(n).padStart(2, "0");
+const sameDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() &&
+  a.getMonth() === b.getMonth() &&
+  a.getDate() === b.getDate();
+const dayText = (d: Date) => `${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+
+/**
+ * Start and end of a run in local time (`08:00–09:30`); the date (`11-07 08:00`) in front of a
+ * start that is not on the day of `now` and of an end that is not on the day of its start.
+ */
+export function spanText(status: DeliverStatus, now: number): string {
+  const start = new Date(startedAt(status) ?? status.updated);
+  const end = new Date(status.updated);
+  const at = (d: Date, ref: Date) => `${sameDay(d, ref) ? "" : `${dayText(d)} `}${clockOf(d)}`;
+  const from = at(start, new Date(now));
+  if (runState(status, now) === "running") return `${from}–now`;
+  return `${from}–${at(end, start)}`;
+}
+
+/** The words of a run's state in its timeline line. */
+function lineOutcome(status: DeliverStatus, now: number): string {
+  if (status.status === "abandoned") return "abandoned";
+  const state = runState(status, now);
+  if (state === "running" || state === "stale") return state;
+  const said = outcomeText(status);
+  return `${status.outcome ?? state}${said ? `: ${said}` : ""}`;
+}
+
+export function timelineLine(group: RunGroup, index: number, now: number): TimelineLine {
+  const { status } = group.runs[index]!;
+  const prs = new Map<string, Link>();
+  for (const l of [
+    ...status.links,
+    ...status.finished.flatMap((t) => t.links),
+    ...status.tasks.flatMap((t) => t.links),
+  ])
+    if (isPullLink(l) && !prs.has(l.url)) prs.set(l.url, l);
+  const left = leftOpen(group, index, now);
+  return {
+    span: spanText(status, now),
+    outcome: lineOutcome(status, now),
+    prs: [...prs.values()],
+    skipped: status.finished.filter((t) => t.outcome === "skipped").length,
+    leftOpen: left.filter((t) => !t.waiting).length,
+    waiting: left.filter((t) => t.waiting).length,
+    notes: status.attentions
+      .filter((a) => !isAlert(a, status))
+      .map((a) => outcomeText(a) ?? "")
+      .filter((n) => n !== ""),
+  };
+}
+
+/** The skipped tasks of one reason, folded into a count that opens to the list. */
+export interface SkippedFold {
+  /** The words of the reason (`blocked`), `no reason` without one. */
+  reason: string;
+  tasks: FinishedTask[];
+}
+
+/** Finished tasks of a run: the ones that ran, and the skipped ones per reason (#782). */
+export interface FinishedFolds {
+  done: FinishedTask[];
+  skipped: SkippedFold[];
+}
+
+export function foldFinished(finished: readonly FinishedTask[]): FinishedFolds {
+  const done: FinishedTask[] = [];
+  const folds = new Map<string, SkippedFold>();
+  for (const t of finished) {
+    if (t.outcome !== "skipped") {
+      done.push(t);
+      continue;
+    }
+    const reason = outcomeText(t) ?? "no reason";
+    const fold = folds.get(reason) ?? { reason, tasks: [] };
+    fold.tasks.push(t);
+    folds.set(reason, fold);
+  }
+  return { done, skipped: [...folds.values()] };
 }

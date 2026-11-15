@@ -235,6 +235,7 @@ fn a_missing_host_binary_fails_terminal_create_with_a_clear_error() {
             layout: true,
             trust: None,
             command: None,
+            env: Default::default(),
         })
         .unwrap_err();
     assert!(

@@ -6,7 +6,7 @@ If a newer version exists, the status bar shows **Update available**; clicking i
 notes and **Install and restart**, which downloads, verifies and installs the update, then
 restarts poimen.
 
-Terminals are not touched: `poimen-server` (and herdr, on the herdr backend) keeps them running, so closing or restarting poimen never closes a terminal or pane. On Windows a running `.exe` cannot be replaced, so poimen never starts the installed `poimen-server.exe` itself: it starts a copy under `%LOCALAPPDATA%\poimen-server\bin\<version>\`, and the installer can replace the installed file while that copy runs. The new version starts its own copy only when no server answers; the old server keeps running (and keeps the terminals) until it is stopped. Copies of other versions are removed when they are not running.
+Terminals are not touched: `poimen-server` keeps them running, so closing or restarting poimen never closes a terminal or pane. On Windows a running `.exe` cannot be replaced, so poimen never starts the installed `poimen-server.exe` itself: it starts a copy under `%LOCALAPPDATA%\poimen-server\bin\<version>\`, and the installer can replace the installed file while that copy runs. The new version starts its own copy only when no server answers; the old server keeps running (and keeps the terminals) until it is stopped. Copies of other versions are removed when they are not running.
 
 ## Terminals and updates (`poimen-pty-host`)
 
@@ -35,7 +35,7 @@ was removed from the release; the signature does not match the public key.
 ## Signing
 
 Update packages are signed with a Tauri updater key. This is separate from operating system code
-signing, which the installers do not have yet (#45).
+signing of the macOS bundle (see [releasing.md](releasing.md)).
 
 - The public key is `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`; the endpoint is
   `https://github.com/GravionLabs/poimen/releases/latest/download/latest.json`.

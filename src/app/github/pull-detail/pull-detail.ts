@@ -1,10 +1,31 @@
-import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  HostListener,
+  computed,
+  effect,
+  inject,
+  signal,
+} from "@angular/core";
 import { UiState } from "../../core/ui-state";
 import { AgentRuns } from "../agent-runs";
 import { AgentActions, pullTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues } from "../issues";
+import { ChipPicker } from "../chip-picker/chip-picker";
 import { renderMarkdown } from "../markdown";
-import { GithubPulls, errorText, isGithubUrl, type LinkedIssue } from "../pulls";
+import {
+  GithubPulls,
+  MERGE_METHOD_LABELS,
+  PR_ACTION_LABELS,
+  canEditPeople,
+  canMerge,
+  canRerun,
+  type MergeMethod,
+  errorText,
+  isGithubUrl,
+  type LinkedIssue,
+  type PrAction,
+} from "../pulls";
 
 /**
  * The detail pane of the selected pull request: description, checks, reviews and linked issues.
@@ -15,6 +36,7 @@ import { GithubPulls, errorText, isGithubUrl, type LinkedIssue } from "../pulls"
   selector: "app-pull-detail",
   templateUrl: "./pull-detail.html",
   styleUrl: "./pull-detail.css",
+  imports: [ChipPicker],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PullDetailPane {
@@ -36,6 +58,46 @@ export class PullDetailPane {
     const err = this.pulls.detailError();
     return err === null ? null : typeof err === "string" ? err : errorText(err);
   });
+
+  protected readonly labels = PR_ACTION_LABELS;
+  protected readonly mergeLabels = MERGE_METHOD_LABELS;
+  protected readonly canMerge = canMerge;
+  protected readonly canRerun = canRerun;
+  protected readonly canEdit = canEditPeople;
+  protected readonly text = signal("");
+
+  constructor() {
+    // A draft belongs to one pull request: switching rows drops it.
+    effect(() => {
+      this.pulls.detailKey();
+      this.text.set("");
+    });
+  }
+
+  protected choose(action: PrAction): void {
+    this.text.set("");
+    this.pulls.choose(action);
+  }
+
+  protected async submit(action: PrAction): Promise<void> {
+    const body = this.text().trim();
+    if (action !== "close" && !body) return;
+    if (await this.pulls.act(action, action === "close" ? undefined : body)) this.text.set("");
+  }
+
+  protected setMethod(method: MergeMethod): void {
+    const draft = this.pulls.mergeDraft();
+    if (draft) this.pulls.mergeDraft.set({ ...draft, method });
+  }
+
+  protected setDelete(deleteBranch: boolean): void {
+    const draft = this.pulls.mergeDraft();
+    if (draft) this.pulls.mergeDraft.set({ ...draft, deleteBranch });
+  }
+
+  protected cancel(): void {
+    this.pulls.compose.set(null);
+  }
 
   /** Selects the issue on the Issues sub-page. */
   protected openIssue(issue: LinkedIssue): void {

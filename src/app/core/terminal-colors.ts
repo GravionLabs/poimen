@@ -40,8 +40,7 @@ export function serverColors(
 
 /**
  * Sends the colors of the active scheme to poimen-server (`set_terminal_colors`) on start and on
- * every change; the same colors are sent only once. Nothing happens for the herdr backend (the
- * command ignores them).
+ * every change; the same colors are sent only once.
  */
 @Injectable({ providedIn: "root" })
 export class TerminalColorSync {

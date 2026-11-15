@@ -69,6 +69,46 @@ pub fn run_of(path: &Path) -> Option<&str> {
     .then_some(stem)
 }
 
+/// Runs that ended or were abandoned longer ago than this are not shown (unless their subject is,
+/// see [`SUBJECT_KEEP_SECS`]).
+pub const RECENT_SECS: f64 = 24.0 * 3600.0;
+
+/// Once one run of a subject is shown, every run of that subject whose last event is at most this
+/// old (14 days) is kept too, so the views can list all runs of a milestone. A file whose last
+/// change is older than this is not opened.
+pub const SUBJECT_KEEP_SECS: f64 = 14.0 * 24.0 * 3600.0;
+
+/// At most this many runs of one subject are kept, newest first.
+pub const MAX_SUBJECT_RUNS: usize = 50;
+
+/// How much of a file [`first_subject`] reads to find its first line.
+const FIRST_LINE_BYTES: u64 = 64 << 10;
+
+/// The identity of a run's subject: `(kind, id)` of `subject` in `run.started`.
+pub type SubjectKey = (String, String);
+
+/// `(kind, id)` of a `subject` object; `None` when either is missing or not a string.
+pub fn subject_key(subject: &Value) -> Option<SubjectKey> {
+    Some((
+        subject.get("kind")?.as_str()?.to_owned(),
+        subject.get("id")?.as_str()?.to_owned(),
+    ))
+}
+
+/// The subject of the run in `path`, from its first line only (`run.started`), without replaying
+/// the file. `None` for a first line that is incomplete, not a `run.started` or without subject.
+pub fn first_subject(path: &Path) -> Option<SubjectKey> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    file.take(FIRST_LINE_BYTES).read_to_end(&mut buf).ok()?;
+    let end = buf.iter().position(|b| *b == b'\n')?;
+    let event: Value = serde_json::from_slice(&buf[..end]).ok()?;
+    if event.get("type")?.as_str()? != "run.started" {
+        return None;
+    }
+    subject_key(event.get("subject")?)
+}
+
 /// Where the reading of one event file stands: the offset after its last complete line.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LineTail {
@@ -236,6 +276,15 @@ pub struct RunEvent {
     pub outcome: Option<String>,
     /// URL of the first link of the event.
     pub link: Option<String>,
+    /// `reason` of the event (core field), when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// `text` of the event (core field), when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Title (else id) of the `subject` of the event, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
 }
 
 /// Seconds since the epoch of an ISO 8601 timestamp of the schema (`Z` or an offset, optional
@@ -456,6 +505,13 @@ impl Reducer {
                 .first()
                 .and_then(|l| l.get("url"))
                 .and_then(text),
+            reason: e.get("reason").and_then(text),
+            text: e.get("text").and_then(text),
+            subject: e.get("subject").filter(|s| s.is_object()).and_then(|s| {
+                s.get("title")
+                    .and_then(text)
+                    .or_else(|| s.get("id").and_then(text))
+            }),
         });
 
         match ty {
@@ -811,6 +867,30 @@ not json
     fn read(tail: &mut LineTail, path: &Path) -> Tailed {
         let len = std::fs::metadata(path).unwrap().len();
         tail.read(path, len).unwrap()
+    }
+
+    #[test]
+    fn first_subject_reads_only_the_first_line() {
+        let path = temp_file("r1.jsonl");
+        std::fs::write(
+            &path,
+            "{\"v\":1,\"type\":\"run.started\",\"subject\":{\"kind\":\"github.milestone\",\"id\":\"M16\"}}\n{\"type\":\"x\"}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            first_subject(&path),
+            Some(("github.milestone".to_owned(), "M16".to_owned()))
+        );
+        // Incomplete first line, other first event, no subject, missing file: none.
+        for text in [
+            "{\"type\":\"run.started\",\"subject\":{\"kind\":\"a\",\"id\":\"1\"}}",
+            "{\"type\":\"progress\",\"subject\":{\"kind\":\"a\",\"id\":\"1\"}}\n",
+            "{\"type\":\"run.started\"}\n",
+        ] {
+            std::fs::write(&path, text).unwrap();
+            assert_eq!(first_subject(&path), None, "{text}");
+        }
+        assert_eq!(first_subject(&path.with_extension("none")), None);
     }
 
     #[test]

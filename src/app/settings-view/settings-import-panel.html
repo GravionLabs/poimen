@@ -1,0 +1,89 @@
+@if (pending(); as p) {
+  <section class="import-plan" aria-label="Import preview">
+    <h3>Import {{ p.path }}</h3>
+    @if (p.scope === "all") {
+      <div class="radios" role="radiogroup" aria-label="Import mode">
+        @for (m of modes; track m.value) {
+          <button
+            type="button"
+            role="radio"
+            class="choice"
+            [attr.aria-checked]="p.mode === m.value"
+            [class.on]="p.mode === m.value"
+            [disabled]="transfer.busy()"
+            (click)="setMode(m.value)"
+          >
+            {{ m.label }}
+          </button>
+        }
+      </div>
+      <p class="hint">
+        Merge keeps the settings the file does not set; Replace removes them. Trusted projects stay
+        as they are.
+      </p>
+    }
+    <p class="summary">{{ planSummary(p.plan) }}</p>
+    @if (p.plan.added.length) {
+      <h4>Added</h4>
+      <ul class="diff" aria-label="Added">
+        @for (c of p.plan.added; track c.path) {
+          <li class="added">
+            <code>{{ c.path }}</code> <span>{{ shortValue(c.after) }}</span>
+          </li>
+        }
+      </ul>
+    }
+    @if (p.plan.changed.length) {
+      <h4>Changed</h4>
+      <ul class="diff" aria-label="Changed">
+        @for (c of p.plan.changed; track c.path) {
+          <li class="changed">
+            <code>{{ c.path }}</code> <span>{{ shortValue(c.before) }}</span> →
+            <span>{{ shortValue(c.after) }}</span>
+          </li>
+        }
+      </ul>
+    }
+    @if (p.plan.removed.length) {
+      <h4>Removed</h4>
+      <ul class="diff" aria-label="Removed">
+        @for (c of p.plan.removed; track c.path) {
+          <li class="removed">
+            <code>{{ c.path }}</code> <span>{{ shortValue(c.before) }}</span>
+          </li>
+        }
+      </ul>
+    }
+    @if (p.plan.invalid.length) {
+      <h4>Invalid, not imported</h4>
+      <ul class="diff" aria-label="Invalid">
+        @for (r of p.plan.invalid; track r.path) {
+          <li class="error">
+            <code>{{ r.path }}</code> <span>{{ r.reason }}</span>
+          </li>
+        }
+      </ul>
+    }
+    @if (p.plan.skipped.length) {
+      <h4>Left out</h4>
+      <ul class="diff" aria-label="Skipped">
+        @for (r of p.plan.skipped; track r.path) {
+          <li>
+            <code>{{ r.path }}</code> <span>{{ r.reason }}</span>
+          </li>
+        }
+      </ul>
+    }
+    <div class="actions">
+      <button
+        type="button"
+        class="btn primary"
+        [disabled]="transfer.busy() || !hasChanges(p.plan)"
+        (click)="apply()"
+      >
+        Import
+      </button>
+      <button type="button" class="btn" (click)="cancel()">Cancel</button>
+    </div>
+  </section>
+}

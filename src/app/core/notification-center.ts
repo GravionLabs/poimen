@@ -15,6 +15,17 @@ export interface NotificationEntry {
   /** Epoch milliseconds. */
   time: number;
   read: boolean;
+  /** Set for an attention of a run (#806): the repository (and machine) the Runs view reveals. */
+  deliver?: { root: string; machine?: string };
+}
+
+/** An attention of a run that asks for the user (needs you, warning or danger). */
+export interface RunAlert {
+  root: string;
+  machine?: string;
+  /** Names the run: its subject, else the repository directory. */
+  label: string;
+  message: string;
 }
 
 /** The message of a status change, the same wording as the system notification. */
@@ -66,6 +77,22 @@ export class NotificationCenter {
         read: false,
       };
     });
+    this.entries.update((list) => prependCapped(list, added));
+  }
+
+  /** Records the attentions of runs (#806); each entry opens the Runs view at its repository. */
+  recordRuns(alerts: readonly RunAlert[], now: number): void {
+    if (alerts.length === 0) return;
+    const added = alerts.map((a): NotificationEntry => ({
+      id: this.nextId++,
+      paneId: "",
+      label: a.label,
+      status: "blocked",
+      message: a.message,
+      time: now,
+      read: false,
+      deliver: { root: a.root, ...(a.machine === undefined ? {} : { machine: a.machine }) },
+    }));
     this.entries.update((list) => prependCapped(list, added));
   }
 

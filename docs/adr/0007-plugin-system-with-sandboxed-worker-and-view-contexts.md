@@ -2,7 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-11-08
-- Issues: #550, Feature #549
+- Issues: #550, #786, Feature #549
 - Supersedes: [ADR 0005](0005-github-views-and-agent-harnesses.md) (in part: the section "No plugin system now, one later")
 - Builds on: [ADR 0003](0003-own-terminal-backend-without-herdr.md), [ADR 0005](0005-github-views-and-agent-harnesses.md)
 
@@ -15,6 +15,8 @@ The removed herdr integration (#234) showed what not to repeat: plugins as Node 
 A plugin can do real damage in poimen. The app starts agents and terminals, writes into panes and runs `gh` and `git` with the user's logins. The project config already has a trust check for exactly this reason (#255, `src-tauri/src/trust.rs`). The webview currently runs without a content security policy (`"csp": null` in `tauri.conf.json`).
 
 Prior art: [Asyar](https://github.com/Xoshbin/asyar), a Tauri 2 launcher with a mature extension system (docs under `docs/explanation/`: two-tier model, extension runtime, IPC bridge, permission system). Its host (`asyar-launcher`) is **GPL-3.0-only**. Only `asyar-sdk` and `asyar-ext-builder` are MIT, and both are tied to Asyar's service catalog. poimen is MIT, so it takes over Asyar's concepts, not its code.
+
+Second prior art: [Paperclip](https://github.com/paperclipai/paperclip), a Node server with a React UI for teams of agents. Its plugin spec (`doc/plugins/PLUGIN_SPEC.md`) answers the same questions for a server product: one worker process per plugin over JSON-RPC on stdio, capabilities declared in the manifest and enforced by the host, UI contributions in named slots, a data and action bridge between plugin UI and worker, and fixed rules for failure and shutdown. Paperclip is **MIT**, so its concepts and its code may be used. Its stack (Node, React, Postgres) keeps the reusable code small. Compared on 2026-11-15 (#786).
 
 ## Decision
 
@@ -30,6 +32,8 @@ Prior art: [Asyar](https://github.com/Xoshbin/asyar), a Tauri 2 launcher with a 
 - The schema is closed: an unknown field fails discovery (`deny_unknown_fields`). Its fields are `id`, `name`, `version`, `description`, `author`, `minAppVersion`, `type` (`plugin` or `theme`), `contributes` (`commands`, `views`, `settings`), `worker`, `permissions` and `permissionArgs`.
 - At startup poimen reads the manifests only. A plugin's code runs only when the plugin is enabled.
 - Development: `poimen plugin link <dir>` (CLI of #175) registers a source directory. Version 1 has no store; installing means copying a directory or unpacking a release archive, followed by consent.
+- A linked plugin may name a development URL (`devUrl`, for example a Vite server on `localhost`). Its views then load from that URL instead of `poimen-plugin://`, so the author gets hot reload. Only a linked plugin may do this, and only for a loopback address. The bridge and the permission gate are unchanged. (Paperclip: `devUiUrl`.)
+- A view names its **slot** from a closed list. Version 1 has `editorTab` and `sidebarPanel`. The host decides which slots exist and when a view is mounted in one; a new slot is added to the list, never invented by a plugin. (Paperclip: `ui.slots[]` with page, detail tab, dashboard widget and sidebar.)
 
 ### Worker and view contexts
 
@@ -72,7 +76,11 @@ Initial permission set (names are a proposal):
 | `github:read` | read through the shared `gh` client | – |
 | `network` | HTTP requests through the host | host list |
 
-Before a plugin's first start, the user sees its permissions and their arguments in a consent dialog, similar to the trust dialog. The consent is stored with the SHA-256 of `plugin.json`, as with `trustedProjects` (#255). A changed manifest needs consent again.
+Before a plugin's first start, the user sees its permissions and their arguments in a consent dialog, similar to the trust dialog. The consent is stored with the SHA-256 of `plugin.json`, as with `trustedProjects` (#255). A changed manifest needs consent again. This also covers an upgrade that asks for more permissions. (Paperclip: `upgrade_pending` until the operator approves the new capability set.)
+
+Some things are never a permission, whatever a manifest asks for: answering a consent or trust dialog, reading or changing the consent and trust stores, the settings and data of another plugin, and direct Tauri IPC. (Paperclip keeps such a list of forbidden capabilities.)
+
+The names keep the form `<resource>:<action>`. Paperclip uses `<resource>.<action>` with about sixty capabilities, split into data read, data write, plugin state, runtime, agent tools and UI. poimen has no counterpart for three of its groups and does not plan one: tools that a plugin gives to agents, scheduled jobs and incoming webhooks. All three need a process that runs without the app.
 
 ### Lifecycle
 
@@ -81,6 +89,7 @@ Each context follows one state machine: `Dormant → Mounting → Ready`, and `D
 - A **mount token** sent with each mount attempt and echoed in the ready message keeps a late message from a crashed attempt from promoting a new one.
 - A **mailbox** holds messages that arrive while a context is mounting and delivers them on ready.
 - Errors of one plugin are shown on that plugin, never as an app error.
+- **Stopping** a plugin (disable, upgrade, uninstall, app exit) follows one order: the host sends `shutdown` to the worker, the worker has 5 s to finish, then the host terminates it. The views are closed first. Every call still open gets an error answer, so no caller hangs. (Paperclip: `shutdown`, 10 s, then SIGTERM and SIGKILL.)
 
 ### Themes without code
 
@@ -98,6 +107,7 @@ Plugins run only in the app, never on a remote machine. They reach spaces, panes
 - Every host service exposed to plugins becomes public API. Changes to it need versioning (`minAppVersion`, an SDK package `@poimen/plugin-sdk` under MIT).
 - Write permissions (`panes:write`, `process:spawn`) can steer agents. They come in a later stage than the read-only permissions.
 - Code from `asyar-launcher` must not be copied. Contributors read the Asyar docs, not its host sources.
+- Code from Paperclip may be read and used under its MIT license, with its copyright notice kept.
 - Open before acceptance:
   - Should plugins receive agent events in the core format of agent-events, the same one the displays read?
   - Which icon set may plugins use?
@@ -107,7 +117,7 @@ Plugins run only in the app, never on a remote machine. They reach spaces, panes
 ## Alternatives
 
 - **No plugin system (stay with ADR 0005).** Every extension stays a poimen change. It is simpler, but nobody outside the poimen authors can extend the app, and core files keep growing.
-- **Process plugins over stdio NDJSON**, like `docs/protocol.md` or the old herdr plugins. They would allow any language and could run on remote machines, but they need a runtime per machine. They also cannot render views, so poimen would need its own UI description language. Rejected for version 1.
-- **Dynamic `import()` of plugin bundles into the app window.** There would be no isolation: the plugin could reach Tauri IPC and the DOM directly, and its bundled SDK copy would clash with the app's. Asyar used this approach and replaced it with iframes for exactly these reasons.
+- **Process plugins over stdio NDJSON**, like `docs/protocol.md` or the old herdr plugins. They would allow any language and could run on remote machines, but they need a runtime per machine. They also cannot render views, so poimen would need its own UI description language. Rejected for version 1. Paperclip runs its plugins this way, one Node worker per plugin, which fits a server that has Node anyway.
+- **Dynamic `import()` of plugin bundles into the app window.** There would be no isolation: the plugin could reach Tauri IPC and the DOM directly, and its bundled SDK copy would clash with the app's. Asyar used this approach and replaced it with iframes for exactly these reasons. Paperclip's spec loads plugin UI this way today and names iframes as its later step for untrusted plugins.
 - **WebAssembly components (for example wasmtime in Rust).** They give strong isolation and any language for logic, but they offer no UI, so views would still need iframes, and the plugin toolchain gets harder.
 - **Reusing Asyar's code.** The host is GPL-3.0-only and incompatible with poimen's MIT license. The MIT SDK is bound to Asyar's services and brings little.

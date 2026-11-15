@@ -1,0 +1,11 @@
+{
+  "total_count": 6,
+  "workflow_runs": [
+    { "id": 101, "workflow_id": 1, "status": "completed", "conclusion": "success" },
+    { "id": 102, "workflow_id": 2, "status": "completed", "conclusion": "failure" },
+    { "id": 103, "workflow_id": 3, "status": "in_progress", "conclusion": null },
+    { "id": 104, "workflow_id": 1, "status": "completed", "conclusion": "failure" },
+    { "id": 105, "workflow_id": 4, "status": "completed", "conclusion": "timed_out" },
+    { "id": 106, "workflow_id": 5, "status": "completed", "conclusion": "cancelled" }
+  ]
+}

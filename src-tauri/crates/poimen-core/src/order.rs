@@ -6,7 +6,9 @@ use std::cmp::Ordering;
 use poimen_protocol::AgentStatus;
 
 /// Compares two texts the way the sidebar sorts by name: case-insensitive, runs of ASCII digits as
-/// numbers (`#9` before `#12`).
+/// numbers (`#9` before `#12`), accents significant (compared by code point after lowercasing).
+/// The app's `naturalCompare` in `snapshot.ts` is the same rule; `fixtures/name-order.json` is read
+/// by both.
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
     loop {
@@ -79,6 +81,19 @@ mod tests {
         let mut v: Vec<String> = names.iter().map(|s| (*s).to_owned()).collect();
         v.sort_by(|a, b| natural_cmp(a, b));
         v
+    }
+
+    #[test]
+    fn shared_fixture_cases() {
+        let v: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/name-order.json")).unwrap();
+        for c in v["cases"].as_array().unwrap() {
+            let (a, b) = (c["a"].as_str().unwrap(), c["b"].as_str().unwrap());
+            let want = c["order"].as_i64().unwrap();
+            let got = natural_cmp(a, b) as i64;
+            assert_eq!(got, want, "{a:?} vs {b:?}");
+            assert_eq!(natural_cmp(b, a) as i64, -want, "{b:?} vs {a:?}");
+        }
     }
 
     #[test]

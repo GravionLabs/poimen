@@ -81,16 +81,31 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
     title: "Backend",
     pages: [
       {
-        id: "herdr",
+        id: "server",
         title: "Server",
-        labels: ["Start the backend server when it is not running", "Agent hooks", "Install hooks"],
+        labels: ["Agent hooks and MCP", "Install hooks"],
       },
       {
         id: "machines",
         title: "Machines",
         labels: ["Remote machines", "Check machine"],
       },
-      { id: "agents", title: "Agents", labels: ["Harnesses", "Models", "Agent actions"] },
+      {
+        id: "agents",
+        title: "Agents",
+        labels: ["Harnesses", "Models", "Agent actions", "Claude Code: classic renderer"],
+      },
+    ],
+  },
+  {
+    id: "general",
+    title: "General",
+    pages: [
+      {
+        id: "transfer",
+        title: "Export & import",
+        labels: ["Export settings", "Import settings"],
+      },
     ],
   },
 ];
@@ -102,6 +117,8 @@ const RETIRED_PAGES: ReadonlyMap<string, string> = new Map([
   ["color-scheme", "appearance"],
   // System notifications were removed (#676).
   ["notifications", "appearance"],
+  // The page was named after herdr, the former backend (#174).
+  ["herdr", "server"],
 ]);
 
 export function allPages(groups: readonly SettingsGroup[] = SETTINGS_GROUPS): SettingsPage[] {

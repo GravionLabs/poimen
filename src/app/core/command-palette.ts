@@ -1,5 +1,7 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { AgentActions } from "../github/agent-actions";
+import { IssueTasks } from "../github/issue-task";
+import { GithubPulls, PR_ACTION_LABELS, type PrAction } from "../github/pulls";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
 import { ProjectEntries, type ProjectEntry } from "./project-entries";
@@ -16,6 +18,7 @@ export interface PoimenCommand {
     | "githubInbox"
     | "githubPulls"
     | "githubIssues"
+    | "startIssueTask"
     | "githubMilestones"
     | "openDeliver"
     | "showChanges"
@@ -40,7 +43,8 @@ export interface PoimenCommand {
     | "projectTeardown"
     | "quitAndStopServer"
     | "projectEntry"
-    | "agentAction";
+    | "agentAction"
+    | "prAction";
   title: string;
 }
 
@@ -81,7 +85,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "githubPulls", title: "GitHub: Pull requests" },
   { id: "githubIssues", title: "GitHub: Issues" },
   { id: "githubMilestones", title: "GitHub: Milestones" },
-  { id: "openDeliver", title: "Open Deliver" },
+  { id: "openDeliver", title: "Open Runs" },
   { id: "showChanges", title: "Show Changes" },
   { id: "markUnread", title: "Mark Agent as Unread" },
   { id: "showSpaceOverview", title: "Show Space Overview" },
@@ -102,6 +106,8 @@ export interface PaletteItem {
   entry?: ProjectEntry;
   /** An agent action of the GitHub view (`command` is `agentAction`). */
   agentActionId?: string;
+  /** A write on the open pull request (`command` is `prAction`). */
+  prAction?: PrAction;
   /** The project file is not trusted: running the entry asks first. */
   locked?: boolean;
 }
@@ -135,6 +141,8 @@ export class CommandPalette {
   private readonly settings = inject(SettingsStore);
   private readonly project = inject(ProjectEntries);
   private readonly agentActions = inject(AgentActions);
+  private readonly issueTasks = inject(IssueTasks);
+  private readonly pulls = inject(GithubPulls);
 
   private readonly _open = signal(false);
   private readonly _query = signal("");
@@ -181,18 +189,28 @@ export class CommandPalette {
         c.id === "projectTeardown" ||
         c.id === "quitAndStopServer" ||
         c.id === "projectEntry" ||
-        c.id === "agentAction"
+        c.id === "agentAction" ||
+        c.id === "startIssueTask" ||
+        c.id === "prAction"
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
     })),
     ...this.projectItems(),
+    ...this.issueTaskItems(),
     ...this.agentActions.entries().map((e): PaletteItem => ({
       key: `agentAction:${e.action.id}`,
       title: e.title,
       shortcut: "",
       command: "agentAction",
       agentActionId: e.action.id,
+    })),
+    ...this.pulls.actions().map((a): PaletteItem => ({
+      key: `prAction:${a}`,
+      title: `GitHub: ${PR_ACTION_LABELS[a]} #${this.pulls.detailRow()?.number}`,
+      shortcut: "",
+      command: "prAction",
+      prAction: a,
     })),
   ]);
 
@@ -239,8 +257,8 @@ export class CommandPalette {
     const rest = items.filter((i) => !recent.includes(i));
     const groups: [string, PaletteItem[]][] = [
       [RECENT_GROUP, recent],
-      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId)],
-      [GITHUB_GROUP, rest.filter((i) => i.agentActionId)],
+      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId && !i.prAction)],
+      [GITHUB_GROUP, rest.filter((i) => i.agentActionId || i.prAction)],
       [PROJECT_GROUP, rest.filter((i) => i.entry)],
     ];
     for (const [label, members] of groups) {
@@ -258,6 +276,20 @@ export class CommandPalette {
   readonly selected = computed(() =>
     Math.max(0, Math.min(this._selected(), this.items().length - 1)),
   );
+
+  /** "Start task…" or "Open space" for the open issue the GitHub view shows. */
+  private issueTaskItems(): PaletteItem[] {
+    const [t] = this.agentActions.current();
+    if (!t || t.kind !== "issue" || t.state !== "open") return [];
+    return [
+      {
+        key: "startIssueTask",
+        title: `GitHub: ${this.issueTasks.label(t.root, t.number)} #${t.number}`,
+        shortcut: "",
+        command: "startIssueTask",
+      },
+    ];
+  }
 
   /** Opens the palette with an empty query. */
   open(): void {

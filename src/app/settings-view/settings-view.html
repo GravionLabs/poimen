@@ -164,7 +164,7 @@
               </section>
               <section aria-label="Fonts">
                 <h2>Fonts</h2>
-                <div class="fields">
+                <div class="fields aligned">
                   <label class="field grow" [class.hit]="hit('Terminal font family')">
                     Terminal font family
                     <input
@@ -187,7 +187,7 @@
                     />
                   </label>
                 </div>
-                <div class="fields">
+                <div class="fields aligned">
                   <label class="field grow" [class.hit]="hit('UI font family')">
                     UI font family
                     <input
@@ -227,7 +227,7 @@
                   optional (up to 1 MiB); without one, a built-in tone plays.
                 </p>
                 @for (kind of soundKinds; track kind.id) {
-                  <div class="fields">
+                  <div class="fields sound-row">
                     <label class="check" [class.hit]="hit(kind.label)">
                       <input
                         type="checkbox"
@@ -352,26 +352,18 @@
               }
             </section>
           }
-          @case ("herdr") {
+          @case ("server") {
             <section aria-label="Server">
-              <label
-                class="check"
-                [class.hit]="hit('Start the backend server when it is not running')"
-              >
-                <input
-                  type="checkbox"
-                  [checked]="settings().herdrAutoStart"
-                  (change)="setAutoStart($event)"
-                />
-                Start the backend server when it is not running
-              </label>
-              <h3 [class.hit]="hit('Agent hooks')">Agent hooks</h3>
+              <h3 [class.hit]="hit('Agent hooks')">Agent hooks and MCP</h3>
               <ul class="harnesses">
                 @for (h of hooks.statuses(); track h.agent) {
                   <li>
                     <strong>{{ agentName(h.agent) }}</strong>
                     <span>{{ h.state }}</span>
-                    @if (h.state !== "installed") {
+                    @if (h.mcp) {
+                      <span class="mcp">MCP {{ h.mcp }}</span>
+                    }
+                    @if (h.state !== "installed" || h.mcp === "missing") {
                       <button
                         type="button"
                         [class.hit]="hit('Install hooks')"
@@ -404,6 +396,20 @@
                 }
               </ul>
               <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
+              <label class="check" [class.hit]="hit('Claude Code: classic renderer')">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  [checked]="settings().claudeClassicRenderer"
+                  (change)="setClassicRenderer($event)"
+                />
+                Claude Code: classic renderer (scrollbar in poimen; no focus view)
+              </label>
+              <p class="hint">
+                Sets <code>CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1</code> in terminals created
+                afterwards; running terminals keep their environment. Inside Claude Code,
+                <code>/tui default</code> is the alternative.
+              </p>
               <h3>Supported agents</h3>
               <ul class="agent-kinds" aria-label="Supported agents">
                 @for (k of agentKinds; track k) {
@@ -441,6 +447,41 @@
           }
           @case ("space-layout") {
             <app-space-layout-editor />
+          }
+          @case ("transfer") {
+            <section aria-label="Export and import">
+              <p class="hint">
+                Settings of <code>config.json</code> as a JSON file, for another machine or a
+                backup. Trusted projects are per machine and never exported or imported.
+              </p>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn"
+                  [class.hit]="hit('Export settings')"
+                  [disabled]="transfer.busy()"
+                  (click)="exportSettings()"
+                >
+                  Export settings…
+                </button>
+                <button
+                  type="button"
+                  class="btn"
+                  [class.hit]="hit('Import settings')"
+                  [disabled]="transfer.busy()"
+                  (click)="importSettings()"
+                >
+                  Import settings…
+                </button>
+              </div>
+              @if (transfer.error(); as message) {
+                <p class="error" role="alert">{{ message }}</p>
+              }
+              @if (transfer.message(); as message) {
+                <p class="hint" role="status">{{ message }}</p>
+              }
+              <app-settings-import-panel scope="all" />
+            </section>
           }
         }
       </div>

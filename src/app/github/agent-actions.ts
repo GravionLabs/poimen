@@ -14,6 +14,7 @@ import { UiState } from "../core/ui-state";
 import { AgentRuns } from "./agent-runs";
 import { GithubIssues, issueLevel, type Issue } from "./issues";
 import { GithubPulls, type PullRow } from "./pulls";
+import { IssueTasks } from "./issue-task";
 
 /** Where the agent of an action runs: the repository root or a worktree of the issue or PR. */
 export type RunWhere = "root" | "worktree" | "diff";
@@ -68,6 +69,8 @@ export interface ActionTarget {
   hasChildren: boolean;
   /** `failed` when the checks of the pull request failed. */
   checks: string | null;
+  /** The head branch lives in a fork, where poimen cannot push. */
+  crossRepo: boolean;
   state: string;
   review: string | null;
 }
@@ -86,6 +89,7 @@ export function issueTarget(repo: string, root: string, issue: Issue): ActionTar
     labels: issue.labels,
     hasChildren: issue.subTotal > 0,
     checks: null,
+    crossRepo: false,
     state: issue.state.toLowerCase(),
     review: null,
   };
@@ -105,6 +109,7 @@ export function pullTarget(row: PullRow): ActionTarget {
     labels: [],
     hasChildren: false,
     checks: row.checks.state === "failing" ? "failed" : null,
+    crossRepo: row.isCrossRepository,
     state: "open",
     review: row.reviewDecision,
   };
@@ -128,6 +133,14 @@ export function matches(action: AgentAction, target: ActionTarget): boolean {
     anyOf(w.state, [target.state]) &&
     (w.review === null || w.review === target.review)
   );
+}
+
+/** Why a log action is off for a pull request from a fork. */
+export const FORK_REASON = "The pull request is from a fork; poimen cannot push to it.";
+
+/** Whether the prompt takes the failed check logs (`{log}`, written before the agent starts). */
+export function usesLog(action: AgentAction): boolean {
+  return action.on === "pr" && action.prompt.includes("{log}");
 }
 
 /** An action offered for the targets; a disabled one carries the reason. */
@@ -213,6 +226,7 @@ export class AgentActions {
   private readonly issues = inject(GithubIssues);
   private readonly ui = inject(UiState);
   private readonly runs = inject(AgentRuns);
+  private readonly issueTasks = inject(IssueTasks);
 
   private readonly byRoot = signal<ReadonlyMap<string, readonly AgentAction[]>>(new Map());
   private readonly _dialog = signal<ActionDialog | null>(null);
@@ -234,6 +248,8 @@ export class AgentActions {
       return row ? [pullTarget(row)] : [];
     }
     if (this.ui.githubPage() === "issues") {
+      const marked = this.issues.markedIssues();
+      if (marked.length > 0) return marked.map((m) => issueTarget(m.repo, m.root, m.issue));
       const sel = this.issues.detailIssue();
       const root = (this.issues.result() ?? []).find((r) => r.repo === sel?.repo)?.root;
       return sel && root ? [issueTarget(sel.repo, root, sel.issue)] : [];
@@ -256,6 +272,7 @@ export class AgentActions {
       ...(this.issues.result() ?? []).map((r) => r.root),
     ];
     for (const root of roots) void this.load(root);
+    void this.issueTasks.load(roots);
   }
 
   /** Reads the actions of the repository at `root` (defaults, user and trusted project file). */
@@ -283,7 +300,10 @@ export class AgentActions {
     if (!first || targets.some((t) => t.kind !== first.kind || t.root !== first.root)) return [];
     return (this.byRoot().get(first.root) ?? [])
       .filter((a) => targets.every((t) => matches(a, t)))
-      .map((action) => ({ action, enabled: true, reason: null }));
+      .map((action) => {
+        const reason = usesLog(action) && targets.some((t) => t.crossRepo) ? FORK_REASON : null;
+        return { action, enabled: reason === null, reason };
+      });
   }
 
   /** A click on an action: Shift opens the harness and model dialog, else it starts at once. */
@@ -374,23 +394,26 @@ export class AgentActions {
           ((action.run === "ask" || extras) && choice?.where === "worktree")
         ? "worktree"
         : "root";
-    let launches: Launch[];
-    try {
-      launches = await this.bridge.invoke<Launch[]>("agent_action_plan", {
+    const planFor = async (items: readonly ActionTarget[], log?: string): Promise<Launch[]> =>
+      this.bridge.invoke<Launch[]>("agent_action_plan", {
         root: first.root,
         id: action.id,
         repo: first.repo,
-        items: targets.map((t) => ({
+        items: items.map((t) => ({
           nr: t.number,
           title: t.title,
           url: t.url,
           branch: t.branch,
           base: t.base,
+          log: log ?? "",
         })),
         harness: choice?.harness || null,
         model: choice?.model || null,
         suffix: suffix || undefined,
       });
+    let launches: Launch[];
+    try {
+      launches = await planFor(targets);
     } catch (err) {
       this.spaces.notify(`${action.label}: ${text(err)}`);
       return null;
@@ -400,7 +423,7 @@ export class AgentActions {
       launches.length === targets.length && action.batch !== "once"
         ? launches.map((launch, i) => ({ launch, targets: [targets[i]] }))
         : launches.map((launch) => ({ launch, targets: [...targets] }));
-    if (where === "worktree") return this.runInWorktrees(action, first.root, groups);
+    if (where === "worktree") return this.runInWorktrees(action, first.root, groups, planFor);
     let summary: RunSummary | null = null;
     const after = async (outcome: SpaceOutcome): Promise<void> => {
       summary = await this.startAll(action, first.root, outcome.space_id, groups, diffOnly);
@@ -444,6 +467,7 @@ export class AgentActions {
     action: AgentAction,
     root: string,
     groups: { launch: Launch; targets: ActionTarget[] }[],
+    planFor: (items: readonly ActionTarget[], log?: string) => Promise<Launch[]>,
   ): Promise<RunSummary | null> {
     const summary: RunSummary = { started: [], failed: [] };
     let detached = false;
@@ -458,6 +482,22 @@ export class AgentActions {
       } catch (err) {
         fail("worktree", err);
         continue;
+      }
+      if (usesLog(action)) {
+        // The failed logs go into a file of the worktree; the prompt points to it.
+        try {
+          const target = group.targets[0];
+          const log = await this.bridge.invoke<string>("github_pr_ci_log", {
+            root,
+            number: target.number,
+            worktree: path,
+          });
+          const [launch] = await planFor(group.targets, log);
+          group.launch = launch;
+        } catch (err) {
+          fail("logs", err);
+          continue;
+        }
       }
       const after = async (outcome: SpaceOutcome): Promise<void> => {
         try {

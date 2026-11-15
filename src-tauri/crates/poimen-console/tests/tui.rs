@@ -494,6 +494,7 @@ impl Fixture {
                     "-c".into(),
                     format!("printf first-{name}; exec cat"),
                 ]),
+                env: Default::default(),
             })
             .unwrap();
         new.id
@@ -745,6 +746,7 @@ fn changes_made_elsewhere_show_up_live() {
             space_id: f.space.clone(),
             name: Some("fresh".into()),
             terminal_id: None,
+            ..Default::default()
         })
         .unwrap();
     wait_until("tab bar updated", || {

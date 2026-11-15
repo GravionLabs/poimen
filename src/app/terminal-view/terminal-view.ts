@@ -24,15 +24,14 @@ import { useUnicode11 } from "./unicode";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge } from "../core/tauri";
 import { agentKind, splitId, type Terminal } from "../core/snapshot";
-import { decodeBase64, type Mode, type StreamRecord } from "../core/backend";
+import type { Mode, StreamRecord } from "../core/backend";
 import { SettingsStore, defaultTerminalFontFamily, windowsPtyOption } from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
-import { TerminalSession, TerminalStreamService, type MouseCommand } from "../core/terminal-stream";
+import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
 import { PromptBar } from "../prompt-bar/prompt-bar";
-import { holdsLinkModifier, isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
+import { isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
 import { matchLabel, searchDecorations, TerminalSearch, type Searchable } from "./search";
-import { buttonName, cellAt, modifierBits } from "./mouse";
 
 const RESIZE_DEBOUNCE_MS = 150;
 /**
@@ -86,7 +85,7 @@ function ansiColors(
 
 /**
  * The live terminal of the active tab. It exists only while its tab is visible: hiding the tab
- * destroys it, which closes the stream and disposes xterm; the herdr pane keeps running.
+ * destroys it, which closes the stream and disposes xterm; the terminal keeps running.
  */
 @Component({
   selector: "app-terminal-view",
@@ -139,12 +138,8 @@ export class TerminalView implements OnDestroy, Searchable {
   protected readonly searchCounter = computed(() =>
     matchLabel(this.searchQuery(), this.searchResult().index, this.searchResult().count),
   );
-  /** Without scrollback in xterm (herdr owns it) only the screen is searched. */
-  protected screenOnly = signal(false);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private session?: TerminalSession;
-  /** Whether the stream opened last is emulated; stays after the stream closed (scrollback keeps). */
-  private streamEmulated = false;
   private themeObserver?: MutationObserver;
   private resizeObserver?: ResizeObserver;
   private resizeTimer?: ReturnType<typeof setTimeout>;
@@ -153,15 +148,9 @@ export class TerminalView implements OnDestroy, Searchable {
   private ptySize = { cols: 0, rows: 0 };
   private destroyed = false;
   private framed = false;
-  /** Grid of the last `terminal.frame`; herdr's pane may differ from xterm's during a resize. */
-  private frameGrid: { cols: number; rows: number } | undefined;
-  /** The snapshot of an emulated controller stream was just reset: refit once it is written. */
+  /** The snapshot of a controller stream was just reset: refit once it is written. */
   private refitAfterSnapshot = false;
-  private detachMouse?: () => void;
   private detachClipboard?: () => void;
-  /** Whether the pointer is over a link (xterm reports it for every renderer). */
-  private linkHovered = false;
-  private endDrag?: () => void;
   /** The next attempt to attach again after a lost connection, and how many came before it. */
   private reattachTimer?: ReturnType<typeof setTimeout>;
   private reattaches = 0;
@@ -257,18 +246,10 @@ export class TerminalView implements OnDestroy, Searchable {
   private createTerminal(): void {
     const open = (url: string) => this.tauri.openUrl(url);
     const openLink = linkHandler(open);
-    const hoverCallbacks = {
-      hover: () => (this.linkHovered = true),
-      leave: () => (this.linkHovered = false),
-    };
     const term = new XTerm({
       // OSC 8 hyperlinks: xterm's default would confirm() and window.open(); use the opener instead.
-      linkHandler: {
-        activate: openLink,
-        ...hoverCallbacks,
-      },
-      // herdr owns scrollback (wheel events are forwarded instead); an emulated stream gets
-      // xterm.js's own once it is open (`applyScrollback`).
+      linkHandler: { activate: openLink },
+      // The scrollback is set once a stream is open (`applyScrollback`).
       scrollback: 0,
       cursorBlink: true,
       allowProposedApi: true,
@@ -283,14 +264,9 @@ export class TerminalView implements OnDestroy, Searchable {
     this.searchResults = searchAddon.onDidChangeResults(({ resultIndex, resultCount }) =>
       this.searchResult.set({ index: resultIndex, count: resultCount }),
     );
-    // xterm marks a hovered link itself (underline, pointer); the view only needs to know about it.
-    this.linkHovered = false;
     term.loadAddon(
       // Detected URLs are trimmed before opening (the addon's range, and so the underline, stays).
-      new WebLinksAddon(
-        taskLinkHandler(open, (link) => this.startTask(link)),
-        hoverCallbacks,
-      ),
+      new WebLinksAddon(taskLinkHandler(open, (link) => this.startTask(link))),
     );
     term.open(this.body().nativeElement);
     try {
@@ -313,19 +289,8 @@ export class TerminalView implements OnDestroy, Searchable {
     term.onData((data) => {
       if (this.mode() === "control") this.session?.input(data);
     });
-    term.attachCustomWheelEventHandler((event) => {
-      // Emulated streams carry PTY bytes: xterm.js itself scrolls and reports the wheel, so its
-      // default handling must run (returning false would skip it).
-      if (this.session?.emulated) return true;
-      if (this.mode() === "control" && this.session?.open && event.deltaY !== 0) {
-        const lines = Math.max(1, Math.min(10, Math.round(Math.abs(event.deltaY) / 30)));
-        this.session.scroll(event.deltaY < 0, lines);
-      }
-      return false;
-    });
     this.term = term;
     this.fit = fit;
-    this.detachMouse = this.attachMouse(this.body().nativeElement);
     this.detachClipboard = this.attachClipboard(this.body().nativeElement);
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(this.body().nativeElement);
@@ -333,7 +298,6 @@ export class TerminalView implements OnDestroy, Searchable {
 
   /** Shows the search bar (a second call selects the query) and moves the focus into it. */
   openSearch(): void {
-    this.screenOnly.set(!this.streamEmulated);
     this.searchOpen.set(true);
     afterNextRender(
       () => {
@@ -460,110 +424,6 @@ export class TerminalView implements OnDestroy, Searchable {
     };
   }
 
-  /**
-   * Whether mouse and wheel go to the pane as commands: only in a stream opened for control and
-   * only for a rendered stream (finished frames, whose application modes xterm.js cannot see). An
-   * emulated stream carries the PTY bytes, so xterm.js tracks the modes and reports the mouse
-   * itself.
-   */
-  private forwardsMouse(): boolean {
-    return this.attempt === "control" && this.session?.emulated !== true;
-  }
-
-  /** A press with the link modifier over a link opens it instead of going to the pane application. */
-  private opensLink(event: { metaKey: boolean; ctrlKey: boolean }): boolean {
-    return this.linkHovered && holdsLinkModifier(event);
-  }
-
-  /**
-   * herdr's stream is a rendered screen: it carries no DECSET 1000/1002/1003/1006, so xterm never
-   * enables mouse tracking and would never report anything. The mouse is therefore forwarded as
-   * `terminal.mouse` cells; herdr encodes them for the pane application's mouse mode and drops
-   * them when the application did not ask for the mouse. herdr does not expose that mode to
-   * clients, so it cannot be checked here; a held Shift (as in other terminals) bypasses the
-   * forwarding and leaves xterm's text selection and the native context menu; so does Cmd on macOS
-   * or Ctrl elsewhere while the pointer is over a link, which is how a link is opened in input mode
-   * (the web-links addon sees the click only then; Ctrl+click is the context menu on macOS, hence
-   * Cmd there). Ctrl elsewhere stays the pane application's modifier outside a link. Read-only tabs send
-   * nothing. Returns the function that removes every listener.
-   */
-  private attachMouse(host: HTMLElement): () => void {
-    let pressed: MouseCommand["button"] | null = null;
-    let last = "";
-    let at = { column: 0, row: 0 };
-    const send = (event: MouseEvent, action: MouseCommand["action"], button: number) => {
-      const session = this.session;
-      const term = this.term;
-      // Gate on the mode the stream was opened with, not on the (earlier) requested mode.
-      if (!term || !session?.open || !this.forwardsMouse()) return;
-      const screen = host.querySelector(".xterm-screen") ?? host;
-      at = cellAt(
-        screen.getBoundingClientRect(),
-        term.cols,
-        term.rows,
-        event.clientX,
-        event.clientY,
-        this.frameGrid,
-      );
-      const key = `${action}:${at.column}:${at.row}`;
-      if ((action === "move" || action === "drag") && key === last) return;
-      last = key;
-      session.mouse({
-        action,
-        button: buttonName(button),
-        ...at,
-        modifiers: modifierBits(event),
-      });
-    };
-    const onMove = (event: MouseEvent) => {
-      if (pressed) send(event, "drag", event.button);
-      else if (!event.shiftKey && !this.opensLink(event)) send(event, "move", 0);
-    };
-    const onHostMove = (event: MouseEvent) => {
-      if (!pressed) onMove(event);
-    };
-    const release = () => {
-      window.removeEventListener("mouseup", onUp, true);
-      window.removeEventListener("mousemove", onMove, true);
-      pressed = null;
-      last = "";
-    };
-    function onUp(event: MouseEvent) {
-      if (pressed) send(event, "up", event.button);
-      release();
-    }
-    const onDown = (event: MouseEvent) => {
-      if (!this.forwardsMouse() || event.shiftKey || this.opensLink(event)) return; // Shift: xterm selects text, Cmd (macOS) or Ctrl over a link: open it
-      event.stopPropagation(); // no text selection while the pane application owns the mouse
-      event.preventDefault();
-      this.term?.focus();
-      pressed = buttonName(event.button);
-      last = "";
-      send(event, "down", event.button);
-      window.addEventListener("mouseup", onUp, true);
-      window.addEventListener("mousemove", onMove, true);
-    };
-    const onContext = (event: MouseEvent) => {
-      if (this.forwardsMouse() && !event.shiftKey) event.preventDefault();
-    };
-    host.addEventListener("mousedown", onDown, true);
-    host.addEventListener("mousemove", onHostMove, true);
-    host.addEventListener("contextmenu", onContext);
-    // A drag still held when the stream ends (tab closed, mode switch) is released first.
-    this.endDrag = () => {
-      if (pressed && this.session?.open && this.forwardsMouse()) {
-        this.session.mouse({ action: "up", button: pressed, ...at, modifiers: 0 });
-      }
-      release();
-    };
-    return () => {
-      release();
-      host.removeEventListener("mousedown", onDown, true);
-      host.removeEventListener("mousemove", onHostMove, true);
-      host.removeEventListener("contextmenu", onContext);
-    };
-  }
-
   private async start(takeover: boolean): Promise<void> {
     if (this.destroyed) return;
     if (!this.term) this.createTerminal();
@@ -594,7 +454,6 @@ export class TerminalView implements OnDestroy, Searchable {
   /** `reattach`: an attempt after a lost connection, which tries again when it fails. */
   private async connect(mode: Mode, takeover: boolean, reattach = false): Promise<void> {
     this.framed = false;
-    this.frameGrid = undefined;
     this.refitAfterSnapshot = false;
     this.attempt = mode;
     const generation = ++this.generation;
@@ -607,8 +466,6 @@ export class TerminalView implements OnDestroy, Searchable {
           mode,
           target: splitId(this.pane().terminal_id).id,
           ...(this.pane().machine ? { machine: this.pane().machine } : {}),
-          cols: this.size.cols,
-          rows: this.size.rows,
           takeover,
         },
         (record) => {
@@ -622,8 +479,6 @@ export class TerminalView implements OnDestroy, Searchable {
         return;
       }
       this.session = session;
-      this.streamEmulated = session.emulated;
-      this.screenOnly.set(!session.emulated);
       this.applyScrollback();
       for (const record of early.splice(0)) this.onRecord(session, record);
     } catch (err) {
@@ -671,7 +526,6 @@ export class TerminalView implements OnDestroy, Searchable {
   private closeStream(): void {
     clearTimeout(this.reattachTimer);
     this.reattaches = 0;
-    this.endDrag?.();
     this.session?.close();
     this.session = undefined;
   }
@@ -684,12 +538,8 @@ export class TerminalView implements OnDestroy, Searchable {
 
   private stop(): void {
     this.closeStream();
-    this.detachMouse?.();
-    this.detachMouse = undefined;
     this.detachClipboard?.();
     this.detachClipboard = undefined;
-    this.linkHovered = false;
-    this.endDrag = undefined;
     clearTimeout(this.resizeTimer);
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
@@ -709,21 +559,12 @@ export class TerminalView implements OnDestroy, Searchable {
           this.reattaches = 0;
           this.banner.set(null);
         }
-        if (session.emulated) {
-          // A snapshot follows as bytes. Reset first, so a reattach does not stack the snapshot
-          // (and its scrollback) on the old screen; the grid is the server's until the
-          // controller has refit.
-          this.term?.reset();
-          this.term?.resize(record.cols, record.rows);
-          this.refitAfterSnapshot = this.attempt === "control";
-        } else {
-          this.frameGrid = { cols: record.cols, rows: record.rows };
-        }
-        this.term?.write(decodeBase64(record.bytes));
-        return;
-      case "output":
-        this.framed = true;
-        this.term?.write(decodeBase64(record.bytes));
+        // A snapshot follows as bytes. Reset first, so a reattach does not stack the snapshot
+        // (and its scrollback) on the old screen; the grid is the server's until the
+        // controller has refit.
+        this.term?.reset();
+        this.term?.resize(record.cols, record.rows);
+        this.refitAfterSnapshot = this.attempt === "control";
         return;
       case "bytes":
         this.framed = true;
@@ -731,9 +572,7 @@ export class TerminalView implements OnDestroy, Searchable {
         return;
       case "resized":
         this.ptySize = { cols: record.cols, rows: record.rows };
-        if (!session.emulated) {
-          this.frameGrid = { cols: record.cols, rows: record.rows };
-        } else if (this.attempt !== "control") {
+        if (this.attempt !== "control") {
           // An observer renders at the terminal's size, the controller's while one holds it.
           this.term?.resize(record.cols, record.rows);
         }
@@ -775,12 +614,12 @@ export class TerminalView implements OnDestroy, Searchable {
     });
   }
 
-  /** Lines of scrollback: xterm.js keeps its own on an emulated stream; herdr owns it otherwise. */
+  /** Lines of scrollback: xterm.js keeps its own. */
   private applyScrollback(): void {
     if (!this.term) return;
-    this.term.options.scrollback = this.streamEmulated ? this.prefs.settings().scrollback : 0;
-    // An emulated stream is a ConPTY on Windows (the poimen server runs on this machine).
-    this.term.options.windowsPty = this.streamEmulated ? windowsPtyOption() : undefined;
+    this.term.options.scrollback = this.prefs.settings().scrollback;
+    // The terminal is a ConPTY on Windows (the poimen server runs on this machine).
+    this.term.options.windowsPty = windowsPtyOption();
   }
 
   private scheduleResize(): void {
@@ -788,7 +627,7 @@ export class TerminalView implements OnDestroy, Searchable {
     this.resizeTimer = setTimeout(() => this.applySize(), RESIZE_DEBOUNCE_MS);
   }
 
-  /** Refits, and when cols/rows changed tells the status bar and herdr (resize or reopen). */
+  /** Refits, and when cols/rows changed tells the status bar and the server. */
   private applySize(): void {
     if (!this.term || !this.fit) return;
     this.fit.fit();
@@ -800,16 +639,13 @@ export class TerminalView implements OnDestroy, Searchable {
     if (!session?.open) return;
     if (this.attempt === "control") {
       void session.resize(cols, rows);
-    } else if (session.emulated) {
-      this.resizeObserved(session, cols, rows);
     } else {
-      // Observers have a fixed viewport; reopen as an observer, never retrying control.
-      void this.restartStream(false, "observe", true);
+      this.resizeObserved(session, cols, rows);
     }
   }
 
   /**
-   * An emulated observer sets its terminal's PTY size while no controller holds it, so an
+   * An observer sets its terminal's PTY size while no controller holds it, so an
    * unfocused leaf of a split tab follows its container. A refusal means a controller holds the
    * terminal: the leaf renders at the size the server last reported, the controller's.
    */

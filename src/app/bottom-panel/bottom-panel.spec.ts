@@ -11,6 +11,7 @@ import { Deliver } from "../deliver/deliver";
 import { TaskLog } from "../core/task-log";
 import { UiState } from "../core/ui-state";
 import { Subagents } from "../core/transcripts";
+import { parseStatus, type DeliverCard } from "../deliver/deliver-status";
 import { BottomPanel } from "./bottom-panel";
 import { FlowView } from "./flow-view";
 
@@ -36,8 +37,23 @@ describe("BottomPanel empty states", () => {
     tab: "output" | "flow" | "events",
     active: Terminal | undefined,
     supported: boolean,
+    cards = signal<DeliverCard[]>([]),
   ) {
-    const ui = { panelTab: signal(tab), panelHeight: signal(200), togglePanel: vi.fn() };
+    const eventsAll = signal<Record<string, string>>({});
+    const ui = {
+      panelTab: signal(tab),
+      panelHeight: signal(200),
+      togglePanel: vi.fn(),
+      eventColumns: signal({ time: 80, task: 80, result: 80 }),
+      eventsAll,
+      setEventsAll: (root: string, key: string | null) =>
+        eventsAll.update((all) => {
+          const next = { ...all };
+          if (key) next[root] = key;
+          else delete next[root];
+          return next;
+        }),
+    };
     const subagents = {
       supported: signal(supported),
       agents: signal([]),
@@ -69,7 +85,7 @@ describe("BottomPanel empty states", () => {
           provide: EditorTabs,
           useValue: { activeId: signal(active ? active.terminal_id : null), openFlow: vi.fn() },
         },
-        { provide: Deliver, useValue: { cards: signal([]), openUrl: vi.fn() } },
+        { provide: Deliver, useValue: { cards, openUrl: vi.fn() } },
         { provide: TaskLog, useValue: { lines: signal([]) } },
         { provide: SpacesStore, useValue: { panes: signal(panes) } },
       ],
@@ -77,6 +93,7 @@ describe("BottomPanel empty states", () => {
     const fixture = TestBed.createComponent(BottomPanel);
     fixture.detectChanges();
     return {
+      fixture,
       text: () =>
         (fixture.nativeElement as HTMLElement).querySelector(".empty")?.textContent?.trim(),
       show: (next: "output" | "flow" | "events") => {
@@ -127,5 +144,154 @@ describe("BottomPanel empty states", () => {
     expect(panel.text()).toBe(
       `Subagent output is available for ${named} agents. Select a pane that runs one.`,
     );
+  });
+
+  it("drops a picked run when a run of the repository starts after it", () => {
+    const run = (id: string, ts: string): DeliverCard => {
+      const status = parseStatus({
+        v: 1,
+        run: id,
+        status: "running",
+        tasks: [],
+        finished: {},
+        attentions: [],
+        needsYou: false,
+        links: [],
+        updated: new Date().toISOString(),
+        tone: "neutral",
+        host: { "poimen.terminal": "w1:p1" },
+        events: [{ type: "run.started", tone: "neutral", ts }],
+      });
+      if (typeof status === "string") throw new Error(status);
+      return { root: "/repo", run: id, state: { kind: "ok", status } };
+    };
+    const cards = signal([
+      run("a", "2026-11-07T10:00:00.000Z"),
+      run("b", "2026-11-07T11:00:00.000Z"),
+    ]);
+    const panel = render("events", pane({ cwd: "/repo" }), false, cards);
+    const root = panel.fixture.nativeElement as HTMLElement;
+    const select = () => root.querySelector<HTMLSelectElement>("select[aria-label=Run]")!;
+    const shown = () => select().selectedOptions[0]?.textContent ?? "";
+    panel.fixture.detectChanges();
+    // Newest first, and the newest run is shown.
+    expect(select().options.length).toBe(2);
+    select().selectedIndex = 1;
+    select().dispatchEvent(new Event("change"));
+    panel.fixture.detectChanges();
+    const picked = shown();
+    // The older run stays shown after the pick.
+    expect(select().selectedIndex).toBe(1);
+    expect(picked).not.toBe(select().options[0]!.textContent);
+    cards.update((c) => [...c, run("c", "2026-11-07T12:00:00.000Z")]);
+    panel.fixture.detectChanges();
+    panel.fixture.detectChanges();
+    expect(select().options.length).toBe(3);
+    expect(select().selectedIndex).toBe(0);
+    expect(shown()).not.toBe(picked);
+  });
+
+  it("shows skipped tasks as one row that opens to the list and stays open", () => {
+    const ev = (type: string, task: string, extra: Record<string, unknown> = {}) => ({
+      type,
+      tone: "neutral",
+      ts: "2026-11-07T10:00:00.000Z",
+      task,
+      ...extra,
+    });
+    const status = parseStatus({
+      v: 1,
+      run: "a",
+      status: "running",
+      tasks: [],
+      finished: {},
+      attentions: [],
+      needsYou: false,
+      links: [],
+      updated: new Date().toISOString(),
+      tone: "neutral",
+      host: { "poimen.terminal": "w1:p1" },
+      events: [
+        ev("task.started", "t1", { subject: "PBI one" }),
+        ev("task.finished", "t1", { outcome: "skipped", reason: "blocked", text: "waits" }),
+        ev("task.started", "t2", { subject: "PBI two" }),
+        ev("task.finished", "t2", { outcome: "skipped", reason: "blocked" }),
+      ],
+    });
+    if (typeof status === "string") throw new Error(status);
+    const cards = signal<DeliverCard[]>([
+      { root: "/repo", run: "a", state: { kind: "ok", status } },
+    ]);
+    const panel = render("events", pane({ cwd: "/repo" }), false, cards);
+    const root = panel.fixture.nativeElement as HTMLElement;
+    panel.fixture.detectChanges();
+    expect(root.querySelectorAll("[data-testid=skipped-fold]").length).toBe(1);
+    expect(root.querySelector("[data-testid=skipped-fold]")!.textContent).toContain(
+      "2 skipped (blocked)",
+    );
+    expect(root.querySelectorAll("[data-testid=skipped-task]").length).toBe(0);
+    root.querySelector<HTMLButtonElement>(".fold-toggle")!.click();
+    panel.fixture.detectChanges();
+    const tasks = root.querySelectorAll("[data-testid=skipped-task]");
+    expect(tasks.length).toBe(2);
+    expect(tasks[0]!.textContent).toContain("PBI one: waits");
+    // A new event keeps the fold open.
+    cards.update((c) => [...c]);
+    panel.fixture.detectChanges();
+    expect(root.querySelectorAll("[data-testid=skipped-task]").length).toBe(2);
+  });
+
+  it("lists the events of all runs of a subject with a separator per run", () => {
+    const run = (id: string, ts: string): DeliverCard => {
+      const status = parseStatus({
+        v: 1,
+        run: id,
+        status: "running",
+        tasks: [],
+        finished: {},
+        attentions: [],
+        needsYou: false,
+        links: [],
+        updated: new Date().toISOString(),
+        tone: "neutral",
+        host: {},
+        subject: { kind: "github.milestone", id: "7", title: "M007" },
+        events: [
+          { type: "run.started", tone: "neutral", ts },
+          {
+            type: "step.finished",
+            tone: "info",
+            task: "t1",
+            step: "implement",
+            ts,
+            link: "https://x/pr/1",
+          },
+        ],
+      });
+      if (typeof status === "string") throw new Error(status);
+      return { root: "/repo", run: id, state: { kind: "ok", status } };
+    };
+    const cards = signal([
+      run("a", "2026-11-07T10:00:00.000Z"),
+      run("b", "2026-11-07T11:00:00.000Z"),
+    ]);
+    const panel = render("events", pane({ cwd: "/repo" }), false, cards);
+    const root = panel.fixture.nativeElement as HTMLElement;
+    panel.fixture.detectChanges();
+    // The default stays a single run.
+    expect(root.querySelectorAll("[data-testid=run-separator]").length).toBe(0);
+    const select = root.querySelector<HTMLSelectElement>("select[aria-label=Run]")!;
+    expect(select.querySelectorAll("optgroup").length).toBe(1);
+    expect(select.options[0]!.textContent).toContain("All runs (2)");
+    select.selectedIndex = 0;
+    select.dispatchEvent(new Event("change"));
+    panel.fixture.detectChanges();
+    expect(root.querySelectorAll("[data-testid=run-separator]").length).toBe(2);
+    expect(root.querySelectorAll("a.pr").length).toBe(2);
+    // Back to one run.
+    select.selectedIndex = 1;
+    select.dispatchEvent(new Event("change"));
+    panel.fixture.detectChanges();
+    expect(root.querySelectorAll("[data-testid=run-separator]").length).toBe(0);
   });
 });

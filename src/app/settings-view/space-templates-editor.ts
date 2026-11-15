@@ -25,6 +25,8 @@ import {
   type SpaceTemplate,
 } from "../core/space-templates";
 import { TauriBridge } from "../core/tauri";
+import { SettingsTransfer } from "../core/settings-transfer";
+import { SettingsImportPanel } from "./settings-import-panel";
 
 /** Where the layout of the draft started: none, a source, or edited by hand. */
 type LayoutSource = "none" | "default" | "user" | "custom" | `preset:${string}`;
@@ -43,6 +45,11 @@ function expandHome(dir: string, home: string | null): string | null {
   return dir;
 }
 
+/** Pane names of a layout, in order, joined for display. */
+function panesText(layout: SpaceLayout): string {
+  return layout.panes.map((p) => p.name).join(" · ");
+}
+
 function value(event: Event): string {
   return (event.target as HTMLInputElement | HTMLSelectElement).value;
 }
@@ -53,6 +60,7 @@ function value(event: Event): string {
  */
 @Component({
   selector: "app-space-templates-editor",
+  imports: [SettingsImportPanel],
   templateUrl: "./space-templates-editor.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -60,6 +68,7 @@ function value(event: Event): string {
 export class SpaceTemplatesEditor {
   private readonly store = inject(SettingsStore);
   private readonly bridge = inject(TauriBridge);
+  protected readonly transfer = inject(SettingsTransfer);
 
   protected readonly settings = this.store.settings;
   protected readonly writeError = this.store.writeError;
@@ -104,6 +113,24 @@ export class SpaceTemplatesEditor {
   );
   protected readonly matchLabel = matchLabel;
 
+  /** The panes of an inline layout; a layout name has none to edit here. */
+  protected inlineLayout(l: SpaceTemplate["layout"]): SpaceLayout | null {
+    return typeof l === "string" ? null : l;
+  }
+
+  /**
+   * The layout a template uses, in words: its own panes, else `spaces.layout`, else the built-in
+   * default, each with its source in brackets.
+   */
+  protected layoutText(t: SpaceTemplate): string {
+    if (typeof t.layout === "string") return `layout "${t.layout}"`;
+    if (t.layout) return panesText(t.layout);
+    const shared = this.settings().spacesLayout;
+    if (shared) return `${panesText(shared)} (spaces.layout)`;
+    const built = this.builtIn();
+    return built ? `${panesText(built)} (built-in)` : "built-in";
+  }
+
   constructor() {
     void this.store.defaultSpacesLayout().then((l) => this.builtIn.set(l));
     // The harnesses come from config.json, so they are read again when the settings change.
@@ -114,6 +141,16 @@ export class SpaceTemplatesEditor {
         .then((raw) => this.harnesses.set(parseHarnesses(raw)))
         .catch(() => this.harnesses.set([]));
     });
+  }
+
+  /** Exports the template `name` (with its layout) to a file chosen in the save dialog. */
+  protected exportTemplate(name: string): void {
+    void this.transfer.export(name);
+  }
+
+  /** Picks a file and shows which templates it adds or changes; nothing is written yet. */
+  protected importTemplate(): void {
+    void this.transfer.choose("template");
   }
 
   protected add(): void {
@@ -144,7 +181,7 @@ export class SpaceTemplatesEditor {
   }
 
   private open(index: number | null, draft: SpaceTemplate, asDefault = false): void {
-    this.source.set(draft.layout ? "custom" : "none");
+    this.source.set(draft.layout && typeof draft.layout !== "string" ? "custom" : "none");
     this.presets.set([]);
     this.editing.set({ index, draft, asDefault });
     void this.loadPresets();
@@ -263,7 +300,7 @@ export class SpaceTemplatesEditor {
 
   private changePanes(change: (panes: SpaceLayout["panes"]) => SpaceLayout["panes"]): void {
     const layout = this.editing()?.draft.layout;
-    if (!layout) return;
+    if (!layout || typeof layout === "string") return;
     this.source.set("custom");
     this.patch({ layout: { panes: change(layout.panes) } });
   }

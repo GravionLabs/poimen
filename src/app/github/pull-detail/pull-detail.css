@@ -1,1 +1,17 @@
 @import "../detail-pane.css";
+
+.compose {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.compose textarea {
+  flex: 1 1 100%;
+  font: inherit;
+}
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}

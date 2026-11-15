@@ -56,6 +56,143 @@
           </button>
         }
       </div>
+      @if (pulls.actions().length > 0) {
+        <div class="actions" role="toolbar" aria-label="Review actions" data-testid="pr-actions">
+          @for (a of pulls.actions(); track a) {
+            <button
+              type="button"
+              [attr.data-testid]="'pr-' + a"
+              [disabled]="pulls.actionBusy()"
+              (click)="choose(a)"
+            >
+              {{ labels[a] }}
+            </button>
+          }
+        </div>
+        @if (pulls.compose(); as c) {
+          <form
+            class="compose"
+            data-testid="pr-compose"
+            (submit)="$event.preventDefault(); submit(c)"
+          >
+            @if (c === "close") {
+              <p>Close #{{ row.number }} without merging?</p>
+            } @else {
+              <textarea
+                rows="3"
+                [attr.aria-label]="labels[c] + ' text'"
+                data-testid="pr-body"
+                [value]="text()"
+                (input)="text.set($any($event.target).value)"
+              ></textarea>
+            }
+            <button
+              type="submit"
+              data-testid="pr-submit"
+              [disabled]="pulls.actionBusy() || (c !== 'close' && !text().trim())"
+            >
+              {{ c === "close" ? "Confirm close" : "Send " + labels[c].toLowerCase() }}
+            </button>
+            <button type="button" data-testid="pr-cancel" (click)="cancel()">Cancel</button>
+          </form>
+        }
+      }
+      @if (pulls.detail(); as d) {
+        @if (canMerge(d) || canRerun(d)) {
+          <div class="actions" role="toolbar" aria-label="Merge and checks" data-testid="merge-bar">
+            @if (canMerge(d)) {
+              <button
+                type="button"
+                data-testid="pr-merge"
+                [disabled]="pulls.actionBusy() || d.mergeBlock !== null"
+                [attr.title]="d.mergeBlock"
+                (click)="pulls.startMerge()"
+              >
+                Merge
+              </button>
+              @if (d.mergeBlock; as why) {
+                <span class="hint" data-testid="merge-reason">{{ why }}</span>
+              }
+            }
+            @if (canRerun(d)) {
+              <button
+                type="button"
+                data-testid="pr-rerun"
+                [disabled]="pulls.actionBusy()"
+                (click)="pulls.rerun()"
+              >
+                Re-run failed checks
+              </button>
+            }
+          </div>
+          @if (pulls.mergeDraft(); as m) {
+            <form
+              class="compose"
+              data-testid="merge-confirm"
+              (submit)="$event.preventDefault(); pulls.merge()"
+            >
+              <p>
+                Merge #{{ row.number }} into <strong>{{ row.baseRef }}</strong> with
+                <strong data-testid="merge-method-label">{{ mergeLabels[m.method] }}</strong>?
+              </p>
+              <select
+                aria-label="Merge method"
+                data-testid="merge-method"
+                (change)="setMethod($any($event.target).value)"
+              >
+                @for (method of d.mergeMethods; track method) {
+                  <option [value]="method" [selected]="method === m.method">
+                    {{ mergeLabels[method] }}
+                  </option>
+                }
+              </select>
+              <label>
+                <input
+                  type="checkbox"
+                  data-testid="merge-delete"
+                  [checked]="m.deleteBranch"
+                  (change)="setDelete($any($event.target).checked)"
+                />
+                Delete branch
+              </label>
+              <button type="submit" data-testid="merge-submit" [disabled]="pulls.actionBusy()">
+                Confirm merge
+              </button>
+              <button type="button" data-testid="merge-cancel" (click)="pulls.mergeDraft.set(null)">
+                Cancel
+              </button>
+            </form>
+          }
+        }
+        @if (canEdit(d)) {
+          <div class="people" data-testid="people">
+            <app-chip-picker
+              label="Reviewers"
+              [selected]="d.reviewers"
+              [options]="d.assignableUsers"
+              [disabled]="pulls.actionBusy()"
+              (add)="pulls.edit({ addReviewers: [$event] })"
+              (remove)="pulls.edit({ removeReviewers: [$event] })"
+            />
+            <app-chip-picker
+              label="Labels"
+              [selected]="d.labels"
+              [options]="pulls.labelOptions()"
+              [disabled]="pulls.actionBusy()"
+              (add)="pulls.edit({ addLabels: [$event] })"
+              (remove)="pulls.edit({ removeLabels: [$event] })"
+            />
+            <app-chip-picker
+              label="Assignees"
+              [selected]="d.assignees"
+              [options]="d.assignableUsers"
+              [disabled]="pulls.actionBusy()"
+              (add)="pulls.edit({ addAssignees: [$event] })"
+              (remove)="pulls.edit({ removeAssignees: [$event] })"
+            />
+          </div>
+        }
+      }
     </header>
     @if (errorMessage(); as message) {
       <p class="problem" role="alert" data-testid="detail-error">

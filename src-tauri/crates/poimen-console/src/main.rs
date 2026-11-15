@@ -25,6 +25,23 @@ fn main() -> ExitCode {
         }
         Ok(Command::Tui) => tui(),
         Ok(Command::Attach(a)) => attach(a),
+        Ok(Command::Mcp) => {
+            let client = Client::new(poimen_protocol::terminal_socket_path());
+            let terminal = std::env::var(poimen_protocol::ENV_TERMINAL_ID).ok();
+            let stdin = std::io::stdin().lock();
+            match poimen_console::mcp::serve(
+                &client,
+                terminal.as_deref(),
+                stdin,
+                &mut std::io::stdout(),
+            ) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("poimen: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Ok(Command::Request(r)) => {
             let client = Client::new(poimen_protocol::terminal_socket_path());
             match commands::run(&client, &r, commands::PROMPT_WAIT, &mut std::io::stdout()) {

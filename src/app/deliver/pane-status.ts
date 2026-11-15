@@ -7,8 +7,9 @@ export const TERMINAL_KEY = "poimen.terminal";
 /**
  * The status poimen shows for a pane: the hook status combined with the runs linked to it. A
  * running (not stale) run keeps the pane `working` after the agent's turn ended (Stop reports
- * `done`, the loop it started still runs); a run that needs the user, or a `blocked` hook, makes
- * it `blocked`. Without such a run the hook status is unchanged; `gone` always wins.
+ * `done`, the loop it started still runs); a `blocked` hook makes it `blocked`, and so does a run that
+ * needs the user while it has no open task left (#752: a gate such as the release PR does not
+ * block the session while the run still works). Without such a run the hook status is unchanged; `gone` always wins.
  */
 export function effectiveStatus<S extends AgentStatus | "gone">(
   hook: S,
@@ -18,7 +19,10 @@ export function effectiveStatus<S extends AgentStatus | "gone">(
   if (hook === "gone") return hook;
   const running = runs.filter((run) => runState(run, now) === "running");
   if (running.length === 0) return hook;
-  return hook === "blocked" || running.some((run) => run.needsYou) ? "blocked" : "working";
+  // A gate for the human (`needsYou`) blocks the pane only when nothing is left to do for the run:
+  // while it has open tasks the session still works and the gate stays in the Runs view.
+  const gated = running.some((run) => run.needsYou && run.tasks.length === 0);
+  return hook === "blocked" || gated ? "blocked" : "working";
 }
 
 /**

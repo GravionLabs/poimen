@@ -109,6 +109,9 @@ pub(crate) struct Spec<'a> {
     /// Whether the server has a locale (see [`locale_set`]); without one the child gets a UTF-8
     /// `LC_CTYPE` ([`default_lc_ctype`]).
     pub locale_set: bool,
+    /// The request's extra variables; applied before POIMEN_SOCKET and POIMEN_TERMINAL_ID, which
+    /// they cannot override.
+    pub env: &'a std::collections::BTreeMap<String, String>,
 }
 
 /// Whether the server's environment names a locale: one of `LC_ALL`, `LC_CTYPE`, `LANG` with a
@@ -145,7 +148,7 @@ pub(crate) fn endpoint_for(socket: &Path, terminal_id: &str) -> PathBuf {
 /// adds (`POIMEN_SOCKET`, `POIMEN_TERMINAL_ID`, `TERM=xterm-256color` when the server has none
 /// or a dumb one, `LC_CTYPE` when the server has no locale).
 pub(crate) fn start_line(spec: &Spec<'_>, endpoint: PathBuf) -> HostStart {
-    let mut env = std::collections::BTreeMap::new();
+    let mut env = spec.env.clone();
     if spec.term.is_none_or(|t| t.is_empty() || t == "dumb") {
         env.insert("TERM".to_string(), "xterm-256color".to_string());
     }
@@ -904,6 +907,8 @@ mod tests {
         );
     }
 
+    static NO_ENV: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+
     fn spec<'a>(command: &'a [String], term: Option<&'a str>) -> Spec<'a> {
         Spec {
             terminal_id: "t3",
@@ -914,6 +919,7 @@ mod tests {
             rows: 30,
             term,
             locale_set: false,
+            env: &NO_ENV,
         }
     }
 
@@ -934,6 +940,40 @@ mod tests {
         }
         assert_eq!(start.spawn.env, expected);
         assert_eq!(start.orphan_timeout_ms, 86_400_000);
+    }
+
+    #[test]
+    fn extra_env_is_added_but_cannot_override_poimens_variables() {
+        let command = vec!["sh".to_string()];
+        let env = std::collections::BTreeMap::from([
+            (
+                "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN".to_string(),
+                "1".to_string(),
+            ),
+            ("POIMEN_TERMINAL_ID".to_string(), "evil".to_string()),
+            ("POIMEN_SOCKET".to_string(), "/evil".to_string()),
+        ]);
+        let start = start_line(
+            &Spec {
+                env: &env,
+                ..spec(&command, Some("xterm"))
+            },
+            PathBuf::from("/e"),
+        );
+        let got = &start.spawn.env;
+        assert_eq!(
+            got.get("CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            got.get("POIMEN_TERMINAL_ID").map(String::as_str),
+            Some("t3")
+        );
+        assert_eq!(
+            got.get("POIMEN_SOCKET").map(String::as_str),
+            Some("/run/s.sock")
+        );
     }
 
     #[test]

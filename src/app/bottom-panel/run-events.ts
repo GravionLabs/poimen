@@ -5,6 +5,10 @@ import {
   stepText,
   type DeliverCard,
   type DeliverStatus,
+  type RunEventRow,
+  runState,
+  startedAt,
+  type Subject,
   type Tone,
 } from "../deliver/deliver-status";
 
@@ -24,10 +28,21 @@ const inside = (dir: string, root: string): boolean => {
   return dir === root || dir.startsWith(base + "/");
 };
 
+/** When a run started (first event), else its last update; 0 when neither is a date. */
+const startMs = (r: RunChoice): number => Date.parse(startedAt(r.status) ?? r.status.updated) || 0;
+const updatedMs = (r: RunChoice): number => Date.parse(r.status.updated) || 0;
+
+/** Newest first: start of the run, then `updated`, then the run id (a total order). */
+const newest = (a: RunChoice, b: RunChoice): number =>
+  startMs(b) - startMs(a) ||
+  updatedMs(b) - updatedMs(a) ||
+  (a.status.run < b.status.run ? -1 : a.status.run > b.status.run ? 1 : 0);
+
 /**
- * The runs (with a readable state) of the repository that contains `dir`, oldest first. `machine`
- * is the machine of the space (`dir` is a path there); only its runs count, so a local and a
- * remote repository at the same path stay apart.
+ * The runs (with a readable state) of the repository that contains `dir`, newest first (start of
+ * the run, `updated` as the tie-break; the cards stay in arrival order for the Deliver view).
+ * `machine` is the machine of the space (`dir` is a path there); only its runs count, so a local
+ * and a remote repository at the same path stay apart.
  */
 export function runsOfSpace(
   cards: readonly DeliverCard[],
@@ -35,39 +50,139 @@ export function runsOfSpace(
   machine?: string,
 ): RunChoice[] {
   if (!dir) return [];
-  return cards.flatMap((card) =>
-    card.state.kind === "ok" && card.machine === machine && inside(dir, card.root)
-      ? [
-          {
-            key: cardKey(card),
-            root: card.root,
-            status: card.state.status,
-            ...(card.machine === undefined ? {} : { machine: card.machine }),
-            ...(card.offline ? { offline: true } : {}),
-          },
-        ]
-      : [],
-  );
+  return cards
+    .flatMap((card) =>
+      card.state.kind === "ok" && card.machine === machine && inside(dir, card.root)
+        ? [
+            {
+              key: cardKey(card),
+              root: card.root,
+              status: card.state.status,
+              ...(card.machine === undefined ? {} : { machine: card.machine }),
+              ...(card.offline ? { offline: true } : {}),
+            },
+          ]
+        : [],
+    )
+    .sort(newest);
+}
+
+/** The runs of one subject (#780); `subject` is null for a run without one. */
+export interface SubjectGroup {
+  /** Stable: `kind`, `id` (else title) of the subject, or the run id without a subject. */
+  key: string;
+  subject: Subject | null;
+  /** Newest first. */
+  runs: RunChoice[];
+}
+
+/** The group key of a run. */
+export const subjectKey = (run: RunChoice): string => {
+  const s = run.status.subject;
+  return s ? `${s.kind}\n${s.id || s.title}` : `run\n${run.status.run}`;
+};
+
+/**
+ * Groups runs by subject (`kind` and `id`); a run without a subject is a group of its own. Groups
+ * are ordered by their latest run, newest first, and inside a group the runs are newest first.
+ * Pure, so the Runs view can share it.
+ */
+export function groupBySubject(runs: readonly RunChoice[]): SubjectGroup[] {
+  const groups = new Map<string, SubjectGroup>();
+  for (const run of [...runs].sort(newest)) {
+    const key = subjectKey(run);
+    const group = groups.get(key);
+    if (group) group.runs.push(run);
+    else groups.set(key, { key, subject: run.status.subject, runs: [run] });
+  }
+  return [...groups.values()].sort((a, b) => newest(a.runs[0]!, b.runs[0]!));
+}
+
+/** The name of a group: its subject title, else the label of its only run. */
+export const groupTitle = (group: SubjectGroup): string =>
+  group.subject?.title || group.subject?.id || runTitle(group.runs[0]!.status, group.runs[0]!.root);
+
+/** The separator row of a run in the merged list: start, state and outcome. */
+export interface RunSeparator {
+  kind: "separator";
+  key: string;
+  start: string;
+  state: string;
+  outcome: string;
+}
+
+/** What the Events tab lists: rows, folds of skipped tasks and run separators. */
+export type ListItem = EventItem | RunSeparator;
+
+/** `2026-11-07 10:00:00` of an ISO timestamp in local time; empty when it is not a date. */
+function dateTime(iso: string | null): string {
+  const date = iso ? new Date(iso) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${eventTime(iso)}`;
 }
 
 /**
- * The run to show: the one whose `host["poimen.terminal"]` is the active terminal, else the one
- * the user picked, else the latest run (by `updated`) of the space's repository.
+ * The events of all runs of a group in time order: runs oldest first, each behind a separator
+ * row, the events of a run in their own order (with its skipped tasks folded). Fold keys carry the
+ * run, so two runs never share an open fold.
+ */
+export function mergedItems(group: SubjectGroup, now: number): ListItem[] {
+  return [...group.runs].reverse().flatMap((run): ListItem[] => {
+    const s = run.status;
+    const separator: RunSeparator = {
+      kind: "separator",
+      key: run.key,
+      start: dateTime(startedAt(s) ?? s.updated),
+      state: runState(s, now),
+      outcome: s.outcome ?? "",
+    };
+    const items = foldSkipped(s.events).map((item) =>
+      item.kind === "skipped" ? { ...item, key: `${run.key}:${item.key}` } : item,
+    );
+    return [separator, ...items];
+  });
+}
+
+/** A run the user picked and the newest start among the runs when they picked it. */
+export interface Pick {
+  key: string;
+  seen: number;
+}
+
+/** The pick of `key` among `runs` (newest first). */
+export const pickRunOf = (runs: readonly RunChoice[], key: string): Pick => ({
+  key,
+  seen: runs.reduce((m, r) => Math.max(m, startMs(r)), 0),
+});
+
+/**
+ * Whether a pick still holds: its run is listed and no run of the repository started after the
+ * pick was made. Otherwise the Events tab follows the active run again.
+ */
+export const pickHolds = (runs: readonly RunChoice[], picked: Pick | null): boolean =>
+  !!picked && runs.some((r) => r.key === picked.key) && !runs.some((r) => startMs(r) > picked.seen);
+
+/**
+ * The run to show: the pick that still holds, else the running (not stale) run of the active
+ * terminal with the latest `updated`, else the latest run of that terminal, else the latest run of
+ * the repository. A terminal is the `host["poimen.terminal"]` of the run.
  */
 export function selectRun(
   runs: readonly RunChoice[],
   terminalId: string | null | undefined,
-  picked: string | null,
+  picked: Pick | null,
+  now: number,
 ): RunChoice | undefined {
-  const byTerminal = terminalId
-    ? runs.find((r) => r.status.host["poimen.terminal"] === terminalId)
-    : undefined;
-  if (picked) {
-    const chosen = runs.find((r) => r.key === picked);
-    if (chosen) return chosen;
-  }
-  if (byTerminal) return byTerminal;
-  return [...runs].sort((a, b) => Date.parse(b.status.updated) - Date.parse(a.status.updated))[0];
+  if (picked && pickHolds(runs, picked)) return runs.find((r) => r.key === picked.key);
+  const sorted = [...runs].sort(newest);
+  const mine = terminalId
+    ? sorted.filter((r) => r.status.host["poimen.terminal"] === terminalId)
+    : [];
+  const running = mine
+    .filter((r) => runState(r.status, now) === "running")
+    .sort((a, b) => updatedMs(b) - updatedMs(a) || newest(a, b));
+  return running[0] ?? mine[0] ?? sorted[0];
 }
 
 /** `text` cut to `max` characters with an ellipsis. */
@@ -125,4 +240,87 @@ export function eventTime(ts: string | null): string {
   if (!date || Number.isNaN(date.getTime())) return "";
   const two = (n: number) => String(n).padStart(2, "0");
   return `${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+}
+
+/** One skipped task of a fold: `task.started` followed at once by its `task.finished` skipped. */
+export interface SkippedTask {
+  task: string;
+  subject: string;
+  text: string;
+  reason: string;
+}
+
+/** What the Events tab lists: a plain row or a fold of consecutive skipped tasks (#781). */
+export type EventItem =
+  | { kind: "row"; row: RunEventRow }
+  | {
+      kind: "skipped";
+      /** Stable while the fold grows at its end: the first task and its start. */
+      key: string;
+      ts: string | null;
+      tasks: SkippedTask[];
+      /** `21 skipped (blocked)`. */
+      label: string;
+    };
+
+const quiet = (r: RunEventRow): boolean => r.tone !== "warning" && r.tone !== "danger";
+
+/** The skipped task of `started` + `finished` when they form such a pair (core fields only). */
+function skippedPair(started: RunEventRow | undefined, finished: RunEventRow | undefined) {
+  if (
+    !started ||
+    !finished ||
+    started.type !== "task.started" ||
+    finished.type !== "task.finished" ||
+    !started.task ||
+    started.task !== finished.task ||
+    finished.outcome !== "skipped" ||
+    !quiet(started) ||
+    !quiet(finished)
+  )
+    return null;
+  return {
+    task: started.task,
+    subject: started.subject || finished.subject || "",
+    text: finished.text || started.text || "",
+    reason: finished.reason || "",
+  } satisfies SkippedTask;
+}
+
+/**
+ * Folds consecutive skipped tasks into one item. A pair is a `task.started` directly followed by
+ * the `task.finished` of the same task with outcome `skipped`; rows with tone `warning` or
+ * `danger` are never folded. A single skipped task stays a fold of one.
+ */
+export function foldSkipped(rows: readonly RunEventRow[]): EventItem[] {
+  const items: EventItem[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    const pair = skippedPair(rows[i], rows[i + 1]);
+    if (!pair) {
+      items.push({ kind: "row", row: rows[i]! });
+      i += 1;
+      continue;
+    }
+    const tasks = [pair];
+    const first = rows[i]!;
+    i += 2;
+    for (
+      let next = skippedPair(rows[i], rows[i + 1]);
+      next;
+      next = skippedPair(rows[i], rows[i + 1])
+    ) {
+      tasks.push(next);
+      i += 2;
+    }
+    const reasons = [...new Set(tasks.map((t) => t.reason).filter((r) => r !== ""))];
+    items.push({
+      kind: "skipped",
+      key: `${first.seq ?? ""}:${pair.task}`,
+      ts: first.ts,
+      tasks,
+      label: `${tasks.length} skipped${reasons.length ? ` (${reasons.join(", ")})` : ""}`,
+    });
+  }
+  return items;
 }

@@ -1,11 +1,10 @@
-//! Creating a space (herdr workspace) for a directory, and listing directories for path completion.
-//! The matching mirrors the herdr-plugins `repo-open`: focus the existing space, else create one.
+//! Creating a space for a directory, and listing directories for path completion. The matching
+//! focuses the existing space, else creates one.
 
 use std::path::{Path, PathBuf};
 
 use poimen_core::snapshot::{Snapshot, Space, Terminal};
 use serde::Serialize;
-use serde_json::{Value, json};
 
 /// What `create_space` did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -100,28 +99,6 @@ pub fn space_label(dir: &str, wanted: &str, home: Option<&Path>, spaces: &[Space
         .filter(|p| !p.is_empty())
         .unwrap_or(dir)
         .to_owned()
-}
-
-/// Params of `workspace.create`.
-pub fn create_params(cwd: &str, label: &str) -> Value {
-    json!({ "cwd": cwd, "label": label })
-}
-
-/// Params of `workspace.focus`.
-pub fn focus_params(workspace_id: &str) -> Value {
-    json!({ "workspace_id": workspace_id })
-}
-
-/// Params of `workspace.rename`.
-pub fn rename_params(workspace_id: &str, label: &str) -> Value {
-    json!({ "workspace_id": workspace_id, "label": label })
-}
-
-/// The workspace id of a `workspace.create` result.
-pub fn created_workspace_id(result: &Value) -> Option<String> {
-    result["workspace"]["workspace_id"]
-        .as_str()
-        .map(str::to_owned)
 }
 
 fn expand_home(input: &str, home: Option<&Path>) -> PathBuf {
@@ -233,6 +210,7 @@ pub fn list_dirs(input: &str, home: Option<&Path>, limit: usize) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_space_outcome_names_the_space_by_its_neutral_id() {
@@ -265,14 +243,6 @@ mod tests {
             terminals: terminals.to_vec(),
         };
         find_space(dir, &snapshot)
-    }
-
-    #[test]
-    fn rename_params_name_the_workspace_and_label() {
-        assert_eq!(
-            rename_params("w1", "api"),
-            json!({ "workspace_id": "w1", "label": "api" })
-        );
     }
 
     fn pane(ws: &str, cwd: &str) -> Terminal {
@@ -425,18 +395,6 @@ mod tests {
             space_label("/work/app", " custom ", Some(home), &workspaces),
             "custom"
         );
-    }
-
-    #[test]
-    fn request_params_carry_cwd_and_label() {
-        assert_eq!(
-            create_params("/work/app", "app"),
-            json!({ "cwd": "/work/app", "label": "app" })
-        );
-        assert_eq!(focus_params("w1"), json!({ "workspace_id": "w1" }));
-        let result = json!({ "type": "workspace_created", "workspace": { "workspace_id": "w3" } });
-        assert_eq!(created_workspace_id(&result), Some("w3".into()));
-        assert_eq!(created_workspace_id(&json!({})), None);
     }
 
     #[test]

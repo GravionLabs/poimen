@@ -244,7 +244,7 @@ fn is_live(hook: &Value, channel: Channel) -> bool {
             .is_some_and(binary_present)
 }
 
-fn read_settings(path: &Path) -> Result<Map<String, Value>, String> {
+pub(crate) fn read_settings(path: &Path) -> Result<Map<String, Value>, String> {
     match std::fs::read_to_string(path) {
         Ok(text) if text.trim().is_empty() => Ok(Map::new()),
         Ok(text) => match serde_json::from_str::<Value>(&text) {
@@ -260,7 +260,7 @@ fn read_settings(path: &Path) -> Result<Map<String, Value>, String> {
 }
 
 /// Writes through a temp file in the same directory and a rename, keeping the file mode.
-fn write_atomic(path: &Path, settings: &Map<String, Value>) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, settings: &Map<String, Value>) -> Result<(), String> {
     let err = |e: std::io::Error| format!("cannot write {}: {e}", path.display());
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).map_err(err)?;

@@ -4,11 +4,17 @@ import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge, type Unlisten } from "../core/tauri";
+import { NotificationCenter, type RunAlert } from "../core/notification-center";
+import { EditorTabs } from "../core/editor-tabs";
+import { UiState } from "../core/ui-state";
 import { isGithubUrl } from "../github/pulls";
 import {
   barSummary,
   cardKey,
   cardsOf,
+  groupRuns,
+  isAlert,
+  outcomeText,
   type DeliverCard,
   type DeliverRead,
   type DeliverStatus,
@@ -74,6 +80,13 @@ export class Deliver {
   private readonly store = inject(SpacesStore);
   private readonly tasks = inject(TaskStarter);
   private readonly machines = inject(Machines);
+  private readonly ui = inject(UiState);
+  private readonly editor = inject(EditorTabs);
+  private readonly center = inject(NotificationCenter);
+  /** Attentions already seen (notified or part of the first read), by machine, root, run and id. */
+  private readonly seenAlerts = new Set<string>();
+  /** Repositories whose first read is in; it only sets the baseline. */
+  private readonly baselined = new Set<string>();
 
   /** Every card received, local and remote, in the order they appeared. */
   private readonly received = signal<readonly DeliverCard[]>([]);
@@ -87,6 +100,10 @@ export class Deliver {
       new Map(this.machines.machines().map((m) => [m.name, m.state] as const)),
     ),
   );
+  /** The runs grouped by subject (#584), the model of the Runs view. */
+  readonly groups = computed(() => groupRuns(this.cards()));
+  /** The group the view should put its cursor on, set by {@link reveal}. */
+  readonly revealed = signal<string | null>(null);
   /** The clock of the age texts. */
   readonly now = signal(Date.now());
   /** The compact status bar item; `null` without a running loop. */
@@ -151,6 +168,7 @@ export class Deliver {
     const same = (c: DeliverCard) => c.root === root && c.machine === machine;
     const before = this.received().filter(same);
     const next = cardsOf(root, read, machine);
+    this.notify(root, machine, next);
     this.received.update((cards) => {
       const rest = cards.filter((c) => !same(c));
       // Keep the place of a card that is only updated; new cards come last.
@@ -160,6 +178,53 @@ export class Deliver {
       );
       return at < 0 ? [...rest, ...placed] : [...rest.slice(0, at), ...placed, ...rest.slice(at)];
     });
+  }
+
+  /**
+   * One notification-center entry per attention of a run that needs the user (#806); the first
+   * read of a repository only records what is already there.
+   */
+  private notify(root: string, machine: string | undefined, cards: readonly DeliverCard[]): void {
+    const where = `${machine ?? ""}\n${root}`;
+    const first = !this.baselined.has(where);
+    this.baselined.add(where);
+    const alerts: RunAlert[] = [];
+    for (const card of cards) {
+      if (card.state.kind !== "ok") continue;
+      const status = card.state.status;
+      for (const attention of status.attentions) {
+        if (!isAlert(attention, status)) continue;
+        const key = `${where}\n${card.run}\n${attention.id}`;
+        if (this.seenAlerts.has(key)) continue;
+        this.seenAlerts.add(key);
+        if (first) continue;
+        const label = status.subject?.title || root.split(/[\\/]/).filter(Boolean).pop() || root;
+        const said = outcomeText(attention) ?? "needs you";
+        alerts.push({
+          root,
+          ...(machine === undefined ? {} : { machine }),
+          label,
+          message: `${label}: ${said}`,
+        });
+      }
+    }
+    this.center.recordRuns(alerts, Date.now());
+  }
+
+  /**
+   * Opens the Runs view with the group of the newest run of `root` (on `machine`) expanded and
+   * under the cursor, as a notification with `extra.deliverRoot` asks for; `false` when the
+   * repository has no run (the view still opens).
+   */
+  reveal(root: string, machine?: string): boolean {
+    const group = this.groups()
+      .filter((g) => g.root === root && g.machine === machine)
+      .sort((a, b) => b.updated - a.updated)[0];
+    this.editor.openDeliver();
+    if (!group) return false;
+    this.ui.setRunGroupExpanded(group.key, true);
+    this.revealed.set(group.key);
+    return true;
   }
 
   /** Opens a GitHub link of the run in the browser; anything else is ignored. */

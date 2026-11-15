@@ -89,7 +89,14 @@ export function neighbourSpace(
   sort: SidebarSort = "manual",
   pinned: readonly string[] = [],
 ): string | null {
-  const ids = orderSpaces(snapshot.spaces, order, sort, pinned).map((w) => w.space_id);
+  return neighbourIn(
+    orderSpaces(snapshot.spaces, order, sort, pinned).map((w) => w.space_id),
+    workspaceId,
+  );
+}
+
+/** The id after `workspaceId` in `ids` (the order the sidebar shows), else the one before; `null` if none. */
+export function neighbourIn(ids: readonly string[], workspaceId: string): string | null {
   const i = ids.indexOf(workspaceId);
   if (i < 0) return null;
   return ids[i + 1] ?? ids[i - 1] ?? null;
@@ -456,12 +463,10 @@ export class SpaceActions {
     try {
       await this.bridge.invoke("space_close", {
         spaceId: workspaceId,
-        focus: neighbourSpace(
-          snapshot,
+        // The row next to the closed one in the sidebar: its sort keys and worktree grouping.
+        focus: neighbourIn(
+          this.store.spaces().map((n) => n.workspace.space_id),
           workspaceId,
-          this.store.spaceOrder(),
-          this.store.sidebarSort(),
-          this.store.pinnedSpaces(),
         ),
       });
     } catch (err) {

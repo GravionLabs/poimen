@@ -59,11 +59,6 @@
       (input)="setQuery($any($event.target).value)"
     />
     <span class="search-count" aria-live="polite">{{ searchCounter() }}</span>
-    @if (screenOnly()) {
-      <span class="search-note" title="This backend keeps no scrollback in the app">
-        Screen only
-      </span>
-    }
     <button
       type="button"
       class="search-toggle"

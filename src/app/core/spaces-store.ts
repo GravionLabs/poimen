@@ -21,7 +21,7 @@ import {
   mergeSnapshots,
 } from "./snapshot";
 import { type BackendEvent, type BackendInfo, type AppChannel } from "./backend";
-import { SettingsStore, type BackendKind, type SidebarSort } from "./settings";
+import { SettingsStore, type SidebarSort } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 import { UiState } from "./ui-state";
 import { Attention } from "./attention";
@@ -35,17 +35,17 @@ export const REFRESH_DEBOUNCE_MS = 80;
 /** Interval of the repo refresh (dirty state, ahead/behind) while the window is focused. */
 export const REPOS_REFRESH_MS = 60_000;
 
-/** `reconnecting`: the event watcher lost herdr and retries; `unreachable`: a snapshot read failed. */
+/** `reconnecting`: the event watcher lost the server and retries; `unreachable`: a snapshot read failed. */
 export type ConnectionState =
   { state: "connected" } | { state: "reconnecting" | "unreachable"; reason: string };
 
 /**
- * What `ensure_backend` found: `running` (already), `started`, `disabled` (`herdr.autoStart` off),
+ * What `ensure_backend` found: `running` (already), `started`,
  * `outdated` (a poimen-server older than the bundled one runs), `incompatible` (one with another
  * protocol version runs) or `failed`. The last two are only reported; restarting is the user's call.
  */
 export interface BackendStatus {
-  state: "running" | "started" | "disabled" | "outdated" | "incompatible" | "failed";
+  state: "running" | "started" | "outdated" | "incompatible" | "failed";
   reason: string | null;
   /** Version of the running server (`outdated`, `incompatible`). */
   running?: string;
@@ -84,7 +84,6 @@ export class SpacesStore {
   private readonly _appVersion = signal<string | null>(null);
   private readonly _appChannel = signal<AppChannel>("stable");
   private readonly _backend = signal<BackendStatus | null>(null);
-  private readonly _backendKind = signal<BackendKind>("poimen");
 
   /**
    * Combines a pane's status with what poimen knows besides the hook (running agent-events runs
@@ -114,43 +113,37 @@ export class SpacesStore {
   readonly all = computed(() =>
     mergeSnapshots(this.snapshot(), this.remote ? [this.remote.snapshot()] : []),
   );
-  /** Whether a snapshot was read from herdr at least once (before that the snapshot is empty). */
+  /** Whether a snapshot was read from the server at least once (before that the snapshot is empty). */
   readonly loaded = this._loaded.asReadonly();
-  /** Version and protocol of the running herdr; `null` when unreachable or too old. Read once per connection. */
+  /** Version and protocol of the running server; `null` when unreachable or too old. Read once per connection. */
   readonly info = this._info.asReadonly();
-  /** The backend of this run (`backend` setting at start); herdr until the app has said otherwise. */
-  readonly backendKind = this._backendKind.asReadonly();
-  /** The last result of starting herdr; `null` before the first one. */
+  /** The last result of starting the server; `null` before the first one. */
   readonly backend = this._backend.asReadonly();
-  /** Why herdr could not be started; `null` when it ran, started or auto start is off. */
+  /** Why the server could not be started; `null` when it ran or started. */
   readonly startFailure = computed(() => {
     const b = this._backend();
-    return b?.state === "failed"
-      ? (b.reason ?? `${this.backendKind()} could not be started`)
-      : null;
+    return b?.state === "failed" ? (b.reason ?? "poimen could not be started") : null;
   });
   /**
-   * The one message for a disconnected herdr (start failed, reconnecting, unreachable, auto start
-   * off); `null` while connected, even after a failed start. A failed start wins over the connection error it causes.
+   * The one message for a disconnected server (start failed, reconnecting, unreachable); `null` while connected, even after a failed start. A failed start wins over the connection error it causes.
    */
   readonly disconnected = computed<string | null>(() => {
     const conn = this.connection();
     if (conn.state === "connected") return null;
-    const name = this._backendKind();
+    const name = "poimen";
     const failure = this.startFailure();
     if (failure !== null) return `${name} was not started: ${failure}`;
     const reason = conn.reason ? `: ${conn.reason}` : "";
     if (conn.state === "reconnecting") return `${name} connection lost, reconnecting${reason}`;
-    const off = this._backend()?.state === "disabled" ? " (auto start is off)" : "";
-    return `${name} not reachable${off}${reason}`;
+    return `${name} not reachable${reason}`;
   });
   /** The version of this poimen build. */
   readonly appVersion = this._appVersion.asReadonly();
   /** The release channel of this build: `rc` for the side-by-side "Poimen RC" app, else `stable`. */
   readonly appChannel = this._appChannel.asReadonly();
-  /** Why herdr is not reachable; `null` while connected. */
+  /** Why the server is not reachable; `null` while connected. */
   readonly connectionError = this._connectionError.asReadonly();
-  /** Branch and worktree flag per pane directory; poimen asks git, herdr does not know them. */
+  /** Branch and worktree flag per pane directory; poimen asks git. */
   readonly connection = computed<ConnectionState>(() => {
     const reason = this._connectionError();
     if (reason === null) return { state: "connected" };
@@ -384,22 +377,20 @@ export class SpacesStore {
     });
   }
 
-  /** Subscribes to herdr events and loads the first snapshot. Calling it again does nothing. */
+  /** Subscribes to backend events and loads the first snapshot. Calling it again does nothing. */
   async start(): Promise<void> {
     if (this.unlisten) return;
-    this.unlisten = this.bridge.listen<BackendEvent>("herdr", (event) => this.handle(event));
+    this.unlisten = this.bridge.listen<BackendEvent>("backend", (event) => this.handle(event));
     await this.unlisten;
     void this.readAppVersion();
     void this.readAppChannel();
-    await this.readBackendKind();
     const started = this.ensureBackend(false);
     await this.refresh();
     await started;
   }
 
   /**
-   * Starts herdr when nothing answers (the backend checks the socket first and honors
-   * `herdr.autoStart`), then re-reads the snapshot (at start only after a start). Runs at start and on Retry; one attempt, no loop.
+   * Starts the server when nothing answers (the backend checks the socket first), then re-reads the snapshot (at start only after a start). Runs at start and on Retry; one attempt, no loop.
    */
   async ensureBackend(retry = true): Promise<void> {
     try {
@@ -507,21 +498,11 @@ export class SpacesStore {
     }
   }
 
-  /** Which backend this run talks to; a failure keeps poimen. */
-  private async readBackendKind(): Promise<void> {
-    try {
-      const kind = await this.bridge.invoke<string | undefined>("backend_kind");
-      this._backendKind.set(kind === "herdr" ? "herdr" : "poimen");
-    } catch {
-      // stays poimen
-    }
-  }
-
-  /** Asks herdr for its version; a failure leaves it unknown and raises no error. */
+  /** Asks the server for its version; a failure leaves it unknown and raises no error. */
   private async readInfo(): Promise<void> {
     try {
       this._info.set(
-        (await this.bridge.invoke<BackendInfo | null | undefined>("herdr_info")) ?? null,
+        (await this.bridge.invoke<BackendInfo | null | undefined>("backend_info")) ?? null,
       );
     } catch {
       this._info.set(null);

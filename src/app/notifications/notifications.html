@@ -15,12 +15,7 @@
   <ul class="list" aria-label="Notifications">
     @for (entry of center.entries(); track entry.id) {
       <li>
-        <button
-          type="button"
-          class="entry"
-          [class.unread]="!entry.read"
-          (click)="choose(entry.id, entry.paneId)"
-        >
+        <button type="button" class="entry" [class.unread]="!entry.read" (click)="choose(entry)">
           <span class="dot status-{{ entry.status }}"></span>
           <span class="text">
             <span class="message">{{ entry.message }}</span>

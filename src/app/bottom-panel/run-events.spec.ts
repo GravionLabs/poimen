@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { clockText, parseStatus, runTitle, type DeliverCard } from "../deliver/deliver-status";
+import {
+  clockText,
+  parseStatus,
+  runTitle,
+  type DeliverCard,
+  type RunEventRow,
+} from "../deliver/deliver-status";
 import {
   eventTime,
+  foldSkipped,
+  groupBySubject,
+  mergedItems,
+  pickHolds,
+  pickRunOf,
   runLabel,
   runsOfSpace,
   selectRun,
@@ -10,11 +21,18 @@ import {
   type RunChoice,
 } from "./run-events";
 
-function card(run: string, updated: string, terminal?: string, root = "/repo"): DeliverCard {
+function card(
+  run: string,
+  updated: string,
+  terminal?: string,
+  root = "/repo",
+  started = updated,
+  state: "running" | "finished" = "running",
+): DeliverCard {
   const status = parseStatus({
     v: 1,
     run,
-    status: "running",
+    status: state,
     tasks: [],
     finished: {},
     attentions: [],
@@ -24,6 +42,7 @@ function card(run: string, updated: string, terminal?: string, root = "/repo"): 
     tone: "neutral",
     host: terminal ? { "poimen.terminal": terminal } : {},
     events: [
+      { type: "run.started", tone: "neutral", ts: started },
       { type: "step.finished", tone: "info", task: "t5", step: "implement", ts: updated },
       { type: "bogus-row-without-tone" },
       "not a row",
@@ -33,6 +52,8 @@ function card(run: string, updated: string, terminal?: string, root = "/repo"): 
   return { root, run, state: { kind: "ok", status } };
 }
 
+const NOW = Date.parse("2026-11-07T13:00:00.000Z");
+
 describe("runs of a space", () => {
   const cards = [
     card("old", "2026-11-07T10:00:00.000Z", "t1"),
@@ -41,36 +62,119 @@ describe("runs of a space", () => {
   ];
 
   it("lists only the runs of the repository around the directory", () => {
-    expect(runsOfSpace(cards, "/repo/sub").map((r) => r.status.run)).toEqual(["old", "new"]);
+    expect(runsOfSpace(cards, "/repo/sub").map((r) => r.status.run)).toEqual(["new", "old"]);
     expect(runsOfSpace(cards, undefined)).toEqual([]);
     expect(runsOfSpace(cards, "/repository")).toEqual([]);
   });
 
   it("selects the run whose host terminal is the active terminal", () => {
     const runs = runsOfSpace(cards, "/repo");
-    expect(selectRun(runs, "t1", null)?.status.run).toBe("old");
+    expect(selectRun(runs, "t1", null, NOW)?.status.run).toBe("old");
   });
 
   it("falls back to the latest run when no terminal matches", () => {
     const runs = runsOfSpace(cards, "/repo");
-    expect(selectRun(runs, "t9", null)?.status.run).toBe("new");
+    expect(selectRun(runs, "t9", null, NOW)?.status.run).toBe("new");
   });
 
   it("lets the picker win and ignores a stale pick", () => {
     const runs = runsOfSpace(cards, "/repo");
-    expect(selectRun(runs, "t2", runs[0]!.key)?.status.run).toBe("old");
-    expect(selectRun(runs, "t2", "gone")?.status.run).toBe("new");
+    expect(selectRun(runs, "t2", pickRunOf(runs, runs[1]!.key), NOW)?.status.run).toBe("old");
+    expect(selectRun(runs, "t2", { key: "gone", seen: 0 }, NOW)?.status.run).toBe("new");
+  });
+
+  it("lists the runs newest first by start, updated breaking the tie", () => {
+    const list = [
+      card("a", "2026-11-07T12:30:00.000Z", "t7", "/repo", "2026-11-07T10:00:00.000Z"),
+      card("b", "2026-11-07T11:00:00.000Z", "t7", "/repo", "2026-11-07T11:00:00.000Z"),
+      card("c", "2026-11-07T11:30:00.000Z", "t7", "/repo", "2026-11-07T11:00:00.000Z"),
+    ];
+    for (const order of [list, [...list].reverse()]) {
+      expect(runsOfSpace(order, "/repo").map((r) => r.status.run)).toEqual(["c", "b", "a"]);
+    }
+  });
+
+  it("shows the running run of the terminal with the latest update, then its latest run", () => {
+    const stale = card(
+      "stale",
+      "2026-11-07T08:00:00.000Z",
+      "t7",
+      "/repo",
+      "2026-11-07T07:00:00.000Z",
+    );
+    const done = card(
+      "done",
+      "2026-11-07T11:30:00.000Z",
+      "t7",
+      "/repo",
+      "2026-11-07T11:00:00.000Z",
+      "finished",
+    );
+    const run1 = card(
+      "run1",
+      "2026-11-07T12:10:00.000Z",
+      "t7",
+      "/repo",
+      "2026-11-07T09:00:00.000Z",
+    );
+    const run2 = card(
+      "run2",
+      "2026-11-07T12:40:00.000Z",
+      "t7",
+      "/repo",
+      "2026-11-07T08:30:00.000Z",
+    );
+    const other = card(
+      "other",
+      "2026-11-07T12:50:00.000Z",
+      "t8",
+      "/repo",
+      "2026-11-07T12:50:00.000Z",
+    );
+    const list = [stale, done, run1, run2, other];
+    for (const order of [list, [...list].reverse()]) {
+      const run = (id: string | null) =>
+        selectRun(runsOfSpace(order, "/repo"), id, null, NOW)?.status.run;
+      expect(run("t7")).toBe("run2");
+      // No running run left: the latest run of the terminal, not the stale one before it.
+      const noRunning = order.filter(
+        (c) => c.run === "stale" || c.run === "done" || c.run === "other",
+      );
+      expect(selectRun(runsOfSpace(noRunning, "/repo"), "t7", null, NOW)?.status.run).toBe("done");
+      // Another terminal, or none: the latest run of the repository.
+      expect(run("t9")).toBe("other");
+      expect(run(null)).toBe("other");
+    }
+  });
+
+  it("drops a pick when a run starts after it, when it is gone or the repository changes", () => {
+    const a = card("a", "2026-11-07T10:00:00.000Z", "t1");
+    const b = card("b", "2026-11-07T11:00:00.000Z", "t1");
+    const runs = runsOfSpace([a, b], "/repo");
+    const older = pickRunOf(runs, runs[1]!.key);
+    expect(pickHolds(runs, older)).toBe(true);
+    expect(selectRun(runs, "t1", older, NOW)?.status.run).toBe("a");
+    const later = runsOfSpace([a, b, card("c", "2026-11-07T12:00:00.000Z", "t1")], "/repo");
+    expect(pickHolds(later, older)).toBe(false);
+    expect(selectRun(later, "t1", older, NOW)?.status.run).toBe("c");
+    expect(pickHolds(runsOfSpace([b], "/repo"), older)).toBe(false);
+    expect(pickHolds(runsOfSpace([a, b], "/elsewhere"), older)).toBe(false);
+    expect(pickHolds(runs, null)).toBe(false);
   });
 
   it("has no run for a space without runs", () => {
-    expect(selectRun([], "t1", null)).toBeUndefined();
+    expect(selectRun([], "t1", null, NOW)).toBeUndefined();
   });
 
   it("keeps valid event rows and drops malformed ones", () => {
-    const events = runsOfSpace(cards, "/repo")[0]!.status.events;
-    expect(events.map((e) => e.type)).toEqual(["step.finished", "bogus-row-without-tone"]);
-    expect(events[0]).toMatchObject({ tone: "info", task: "t5", step: "implement" });
-    expect(events[1]!.tone).toBe("neutral");
+    const events = runsOfSpace(cards, "/repo")[1]!.status.events;
+    expect(events.map((e) => e.type)).toEqual([
+      "run.started",
+      "step.finished",
+      "bogus-row-without-tone",
+    ]);
+    expect(events[1]).toMatchObject({ tone: "info", task: "t5", step: "implement" });
+    expect(events[2]!.tone).toBe("neutral");
   });
 });
 
@@ -89,7 +193,7 @@ describe("runs of a remote space (#692)", () => {
     expect(onBox[0]!.key).not.toBe(runsOfSpace(cards, "/repo")[0]!.key);
     expect(runsOfSpace(cards, "/repo", "gpu")).toEqual([]);
     // The remote run is found by the qualified terminal of the machine's snapshot.
-    expect(selectRun(onBox, "box::t1", null)?.status.updated).toBe("2026-11-07T11:00:00.000Z");
+    expect(selectRun(onBox, "box::t1", null, NOW)?.status.updated).toBe("2026-11-07T11:00:00.000Z");
   });
 
   it("labels a remote run with its machine and an offline one as offline", () => {
@@ -193,5 +297,122 @@ describe("run label", () => {
     const run = choice({});
     expect(runTitle(run.status)).toBe("20261110-042412-3a7a");
     expect(runTitle(run.status, "/src/poimen\\")).toBe("poimen");
+  });
+});
+
+describe("foldSkipped", () => {
+  const row = (over: Partial<RunEventRow>): RunEventRow => ({
+    seq: null,
+    ts: null,
+    type: "progress",
+    tone: "neutral",
+    task: null,
+    step: null,
+    outcome: null,
+    link: null,
+    ...over,
+  });
+  const skip = (task: string, tone: RunEventRow["tone"] = "neutral", reason = "blocked") => [
+    row({ type: "task.started", task, subject: `PBI ${task}`, tone }),
+    row({ type: "task.finished", task, outcome: "skipped", reason, text: `why ${task}`, tone }),
+  ];
+
+  it("folds consecutive skipped pairs into one item with count and reason", () => {
+    const items = foldSkipped([
+      row({ type: "run.started" }),
+      ...skip("a"),
+      ...skip("b"),
+      row({ type: "task.started", task: "c" }),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(["row", "skipped", "row"]);
+    const fold = items[1]!;
+    if (fold.kind !== "skipped") throw new Error("fold");
+    expect(fold.label).toBe("2 skipped (blocked)");
+    expect(fold.tasks).toEqual([
+      { task: "a", subject: "PBI a", text: "why a", reason: "blocked" },
+      { task: "b", subject: "PBI b", text: "why b", reason: "blocked" },
+    ]);
+  });
+
+  it("lists several reasons and none", () => {
+    const [a, b] = [skip("a", "neutral", "blocked"), skip("b", "neutral", "no repro")];
+    const fold = foldSkipped([...a, ...b])[0]!;
+    expect(fold.kind === "skipped" && fold.label).toBe("2 skipped (blocked, no repro)");
+    const none = foldSkipped(skip("a", "neutral", ""))[0]!;
+    expect(none.kind === "skipped" && none.label).toBe("1 skipped");
+  });
+
+  it("does not fold when an event sits between, the task differs or the outcome is not skipped", () => {
+    const [s, f] = skip("a");
+    expect(foldSkipped([s!, row({ type: "step.started", task: "a" }), f!]).length).toBe(3);
+    expect(foldSkipped([s!, { ...f!, task: "b" }]).length).toBe(2);
+    expect(foldSkipped([s!, { ...f!, outcome: "succeeded" }]).length).toBe(2);
+  });
+
+  it("never folds warning or danger rows", () => {
+    expect(foldSkipped(skip("a", "warning")).length).toBe(2);
+    expect(foldSkipped(skip("a", "danger")).length).toBe(2);
+    const mixed = foldSkipped([...skip("a"), ...skip("b", "warning"), ...skip("c")]);
+    expect(mixed.map((i) => i.kind)).toEqual(["skipped", "row", "row", "skipped"]);
+  });
+
+  it("keeps the key of a fold stable while it grows", () => {
+    const start = { ...skip("a")[0]!, seq: 4 };
+    const one = foldSkipped([start, skip("a")[1]!]);
+    const two = foldSkipped([start, skip("a")[1]!, ...skip("b")]);
+    expect(one[0]!.kind === "skipped" && one[0]!.key).toBe(
+      two[0]!.kind === "skipped" && two[0]!.key,
+    );
+  });
+});
+
+describe("runs by subject (#780)", () => {
+  const withSubject = (c: DeliverCard, id: string | null, outcome?: string): DeliverCard => {
+    if (c.state.kind !== "ok") throw new Error("not ok");
+    return {
+      ...c,
+      state: {
+        kind: "ok",
+        status: {
+          ...c.state.status,
+          subject: id ? { kind: "github.milestone", id, title: `M${id}`, url: null } : null,
+          ...(outcome ? { status: "finished" as const, outcome } : {}),
+        },
+      },
+    };
+  };
+  const choices = (cards: DeliverCard[]) => runsOfSpace(cards, "/repo");
+  const cards = [
+    withSubject(card("a1", "2026-11-07T10:00:00.000Z"), "1"),
+    withSubject(card("b1", "2026-11-07T11:00:00.000Z"), "2"),
+    withSubject(card("a2", "2026-11-07T12:00:00.000Z"), "1"),
+    withSubject(card("solo", "2026-11-07T09:00:00.000Z"), null),
+  ];
+
+  it("groups by subject, newest group first, newest run first, no subject alone", () => {
+    const groups = groupBySubject(choices(cards));
+    expect(groups.map((g) => g.runs.map((r) => r.status.run))).toEqual([
+      ["a2", "a1"],
+      ["b1"],
+      ["solo"],
+    ]);
+    expect(groups[0]!.subject?.id).toBe("1");
+    expect(groups[2]!.subject).toBeNull();
+  });
+
+  it("merges the events of a group oldest run first behind a separator per run", () => {
+    const [group] = groupBySubject(
+      choices([cards[0]!, withSubject(card("a2", "2026-11-07T12:00:00.000Z"), "1", "succeeded")]),
+    );
+    const items = mergedItems(group!, NOW);
+    const perRun = foldSkipped(group!.runs[0]!.status.events).length;
+    expect(items.length).toBe(2 * (perRun + 1));
+    expect(items[0]!.kind).toBe("separator");
+    expect(items[perRun + 1]!.kind).toBe("separator");
+    const seps = items.filter((i) => i.kind === "separator");
+    expect(seps.map((s) => s.key)).toEqual([group!.runs[1]!.key, group!.runs[0]!.key]);
+    expect(seps[1]).toMatchObject({ state: "succeeded", outcome: "succeeded" });
+    expect(seps[0]).toMatchObject({ state: "stale", outcome: "" });
+    expect(seps[0]!.start).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   });
 });

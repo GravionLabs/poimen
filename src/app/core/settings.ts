@@ -259,12 +259,10 @@ export interface Settings {
   explorerRoots: string[];
   /** Whether the explorer shows hidden directories. */
   explorerShowHidden: boolean;
-  /** The terminal backend (`backend`); a change needs a restart. */
-  backend: BackendKind;
-  /** Lines of scrollback xterm.js keeps on an emulated stream (`terminal.scrollback`). */
+  /** `agents.claude.classicRenderer`: new terminals set `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`. */
+  claudeClassicRenderer: boolean;
+  /** Lines of scrollback xterm.js keeps (`terminal.scrollback`). */
   scrollback: number;
-  /** Start the backend's server when it is not running (`herdr.autoStart`). */
-  herdrAutoStart: boolean;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
   /** `spaceTemplates`: directory or remote matched templates with agent and layout. */
@@ -306,9 +304,6 @@ function parseSounds(v: unknown): SoundSettings {
 export function nextTheme(theme: ThemeSetting): ThemeSetting {
   return theme === "system" ? "light" : theme === "light" ? "dark" : "system";
 }
-
-/** The terminal backend poimen talks to: poimen-server (default) or herdr. */
-export type BackendKind = "herdr" | "poimen";
 
 /** Whether the app runs on Windows (the webview reports `Win32`). */
 export function isWindows(): boolean {
@@ -360,9 +355,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sidebarShowBaseBranch: false,
   explorerRoots: ["~"],
   explorerShowHidden: false,
-  backend: "poimen",
+  claudeClassicRenderer: false,
   scrollback: 10000,
-  herdrAutoStart: true,
   spacesLayout: null,
   spaceTemplates: [],
   trustedProjects: {},
@@ -466,14 +460,13 @@ export function parseSettings(raw: unknown): Settings {
     sidebarShowBaseBranch: r["sidebarShowBaseBranch"] === true,
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
-    backend: r["backend"] === "herdr" ? "herdr" : "poimen",
+    claudeClassicRenderer: r["claudeClassicRenderer"] === true,
     scrollback:
       typeof r["scrollback"] === "number" &&
       Number.isInteger(r["scrollback"]) &&
       r["scrollback"] >= 0
         ? r["scrollback"]
         : DEFAULT_SETTINGS.scrollback,
-    herdrAutoStart: r["herdrAutoStart"] !== false,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
     spaceTemplates: parseSpaceTemplates(r["spaceTemplates"]),
     trustedProjects: parseTrusted(r["trustedProjects"]),
@@ -591,6 +584,16 @@ export class SettingsStore {
     );
   }
 
+  /** Writes `agents.claude.classicRenderer` of config.json; it applies to terminals created later. */
+  async setClaudeClassicRenderer(claudeClassicRenderer: boolean): Promise<void> {
+    await this.write(
+      { claudeClassicRenderer },
+      "the classic renderer option",
+      "set_claude_classic_renderer",
+      { on: claudeClassicRenderer },
+    );
+  }
+
   /** Writes `sounds.<kind>` (`false`, `true` or an audio file path) and applies it at once. */
   async setSound(kind: SoundKind, value: SoundSetting): Promise<boolean> {
     const sounds = { ...this._settings().sounds, [kind]: value };
@@ -650,13 +653,6 @@ export class SettingsStore {
   private reject(message: string): false {
     this._writeError.set(message);
     return false;
-  }
-
-  /** Writes `herdr.autoStart` of config.json and applies it at once. */
-  async setHerdrAutoStart(herdrAutoStart: boolean): Promise<void> {
-    await this.write({ herdrAutoStart }, "the herdr auto start option", "set_herdr_auto_start", {
-      on: herdrAutoStart,
-    });
   }
 
   /** Writes `spaces.layout` (validated again by the backend); `false` when the write failed. */

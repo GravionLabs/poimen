@@ -74,7 +74,7 @@ test.
 
 - **Steps:** open `poimen_<version>_<arch>.dmg`, drag poimen to Applications, eject the image, start
   poimen from Applications.
-- **Expected:** the app starts. Gatekeeper shows at most its first-open prompt. The status bar shows
+- **Expected:** the app starts. On a signed release Gatekeeper shows at most its first-open prompt ("downloaded from the internet"), never an unidentified-developer warning; `spctl --assess --type execute -vv` says `Notarized Developer ID` ([releasing.md](releasing.md)). An rc/beta without Apple secrets is unsigned and warns. The status bar shows
   the poimen backend and its server version.
 - **Source:** #46 (packaging and updater).
 
@@ -285,9 +285,8 @@ The open M10 checks (W-S-9 to W-S-14) run once, here. The `.msi` section repeats
   window and run a full-screen program (for example `less` on a long file). Compose Japanese text with
   the Microsoft IME in the terminal.
 - **Expected:** the cursor sits where the text ends after moves and resizes. The IME composition shows
-  at the cursor and commits once, without a duplicate. Known ConPTY limits are listed in herdr's
-  Windows notes (`docs/next/website/src/content/docs/windows-beta.mdx` in `herdrdev/herdr`). Record
-  each difference from them.
+  at the cursor and commits once, without a duplicate. Known ConPTY limits are listed in
+  `src-tauri/vendor/portable-pty/POIMEN.md` and ADR 0009. Record each difference from them.
 - **Source:** #416 (open check, PR #422).
 
 ### W-S-15 CLI on the user PATH

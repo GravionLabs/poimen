@@ -246,12 +246,12 @@ describe("settings view state", () => {
     const storage = fakeStorage();
     const state = stateOn(storage);
     expect(state.settingsPage()).toBeNull();
-    state.selectSettingsPage("herdr");
+    state.selectSettingsPage("server");
     state.setSettingsGroupCollapsed("workspace", true);
     state.setSettingsGroupCollapsed("backend", true);
     state.setSettingsGroupCollapsed("backend", false);
     const stored = storage.data.get(UI_STATE_KEY)!;
-    expect(parseLayout(stored).settingsPage).toBe("herdr");
+    expect(parseLayout(stored).settingsPage).toBe("server");
     expect(parseLayout(stored).settingsCollapsed).toEqual(["workspace"]);
   });
 

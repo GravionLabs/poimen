@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::git;
-use crate::github::{Client, GhError, Repo, Runner, repo_of};
+use crate::github::{Client, GhError, Repo, Runner, failed_logs, failed_runs, repo_of};
 
 pub(crate) const QUERY: &str = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { \
 pullRequests(states: OPEN, first: 50, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { \
@@ -250,11 +250,15 @@ pub fn load<R: Runner + Sync>(client: &Client<R>, dirs: &[String]) -> Pulls {
 
 const DETAIL_QUERY: &str = "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { \
 pullRequest(number: $number) { number title url body state isDraft author { login } headRefName baseRefName \
-mergeable mergeStateStatus viewerCanUpdate viewerDidAuthor viewerCanMergeAsAdmin \
+mergeable mergeStateStatus viewerCanUpdate viewerDidAuthor viewerCanMergeAsAdmin headRefOid \
+reviewRequests(first: 20) { nodes { requestedReviewer { __typename ... on User { login } } } } \
+labels(first: 50) { nodes { name } } assignees(first: 20) { nodes { login } } \
 commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes { __typename \
 ... on CheckRun { name status conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } } } } } \
 reviews(last: 50) { nodes { author { login } state submittedAt } } \
-closingIssuesReferences(first: 20) { nodes { number title url state repository { nameWithOwner } } } } } }";
+closingIssuesReferences(first: 20) { nodes { number title url state repository { nameWithOwner } } } } \
+squashMergeAllowed mergeCommitAllowed rebaseMergeAllowed \
+assignableUsers(first: 100) { nodes { login } } } }";
 
 /// One check context of the last commit; `state` is `passing`, `failing`, `pending` or `skipped`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -306,6 +310,38 @@ pub struct PullDetail {
     pub viewer_can_update: bool,
     pub viewer_did_author: bool,
     pub viewer_can_merge_as_admin: bool,
+    /// Commit the checks and runs belong to.
+    pub head_sha: String,
+    /// The merge methods the repository allows, of `squash`, `merge`, `rebase`.
+    pub merge_methods: Vec<String>,
+    /// Why the pull request cannot be merged now; `None` when it can.
+    pub merge_block: Option<String>,
+    /// Logins with a pending review request.
+    pub reviewers: Vec<String>,
+    pub labels: Vec<String>,
+    pub assignees: Vec<String>,
+    /// People that can be asked to review or be assigned.
+    pub assignable_users: Vec<String>,
+}
+
+/// Why a pull request in `state` with `merge_state_status` cannot be merged, or `None` when it can
+/// (`CLEAN`, `UNSTABLE` or `HAS_HOOKS`).
+pub fn merge_block(state: &str, is_draft: bool, merge_state_status: &str) -> Option<String> {
+    if state != "OPEN" {
+        return Some("The pull request is not open.".into());
+    }
+    if is_draft {
+        return Some("The pull request is a draft.".into());
+    }
+    let reason = match merge_state_status {
+        "CLEAN" | "UNSTABLE" | "HAS_HOOKS" => return None,
+        "BLOCKED" => "Required reviews or checks are missing.",
+        "BEHIND" => "The branch is behind its base branch.",
+        "DIRTY" => "The branch has merge conflicts.",
+        "DRAFT" => "The pull request is a draft.",
+        _ => "GitHub has not decided yet whether it can be merged.",
+    };
+    Some(reason.into())
 }
 
 fn opt_text(v: &Value) -> Option<String> {
@@ -354,21 +390,50 @@ pub fn parse_detail(answer: &Value) -> Result<PullDetail, GhError> {
     };
     let list = |v: &Value| v.as_array().cloned().unwrap_or_default();
     let flag = |k: &str| node[k].as_bool().unwrap_or(false);
+    let repo = &answer["data"]["repository"];
+    let logins = |v: &Value, key: &str| -> Vec<String> {
+        list(&v["nodes"])
+            .iter()
+            .filter_map(|n| opt_text(&n[key]))
+            .collect()
+    };
+    let merge_methods = [
+        ("squash", "squashMergeAllowed"),
+        ("merge", "mergeCommitAllowed"),
+        ("rebase", "rebaseMergeAllowed"),
+    ]
+    .iter()
+    .filter(|(_, k)| repo[*k].as_bool().unwrap_or(false))
+    .map(|(m, _)| (*m).to_owned())
+    .collect();
+    let reviewers = list(&node["reviewRequests"]["nodes"])
+        .iter()
+        .filter_map(|n| opt_text(&n["requestedReviewer"]["login"]))
+        .collect();
+    let state = text(&node["state"]);
+    let merge_state_status = node["mergeStateStatus"]
+        .as_str()
+        .unwrap_or("UNKNOWN")
+        .to_owned();
     Ok(PullDetail {
+        head_sha: text(&node["headRefOid"]),
+        merge_methods,
+        merge_block: merge_block(&state, flag("isDraft"), &merge_state_status),
+        reviewers,
+        labels: logins(&node["labels"], "name"),
+        assignees: logins(&node["assignees"], "login"),
+        assignable_users: logins(&repo["assignableUsers"], "login"),
         number,
         title: text(&node["title"]),
         url: text(&node["url"]),
         body: text(&node["body"]),
-        state: text(&node["state"]),
+        state,
         is_draft: flag("isDraft"),
         author: opt_text(&node["author"]["login"]),
         head_ref: text(&node["headRefName"]),
         base_ref: text(&node["baseRefName"]),
         mergeable: node["mergeable"].as_str().unwrap_or("UNKNOWN").to_owned(),
-        merge_state_status: node["mergeStateStatus"]
-            .as_str()
-            .unwrap_or("UNKNOWN")
-            .to_owned(),
+        merge_state_status,
         checks: list(
             &node["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["nodes"],
         )
@@ -411,6 +476,268 @@ pub fn load_detail<R: Runner>(
     let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
     let vars = json!({ "owner": repo.owner, "name": repo.name, "number": number });
     parse_detail(&client.graphql(DETAIL_QUERY, &vars)?)
+}
+
+/// A write on a pull request (`github_pr_action`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrAction {
+    Approve,
+    RequestChanges,
+    Comment,
+    Ready,
+    Draft,
+    Close,
+    Reopen,
+}
+
+/// The `gh` argv (without the program name) of `action`; argv only, never a shell. Request changes
+/// and comment need a non-blank `body`; approve takes one when given.
+pub fn action_argv(
+    repo: &Repo,
+    number: u64,
+    action: PrAction,
+    body: Option<&str>,
+) -> Result<Vec<String>, GhError> {
+    let body = body.map(str::trim).filter(|b| !b.is_empty());
+    let mut argv: Vec<String> = vec!["pr".into()];
+    let flag = |name: &str| name.to_owned();
+    match action {
+        PrAction::Approve | PrAction::RequestChanges | PrAction::Comment => {
+            argv.extend(["review".into(), number.to_string()]);
+            argv.push(flag(match action {
+                PrAction::Approve => "--approve",
+                PrAction::RequestChanges => "--request-changes",
+                _ => "--comment",
+            }));
+            if action != PrAction::Approve && body.is_none() {
+                return Err(GhError::Other {
+                    message: "a comment text is required".into(),
+                });
+            }
+            if let Some(body) = body {
+                argv.extend(["-b".into(), body.to_owned()]);
+            }
+        }
+        PrAction::Ready | PrAction::Draft => {
+            argv.extend(["ready".into(), number.to_string()]);
+            if action == PrAction::Draft {
+                argv.push("--undo".into());
+            }
+        }
+        PrAction::Close | PrAction::Reopen => {
+            let verb = if action == PrAction::Close {
+                "close"
+            } else {
+                "reopen"
+            };
+            argv.extend([verb.into(), number.to_string()]);
+        }
+    }
+    argv.extend(["-R".into(), format!("{}/{}", repo.owner, repo.name)]);
+    Ok(argv)
+}
+
+/// Runs `action` on pull request `number` in the repository of `root` through `Client::mutate`.
+pub fn run_action<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+    action: PrAction,
+    body: Option<&str>,
+) -> Result<(), GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let argv = action_argv(&repo, number, action, body)?;
+    client.mutate(&repo, &argv).map(|_| ())
+}
+
+/// How to merge (`github_pr_merge`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MergeMethod {
+    Squash,
+    Merge,
+    Rebase,
+}
+
+impl MergeMethod {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Squash => "squash",
+            Self::Merge => "merge",
+            Self::Rebase => "rebase",
+        }
+    }
+}
+
+/// `gh pr merge` argv; argv only.
+pub fn merge_argv(
+    repo: &Repo,
+    number: u64,
+    method: MergeMethod,
+    delete_branch: bool,
+) -> Vec<String> {
+    let mut argv: Vec<String> = vec![
+        "pr".into(),
+        "merge".into(),
+        number.to_string(),
+        format!("--{}", method.name()),
+    ];
+    if delete_branch {
+        argv.push("--delete-branch".into());
+    }
+    argv.extend(["-R".into(), format!("{}/{}", repo.owner, repo.name)]);
+    argv
+}
+
+/// Merges pull request `number` after checking against a fresh read that the repository allows
+/// `method` and the merge state permits it.
+pub fn run_merge<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+    method: MergeMethod,
+    delete_branch: bool,
+) -> Result<(), GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let detail = load_detail(client, root, number)?;
+    let refuse = |message: String| Err(GhError::Other { message });
+    if let Some(reason) = &detail.merge_block {
+        return refuse(reason.clone());
+    }
+    if !detail.merge_methods.iter().any(|m| m == method.name()) {
+        return refuse(format!(
+            "The repository does not allow {} merges.",
+            method.name()
+        ));
+    }
+    client
+        .mutate(&repo, &merge_argv(&repo, number, method, delete_branch))
+        .map(|_| ())
+}
+
+/// `gh run rerun <id> --failed` argv.
+pub fn rerun_argv(repo: &Repo, run_id: u64) -> Vec<String> {
+    vec![
+        "run".into(),
+        "rerun".into(),
+        run_id.to_string(),
+        "--failed".into(),
+        "-R".into(),
+        format!("{}/{}", repo.owner, repo.name),
+    ]
+}
+
+/// Re-runs the failed jobs of every failed run of the head commit; returns how many runs. All
+/// are tried; the first error is returned afterwards.
+pub fn run_rerun<R: Runner>(client: &Client<R>, root: &str, number: u64) -> Result<usize, GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let detail = load_detail(client, root, number)?;
+    let runs = failed_runs(client, &repo, &detail.head_sha)?;
+    if runs.is_empty() {
+        return Err(GhError::Other {
+            message: "no failed run found for the last commit".into(),
+        });
+    }
+    let mut first_error = None;
+    for id in &runs {
+        if let Err(e) = client.mutate(&repo, &rerun_argv(&repo, *id)) {
+            first_error.get_or_insert(e);
+        }
+    }
+    first_error.map_or(Ok(runs.len()), Err)
+}
+
+/// Collects the failed logs of the head commit of pull request `number` and writes them to
+/// `<worktree>/.agents/state/ci-failed-<nr>.log`; returns the path (`{log}` of the `fix-checks`
+/// action). The file carries the log, never the command line.
+pub fn run_ci_log<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+    worktree: &str,
+    home: Option<&std::path::Path>,
+) -> Result<String, GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let detail = load_detail(client, root, number)?;
+    let log = failed_logs(client, &repo, &detail.head_sha)?;
+    crate::changes::write_ci_log(worktree, number, &log, home)
+        .map_err(|message| GhError::Other { message })
+}
+
+/// People, labels and assignees to add and remove (`github_pr_edit`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PrEdit {
+    pub add_reviewers: Vec<String>,
+    pub remove_reviewers: Vec<String>,
+    pub add_labels: Vec<String>,
+    pub remove_labels: Vec<String>,
+    pub add_assignees: Vec<String>,
+    pub remove_assignees: Vec<String>,
+}
+
+/// `gh pr edit` argv: one flag per value, so a name never gets split; a value that is blank or has
+/// a comma is refused (`gh` would read it as a list); nothing to change is an error.
+pub fn edit_argv(repo: &Repo, number: u64, edit: &PrEdit) -> Result<Vec<String>, GhError> {
+    let mut argv: Vec<String> = vec!["pr".into(), "edit".into(), number.to_string()];
+    let groups = [
+        ("--add-reviewer", &edit.add_reviewers),
+        ("--remove-reviewer", &edit.remove_reviewers),
+        ("--add-label", &edit.add_labels),
+        ("--remove-label", &edit.remove_labels),
+        ("--add-assignee", &edit.add_assignees),
+        ("--remove-assignee", &edit.remove_assignees),
+    ];
+    let mut changes = 0;
+    for (flag, values) in groups {
+        for value in values {
+            let value = value.trim();
+            if value.is_empty() || value.contains(',') {
+                return Err(GhError::Other {
+                    message: format!("invalid value for {flag}: {value:?}"),
+                });
+            }
+            argv.extend([flag.to_owned(), value.to_owned()]);
+            changes += 1;
+        }
+    }
+    if changes == 0 {
+        return Err(GhError::Other {
+            message: "nothing to change".into(),
+        });
+    }
+    argv.extend(["-R".into(), format!("{}/{}", repo.owner, repo.name)]);
+    Ok(argv)
+}
+
+/// Edits reviewers, labels and assignees of pull request `number` through `Client::mutate`.
+pub fn run_edit<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+    edit: &PrEdit,
+) -> Result<(), GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let argv = edit_argv(&repo, number, edit)?;
+    client.mutate(&repo, &argv).map(|_| ())
+}
+
+/// The label names of `repo` (first 100, REST `labels` through the cached `rest`).
+pub fn parse_labels(body: &str) -> Result<Vec<String>, GhError> {
+    let v: Value = serde_json::from_str(body).map_err(|e| GhError::Other {
+        message: format!("unexpected GitHub answer: {e}"),
+    })?;
+    let list = v.as_array().ok_or(GhError::Other {
+        message: "unexpected GitHub answer".into(),
+    })?;
+    Ok(list.iter().filter_map(|l| opt_text(&l["name"])).collect())
+}
+
+pub fn repo_labels<R: Runner>(client: &Client<R>, root: &str) -> Result<Vec<String>, GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let path = format!("repos/{}/{}/labels?per_page=100", repo.owner, repo.name);
+    parse_labels(&client.rest(&path)?)
 }
 
 #[cfg(test)]
@@ -580,5 +907,190 @@ mod tests {
         assert_eq!(v["viewerCanMergeAsAdmin"], false);
         assert_eq!(v["linkedIssues"][0]["repo"], "GravionLabs/poimen");
         assert_eq!(v["reviews"][0]["submittedAt"], "2026-11-05T10:00:00Z");
+    }
+
+    #[test]
+    fn action_argv_per_action() {
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        let a = |act, body| action_argv(&r, 7, act, body).unwrap();
+        assert_eq!(
+            a(PrAction::Approve, None),
+            ["pr", "review", "7", "--approve", "-R", "o/n"]
+        );
+        assert_eq!(
+            a(PrAction::RequestChanges, Some(" fix it ")),
+            [
+                "pr",
+                "review",
+                "7",
+                "--request-changes",
+                "-b",
+                "fix it",
+                "-R",
+                "o/n"
+            ]
+        );
+        assert_eq!(
+            a(PrAction::Comment, Some("hi")),
+            ["pr", "review", "7", "--comment", "-b", "hi", "-R", "o/n"]
+        );
+        assert_eq!(a(PrAction::Ready, None), ["pr", "ready", "7", "-R", "o/n"]);
+        assert_eq!(
+            a(PrAction::Draft, None),
+            ["pr", "ready", "7", "--undo", "-R", "o/n"]
+        );
+        assert_eq!(a(PrAction::Close, None), ["pr", "close", "7", "-R", "o/n"]);
+        assert_eq!(
+            a(PrAction::Reopen, None),
+            ["pr", "reopen", "7", "-R", "o/n"]
+        );
+    }
+
+    #[test]
+    fn request_changes_and_comment_need_a_body() {
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        for act in [PrAction::RequestChanges, PrAction::Comment] {
+            assert!(action_argv(&r, 1, act, None).is_err());
+            assert!(action_argv(&r, 1, act, Some("  \n")).is_err());
+        }
+    }
+    fn repo() -> Repo {
+        Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        }
+    }
+
+    #[test]
+    fn detail_fixture_has_merge_and_people_fields() {
+        let d = parse_detail(&detail_fixture()).unwrap();
+        assert_eq!(d.head_sha, "0123456789abcdef0123456789abcdef01234567");
+        assert_eq!(d.merge_methods, ["squash", "rebase"]);
+        assert_eq!(
+            d.merge_block.as_deref(),
+            Some("Required reviews or checks are missing.")
+        );
+        assert_eq!(d.reviewers, ["octocat"]);
+        assert_eq!(d.labels, ["bug", "github"]);
+        assert_eq!(d.assignees, ["jkaufmann"]);
+        assert_eq!(d.assignable_users, ["jkaufmann", "octocat", "hubot"]);
+    }
+
+    #[test]
+    fn merge_gating_by_state() {
+        for ok in ["CLEAN", "UNSTABLE", "HAS_HOOKS"] {
+            assert_eq!(merge_block("OPEN", false, ok), None, "{ok}");
+        }
+        for bad in ["BLOCKED", "BEHIND", "DIRTY", "UNKNOWN", "DRAFT"] {
+            assert!(merge_block("OPEN", false, bad).is_some(), "{bad}");
+        }
+        assert!(merge_block("MERGED", false, "CLEAN").is_some());
+        assert!(merge_block("OPEN", true, "CLEAN").is_some());
+    }
+
+    #[test]
+    fn merge_argv_per_method() {
+        let a = |m, d| merge_argv(&repo(), 7, m, d);
+        assert_eq!(
+            a(MergeMethod::Squash, true),
+            [
+                "pr",
+                "merge",
+                "7",
+                "--squash",
+                "--delete-branch",
+                "-R",
+                "o/n"
+            ]
+        );
+        assert_eq!(
+            a(MergeMethod::Merge, false),
+            ["pr", "merge", "7", "--merge", "-R", "o/n"]
+        );
+        assert_eq!(
+            a(MergeMethod::Rebase, false),
+            ["pr", "merge", "7", "--rebase", "-R", "o/n"]
+        );
+    }
+
+    #[test]
+    fn rerun_argv_is_failed_only() {
+        assert_eq!(
+            rerun_argv(&repo(), 102),
+            ["run", "rerun", "102", "--failed", "-R", "o/n"]
+        );
+    }
+
+    #[test]
+    fn edit_argv_has_one_flag_per_value() {
+        let edit = PrEdit {
+            add_reviewers: vec!["octocat".into()],
+            remove_labels: vec!["good first issue".into(), "bug".into()],
+            add_assignees: vec!["hubot".into()],
+            ..PrEdit::default()
+        };
+        assert_eq!(
+            edit_argv(&repo(), 7, &edit).unwrap(),
+            [
+                "pr",
+                "edit",
+                "7",
+                "--add-reviewer",
+                "octocat",
+                "--remove-label",
+                "good first issue",
+                "--remove-label",
+                "bug",
+                "--add-assignee",
+                "hubot",
+                "-R",
+                "o/n"
+            ]
+        );
+        let all = PrEdit {
+            remove_reviewers: vec!["a".into()],
+            add_labels: vec!["b".into()],
+            remove_assignees: vec!["c".into()],
+            ..PrEdit::default()
+        };
+        assert_eq!(
+            edit_argv(&repo(), 1, &all).unwrap()[3..9],
+            [
+                "--remove-reviewer",
+                "a",
+                "--add-label",
+                "b",
+                "--remove-assignee",
+                "c"
+            ]
+        );
+    }
+
+    #[test]
+    fn edit_refuses_nothing_blank_and_comma_values() {
+        assert!(edit_argv(&repo(), 1, &PrEdit::default()).is_err());
+        for bad in ["", "  ", "a,b"] {
+            let edit = PrEdit {
+                add_labels: vec![bad.into()],
+                ..PrEdit::default()
+            };
+            assert!(edit_argv(&repo(), 1, &edit).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn labels_parse_from_the_rest_answer() {
+        let body = include_str!("../fixtures/github-labels.json");
+        assert_eq!(
+            parse_labels(body).unwrap(),
+            ["bug", "github", "good first issue"]
+        );
+        assert!(parse_labels("{}").is_err());
     }
 }

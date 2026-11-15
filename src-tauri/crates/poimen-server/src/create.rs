@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use poimen_core::layout::{Layout, SplitDirection as CoreDirection};
+use poimen_core::layout::{SplitDirection as CoreDirection, TabLayout};
 use poimen_core::space_layout::{self, UserSpaces};
 use poimen_core::trust::{self, Decision, Gate, Sources};
 use poimen_core::{git, project, settings};
@@ -25,12 +25,14 @@ static TRUST_WRITE: Mutex<()> = Mutex::new(());
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Build {
     pub(crate) dir: String,
-    /// The panes in order (the first is the root pane); `None` when the project layout is
+    /// The tabs (the first terminal of the first is the root pane); `None` when the project layout is
     /// invalid, so the space gets one pane (a warning says why).
-    pub(crate) layout: Option<Layout>,
+    pub(crate) layout: Option<TabLayout>,
     pub(crate) warnings: Vec<String>,
     /// The project's `setup`, only when its commands may run.
     pub(crate) setup: Option<String>,
+    /// The request's `env` for every terminal built.
+    pub(crate) env: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,9 +56,9 @@ pub(crate) fn direction(d: CoreDirection) -> SplitDirection {
     }
 }
 
-fn wire_layout(layout: &Layout) -> Vec<LayoutPane> {
+fn wire_layout(layout: &TabLayout) -> Vec<LayoutPane> {
     layout
-        .panes
+        .panes()
         .iter()
         .map(|p| LayoutPane {
             name: p.name.clone(),
@@ -82,14 +84,14 @@ pub(crate) enum Wanted<'a> {
 }
 
 /// The preset `name` of the project file in `sources`.
-fn preset_of(sources: &Sources, name: &str) -> Option<Layout> {
+fn preset_of(sources: &Sources, name: &str) -> Option<TabLayout> {
     let (path, text) = sources.project.as_ref()?;
     project::parse(path, text, project::platform())
         .config
         .presets
         .into_iter()
         .find(|p| p.name == name)
-        .map(|p| p.layout)
+        .map(|p| p.layout.to_tabs())
 }
 
 /// Decides what `space.create` or `space.apply_layout` builds in `cwd` (an existing directory).
@@ -112,14 +114,7 @@ pub(crate) fn prepare(
     let root = git::toplevel(cwd).unwrap_or_else(|| cwd.to_owned());
     let sources = Sources::read(&root);
     let user = home.map(UserSpaces::load).unwrap_or_default();
-    let (agent, user_layout, mut warnings) = space_layout::inputs(
-        cwd,
-        &user.templates,
-        &user.harnesses,
-        user.spaces_layout.as_ref(),
-        home,
-        available,
-    );
+    let (agent, user_layout, mut warnings) = space_layout::inputs(cwd, &user, home, available);
     let preset = match wanted {
         Wanted::Preset(name) => Some(preset_of(&sources, name).ok_or((
             ErrorCode::NotFound,
@@ -198,6 +193,7 @@ pub(crate) fn prepare(
         layout,
         warnings,
         setup,
+        env: Default::default(),
     }))
 }
 
@@ -298,7 +294,7 @@ mod tests {
         let b = build(prepare_in(&d, Some(&answer)));
         assert_eq!(b.setup.as_deref(), Some("make deps"));
         assert_eq!(
-            b.layout.unwrap().panes[0].command.as_deref(),
+            b.layout.unwrap().panes()[0].command.as_deref(),
             Some("make dev")
         );
         let text = d.config_text();
@@ -331,8 +327,8 @@ mod tests {
         let b = build(prepare_in(&d, Some(&TrustAnswer::Without)));
         assert_eq!(b.setup, None);
         let layout = b.layout.unwrap();
-        assert_eq!(layout.panes.len(), 2);
-        assert!(layout.panes.iter().all(|p| p.command.is_none()));
+        assert_eq!(layout.panes().len(), 2);
+        assert!(layout.panes().iter().all(|p| p.command.is_none()));
         assert_eq!(d.config_text(), "");
     }
 
@@ -355,9 +351,31 @@ mod tests {
         d.config(r#"{"spaces": {"layout": {"panes": [{"name": "solo", "command": "htop"}]}}}"#);
         let b = build(prepare_in(&d, None));
         let layout = b.layout.unwrap();
-        assert_eq!(layout.panes[0].name, "solo");
-        assert_eq!(layout.panes[0].command.as_deref(), Some("htop"));
+        assert_eq!(layout.panes()[0].name, "solo");
+        assert_eq!(layout.panes()[0].command.as_deref(), Some("htop"));
         assert_eq!(b.setup, None);
+    }
+
+    #[test]
+    fn a_template_that_names_a_layout_builds_its_tabs_and_splits() {
+        let d = Dirs::new("named");
+        d.config(&format!(
+            r#"{{"layouts": [{{"name": "review", "tabs": [
+                  {{"name": "r", "command": "copilot", "children": [{{"name": "logs"}}]}},
+                  {{"name": "w", "root": {{"kind": "split", "direction": "down", "ratio": 0.3,
+                     "children": [{{"kind": "terminal", "name": "x"}}, {{"kind": "terminal", "name": "y"}}]}}}}]}}],
+                "spaceTemplates": [{{"name": "t", "agent": "claude", "layout": "review",
+                  "match": {{"dir": {:?}}}}}]}}"#,
+            d.repo()
+        ));
+        let b = build(prepare_in(&d, None));
+        let layout = b.layout.unwrap();
+        let tabs = layout.pane_tabs();
+        assert_eq!(tabs.len(), 3);
+        // The agent fills the named layout's root pane only when that has no command of its own.
+        assert_eq!(tabs[0][0].command.as_deref(), Some("copilot"));
+        let split = tabs[2][1].split.as_ref().unwrap();
+        assert_eq!((split.from.as_str(), split.ratio), ("x", 0.3));
     }
 
     #[test]
@@ -366,7 +384,10 @@ mod tests {
         d.config(r#"{"spaces": {"layout": {"panes": [{"name": "solo", "command": "htop"}]}}}"#);
         let b =
             build(prepare(Some(&d.home()), &d.repo(), None, task("fix 7"), &|_| false).unwrap());
-        assert_eq!(b.layout.unwrap().panes[0].command.as_deref(), Some("fix 7"));
+        assert_eq!(
+            b.layout.unwrap().panes()[0].command.as_deref(),
+            Some("fix 7")
+        );
     }
 
     #[test]
@@ -410,9 +431,10 @@ mod tests {
         let b = build(p);
         assert_eq!(b.setup, None);
         let layout = b.layout.unwrap();
-        let names: Vec<_> = layout.panes.iter().map(|p| p.name.as_str()).collect();
+        let panes = layout.panes();
+        let names: Vec<_> = panes.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["a", "b"]);
-        assert_eq!(layout.panes[0].command.as_deref(), Some("vim"));
+        assert_eq!(layout.panes()[0].command.as_deref(), Some("vim"));
     }
 
     #[test]
@@ -447,8 +469,8 @@ mod tests {
             &|_| false,
         );
         let layout = build(p.unwrap()).layout.unwrap();
-        assert_eq!(layout.panes.len(), 2);
-        assert!(layout.panes.iter().all(|p| p.command.is_none()));
+        assert_eq!(layout.panes().len(), 2);
+        assert!(layout.panes().iter().all(|p| p.command.is_none()));
     }
 
     #[test]

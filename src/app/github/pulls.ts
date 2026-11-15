@@ -89,6 +89,100 @@ export interface PullDetail {
   viewerCanUpdate: boolean;
   viewerDidAuthor: boolean;
   viewerCanMergeAsAdmin: boolean;
+  headSha: string;
+  /** The merge methods the repository allows. */
+  mergeMethods: MergeMethod[];
+  /** Why it cannot be merged now; null when it can. */
+  mergeBlock: string | null;
+  reviewers: string[];
+  labels: string[];
+  assignees: string[];
+  assignableUsers: string[];
+}
+
+export type MergeMethod = "squash" | "merge" | "rebase";
+
+export const MERGE_METHOD_LABELS: Record<MergeMethod, string> = {
+  squash: "Squash and merge",
+  merge: "Create a merge commit",
+  rebase: "Rebase and merge",
+};
+
+/** What `github_pr_edit` changes (`PrEdit` of `github_pulls.rs`). */
+export interface PrEdit {
+  addReviewers?: string[];
+  removeReviewers?: string[];
+  addLabels?: string[];
+  removeLabels?: string[];
+  addAssignees?: string[];
+  removeAssignees?: string[];
+}
+
+/** The pending merge confirmation of the detail pane. */
+export interface MergeDraft {
+  method: MergeMethod;
+  deleteBranch: boolean;
+}
+
+type Actionable = Pick<PullDetail, "state" | "viewerCanUpdate">;
+
+/** Whether the merge control is shown at all: open, writable, and a method the repository allows. */
+export function canMerge(detail: Actionable & Pick<PullDetail, "mergeMethods">): boolean {
+  return detail.viewerCanUpdate && detail.state === "OPEN" && detail.mergeMethods.length > 0;
+}
+
+/** The method a merge starts with: squash when allowed, else the first the repository allows. */
+export function defaultMergeMethod(allowed: readonly MergeMethod[]): MergeMethod | null {
+  return allowed.includes("squash") ? "squash" : (allowed[0] ?? null);
+}
+
+/** "Re-run failed checks" is offered on an open pull request with a failing check. */
+export function canRerun(detail: Actionable & Pick<PullDetail, "checks">): boolean {
+  return (
+    detail.viewerCanUpdate &&
+    detail.state === "OPEN" &&
+    detail.checks.some((c) => c.state === "failing")
+  );
+}
+
+/** Reviewers, labels and assignees can be edited on an open pull request the viewer may update. */
+export function canEditPeople(detail: Actionable): boolean {
+  return detail.viewerCanUpdate && detail.state === "OPEN";
+}
+
+/** A write on a pull request (`PrAction` of `github_pulls.rs`). */
+export type PrAction =
+  "approve" | "request_changes" | "comment" | "ready" | "draft" | "close" | "reopen";
+
+export const PR_ACTION_LABELS: Record<PrAction, string> = {
+  approve: "Approve",
+  request_changes: "Request changes",
+  comment: "Comment",
+  ready: "Ready for review",
+  draft: "Convert to draft",
+  close: "Close",
+  reopen: "Reopen",
+};
+
+/** The actions that need text (`request_changes`, `comment`) or a confirmation (`close`). */
+export type PrCompose = "request_changes" | "comment" | "close";
+
+/**
+ * The write actions the viewer may use on `detail`: none without `viewerCanUpdate`, none on a
+ * merged pull request; approve and request changes never on one's own pull request.
+ */
+export function availableActions(
+  detail: Pick<PullDetail, "state" | "isDraft" | "viewerCanUpdate" | "viewerDidAuthor">,
+): PrAction[] {
+  if (!detail.viewerCanUpdate) return [];
+  if (detail.state === "CLOSED") return ["reopen"];
+  if (detail.state !== "OPEN") return [];
+  return [
+    ...(detail.viewerDidAuthor ? [] : (["approve", "request_changes"] as const)),
+    "comment",
+    detail.isDraft ? "ready" : "draft",
+    "close",
+  ];
 }
 
 /** A pull request in the table, with the repository it belongs to. */
@@ -472,6 +566,8 @@ export class GithubPulls {
 
   /** Opens the detail pane of `row` and reads its detail (the backend caches for 30 s). */
   async openDetail(row: PullRow): Promise<void> {
+    this.compose.set(null);
+    this.mergeDraft.set(null);
     this._cursor.set(row.key);
     this._detailKey.set(row.key);
     this._detail.set(null);
@@ -482,7 +578,10 @@ export class GithubPulls {
         root: row.root,
         number: row.number,
       });
-      if (this._detailKey() === row.key) this._detail.set(detail);
+      if (this._detailKey() === row.key) {
+        this._detail.set(detail);
+        if (detail.viewerCanUpdate) void this.loadLabels(row);
+      }
     } catch (err) {
       if (this._detailKey() === row.key) this._detailError.set(ghErrorOf(err));
     } finally {
@@ -490,7 +589,136 @@ export class GithubPulls {
     }
   }
 
+  private async loadLabels(row: PullRow): Promise<void> {
+    try {
+      const names = await this.bridge.invoke<string[]>("github_labels", { root: row.root });
+      if (this._detailKey() === row.key) this.labelOptions.set(names ?? []);
+    } catch {
+      if (this._detailKey() === row.key) this.labelOptions.set([]);
+    }
+  }
+
+  /** The pending text or confirmation step of the detail pane (also set by the palette). */
+  readonly compose = signal<PrCompose | null>(null);
+  private readonly _actionBusy = signal(false);
+  readonly actionBusy = this._actionBusy.asReadonly();
+
+  /** The actions of the open detail, empty while it is not loaded. */
+  readonly actions = computed<PrAction[]>(() => {
+    const d = this._detail();
+    return d && this.detailRow() ? availableActions(d) : [];
+  });
+
+  /**
+   * Runs a write on the open pull request, only on explicit user input. Afterwards the list and
+   * the pane reload; a failure is a notification naming the action and the `gh` message.
+   */
+  async act(action: PrAction, body?: string): Promise<boolean> {
+    if (!this.actions().includes(action)) return false;
+    const row = this.detailRow();
+    const done = await this.write(PR_ACTION_LABELS[action], () =>
+      this.bridge.invoke("github_pr_action", {
+        root: row!.root,
+        number: row!.number,
+        action,
+        body: body ?? null,
+      }),
+    );
+    if (done) this.compose.set(null);
+    return done;
+  }
+
+  /** The pending merge confirmation (method, delete branch), null while none is open. */
+  readonly mergeDraft = signal<MergeDraft | null>(null);
+  /** Label names of the repository of the open pull request, for the label picker. */
+  readonly labelOptions = signal<string[]>([]);
+
+  /** Opens the merge confirmation; refused while the merge state blocks it. */
+  startMerge(): void {
+    const d = this._detail();
+    if (!d || !canMerge(d) || d.mergeBlock !== null) return;
+    const method = defaultMergeMethod(d.mergeMethods);
+    if (method) this.mergeDraft.set({ method, deleteBranch: true });
+  }
+
+  /** Merges with the confirmed draft. */
+  async merge(): Promise<boolean> {
+    const row = this.detailRow();
+    const d = this._detail();
+    const draft = this.mergeDraft();
+    if (!row || !d || !draft || !canMerge(d) || d.mergeBlock !== null) return false;
+    if (!d.mergeMethods.includes(draft.method)) return false;
+    const done = await this.write("Merge", () =>
+      this.bridge.invoke("github_pr_merge", {
+        root: row.root,
+        number: row.number,
+        method: draft.method,
+        deleteBranch: draft.deleteBranch,
+      }),
+    );
+    if (done) this.mergeDraft.set(null);
+    return done;
+  }
+
+  /** Re-runs the failed jobs of the failed runs of the head commit. */
+  async rerun(): Promise<boolean> {
+    const row = this.detailRow();
+    const d = this._detail();
+    if (!row || !d || !canRerun(d)) return false;
+    const done = await this.write("Re-run failed checks", async () => {
+      const n = await this.bridge.invoke<number>("github_pr_rerun", {
+        root: row.root,
+        number: row.number,
+      });
+      this.spaces.notify(`Re-running ${n} failed ${n === 1 ? "run" : "runs"} of #${row.number}`);
+    });
+    return done;
+  }
+
+  /** Adds and removes reviewers, labels and assignees; nothing to change is not sent. */
+  async edit(change: PrEdit): Promise<boolean> {
+    const row = this.detailRow();
+    const d = this._detail();
+    if (!row || !d || !canEditPeople(d)) return false;
+    if (!Object.values(change).some((v) => v && v.length > 0)) return false;
+    return this.write("Edit", () =>
+      this.bridge.invoke("github_pr_edit", { root: row.root, number: row.number, edit: change }),
+    );
+  }
+
+  /** Runs `fn` as one write, then reloads the list and the pane; a failure is a notification. */
+  private async write(label: string, fn: () => Promise<unknown>): Promise<boolean> {
+    const row = this.detailRow();
+    if (!row || this._actionBusy()) return false;
+    this._actionBusy.set(true);
+    try {
+      await fn();
+    } catch (err) {
+      const e = ghErrorOf(err);
+      this.spaces.notify(`${label} #${row.number}: ${typeof e === "string" ? e : errorText(e)}`);
+      return false;
+    } finally {
+      this._actionBusy.set(false);
+    }
+    await this.load(true);
+    const again = this.rows().find((r) => r.key === row.key);
+    if (again && this._detailKey() === row.key) await this.openDetail(again);
+    return true;
+  }
+
+  /** An action chosen by button or palette: text and close ask first, the rest run at once. */
+  choose(action: PrAction): void {
+    if (!this.actions().includes(action)) return;
+    if (action === "request_changes" || action === "comment" || action === "close") {
+      this.compose.set(action);
+    } else {
+      void this.act(action);
+    }
+  }
+
   closeDetail(): void {
+    this.compose.set(null);
+    this.mergeDraft.set(null);
     this._detailKey.set(null);
     this._detail.set(null);
     this._detailError.set(null);

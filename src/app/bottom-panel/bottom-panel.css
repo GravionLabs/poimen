@@ -292,3 +292,24 @@ pre {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.fold-toggle {
+  all: unset;
+  cursor: pointer;
+}
+.fold-toggle:focus-visible {
+  outline: 1px solid var(--h-focus-color, currentColor);
+}
+.event.fold-task {
+  opacity: 0.8;
+}
+
+.run-separator {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  margin-top: 0.25rem;
+  font-weight: 600;
+  border-top: 1px solid var(--term-ansi-8, currentColor);
+  opacity: 0.8;
+}

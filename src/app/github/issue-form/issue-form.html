@@ -1,0 +1,74 @@
+@if (issues.form(); as f) {
+  <form
+    class="form"
+    aria-label="New issue"
+    data-testid="issue-form"
+    (submit)="$event.preventDefault(); issues.submitForm()"
+    (keydown.escape)="issues.closeForm()"
+  >
+    <h3>
+      @if (f.parent) {
+        New sub-issue of #{{ f.parent.number }} in {{ f.repo }}
+      } @else {
+        New issue in {{ f.repo }}
+      }
+    </h3>
+    <label>
+      Title
+      <input
+        type="text"
+        data-testid="form-title"
+        [value]="f.title"
+        (input)="issues.patchForm({ title: value($event) })"
+      />
+    </label>
+    <div class="tabs" role="group" aria-label="Description view">
+      <button
+        type="button"
+        [attr.aria-pressed]="!f.previewing"
+        (click)="issues.patchForm({ previewing: false })"
+      >
+        Write
+      </button>
+      <button
+        type="button"
+        data-testid="form-preview"
+        [attr.aria-pressed]="f.previewing"
+        (click)="issues.patchForm({ previewing: true })"
+      >
+        Preview
+      </button>
+    </div>
+    @if (f.previewing) {
+      <div class="markdown" data-testid="form-preview-body" [innerHTML]="preview()"></div>
+    } @else {
+      <textarea
+        rows="8"
+        aria-label="Description (Markdown)"
+        data-testid="form-body"
+        [value]="f.body"
+        (input)="issues.patchForm({ body: value($event) })"
+      ></textarea>
+    }
+    <app-chip-picker
+      label="Labels"
+      [selected]="f.labels"
+      [options]="issues.labelOptions()"
+      (add)="addLabel($event)"
+      (remove)="removeLabel($event)"
+    />
+    <app-chip-picker
+      label="Milestone"
+      [selected]="f.milestone ? [f.milestone] : []"
+      [options]="issues.milestoneOptions()"
+      (add)="issues.patchForm({ milestone: $event })"
+      (remove)="issues.patchForm({ milestone: null })"
+    />
+    <div class="buttons">
+      <button type="submit" data-testid="form-create" [disabled]="!ready() || issues.busy()">
+        Create
+      </button>
+      <button type="button" data-testid="form-cancel" (click)="issues.closeForm()">Cancel</button>
+    </div>
+  </form>
+}

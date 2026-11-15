@@ -16,15 +16,18 @@ describe("settings categories", () => {
       "Appearance & Behavior": ["Appearance"],
       Workspace: ["Explorer", "Spaces", "New space layout", "Trusted projects"],
       Backend: ["Server", "Machines", "Agents"],
+      General: ["Export & import"],
     });
   });
 
   it("finds a page with its group, or null", () => {
-    expect(findPage("herdr")?.group.title).toBe("Backend");
+    expect(findPage("server")?.group.title).toBe("Backend");
+    // The page of the former herdr backend keeps its stored selection.
+    expect(findPage("herdr")?.page.id).toBe("server");
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");
-    expect(allPages()).toHaveLength(8);
+    expect(allPages()).toHaveLength(9);
   });
 
   it("resolves the retired color-scheme page to appearance", () => {
@@ -64,6 +67,12 @@ describe("settings categories", () => {
     ]);
   });
 
+  it("finds the export and import page", () => {
+    expect(filterGroups("import settings").flatMap((g) => g.pages.map((p) => p.id))).toEqual([
+      "transfer",
+    ]);
+  });
+
   it("filters by the label of a setting", () => {
     expect(filterGroups("hidden folders").flatMap((g) => g.pages.map((p) => p.id))).toEqual([
       "explorer",
@@ -72,6 +81,6 @@ describe("settings categories", () => {
 
   it("hides groups without a match and returns all for a blank query", () => {
     expect(filterGroups("zzz")).toEqual([]);
-    expect(filterGroups("   ")).toHaveLength(3);
+    expect(filterGroups("   ")).toHaveLength(4);
   });
 });

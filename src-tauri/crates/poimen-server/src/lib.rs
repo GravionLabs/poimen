@@ -17,6 +17,7 @@ pub mod gemini;
 pub mod hook;
 mod host;
 pub mod integration;
+pub mod mcp_config;
 mod pty;
 pub mod report;
 mod runs;
@@ -1023,6 +1024,10 @@ fn space_create(shared: &Arc<Shared>, p: SpaceCreate) -> ApiResult {
         }
         create::Prepared::Build(build) => build,
     };
+    let build = create::Build {
+        env: p.env,
+        ..build
+    };
     let (mut created, typing) = build_space(shared, name, build)?;
     type_commands(typing, &mut created);
     Ok(json!(SpaceCreateResult::Created(created)))
@@ -1219,6 +1224,10 @@ fn space_apply_layout(shared: &Arc<Shared>, p: SpaceApplyLayout) -> ApiResult {
         }
         create::Prepared::Build(build) => build,
     };
+    let build = create::Build {
+        env: p.env,
+        ..build
+    };
     let (mut applied, typing) = {
         let mut inner = lock(&shared.inner);
         // The space may have gone between the lookup and the build.
@@ -1344,6 +1353,7 @@ fn build_tabs(
         space_id: space_id.to_owned(),
         cwd: Some(build.dir.clone()),
         name: Some(name.to_string()).filter(|n| !n.is_empty()),
+        env: build.env.clone(),
         ..Default::default()
     };
     let mut warnings = build.warnings;
@@ -1367,81 +1377,106 @@ fn build_tabs(
             });
         }
     };
-    let panes = build.layout.map(|l| l.panes).unwrap_or_default();
-    let root_name = panes.first().map(|p| p.name.clone()).unwrap_or_default();
-    let root = spawn_terminal(shared, inner, shell(&root_name))?;
-    let root_tab = shared.new_id("tab");
-    let events = match inner
-        .layout
-        .add_tab(space_id, root_tab.clone(), root.name.clone(), &root.id)
-    {
-        Ok(events) => events,
-        Err(e) => {
-            // A terminal is never left without a leaf.
-            drop_terminal(shared, inner, &root.id);
-            return Err(e);
-        }
-    };
-    publish_all(shared, events);
-    tab_ids.push(root_tab);
-    queue(
-        inner,
-        &root.name,
-        &root.id,
-        panes.first().and_then(|p| p.command.as_ref()),
-        false,
-    );
-    let mut ids = vec![(root_name, root.id)];
-    for spec in panes.iter().skip(1) {
-        let Some(split) = &spec.split else { continue };
-        let Some(from) = ids
-            .iter()
-            .find(|(n, _)| *n == split.from)
-            .map(|(_, id)| id.clone())
-        else {
-            warnings.push(format!(
-                "layout not fully applied: pane \"{}\": unknown split.from \"{}\"",
-                spec.name, split.from
-            ));
-            break;
-        };
-        let terminal = match spawn_terminal(shared, inner, shell(&spec.name)) {
+    // Every tab of the layout (a parent before its children) as the panes that build it; a space
+    // with no layout gets one tab with one terminal. The server has no parent link of a tab yet
+    // (ADR 0011), so a child tab is a tab of the space after its parent.
+    let mut tab_panes = build.layout.map(|l| l.pane_tabs()).unwrap_or_default();
+    if tab_panes.is_empty() {
+        tab_panes.push(Vec::new());
+    }
+    'tabs: for (index, panes) in tab_panes.iter().enumerate() {
+        let root_name = panes.first().map(|p| p.name.clone()).unwrap_or_default();
+        let root = match spawn_terminal(shared, inner, shell(&root_name)) {
             Ok(t) => t,
+            Err(e) if index == 0 => return Err(e),
             Err((_, e)) => {
                 warnings.push(format!(
-                    "layout not fully applied: pane \"{}\": {e}",
-                    spec.name
+                    "layout not fully applied: tab \"{root_name}\": {e}"
                 ));
-                break;
+                break 'tabs;
             }
         };
-        let split_id = shared.new_id("split");
-        match inner.layout.split(
-            &from,
-            &terminal.id,
-            create::direction(split.direction),
-            split.ratio,
-            split_id,
-        ) {
-            Ok(events) => publish_all(shared, events),
-            Err((_, e)) => {
-                // A terminal is never left without a leaf.
-                drop_terminal(shared, inner, &terminal.id);
-                warnings.push(format!(
-                    "layout not fully applied: pane \"{}\": {e}",
-                    spec.name
-                ));
-                break;
-            }
-        }
+        let root_tab = shared.new_id("tab");
+        let events =
+            match inner
+                .layout
+                .add_tab(space_id, root_tab.clone(), root.name.clone(), &root.id)
+            {
+                Ok(events) => events,
+                Err(e) => {
+                    // A terminal is never left without a leaf.
+                    drop_terminal(shared, inner, &root.id);
+                    if index == 0 {
+                        return Err(e);
+                    }
+                    warnings.push(format!(
+                        "layout not fully applied: tab \"{root_name}\": {}",
+                        e.1
+                    ));
+                    break 'tabs;
+                }
+            };
+        publish_all(shared, events);
+        tab_ids.push(root_tab);
         queue(
             inner,
-            &spec.name,
-            &terminal.id,
-            spec.command.as_ref(),
+            &root.name,
+            &root.id,
+            panes.first().and_then(|p| p.command.as_ref()),
             false,
         );
-        ids.push((spec.name.clone(), terminal.id));
+        let mut ids = vec![(root_name, root.id)];
+        for spec in panes.iter().skip(1) {
+            let Some(split) = &spec.split else { continue };
+            let Some(from) = ids
+                .iter()
+                .find(|(n, _)| *n == split.from)
+                .map(|(_, id)| id.clone())
+            else {
+                warnings.push(format!(
+                    "layout not fully applied: pane \"{}\": unknown split.from \"{}\"",
+                    spec.name, split.from
+                ));
+                break;
+            };
+            let terminal = match spawn_terminal(shared, inner, shell(&spec.name)) {
+                Ok(t) => t,
+                Err((_, e)) => {
+                    warnings.push(format!(
+                        "layout not fully applied: pane \"{}\": {e}",
+                        spec.name
+                    ));
+                    break;
+                }
+            };
+            let split_id = shared.new_id("split");
+            match inner.layout.split(
+                &from,
+                &terminal.id,
+                create::direction(split.direction),
+                split.ratio,
+                split_id,
+            ) {
+                Ok(events) => publish_all(shared, events),
+                Err((_, e)) => {
+                    // A terminal is never left without a leaf.
+                    drop_terminal(shared, inner, &terminal.id);
+                    warnings.push(format!(
+                        "layout not fully applied: pane \"{}\": {e}",
+                        spec.name
+                    ));
+                    break;
+                }
+            }
+            queue(
+                inner,
+                &spec.name,
+                &terminal.id,
+                spec.command.as_ref(),
+                false,
+            );
+            ids.push((spec.name.clone(), terminal.id));
+        }
     }
     let mut setup_started = false;
     if let Some(setup) = &build.setup {
@@ -1646,6 +1681,7 @@ fn spawn_terminal(
             rows,
             term: term.as_deref(),
             locale_set,
+            env: &p.env,
         },
         output_to(&stream),
         exit_to(shared, &id),
@@ -2155,6 +2191,7 @@ fn tab_create(shared: &Arc<Shared>, p: TabCreate) -> ApiResult {
             &mut inner,
             TerminalCreate {
                 space_id: p.space_id.clone(),
+                env: p.env.clone(),
                 ..Default::default()
             },
         )?,
@@ -2240,6 +2277,7 @@ fn tab_split(shared: &Arc<Shared>, p: TabSplit) -> ApiResult {
             command: p.command,
             cols: None,
             rows: None,
+            env: p.env,
         },
     )?;
     let split_id = shared.new_id("split");

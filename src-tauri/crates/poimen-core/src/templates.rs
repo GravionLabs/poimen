@@ -20,7 +20,10 @@ pub struct Template {
     /// A harness id from `harnesses`.
     pub agent: String,
     pub model: Option<String>,
+    /// An inline layout (`panes[]`).
     pub layout: Option<Layout>,
+    /// The name of a layout of `layouts[]` (ADR 0011); an inline `layout` wins.
+    pub layout_name: Option<String>,
 }
 
 /// Whether `dir` (as written in the config) is absolute or starts with `~`; also accepts Windows
@@ -199,6 +202,7 @@ mod tests {
             agent: "claude".into(),
             model: None,
             layout: None,
+            layout_name: None,
         }
     }
 

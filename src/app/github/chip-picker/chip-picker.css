@@ -1,0 +1,46 @@
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  position: relative;
+}
+.name {
+  font-weight: 600;
+  min-width: 5.5rem;
+}
+.chips,
+.options {
+  display: contents;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--h-border, currentcolor);
+}
+.chip button {
+  all: unset;
+  cursor: pointer;
+}
+.none {
+  opacity: 0.6;
+}
+.options {
+  display: flex;
+  flex-direction: column;
+  flex-basis: 100%;
+}
+.options button {
+  all: unset;
+  cursor: pointer;
+  padding: 0.1rem 0.4rem;
+}
+input {
+  font: inherit;
+}

@@ -1,11 +1,8 @@
 <section aria-labelledby="templates-h">
   <h2 id="templates-h">Space templates</h2>
-  <p class="hint">
-    A template gives a new space an agent and, optionally, a pane layout. It applies to the
-    directories under its directory, to the repositories of its remote, or to both. The best match
-    wins: directory and remote, then remote, then the longest directory. A template with neither is
-    the default for every other directory.
-  </p>
+  @if (defaultTemplate()) {
+    <p class="hint">Every new space that no other template matches uses the default.</p>
+  }
   @for (w of warnings(); track $index) {
     <p class="error" role="alert">{{ w }}</p>
   }
@@ -15,15 +12,25 @@
   @if (templates().length === 0) {
     <p class="hint">No templates yet: new spaces use no template.</p>
   }
-  <ul class="rows" aria-label="Space templates">
-    <li class="row-item" data-testid="default-template">
+  <ul class="rows template-grid" aria-label="Space templates">
+    <li class="row-item template-row" data-testid="default-template">
       <strong>Default</strong>
       @if (defaultTemplate(); as d) {
-        <span class="path">{{ d.name }}</span>
+        <span class="path">{{ matchLabel(d) }}</span>
         <span class="agent">{{ d.agent }}{{ d.model ? " · " + d.model : "" }}</span>
+        <span class="layout">{{ layoutText(d) }}</span>
         <span class="actions">
           <button type="button" class="btn" aria-label="Edit default" (click)="editDefault()">
             Edit
+          </button>
+          <button
+            type="button"
+            class="btn"
+            aria-label="Export default"
+            [disabled]="transfer.busy()"
+            (click)="exportTemplate(d.name)"
+          >
+            Export…
           </button>
           <button
             type="button"
@@ -37,16 +44,19 @@
         </span>
       } @else {
         <span class="path">None: new spaces use no template</span>
+        <span class="agent"></span>
+        <span class="layout"></span>
         <span class="actions">
           <button type="button" class="btn" (click)="addDefault()">Add default</button>
         </span>
       }
     </li>
     @for (item of listed(); track item.t.name) {
-      <li class="row-item">
+      <li class="row-item template-row">
         <strong>{{ item.t.name }}</strong>
         <span class="path" [title]="matchLabel(item.t)">{{ matchLabel(item.t) }}</span>
         <span class="agent">{{ item.t.agent }}{{ item.t.model ? " · " + item.t.model : "" }}</span>
+        <span class="layout">{{ layoutText(item.t) }}</span>
         <span class="actions">
           <button
             type="button"
@@ -55,6 +65,15 @@
             (click)="edit(item.i)"
           >
             Edit
+          </button>
+          <button
+            type="button"
+            class="btn"
+            [attr.aria-label]="'Export ' + item.t.name"
+            [disabled]="transfer.busy()"
+            (click)="exportTemplate(item.t.name)"
+          >
+            Export…
           </button>
           <button
             type="button"
@@ -69,9 +88,24 @@
       </li>
     }
   </ul>
-  @if (defaultTemplate()) {
-    <p class="hint">Every new space that no other template matches uses the default.</p>
+  <p class="hint">
+    A template gives a new space an agent and, optionally, a pane layout. It applies to the
+    directories under its directory, to the repositories of its remote, or to both. The best match
+    wins: directory and remote, then remote, then the longest directory. A template with neither is
+    the default for every other directory.
+  </p>
+  <div class="actions">
+    <button type="button" class="btn" [disabled]="transfer.busy()" (click)="importTemplate()">
+      Import template…
+    </button>
+  </div>
+  @if (transfer.error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
   }
+  @if (transfer.message(); as message) {
+    <p class="hint" role="status">{{ message }}</p>
+  }
+  <app-settings-import-panel scope="template" />
   @if (editing(); as e) {
     <form
       class="template-form"
@@ -220,7 +254,7 @@
           </select>
         </label>
       </div>
-      @if (e.draft.layout; as layout) {
+      @if (inlineLayout(e.draft.layout); as layout) {
         <ol class="rows panes" aria-label="Panes of the template">
           @for (pane of layout.panes; track $index; let i = $index) {
             <li class="pane-row">
