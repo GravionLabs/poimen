@@ -23,7 +23,8 @@ export interface SpaceTemplate {
   /** A harness id. */
   agent: string;
   model: string | null;
-  layout: SpaceLayout | null;
+  /** Inline panes, or the name of a layout of `layouts[]`. */
+  layout: SpaceLayout | string | null;
 }
 
 /** The template a directory resolves to (`resolve_space_template`). */
@@ -67,7 +68,7 @@ export function parseSpaceTemplates(raw: unknown): SpaceTemplate[] {
         remote: parseRemote(r["remote"]),
         agent: r["agent"],
         model: typeof r["model"] === "string" ? r["model"] : null,
-        layout: parseSpaceLayout(r["layout"]),
+        layout: typeof r["layout"] === "string" ? r["layout"] : parseSpaceLayout(r["layout"]),
       },
     ];
   });
@@ -95,7 +96,8 @@ export function templateConfig(t: SpaceTemplate): Record<string, unknown> {
   const out: Record<string, unknown> = { name: t.name.trim(), match, agent: t.agent.trim() };
   const model = t.model?.trim();
   if (model) out["model"] = model;
-  if (t.layout) out["layout"] = toConfig(t.layout.panes);
+  if (typeof t.layout === "string") out["layout"] = t.layout;
+  else if (t.layout) out["layout"] = toConfig(t.layout.panes);
   return out;
 }
 
@@ -156,7 +158,7 @@ export function templateErrors(
   const agent = draft.agent.trim();
   if (!agent) errors.agent = "Choose an agent";
   else if (!harnessIds.includes(agent)) errors.agent = `Unknown harness "${agent}"`;
-  if (draft.layout && !isValidLayout(draft.layout.panes)) {
+  if (draft.layout && typeof draft.layout !== "string" && !isValidLayout(draft.layout.panes)) {
     errors.layout = layoutErrors(draft.layout.panes).find((e) => e !== null) ?? "Add a pane";
   }
   return errors;

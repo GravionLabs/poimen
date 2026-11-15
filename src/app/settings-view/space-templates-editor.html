@@ -254,7 +254,7 @@
           </select>
         </label>
       </div>
-      @if (e.draft.layout; as layout) {
+      @if (inlineLayout(e.draft.layout); as layout) {
         <ol class="rows panes" aria-label="Panes of the template">
           @for (pane of layout.panes; track $index; let i = $index) {
             <li class="pane-row">
