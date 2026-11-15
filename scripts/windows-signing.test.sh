@@ -19,7 +19,7 @@ full=(AZURE_TENANT_ID=t AZURE_CLIENT_ID=c AZURE_CLIENT_SECRET=topsecret AZURE_TR
 
 # A fake for Get-AuthenticodeSignature: files named *.bad are NotSigned, *.tampered HashMismatch, the rest Valid.
 fake="$tmp/status.sh"
-printf '#!/usr/bin/env bash\ncase "$1" in *.bad) echo NotSigned;; *.tampered) echo HashMismatch;; *) echo Valid;; esac\n' > "$fake"
+printf '#!/usr/bin/env bash\ncase "$1" in *.bad|*.bad.exe) echo NotSigned;; *.tampered) echo HashMismatch;; *) echo Valid;; esac\n' > "$fake"
 chmod +x "$fake"
 touch "$tmp/a.exe" "$tmp/b.exe" "$tmp/c.bad" "$tmp/d.tampered"
 verify() { run POIMEN_SIGNATURE_STATUS_CMD="$fake" bash "$script" verify "$@"; }
@@ -42,6 +42,20 @@ check "verify: unsigned file fails" bash -c '! env -i PATH="$PATH" POIMEN_SIGNAT
 check "verify: invalid signature fails" bash -c '! env -i PATH="$PATH" POIMEN_SIGNATURE_STATUS_CMD="$1" bash "$2" verify "$3" > /dev/null 2>&1' _ "$fake" "$script" "$tmp/d.tampered"
 check "verify: missing file fails" bash -c '! env -i PATH="$PATH" POIMEN_SIGNATURE_STATUS_CMD="$1" bash "$2" verify /nonexistent.exe > /dev/null 2>&1' _ "$fake" "$script"
 check "verify: no files is a usage error" bash -c 'env -i PATH="$PATH" bash "$1" verify > /dev/null 2>&1; test $? = 2' _ "$script"
+# A fake 7z: extracts "$layout" (a directory named by the installer's first line) into the -o folder.
+fake7z="$tmp/7z.sh"
+printf '#!/usr/bin/env bash\nout=; for a in "$@"; do case "$a" in -o*) out=${a#-o};; esac; done\nfile=${@: -1}\ncp -r "$(cat "$file")/." "$out/"\n' > "$fake7z"
+chmod +x "$fake7z"
+mkdir -p "$tmp/good/\$PLUGINSDIR" "$tmp/rcgood" "$tmp/badin" "$tmp/empty"
+touch "$tmp/good/poimen-app.exe" "$tmp/good/poimen-server.exe" "$tmp/good/\$PLUGINSDIR/x.exe" "$tmp/good/uninstall.bad.exe"
+touch "$tmp/rcgood/poimen-rc.exe" "$tmp/badin/poimen-rc.exe" "$tmp/badin/poimen-server.bad"
+mv "$tmp/badin/poimen-server.bad" "$tmp/badin/poimen-server.bad.exe"
+for n in good rcgood badin empty; do echo "$tmp/$n" > "$tmp/$n-setup.exe"; done
+vi() { env -i PATH="$PATH" POIMEN_SEVENZIP="$fake7z" POIMEN_SIGNATURE_STATUS_CMD="$fake" bash "$script" verify-installer "$1" > /dev/null 2>&1; }
+check "verify-installer: signed contents pass" vi "$tmp/good-setup.exe"
+check "verify-installer: rc main binary name passes" vi "$tmp/rcgood-setup.exe"
+check "verify-installer: unsigned exe inside fails" bash -c '! env -i PATH="$PATH" POIMEN_SEVENZIP="$1" POIMEN_SIGNATURE_STATUS_CMD="$2" bash "$3" verify-installer "$4" > /dev/null 2>&1' _ "$fake7z" "$fake" "$script" "$tmp/badin-setup.exe"
+check "verify-installer: nothing inside fails" bash -c '! env -i PATH="$PATH" POIMEN_SEVENZIP="$1" POIMEN_SIGNATURE_STATUS_CMD="$2" bash "$3" verify-installer "$4" > /dev/null 2>&1' _ "$fake7z" "$fake" "$script" "$tmp/empty-setup.exe"
 check "unknown command: exit 2" bash -c 'bash "$1" nope > /dev/null 2>&1; test $? = 2' _ "$script"
 
 ((failures == 0)) || { echo "$failures failed"; exit 1; }

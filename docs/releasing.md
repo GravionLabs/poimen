@@ -51,9 +51,13 @@ Gatekeeper warning about an unidentified developer or an unverified app may appe
 The NSIS installer (`-setup.exe`) and every shipped executable (`poimen-app.exe`, `poimen-server`, `poimen-pty-host`,
 `poimen`, and the `-rc` variants) are signed with Azure Trusted Signing by `release.yml`. The sidecars are signed first
 (`scripts/windows-signing.sh sign`), then Tauri signs the app and the installer through
-`bundle.windows.signCommand` (a config overlay written at build time, so no account name is committed). The job
-finishes with `scripts/windows-signing.sh verify`, which runs `Get-AuthenticodeSignature` on each file and fails unless
-the status is `Valid`. The MSI is not built for pre-releases and stays unsigned for the stable one until a follow-up.
+`bundle.windows.signCommand` (a config overlay written at build time, so no account name is committed). After the build
+`scripts/windows-signing.sh verify` (sidecars) and `verify-installer` (the installer is opened with 7z and every
+executable inside is checked, so `poimen-app.exe` and the rc's `poimen-rc.exe` are covered alike) run
+`Get-AuthenticodeSignature` and fail the job unless every status is `Valid`. Order: the release or pre-release is
+created and set to draft at once, the installers are attached to the draft, and the final `publish` job makes it public
+only after every installer, server archive, CLI package and the checksums succeeded. An unsigned build therefore fails
+the job and the release stays a draft (delete it, fix, run again); nothing unsigned is ever downloadable. The MSI is not built for pre-releases and stays unsigned for the stable one until a follow-up.
 
 ### What the owner does by hand
 

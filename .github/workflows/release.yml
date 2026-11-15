@@ -111,7 +111,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ steps.version.outputs.semver }}
-        run: echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          # Hidden until every installer is built and verified; the publish job makes it public (#672).
+          gh release edit "$TAG" --draft --repo "$GITHUB_REPOSITORY"
 
   # Manual dispatch: rc on release/next (tag and GitHub pre-release only), beta elsewhere (no tag, no release). No
   # manifest or changelog commit, no issue closing; the installers set the version in their own checkout. The default
@@ -165,7 +170,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ steps.version.outputs.semver }}
-        run: echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          # Hidden until every installer is built and verified; the publish job makes it public (#672).
+          gh release edit "$TAG" --draft --repo "$GITHUB_REPOSITORY"
 
   installers:
     name: Installers ${{ matrix.target }}
@@ -304,17 +314,19 @@ jobs:
           for app in "${apps[@]}"; do bash scripts/macos-signing.sh verify "$app" "${{ steps.sign.outputs.notarize }}"; done
           for dmg in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do ls -l "$dmg"; done
 
-      # Every shipped executable and the installer must carry a Valid signature before anything is uploaded (#672).
-      # Tauri uploads to the release inside the installers step, so a release with an unsigned file is caught by the
-      # failing job (docs/releasing.md says to delete such a release); the beta has no release at all.
+      # Every shipped executable and the installer must carry a Valid signature (#672). The release is a draft until
+      # the publish job, so a failure here leaves nothing downloadable. The installer is opened with 7z and every
+      # executable inside is checked, so the name of the main binary (poimen-app, poimen-rc) does not matter.
       - name: Verify the Windows signatures
         if: ${{ runner.os == 'Windows' && steps.winsign.outputs.sign == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(src-tauri/binaries/*.exe src-tauri/target/${{ matrix.target }}/release/poimen-app.exe src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe)
-          bash scripts/windows-signing.sh verify "${files[@]}"
+          bash scripts/windows-signing.sh verify src-tauri/binaries/*.exe
+          installers=(src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe)
+          [ ${#installers[@]} -gt 0 ] || { echo "no NSIS installer in the bundle folder" >&2; exit 1; }
+          for i in "${installers[@]}"; do bash scripts/windows-signing.sh verify-installer "$i"; done
 
       # A beta has no release: the installers are workflow artifacts.
       - name: Upload the beta installers
@@ -513,3 +525,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" dist/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+
+  # The release stays a draft while the installers are built (#672): an installer whose signature check failed is
+  # never downloadable. Publishes only when every asset job and the checksums succeeded.
+  publish:
+    name: Publish the release
+    needs: [release, prerelease, installers, server-linux, cli, checksums]
+    if: ${{ !cancelled() && needs.checksums.result == 'success' && (needs.release.outputs.release-id || needs.prerelease.outputs.release-id) != '' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # publish the draft
+    env:
+      TAG: v${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
+    steps:
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"
