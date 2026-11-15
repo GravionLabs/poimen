@@ -70,55 +70,17 @@ On a Mac that never ran the build: download the `.dmg` from the release, open it
 Gatekeeper warning about an unidentified developer or an unverified app may appear
 (`spctl --assess --type execute -vv /Applications/poimen.app` says `accepted`, `source=Notarized Developer ID`).
 
-## Windows: Authenticode (#672)
+## Windows
 
-The NSIS installer (`-setup.exe`) and every shipped executable (`poimen-app.exe`, `poimen-server`, `poimen-pty-host`,
-`poimen`, and the `-rc` variants; `poimen.exe` of the standalone CLI zip is signed and verified in the `cli` job's Windows leg) are signed with Azure Trusted Signing by `release.yml`. The sidecars are signed first
-(`scripts/windows-signing.sh sign`), then Tauri signs the app and the installer through
-`bundle.windows.signCommand` (a config overlay written at build time, so no account name is committed). After the build
-`scripts/windows-signing.sh verify` (sidecars) and `verify-installer` (the installer is opened with 7z and every
-executable inside is checked, so `poimen-app.exe` and the rc's `poimen-rc.exe` are covered alike) run
-`Get-AuthenticodeSignature` and fail the job unless every status is `Valid`. Order: the release or pre-release is
-created and set to draft at once, the installers are attached to the draft, and the final `publish` job makes it public
-only after every installer, server archive, CLI package and the checksums succeeded. An unsigned build therefore fails
-the job and the release stays a draft; nothing unsigned is ever downloadable. The MSI (stable only) is neither signed nor verified: `windows-signing.sh` cannot verify `bundle/msi/*.msi` yet, so this is a documented gap until a follow-up.
+The Windows installer and its executables are not signed (no Authenticode certificate), so SmartScreen warns on the
+first start. `SHA256SUMS` and the build provenance attestation cover the Windows files.
 
-### Recovery after a failed signing run
+## Draft until complete
 
-Use "Re-run failed jobs" on the same run. The release id output is kept, the secrets are read again, and `publish` runs
-after the repaired jobs. Do not delete the draft and dispatch again: for a stable release the tag exists and there is no
-dispatch on `main`. A left-over draft blocks nothing, it is only visible to maintainers.
+The release or pre-release is created and set to draft at once, the installers are attached to the draft, and the final
+`publish` job makes it public only after every installer, server archive, CLI package and the checksums succeeded. A
+macOS build whose signature check failed is therefore never downloadable.
 
-### What the owner does by hand
-
-1. Create an Azure Trusted Signing account and a certificate profile (identity validation of the publisher is part of
-   it and takes days), in a region with its endpoint (e.g. `https://weu.codesigning.azure.net`).
-2. Create an app registration (service principal) and give it the role `Trusted Signing Certificate Profile Signer`
-   on the account.
-3. Create the GitHub environment `release` (Settings, Environments) leave it without branch restriction and
-   without required reviewers. Restricting it to `main` and `release/**` makes beta dispatches from other branches fail
-   at job start, and required reviewers would demand an approval for each leg that uses it (macOS, Linux and Windows of
-   the installers job, plus the Windows leg of the `cli` job).
-4. Add these as secrets of that environment, not as repository secrets:
-
-| Secret | Content |
-| --- | --- |
-| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | the service principal |
-| `AZURE_TRUSTED_SIGNING_ENDPOINT` | the regional endpoint URL |
-| `AZURE_TRUSTED_SIGNING_ACCOUNT` | the account name |
-| `AZURE_TRUSTED_SIGNING_PROFILE` | the certificate profile name |
-
-Pull requests never use `release.yml`, and the environment secrets are not visible to other workflows.
-
-### Behavior
-
-- All settings present: everything is signed and verified.
-- A stable release or an rc with a missing setting: the job fails in the first Windows step, before the installer is
-  built or uploaded.
-- A beta (workflow artifacts only) with a missing setting: unsigned, with a `::warning::`.
-- The signing tool is `trusted-signing-cli` (installed with `cargo install`, version pinned in the workflow).
-
-### Manual check
-
-On Windows: `Get-AuthenticodeSignature .\poimen-<version>-setup.exe` and the installed `poimen-app.exe`,
-`poimen-server.exe`, `poimen-pty-host.exe` show `Valid`; SmartScreen names the verified publisher.
+After a failed run use "Re-run failed jobs" on the same run. The release id output is kept, the secrets are read again,
+and `publish` runs after the repaired jobs. Do not delete the draft and dispatch again: for a stable release the tag
+exists and there is no dispatch on `main`. A left-over draft blocks nothing, it is only visible to maintainers.
