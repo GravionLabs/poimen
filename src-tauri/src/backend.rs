@@ -178,6 +178,10 @@ pub type OnRecord = Box<dyn Fn(u32, StreamRecord) + Send + 'static>;
 /// only implementation; the trait is the seam of the tests (`backend_fake.rs`). Errors are text
 /// for the user.
 pub trait Backend: Send + Sync {
+    /// `agents.claude.classicRenderer`: while on, terminals created afterwards get
+    /// `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`. Running terminals keep their environment. Only
+    /// the poimen backend supports it; the default ignores it.
+    fn set_claude_classic_renderer(&self, _on: bool) {}
     /// Makes sure the backend answers: returns at once when it does, otherwise starts it (when
     /// `auto_start` allows) and waits. Never stops or restarts a running backend.
     fn ensure_running(&self, auto_start: bool) -> Result<Outcome, StartError>;

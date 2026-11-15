@@ -183,6 +183,9 @@ pub struct Settings {
     pub machines: Vec<crate::machines::MachineConfig>,
     /// What plays when an agent is blocked or done (`sounds`).
     pub sounds: Sounds,
+    /// `agents.claude.classicRenderer`: new poimen terminals set
+    /// `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` (default false).
+    pub claude_classic_renderer: bool,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -367,6 +370,7 @@ impl Default for Settings {
             agent_actions: Vec::new(),
             machines: Vec::new(),
             sounds: Sounds::default(),
+            claude_classic_renderer: false,
             home: None,
             warnings: Vec::new(),
         }
@@ -433,6 +437,28 @@ pub fn parse_ghostty(text: &str) -> Ghostty {
         }
     }
     out
+}
+
+/// `agents.claude.classicRenderer`; anything but a boolean warns and keeps the default.
+fn resolve_agents(value: &Value, s: &mut Settings) {
+    let Some(agents) = value.as_object() else {
+        s.warnings.push("agents must be an object".into());
+        return;
+    };
+    let Some(claude) = agents.get("claude") else {
+        return;
+    };
+    let Some(claude) = claude.as_object() else {
+        s.warnings.push("agents.claude must be an object".into());
+        return;
+    };
+    match claude.get("classicRenderer") {
+        None => {}
+        Some(Value::Bool(b)) => s.claude_classic_renderer = *b,
+        Some(_) => s
+            .warnings
+            .push("agents.claude.classicRenderer must be true or false".into()),
+    }
 }
 
 /// `explorer.roots` (non-empty list of absolute or `~` paths) and `explorer.showHidden`; invalid
@@ -634,6 +660,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("sounds") {
         s.sounds = resolve_sounds(value, &mut s.warnings);
+    }
+    if let Some(value) = root.get("agents") {
+        resolve_agents(value, &mut s);
     }
 
     if let Some(ui) = root.get("ui") {
@@ -950,6 +979,15 @@ pub fn set_explorer_roots_text(text: &str, roots: &[String]) -> Result<String, S
     set_path_text(text, &["explorer", "roots"], &value)
 }
 
+/// Returns `text` with `agents.claude.classicRenderer` set, touching nothing else.
+pub fn set_claude_classic_renderer_text(text: &str, on: bool) -> Result<String, String> {
+    set_path_text(
+        text,
+        &["agents", "claude", "classicRenderer"],
+        &on.to_string(),
+    )
+}
+
 /// Returns `text` with `explorer.showHidden` set, touching nothing else.
 pub fn set_explorer_show_hidden_text(text: &str, show: bool) -> Result<String, String> {
     set_path_text(text, &["explorer", "showHidden"], &show.to_string())
@@ -1078,6 +1116,11 @@ pub fn set_sound_text(text: &str, kind: &str, value: &Value) -> Result<String, S
 /// Writes `sounds.<kind>` below `home`, like `save_theme`.
 pub fn save_sound(home: &Path, kind: &str, value: &Value) -> Result<(), String> {
     save_with(home, |text| set_sound_text(text, kind, value))
+}
+
+/// Writes `agents.claude.classicRenderer` below `home`, like `save_theme`.
+pub fn save_claude_classic_renderer(home: &Path, on: bool) -> Result<(), String> {
+    save_with(home, |text| set_claude_classic_renderer_text(text, on))
 }
 
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
@@ -1263,6 +1306,35 @@ mod tests {
         assert_eq!(s.space_templates[0].name, "one");
         assert_eq!(s.warnings.len(), 1, "{:?}", s.warnings);
         assert!(s.warnings[0].contains("default template"));
+    }
+
+    #[test]
+    fn claude_classic_renderer_defaults_off_and_parses_tolerantly() {
+        assert!(!resolve(None, none).claude_classic_renderer);
+        let on = rows(r#"{"agents":{"claude":{"classicRenderer":true}}}"#);
+        assert!(on.claude_classic_renderer);
+        assert!(on.warnings.is_empty());
+        for bad in [
+            r#"{"agents":{"claude":{"classicRenderer":"yes"}}}"#,
+            r#"{"agents":{"claude":3}}"#,
+            r#"{"agents":[]}"#,
+        ] {
+            let s = rows(bad);
+            assert!(!s.claude_classic_renderer, "{bad}");
+            assert_eq!(s.warnings.len(), 1, "{bad}: {:?}", s.warnings);
+        }
+        assert!(rows(r#"{"agents":{}}"#).warnings.is_empty());
+    }
+
+    #[test]
+    fn writing_the_classic_renderer_keeps_the_rest_of_the_file() {
+        let out = set_claude_classic_renderer_text("{\"theme\": \"dark\"}", true).unwrap();
+        let s = rows(&out);
+        assert!(s.claude_classic_renderer);
+        assert_eq!(s.theme, "dark");
+        let commented = "{\n  // mine\n  \"theme\": \"dark\"\n}";
+        let out = set_claude_classic_renderer_text(commented, true).unwrap();
+        assert!(out.contains("// mine"), "{out}");
     }
 
     #[test]

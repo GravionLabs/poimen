@@ -435,6 +435,27 @@ describe("SettingsView agents section", () => {
   });
 });
 
+describe("SettingsView classic renderer toggle", () => {
+  const toggle = (host: HTMLElement) =>
+    host.querySelector<HTMLInputElement>('section[aria-label="Agents"] input[role="switch"]')!;
+
+  it("writes agents.claude.classicRenderer when switched", () => {
+    const { fixture, host } = setup(undefined, undefined, "agents");
+    tauri.answer("set_claude_classic_renderer", () => null);
+    const box = toggle(host);
+    expect(box.checked).toBe(false);
+    expect(box.disabled).toBe(false);
+    expect(host.textContent).toContain(
+      "Claude Code: classic renderer (scrollbar in poimen; no focus view)",
+    );
+    expect(host.textContent).toContain("running terminals keep their environment");
+    box.checked = true;
+    box.dispatchEvent(new Event("change"));
+    fixture.detectChanges();
+    expect(tauri.calls("set_claude_classic_renderer")).toEqual([{ on: true }]);
+  });
+});
+
 describe("SettingsView agent actions", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
 

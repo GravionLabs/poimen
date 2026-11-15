@@ -1023,6 +1023,10 @@ fn space_create(shared: &Arc<Shared>, p: SpaceCreate) -> ApiResult {
         }
         create::Prepared::Build(build) => build,
     };
+    let build = create::Build {
+        env: p.env,
+        ..build
+    };
     let (mut created, typing) = build_space(shared, name, build)?;
     type_commands(typing, &mut created);
     Ok(json!(SpaceCreateResult::Created(created)))
@@ -1219,6 +1223,10 @@ fn space_apply_layout(shared: &Arc<Shared>, p: SpaceApplyLayout) -> ApiResult {
         }
         create::Prepared::Build(build) => build,
     };
+    let build = create::Build {
+        env: p.env,
+        ..build
+    };
     let (mut applied, typing) = {
         let mut inner = lock(&shared.inner);
         // The space may have gone between the lookup and the build.
@@ -1344,6 +1352,7 @@ fn build_tabs(
         space_id: space_id.to_owned(),
         cwd: Some(build.dir.clone()),
         name: Some(name.to_string()).filter(|n| !n.is_empty()),
+        env: build.env.clone(),
         ..Default::default()
     };
     let mut warnings = build.warnings;
@@ -1646,6 +1655,7 @@ fn spawn_terminal(
             rows,
             term: term.as_deref(),
             locale_set,
+            env: &p.env,
         },
         output_to(&stream),
         exit_to(shared, &id),
@@ -2155,6 +2165,7 @@ fn tab_create(shared: &Arc<Shared>, p: TabCreate) -> ApiResult {
             &mut inner,
             TerminalCreate {
                 space_id: p.space_id.clone(),
+                env: p.env.clone(),
                 ..Default::default()
             },
         )?,
@@ -2240,6 +2251,7 @@ fn tab_split(shared: &Arc<Shared>, p: TabSplit) -> ApiResult {
             command: p.command,
             cols: None,
             rows: None,
+            env: p.env,
         },
     )?;
     let split_id = shared.new_id("split");

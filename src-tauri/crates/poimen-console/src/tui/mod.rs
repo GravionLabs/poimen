@@ -898,6 +898,7 @@ fn new_tab(app: &mut App, client: &Client, tx: &Sender<Msg>) {
         space_id,
         name: None,
         terminal_id: None,
+        env: Default::default(),
     };
     match client.create_tab(&params) {
         Ok((_, terminal)) => {
@@ -938,6 +939,7 @@ fn split(app: &mut App, client: &Client, tx: &Sender<Msg>, direction: SplitDirec
         cwd: None,
         name: None,
         command: None,
+        env: Default::default(),
     };
     match client.split(&params) {
         Ok((_, terminal)) => {

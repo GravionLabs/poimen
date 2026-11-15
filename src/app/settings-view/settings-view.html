@@ -393,6 +393,20 @@
                 }
               </ul>
               <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
+              <label class="check" [class.hit]="hit('Claude Code: classic renderer')">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  [checked]="settings().claudeClassicRenderer"
+                  (change)="setClassicRenderer($event)"
+                />
+                Claude Code: classic renderer (scrollbar in poimen; no focus view)
+              </label>
+              <p class="hint">
+                Sets <code>CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1</code> in terminals created
+                afterwards; running terminals keep their environment. Inside Claude Code,
+                <code>/tui default</code> is the alternative.
+              </p>
               <h3>Supported agents</h3>
               <ul class="agent-kinds" aria-label="Supported agents">
                 @for (k of agentKinds; track k) {

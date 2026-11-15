@@ -407,6 +407,10 @@ export class SettingsView {
     void this.store.setExplorerShowHidden((event.target as HTMLInputElement).checked);
   }
 
+  protected setClassicRenderer(event: Event): void {
+    void this.store.setClaudeClassicRenderer((event.target as HTMLInputElement).checked);
+  }
+
   protected readonly monoFonts = COMMON_MONO_FONTS;
   protected readonly uiFonts = COMMON_UI_FONTS;
   protected readonly uiSizeRange = [MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE] as const;

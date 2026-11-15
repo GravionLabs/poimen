@@ -1913,6 +1913,14 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
+/// Writes only `agents.claude.classicRenderer`; the settings watcher emits the change and applies
+/// it to the backend for terminals created afterwards.
+#[tauri::command]
+fn set_claude_classic_renderer(on: bool) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    settings::save_claude_classic_renderer(&home, on)
+}
+
 /// Writes only `sounds.<kind>` (`blocked` or `done`: `false`, `true` or a file path).
 #[tauri::command]
 fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
@@ -2563,10 +2571,14 @@ pub fn run() {
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
                 let machines = app.state::<SharedMachines>().inner().clone();
-                sync_machines(&machines, &settings::load(&home).machines, &handle);
+                let loaded = settings::load(&home);
+                backend.set_claude_classic_renderer(loaded.claude_classic_renderer);
+                let watch_backend = backend.clone();
+                sync_machines(&machines, &loaded.machines, &handle);
                 std::thread::spawn(move || {
                     settings::watch(&home, std::time::Duration::from_secs(1), |s| {
                         let _ = handle.emit("settings", s);
+                        watch_backend.set_claude_classic_renderer(s.claude_classic_renderer);
                         sync_machines(&machines, &s.machines, &handle);
                         // Menu items carry the accelerators; rebuild them on the main thread.
                         let (app, shortcuts) = (handle.clone(), s.shortcuts.clone());
@@ -2680,6 +2692,7 @@ pub fn run() {
             set_sidebar_agents,
             set_explorer_roots,
             set_explorer_show_hidden,
+            set_claude_classic_renderer,
             set_sound,
             sound_file,
             set_spaces_layout,

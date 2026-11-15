@@ -131,6 +131,7 @@ describe("parseSettings", () => {
       sidebarShowBaseBranch: false,
       explorerRoots: ["~"],
       explorerShowHidden: false,
+      claudeClassicRenderer: false,
       scrollback: 10000,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       spaceTemplates: [
@@ -170,6 +171,12 @@ describe("parseSettings", () => {
     ]);
     expect(parseSettings({ machines: "box" }).machines).toEqual([]);
     expect(parseSettings({}).machines).toEqual([]);
+  });
+
+  it("reads the classic renderer option and defaults it to off", () => {
+    expect(parseSettings({}).claudeClassicRenderer).toBe(false);
+    expect(parseSettings({ claudeClassicRenderer: true }).claudeClassicRenderer).toBe(true);
+    expect(parseSettings({ claudeClassicRenderer: "yes" }).claudeClassicRenderer).toBe(false);
   });
 
   it("reads the scrollback and keeps 10000 for a value that is not a whole number from 0", () => {

@@ -946,6 +946,10 @@ pub struct SpaceCreate {
     /// Replaces the command of the layout's root pane (a task's command); typed into its shell.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Extra environment of the new terminal(s), added after the server's own variables
+    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 fn yes() -> bool {
@@ -961,6 +965,7 @@ impl SpaceCreate {
             layout: false,
             trust: None,
             command: None,
+            env: BTreeMap::new(),
         }
     }
 
@@ -1070,6 +1075,10 @@ pub struct SpaceApplyLayout {
     /// The user's answer to a `trust_required` result; absent on the first send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trust: Option<TrustAnswer>,
+    /// Extra environment of the new terminal(s), added after the server's own variables
+    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 impl SpaceApplyLayout {
@@ -1080,6 +1089,7 @@ impl SpaceApplyLayout {
             cwd: None,
             preset: None,
             trust: None,
+            env: BTreeMap::new(),
         }
     }
 
@@ -1134,6 +1144,10 @@ pub struct TerminalCreate {
     pub cols: Option<u16>,
     #[serde(default)]
     pub rows: Option<u16>,
+    /// Extra environment of the new terminal(s), added after the server's own variables
+    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 /// `tab.create`: a new tab at the end of the space, with `terminal_id` (moved out of its tab) or
@@ -1146,6 +1160,10 @@ pub struct TabCreate {
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_id: Option<String>,
+    /// Extra environment of the new terminal(s), added after the server's own variables
+    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1184,6 +1202,10 @@ pub struct TabSplit {
     /// Program and arguments, never through a shell; defaults to the user's `$SHELL`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<Vec<String>>,
+    /// Extra environment of the new terminal(s), added after the server's own variables
+    /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 /// `tab.resize_split`: sets the ratio of one split; an unknown `split_id` is `not_found`.
@@ -1392,6 +1414,28 @@ pub enum Event {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn env_of_the_create_requests_is_optional_and_round_trips() {
+        let old: TerminalCreate = serde_json::from_str(r#"{"space_id":"s1"}"#).unwrap();
+        assert!(old.env.is_empty());
+        assert_eq!(serde_json::to_value(&old).unwrap().get("env"), None);
+        let with: TerminalCreate =
+            serde_json::from_str(r#"{"space_id":"s1","env":{"A":"1"}}"#).unwrap();
+        assert_eq!(with.env["A"], "1");
+        let split: TabSplit =
+            serde_json::from_str(r#"{"terminal_id":"t1","direction":"right","env":{"A":"1"}}"#)
+                .unwrap();
+        assert_eq!(split.env["A"], "1");
+        let space: SpaceCreate =
+            serde_json::from_str(r#"{"name":"x","cwd":"/","env":{"A":"1"}}"#).unwrap();
+        assert_eq!(space.env["A"], "1");
+        let apply: SpaceApplyLayout =
+            serde_json::from_str(r#"{"space_id":"s1","env":{"A":"1"}}"#).unwrap();
+        assert_eq!(apply.env["A"], "1");
+        let tab: TabCreate = serde_json::from_str(r#"{"space_id":"s1"}"#).unwrap();
+        assert!(tab.env.is_empty());
+    }
+
     use super::*;
     use serde_json::json;
 
