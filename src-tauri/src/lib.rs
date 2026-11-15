@@ -415,6 +415,27 @@ async fn github_pull_detail(
         })?
 }
 
+/// A write on a pull request (review, ready/draft, close/reopen). Runs only on explicit user
+/// input; the client drops the caches of the repository afterwards.
+#[tauri::command]
+async fn github_pr_action(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+    action: github_pulls::PrAction,
+    body: Option<String>,
+) -> Result<(), github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        github_pulls::run_action(&client, &root, number, action, body.as_deref())
+    })
+    .await
+    .map_err(|e| github::GhError::Other {
+        message: e.to_string(),
+    })?
+}
+
 /// The pull request (open or merged) of the branch of each directory, one GraphQL query per
 /// repository; directories without one are left out. Read-only; `gh` errors give an empty answer.
 #[tauri::command]
@@ -2623,6 +2644,7 @@ pub fn run() {
             terminal_create,
             github_pulls,
             github_pull_detail,
+            github_pr_action,
             branch_pulls,
             github_issues,
             github_issue_detail,

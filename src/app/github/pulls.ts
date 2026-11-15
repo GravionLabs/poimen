@@ -91,6 +91,41 @@ export interface PullDetail {
   viewerCanMergeAsAdmin: boolean;
 }
 
+/** A write on a pull request (`PrAction` of `github_pulls.rs`). */
+export type PrAction =
+  "approve" | "request_changes" | "comment" | "ready" | "draft" | "close" | "reopen";
+
+export const PR_ACTION_LABELS: Record<PrAction, string> = {
+  approve: "Approve",
+  request_changes: "Request changes",
+  comment: "Comment",
+  ready: "Ready for review",
+  draft: "Convert to draft",
+  close: "Close",
+  reopen: "Reopen",
+};
+
+/** The actions that need text (`request_changes`, `comment`) or a confirmation (`close`). */
+export type PrCompose = "request_changes" | "comment" | "close";
+
+/**
+ * The write actions the viewer may use on `detail`: none without `viewerCanUpdate`, none on a
+ * merged pull request; approve and request changes never on one's own pull request.
+ */
+export function availableActions(
+  detail: Pick<PullDetail, "state" | "isDraft" | "viewerCanUpdate" | "viewerDidAuthor">,
+): PrAction[] {
+  if (!detail.viewerCanUpdate) return [];
+  if (detail.state === "CLOSED") return ["reopen"];
+  if (detail.state !== "OPEN") return [];
+  return [
+    ...(detail.viewerDidAuthor ? [] : (["approve", "request_changes"] as const)),
+    "comment",
+    detail.isDraft ? "ready" : "draft",
+    "close",
+  ];
+}
+
 /** A pull request in the table, with the repository it belongs to. */
 export interface PullRow extends Pull {
   repo: string;
@@ -472,6 +507,7 @@ export class GithubPulls {
 
   /** Opens the detail pane of `row` and reads its detail (the backend caches for 30 s). */
   async openDetail(row: PullRow): Promise<void> {
+    this.compose.set(null);
     this._cursor.set(row.key);
     this._detailKey.set(row.key);
     this._detail.set(null);
@@ -490,7 +526,60 @@ export class GithubPulls {
     }
   }
 
+  /** The pending text or confirmation step of the detail pane (also set by the palette). */
+  readonly compose = signal<PrCompose | null>(null);
+  private readonly _actionBusy = signal(false);
+  readonly actionBusy = this._actionBusy.asReadonly();
+
+  /** The actions of the open detail, empty while it is not loaded. */
+  readonly actions = computed<PrAction[]>(() => {
+    const d = this._detail();
+    return d && this.detailRow() ? availableActions(d) : [];
+  });
+
+  /**
+   * Runs a write on the open pull request, only on explicit user input. Afterwards the list and
+   * the pane reload; a failure is a notification naming the action and the `gh` message.
+   */
+  async act(action: PrAction, body?: string): Promise<boolean> {
+    const row = this.detailRow();
+    if (!row || this._actionBusy() || !this.actions().includes(action)) return false;
+    this._actionBusy.set(true);
+    try {
+      await this.bridge.invoke("github_pr_action", {
+        root: row.root,
+        number: row.number,
+        action,
+        body: body ?? null,
+      });
+    } catch (err) {
+      const e = ghErrorOf(err);
+      this.spaces.notify(
+        `${PR_ACTION_LABELS[action]} #${row.number}: ${typeof e === "string" ? e : errorText(e)}`,
+      );
+      return false;
+    } finally {
+      this._actionBusy.set(false);
+    }
+    this.compose.set(null);
+    await this.load(true);
+    const again = this.rows().find((r) => r.key === row.key);
+    if (again && this._detailKey() === row.key) await this.openDetail(again);
+    return true;
+  }
+
+  /** An action chosen by button or palette: text and close ask first, the rest run at once. */
+  choose(action: PrAction): void {
+    if (!this.actions().includes(action)) return;
+    if (action === "request_changes" || action === "comment" || action === "close") {
+      this.compose.set(action);
+    } else {
+      void this.act(action);
+    }
+  }
+
   closeDetail(): void {
+    this.compose.set(null);
     this._detailKey.set(null);
     this._detail.set(null);
     this._detailError.set(null);

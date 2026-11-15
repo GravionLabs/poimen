@@ -97,6 +97,7 @@ import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
 import { AgentActionDialog } from "./github/agent-action-dialog/agent-action-dialog";
 import { AgentActions } from "./github/agent-actions";
 import { IssueTasks } from "./github/issue-task";
+import { GithubPulls } from "./github/pulls";
 import { TaskStarter } from "./core/task-start";
 import { ProjectTeardown } from "./core/project-teardown";
 import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
@@ -179,6 +180,7 @@ export class App {
   private readonly teardown = inject(ProjectTeardown);
   private readonly projectEntries = inject(ProjectEntries);
   protected readonly agentActions = inject(AgentActions);
+  protected readonly pulls = inject(GithubPulls);
   protected readonly deliver = inject(Deliver);
   private readonly spaceRebuild = inject(SpaceRebuild);
 
