@@ -11,7 +11,19 @@
     </p>
   }
   @for (r of milestones.repos(); track r.root) {
-    <h3 class="mono">{{ r.repo }}</h3>
+    <h3 class="mono">
+      {{ r.repo }}
+      <button
+        type="button"
+        class="icon-btn"
+        title="New milestone"
+        data-testid="milestone-new"
+        [attr.aria-label]="'New milestone in ' + r.repo"
+        (click)="milestones.openCreate(r.root, r.repo)"
+      >
+        +
+      </button>
+    </h3>
     @if (r.milestones.length === 0) {
       <p class="hint" data-testid="milestones-empty">No open milestones.</p>
     }
@@ -57,8 +69,85 @@
           >
             ↗
           </button>
+          @if (readyToClose(m)) {
+            <button
+              type="button"
+              class="icon-btn text"
+              data-testid="milestone-close"
+              [attr.aria-label]="'Close milestone ' + m.title"
+              (click)="milestones.openClose(r.root, r.repo, m)"
+            >
+              Close
+            </button>
+          }
+          <button
+            type="button"
+            class="icon-btn"
+            title="Edit or close"
+            data-testid="milestone-edit"
+            [attr.aria-label]="'Edit milestone ' + m.title"
+            (click)="milestones.openEdit(r.root, r.repo, m)"
+          >
+            ✎
+          </button>
+          @if (!readyToClose(m)) {
+            <button
+              type="button"
+              class="icon-btn text"
+              data-testid="milestone-close"
+              [attr.aria-label]="'Close milestone ' + m.title"
+              (click)="milestones.openClose(r.root, r.repo, m)"
+            >
+              Close
+            </button>
+          }
         </li>
       }
     </ul>
+  }
+  @if (milestones.compose(); as c) {
+    <form
+      class="compose"
+      data-testid="milestone-compose"
+      (submit)="$event.preventDefault(); milestones.submit()"
+    >
+      @if (c.kind === "close") {
+        <p data-testid="close-text">
+          Close milestone {{ c.title }} of {{ c.repo }}?
+          @if (c.open > 0) {
+            It still has {{ c.open }} open {{ c.open === 1 ? "issue" : "issues" }}.
+          }
+        </p>
+      } @else {
+        <h3>{{ c.kind === "create" ? "New milestone in " + c.repo : "Edit " + c.title }}</h3>
+        <label>
+          Title
+          <input name="title" [value]="c.title" (input)="c.title = $any($event.target).value" />
+        </label>
+        <label>
+          Description
+          <textarea
+            name="description"
+            [value]="c.description"
+            (input)="c.description = $any($event.target).value"
+          ></textarea>
+        </label>
+        <label>
+          Due date
+          <input
+            name="dueOn"
+            type="date"
+            [value]="c.dueOn"
+            (input)="c.dueOn = $any($event.target).value"
+          />
+        </label>
+      }
+      <div class="actions">
+        <button type="button" (click)="milestones.cancel()">Cancel</button>
+        <button type="submit" data-testid="milestone-submit" [disabled]="milestones.busy()">
+          {{ c.kind === "close" ? "Close milestone" : c.kind === "create" ? "Create" : "Save" }}
+        </button>
+      </div>
+    </form>
   }
 </section>

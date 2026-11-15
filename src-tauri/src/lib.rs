@@ -630,6 +630,40 @@ async fn github_milestones(
         .map_err(|e| e.to_string())
 }
 
+/// A write on a milestone (create, edit, close). Runs only on explicit user input; the client
+/// drops the caches of the repository afterwards.
+#[tauri::command]
+async fn github_milestone_write(
+    client: State<'_, GithubClient>,
+    root: String,
+    write: github_milestones::MilestoneWrite,
+) -> Result<(), github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        github_milestones::run_write(&client, &root, &write)
+    })
+    .await
+    .map_err(|e| github::GhError::Other {
+        message: e.to_string(),
+    })?
+}
+
+/// The suggested title (`M<n+1>`) of a new milestone of the repository of `root`. Read-only.
+#[tauri::command]
+async fn github_milestone_title(
+    client: State<'_, GithubClient>,
+    root: String,
+) -> Result<String, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || github_milestones::suggest_title(&client, &root))
+        .await
+        .map_err(|e| github::GhError::Other {
+            message: e.to_string(),
+        })?
+}
+
 /// `owner/name` of the GitHub `origin` of `dir`, `None` for a directory without one (read-only).
 #[tauri::command]
 async fn github_repo(dir: String) -> Option<github::Repo> {
@@ -2566,6 +2600,8 @@ pub fn run() {
             github_issue_edit,
             github_issue_action,
             github_milestones,
+            github_milestone_write,
+            github_milestone_title,
             task_issues,
             github_repo,
             create_space,
