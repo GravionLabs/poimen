@@ -158,6 +158,8 @@ export interface LayoutState {
   expandedRunGroups?: string[];
   /** Keys of the expanded timeline lines (runs) of the Runs view. */
   expandedRuns?: string[];
+  /** Keys (`owner/repo#title`) of the expanded milestones of the Runs overview (#585). */
+  expandedMilestones?: string[];
   /** The user answered "Not now" to the offer to install the agent hooks of the poimen backend. */
   hooksOfferDismissed?: boolean;
   /** Agents whose hooks were seen installed; a dismissed offer returns when one goes missing. */
@@ -276,6 +278,7 @@ export function parseLayout(raw: string | null): LayoutState {
       settingsCollapsed,
       expandedRunGroups,
       expandedRuns,
+      expandedMilestones,
       hooksOfferDismissed,
       hooksSeen,
       defaultsSeeded,
@@ -284,6 +287,8 @@ export function parseLayout(raw: string | null): LayoutState {
     if (runGroups) state.expandedRunGroups = runGroups;
     const runs = parseKeys(expandedRuns);
     if (runs) state.expandedRuns = runs;
+    const milestones = parseKeys(expandedMilestones);
+    if (milestones) state.expandedMilestones = milestones;
     const comments = parseLineComments(lineComments);
     if (Object.keys(comments).length) state.lineComments = comments;
     if (changesLayout === "inline" || changesLayout === "split")
@@ -465,6 +470,9 @@ export class UiState {
   );
   /** Expanded timeline lines of the Runs view (persisted). */
   readonly expandedRuns = signal<ReadonlySet<string>>(new Set(this.initial.expandedRuns ?? []));
+  readonly expandedMilestones = signal<ReadonlySet<string>>(
+    new Set(this.initial.expandedMilestones ?? []),
+  );
   /** Whether the hooks offer was declined; it is not shown again. */
   readonly hooksOfferDismissed = signal(this.initial.hooksOfferDismissed === true);
   /** Agents whose hooks were seen installed (persisted). */
@@ -545,6 +553,12 @@ export class UiState {
   /** Expands or collapses a subject group of the Runs view. */
   setRunGroupExpanded(key: string, expanded: boolean): void {
     this.expandedRunGroups.set(withKey(this.expandedRunGroups(), key, expanded));
+    this.save();
+  }
+
+  /** Expands or collapses a milestone of the Runs overview. */
+  setMilestoneExpanded(key: string, expanded: boolean): void {
+    this.expandedMilestones.set(withKey(this.expandedMilestones(), key, expanded));
     this.save();
   }
 
@@ -805,6 +819,9 @@ export class UiState {
       settingsCollapsed: this.settingsCollapsed().size ? [...this.settingsCollapsed()] : undefined,
       expandedRunGroups: this.expandedRunGroups().size ? [...this.expandedRunGroups()] : undefined,
       expandedRuns: this.expandedRuns().size ? [...this.expandedRuns()] : undefined,
+      expandedMilestones: this.expandedMilestones().size
+        ? [...this.expandedMilestones()]
+        : undefined,
       hooksOfferDismissed: this.hooksOfferDismissed() ? true : undefined,
       hooksSeen: this.hooksSeen().length ? [...this.hooksSeen()] : undefined,
       defaultsSeeded: this.defaultsSeeded() ? true : undefined,

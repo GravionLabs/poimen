@@ -37,6 +37,8 @@ export interface Issue {
   parent: { number: number; repo: string } | null;
   subTotal: number;
   subCompleted: number;
+  /** Numbers of the open issues that block this one (native dependencies). */
+  blockedBy?: number[];
   prs: LinkedPr[];
 }
 

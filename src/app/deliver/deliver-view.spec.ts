@@ -12,6 +12,7 @@ import { UI_STATE_KEY, UI_STORAGE, UiState } from "../core/ui-state";
 import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { Deliver, loopPane, milestoneNumber } from "./deliver";
+import { Overview } from "./overview";
 import { DeliverView, linkLabel, prLabel, stepText } from "./deliver-view";
 import { cardsOf, type DeliverCard, type DeliverRead, type DeliverStatus } from "./deliver-status";
 
@@ -84,7 +85,9 @@ const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim(
 /** The texts of the child elements, joined by a space (the template drops the whitespace). */
 const parts = (el: Element) => [...el.children].map((c) => text(c)).join(" ");
 const button = (el: HTMLElement, label: string) =>
-  [...el.querySelectorAll("button")].find((b) => text(b).includes(label))!;
+  [...el.querySelectorAll("button")].find(
+    (b) => !b.closest("[data-testid=overview]") && text(b).includes(label),
+  )!;
 
 beforeEach(() => {
   tauri.reset();
@@ -168,11 +171,9 @@ describe("Runs view", () => {
       "M014.1 Runs view Decide whether #104 ships in M014.1 issue",
     ]);
     // Sections in order: Running now, Needs you, History.
-    expect([...el.querySelectorAll(".section-title")].map((h) => text(h))).toEqual([
-      "Running now",
-      "Needs you",
-      "History",
-    ]);
+    expect(
+      [...el.querySelectorAll(":not([data-testid=overview]) > .section-title")].map((h) => text(h)),
+    ).toEqual(["Running now", "Needs you", "History"]);
   });
 
   it("collapses a subject's runs into one history group, the head with its newest run", async () => {
@@ -715,5 +716,132 @@ describe("entry points", () => {
     expect(tabs.tabs().filter((t) => t.paneId === DELIVER_TAB)).toEqual([
       { paneId: DELIVER_TAB, pinned: true },
     ]);
+  });
+});
+
+describe("Runs view: milestone overview (#585)", () => {
+  const MILESTONE_URL = "https://github.com/GravionLabs/demo/milestone/14";
+  const milestone = (extra: Record<string, unknown> = {}) => ({
+    number: 14,
+    title: "M014.1 Runs view",
+    url: MILESTONE_URL,
+    dueOn: null,
+    description: "",
+    open: 3,
+    closed: 1,
+    current: true,
+    ...extra,
+  });
+  const issue = (number: number, extra: Record<string, unknown> = {}) => ({
+    number,
+    title: `Issue ${number}`,
+    url: `https://github.com/GravionLabs/demo/issues/${number}`,
+    state: "OPEN",
+    labels: ["pbi"],
+    assignees: [],
+    milestone: "M014.1 Runs view",
+    parent: null,
+    subTotal: 0,
+    subCompleted: 0,
+    prs: [],
+    ...extra,
+  });
+  const answerGithub = (error?: unknown) => {
+    tauri.answer("github_milestones", () => [
+      error
+        ? { root: "/r", repo: "GravionLabs/demo", status: "error", error }
+        : {
+            root: "/r",
+            repo: "GravionLabs/demo",
+            status: "ok",
+            milestones: [
+              milestone({ number: 15, title: "M015", url: "u15", current: false }),
+              milestone(),
+            ],
+          },
+    ]);
+    tauri.answer("github_issues", (args) => [
+      {
+        root: "/r",
+        repo: "GravionLabs/demo",
+        status: "ok",
+        truncated: false,
+        issues: args?.["closed"]
+          ? [issue(100, { state: "CLOSED" })]
+          : [
+              issue(101),
+              issue(102, { blockedBy: [101] }),
+              issue(103, { labels: ["pbi", "needs-decision"] }),
+            ],
+      },
+    ]);
+  };
+  const showOverview = async () => {
+    const view = await render();
+    vi.spyOn(TestBed.inject(Overview) as unknown as { dirs(): string[] }, "dirs").mockReturnValue([
+      "/r",
+    ]);
+    view.deliver.apply("/r", FOUR);
+    view.deliver.now.set(AT);
+    await TestBed.inject(Overview).load();
+    await view.show();
+    return view;
+  };
+
+  it("lists the current milestone first with progress and counts, the others collapsed", async () => {
+    answerGithub();
+    const { el } = await showOverview();
+    const rows = [...el.querySelectorAll("[data-testid=milestone]")];
+    expect(rows.map((r) => text(r.querySelector(".group-name")))).toEqual(
+      ["M014.1 Runs view current", "M015"].map((t) => t.replace(" current", "")),
+    );
+    expect(text(rows[0]!.querySelector("[data-testid=milestone-progress-text]"))).toBe(
+      "1/4 closed",
+    );
+    expect(text(rows[0]!.querySelector("[data-testid=milestone-counts]"))).toBe(
+      "0 in progress · 1 blocked · 1 needs you · 1 open",
+    );
+    expect(el.querySelectorAll("[data-testid=overview-issue]")).toHaveLength(0);
+  });
+
+  it("expands a milestone to its issues with their states and keeps that in the UI state", async () => {
+    answerGithub();
+    const { el, show } = await showOverview();
+    (el.querySelector("[data-testid=milestone-toggle]") as HTMLElement).click();
+    await show();
+    const states = [...el.querySelectorAll("[data-testid=overview-issue]")].map((li) => [
+      li.getAttribute("data-state"),
+      text(li.querySelector("[data-testid=issue-link]")),
+    ]);
+    expect(states).toEqual([
+      ["done", "#100 Issue 100"],
+      ["next", "#101 Issue 101"],
+      ["blocked", "#102 Issue 102"],
+      ["needs-you", "#103 Issue 103"],
+    ]);
+    expect(text(el.querySelector("[data-testid=issue-blockers]"))).toBe("blocked by #101");
+    expect(
+      TestBed.inject(UiState).expandedMilestones().has("GravionLabs/demo#M014.1 Runs view"),
+    ).toBe(true);
+  });
+
+  it("shows GitHub's progress in the head of a milestone group instead of the run's own", async () => {
+    answerGithub();
+    const { el } = await showOverview();
+    const group = [...el.querySelectorAll("[data-testid=group]")][0]!;
+    expect(text(group.querySelector("[data-testid=progress]"))).toBe("1/4 closed");
+  });
+
+  it("lists the milestone of the run subjects with a hint when GitHub fails", async () => {
+    answerGithub({ kind: "offline" });
+    const { el } = await showOverview();
+    expect(text(el.querySelector("[data-testid=overview-repo-error]"))).toContain("not reachable");
+    const rows = [...el.querySelectorAll("[data-testid=milestone]")];
+    expect(rows).toHaveLength(1);
+    expect(text(rows[0]!.querySelector(".group-name"))).toBe("M014.1 Runs view");
+    expect(el.querySelector("[data-testid=milestone-progress-text]")).toBeNull();
+    // Without GitHub the group head keeps the run's own progress.
+    const group = [...el.querySelectorAll("[data-testid=group]")][0]!;
+    expect(text(group.querySelector("[data-testid=progress]"))).toBe("4/7 issues");
   });
 });

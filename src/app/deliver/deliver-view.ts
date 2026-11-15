@@ -2,15 +2,27 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  DestroyRef,
   computed,
+  effect,
   inject,
   linkedSignal,
+  untracked,
   output,
 } from "@angular/core";
 import { NgTemplateOutlet } from "@angular/common";
 import { UiState } from "../core/ui-state";
 import { eventTime, toneStyle } from "../bottom-panel/run-events";
+import { errorText, type GhError } from "../github/pulls";
 import { Deliver } from "./deliver";
+import { OVERVIEW_REFRESH_MS, Overview } from "./overview";
+import {
+  issueSubjectNumber,
+  type IssueState,
+  type MilestoneRow,
+  type OverviewIssue,
+  type RepoOverview,
+} from "./milestone-overview";
 import {
   SUPPORTED_EVENTS,
   SUPPORTED_SCHEMA,
@@ -35,6 +47,7 @@ import {
   type GroupRun,
   type LeftTask,
   type Link,
+  type Progress,
   type RunGroup,
   type RunSections,
   type Step,
@@ -92,6 +105,7 @@ export function lineCounts(line: TimelineLine): string[] {
 export class DeliverView {
   protected readonly deliver = inject(Deliver);
   protected readonly ui = inject(UiState);
+  protected readonly overview = inject(Overview);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly supported = SUPPORTED_SCHEMA;
   protected readonly eventsVersion = SUPPORTED_EVENTS;
@@ -108,6 +122,17 @@ export class DeliverView {
   protected readonly lineCounts = lineCounts;
   /** The terminal of a run was asked for. */
   readonly paneChosen = output<string>();
+
+  constructor() {
+    // The overview follows every run event of the open repositories and is read again at least
+    // every five minutes while the view is open.
+    effect(() => {
+      this.deliver.cards();
+      untracked(() => void this.overview.load());
+    });
+    const timer = setInterval(() => void this.overview.load(), OVERVIEW_REFRESH_MS);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+  }
 
   /** Cards that are not a readable run: unknown versions and broken files. */
   protected readonly problems = computed(() =>
@@ -130,6 +155,11 @@ export class DeliverView {
 
   protected age(status: DeliverStatus): string {
     return ageText(status.updated, this.deliver.now());
+  }
+
+  /** The progress of a group head: GitHub's `closed/total` for a milestone, else the run's own. */
+  protected progressOf(group: RunGroup): Progress | null {
+    return this.overview.progressOf(group) ?? this.newest(group).progress;
   }
 
   protected newest(group: RunGroup): DeliverStatus {
@@ -196,6 +226,53 @@ export class DeliverView {
   protected agentText(status: DeliverStatus): string {
     const agent = [status.harness, status.model].filter(Boolean).join(" ");
     return agent ? `${agent} · ` : "";
+  }
+
+  protected failureText(failure: GhError | string): string {
+    return typeof failure === "string" ? failure : errorText(failure);
+  }
+
+  protected repoLabel(repo: RepoOverview): string {
+    return repo.repo ?? this.where(repo);
+  }
+
+  protected milestoneOpen(row: MilestoneRow): boolean {
+    return this.ui.expandedMilestones().has(row.key);
+  }
+
+  protected toggleMilestone(row: MilestoneRow): void {
+    this.ui.setMilestoneExpanded(row.key, !this.milestoneOpen(row));
+  }
+
+  /** "running, updated 2 min ago" / "failed 3 h ago: ..." of the run a milestone row shows. */
+  protected runLabel(run: GroupRun): string {
+    return stateText(run.status, this.deliver.now());
+  }
+
+  protected paneOfRun(run: GroupRun): string | undefined {
+    return this.deliver.paneOf(run.card);
+  }
+
+  /** The terminal of the run when it works on this issue, else nothing. */
+  protected issuePane(row: MilestoneRow, entry: OverviewIssue): string | undefined {
+    const run = row.run;
+    if (!run || !run.status.tasks.some((t) => issueSubjectNumber(t) === entry.issue.number))
+      return undefined;
+    return this.deliver.paneOf(run.card);
+  }
+
+  protected blockers(entry: OverviewIssue): string {
+    return entry.blockedBy.map((n) => `#${n}`).join(", ");
+  }
+
+  protected issueStateText(state: IssueState): string {
+    return {
+      "in-progress": "in progress",
+      "needs-you": "needs you",
+      blocked: "blocked",
+      next: "next",
+      done: "done",
+    }[state];
   }
 
   protected groupOpen(group: RunGroup): boolean {

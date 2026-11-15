@@ -26,6 +26,7 @@ issues(states: {states}, first: {PAGE}, after: $cursor, orderBy: {{field: UPDATE
 pageInfo {{ hasNextPage endCursor }} nodes {{ number title url state labels(first: 20) {{ nodes {{ name }} }} \
 assignees(first: 10) {{ nodes {{ login }} }} milestone {{ title }} \
 parent {{ number repository {{ nameWithOwner }} }} subIssuesSummary {{ total completed }} \
+blockedBy(first: 10) {{ nodes {{ number state }} }} \
 closedByPullRequestsReferences(first: 5, includeClosedPrs: true) {{ nodes {{ {PR_FIELDS} }} }} }} }} }} }}"
     )
 }
@@ -60,6 +61,8 @@ pub struct Issue {
     pub parent: Option<Parent>,
     pub sub_total: u64,
     pub sub_completed: u64,
+    /// Numbers of the open issues that block this one (native dependencies, #585).
+    pub blocked_by: Vec<u64>,
     pub prs: Vec<LinkedPr>,
 }
 
@@ -128,6 +131,13 @@ fn parse_issue(node: &Value) -> Option<Issue> {
         parent,
         sub_total: node["subIssuesSummary"]["total"].as_u64().unwrap_or(0),
         sub_completed: node["subIssuesSummary"]["completed"].as_u64().unwrap_or(0),
+        blocked_by: node["blockedBy"]["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|b| b["state"].as_str() != Some("CLOSED"))
+            .filter_map(|b| b["number"].as_u64())
+            .collect(),
         prs,
     })
 }
@@ -782,6 +792,14 @@ mod tests {
         assert_eq!(pbi.prs[0].state, "MERGED");
         assert_eq!(pbi.prs[0].checks.state, "passing");
         assert_eq!(pbi.prs[1].checks.state, "none");
+    }
+
+    #[test]
+    fn open_blockers_are_listed_and_closed_ones_are_not() {
+        let (issues, _) = parse_page(&fixture()).unwrap();
+        assert_eq!(issues[1].blocked_by, vec![231]);
+        assert!(issues[0].blocked_by.is_empty());
+        assert!(issues[2].blocked_by.is_empty());
     }
 
     #[test]
