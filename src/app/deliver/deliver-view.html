@@ -418,9 +418,10 @@
                   </ul>
                 }
                 @if (r.status.finished.length > 0) {
+                  @let folds = foldFinished(r.status.finished);
                   <h3>Finished</h3>
                   <ul data-testid="finished">
-                    @for (t of r.status.finished; track t.task) {
+                    @for (t of folds.done; track t.task) {
                       <li>
                         @if (t.subject.url; as url) {
                           <button type="button" class="link" (click)="deliver.openUrl(url)">
@@ -440,6 +441,24 @@
                       </li>
                     }
                   </ul>
+                  @for (f of folds.skipped; track f.reason) {
+                    <details data-testid="skipped-fold">
+                      <summary>{{ f.tasks.length }} skipped ({{ f.reason }})</summary>
+                      <ul>
+                        @for (t of f.tasks; track t.task) {
+                          <li>
+                            @if (t.subject.url; as url) {
+                              <button type="button" class="link" (click)="deliver.openUrl(url)">
+                                {{ overview.titleOf(t, g.root, g.machine) }}
+                              </button>
+                            } @else {
+                              <span>{{ overview.titleOf(t, g.root, g.machine) }}</span>
+                            }
+                          </li>
+                        }
+                      </ul>
+                    </details>
+                  }
                 }
                 @if (r.status.links.length > 0) {
                   <p class="links" data-testid="links">

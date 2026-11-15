@@ -32,6 +32,7 @@ import {
   leftOpen,
   needsYouItems,
   outcomeText,
+  foldFinished,
   percent,
   progressText,
   runSections,
@@ -117,6 +118,7 @@ export class DeliverView {
   protected readonly stepText = stepText;
   protected readonly title = runTitle;
   protected readonly outcomeText = outcomeText;
+  protected readonly foldFinished = foldFinished;
   protected readonly eventTime = eventTime;
   protected readonly toneStyle = toneStyle;
   protected readonly lineCounts = lineCounts;
