@@ -181,6 +181,7 @@ fn tab_with_command(
             space_id: space_id.to_owned(),
             name: Some(name.to_owned()),
             terminal_id: None,
+            env: Default::default(),
         })
         .map_err(text)?;
     client
@@ -242,6 +243,7 @@ pub fn run_entry(
             space_id: space_id.to_owned(),
             name: Some(preset.name.clone()),
             terminal_id: None,
+            env: Default::default(),
         })
         .map_err(text)?;
     let mut ids: BTreeMap<&str, String> = BTreeMap::new();
@@ -263,6 +265,7 @@ pub fn run_entry(
                         cwd: None,
                         name: Some(pane.name.clone()),
                         command: None,
+                        env: Default::default(),
                     })
                     .map_err(text)?;
                 t.id

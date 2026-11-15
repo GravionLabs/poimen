@@ -90,7 +90,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
         title: "Machines",
         labels: ["Remote machines", "Check machine"],
       },
-      { id: "agents", title: "Agents", labels: ["Harnesses", "Models", "Agent actions"] },
+      {
+        id: "agents",
+        title: "Agents",
+        labels: ["Harnesses", "Models", "Agent actions", "Claude Code: classic renderer"],
+      },
     ],
   },
 ];

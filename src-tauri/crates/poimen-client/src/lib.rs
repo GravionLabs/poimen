@@ -987,6 +987,7 @@ mod tests {
                 cwd: None,
                 name: None,
                 command: None,
+                env: Default::default(),
             })
             .unwrap();
         assert_eq!(tab.root.split_ids(), ["split5"]);

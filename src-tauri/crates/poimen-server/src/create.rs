@@ -31,6 +31,8 @@ pub(crate) struct Build {
     pub(crate) warnings: Vec<String>,
     /// The project's `setup`, only when its commands may run.
     pub(crate) setup: Option<String>,
+    /// The request's `env` for every terminal built.
+    pub(crate) env: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -198,6 +200,7 @@ pub(crate) fn prepare(
         layout,
         warnings,
         setup,
+        env: Default::default(),
     }))
 }
 

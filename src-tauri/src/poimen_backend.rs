@@ -9,7 +9,7 @@
 //! xterm.js tracks the modes itself (mouse, scrollback). poimen stops the server only after the user confirmed (`restart_server`, `stop_server`).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -45,7 +45,12 @@ pub struct PoimenBackend {
     unreported: Mutex<HashSet<String>>,
     next_id: AtomicU32,
     streams: Arc<Mutex<HashMap<u32, Arc<Stream>>>>,
+    /// `agents.claude.classicRenderer`: see [`PoimenBackend::terminal_env`].
+    classic_renderer: AtomicBool,
 }
+
+/// Makes Claude Code use its normal screen, so xterm.js keeps scrollback, scrollbar and search.
+const CLASSIC_RENDERER_ENV: (&str, &str) = ("CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN", "1");
 
 impl PoimenBackend {
     /// Gives the tab whose only terminal is `terminal_id` the name `name`; no such tab is Ok.
@@ -65,7 +70,21 @@ impl PoimenBackend {
             unreported: Mutex::default(),
             next_id: AtomicU32::new(0),
             streams: Arc::default(),
+            classic_renderer: AtomicBool::new(false),
         }
+    }
+
+    /// The `env` every terminal this backend creates carries: the classic renderer variable while
+    /// the setting is on, else nothing.
+    fn terminal_env(&self) -> std::collections::BTreeMap<String, String> {
+        let mut env = std::collections::BTreeMap::new();
+        if self.classic_renderer.load(Ordering::Relaxed) {
+            env.insert(
+                CLASSIC_RENDERER_ENV.0.to_owned(),
+                CLASSIC_RENDERER_ENV.1.to_owned(),
+            );
+        }
+        env
     }
 
     /// The backend of a machine's server: `client` reaches it over its connector, and poimen never
@@ -141,6 +160,7 @@ impl PoimenBackend {
             .create_terminal(&TerminalCreate {
                 space_id: space_id.into(),
                 cwd: cwd.map(str::to_owned),
+                env: self.terminal_env(),
                 ..TerminalCreate::default()
             })
             .map_err(text)
@@ -436,6 +456,10 @@ fn controller_held() -> StreamRecord {
 }
 
 impl Backend for PoimenBackend {
+    fn set_claude_classic_renderer(&self, on: bool) {
+        self.classic_renderer.store(on, Ordering::Relaxed);
+    }
+
     fn ensure_running(&self, auto_start: bool) -> Result<Outcome, StartError> {
         self.local_only()?;
         poimen_server::ensure_running(&poimen_server::SystemRunner::new(), auto_start)
@@ -478,6 +502,7 @@ impl Backend for PoimenBackend {
         let params = SpaceCreate {
             trust: request.decision.map(trust_answer),
             command: request.command.map(str::to_owned),
+            env: self.terminal_env(),
             ..SpaceCreate::with_layout(request.label, request.cwd)
         };
         Some(
@@ -496,6 +521,7 @@ impl Backend for PoimenBackend {
             cwd: Some(request.cwd.to_owned()),
             preset: request.preset.map(str::to_owned),
             trust: request.decision.map(trust_answer),
+            env: self.terminal_env(),
         };
         Some(self.client.apply_layout(&params).map(applied).map_err(text))
     }
@@ -541,6 +567,7 @@ impl Backend for PoimenBackend {
                 cwd: cwd.map(str::to_owned),
                 name: None,
                 command: None,
+                env: self.terminal_env(),
             })
             .map_err(text)?;
         Ok(Some(terminal.id))
@@ -567,6 +594,7 @@ impl Backend for PoimenBackend {
                     argv.extend(old.args.iter().cloned());
                     argv
                 }),
+                env: self.terminal_env(),
             })
             .map_err(text)?;
         self.client.close_terminal(&old.id).map_err(text)?;
@@ -1662,6 +1690,80 @@ mod tests {
             .cloned()
             .unwrap();
         serde_json::from_str(&line[method.len() + 1..]).unwrap()
+    }
+
+    const CLASSIC: &str = "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN";
+
+    #[test]
+    fn the_classic_renderer_env_is_passed_only_while_the_setting_is_on() {
+        let (backend, log) = backend_for("classic-off", vec![], false);
+        backend.create_terminal("s1", None).unwrap();
+        backend
+            .split("t1", SplitDirection::Right, None, None)
+            .unwrap();
+        backend
+            .create_space_with_layout(layout_request("/work/api", None, None))
+            .unwrap()
+            .unwrap();
+        backend
+            .apply_layout(ApplyRequest {
+                space_id: "s1",
+                cwd: "/work/api",
+                preset: None,
+                decision: None,
+            })
+            .unwrap()
+            .unwrap();
+        for method in [
+            "terminal.create",
+            "tab.split",
+            "space.create",
+            "space.apply_layout",
+        ] {
+            assert!(params_of(&log, method).get("env").is_none(), "{method} off");
+        }
+
+        let (backend, log) = backend_for("classic-on", vec![], false);
+        backend.set_claude_classic_renderer(true);
+        backend.create_terminal("s1", None).unwrap();
+        backend
+            .split("t1", SplitDirection::Right, None, None)
+            .unwrap();
+        backend
+            .create_space_with_layout(layout_request("/work/api", None, None))
+            .unwrap()
+            .unwrap();
+        backend
+            .apply_layout(ApplyRequest {
+                space_id: "s1",
+                cwd: "/work/api",
+                preset: None,
+                decision: None,
+            })
+            .unwrap()
+            .unwrap();
+        for method in [
+            "terminal.create",
+            "tab.split",
+            "space.create",
+            "space.apply_layout",
+        ] {
+            assert_eq!(
+                params_of(&log, method)["env"],
+                json!({CLASSIC: "1"}),
+                "{method} on"
+            );
+        }
+
+        backend.set_claude_classic_renderer(false);
+        backend.create_terminal("s2", None).unwrap();
+        let last = lock(&log)
+            .iter()
+            .rev()
+            .find(|l| l.starts_with("terminal.create"))
+            .cloned()
+            .unwrap();
+        assert!(!last.contains(CLASSIC), "turned off again: {last}");
     }
 
     #[test]

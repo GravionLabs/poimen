@@ -239,6 +239,7 @@ fn a_preset_is_one_new_tab_after_the_existing_ones_without_setup() {
             space_id: space.id.clone(),
             name: Some("shell".into()),
             terminal_id: None,
+            ..Default::default()
         })
         .unwrap();
     let rx = events(&client);

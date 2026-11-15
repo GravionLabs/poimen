@@ -111,6 +111,7 @@ fn split_of(terminal_id: &str, direction: SplitDirection, ratio: Option<f64>) ->
         cwd: None,
         name: None,
         command: Some(vec![SHELL.into()]),
+        env: Default::default(),
     }
 }
 
@@ -390,6 +391,7 @@ fn tab_create_with_a_new_or_an_existing_terminal_rename_and_close() {
             space_id: space.id.clone(),
             name: Some("logs".into()),
             terminal_id: None,
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(
@@ -407,6 +409,7 @@ fn tab_create_with_a_new_or_an_existing_terminal_rename_and_close() {
             space_id: space.id.clone(),
             name: None,
             terminal_id: Some(second.id.clone()),
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(drain(&rx), ["tab.changed", "tab.created", "space.changed"]);
@@ -459,6 +462,7 @@ fn tab_create_with_a_new_or_an_existing_terminal_rename_and_close() {
         space_id: other.id.clone(),
         name: None,
         terminal_id: Some(fresh.id.clone()),
+        ..Default::default()
     };
     assert_eq!(code(client.create_tab(&foreign)), ErrorCode::InvalidParams);
     let unknown = TabCreate {
@@ -471,6 +475,7 @@ fn tab_create_with_a_new_or_an_existing_terminal_rename_and_close() {
         space_id: space.id.clone(),
         name: None,
         terminal_id: Some("t999".into()),
+        ..Default::default()
     };
     assert_eq!(code(client.create_tab(&gone)), ErrorCode::NotFound);
     assert_consistent(&client);
