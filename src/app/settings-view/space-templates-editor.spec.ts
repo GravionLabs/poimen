@@ -8,6 +8,7 @@ import type { SpaceTemplate } from "../core/space-templates";
 import { TauriBridge } from "../core/tauri";
 import { tauri } from "../core/tauri.mock";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
+import { SettingsImportPanel } from "./settings-import-panel";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -84,6 +85,13 @@ async function setup(
     warnings: [],
   }));
   TestBed.resetTestingModule();
+  TestBed.overrideComponent(SettingsImportPanel, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/settings-view/settings-import-panel.html", "utf8"),
+    },
+  });
   TestBed.overrideComponent(SpaceTemplatesEditor, {
     set: {
       templateUrl: undefined,
@@ -320,6 +328,38 @@ describe("SpaceTemplatesEditor", () => {
     await choose(select("agent"), "copilot");
     expect([...select("model").options].map((o) => o.value)).toEqual(["", "auto"]);
     expect(host.querySelector<HTMLSelectElement>("[name=model]")!.value).toBe("");
+  });
+
+  it("exports one template and previews a template import", async () => {
+    const { fixture, host, press } = await setup([WORK]);
+    const bridge = TestBed.inject(TauriBridge);
+    vi.spyOn(bridge, "pickSaveFile").mockResolvedValue("/tmp/work.json");
+    vi.spyOn(bridge, "pickJsonFile").mockResolvedValue("/tmp/in.json");
+    tauri.answer("settings_export", () => null);
+    tauri.answer("settings_import_plan", () => ({
+      added: [{ path: "spaceTemplates[Home]", after: { name: "Home" } }],
+      changed: [],
+      removed: [],
+      invalid: [],
+      skipped: [{ path: "theme", reason: "not a space template" }],
+    }));
+    const settle = async () => {
+      await fixture.whenStable();
+      await new Promise((resolve) => setTimeout(resolve));
+      fixture.detectChanges();
+    };
+    press("Export Work");
+    await settle();
+    expect(tauri.calls("settings_export")).toEqual([{ path: "/tmp/work.json", template: "Work" }]);
+    press("Import template…");
+    await settle();
+    expect(tauri.calls("settings_import_plan")).toEqual([
+      { path: "/tmp/in.json", mode: "merge", scope: "template" },
+    ]);
+    const preview = host.querySelector('[aria-label="Import preview"]')!;
+    expect(preview.textContent).toContain("spaceTemplates[Home]");
+    // A template import merges by name: no merge/replace choice.
+    expect(preview.querySelector('[aria-label="Import mode"]')).toBeNull();
   });
 
   it("fills the directory from the folder picker", async () => {

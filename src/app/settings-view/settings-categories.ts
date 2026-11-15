@@ -97,6 +97,17 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       },
     ],
   },
+  {
+    id: "general",
+    title: "General",
+    pages: [
+      {
+        id: "transfer",
+        title: "Export & import",
+        labels: ["Export settings", "Import settings"],
+      },
+    ],
+  },
 ];
 
 export const DEFAULT_SETTINGS_PAGE = SETTINGS_GROUPS[0].pages[0].id;

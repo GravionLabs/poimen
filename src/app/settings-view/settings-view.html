@@ -445,6 +445,41 @@
           @case ("space-layout") {
             <app-space-layout-editor />
           }
+          @case ("transfer") {
+            <section aria-label="Export and import">
+              <p class="hint">
+                Settings of <code>config.json</code> as a JSON file, for another machine or a
+                backup. Trusted projects are per machine and never exported or imported.
+              </p>
+              <div class="actions">
+                <button
+                  type="button"
+                  class="btn"
+                  [class.hit]="hit('Export settings')"
+                  [disabled]="transfer.busy()"
+                  (click)="exportSettings()"
+                >
+                  Export settings…
+                </button>
+                <button
+                  type="button"
+                  class="btn"
+                  [class.hit]="hit('Import settings')"
+                  [disabled]="transfer.busy()"
+                  (click)="importSettings()"
+                >
+                  Import settings…
+                </button>
+              </div>
+              @if (transfer.error(); as message) {
+                <p class="error" role="alert">{{ message }}</p>
+              }
+              @if (transfer.message(); as message) {
+                <p class="hint" role="status">{{ message }}</p>
+              }
+              <app-settings-import-panel scope="all" />
+            </section>
+          }
         }
       </div>
     </div>

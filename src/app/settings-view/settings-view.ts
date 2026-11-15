@@ -53,6 +53,8 @@ import {
 import { MachinesPage } from "../machines-page/machines-page";
 import { SpaceLayoutEditor } from "./space-layout-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
+import { SettingsImportPanel } from "./settings-import-panel";
+import { SettingsTransfer } from "../core/settings-transfer";
 
 export type SchemeMode = "single" | "pair";
 
@@ -151,7 +153,7 @@ export function withRoot(
 /** The settings view (an editor tab): appearance and the color scheme picker with live preview. */
 @Component({
   selector: "app-settings-view",
-  imports: [MachinesPage, SpaceLayoutEditor, SpaceTemplatesEditor],
+  imports: [MachinesPage, SpaceLayoutEditor, SpaceTemplatesEditor, SettingsImportPanel],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -164,6 +166,7 @@ export class SettingsView {
   private readonly ui = inject(UiState);
   protected readonly hooks = inject(HooksOffer);
   private readonly sounds = inject(Sounds);
+  protected readonly transfer = inject(SettingsTransfer);
   protected readonly agentName = agentName;
   protected readonly agentSupport = agentSupport;
   protected readonly agentKinds = HOOK_AGENT_KINDS;
@@ -401,6 +404,14 @@ export class SettingsView {
 
   protected testSound(kind: SoundKind): void {
     void this.sounds.test(kind);
+  }
+
+  protected exportSettings(): void {
+    void this.transfer.export();
+  }
+
+  protected importSettings(): void {
+    void this.transfer.choose("all");
   }
 
   protected setShowHidden(event: Event): void {

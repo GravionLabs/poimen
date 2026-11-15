@@ -490,3 +490,31 @@ h3 {
   border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
 }
+
+.import-plan {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+}
+
+.import-plan h3 {
+  overflow-wrap: anywhere;
+}
+
+.import-plan .diff {
+  margin: 4px 0 8px;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.import-plan .diff span {
+  color: var(--h-text-muted-color);
+  overflow-wrap: anywhere;
+}
+
+.import-plan .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
