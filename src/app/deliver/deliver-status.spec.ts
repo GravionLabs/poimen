@@ -8,6 +8,9 @@ import {
   cardKey,
   cardsOf,
   fromLegacy,
+  foldFinished,
+  type FinishedTask,
+  type Outcome,
   groupKey,
   groupRuns,
   isAlert,
@@ -625,5 +628,31 @@ describe("Runs view: groups by subject (#584)", () => {
     expect(groupKey(a!)).toBe("/r\ngithub.milestone\nGravionLabs/demo#14");
     expect(groupKey(b!)).toBe("box::/r\ngithub.milestone\nGravionLabs/demo#14");
     expect(groupKey(c!)).toBe(`/r\n\n\n${SESSION.run}`);
+  });
+});
+
+describe("foldFinished (#782)", () => {
+  const t = (task: string, outcome: Outcome, text: string | null) =>
+    ({
+      task,
+      outcome,
+      subject: { kind: "github.issue", id: task, title: task, url: null },
+      reason: null,
+      text,
+      links: [],
+    }) as FinishedTask;
+
+  it("counts skipped tasks per reason and keeps the others", () => {
+    const folds = foldFinished([
+      t("a", "succeeded", null),
+      t("b", "skipped", "blocked"),
+      t("c", "skipped", "blocked"),
+      t("d", "skipped", null),
+    ]);
+    expect(folds.done.map((x) => x.task)).toEqual(["a"]);
+    expect(folds.skipped.map((f) => [f.reason, f.tasks.length])).toEqual([
+      ["blocked", 2],
+      ["no reason", 1],
+    ]);
   });
 });

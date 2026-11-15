@@ -240,10 +240,10 @@ describe("Runs view", () => {
     const left = [...details.querySelectorAll("[data-testid=left-task]")].map(parts);
     expect(left).toEqual(["#102 Timeline waiting for merge PR #202"]);
     const finished = [...details.querySelectorAll("[data-testid=finished] li")].map(parts);
-    expect(finished).toEqual([
-      "#101 Group runs succeeded PR #201",
-      "#103 Keyboard skipped: blocked",
-    ]);
+    expect(finished).toEqual(["#101 Group runs succeeded PR #201"]);
+    const folds = [...details.querySelectorAll("[data-testid=skipped-fold]")];
+    expect(folds.map((f) => text(f.querySelector("summary")))).toEqual(["1 skipped (blocked)"]);
+    expect(folds.map((f) => text(f.querySelector("li")))).toEqual(["#103 Keyboard"]);
     expect(text(details.querySelector("[data-testid=links]"))).toBe("Links PR #201 PR #202");
     const rows = [...details.querySelectorAll("[data-testid=event]")].map((e) => e.className);
     expect(rows).toEqual([

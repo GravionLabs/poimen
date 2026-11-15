@@ -975,3 +975,32 @@ export function timelineLine(group: RunGroup, index: number, now: number): Timel
       .filter((n) => n !== ""),
   };
 }
+
+/** The skipped tasks of one reason, folded into a count that opens to the list. */
+export interface SkippedFold {
+  /** The words of the reason (`blocked`), `no reason` without one. */
+  reason: string;
+  tasks: FinishedTask[];
+}
+
+/** Finished tasks of a run: the ones that ran, and the skipped ones per reason (#782). */
+export interface FinishedFolds {
+  done: FinishedTask[];
+  skipped: SkippedFold[];
+}
+
+export function foldFinished(finished: readonly FinishedTask[]): FinishedFolds {
+  const done: FinishedTask[] = [];
+  const folds = new Map<string, SkippedFold>();
+  for (const t of finished) {
+    if (t.outcome !== "skipped") {
+      done.push(t);
+      continue;
+    }
+    const reason = outcomeText(t) ?? "no reason";
+    const fold = folds.get(reason) ?? { reason, tasks: [] };
+    fold.tasks.push(t);
+    folds.set(reason, fold);
+  }
+  return { done, skipped: [...folds.values()] };
+}
