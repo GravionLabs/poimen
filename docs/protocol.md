@@ -143,7 +143,7 @@ Supported agent kinds and what each gives (the table is `integration.rs::KINDS` 
 | `copilot` | yes            | yes                       |
 | `gemini`  | yes            | no                        |
 
-Any other harness of the `harnesses` registry can be started and prompted (the app remembers which terminals it started this way, since the server cannot tell such an agent from a shell), but has no hooks: its pane shows no status (not an error), and the app's "Start agent" dialog offers only the kinds above on this backend.
+Any other harness of the `harnesses` registry can be started and prompted (the app remembers which terminals it started this way, since the server cannot tell such an agent from a shell), but has no hooks: its pane shows no status (not an error), and the app's "Start agent" dialog offers the kinds above (with status) first and then every other harness of the registry, labeled "(no status)".
 
 On Windows the hooks run through PowerShell: Claude Code entries get `"shell": "powershell"` and the command `& '<path of poimen-server.exe>' hook claude # poimen-agent-hook` (single quotes doubled), the Copilot file gets a `powershell` command next to `bash`, and the hook timeout is 5 s instead of 2 (the PowerShell start). A Claude Code without the `shell` field runs the command in Git Bash, where it fails as a non-blocking hook error. `integration status` finds the marker in either form.
 
