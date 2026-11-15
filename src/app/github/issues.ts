@@ -12,6 +12,7 @@ import {
   errorText,
   ghErrorOf,
   isGithubUrl,
+  keyRange,
   type Checks,
   type GhError,
 } from "./pulls";
@@ -337,6 +338,23 @@ export function issueKey(repo: string, number: number): string {
   return `${repo}#${number}`;
 }
 
+/** The outcome of a bulk action: issue numbers done, and failed with the reason. */
+export interface BulkResult {
+  done: number[];
+  failed: { number: number; error: string }[];
+}
+
+/** The one notification of a bulk action. */
+export function bulkSummary(what: string, r: BulkResult): string {
+  const nums = (ns: number[]) => ns.map((n) => `#${n}`).join(", ");
+  let text = `Bulk ${what}: ${r.done.length} done`;
+  if (r.done.length) text += ` (${nums(r.done)})`;
+  if (r.failed.length) {
+    text += `, ${r.failed.length} failed (${r.failed.map((f) => `#${f.number}: ${f.error}`).join("; ")})`;
+  }
+  return text;
+}
+
 /** One repository ready for the view. */
 export interface RepoTree {
   root: string;
@@ -368,6 +386,9 @@ export class GithubIssues {
   private readonly _error = signal<string | null>(null);
   private readonly _selected = signal<{ repo: string; number: number } | null>(null);
   private readonly _cursor = signal<string | null>(null);
+  private readonly _marked = signal<ReadonlySet<string>>(new Set());
+  private readonly _bulkBusy = signal(false);
+  private anchor: string | null = null;
   private readonly _detailKey = signal<string | null>(null);
   private readonly _detail = signal<IssueDetail | null>(null);
   private readonly _detailError = signal<GhError | string | null>(null);
@@ -464,6 +485,141 @@ export class GithubIssues {
   select(repo: string, number: number): void {
     this._selected.set({ repo, number });
     this._cursor.set(issueKey(repo, number));
+  }
+
+  /** Keys (`owner/name#number`) of the issues marked for a bulk action (one repository). */
+  readonly marked = this._marked.asReadonly();
+  readonly bulkBusy = this._bulkBusy.asReadonly();
+
+  /** The repository of the marked issues; null without a selection. */
+  readonly markedRepo = computed(() => {
+    const first = [...this._marked()][0];
+    return first === undefined ? null : first.slice(0, first.lastIndexOf("#"));
+  });
+
+  /** The marked issues that pass the filters, in screen order, with their repository root. */
+  readonly markedIssues = computed(() => {
+    const keys = this._marked();
+    return this.trees().flatMap((t) =>
+      this.rows(t).flatMap((r) =>
+        keys.has(issueKey(t.repo, r.node.issue.number))
+          ? [{ repo: t.repo, root: t.root, issue: r.node.issue }]
+          : [],
+      ),
+    );
+  });
+
+  /** Whether the row cannot be marked: a selection exists in another repository. */
+  markDisabled(repo: string): boolean {
+    const at = this.markedRepo();
+    return at !== null && at !== repo;
+  }
+
+  /**
+   * Adds or removes one issue from the bulk selection; with `range` marks everything since the
+   * anchor. The selection stays in one repository: a key of another one is ignored.
+   */
+  mark(key: string, mode: "toggle" | "range" = "toggle"): void {
+    const repo = key.slice(0, key.lastIndexOf("#"));
+    if (this.markDisabled(repo)) return;
+    this._cursor.set(key);
+    if (mode === "range") {
+      const same = this.visibleKeys().filter((k) => k.startsWith(repo + "#"));
+      const keys = keyRange(same, this.anchor, key);
+      this._marked.update((s) => new Set([...s, ...keys]));
+      return;
+    }
+    this._marked.update((s) => {
+      const next = new Set(s);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+    this.anchor = key;
+  }
+
+  clearMarked(): void {
+    this._marked.set(new Set());
+    this.anchor = null;
+  }
+
+  /** Sets the milestone, or adds or removes a label, on every marked issue. */
+  bulkEdit(
+    change: Pick<IssueEdit, "milestone" | "addLabels" | "removeLabels">,
+  ): Promise<BulkResult> {
+    const text = change.milestone
+      ? `milestone ${change.milestone}`
+      : change.addLabels?.length
+        ? `add label ${change.addLabels.join(", ")}`
+        : `remove label ${(change.removeLabels ?? []).join(", ")}`;
+    return this.bulk(text, (root, number) =>
+      this.bridge.invoke("github_issue_edit", { root, number, edit: change }),
+    );
+  }
+
+  /** Closes every marked issue with the reason. */
+  bulkClose(reason: "completed" | "not_planned"): Promise<BulkResult> {
+    return this.bulk(ISSUE_ACTION_LABELS[reason].toLowerCase(), (root, number) =>
+      this.bridge.invoke("github_issue_action", { root, number, action: reason }),
+    );
+  }
+
+  /**
+   * One request per marked issue, in order; a failure does not stop the rest. One notification
+   * lists the numbers done and failed; the selection is cleared and the tree read again.
+   */
+  private async bulk(
+    what: string,
+    run: (root: string, number: number) => Promise<unknown>,
+  ): Promise<BulkResult> {
+    const targets = this.markedIssues();
+    const result: BulkResult = { done: [], failed: [] };
+    if (targets.length === 0 || this._bulkBusy()) return result;
+    this._bulkBusy.set(true);
+    try {
+      for (const t of targets) {
+        try {
+          await run(t.root, t.issue.number);
+          result.done.push(t.issue.number);
+        } catch (err) {
+          const e = ghErrorOf(err);
+          result.failed.push({
+            number: t.issue.number,
+            error: typeof e === "string" ? e : errorText(e),
+          });
+        }
+      }
+    } finally {
+      this._bulkBusy.set(false);
+    }
+    this.spaces.notify(bulkSummary(what, result));
+    this.clearMarked();
+    await this.load(true);
+    return result;
+  }
+
+  /** Labels and milestone titles of the marked repository, for the bulk bar. */
+  readonly bulkLabels = signal<string[]>([]);
+  readonly bulkMilestones = signal<string[]>([]);
+
+  /** Reads the labels and milestones of the marked repository (called by the bar). */
+  async loadBulkOptions(): Promise<void> {
+    const repo = this.markedRepo();
+    const root = (this._result() ?? []).find((r) => r.repo === repo)?.root;
+    if (!root) return;
+    const [labels, milestones] = await Promise.all([
+      this.bridge.invoke<string[]>("github_labels", { root }).catch(() => []),
+      this.bridge
+        .invoke<{ status: string; milestones?: { title: string }[] }[]>("github_milestones", {
+          dirs: [root],
+        })
+        .catch(() => []),
+    ]);
+    this.bulkLabels.set(labels ?? []);
+    this.bulkMilestones.set(
+      (milestones ?? [])
+        .flatMap((r) => (r.status === "ok" ? (r.milestones ?? []) : []))
+        .map((m) => m.title),
+    );
   }
 
   /** Moves the keyboard cursor by `delta` rows within the visible rows (clamped). */
@@ -833,6 +989,10 @@ export class GithubIssues {
         }),
       );
       this._error.set(null);
+      const known = new Set(
+        this.okRepos().flatMap((r) => r.issues.map((i) => issueKey(r.repo, i.number))),
+      );
+      this._marked.update((s) => new Set([...s].filter((k) => known.has(k))));
     } catch (err) {
       this._error.set(String(err));
     } finally {

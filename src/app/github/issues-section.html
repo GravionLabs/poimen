@@ -50,7 +50,60 @@
         [value]="issues.text()"
         (input)="issues.text.set(value($event))"
       />
+      @if (issues.markedIssues().length) {
+        <span class="hint" data-testid="marked-count"
+          >{{ issues.markedIssues().length }} selected</span
+        >
+      }
     </div>
+    @if (issues.markedIssues().length) {
+      <div class="toolbar bulk" role="group" aria-label="Bulk actions" data-testid="bulk-bar">
+        <select
+          aria-label="Set milestone"
+          data-testid="bulk-milestone"
+          [disabled]="issues.bulkBusy()"
+          (change)="bulkMilestone(value($event)); $any($event.target).value = ''"
+        >
+          <option value="">Set milestone</option>
+          @for (m of issues.bulkMilestones(); track m) {
+            <option [value]="m">{{ m }}</option>
+          }
+        </select>
+        <select
+          aria-label="Add label"
+          data-testid="bulk-add-label"
+          [disabled]="issues.bulkBusy()"
+          (change)="bulkAddLabel(value($event)); $any($event.target).value = ''"
+        >
+          <option value="">Add label</option>
+          @for (l of issues.bulkLabels(); track l) {
+            <option [value]="l">{{ l }}</option>
+          }
+        </select>
+        <select
+          aria-label="Remove label"
+          data-testid="bulk-remove-label"
+          [disabled]="issues.bulkBusy()"
+          (change)="bulkRemoveLabel(value($event)); $any($event.target).value = ''"
+        >
+          <option value="">Remove label</option>
+          @for (l of issues.bulkLabels(); track l) {
+            <option [value]="l">{{ l }}</option>
+          }
+        </select>
+        <select
+          aria-label="Close"
+          data-testid="bulk-close"
+          [disabled]="issues.bulkBusy()"
+          (change)="bulkClose(value($event)); $any($event.target).value = ''"
+        >
+          <option value="">Close…</option>
+          <option value="completed">Close as completed</option>
+          <option value="not_planned">Close as not planned</option>
+        </select>
+        <button type="button" data-testid="bulk-clear" (click)="issues.clearMarked()">Clear</button>
+      </div>
+    }
     @for (e of issues.errors(); track e.repo) {
       <p class="problem" role="alert" data-testid="issue-error">
         {{ e.repo }}: {{ errorText(e.error) }}
@@ -87,11 +140,20 @@
               issues.selected()?.repo === tree.repo && issues.selected()?.number === i.number
             "
             [style.padding-left.px]="row.depth * 20"
+            [class.marked]="issues.marked().has(tree.repo + '#' + i.number)"
             [class.cursor]="issues.cursor() === tree.repo + '#' + i.number"
             [attr.data-number]="i.number"
             [attr.data-repo]="tree.repo"
             (contextmenu)="openRowMenu($event, tree.repo, tree.root, i)"
           >
+            <input
+              type="checkbox"
+              data-testid="mark"
+              [checked]="issues.marked().has(tree.repo + '#' + i.number)"
+              [disabled]="issues.markDisabled(tree.repo)"
+              [attr.aria-label]="'Select #' + i.number"
+              (click)="onCheck($event, tree.repo, i.number)"
+            />
             @if (row.node.children.length) {
               <button
                 type="button"
