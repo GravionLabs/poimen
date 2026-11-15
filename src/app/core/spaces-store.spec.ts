@@ -56,21 +56,6 @@ describe("SpacesStore", () => {
     expect(store.connectionError()).toBeNull();
   });
 
-  it("names the backend of this run, poimen until the app says herdr", async () => {
-    expect(store.backendKind()).toBe("poimen");
-    tauri.answer("backend_kind", () => "herdr");
-    await store.start();
-    expect(store.backendKind()).toBe("herdr");
-  });
-
-  it("keeps poimen when the backend kind cannot be read", async () => {
-    tauri.answer("backend_kind", () => {
-      throw new Error("no such command");
-    });
-    await store.start();
-    expect(store.backendKind()).toBe("poimen");
-  });
-
   it("loads the first snapshot on start and listens once", async () => {
     await store.start();
     await store.start();
@@ -82,15 +67,15 @@ describe("SpacesStore", () => {
     expect(tauri.calls("snapshot")).toHaveLength(1);
   });
 
-  it("reads the herdr and app versions, herdr once per connection", async () => {
-    tauri.answer("herdr_info", () => ({ version: "0.9.5", protocol: 22, supported: 22 }));
+  it("reads the server and app versions, the server once per connection", async () => {
+    tauri.answer("backend_info", () => ({ version: "0.9.5", protocol: 22, supported: 22 }));
     tauri.answer("app_version", () => "0.2.0");
     await store.start();
     await store.refresh();
 
     expect(store.info()?.version).toBe("0.9.5");
     await vi.waitFor(() => expect(store.appVersion()).toBe("0.2.0"));
-    expect(tauri.calls("herdr_info")).toHaveLength(1);
+    expect(tauri.calls("backend_info")).toHaveLength(1);
   });
 
   it("reads the release channel of the build, stable when it cannot say", async () => {
@@ -109,7 +94,7 @@ describe("SpacesStore", () => {
   });
 
   it("leaves the version unknown without an error when herdr cannot say", async () => {
-    tauri.answer("herdr_info", () => {
+    tauri.answer("backend_info", () => {
       throw new Error("no socket");
     });
     await store.start();
@@ -122,9 +107,9 @@ describe("SpacesStore", () => {
     await store.start();
     tauri.invoke.mockClear();
 
-    tauri.emit("herdr", { kind: "pane.created", data: null });
-    tauri.emit("herdr", { kind: "tab.renamed", data: null });
-    tauri.emit("herdr", { kind: "pane.closed", data: null });
+    tauri.emit("backend", { kind: "pane.created", data: null });
+    tauri.emit("backend", { kind: "tab.renamed", data: null });
+    tauri.emit("backend", { kind: "pane.closed", data: null });
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS - 1);
     expect(tauri.calls("snapshot")).toHaveLength(0);
 
@@ -136,11 +121,11 @@ describe("SpacesStore", () => {
     await store.start();
     tauri.invoke.mockClear();
 
-    tauri.emit("herdr", { kind: "tab.changed", data: null });
+    tauri.emit("backend", { kind: "tab.changed", data: null });
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
     expect(tauri.calls("snapshot")).toHaveLength(1);
 
-    tauri.emit("herdr", { kind: "tab.closed", data: null });
+    tauri.emit("backend", { kind: "tab.closed", data: null });
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
     expect(tauri.calls("snapshot")).toHaveLength(2);
   });
@@ -181,7 +166,7 @@ describe("SpacesStore", () => {
     tauri.answer("snapshot", () => snapshot(pane("w1:p1"), pane("w1:p2")));
     await store.start();
 
-    tauri.emit("herdr", {
+    tauri.emit("backend", {
       kind: "terminal.agent_status_changed",
       data: { terminal_id: "w1:p2", agent_status: "blocked" },
     });
@@ -198,8 +183,11 @@ describe("SpacesStore", () => {
     await store.start();
     const before = store.snapshot();
 
-    tauri.emit("herdr", { kind: "terminal.agent_status_changed", data: { terminal_id: "w1:p1" } });
-    tauri.emit("herdr", { kind: "terminal.agent_status_changed", data: null });
+    tauri.emit("backend", {
+      kind: "terminal.agent_status_changed",
+      data: { terminal_id: "w1:p1" },
+    });
+    tauri.emit("backend", { kind: "terminal.agent_status_changed", data: null });
 
     expect(store.snapshot()).toBe(before);
   });
@@ -208,13 +196,13 @@ describe("SpacesStore", () => {
     await store.start();
     tauri.invoke.mockClear();
 
-    tauri.emit("herdr", { kind: "poimen.disconnected", data: { reason: "socket gone" } });
+    tauri.emit("backend", { kind: "poimen.disconnected", data: { reason: "socket gone" } });
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
     expect(store.connectionError()).toBe("socket gone");
     expect(store.connection()).toEqual({ state: "reconnecting", reason: "socket gone" });
     expect(tauri.calls("snapshot")).toHaveLength(0);
 
-    tauri.emit("herdr", { kind: "poimen.connected", data: null });
+    tauri.emit("backend", { kind: "poimen.connected", data: null });
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
     expect(store.connectionError()).toBeNull();
     expect(store.connection()).toEqual({ state: "connected" });
@@ -237,12 +225,12 @@ describe("SpacesStore", () => {
   it("stops listening and drops a pending re-read when destroyed", async () => {
     await store.start();
     tauri.invoke.mockClear();
-    tauri.emit("herdr", { kind: "pane.created", data: null });
+    tauri.emit("backend", { kind: "pane.created", data: null });
 
     injector.destroy();
     await vi.advanceTimersByTimeAsync(REFRESH_DEBOUNCE_MS);
 
-    expect(tauri.unlisten).toHaveBeenCalledWith("herdr");
+    expect(tauri.unlisten).toHaveBeenCalledWith("backend");
     expect(tauri.calls("snapshot")).toHaveLength(0);
     injector = Injector.create({ providers: [TauriBridge, SpacesStore] }); // afterEach destroys again
   });
@@ -282,10 +270,10 @@ describe("SpacesStore", () => {
     await store.start();
     expect(store.disconnected()).toBeNull();
 
-    tauri.emit("herdr", { kind: "poimen.disconnected", data: { reason: "socket gone" } });
+    tauri.emit("backend", { kind: "poimen.disconnected", data: { reason: "socket gone" } });
     expect(store.disconnected()).toBe("poimen connection lost, reconnecting: socket gone");
 
-    tauri.emit("herdr", { kind: "poimen.connected", data: null });
+    tauri.emit("backend", { kind: "poimen.connected", data: null });
     expect(store.disconnected()).toBeNull();
 
     tauri.answer("snapshot", () => {
@@ -295,22 +283,16 @@ describe("SpacesStore", () => {
     expect(store.disconnected()).toBe("poimen not reachable: connection refused");
   });
 
-  it("names a switched-off auto start and prefers a failed start", async () => {
-    tauri.answer("ensure_backend", () => ({ state: "disabled", reason: null }));
+  it("prefers a failed start over the connection error it causes", async () => {
+    tauri.answer("ensure_backend", () => ({ state: "failed", reason: "no server" }));
     tauri.answer("snapshot", () => {
       throw "connection refused";
     });
     await store.start();
-    expect(store.disconnected()).toBe(
-      "poimen not reachable (auto start is off): connection refused",
-    );
-
-    tauri.answer("ensure_backend", () => ({ state: "failed", reason: "no herdr" }));
-    await store.ensureBackend();
-    expect(store.disconnected()).toBe("poimen was not started: no herdr");
+    expect(store.disconnected()).toBe("poimen was not started: no server");
   });
 
-  it("is null once herdr connects after a failed start", async () => {
+  it("is null once the server connects after a failed start", async () => {
     tauri.answer("ensure_backend", () => ({ state: "failed", reason: "timeout" }));
     tauri.answer("snapshot", () => {
       throw "connection refused";
@@ -319,27 +301,26 @@ describe("SpacesStore", () => {
     expect(store.disconnected()).toBe("poimen was not started: timeout");
 
     tauri.answer("snapshot", () => snapshot(pane("w1:p1")));
-    tauri.emit("herdr", { kind: "poimen.connected", data: null });
+    tauri.emit("backend", { kind: "poimen.connected", data: null });
     await store.refresh();
     expect(store.connection().state).toBe("connected");
     expect(store.disconnected()).toBeNull();
   });
 
-  it("names herdr in the disconnected messages when herdr is the backend", async () => {
-    tauri.answer("backend_kind", () => "herdr");
-    tauri.answer("ensure_backend", () => ({ state: "failed", reason: "no herdr" }));
+  it("names poimen in the messages of a start that failed without a reason", async () => {
+    tauri.answer("ensure_backend", () => ({ state: "failed", reason: "no server" }));
     tauri.answer("snapshot", () => {
       throw "connection refused";
     });
     await store.start();
-    expect(store.disconnected()).toBe("herdr was not started: no herdr");
+    expect(store.disconnected()).toBe("poimen was not started: no server");
 
     tauri.answer("ensure_backend", () => ({ state: "failed", reason: null }));
     await store.ensureBackend();
-    expect(store.startFailure()).toBe("herdr could not be started");
+    expect(store.startFailure()).toBe("poimen could not be started");
 
     tauri.answer("ensure_backend", () => ({ state: "running", reason: null }));
     await store.ensureBackend();
-    expect(store.disconnected()).toBe("herdr not reachable: connection refused");
+    expect(store.disconnected()).toBe("poimen not reachable: connection refused");
   });
 });

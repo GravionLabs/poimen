@@ -113,7 +113,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      # fmt is checked in `rust-server`. The live tests are #[ignore]d and need a herdr server; they never run here.
+      # fmt is checked in `rust-server`.
       - uses: GravionLabs/ci/rust/ci@v1
         with:
           working-directory: src-tauri

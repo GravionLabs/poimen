@@ -34,7 +34,7 @@ features:
 
 *Poimen* (ποιμήν) is Greek for shepherd. `poimen-server` runs your terminals and AI coding agents as persistent terminals that outlive the app. poimen is a desktop app (Tauri, with an Angular frontend) that shows those terminals the way an editor shows files: a sidebar of spaces, tabs for the panes, a status bar, a command palette and menus.
 
-poimen does not keep any pane state of its own. `poimen-server`, bundled with the installers, is the backend and the only source of truth: poimen reads its snapshots and events and attaches to its terminals. Closing poimen only closes the view; the terminals and their agents keep running. [herdr](https://herdr.dev) is still supported as an alternative backend (`"backend": "herdr"`) until it is removed.
+poimen does not keep any pane state of its own. `poimen-server`, bundled with the installers, is the backend and the only source of truth: poimen reads its snapshots and events and attaches to its terminals. Closing poimen only closes the view; the terminals and their agents keep running.
 
 <Screenshot src="sidebar-dark.png" alt="The poimen window with the Spaces sidebar: three workspaces, api-gateway working, web-app blocked and docs-site done, each with its panes and agent status" caption="The poimen window: spaces on the left with working, blocked and done agents (demo data)." />
 
@@ -70,7 +70,7 @@ A longer run shows the nesting: the main agent starts subagents (implement, revi
 
 ### Color schemes
 
-Light, dark or follow the system. Choose a bundled scheme, use the one of your herdr configuration (herdr backend), or drop WezTerm color scheme files into `~/.config/poimen/themes/`; the window chrome is derived from the scheme.
+Light, dark or follow the system. Choose a bundled scheme, or drop WezTerm color scheme files into `~/.config/poimen/themes/`; the window chrome is derived from the scheme.
 
 <Screenshot src="schemas-dark.png" light="schemas-light.png" alt="The settings view with the appearance switch and the color scheme picker listing dark and light schemes with their palettes" caption="Appearance and color scheme in the settings view (demo data, follows the site theme)." />
 

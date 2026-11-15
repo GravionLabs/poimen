@@ -2,7 +2,7 @@
   "name": "poimen",
   "private": true,
   "version": "0.19.0",
-  "description": "Desktop GUI for herdr: coordinate AI coding agent sessions",
+  "description": "Desktop GUI to coordinate AI coding agent sessions",
   "license": "MIT",
   "packageManager": "pnpm@12.21.0",
   "scripts": {

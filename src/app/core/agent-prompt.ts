@@ -2,7 +2,7 @@ import { Injectable, inject } from "@angular/core";
 import { Machines } from "./machines";
 import { TauriBridge } from "./tauri";
 
-/** What happened to a prompt (wire type of the `agent_prompt` command; shapes live in `herdr.rs`). */
+/** What happened to a prompt (wire type of the `agent_prompt` command; shapes live in `agent_session.rs`). */
 export type PromptOutcome =
   | { kind: "started"; status: string }
   | { kind: "stalled" }
@@ -34,8 +34,8 @@ export function promptSucceeded(outcome: PromptOutcome): boolean {
 }
 
 /**
- * Sends prompts to agents through herdr's `agent.prompt`. It needs no controller and no focus, so
- * it works from a read-only tab. herdr owns the agent's state; nothing is stored here.
+ * Sends prompts to agents through the backend. It needs no controller and no focus, so
+ * it works from a read-only tab. the backend owns the agent's state; nothing is stored here.
  */
 @Injectable({ providedIn: "root" })
 export class AgentPrompts {

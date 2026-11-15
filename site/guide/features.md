@@ -4,9 +4,8 @@ Everything here is in the application today; the [README](https://github.com/Gra
 
 ## The backend
 
-- `poimen-server` is the default backend. It owns the terminals (PTYs) and the state; poimen never stores pane state, and closing a tab or the app leaves the terminals and their agents running. The installers bundle it and poimen starts it when needed.
+- `poimen-server` is the backend. It owns the terminals (PTYs) and the state; poimen never stores pane state, and closing a tab or the app leaves the terminals and their agents running. The installers bundle it and poimen starts it when needed.
 - Agent status comes from Claude Code and Copilot CLI hooks; on the first start poimen offers to install them.
-- Alternative: `"backend": "herdr"` makes poimen a window onto [herdr](https://herdr.dev) (its socket API, terminals via `herdr terminal session observe|control`). It is removed in a later release.
 
 ## Spaces sidebar
 
@@ -21,12 +20,12 @@ Everything here is in the application today; the [README](https://github.com/Gra
 - One tab per pane; a preview tab becomes a pinned tab on use. One xterm.js shows the active tab with the WebGL renderer.
 - Input by default; read-only when another client controls the pane, with an explicit *Take over*. A mode button toggles input and read-only per tab.
 - A read-only agent tab has a prompt bar above the terminal that sends a prompt without taking over the controller; it is hidden while the tab controls the terminal, and the typed text is kept.
-- Cmd+click (macOS) or Ctrl+click opens links; Shift bypasses mouse forwarding for text selection. On herdr streams, mouse cells follow the frame grid herdr sends; on the poimen backend xterm.js handles the mouse.
+- Cmd+click (macOS) or Ctrl+click opens links; Shift bypasses the application's mouse mode for text selection; xterm.js handles the mouse.
 - Compact command palette (`CmdOrCtrl+Shift+P`, JetBrains style: highlighted matches, shortcuts, recent entries) with the poimen commands; every shortcut can be changed. It opens centered on the editor area, which also holds non-terminal tabs (on the window without an open tab). The ? button in the status bar (`CmdOrCtrl+/`) lists all shortcuts with your current bindings.
 
 ## Agent status and attention
 
-- Statuses (working, idle, blocked, done) come from the backend (hooks on `poimen-server`, events on herdr). On the poimen backend an agent that finishes a turn (`Stop` / `agentStop`) reports done, and done stays until the next prompt; a new session reports idle.
+- Statuses (working, idle, blocked, done) come from the hooks on `poimen-server`. An agent that finishes a turn (`Stop` / `agentStop`) reports done, and done stays until the next prompt; a new session reports idle.
 - A pane that turns blocked while not viewed rings on its tab and sidebar row; one that turns done counts as unread; workspace rows sum their panes. Viewing the tab clears both.
 - A dock badge with the number of waiting agents and a notification center view with recent status changes (no system notifications).
 - `CmdOrCtrl+Shift+A` jumps to the next waiting agent.
@@ -50,9 +49,9 @@ The Deliver item of the activity bar opens a live view of the running deliver lo
 
 ## Color schemes
 
-- Light, dark or system. Bundled schemes, the scheme of your herdr config (`"herdr"`), and your own WezTerm color schemes in `~/.config/poimen/themes/`, watched without a restart. The window chrome is derived from the scheme.
+- Light, dark or system. Bundled schemes and your own WezTerm color schemes in `~/.config/poimen/themes/`, watched without a restart. The window chrome is derived from the scheme.
 - Optionally the terminal font and colors of your Ghostty config.
 
 ## Settings
 
-Optional `~/.config/poimen/config.json`, applied without a restart; it holds preferences only. Examples: `theme`, `colorSchema`, `terminal.fontFamily`, `terminal.fontSize`, `terminal.autoControl`, `terminal.scrollback`, `backend` (`poimen` by default, or `herdr`; needs a restart), `shortcuts`, `spaces.layout` (the pane layout of a new space), `explorer.roots`, `sidebar.layout`, `sidebar.rows`, `herdr.autoStart`, `notifications`. The full list is in the [README](https://github.com/GravionLabs/poimen#settings).
+Optional `~/.config/poimen/config.json`, applied without a restart; it holds preferences only. Examples: `theme`, `colorSchema`, `terminal.fontFamily`, `terminal.fontSize`, `terminal.autoControl`, `terminal.scrollback`, `shortcuts`, `spaces.layout` (the pane layout of a new space), `explorer.roots`, `sidebar.layout`, `sidebar.rows`, `notifications`. The full list is in the [README](https://github.com/GravionLabs/poimen#settings).

@@ -7,17 +7,9 @@ import {
   hasTranscripts,
   appVersionLabel,
   backendVersionLabel,
-  decodeBase64,
   protocolWarning,
   windowTitle,
 } from "./backend";
-
-describe("decodeBase64", () => {
-  it("decodes ANSI bytes including non-ASCII", () => {
-    // "\x1b[2J" followed by "λ" (UTF-8 0xCE 0xBB)
-    expect(Array.from(decodeBase64("G1sySs67"))).toEqual([0x1b, 0x5b, 0x32, 0x4a, 0xce, 0xbb]);
-  });
-});
 
 describe("windowTitle", () => {
   it("names the RC build and the waiting agents", () => {
@@ -31,13 +23,13 @@ describe("windowTitle", () => {
 describe("version labels", () => {
   const info = { version: "0.9.5", protocol: 22, supported: 22 };
   it("names the versions", () => {
-    expect(backendVersionLabel(info)).toBe("backend herdr 0.9.5");
+    expect(backendVersionLabel(info)).toBe("backend poimen 0.9.5");
     expect(appVersionLabel("0.2.0")).toBe("frontend poimen 0.2.0");
   });
   it("shows ? when unknown", () => {
-    expect(backendVersionLabel({ version: "0.1", supported: 22 })).toBe("backend herdr 0.1");
-    expect(backendVersionLabel(null)).toBe("backend herdr ?");
-    expect(backendVersionLabel(undefined)).toBe("backend herdr ?");
+    expect(backendVersionLabel({ version: "0.1", supported: 22 })).toBe("backend poimen 0.1");
+    expect(backendVersionLabel(null)).toBe("backend poimen ?");
+    expect(backendVersionLabel(undefined)).toBe("backend poimen ?");
     expect(backendVersionLabel({ ...info, version: "0.9.0" }, "poimen")).toBe(
       "backend poimen 0.9.0",
     );
@@ -52,18 +44,18 @@ describe("version labels", () => {
     expect(protocolWarning(null)).toBe("");
     expect(protocolWarning({ version: "0.1", supported: 22 })).toBe("");
     expect(protocolWarning({ ...info, protocol: 23 })).toBe(
-      "herdr protocol 23, poimen supports 22",
+      "poimen protocol 23, poimen supports 22",
     );
   });
 });
 
 describe("startableKinds", () => {
-  it("offers only the kinds that report through hooks on the poimen backend", () => {
-    expect(startableKinds("poimen")).toEqual(["claude", "copilot", "gemini"]);
+  it("offers only the kinds that report through hooks", () => {
+    expect(startableKinds()).toEqual(["claude", "copilot", "gemini"]);
   });
 
-  it("adds the other harnesses of the registry on the poimen backend, once", () => {
-    expect(startableKinds("poimen", ["claude", "codex", "aider"])).toEqual([
+  it("adds the other harnesses of the registry once", () => {
+    expect(startableKinds(["claude", "codex", "aider"])).toEqual([
       "claude",
       "copilot",
       "gemini",
@@ -73,16 +65,8 @@ describe("startableKinds", () => {
   });
 
   it("labels a kind without hooks as having no status", () => {
-    expect(statusNote("codex", "poimen")).toBe(" (no status)");
-    expect(statusNote("claude", "poimen")).toBe("");
-    expect(statusNote("codex", "herdr")).toBe("");
-  });
-
-  it("keeps herdr's full list on the herdr backend", () => {
-    const kinds = startableKinds("herdr");
-    expect(kinds).toHaveLength(24);
-    expect(kinds.slice(0, 5)).toEqual(["claude", "codex", "gemini", "opencode", "copilot"]);
-    expect(kinds).toContain("muse");
+    expect(statusNote("codex")).toBe(" (no status)");
+    expect(statusNote("claude")).toBe("");
   });
 });
 

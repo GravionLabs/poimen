@@ -163,13 +163,8 @@ pub struct Settings {
     pub explorer_roots: Vec<String>,
     /// Whether the explorer shows hidden directories (`explorer.showHidden`).
     pub explorer_show_hidden: bool,
-    /// The terminal backend (`backend`): `poimen` (default) or `herdr`. Read at start; a change
-    /// needs a restart.
-    pub backend: String,
     /// Lines of scrollback xterm.js keeps on an emulated stream (`terminal.scrollback`).
     pub scrollback: u32,
-    /// Start the herdr server when nothing answers on its socket (`herdr.autoStart`).
-    pub herdr_auto_start: bool,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
     /// The space templates (`spaceTemplates`); invalid entries are skipped with a warning.
@@ -363,9 +358,7 @@ impl Default for Settings {
             sidebar_show_base_branch: false,
             explorer_roots: vec!["~".into()],
             explorer_show_hidden: false,
-            backend: "poimen".into(),
             scrollback: DEFAULT_SCROLLBACK,
-            herdr_auto_start: true,
             spaces_layout: None,
             space_templates: Vec::new(),
             trusted_projects: BTreeMap::new(),
@@ -482,21 +475,6 @@ fn resolve_explorer(value: &Value, s: &mut Settings) {
     }
 }
 
-/// `herdr.autoStart`; a wrong type warns and keeps `true`.
-fn resolve_herdr(value: &Value, s: &mut Settings) {
-    let Some(obj) = value.as_object() else {
-        s.warnings.push("herdr must be an object".into());
-        return;
-    };
-    match obj.get("autoStart") {
-        None => {}
-        Some(Value::Bool(b)) => s.herdr_auto_start = *b,
-        Some(_) => s
-            .warnings
-            .push("herdr.autoStart must be true or false; using true".into()),
-    }
-}
-
 /// `spaces.layout` (the layout-bootstrap schema); an invalid one warns and keeps the default.
 fn resolve_spaces(value: &Value, s: &mut Settings) {
     let Some(obj) = value.as_object() else {
@@ -569,6 +547,8 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     match root.get("colorSchema") {
         None => {}
+        // The herdr scheme followed herdr's own config; herdr is no longer supported (#174).
+        Some(Value::String(name)) if name.trim() == "herdr" => {}
         Some(Value::String(name)) if !name.trim().is_empty() => {
             s.color_schema = Some(ColorSchema::Name(name.trim().to_owned()));
         }
@@ -629,19 +609,6 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
 
     if let Some(value) = root.get("explorer") {
         resolve_explorer(value, &mut s);
-    }
-
-    if let Some(value) = root.get("herdr") {
-        resolve_herdr(value, &mut s);
-    }
-    match root.get("backend") {
-        None => {}
-        Some(Value::String(b)) if matches!(b.as_str(), "herdr" | "poimen") => {
-            s.backend = b.clone();
-        }
-        Some(other) => s.warnings.push(format!(
-            "backend {other} must be \"poimen\" or \"herdr\"; using poimen"
-        )),
     }
 
     if let Some(value) = root.get("trustedProjects") {
@@ -788,79 +755,33 @@ pub fn ghostty_path(home: &Path) -> PathBuf {
     home.join(".config").join("ghostty").join("config")
 }
 
-/// herdr's `config.toml` in the herdr directory (`herdr::herdr_dir`, also home of the socket).
-pub fn herdr_config_path(home: &Path) -> PathBuf {
-    herdr_config_path_in(
-        cfg!(windows),
-        home,
-        &std::env::var("APPDATA").unwrap_or_default(),
-    )
-}
-
-fn herdr_config_path_in(windows: bool, home: &Path, appdata: &str) -> PathBuf {
-    crate::herdr::herdr_dir(windows, &home.to_string_lossy(), appdata).join("config.toml")
-}
-
-/// The `[theme] name` of a herdr `config.toml` (minimal read: no full TOML parser needed).
-pub fn parse_herdr_theme(text: &str) -> Option<String> {
-    let mut in_theme = false;
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_theme = line.split('#').next().unwrap_or("").trim() == "[theme]";
-            continue;
-        }
-        if !in_theme {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        if key.trim() != "name" {
-            continue;
-        }
-        let value = value.trim();
-        let quote = value.chars().next().filter(|c| matches!(c, '"' | '\''))?;
-        let rest = &value[1..];
-        let name = rest[..rest.find(quote)?].trim();
-        return (!name.is_empty()).then(|| name.to_owned());
+/// The keys of an older config that poimen ignores since the herdr backend is gone (#174): the
+/// `backend` and `herdr` settings and `colorSchema: "herdr"`. Each one is named once in a log
+/// line; none is an error.
+pub fn ignored_herdr_keys(text: &str) -> Vec<&'static str> {
+    let Ok(Value::Object(root)) = serde_json::from_str::<Value>(text) else {
+        return Vec::new();
+    };
+    let mut keys = Vec::new();
+    if root.contains_key("backend") {
+        keys.push("backend");
     }
-    None
-}
-
-/// Replaces `colorSchema: "herdr"` by the scheme named in herdr's config. `terminal`, a missing
-/// file or no name warns and falls back to `poimen` (which follows `theme`). Unknown scheme names
-/// are warned about and replaced by the frontend, like any other name.
-fn apply_herdr(s: &mut Settings, herdr_toml: Option<&str>, config: &Path) {
-    if s.color_schema != Some(ColorSchema::Name("herdr".into())) {
-        return;
+    if root.contains_key("herdr") {
+        keys.push("herdr");
     }
-    match herdr_toml.and_then(parse_herdr_theme) {
-        Some(name) if name != "terminal" => s.color_schema = Some(ColorSchema::Name(name)),
-        Some(_) => {
-            s.color_schema = None;
-            s.warnings.push(
-                "colorSchema \"herdr\": herdr uses the terminal colors (theme \"terminal\"); using poimen"
-                    .into(),
-            );
-        }
-        None => {
-            s.color_schema = None;
-            s.warnings.push(format!(
-                "colorSchema \"herdr\": no [theme] name in {}; using poimen",
-                config.display()
-            ));
-        }
+    if root
+        .get("colorSchema")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        == Some("herdr")
+    {
+        keys.push("colorSchema \"herdr\"");
     }
+    keys
 }
 
 /// Reads and resolves the settings below `home`; a missing file means defaults.
 pub fn load(home: &Path) -> Settings {
-    load_with(home, &herdr_config_path(home))
-}
-
-/// `load` with the herdr `config.toml` given, so tests never read the real herdr directory.
-fn load_with(home: &Path, herdr_config: &Path) -> Settings {
     let json = match std::fs::read_to_string(config_path(home)) {
         Ok(text) => Some(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -876,9 +797,10 @@ fn load_with(home: &Path, herdr_config: &Path) -> Settings {
     let mut s = resolve(json.as_deref(), || {
         std::fs::read_to_string(ghostty_path(home)).ok()
     });
-    if s.color_schema == Some(ColorSchema::Name("herdr".into())) {
-        let toml = std::fs::read_to_string(herdr_config).ok();
-        apply_herdr(&mut s, toml.as_deref(), herdr_config);
+    if let Some(text) = &json {
+        for key in ignored_herdr_keys(text) {
+            eprintln!("poimen: ignoring {key} in config.json: the herdr backend was removed");
+        }
     }
     s.home = Some(home.to_string_lossy().into_owned());
     s
@@ -1071,16 +993,6 @@ pub fn save_explorer_roots(home: &Path, roots: &[String]) -> Result<(), String> 
     save_with(home, |text| set_explorer_roots_text(text, &roots))
 }
 
-/// Returns `text` with `herdr.autoStart` set, touching nothing else.
-pub fn set_herdr_auto_start_text(text: &str, on: bool) -> Result<String, String> {
-    set_path_text(text, &["herdr", "autoStart"], &on.to_string())
-}
-
-/// Writes `herdr.autoStart` below `home`, like `save_theme`.
-pub fn save_herdr_auto_start(home: &Path, on: bool) -> Result<(), String> {
-    save_with(home, |text| set_herdr_auto_start_text(text, on))
-}
-
 /// Returns `text` with `terminal.fontFamily` set; an empty family removes the key.
 pub fn set_terminal_font_family_text(text: &str, family: &str) -> Result<String, String> {
     set_font_family_text(text, "terminal", family)
@@ -1221,16 +1133,12 @@ pub fn remove_spaces_layout(home: &Path) -> Result<(), String> {
     save_with(home, remove_spaces_layout_text)
 }
 
-fn stamp(home: &Path) -> [Option<SystemTime>; 3] {
-    [
-        config_path(home),
-        ghostty_path(home),
-        herdr_config_path(home),
-    ]
-    .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+fn stamp(home: &Path) -> [Option<SystemTime>; 2] {
+    [config_path(home), ghostty_path(home)]
+        .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
 }
 
-/// Runs forever on the calling thread: polls the config files (poimen, Ghostty, herdr) and calls `emit` on every change.
+/// Runs forever on the calling thread: polls the config files (poimen, Ghostty) and calls `emit` on every change.
 pub fn watch(home: &Path, interval: Duration, emit: impl Fn(&Settings)) {
     let mut last = stamp(home);
     loop {
@@ -1560,29 +1468,6 @@ mod tests {
     }
 
     #[test]
-    fn backend_defaults_to_poimen_and_keeps_an_explicit_herdr() {
-        assert_eq!(rows("{}").backend, "poimen");
-        assert_eq!(rows(r#"{"backend":"poimen"}"#).backend, "poimen");
-        assert_eq!(rows(r#"{"backend":"herdr"}"#).backend, "herdr");
-    }
-
-    #[test]
-    fn an_unknown_backend_warns_and_keeps_poimen() {
-        for json in [
-            r#"{"backend":"tmux"}"#,
-            r#"{"backend":true}"#,
-            r#"{"backend":""}"#,
-        ] {
-            let s = rows(json);
-            assert_eq!(s.backend, "poimen", "{json}");
-            assert!(
-                s.warnings.iter().any(|w| w.starts_with("backend ")),
-                "{json}"
-            );
-        }
-    }
-
-    #[test]
     fn scrollback_defaults_to_10000_and_validates() {
         assert_eq!(rows("{}").scrollback, 10_000);
         assert_eq!(rows(r#"{"terminal":{"scrollback":500}}"#).scrollback, 500);
@@ -1599,24 +1484,6 @@ mod tests {
                 s.warnings.iter().any(|w| w.contains("terminal.scrollback")),
                 "{json}"
             );
-        }
-    }
-
-    #[test]
-    fn herdr_auto_start_defaults_to_true_and_can_be_turned_off() {
-        assert!(rows("{}").herdr_auto_start);
-        assert!(rows(r#"{"herdr":{}}"#).herdr_auto_start);
-        let off = rows(r#"{"herdr":{"autoStart":false}}"#);
-        assert!(!off.herdr_auto_start);
-        assert!(off.warnings.is_empty());
-    }
-
-    #[test]
-    fn herdr_auto_start_invalid_warns_and_keeps_true() {
-        for json in [r#"{"herdr":{"autoStart":"no"}}"#, r#"{"herdr":true}"#] {
-            let s = rows(json);
-            assert!(s.herdr_auto_start, "{json}");
-            assert_eq!(s.warnings.len(), 1, "{json}");
         }
     }
 
@@ -1773,20 +1640,6 @@ mod tests {
         std::fs::write(home.join("none.wav"), vec![0u8; MAX_SOUND_BYTES as usize]).unwrap();
         assert!(read_sound_file(&home, "blocked").is_ok());
         let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn set_herdr_auto_start_keeps_comments_and_other_keys() {
-        let text = "{\n  // keep\n  \"herdr\": { \"autoStart\": true }\n}";
-        let out = set_herdr_auto_start_text(text, false).unwrap();
-        assert_eq!(
-            out,
-            "{\n  // keep\n  \"herdr\": { \"autoStart\": false }\n}"
-        );
-        let created = set_herdr_auto_start_text("{\"theme\":\"dark\"}", false).unwrap();
-        let r = resolve(Some(&created), || None);
-        assert!(!r.herdr_auto_start);
-        assert_eq!(r.theme, "dark");
     }
 
     #[test]
@@ -2544,87 +2397,25 @@ mod tests {
     }
 
     #[test]
-    fn parses_the_herdr_theme_name() {
-        let toml = "[ui]\nname = \"no\"\n\n[theme] # colors\n# name = \"x\"\nname = 'dracula'\n[other]\nname = \"y\"\n";
-        assert_eq!(parse_herdr_theme(toml), Some("dracula".into()));
-        assert_eq!(
-            parse_herdr_theme("[theme]\nname = \"gruvbox\" # c"),
-            Some("gruvbox".into())
-        );
-        assert_eq!(parse_herdr_theme("[theme]\nname = \"\""), None);
-        assert_eq!(parse_herdr_theme("[theme]\nname = dracula"), None);
-        assert_eq!(parse_herdr_theme("[other]\nname = \"x\""), None);
-        assert_eq!(parse_herdr_theme(""), None);
-    }
-
-    #[test]
-    fn herdr_schema_follows_the_herdr_theme_or_falls_back_with_a_warning() {
-        let herdr = |toml: Option<&str>| {
-            let mut s = resolve(Some(r#"{"colorSchema":"herdr"}"#), none);
-            apply_herdr(&mut s, toml, Path::new("/h/herdr/config.toml"));
-            s
-        };
-        let s = herdr(Some("[theme]\nname = \"dracula\""));
-        assert_eq!(s.color_schema, Some(ColorSchema::Name("dracula".into())));
-        assert!(s.warnings.is_empty());
-        for toml in [Some("[theme]\nname = \"terminal\""), Some("[ui]\n"), None] {
-            let s = herdr(toml);
-            assert_eq!(s.color_schema, None, "{toml:?}");
-            assert_eq!(s.warnings.len(), 1, "{toml:?}");
-        }
-        let mut other = resolve(Some(r#"{"colorSchema":"vesper"}"#), none);
-        apply_herdr(
-            &mut other,
-            Some("[theme]\nname = \"dracula\""),
-            Path::new("x"),
-        );
+    fn the_herdr_color_schema_is_ignored() {
+        let s = rows(r#"{"colorSchema":"herdr"}"#);
+        assert_eq!(s.color_schema, None);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        let other = rows(r#"{"colorSchema":"vesper"}"#);
         assert_eq!(other.color_schema, Some(ColorSchema::Name("vesper".into())));
     }
 
     #[test]
-    fn the_herdr_warning_names_the_real_config_path() {
-        let mut s = resolve(Some(r#"{"colorSchema":"herdr"}"#), none);
-        apply_herdr(&mut s, None, Path::new("/h/herdr/config.toml"));
-        assert!(
-            s.warnings[0].contains("/h/herdr/config.toml"),
-            "{:?}",
-            s.warnings
-        );
-    }
-
-    #[test]
-    fn herdr_config_sits_in_the_herdr_directory_of_each_system() {
-        let home = Path::new("/home/u");
+    fn the_old_herdr_keys_are_named_and_never_an_error() {
+        let text = "{\n \"backend\": \"herdr\", \"herdr\": {\"autoStart\": false}, \"colorSchema\": \"herdr\"}";
         assert_eq!(
-            herdr_config_path_in(false, home, "ignored"),
-            Path::new("/home/u")
-                .join(".config")
-                .join("herdr")
-                .join("config.toml")
+            ignored_herdr_keys(text),
+            ["backend", "herdr", "colorSchema \"herdr\""]
         );
-        assert_eq!(
-            herdr_config_path_in(true, home, r"C:\Users\u\AppData\Roaming"),
-            Path::new(r"C:\Users\u\AppData\Roaming")
-                .join("herdr")
-                .join("config.toml")
-        );
-    }
-
-    #[test]
-    fn load_follows_the_herdr_config_in_a_temp_home() {
-        let home = std::env::temp_dir().join(format!("poimen-herdr-{}", std::process::id()));
-        let herdr = herdr_config_path_in(false, &home, "");
-        assert!(herdr.starts_with(&home));
-        std::fs::create_dir_all(home.join(".config/poimen")).unwrap();
-        std::fs::create_dir_all(herdr.parent().unwrap()).unwrap();
-        std::fs::write(config_path(&home), r#"{"colorSchema":"herdr"}"#).unwrap();
-        assert_eq!(load_with(&home, &herdr).color_schema, None);
-        std::fs::write(&herdr, "[theme]\nname = \"vesper\"\n").unwrap();
-        assert_eq!(
-            load_with(&home, &herdr).color_schema,
-            Some(ColorSchema::Name("vesper".into()))
-        );
-        std::fs::remove_dir_all(&home).unwrap();
+        let s = rows(text);
+        assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+        assert!(ignored_herdr_keys(r#"{"colorSchema":"vesper"}"#).is_empty());
+        assert!(ignored_herdr_keys("not json").is_empty());
     }
 
     #[test]

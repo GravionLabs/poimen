@@ -22,17 +22,15 @@ use poimen_client::protocol::{
 use poimen_client::{AttachmentWriter, Client, ClientError};
 use serde_json::{Value, json};
 
+use crate::agent_session::{AgentSession, PromptOutcome};
 use crate::backend::{
     ApplyRequest, Backend, BackendEvent, BackendInfo, CloseCode, LaidOut, LayoutRequest, Mode,
-    NewSpace, OnRecord, OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord,
+    OnRecord, OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord,
     StreamRequest,
 };
-use crate::herdr::{AgentSession, PromptOutcome, ServerInfo};
 use crate::poimen_server;
 use crate::trust;
 use poimen_core::snapshot as snap;
-
-const NO_RENDERED_INPUT: &str = "xterm.js handles the mouse and the scrollback on this backend";
 
 /// One open stream: the write half of its attachment.
 struct Stream {
@@ -276,7 +274,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         // The name of a terminal is its label only once it was renamed: the default is the
         // directory name, which the sidebar already shows for a terminal without a label.
         label: (terminal.name != default_name(&terminal.cwd)).then(|| terminal.name.clone()),
-        // The same `tokens` map herdr's panes have, so `$<name>` row tokens work unchanged.
+        // The `tokens` map the `$<name>` row tokens read.
         tokens: terminal.tokens.clone(),
         // The restart confirmation names only the terminals a restart ends.
         survives_restart: terminal.survives_restart,
@@ -458,7 +456,7 @@ impl Backend for PoimenBackend {
 
     fn info(&self) -> Option<BackendInfo> {
         let ping = self.client.ping().ok()?;
-        Some(ServerInfo {
+        Some(BackendInfo {
             version: ping.version,
             protocol: Some(ping.protocol),
             supported: PROTOCOL_VERSION,
@@ -469,15 +467,6 @@ impl Backend for PoimenBackend {
         let layout = self.client.list_layout().map_err(text)?;
         let terminals = self.client.list_terminals(None).map_err(text)?;
         Ok(map_snapshot(&layout, &terminals))
-    }
-
-    fn create_space(&self, cwd: &str, label: &str) -> Result<NewSpace, String> {
-        let space = self.client.create_space(label, cwd).map_err(text)?;
-        let terminal = self.new_terminal(&space.id, None)?;
-        Ok(NewSpace {
-            space_id: space.id,
-            root_terminal: Some(terminal.id),
-        })
     }
 
     /// `space.create` with `layout`: the server resolves the layout of `cwd`, builds its tabs and
@@ -702,7 +691,7 @@ impl Backend for PoimenBackend {
             .find(|t| t.id == terminal_id)
             .and_then(|t| {
                 let agent = t.agent.as_ref()?;
-                crate::herdr::session_of(
+                crate::agent_session::session_of(
                     agent.agent.as_deref(),
                     agent.session_id.as_deref(),
                     &t.cwd,
@@ -727,7 +716,7 @@ impl Backend for PoimenBackend {
         on_record: OnRecord,
     ) -> Result<OpenedStream, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
-        let opened = OpenedStream { id, emulated: true };
+        let opened = OpenedStream { id };
         let mode = match request.mode {
             Mode::Observe => AttachMode::Observe,
             Mode::Control => AttachMode::Control,
@@ -788,10 +777,6 @@ impl Backend for PoimenBackend {
         Ok(opened)
     }
 
-    fn emulated(&self) -> bool {
-        true
-    }
-
     fn stream_input(&self, id: u32, text_: &str) -> Result<(), String> {
         let stream = self.stream(id)?;
         lock(&stream.writer).input(text_).map_err(text)
@@ -800,22 +785,6 @@ impl Backend for PoimenBackend {
     fn stream_resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
         let stream = self.stream(id)?;
         lock(&stream.writer).resize(cols, rows).map_err(text)
-    }
-
-    fn stream_scroll(&self, _id: u32, _up: bool, _lines: u16) -> Result<(), String> {
-        Err(NO_RENDERED_INPUT.into())
-    }
-
-    fn stream_mouse(
-        &self,
-        _id: u32,
-        _action: &str,
-        _button: &str,
-        _column: u16,
-        _row: u16,
-        _modifiers: u8,
-    ) -> Result<(), String> {
-        Err(NO_RENDERED_INPUT.into())
     }
 
     /// Detaches; the terminal keeps running.
@@ -1495,7 +1464,7 @@ mod tests {
     }
 
     #[test]
-    fn tokens_reach_the_pane_as_herdr_tokens_and_their_event_passes_through() {
+    fn tokens_reach_the_pane_and_their_event_passes_through() {
         let mut t = terminal("t1", "s1", "a");
         t.tokens = [("deliver_step".to_owned(), "build".to_owned())].into();
         let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
@@ -1693,15 +1662,6 @@ mod tests {
             .cloned()
             .unwrap();
         serde_json::from_str(&line[method.len() + 1..]).unwrap()
-    }
-
-    #[test]
-    fn a_new_space_gets_its_first_terminal() {
-        let (backend, log) = backend_for("space", vec![], false);
-        let created = backend.create_space("/work/api", "api").unwrap();
-        assert_eq!(created.space_id, "s9");
-        assert_eq!(created.root_terminal.as_deref(), Some("t9"));
-        assert_eq!(params_of(&log, "terminal.create")["space_id"], "s9");
     }
 
     #[test]
@@ -2227,13 +2187,13 @@ mod tests {
         let claude = backend.agent_session("t1").unwrap().unwrap();
         assert_eq!(
             (claude.agent, claude.session.as_str()),
-            (crate::herdr::TranscriptAgent::Claude, "abc-1")
+            (crate::agent_session::TranscriptAgent::Claude, "abc-1")
         );
         assert!(!claude.cwd.is_empty());
         let copilot = backend.agent_session("t2").unwrap().unwrap();
         assert_eq!(
             (copilot.agent, copilot.session.as_str()),
-            (crate::herdr::TranscriptAgent::Copilot, "0b7e")
+            (crate::agent_session::TranscriptAgent::Copilot, "0b7e")
         );
         assert_eq!(backend.agent_session("t3"), Ok(None));
         assert_eq!(backend.agent_session("t4"), Ok(None));
@@ -2270,8 +2230,6 @@ mod tests {
             StreamRequest {
                 mode,
                 target: "t1",
-                cols: 80,
-                rows: 24,
                 takeover,
             },
             Box::new(move |id, record| {
@@ -2290,8 +2248,7 @@ mod tests {
         ];
         let (backend, log) = backend_for("stream", extra, false);
         let (opened, rx) = collect(&backend, Mode::Control, false);
-        let opened = opened.unwrap();
-        assert!(opened.emulated);
+        assert!(opened.is_ok());
         let records: Vec<_> = rx.iter().map(|(_, r)| r).collect();
         assert_eq!(
             records,
@@ -2363,7 +2320,7 @@ mod tests {
     fn a_held_controller_is_reported_as_a_closed_record_not_an_error() {
         let (backend, _) = backend_for("held", vec![], true);
         let (opened, rx) = collect(&backend, Mode::Control, false);
-        assert!(opened.unwrap().emulated);
+        assert!(opened.is_ok());
         let (_, record) = rx.recv().unwrap();
         assert!(matches!(
             record,
@@ -2372,12 +2329,5 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn scroll_and_mouse_commands_are_refused() {
-        let (backend, _) = backend_for("refuse", vec![], false);
-        assert!(backend.stream_scroll(1, true, 3).is_err());
-        assert!(backend.stream_mouse(1, "down", "left", 0, 0, 0).is_err());
     }
 }

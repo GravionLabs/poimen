@@ -94,7 +94,7 @@ describe("SpaceRebuild", () => {
     answer = () => ({ state: "consent", reasons: ['pane "agent" starts an agent: claude'] });
     await store.start();
     await settle();
-    tauri.emit("herdr", { kind: "poimen.disconnected", data: { reason: "gone" } });
+    tauri.emit("backend", { kind: "poimen.disconnected", data: { reason: "gone" } });
     await store.refresh();
     await settle();
     expect(calls()).toHaveLength(2);

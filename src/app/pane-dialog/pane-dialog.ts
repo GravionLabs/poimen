@@ -10,7 +10,6 @@ import { type Terminal } from "../core/snapshot";
 import { HOOK_AGENT_KINDS, startableKinds, statusNote } from "../core/backend";
 import { TauriBridge } from "../core/tauri";
 import { parseHarnesses, type HarnessInfo } from "../core/settings";
-import { SpacesStore } from "../core/spaces-store";
 import { PaneActions, type PaneClosed } from "../core/pane-actions";
 
 /** The question for a new terminal (directory) or a pane close (confirmation), and action errors. */
@@ -26,17 +25,11 @@ export class PaneDialog {
   readonly created = output<Terminal>();
   /** A pane was closed; the host drops its tab or hands it to the successor. */
   readonly closed = output<PaneClosed>();
-  private readonly store = inject(SpacesStore);
-  /** Only the kinds that can report on the active backend (#410). */
+  /** Only the kinds that can report (#410). */
   private readonly bridge = inject(TauriBridge);
   private readonly harnesses = signal<HarnessInfo[]>([]);
-  protected readonly kinds = computed(() =>
-    startableKinds(
-      this.store.backendKind(),
-      this.harnesses().map((h) => h.id),
-    ),
-  );
-  protected readonly note = (kind: string) => statusNote(kind, this.store.backendKind());
+  protected readonly kinds = computed(() => startableKinds(this.harnesses().map((h) => h.id)));
+  protected readonly note = (kind: string) => statusNote(kind);
   private readonly typed = signal<string | null>(null);
 
   constructor() {

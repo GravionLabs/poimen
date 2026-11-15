@@ -2,17 +2,13 @@
 
 ## Prerequisites
 
-None. The installers bundle `poimen-server`, the terminal server poimen uses by default. poimen starts it detached when nothing answers on its socket, and never stops it, so your terminals and agents keep running when you close the app. You do not need herdr.
+None. The installers bundle `poimen-server`, the terminal server poimen uses by default. poimen starts it detached when nothing answers on its socket, and never stops it, so your terminals and agents keep running when you close the app.
 
 Optional: Claude Code or GitHub Copilot CLI. On the first start poimen offers to install their hooks (`poimen-server integration install`), which report whether an agent works, waits or is done; "Not now" is remembered. The same Claude Code and Copilot CLI are used for the subagent and Flow views.
 
-### Alternative: the herdr backend
+### Coming from herdr
 
-Set `"backend": "herdr"` in `~/.config/poimen/config.json` to use [herdr](https://herdr.dev) instead (a restart is needed). This backend is removed in a later release.
-
-1. Install herdr 0.9.5 or newer, following the instructions on [herdr.dev](https://herdr.dev).
-2. Make sure `herdr` is on the `PATH` of your **login shell** (check with `herdr --version` in a new terminal). A macOS app does not see your shell's `PATH`, so poimen reads it from your login shell and also looks in Homebrew, `~/.local/bin` and `~/.cargo/bin`. `HERDR_BIN_PATH` overrides the lookup.
-3. You do not have to start the server. poimen starts a detached `herdr server` when nothing listens on the socket, and never restarts or stops one that answers. The setting `herdr.autoStart` turns the automatic start off (for either backend).
+The herdr backend was removed. Your spaces and terminals of herdr are not moved. If you leave herdr, remove its agent hooks so they do not report next to poimen's: run `herdr integration uninstall` for each agent you installed them for. An old `backend`, `herdr.autoStart` or `colorSchema: "herdr"` in `config.json` is ignored.
 
 ## Download
 
@@ -83,5 +79,5 @@ Needs Rust 1.99.1, Node.js 26 and pnpm. See "Development" in the [README](https:
 
 ## First start
 
-- The status bar shows "poimen connected" and the sidebar your spaces. If it shows "unreachable", press **Retry**; the message names the reason (for the herdr backend: herdr not found on the `PATH`, no answer in 10 s, or a protocol older than the supported one).
+- The status bar shows "poimen connected" and the sidebar your spaces. If it shows "unreachable", press **Retry**; the message names the reason (for example the server did not answer in 10 s, or it speaks another protocol).
 - Settings are optional: `~/.config/poimen/config.json`, applied without a restart. See [Features](/guide/features#settings).

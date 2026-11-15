@@ -29,8 +29,8 @@
       }
     </section>
   }
-  <span class="item conn {{ connection().state }}" [title]="label(connection(), backend())">
-    <span class="dot"></span>{{ label(connection(), backend()) }}
+  <span class="item conn {{ connection().state }}" [title]="label(connection())">
+    <span class="dot"></span>{{ label(connection()) }}
   </span>
   @if (deliver(); as run) {
     <button
@@ -130,9 +130,9 @@
   <span class="item version">{{ appLabel(appVersion()) }}</span>
   <span
     class="item version"
-    [class.warn]="warning(info(), backend()) !== ''"
-    [title]="warning(info(), backend()) || herdrLabel(info(), backend())"
-    >{{ herdrLabel(info(), backend()) }}</span
+    [class.warn]="warning(info()) !== ''"
+    [title]="warning(info()) || versionLabel(info())"
+    >{{ versionLabel(info()) }}</span
   >
   @if (channel() !== "rc") {
     @switch (update().kind) {

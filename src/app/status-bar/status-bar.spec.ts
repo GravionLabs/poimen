@@ -24,31 +24,19 @@ beforeAll(() => {
 });
 
 describe("connectionLabel", () => {
-  it("names a connected herdr", () => {
-    expect(connectionLabel({ state: "connected" })).toBe("herdr connected");
+  it("names a connected server", () => {
+    expect(connectionLabel({ state: "connected" })).toBe("poimen connected");
   });
   it("shows the reason when reconnecting", () => {
     expect(connectionLabel({ state: "reconnecting", reason: "socket closed" })).toBe(
-      "herdr reconnecting: socket closed",
+      "poimen reconnecting: socket closed",
     );
   });
   it("shows the reason when unreachable, and copes with an empty one", () => {
     expect(connectionLabel({ state: "unreachable", reason: "no socket" })).toBe(
-      "herdr unreachable: no socket",
+      "poimen unreachable: no socket",
     );
-    expect(connectionLabel({ state: "unreachable", reason: "" })).toBe("herdr unreachable");
-  });
-});
-
-describe("connectionLabel on the poimen backend", () => {
-  it("names the backend instead of herdr", () => {
-    expect(connectionLabel({ state: "connected" }, "poimen")).toBe("poimen connected");
-    expect(connectionLabel({ state: "reconnecting", reason: "gone" }, "poimen")).toBe(
-      "poimen reconnecting: gone",
-    );
-    expect(connectionLabel({ state: "unreachable", reason: "" }, "poimen")).toBe(
-      "poimen unreachable",
-    );
+    expect(connectionLabel({ state: "unreachable", reason: "" })).toBe("poimen unreachable");
   });
 });
 
@@ -129,9 +117,8 @@ describe("mode button", () => {
       modeHint = modeTitle;
       sizeText = sizeLabel;
       appLabel = () => "";
-      herdrLabel = () => "";
+      versionLabel = () => "";
       warning = () => "";
-      backend = () => "herdr";
       deliver = () => deliver;
       showDeliver = { emit: () => deliverClicks++ };
     }

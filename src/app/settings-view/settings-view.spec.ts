@@ -649,19 +649,19 @@ describe("SettingsView categories", () => {
     const mem = memoryStorage();
     storage = mem;
     const { fixture, host } = setup(undefined, undefined, "appearance");
-    item(host, "p:herdr").click();
+    item(host, "p:server").click();
     item(host, "g:workspace").click();
     fixture.detectChanges();
     expect(crumb(host)).toBe("Backend › Server");
-    expect(host.textContent).toContain("Start the backend server");
+    expect(host.textContent).toContain("Agent hooks");
     expect(item(host, "p:explorer")).toBeNull();
     const saved = JSON.parse(mem.data.get(UI_STATE_KEY)!);
-    expect(saved.settingsPage).toBe("herdr");
+    expect(saved.settingsPage).toBe("server");
     expect(saved.settingsCollapsed).toEqual(["workspace"]);
   });
 
   it("shows the hooks state per agent on the Server page with an install button", async () => {
-    const { fixture, host } = setup(undefined, undefined, "herdr");
+    const { fixture, host } = setup(undefined, undefined, "server");
     tauri.answer("hooks_status", () => [
       { agent: "claude", state: "missing" },
       { agent: "copilot", state: "installed" },
@@ -838,7 +838,7 @@ describe("SettingsView categories", () => {
 
   it("opens a page with Enter or Space and keeps one tab stop", () => {
     const { fixture, host } = setup(undefined, undefined, "appearance");
-    press(item(host, "p:herdr"), "Enter");
+    press(item(host, "p:server"), "Enter");
     fixture.detectChanges();
     expect(crumb(host)).toBe("Backend › Server");
     press(item(host, "p:agents"), " ");

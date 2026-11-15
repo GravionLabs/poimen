@@ -141,7 +141,7 @@ beforeAll(() => {
 
 afterEach(() => TestBed.resetTestingModule());
 
-async function setup(wanted: "control" | "observe", target: Terminal = pane, emulated = false) {
+async function setup(wanted: "control" | "observe", target: Terminal = pane) {
   fake.cols = 80;
   fake.nextCols = 80;
   fake.observers = [];
@@ -152,12 +152,9 @@ async function setup(wanted: "control" | "observe", target: Terminal = pane, emu
   const settings = signal<Settings>(DEFAULT_SETTINGS);
   const session = {
     open: true,
-    emulated,
     resize: vi.fn(async () => undefined),
     close: vi.fn(),
     input: vi.fn(),
-    scroll: vi.fn(),
-    mouse: vi.fn(),
   };
   const records: ((record: StreamRecord) => void)[] = [];
   const open = vi.fn(async (_opts: unknown, onRecord: (record: StreamRecord) => void) => {
@@ -395,16 +392,6 @@ describe("TerminalView font change", () => {
     expect(session.resize).toHaveBeenCalledWith(100, 24);
   });
 
-  it("reopens the observe stream with the new size", async () => {
-    const { fixture, settings, open } = await setup("observe");
-    fake.nextCols = 100;
-    settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
-    fixture.detectChanges();
-    await fixture.whenStable();
-    expect(open).toHaveBeenCalledTimes(2);
-    expect(open.mock.calls[1][0]).toMatchObject({ cols: 100, rows: 24 });
-  });
-
   it("does nothing when the font change keeps cols and rows", async () => {
     const { fixture, settings, session, sized } = await setup("control");
     settings.set({ ...DEFAULT_SETTINGS, fontSize: 14 });
@@ -450,7 +437,6 @@ describe("TerminalView input mode decision", () => {
     type: "reset",
     cols: 80,
     rows: 24,
-    bytes: "",
   };
   const modeOf = (call: unknown) => call as { mode: string; takeover: boolean };
 
@@ -511,7 +497,7 @@ describe("TerminalView input mode decision", () => {
     fixture.detectChanges();
     await fixture.whenStable();
     await new Promise((resolve) => setTimeout(resolve));
-    expect(open).toHaveBeenCalledTimes(3);
+    expect(open).toHaveBeenCalledTimes(2);
     expect(open.mock.calls.slice(1).every((c) => modeOf(c[0]).mode === "observe")).toBe(true);
     expect(fixture.componentInstance.mode()).toBe("observe");
   });
@@ -547,12 +533,9 @@ describe("TerminalView input mode decision", () => {
       await new Promise<void>((r) => (release = r));
       const s = {
         open: true,
-        emulated: false,
         close: vi.fn(),
         resize: vi.fn(async () => undefined),
         input: vi.fn(),
-        scroll: vi.fn(),
-        mouse: vi.fn(),
       };
       sessions.push(s);
       return s;
@@ -632,140 +615,6 @@ describe("TerminalView fit on layout change (#80)", () => {
   });
 });
 
-describe("TerminalView mouse input", () => {
-  const frame: StreamRecord = {
-    type: "reset",
-    cols: 80,
-    rows: 24,
-    bytes: "",
-  };
-  /** 800x480 px body: 80x24 cells of 10x20 px. */
-  const rect = () => ({ left: 0, top: 0, width: 800, height: 480 }) as DOMRect;
-  const mouse = (type: string, x: number, y: number, init: MouseEventInit = {}) =>
-    new MouseEvent(type, { clientX: x, clientY: y, bubbles: true, cancelable: true, ...init });
-
-  async function controlling() {
-    const ctx = await setup("control");
-    ctx.body.getBoundingClientRect = rect;
-    await ctx.send(0, frame);
-    await ctx.send(0, attached); // the controller record confirms control
-    return ctx;
-  }
-
-  it("forwards a click as down and up at the cell under the pointer", async () => {
-    const { session, body } = await controlling();
-    body.dispatchEvent(mouse("mousedown", 125, 45));
-    window.dispatchEvent(mouse("mouseup", 125, 45));
-    expect(session.mouse.mock.calls.map(([e]) => e)).toEqual([
-      { action: "down", button: "left", column: 12, row: 2, modifiers: 0 },
-      { action: "up", button: "left", column: 12, row: 2, modifiers: 0 },
-    ]);
-  });
-
-  it("clamps the mouse cell to the grid of the last frame", async () => {
-    const { session, body, send } = await controlling();
-    await send(0, { type: "resized", cols: 60, rows: 10 });
-    body.dispatchEvent(mouse("mousedown", 795, 475)); // xterm cell 79,23
-    window.dispatchEvent(mouse("mouseup", 125, 45));
-    expect(session.mouse.mock.calls.map(([e]) => [e.column, e.row])).toEqual([
-      [59, 9],
-      [12, 2],
-    ]);
-  });
-
-  it("forwards a drag to a new cell once, with the pressed button and modifiers", async () => {
-    const { session, body } = await controlling();
-    body.dispatchEvent(mouse("mousedown", 5, 5, { button: 2, ctrlKey: true }));
-    window.dispatchEvent(mouse("mousemove", 35, 5, { button: 2, ctrlKey: true }));
-    window.dispatchEvent(mouse("mousemove", 36, 6, { button: 2, ctrlKey: true })); // same cell
-    window.dispatchEvent(mouse("mouseup", 35, 5, { button: 2, ctrlKey: true }));
-    expect(session.mouse.mock.calls.map(([e]) => e.action)).toEqual(["down", "drag", "up"]);
-    expect(session.mouse.mock.calls[1][0]).toEqual({
-      action: "drag",
-      button: "right",
-      column: 3,
-      row: 0,
-      modifiers: 2,
-    });
-  });
-
-  it("leaves selection and the context menu to the browser while Shift is held", async () => {
-    const { session, body } = await controlling();
-    const down = mouse("mousedown", 5, 5, { shiftKey: true });
-    body.dispatchEvent(down);
-    window.dispatchEvent(mouse("mousemove", 50, 50, { shiftKey: true }));
-    window.dispatchEvent(mouse("mouseup", 50, 50, { shiftKey: true }));
-    const menu = mouse("contextmenu", 5, 5, { shiftKey: true });
-    body.dispatchEvent(menu);
-    expect(session.mouse).not.toHaveBeenCalled();
-    expect(down.defaultPrevented).toBe(false);
-    expect(menu.defaultPrevented).toBe(false);
-    const plain = mouse("contextmenu", 5, 5);
-    body.dispatchEvent(plain);
-    expect(plain.defaultPrevented).toBe(true);
-  });
-
-  it("releases a held button when the tab is destroyed mid-drag and drops the listeners", async () => {
-    const { session, body, fixture } = await controlling();
-    body.dispatchEvent(mouse("mousedown", 125, 45));
-    fixture.destroy();
-    expect(session.mouse.mock.calls.map(([e]) => e.action)).toEqual(["down", "up"]);
-    expect(session.mouse.mock.calls[1][0]).toMatchObject({ column: 12, row: 2 });
-    body.dispatchEvent(mouse("mousedown", 5, 5));
-    window.dispatchEvent(mouse("mouseup", 5, 5));
-    expect(session.mouse).toHaveBeenCalledTimes(2);
-  });
-
-  it("sends nothing from a read-only tab and leaves selection alone", async () => {
-    const { session, body, send } = await setup("observe");
-    body.getBoundingClientRect = rect;
-    await send(0, frame);
-    const down = mouse("mousedown", 5, 5);
-    body.dispatchEvent(down);
-    body.dispatchEvent(mouse("mousemove", 50, 50));
-    window.dispatchEvent(mouse("mouseup", 50, 50));
-    expect(session.mouse).not.toHaveBeenCalled();
-    expect(down.defaultPrevented).toBe(false);
-  });
-
-  it("forwards the wheel to a rendered stream", async () => {
-    const { send, session } = await setup("control");
-    await send(0, attached);
-    fake.wheelHandler?.({ deltaY: -60 } as WheelEvent);
-    expect(session.scroll).toHaveBeenCalledWith(true, 2);
-  });
-
-  it("does not forward the wheel to an emulated stream", async () => {
-    const { send, session } = await setup("control", pane, true);
-    await send(0, attached);
-    expect(fake.wheelHandler?.({ deltaY: -60 } as WheelEvent)).toBe(true);
-    expect(session.scroll).not.toHaveBeenCalled();
-  });
-
-  it("leaves the mouse to xterm.js in an emulated stream", async () => {
-    const { session, body, send } = await setup("control", pane, true);
-    body.getBoundingClientRect = rect;
-    await send(0, attached);
-    const down = mouse("mousedown", 5, 5);
-    body.dispatchEvent(down);
-    window.dispatchEvent(mouse("mouseup", 5, 5));
-    expect(session.mouse).not.toHaveBeenCalled();
-    expect(down.defaultPrevented).toBe(false);
-  });
-
-  it("sends nothing while another client holds the controller", async () => {
-    const { session, body, send } = await setup("control");
-    body.getBoundingClientRect = rect;
-    await send(0, {
-      type: "closed",
-      reason: "terminal already has an attached client",
-      code: "controller_held",
-    });
-    body.dispatchEvent(mouse("mousedown", 5, 5));
-    expect(session.mouse).not.toHaveBeenCalled();
-  });
-});
-
 describe("TerminalView links", () => {
   it("opens an http(s) link through the opener and nothing else", async () => {
     const { openUrl } = await setup("control");
@@ -787,84 +636,6 @@ describe("TerminalView links", () => {
     options.linkHandler.activate(new MouseEvent("click"), "https://example.com/doc");
     options.linkHandler.activate(new MouseEvent("click"), "file:///etc/passwd");
     expect(openUrl.mock.calls).toEqual([["https://example.com/doc"]]);
-  });
-
-  /** Makes xterm report a hovered link, as it does on a real mouse move. */
-  function hoverLink() {
-    const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {
-      options: { hover: (e: MouseEvent, t: string, r: unknown) => void };
-    };
-    addon.options.hover(new MouseEvent("mousemove"), "https://x.y", {
-      start: { x: 1, y: 1 },
-      end: { x: 2, y: 1 },
-    });
-  }
-
-  it("lets a Ctrl mousedown over a link reach xterm in input mode off macOS, but captures a plain one", async () => {
-    const { session, body } = await setup("control");
-    await new Promise((resolve) => setTimeout(resolve));
-    hoverLink();
-    const reached = vi.fn();
-    body.addEventListener("mousedown", reached);
-    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
-    expect(reached).toHaveBeenCalledTimes(1);
-    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    expect(reached).toHaveBeenCalledTimes(1);
-    expect(session.mouse).toHaveBeenCalledTimes(1); // only the plain press
-  });
-
-  it("keeps Ctrl for the pane application outside a link", async () => {
-    const { session, body } = await setup("control");
-    await new Promise((resolve) => setTimeout(resolve));
-    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
-    expect(session.mouse).toHaveBeenCalledTimes(1);
-  });
-
-  it("uses Cmd instead of Ctrl on macOS", async () => {
-    vi.stubGlobal("navigator", { platform: "MacIntel" });
-    try {
-      const { session, body } = await setup("control");
-      await new Promise((resolve) => setTimeout(resolve));
-      hoverLink();
-      const reached = vi.fn();
-      body.addEventListener("mousedown", reached);
-      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
-      expect(reached).toHaveBeenCalledTimes(1);
-      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
-      expect(reached).toHaveBeenCalledTimes(1);
-      expect(session.mouse).toHaveBeenCalledTimes(1); // the Ctrl press is the pane's
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("forwards Cmd to the pane on macOS outside a link and after the pointer left a link", async () => {
-    vi.stubGlobal("navigator", { platform: "MacIntel" });
-    try {
-      const { session, body } = await setup("control");
-      await new Promise((resolve) => setTimeout(resolve));
-      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
-      expect(session.mouse).toHaveBeenCalledTimes(1);
-      hoverLink();
-      const addon = fake.addons.find((a) => a && typeof a === "object" && "options" in a) as {
-        options: { leave: () => void };
-      };
-      addon.options.leave();
-      body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, metaKey: true }));
-      expect(session.mouse).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("forwards Shift-less Ctrl drags outside a link and still bypasses on Shift over a link", async () => {
-    const { session, body } = await setup("control");
-    await new Promise((resolve) => setTimeout(resolve));
-    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, ctrlKey: true }));
-    expect(session.mouse).toHaveBeenCalledTimes(1);
-    hoverLink();
-    body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, shiftKey: true }));
-    expect(session.mouse).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -925,23 +696,8 @@ describe("TerminalView search (#714)", () => {
     }
   });
 
-  it("opens in an observer too and says Screen only without xterm scrollback", async () => {
-    const { fixture } = await setup("observe");
-    view(fixture).openSearch();
-    fixture.detectChanges();
-    expect(view(fixture).searchOpen()).toBe(true);
-    expect(fixture.nativeElement.textContent).toContain("Screen only");
-  });
-
-  it("does not say Screen only on an emulated stream", async () => {
-    const { fixture } = await setup("control", pane, true);
-    view(fixture).openSearch();
-    fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).not.toContain("Screen only");
-  });
-
   it("searches while typing, steps with Enter and Shift+Enter and shows the position", async () => {
-    const { fixture } = await setup("control", pane, true);
+    const { fixture } = await setup("control", pane);
     const v = view(fixture);
     v.openSearch();
     v.setQuery("err");
@@ -958,7 +714,7 @@ describe("TerminalView search (#714)", () => {
   });
 
   it("searches incrementally while typing", async () => {
-    const { fixture } = await setup("control", pane, true);
+    const { fixture } = await setup("control", pane);
     const v = view(fixture);
     v.openSearch();
     v.setQuery("e");
@@ -969,7 +725,7 @@ describe("TerminalView search (#714)", () => {
   });
 
   it("is not the search target once the focus left the view", async () => {
-    const { fixture } = await setup("control", pane, true);
+    const { fixture } = await setup("control", pane);
     const hub = TestBed.inject(TerminalSearch);
     const host = fixture.nativeElement as HTMLElement;
     host.dispatchEvent(new FocusEvent("focusin"));
@@ -985,7 +741,7 @@ describe("TerminalView search (#714)", () => {
   });
 
   it("reports no results and passes the case and regex toggles", async () => {
-    const { fixture } = await setup("control", pane, true);
+    const { fixture } = await setup("control", pane);
     const v = view(fixture);
     v.openSearch();
     v.setQuery("x+");
@@ -1000,7 +756,7 @@ describe("TerminalView search (#714)", () => {
   });
 
   it("clears highlights without a query", async () => {
-    const { fixture } = await setup("control", pane, true);
+    const { fixture } = await setup("control", pane);
     const v = view(fixture);
     v.openSearch();
     v.setQuery("");
@@ -1012,7 +768,7 @@ describe("TerminalView search (#714)", () => {
   it("colors the highlights from the theme tokens", async () => {
     document.documentElement.style.setProperty("--term-ansi-3", "#aabbcc");
     try {
-      const { fixture } = await setup("control", pane, true);
+      const { fixture } = await setup("control", pane);
       const v = view(fixture);
       v.openSearch();
       v.setQuery("a");
@@ -1024,7 +780,7 @@ describe("TerminalView search (#714)", () => {
   });
 
   it("closes with Escape, clears the highlights and does not let the key out", async () => {
-    const { fixture } = await setup("control", pane, true);
+    const { fixture } = await setup("control", pane);
     const v = view(fixture);
     v.openSearch();
     v.setQuery("a");
@@ -1037,7 +793,7 @@ describe("TerminalView search (#714)", () => {
   });
 
   it("returns the focus to the terminal on close", async () => {
-    const { fixture } = await setup("control", pane, true);
+    const { fixture } = await setup("control", pane);
     const focus = vi.spyOn(fake.term as unknown as { focus(): void }, "focus");
     view(fixture).openSearch();
     view(fixture).closeSearch();
@@ -1061,7 +817,6 @@ describe("TerminalView copy and paste (#35)", () => {
     type: "reset",
     cols: 80,
     rows: 24,
-    bytes: "",
   };
   const clipboardEvent = (type: string, text?: string) => {
     const data = new Map<string, string>(text === undefined ? [] : [["text/plain", text]]);
@@ -1204,8 +959,8 @@ describe("TerminalView prompt bar (#293)", () => {
   });
 });
 
-describe("TerminalView on an emulated stream (poimen backend)", () => {
-  const reset = (cols = 100, rows = 30): StreamRecord => ({ type: "reset", cols, rows, bytes: "" });
+describe("TerminalView stream (poimen backend)", () => {
+  const reset = (cols = 100, rows = 30): StreamRecord => ({ type: "reset", cols, rows });
   const bytes = (...values: number[]): StreamRecord => ({
     type: "bytes",
     data: new Uint8Array(values),
@@ -1213,7 +968,7 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   const scrollbackOf = () => (fake.term as unknown as { options: { scrollback: number } }).options;
 
   it("resets xterm before a snapshot, so a reattach does not stack scrollback", async () => {
-    const { send } = await setup("observe", pane, true);
+    const { send } = await setup("observe", pane);
     await send(0, reset());
     await send(0, bytes(104, 105));
     expect(fake.calls).toEqual(["reset", "resize 100x30"]);
@@ -1221,26 +976,20 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("writes raw bytes to xterm without decoding", async () => {
-    const { send } = await setup("control", pane, true);
+    const { send } = await setup("control", pane);
     await send(0, bytes(27, 91, 72));
     expect(fake.writes).toContainEqual(new Uint8Array([27, 91, 72]));
   });
 
-  it("leaves a rendered stream alone: no reset, no resize", async () => {
-    const { send } = await setup("observe", pane, false);
-    await send(0, reset());
-    expect(fake.calls).toEqual([]);
-  });
-
   it("sizes an observer to the controller instead of fitting, on the snapshot and on resized", async () => {
-    const { send } = await setup("observe", pane, true);
+    const { send } = await setup("observe", pane);
     await send(0, reset(90, 20));
     await send(0, { type: "resized", cols: 120, rows: 40 });
     expect(fake.calls).toEqual(["reset", "resize 90x20", "resize 120x40"]);
   });
 
   it("sets the PTY size of an unfocused emulated observer when its container resizes", async () => {
-    const { fixture, settings, session, open } = await setup("observe", pane, true);
+    const { fixture, settings, session, open } = await setup("observe", pane);
     fake.nextCols = 100;
     settings.set({ ...DEFAULT_SETTINGS, fontSize: 10 });
     fixture.detectChanges();
@@ -1250,7 +999,7 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("renders at the controller's size when the server refuses an observer's resize", async () => {
-    const { fixture, settings, session, sized, send } = await setup("observe", pane, true);
+    const { fixture, settings, session, sized, send } = await setup("observe", pane);
     await send(0, reset(90, 20));
     session.resize.mockRejectedValueOnce(new Error("not_controller"));
     fake.nextCols = 100;
@@ -1263,7 +1012,7 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("gives a controller its own size back after the snapshot and tells the server", async () => {
-    const { send, session } = await setup("control", pane, true);
+    const { send, session } = await setup("control", pane);
     await send(0, attached);
     await send(0, reset(100, 30));
     await send(0, bytes(1));
@@ -1272,32 +1021,26 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("ignores the resized echo of its own size as a controller", async () => {
-    const { send } = await setup("control", pane, true);
+    const { send } = await setup("control", pane);
     await send(0, attached);
     await send(0, { type: "resized", cols: 80, rows: 24 });
     expect(fake.calls).toEqual([]);
   });
 
-  it("keeps xterm's own scrollback from the settings on an emulated stream only", async () => {
-    const emulated = await setup("observe", pane, true);
+  it("keeps xterm's own scrollback from the settings", async () => {
+    const view = await setup("observe");
     expect(scrollbackOf().scrollback).toBe(DEFAULT_SETTINGS.scrollback);
-    emulated.settings.set({ ...DEFAULT_SETTINGS, scrollback: 500 });
-    emulated.fixture.detectChanges();
+    view.settings.set({ ...DEFAULT_SETTINGS, scrollback: 500 });
+    view.fixture.detectChanges();
     expect(scrollbackOf().scrollback).toBe(500);
-    TestBed.resetTestingModule();
-    await setup("observe", pane, false);
-    expect(scrollbackOf().scrollback).toBe(0);
   });
 
-  it("tells xterm.js it runs over ConPTY on Windows, for an emulated stream only", async () => {
+  it("tells xterm.js it runs over ConPTY on Windows", async () => {
     vi.stubGlobal("navigator", { platform: "Win32" });
     try {
-      await setup("observe", pane, true);
-      const options = () => (fake.term as unknown as { options: { windowsPty?: unknown } }).options;
-      expect(options().windowsPty).toEqual({ backend: "conpty", buildNumber: 21376 });
-      TestBed.resetTestingModule();
-      await setup("observe", pane, false);
-      expect(options().windowsPty).toBeUndefined();
+      await setup("observe");
+      const options = (fake.term as unknown as { options: { windowsPty?: unknown } }).options;
+      expect(options.windowsPty).toEqual({ backend: "conpty", buildNumber: 21376 });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -1306,7 +1049,7 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   it("leaves windowsPty unset off Windows", async () => {
     vi.stubGlobal("navigator", { platform: "MacIntel" });
     try {
-      await setup("observe", pane, true);
+      await setup("observe", pane);
       expect(
         (fake.term as unknown as { options: { windowsPty?: unknown } }).options.windowsPty,
       ).toBeUndefined();
@@ -1316,13 +1059,13 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("sends typed input and terminal answers from the controller only", async () => {
-    const observer = await setup("observe", pane, true);
+    const observer = await setup("observe", pane);
     await observer.send(0, reset());
     fake.onData?.("\x1b[?1;2c"); // a device attributes answer
     expect(observer.session.input).not.toHaveBeenCalled();
     TestBed.resetTestingModule();
 
-    const controller = await setup("control", pane, true);
+    const controller = await setup("control", pane);
     fake.onData?.("early");
     expect(controller.session.input).not.toHaveBeenCalled(); // not the controller yet
     await controller.send(0, attached);
@@ -1331,7 +1074,7 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("keeps the last screen with a banner when the process exits, and does not reattach", async () => {
-    const { send, open, fixture, modes } = await setup("control", pane, true);
+    const { send, open, fixture, modes } = await setup("control", pane);
     await send(0, attached);
     await send(0, {
       type: "closed",
@@ -1345,8 +1088,8 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
     expect(fake.calls).not.toContain("reset");
   });
 
-  it("keeps the scrollback of an emulated stream after the process exited", async () => {
-    const { send, settings, fixture } = await setup("control", pane, true);
+  it("keeps the scrollback after the process exited", async () => {
+    const { send, settings, fixture } = await setup("control", pane);
     await send(0, attached);
     await send(0, { type: "closed", reason: "the process exited", exit_code: 0, code: "exited" });
     settings.set({ ...DEFAULT_SETTINGS, scrollback: 500 });
@@ -1355,8 +1098,8 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("attaches again in its mode after the server went away, without a takeover", async () => {
-    const frame: StreamRecord = { type: "reset", cols: 80, rows: 24, bytes: "" };
-    const { send, open, fixture, modes } = await setup("control", pane, true);
+    const frame: StreamRecord = { type: "reset", cols: 80, rows: 24 };
+    const { send, open, fixture, modes } = await setup("control", pane);
     await send(0, frame);
     await send(0, attached);
     await send(0, {
@@ -1377,7 +1120,7 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("keeps trying while no server answers yet", async () => {
-    const { send, open, fixture } = await setup("observe", pane, true);
+    const { send, open, fixture } = await setup("observe", pane);
     open.mockImplementationOnce(() => Promise.reject("no server"));
     await send(0, { type: "closed", reason: "gone", code: "lost" });
     await new Promise((resolve) => setTimeout(resolve, REATTACH_DELAYS_MS[0] + 50));
@@ -1389,7 +1132,7 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("stops trying when the view is destroyed", async () => {
-    const { send, open, fixture } = await setup("observe", pane, true);
+    const { send, open, fixture } = await setup("observe", pane);
     await send(0, { type: "closed", reason: "gone", code: "lost" });
     fixture.destroy();
     await new Promise((resolve) => setTimeout(resolve, REATTACH_DELAYS_MS[0] + 50));
@@ -1397,14 +1140,14 @@ describe("TerminalView on an emulated stream (poimen backend)", () => {
   });
 
   it("closes silently when the server detaches the stream", async () => {
-    const { send, open, fixture } = await setup("observe", pane, true);
+    const { send, open, fixture } = await setup("observe", pane);
     await send(0, { type: "closed", reason: "detached" });
     expect(fixture.componentInstance.banner()).toBeNull();
     expect(open).toHaveBeenCalledTimes(1);
   });
 
   it("shows the read-only state with the input action when the controller is held", async () => {
-    const { send, open, fixture, modes } = await setup("control", pane, true);
+    const { send, open, fixture, modes } = await setup("control", pane);
     await send(0, {
       type: "closed",
       reason: "another client controls this terminal",

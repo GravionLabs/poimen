@@ -46,7 +46,7 @@ export class HooksOffer {
     effect(() => {
       const status = this.store.backend();
       const ready = status?.state === "running" || status?.state === "started";
-      if (ready && this.store.backendKind() === "poimen") untracked(() => void this.check());
+      if (ready) untracked(() => void this.check());
     });
   }
 
