@@ -25,7 +25,7 @@ const inside = (dir: string, root: string): boolean => {
 };
 
 /**
- * The runs (with a readable state) of the repository that contains `dir`, oldest first. `machine`
+ * The runs (with a readable state) of the repository that contains `dir`, in the order of the cards (arrival order, not sorted). `machine`
  * is the machine of the space (`dir` is a path there); only its runs count, so a local and a
  * remote repository at the same path stay apart.
  */
@@ -50,24 +50,35 @@ export function runsOfSpace(
   );
 }
 
+/** Running first, then the latest `updated`, then the run id: independent of the input order. */
+const rank = (a: RunChoice, b: RunChoice): number => {
+  const running = Number(b.status.status === "running") - Number(a.status.status === "running");
+  if (running !== 0) return running;
+  const time = (Date.parse(b.status.updated) || 0) - (Date.parse(a.status.updated) || 0);
+  if (time !== 0) return time;
+  return a.status.run < b.status.run ? -1 : a.status.run > b.status.run ? 1 : 0;
+};
+
+const best = (runs: readonly RunChoice[]): RunChoice | undefined => [...runs].sort(rank)[0];
+
 /**
- * The run to show: the one whose `host["poimen.terminal"]` is the active terminal, else the one
- * the user picked, else the latest run (by `updated`) of the space's repository.
+ * The run to show: the one the user picked, else the best run whose `host["poimen.terminal"]` is
+ * the active terminal, else the best run of the space's repository. Best = a running run before a
+ * finished one, then the latest `updated`, then the run id, whatever the order of `runs`.
  */
 export function selectRun(
   runs: readonly RunChoice[],
   terminalId: string | null | undefined,
   picked: string | null,
 ): RunChoice | undefined {
-  const byTerminal = terminalId
-    ? runs.find((r) => r.status.host["poimen.terminal"] === terminalId)
-    : undefined;
   if (picked) {
     const chosen = runs.find((r) => r.key === picked);
     if (chosen) return chosen;
   }
-  if (byTerminal) return byTerminal;
-  return [...runs].sort((a, b) => Date.parse(b.status.updated) - Date.parse(a.status.updated))[0];
+  const byTerminal = terminalId
+    ? best(runs.filter((r) => r.status.host["poimen.terminal"] === terminalId))
+    : undefined;
+  return byTerminal ?? best(runs);
 }
 
 /** `text` cut to `max` characters with an ellipsis. */
