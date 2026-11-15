@@ -51,11 +51,26 @@ pub enum Read {
     },
 }
 
-/// Runs that ended or were abandoned longer ago than this are not shown, nor are older files read.
+/// Runs that ended or were abandoned longer ago than this are not shown, unless their subject is
+/// a milestone ([`is_milestone_run`]).
 const RECENT_SECS: f64 = 24.0 * 3600.0;
 
-/// At most this many runs per repository.
+/// At most this many runs per repository, not counting milestone runs.
 const MAX_RUNS: usize = 12;
+
+/// At most this many milestone runs per repository, newest first.
+const MAX_MILESTONE_RUNS: usize = 100;
+
+/// A run of a GitHub milestone: kept regardless of age (the backend does not know whether the
+/// milestone is open; the frontend leaves out the closed ones).
+fn is_milestone_run(run: &Run) -> bool {
+    run.state
+        .subject
+        .as_ref()
+        .and_then(|s| s.get("kind"))
+        .and_then(Value::as_str)
+        == Some("github.milestone")
+}
 
 struct FileState {
     reducer: Reducer,
@@ -67,6 +82,9 @@ struct FileState {
 #[derive(Default)]
 pub struct Tailer {
     files: HashMap<PathBuf, FileState>,
+    /// Old files that held no milestone run, by modification time and length: not read again
+    /// until they change.
+    skipped: HashMap<PathBuf, (Option<SystemTime>, u64)>,
 }
 
 impl Tailer {
@@ -98,23 +116,35 @@ impl Tailer {
                 if !meta.is_file() || meta.len() > MAX_EVENTS_BYTES {
                     continue;
                 }
-                let recent = meta
-                    .modified()
-                    .ok()
+                let modified = meta.modified().ok();
+                let old = modified
                     .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
-                    .is_none_or(|m| now - m.as_secs_f64() < RECENT_SECS + 3600.0);
-                if !recent && !self.files.contains_key(&path) {
+                    .is_some_and(|m| now - m.as_secs_f64() >= RECENT_SECS + 3600.0);
+                if self.skipped.get(&path) == Some(&(modified, meta.len())) {
+                    seen.insert(path);
                     continue;
                 }
+                self.skipped.remove(&path);
                 seen.insert(path.clone());
                 let state = self.files.entry(path.clone()).or_insert_with(|| FileState {
                     reducer: Reducer::new(),
                     tail: LineTail::default(),
                 });
                 let _ = Self::advance(state, &path, meta.len());
+                // An old file is read once; it stays only when it holds a milestone run.
+                if old
+                    && !state
+                        .reducer
+                        .snapshot(now, &agent_events::pid_alive)
+                        .is_some_and(|r| is_milestone_run(&r))
+                {
+                    self.files.remove(&path);
+                    self.skipped.insert(path, (modified, meta.len()));
+                }
             }
         }
         self.files.retain(|path, _| seen.contains(path));
+        self.skipped.retain(|path, _| seen.contains(path));
         let mut unknown = None;
         let mut runs = Vec::new();
         for (path, state) in &self.files {
@@ -135,28 +165,41 @@ pub fn named(mut run: Run, file_run: &str) -> Run {
     run
 }
 
-/// The runs the panel shows, newest first: runs that ended or were abandoned more than a day ago
-/// are left out, and at most [`MAX_RUNS`] are kept.
+/// The runs the panel shows, newest first: milestone runs regardless of age, at most
+/// [`MAX_MILESTONE_RUNS`]; the others only when they did not end or get abandoned more than a day
+/// ago, at most [`MAX_RUNS`] of them.
 pub fn recent(runs: Vec<Run>, now: f64) -> Vec<Run> {
-    let mut runs: Vec<Run> = runs
-        .into_iter()
-        .filter(|run| {
-            let last = run
-                .state
-                .updated
-                .as_deref()
-                .and_then(agent_events::parse_ts);
-            let over = run.state.status != "running";
-            !(over && last.is_some_and(|t| now - t > RECENT_SECS))
-        })
-        .collect();
-    runs.sort_by(|a, b| {
-        b.state
-            .updated
-            .cmp(&a.state.updated)
-            .then_with(|| a.state.run.cmp(&b.state.run))
-    });
-    runs.truncate(MAX_RUNS);
+    let (milestone, other): (Vec<Run>, Vec<Run>) = runs.into_iter().partition(is_milestone_run);
+    let mut runs = newest(milestone, MAX_MILESTONE_RUNS);
+    runs.extend(newest(
+        other
+            .into_iter()
+            .filter(|run| {
+                let last = run
+                    .state
+                    .updated
+                    .as_deref()
+                    .and_then(agent_events::parse_ts);
+                let over = run.state.status != "running";
+                !(over && last.is_some_and(|t| now - t > RECENT_SECS))
+            })
+            .collect(),
+        MAX_RUNS,
+    ));
+    runs.sort_by(order);
+    runs
+}
+
+fn order(a: &Run, b: &Run) -> std::cmp::Ordering {
+    b.state
+        .updated
+        .cmp(&a.state.updated)
+        .then_with(|| a.state.run.cmp(&b.state.run))
+}
+
+fn newest(mut runs: Vec<Run>, max: usize) -> Vec<Run> {
+    runs.sort_by(order);
+    runs.truncate(max);
     runs
 }
 
@@ -584,6 +627,53 @@ mod tests {
         let mut status: Vec<_> = runs.iter().map(|r| r.state.status.as_str()).collect();
         status.sort_unstable();
         assert_eq!(status, ["finished", "running"]);
+    }
+
+    #[test]
+    fn old_milestone_runs_are_kept_and_old_session_runs_dropped() {
+        let dir = temp_dir("milestone");
+        let line = |run: &str, kind: &str| {
+            format!(
+                r#"{{"v":1,"seq":1,"ts":"2026-10-01T10:00:00Z","run":"{run}","type":"run.started","tone":"neutral","subject":{{"kind":"{kind}","id":"M1"}}}}
+{{"v":1,"seq":2,"ts":"2026-10-01T11:00:00Z","run":"{run}","type":"run.finished","tone":"success","outcome":"succeeded"}}
+"#
+            )
+        };
+        append(&dir.join("ms.jsonl"), &line("ms", "github.milestone"));
+        append(&dir.join("sess.jsonl"), &line("sess", "session"));
+        let mut tailer = Tailer::default();
+        // Well past the day: the file mtime (now) is in the "future" of the old events, so the
+        // reader runs at a later time to make the files old.
+        let later = now() + 40.0 * 24.0 * 3600.0;
+        let (runs, _) = tailer.read(&dir, later);
+        let ids: Vec<_> = runs.iter().map(|r| r.state.run.as_str()).collect();
+        assert_eq!(ids, ["ms"]);
+        assert_eq!(tailer.files.len(), 1);
+        // The dropped file is not read again, the kept one is followed.
+        let (runs, _) = tailer.read(&dir, later);
+        assert_eq!(runs.len(), 1);
+    }
+
+    #[test]
+    fn the_milestone_cap_keeps_the_newest_and_does_not_count_other_runs() {
+        let mk = |i: usize, kind: &str| {
+            let mut r = Reducer::new();
+            r.push_line(&format!(
+                r#"{{"v":1,"seq":1,"ts":"2026-11-07T11:00:00Z","run":"r{i}","type":"run.started","tone":"neutral","subject":{{"kind":"{kind}","id":"1"}}}}"#
+            ));
+            let mut run = r.snapshot(now(), &|_| true).unwrap();
+            run.state.updated = Some(format!("2026-11-07T11:{:02}:{:02}Z", i / 60, i % 60));
+            run
+        };
+        let mut runs: Vec<Run> = (0..130).map(|i| mk(i, "github.milestone")).collect();
+        runs.extend((200..220).map(|i| mk(i, "session")));
+        let kept = recent(runs, now());
+        let milestone: Vec<_> = kept.iter().filter(|r| is_milestone_run(r)).collect();
+        assert_eq!(milestone.len(), MAX_MILESTONE_RUNS);
+        // The newest of the milestone runs survive.
+        assert!(milestone.iter().any(|r| r.state.run == "r129"));
+        assert!(milestone.iter().all(|r| r.state.run != "r0"));
+        assert_eq!(kept.len() - milestone.len(), MAX_RUNS);
     }
 
     #[test]
