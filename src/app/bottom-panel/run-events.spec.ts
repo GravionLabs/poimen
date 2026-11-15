@@ -62,6 +62,25 @@ describe("runs of a space", () => {
     expect(selectRun(runs, "t2", "gone")?.status.run).toBe("new");
   });
 
+  it("picks the same run for the terminal in any card order", () => {
+    const mk = (run: string, updated: string, status: "running" | "finished") => {
+      const c = card(run, updated, "t7");
+      if (c.state.kind === "ok") c.state.status.status = status;
+      return c;
+    };
+    const list = [
+      mk("a", "2026-11-07T10:00:00.000Z", "running"),
+      mk("b", "2026-11-07T12:00:00.000Z", "finished"),
+      mk("c", "2026-11-07T11:00:00.000Z", "running"),
+      mk("d", "2026-11-07T11:00:00.000Z", "running"),
+    ];
+    for (const order of [list, [...list].reverse(), [list[2]!, list[0]!, list[3]!, list[1]!]]) {
+      const runs = runsOfSpace(order, "/repo");
+      expect(selectRun(runs, "t7", null)?.status.run).toBe("c");
+      expect(selectRun(runs, "t9", null)?.status.run).toBe("c");
+    }
+  });
+
   it("has no run for a space without runs", () => {
     expect(selectRun([], "t1", null)).toBeUndefined();
   });
