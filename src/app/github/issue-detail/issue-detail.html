@@ -46,6 +46,11 @@
       </div>
       <!-- Action bar: agent actions; later actions (close, label, ...) go here, see viewerCanUpdate. -->
       <div class="actions" role="toolbar" aria-label="Issue actions" data-testid="actions">
+        @if (startable(); as issue) {
+          <button type="button" data-testid="start-task" (click)="startTask(issue)">
+            {{ issueTasks.label(issue.root, issue.number) }}
+          </button>
+        }
         @for (o of offered(); track o.action.id) {
           <button
             type="button"

@@ -96,6 +96,7 @@ import { TrustDialog } from "./trust-dialog/trust-dialog";
 import { spaceRepoDir, type SidebarMenuAction } from "./sidebar/sidebar";
 import { AgentActionDialog } from "./github/agent-action-dialog/agent-action-dialog";
 import { AgentActions } from "./github/agent-actions";
+import { IssueTasks } from "./github/issue-task";
 import { TaskStarter } from "./core/task-start";
 import { ProjectTeardown } from "./core/project-teardown";
 import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
@@ -173,6 +174,7 @@ export class App {
   protected readonly shortcutsOverview = inject(ShortcutsOverview);
   private readonly subagents = inject(Subagents);
   private readonly tasks = inject(TaskStarter);
+  protected readonly issueTasks = inject(IssueTasks);
   private readonly cleanup = inject(TaskCleanup);
   private readonly teardown = inject(ProjectTeardown);
   private readonly projectEntries = inject(ProjectEntries);
@@ -505,6 +507,11 @@ export class App {
     }
     if (id === "showChanges") {
       this.showChangesOfActiveSpace();
+      return;
+    }
+    if (id === "startIssueTask") {
+      const [t] = this.agentActions.current();
+      if (t?.kind === "issue") void this.issueTasks.start(t.root, t.number);
       return;
     }
     if (id === "startTask") {

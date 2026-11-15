@@ -205,7 +205,9 @@ describe("issue detail pane", () => {
     expect(q(el, "[data-testid=detail-labels]")!.textContent).toContain("frontend");
     expect(q(el, "[data-testid=detail-assignees]")!.textContent).toContain("octocat");
     expect(q(el, "[data-testid=detail-milestone]")!.textContent).toContain("M2");
-    expect(q(el, "[data-testid=actions]")!.children).toHaveLength(0);
+    // The only action of an open issue here is its task: no agent action without a viewerCanUpdate.
+    expect(q(el, "[data-testid=actions]")!.children).toHaveLength(1);
+    expect(q(el, "[data-testid=start-task]")!.textContent!.trim()).toBe("Start task…");
     const subs = el.querySelectorAll<HTMLButtonElement>("[data-testid=detail-sub]");
     expect(subs).toHaveLength(2);
     expect(subs[0].disabled).toBe(false);
