@@ -1,10 +1,24 @@
-import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  HostListener,
+  computed,
+  inject,
+  signal,
+} from "@angular/core";
 import { UiState } from "../../core/ui-state";
 import { AgentRuns } from "../agent-runs";
 import { AgentActions, pullTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues } from "../issues";
 import { renderMarkdown } from "../markdown";
-import { GithubPulls, errorText, isGithubUrl, type LinkedIssue } from "../pulls";
+import {
+  GithubPulls,
+  PR_ACTION_LABELS,
+  errorText,
+  isGithubUrl,
+  type LinkedIssue,
+  type PrAction,
+} from "../pulls";
 
 /**
  * The detail pane of the selected pull request: description, checks, reviews and linked issues.
@@ -36,6 +50,23 @@ export class PullDetailPane {
     const err = this.pulls.detailError();
     return err === null ? null : typeof err === "string" ? err : errorText(err);
   });
+
+  protected readonly labels = PR_ACTION_LABELS;
+  protected readonly text = signal("");
+  protected choose(action: PrAction): void {
+    this.text.set("");
+    this.pulls.choose(action);
+  }
+
+  protected async submit(action: PrAction): Promise<void> {
+    const body = this.text().trim();
+    if (action !== "close" && !body) return;
+    if (await this.pulls.act(action, action === "close" ? undefined : body)) this.text.set("");
+  }
+
+  protected cancel(): void {
+    this.pulls.compose.set(null);
+  }
 
   /** Selects the issue on the Issues sub-page. */
   protected openIssue(issue: LinkedIssue): void {

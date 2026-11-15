@@ -13,6 +13,7 @@ import {
   type PaletteItem,
   type PoimenCommand,
 } from "../core/command-palette";
+import type { PrAction } from "../github/pulls";
 import { EditorTabs } from "../core/editor-tabs";
 import type { ProjectEntry } from "../core/project-entries";
 import { palettePosition, PALETTE_MAX_HEIGHT } from "./palette-position";
@@ -35,6 +36,8 @@ export class CommandPalette {
   readonly entryChosen = output<ProjectEntry>();
   /** An agent action of the GitHub view was chosen (its id). */
   readonly agentActionChosen = output<string>();
+  /** A write on the open pull request was chosen. */
+  readonly prActionChosen = output<PrAction>();
   private readonly field = viewChild<ElementRef<HTMLInputElement>>("field");
 
   /** Top-left corner of the popup, centred on the editor area. */
@@ -105,7 +108,8 @@ export class CommandPalette {
   protected run(item: PaletteItem): void {
     this.palette.recordRun(item);
     this.palette.close();
-    if (item.agentActionId) this.agentActionChosen.emit(item.agentActionId);
+    if (item.prAction) this.prActionChosen.emit(item.prAction);
+    else if (item.agentActionId) this.agentActionChosen.emit(item.agentActionId);
     else if (item.entry) this.entryChosen.emit(item.entry);
     else this.commandChosen.emit(item.command);
   }

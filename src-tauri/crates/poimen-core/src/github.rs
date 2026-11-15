@@ -264,6 +264,8 @@ pub struct Client<R: Runner> {
     runner: R,
     cache_dir: PathBuf,
     graphql_cache: Mutex<HashMap<String, (Duration, Value)>>,
+    /// Bumped by every write; a GraphQL answer read before it is not cached.
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl Client<SystemRunner> {
@@ -278,6 +280,50 @@ impl<R: Runner> Client<R> {
             runner,
             cache_dir,
             graphql_cache: Mutex::new(HashMap::new()),
+            generation: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Runs a writing `gh` command (`argv` without the program name) without touching the caches,
+    /// then drops the GraphQL cache and the REST disk entries of `repo`, whatever the outcome (a
+    /// failed write may have changed something). Returns stdout; errors map through `map_error`.
+    pub fn mutate(&self, repo: &Repo, argv: &[String]) -> Result<String, GhError> {
+        let result = self.run(argv);
+        self.invalidate(repo);
+        let out = result?;
+        if out.code == Some(0) {
+            Ok(out.stdout)
+        } else {
+            Err(self.classify(None, None, &out.stderr))
+        }
+    }
+
+    /// Drops every cached answer that may describe `repo`.
+    fn invalidate(&self, repo: &Repo) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut cache) = self.graphql_cache.lock() {
+            cache.clear();
+        }
+        let prefix = format!("repos/{}/{}", repo.owner, repo.name).to_lowercase();
+        let Ok(dir) = std::fs::read_dir(&self.cache_dir) else {
+            return;
+        };
+        for file in dir.flatten() {
+            let path = file.path();
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(entry) = serde_json::from_str::<DiskEntry>(&text) else {
+                continue;
+            };
+            let lower = entry.path.trim_start_matches('/').to_lowercase();
+            if lower == prefix
+                || lower.starts_with(&format!("{prefix}/"))
+                || lower.starts_with(&format!("{prefix}?"))
+            {
+                let _ = std::fs::remove_file(&path);
+            }
         }
     }
 
@@ -398,6 +444,7 @@ impl<R: Runner> Client<R> {
     pub fn graphql(&self, query: &str, vars: &Value) -> Result<Value, GhError> {
         let key = format!("{query}\u{0}{vars}");
         let now = self.runner.now();
+        let generation = self.generation.load(std::sync::atomic::Ordering::SeqCst);
         if let Ok(cache) = self.graphql_cache.lock()
             && let Some((at, value)) = cache.get(&key)
             && now.saturating_sub(*at) < CACHE_TTL
@@ -431,7 +478,9 @@ impl<R: Runner> Client<R> {
         let value: Value = serde_json::from_str(&out.stdout).map_err(|e| GhError::Other {
             message: format!("unreadable GraphQL answer: {e}"),
         })?;
-        if let Ok(mut cache) = self.graphql_cache.lock() {
+        if let Ok(mut cache) = self.graphql_cache.lock()
+            && generation == self.generation.load(std::sync::atomic::Ordering::SeqCst)
+        {
             cache.insert(key, (now, value.clone()));
         }
         Ok(value)
@@ -859,6 +908,64 @@ mod tests {
         // Expiry.
         f.clock.set(f.clock.get() + CACHE_TTL);
         assert_eq!(c.graphql("query{a}", &vars).unwrap(), json!({"data": 3}));
+    }
+
+    #[test]
+    fn mutate_runs_uncached_and_drops_the_caches_of_that_repository() {
+        let dir = temp_dir("mutate");
+        let f = fake(vec![
+            out(0, OK, ""),             // rest of repo o/n
+            out(0, OK, ""),             // rest of repo o/other
+            out(0, "{\"data\":1}", ""), // graphql
+            out(0, "done\n", ""),       // mutate
+            out(0, OK, ""),             // rest o/n again
+            out(0, "{\"data\":2}", ""), // graphql again
+            out(0, "done\n", ""),       // second mutate is not cached
+        ]);
+        let c = Client::new(&f, dir.clone());
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        c.rest("repos/o/n/milestones").unwrap();
+        c.rest("repos/o/other/milestones").unwrap();
+        c.graphql("q", &json!({})).unwrap();
+        let argv: Vec<String> = vec!["pr".into(), "ready".into(), "1".into()];
+        assert_eq!(c.mutate(&r, &argv).unwrap(), "done\n");
+        assert_eq!(f.calls.borrow()[3], argv);
+        // Fresh after the write; the other repository stays cached.
+        c.rest("repos/o/n/milestones").unwrap();
+        c.rest("repos/o/other/milestones").unwrap();
+        assert_eq!(c.graphql("q", &json!({})).unwrap(), json!({"data": 2}));
+        assert_eq!(f.calls.borrow().len(), 6);
+        c.mutate(&r, &argv).unwrap();
+        assert_eq!(f.calls.borrow().len(), 7);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mutate_errors_map_and_still_invalidate() {
+        let f = fake(vec![
+            out(0, "{\"data\":1}", ""),
+            out(1, "", "error connecting to api.github.com"),
+            out(1, "", "GraphQL: Pull request is not mergeable\nmore"),
+            out(0, "{\"data\":2}", ""),
+        ]);
+        let c = Client::new(&f, temp_dir("mutate-err"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        c.graphql("q", &json!({})).unwrap();
+        let argv: Vec<String> = vec!["pr".into(), "close".into(), "1".into()];
+        assert_eq!(c.mutate(&r, &argv), Err(GhError::Offline));
+        assert_eq!(
+            c.mutate(&r, &argv),
+            Err(GhError::Other {
+                message: "GraphQL: Pull request is not mergeable".into()
+            })
+        );
+        assert_eq!(c.graphql("q", &json!({})).unwrap(), json!({"data": 2}));
     }
 
     #[test]

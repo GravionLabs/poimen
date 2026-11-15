@@ -413,6 +413,79 @@ pub fn load_detail<R: Runner>(
     parse_detail(&client.graphql(DETAIL_QUERY, &vars)?)
 }
 
+/// A write on a pull request (`github_pr_action`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrAction {
+    Approve,
+    RequestChanges,
+    Comment,
+    Ready,
+    Draft,
+    Close,
+    Reopen,
+}
+
+/// The `gh` argv (without the program name) of `action`; argv only, never a shell. Request changes
+/// and comment need a non-blank `body`; approve takes one when given.
+pub fn action_argv(
+    repo: &Repo,
+    number: u64,
+    action: PrAction,
+    body: Option<&str>,
+) -> Result<Vec<String>, GhError> {
+    let body = body.map(str::trim).filter(|b| !b.is_empty());
+    let mut argv: Vec<String> = vec!["pr".into()];
+    let flag = |name: &str| name.to_owned();
+    match action {
+        PrAction::Approve | PrAction::RequestChanges | PrAction::Comment => {
+            argv.extend(["review".into(), number.to_string()]);
+            argv.push(flag(match action {
+                PrAction::Approve => "--approve",
+                PrAction::RequestChanges => "--request-changes",
+                _ => "--comment",
+            }));
+            if action != PrAction::Approve && body.is_none() {
+                return Err(GhError::Other {
+                    message: "a comment text is required".into(),
+                });
+            }
+            if let Some(body) = body {
+                argv.extend(["-b".into(), body.to_owned()]);
+            }
+        }
+        PrAction::Ready | PrAction::Draft => {
+            argv.extend(["ready".into(), number.to_string()]);
+            if action == PrAction::Draft {
+                argv.push("--undo".into());
+            }
+        }
+        PrAction::Close | PrAction::Reopen => {
+            let verb = if action == PrAction::Close {
+                "close"
+            } else {
+                "reopen"
+            };
+            argv.extend([verb.into(), number.to_string()]);
+        }
+    }
+    argv.extend(["-R".into(), format!("{}/{}", repo.owner, repo.name)]);
+    Ok(argv)
+}
+
+/// Runs `action` on pull request `number` in the repository of `root` through `Client::mutate`.
+pub fn run_action<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+    action: PrAction,
+    body: Option<&str>,
+) -> Result<(), GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let argv = action_argv(&repo, number, action, body)?;
+    client.mutate(&repo, &argv).map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,5 +653,57 @@ mod tests {
         assert_eq!(v["viewerCanMergeAsAdmin"], false);
         assert_eq!(v["linkedIssues"][0]["repo"], "GravionLabs/poimen");
         assert_eq!(v["reviews"][0]["submittedAt"], "2026-11-05T10:00:00Z");
+    }
+
+    #[test]
+    fn action_argv_per_action() {
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        let a = |act, body| action_argv(&r, 7, act, body).unwrap();
+        assert_eq!(
+            a(PrAction::Approve, None),
+            ["pr", "review", "7", "--approve", "-R", "o/n"]
+        );
+        assert_eq!(
+            a(PrAction::RequestChanges, Some(" fix it ")),
+            [
+                "pr",
+                "review",
+                "7",
+                "--request-changes",
+                "-b",
+                "fix it",
+                "-R",
+                "o/n"
+            ]
+        );
+        assert_eq!(
+            a(PrAction::Comment, Some("hi")),
+            ["pr", "review", "7", "--comment", "-b", "hi", "-R", "o/n"]
+        );
+        assert_eq!(a(PrAction::Ready, None), ["pr", "ready", "7", "-R", "o/n"]);
+        assert_eq!(
+            a(PrAction::Draft, None),
+            ["pr", "ready", "7", "--undo", "-R", "o/n"]
+        );
+        assert_eq!(a(PrAction::Close, None), ["pr", "close", "7", "-R", "o/n"]);
+        assert_eq!(
+            a(PrAction::Reopen, None),
+            ["pr", "reopen", "7", "-R", "o/n"]
+        );
+    }
+
+    #[test]
+    fn request_changes_and_comment_need_a_body() {
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        for act in [PrAction::RequestChanges, PrAction::Comment] {
+            assert!(action_argv(&r, 1, act, None).is_err());
+            assert!(action_argv(&r, 1, act, Some("  \n")).is_err());
+        }
     }
 }

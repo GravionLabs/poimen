@@ -56,6 +56,47 @@
           </button>
         }
       </div>
+      @if (pulls.actions().length > 0) {
+        <div class="actions" role="toolbar" aria-label="Review actions" data-testid="pr-actions">
+          @for (a of pulls.actions(); track a) {
+            <button
+              type="button"
+              [attr.data-testid]="'pr-' + a"
+              [disabled]="pulls.actionBusy()"
+              (click)="choose(a)"
+            >
+              {{ labels[a] }}
+            </button>
+          }
+        </div>
+        @if (pulls.compose(); as c) {
+          <form
+            class="compose"
+            data-testid="pr-compose"
+            (submit)="$event.preventDefault(); submit(c)"
+          >
+            @if (c === "close") {
+              <p>Close #{{ row.number }} without merging?</p>
+            } @else {
+              <textarea
+                rows="3"
+                [attr.aria-label]="labels[c] + ' text'"
+                data-testid="pr-body"
+                [value]="text()"
+                (input)="text.set($any($event.target).value)"
+              ></textarea>
+            }
+            <button
+              type="submit"
+              data-testid="pr-submit"
+              [disabled]="pulls.actionBusy() || (c !== 'close' && !text().trim())"
+            >
+              {{ c === "close" ? "Confirm close" : "Send " + labels[c].toLowerCase() }}
+            </button>
+            <button type="button" data-testid="pr-cancel" (click)="cancel()">Cancel</button>
+          </form>
+        }
+      }
     </header>
     @if (errorMessage(); as message) {
       <p class="problem" role="alert" data-testid="detail-error">

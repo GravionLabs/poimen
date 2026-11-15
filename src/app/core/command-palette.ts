@@ -1,6 +1,7 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import { AgentActions } from "../github/agent-actions";
 import { IssueTasks } from "../github/issue-task";
+import { GithubPulls, PR_ACTION_LABELS, type PrAction } from "../github/pulls";
 import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
 import { ProjectEntries, type ProjectEntry } from "./project-entries";
@@ -42,7 +43,8 @@ export interface PoimenCommand {
     | "projectTeardown"
     | "quitAndStopServer"
     | "projectEntry"
-    | "agentAction";
+    | "agentAction"
+    | "prAction";
   title: string;
 }
 
@@ -104,6 +106,8 @@ export interface PaletteItem {
   entry?: ProjectEntry;
   /** An agent action of the GitHub view (`command` is `agentAction`). */
   agentActionId?: string;
+  /** A write on the open pull request (`command` is `prAction`). */
+  prAction?: PrAction;
   /** The project file is not trusted: running the entry asks first. */
   locked?: boolean;
 }
@@ -138,6 +142,7 @@ export class CommandPalette {
   private readonly project = inject(ProjectEntries);
   private readonly agentActions = inject(AgentActions);
   private readonly issueTasks = inject(IssueTasks);
+  private readonly pulls = inject(GithubPulls);
 
   private readonly _open = signal(false);
   private readonly _query = signal("");
@@ -185,7 +190,8 @@ export class CommandPalette {
         c.id === "quitAndStopServer" ||
         c.id === "projectEntry" ||
         c.id === "agentAction" ||
-        c.id === "startIssueTask"
+        c.id === "startIssueTask" ||
+        c.id === "prAction"
           ? ""
           : this.keymap.label(c.id),
       command: c.id,
@@ -198,6 +204,13 @@ export class CommandPalette {
       shortcut: "",
       command: "agentAction",
       agentActionId: e.action.id,
+    })),
+    ...this.pulls.actions().map((a): PaletteItem => ({
+      key: `prAction:${a}`,
+      title: `GitHub: ${PR_ACTION_LABELS[a]} #${this.pulls.detailRow()?.number}`,
+      shortcut: "",
+      command: "prAction",
+      prAction: a,
     })),
   ]);
 
@@ -244,8 +257,8 @@ export class CommandPalette {
     const rest = items.filter((i) => !recent.includes(i));
     const groups: [string, PaletteItem[]][] = [
       [RECENT_GROUP, recent],
-      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId)],
-      [GITHUB_GROUP, rest.filter((i) => i.agentActionId)],
+      [POIMEN_GROUP, rest.filter((i) => !i.entry && !i.agentActionId && !i.prAction)],
+      [GITHUB_GROUP, rest.filter((i) => i.agentActionId || i.prAction)],
       [PROJECT_GROUP, rest.filter((i) => i.entry)],
     ];
     for (const [label, members] of groups) {

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { SpaceActions } from "../../core/space-actions";
 import { UI_STORAGE, UiState } from "../../core/ui-state";
 import { tauri } from "../../core/tauri.mock";
 import { AgentActionMenu } from "../agent-action-menu/agent-action-menu";
@@ -11,7 +12,13 @@ import { IssuesSection } from "../issues-section";
 import { GithubIssues } from "../issues";
 import { InboxSection } from "../inbox-section";
 import { MilestonesSection } from "../milestones-section";
-import { GithubPulls, type Pull, type PullDetail, type PullsResult } from "../pulls";
+import {
+  GithubPulls,
+  availableActions,
+  type Pull,
+  type PullDetail,
+  type PullsResult,
+} from "../pulls";
 import { IssueDetailPane } from "../issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail";
 
@@ -178,6 +185,7 @@ describe("pull request detail pane", () => {
     expect(q(el, "[data-testid=detail-reviews]")!.textContent).toContain("changes requested");
     expect(q(el, "[data-testid=detail-issue]")!.textContent).toContain("o/n#7 The issue");
     expect(q(el, "[data-testid=actions]")!.children).toHaveLength(0);
+    expect(q(el, "[data-testid=pr-actions]")).not.toBeNull();
     q(el, "[data-testid=detail-checks] a")!.click();
     expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/o/n/actions/runs/1");
   });
@@ -216,5 +224,100 @@ describe("pull request detail pane", () => {
   it("overlays the list under 1100 px through its stylesheet", () => {
     const css = readFileSync("src/app/github/detail-pane.css", "utf8");
     expect(css).toMatch(/@media \(max-width: 1099\.98px\)[\s\S]*position: absolute/);
+  });
+});
+
+describe("pull request write actions", () => {
+  const base = { state: "OPEN", isDraft: false, viewerCanUpdate: true, viewerDidAuthor: false };
+
+  it("offers the actions the viewer may use", () => {
+    expect(availableActions(base)).toEqual([
+      "approve",
+      "request_changes",
+      "comment",
+      "draft",
+      "close",
+    ]);
+    expect(availableActions({ ...base, isDraft: true })).toContain("ready");
+    expect(availableActions({ ...base, state: "CLOSED" })).toEqual(["reopen"]);
+  });
+
+  it("hides review on own pull requests, writes without viewerCanUpdate and on merged ones", () => {
+    expect(availableActions({ ...base, viewerDidAuthor: true })).toEqual([
+      "comment",
+      "draft",
+      "close",
+    ]);
+    expect(availableActions({ ...base, viewerCanUpdate: false })).toEqual([]);
+    expect(availableActions({ ...base, state: "MERGED" })).toEqual([]);
+  });
+
+  async function open() {
+    const fixture = await render();
+    const el = fixture.nativeElement as HTMLElement;
+    q(el, 'tr.row[data-key="o/n#1"]')!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    return { fixture, el };
+  }
+
+  it("approves at once, reloads the list and the pane", async () => {
+    tauri.answer("github_pr_action", () => null);
+    const { fixture, el } = await open();
+    q(el, "[data-testid=pr-approve]")!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(tauri.calls("github_pr_action")).toEqual([
+      { root: "/src/n", number: 1, action: "approve", body: null },
+    ]);
+    expect(tauri.calls("github_pull_detail")).toHaveLength(2);
+    expect(tauri.calls("github_pulls").length).toBeGreaterThan(1);
+  });
+
+  it("needs a body for request changes", async () => {
+    tauri.answer("github_pr_action", () => null);
+    const { fixture, el } = await open();
+    q(el, "[data-testid=pr-request_changes]")!.click();
+    fixture.detectChanges();
+    const submit = q(el, "[data-testid=pr-submit]") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    const field = q(el, "[data-testid=pr-body]") as HTMLTextAreaElement;
+    field.value = "please fix";
+    field.dispatchEvent(new Event("input"));
+    fixture.detectChanges();
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    await fixture.whenStable();
+    expect(tauri.calls("github_pr_action")).toEqual([
+      { root: "/src/n", number: 1, action: "request_changes", body: "please fix" },
+    ]);
+  });
+
+  it("asks before closing and runs nothing on cancel", async () => {
+    tauri.answer("github_pr_action", () => null);
+    const { fixture, el } = await open();
+    q(el, "[data-testid=pr-close]")!.click();
+    fixture.detectChanges();
+    expect(tauri.calls("github_pr_action")).toHaveLength(0);
+    q(el, "[data-testid=pr-cancel]")!.click();
+    fixture.detectChanges();
+    expect(q(el, "[data-testid=pr-compose]")).toBeNull();
+    q(el, "[data-testid=pr-close]")!.click();
+    fixture.detectChanges();
+    q(el, "[data-testid=pr-submit]")!.click();
+    await fixture.whenStable();
+    expect(tauri.calls("github_pr_action")).toEqual([
+      { root: "/src/n", number: 1, action: "close", body: null },
+    ]);
+  });
+
+  it("notifies with the action and the gh message on failure", async () => {
+    tauri.answer("github_pr_action", () => {
+      throw { kind: "other", message: "not allowed" };
+    });
+    const { fixture, el } = await open();
+    q(el, "[data-testid=pr-approve]")!.click();
+    await fixture.whenStable();
+    expect(TestBed.inject(SpaceActions).warning()).toBe("Approve #1: not allowed");
   });
 });

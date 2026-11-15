@@ -119,6 +119,7 @@
   (commandChosen)="run($event)"
   (entryChosen)="runEntry($event)"
   (agentActionChosen)="agentActions.runCurrent($event)"
+  (prActionChosen)="pulls.choose($event)"
 />
 
 <ng-template #nodeTpl let-node>
