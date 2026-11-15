@@ -619,7 +619,11 @@ pub fn apply_text(
             return Ok(next);
         }
     }
-    Err("config.json cannot be edited in place; fix it by hand or import with replace".into())
+    Err(
+        "config.json cannot be edited without changing keys the import leaves alone; \
+         edit the keys of the import in config.json by hand"
+            .into(),
+    )
 }
 
 /// Reads an import file: a regular file up to 1 MiB holding a JSON object (comments allowed).
@@ -1037,6 +1041,45 @@ mod tests {
         assert_eq!(
             Value::Object(parse_object(&next).unwrap()),
             json!({ "sidebar": { "layout": "tree" } })
+        );
+    }
+
+    #[test]
+    fn replace_removes_a_last_top_level_key_with_a_comment_above_it() {
+        let text = "{\n  \"a\": 1,\n  // about b\n  \"b\": 2\n}\n";
+        let current = parse_object(text).unwrap();
+        let file = obj(json!({ "a": 1 }));
+        let (p, after) = plan(&current, &file, Mode::Replace, Scope::All);
+        assert_eq!(paths(&p.removed), ["b"]);
+        let next = apply_text(text, &current, &p, &after).unwrap();
+        assert_eq!(next, "{\n  \"a\": 1\n  // about b\n}\n");
+    }
+
+    #[test]
+    fn replace_removes_a_last_nested_key_with_a_comment_above_it_and_keeps_trust() {
+        let text = r#"{
+  "trustedProjects": { "/repo": "abc" },
+  "sidebar": {
+    "layout": "tree",
+    // about agents
+    "agents": "list"
+  }
+}
+"#;
+        let current = parse_object(text).unwrap();
+        let file = obj(json!({ "sidebar": { "layout": "tree" } }));
+        let (p, after) = plan(&current, &file, Mode::Replace, Scope::All);
+        let next = apply_text(text, &current, &p, &after).unwrap();
+        assert_eq!(
+            next,
+            r#"{
+  "trustedProjects": { "/repo": "abc" },
+  "sidebar": {
+    "layout": "tree"
+    // about agents
+  }
+}
+"#
         );
     }
 
