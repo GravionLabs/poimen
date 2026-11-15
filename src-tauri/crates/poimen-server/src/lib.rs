@@ -17,6 +17,7 @@ pub mod gemini;
 pub mod hook;
 mod host;
 pub mod integration;
+pub mod mcp_config;
 mod pty;
 pub mod report;
 mod runs;

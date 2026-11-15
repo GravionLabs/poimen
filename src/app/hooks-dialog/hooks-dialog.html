@@ -23,9 +23,14 @@
         <li>{{ name(agent) }}</li>
       }
     </ul>
+    <p class="hint mcp">
+      The same step registers <code>poimen mcp</code> in the agent's MCP config, so the agent can
+      list your spaces, terminals and runs. Remove it again with
+      <code>poimen-server integration uninstall</code>.
+    </p>
     <p class="hint restart">
       An agent that already runs reads its hooks only when it starts: start it again to see its
-      status.
+      status and tools.
     </p>
     @if (offer.error(); as error) {
       <p class="error" role="alert">{{ error }}</p>
