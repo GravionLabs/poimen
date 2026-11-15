@@ -74,7 +74,7 @@ test.
 
 - **Steps:** open `poimen_<version>_<arch>.dmg`, drag poimen to Applications, eject the image, start
   poimen from Applications.
-- **Expected:** the app starts. Gatekeeper shows at most its first-open prompt. The status bar shows
+- **Expected:** the app starts. On a signed release Gatekeeper shows at most its first-open prompt ("downloaded from the internet"), never an unidentified-developer warning; `spctl --assess --type execute -vv` says `Notarized Developer ID` ([releasing.md](releasing.md)). An rc/beta without Apple secrets is unsigned and warns. The status bar shows
   the poimen backend and its server version.
 - **Source:** #46 (packaging and updater).
 

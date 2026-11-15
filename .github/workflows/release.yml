@@ -4,7 +4,7 @@
 #   ci.yml (frontend and Rust checks) -> determine-version (GitVersion.yml) -> gh-release: git-cliff writes CHANGELOG.md
 #   and commits it to main ([skip ci]), tags v<version>, creates the GitHub Release and closes the issues delivered by
 #   the release PR. Then the installers (Linux x64, macOS arm64, Windows x64) are built from the tag and attached to
-#   the release. They are not code-signed yet (#45); the `checksums` job attaches SHA256SUMS and attests them (#522).
+#   the release. The macOS app is signed and notarized when the Apple secrets exist (#45, docs/releasing.md); the `checksums` job attaches SHA256SUMS and attests them (#522).
 #
 # workflow_dispatch: the channel comes from the branch (determine-version of GravionLabs/ci, input `channel: auto`).
 #   release/next: <next stable>-rc<nnn> (nnn = commits since the last stable tag, zero-padded to three digits so
@@ -209,7 +209,44 @@ jobs:
           rustup target add "${{ matrix.target }}"
           scripts/prepare-sidecar.sh "${{ matrix.target }}"
 
+      # macOS only (#45): decide whether the bundle is signed and notarized from the secrets (docs/releasing.md).
+      # Without them a beta, an rc or a fork build is unsigned with a warning; a stable release fails instead.
+      - name: Plan the macOS signing
+        id: sign
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        env:
+          POIMEN_REQUIRE_SIGNING: ${{ needs.release.outputs.version != '' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_CONTENT && format('{0}/apple-api-key.p8', runner.temp) || '' }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY_CONTENT }}
+        run: |
+          set -euo pipefail
+          bash scripts/macos-signing.test.sh
+          if [ -n "$APPLE_API_KEY_PATH" ]; then
+            printf '%s\n' "$APPLE_API_KEY_CONTENT" > "$APPLE_API_KEY_PATH"
+            echo "APPLE_API_KEY_PATH=$APPLE_API_KEY_PATH" >> "$GITHUB_ENV"
+          fi
+          bash scripts/macos-signing.sh plan >> "$GITHUB_OUTPUT"
+
       - uses: GravionLabs/ci/tauri/installers@v1
+        # tauri-action signs the app and its externalBin sidecars (hardened runtime) and notarizes when these are set.
+        env:
+          APPLE_CERTIFICATE: ${{ steps.sign.outputs.sign == 'true' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ steps.sign.outputs.sign == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.sign.outputs.sign == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ steps.sign.outputs.notarize == 'apple-id' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ steps.sign.outputs.notarize == 'apple-id' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ steps.sign.outputs.notarize == 'apple-id' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_ISSUER: ${{ steps.sign.outputs.notarize == 'api-key' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY: ${{ steps.sign.outputs.notarize == 'api-key' && secrets.APPLE_API_KEY || '' }}
         with:
           checkout: "false"
           version: ${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
@@ -223,6 +260,18 @@ jobs:
           args: --config src-tauri/tauri.bundle.conf.json ${{ needs.prerelease.outputs.version && format('--config src-tauri/tauri.rc.conf.json {0}', matrix.suffix-args) || '' }}
           signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           signing-private-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # Gatekeeper must accept what was built (#45); the app of the bundle folder is the one inside the .dmg.
+      - name: Verify the macOS signature
+        if: ${{ runner.os == 'macOS' && steps.sign.outputs.sign == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apps=(src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app)
+          [ ${#apps[@]} -gt 0 ] || { echo "no .app in the bundle folder" >&2; exit 1; }
+          for app in "${apps[@]}"; do bash scripts/macos-signing.sh verify "$app" "${{ steps.sign.outputs.notarize }}"; done
+          for dmg in src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg; do ls -l "$dmg"; done
 
       # A beta has no release: the installers are workflow artifacts.
       - name: Upload the beta installers
