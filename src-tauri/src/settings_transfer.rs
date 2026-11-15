@@ -3,7 +3,8 @@
 //!
 //! Settings are preferences only: UI state never is in `config.json`, so it is never exported.
 //! `trustedProjects` is per machine: it is left out of an export, skipped on import and never
-//! written. An import is validated with the settings loader (`settings::resolve`), entry by entry,
+//! written. An import is validated with the settings loader (`settings::resolve`), entry by entry
+//! in the settings the import gives (an entry is invalid only when it adds a warning there),
 //! so an invalid entry is listed and skipped while the rest is kept. The plan lists the keys that
 //! the import adds, changes and removes; applying it writes only those keys through
 //! `poimen_core::settings::save_with`, so comments and formatting elsewhere stay.
@@ -150,6 +151,79 @@ fn warnings_of(config: Value) -> Vec<String> {
     crate::settings::resolve(Some(&config.to_string()), || Some(String::new())).warnings
 }
 
+/// `ctx` with the value at `path` set (`Some`) or removed (`None`); missing or non-object parents
+/// become objects.
+fn with_at(ctx: &Map<String, Value>, path: &[&str], value: Option<Value>) -> Map<String, Value> {
+    let mut out = ctx.clone();
+    let Some((first, rest)) = path.split_first() else {
+        return out;
+    };
+    if rest.is_empty() {
+        match value {
+            Some(v) => out.insert((*first).to_owned(), v),
+            None => out.remove(*first),
+        };
+    } else {
+        let inner = match ctx.get(*first) {
+            Some(Value::Object(m)) => m.clone(),
+            _ => Map::new(),
+        };
+        out.insert(
+            (*first).to_owned(),
+            Value::Object(with_at(&inner, rest, value)),
+        );
+    }
+    out
+}
+
+/// The settings an entry of an import is checked in: what the import gives (the file over the
+/// current settings, or the file alone on a replace), and on a merge the current settings an
+/// entry is merged into.
+struct Ctx {
+    settings: Map<String, Value>,
+    base: Option<Map<String, Value>>,
+}
+
+impl Ctx {
+    /// The value at `path` once `value` (`None`: the file has nothing there) is imported.
+    fn imported(&self, path: &[&str], value: Option<Value>) -> Option<Value> {
+        let Some(base) = &self.base else {
+            return value;
+        };
+        let path_owned: Vec<String> = path.iter().map(|k| (*k).to_owned()).collect();
+        match value {
+            None => value_at(base, &path_owned).cloned(),
+            Some(v) => {
+                let Value::Object(over) = wrap(path, v) else {
+                    return None;
+                };
+                let merged = deep_merge(base, &over, true, &mut Vec::new());
+                value_at(&merged, &path_owned).cloned()
+            }
+        }
+    }
+}
+
+/// The warnings that `candidate` at `path` adds to the settings of `ctx`, compared as sets with
+/// `baseline` there (`None`: the file has nothing there). Checking in context keeps entries that
+/// depend on another key (an agent action using a harness of `harnesses`).
+fn new_warnings(
+    ctx: &Ctx,
+    path: &[&str],
+    candidate: Value,
+    baseline: Option<Value>,
+) -> Vec<String> {
+    let at = |value: Option<Value>| {
+        let value = ctx.imported(path, value);
+        warnings_of(Value::Object(with_at(&ctx.settings, path, value)))
+    };
+    let before: std::collections::HashSet<String> = at(baseline).into_iter().collect();
+    at(Some(candidate))
+        .into_iter()
+        .filter(|w| !before.contains(w))
+        .collect()
+}
+
 fn wrap(path: &[&str], value: Value) -> Value {
     path.iter().rev().fold(value, |inner, key| {
         let mut map = Map::new();
@@ -163,14 +237,24 @@ fn plain_key(key: &str) -> bool {
     !key.is_empty() && !key.chars().any(|c| c == '"' || c == '\\' || c.is_control())
 }
 
-/// The items of the array at `path` that the loader accepts, one after the other (a duplicate of
-/// an accepted name is rejected like the loader does).
-fn accept_items(path: &[&str], items: &[Value], invalid: &mut Vec<Rejected>) -> Vec<Value> {
+/// The items of the array at `path` that the loader accepts in `ctx`, one after the other (a
+/// duplicate of an accepted name is rejected like the loader does).
+fn accept_items(
+    ctx: &Ctx,
+    path: &[&str],
+    items: &[Value],
+    invalid: &mut Vec<Rejected>,
+) -> Vec<Value> {
     let mut kept: Vec<Value> = Vec::new();
     for (i, item) in items.iter().enumerate() {
         let mut trial = kept.clone();
         trial.push(item.clone());
-        let warnings = warnings_of(wrap(path, Value::Array(trial)));
+        let warnings = new_warnings(
+            ctx,
+            path,
+            Value::Array(trial),
+            Some(Value::Array(kept.clone())),
+        );
         if warnings.is_empty() {
             kept.push(item.clone());
         } else {
@@ -186,15 +270,17 @@ fn accept_items(path: &[&str], items: &[Value], invalid: &mut Vec<Rejected>) -> 
     kept
 }
 
-/// The value at `path` as far as the loader accepts it: whole, else (arrays) item by item, else
-/// (objects up to `depth` levels) key by key. `None` when nothing of it is accepted.
+/// The value at `path` as far as the loader accepts it in the settings `ctx`: whole, else (arrays)
+/// item by item, else (objects up to `depth` levels) key by key. `None` when nothing of it is
+/// accepted.
 fn accept_value(
+    ctx: &Ctx,
     path: &[&str],
     value: &Value,
     depth: usize,
     invalid: &mut Vec<Rejected>,
 ) -> Option<Value> {
-    let warnings = warnings_of(wrap(path, value.clone()));
+    let warnings = new_warnings(ctx, path, value.clone(), None);
     if warnings.is_empty() {
         return Some(value.clone());
     }
@@ -207,7 +293,7 @@ fn accept_value(
     };
     match value {
         Value::Array(items) if !items.is_empty() => {
-            let kept = accept_items(path, items, invalid);
+            let kept = accept_items(ctx, path, items, invalid);
             (!kept.is_empty()).then_some(Value::Array(kept))
         }
         Value::Object(map) if !map.is_empty() && depth > 0 => {
@@ -220,7 +306,7 @@ fn accept_value(
                         path: sub.join("."),
                         reason: "unsupported key name".into(),
                     });
-                } else if let Some(v) = accept_value(&sub, inner, depth - 1, invalid) {
+                } else if let Some(v) = accept_value(ctx, &sub, inner, depth - 1, invalid) {
                     kept.insert(key.clone(), v);
                 }
             }
@@ -229,7 +315,7 @@ fn accept_value(
             }
             // The accepted keys together must be valid too.
             let together = Value::Object(kept);
-            let warnings = warnings_of(wrap(path, together.clone()));
+            let warnings = new_warnings(ctx, path, together.clone(), None);
             if warnings.is_empty() {
                 Some(together)
             } else {
@@ -245,8 +331,15 @@ fn accept_value(
 }
 
 /// The part of an imported file the import uses: per-machine keys skipped, for a template import
-/// only `spaceTemplates`, each entry validated.
-fn accepted(file: &Map<String, Value>, scope: Scope, plan: &mut Plan) -> Map<String, Value> {
+/// only `spaceTemplates`, each entry validated in the settings the import gives (the file over
+/// `current`, the file alone on a replace), so an entry is invalid only when it adds a warning.
+fn accepted(
+    current: &Map<String, Value>,
+    file: &Map<String, Value>,
+    mode: Mode,
+    scope: Scope,
+    plan: &mut Plan,
+) -> Map<String, Value> {
     let mut source = file.clone();
     if scope == Scope::Template {
         if !source.contains_key("spaceTemplates") && source.contains_key("name") {
@@ -265,6 +358,20 @@ fn accepted(file: &Map<String, Value>, scope: Scope, plan: &mut Plan) -> Map<Str
         }
         source.retain(|k, _| k == "spaceTemplates");
     }
+    let raw = without_per_machine(&source);
+    let ctx = match (mode, scope) {
+        (Mode::Replace, Scope::All) => Ctx {
+            settings: raw,
+            base: None,
+        },
+        _ => {
+            let base = without_per_machine(current);
+            Ctx {
+                settings: deep_merge(&base, &raw, true, &mut Vec::new()),
+                base: Some(base),
+            }
+        }
+    };
     let mut out = Map::new();
     for (key, value) in &source {
         if PER_MACHINE.contains(&key.as_str()) {
@@ -277,7 +384,7 @@ fn accepted(file: &Map<String, Value>, scope: Scope, plan: &mut Plan) -> Map<Str
                 path: key.clone(),
                 reason: "unsupported key name".into(),
             });
-        } else if let Some(v) = accept_value(&[key], value, 1, &mut plan.invalid) {
+        } else if let Some(v) = accept_value(&ctx, &[key], value, 1, &mut plan.invalid) {
             out.insert(key.clone(), v);
         }
     }
@@ -449,7 +556,7 @@ pub fn plan(
     scope: Scope,
 ) -> (Plan, Map<String, Value>) {
     let mut plan = Plan::default();
-    let import = accepted(file, scope, &mut plan);
+    let import = accepted(current, file, mode, scope, &mut plan);
     let before = without_per_machine(current);
     let after = match (mode, scope) {
         (Mode::Replace, Scope::All) => import,
@@ -743,6 +850,71 @@ mod tests {
         assert_eq!(after["sidebar"], json!({ "agents": "priority" }));
         assert_eq!(after["spaceTemplates"].as_array().unwrap().len(), 1);
         assert!(!after.contains_key("theme"));
+    }
+
+    fn action(id: &str, harness: &str) -> Value {
+        json!({ "id": id, "on": "issue", "prompt": "do {nr}", "harness": harness })
+    }
+
+    #[test]
+    fn an_action_with_a_harness_of_the_file_is_imported() {
+        let file = obj(json!({
+            "harnesses": { "x": { "command": ["x"] } },
+            "github": { "agentActions": [action("a", "x")] }
+        }));
+        for mode in [Mode::Merge, Mode::Replace] {
+            let (p, after) = plan(&Map::new(), &file, mode, Scope::All);
+            assert!(p.invalid.is_empty(), "{mode:?}: {:?}", p.invalid);
+            assert_eq!(after, file, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn an_action_with_a_harness_of_the_current_config_is_merged() {
+        let current = obj(json!({ "harnesses": { "x": { "command": ["x"] } } }));
+        let file = obj(json!({
+            "harnesses": { "y": { "command": ["y"] } },
+            "github": { "agentActions": [action("a", "x")] }
+        }));
+        let (p, after) = plan(&current, &file, Mode::Merge, Scope::All);
+        assert!(p.invalid.is_empty(), "{:?}", p.invalid);
+        assert_eq!(
+            after["harnesses"],
+            json!({ "x": { "command": ["x"] }, "y": { "command": ["y"] } })
+        );
+        assert_eq!(
+            after["github"],
+            json!({ "agentActions": [action("a", "x")] })
+        );
+    }
+
+    #[test]
+    fn a_harness_of_the_current_config_does_not_count_on_replace() {
+        let current = obj(json!({ "harnesses": { "x": { "command": ["x"] } } }));
+        let file = obj(json!({ "github": { "agentActions": [action("a", "x")] } }));
+        let (p, after) = plan(&current, &file, Mode::Replace, Scope::All);
+        assert_eq!(rejected(&p.invalid), ["github.agentActions[0]"]);
+        assert!(!after.contains_key("github"));
+    }
+
+    #[test]
+    fn an_action_with_an_unknown_harness_is_still_invalid() {
+        let current = obj(json!({ "harnesses": { "x": { "command": ["x"] } } }));
+        let file = obj(json!({
+            "harnesses": { "y": { "command": ["y"] } },
+            "github": { "agentActions": [action("a", "y"), action("b", "nope")] }
+        }));
+        let (p, after) = plan(&current, &file, Mode::Merge, Scope::All);
+        assert_eq!(rejected(&p.invalid), ["github.agentActions[1]"]);
+        assert!(
+            p.invalid[0].reason.contains("nope"),
+            "{}",
+            p.invalid[0].reason
+        );
+        assert_eq!(
+            after["github"],
+            json!({ "agentActions": [action("a", "y")] })
+        );
     }
 
     #[test]
