@@ -71,6 +71,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - Remote machines over `poimen-server stdio` through SSH, no open port and no stored secret (proposed, [ADR 0008](docs/adr/0008-remote-machines-over-ssh.md)).
 - Terminals owned by a stable `poimen-pty-host` per terminal, so a server update or crash keeps them (accepted, [ADR 0009](docs/adr/0009-terminal-ownership-in-a-stable-pty-host-server-updates-without-losing-terminals.md)). Numbered 0007 until 2026-11-09, when it collided with the plugin ADR.
 - Shells in a terminal panel at the bottom of the app by default, agents in editor tabs; the placement (`editor`/`panel`) is a server-owned tab field, splits stay (proposed, [ADR 0010](docs/adr/0010-terminal-panel-for-shells-in-the-app.md)).
+- Named layouts: `layouts[]` in the user config with the shape of ADR 0006 (tabs with split trees, nested tabs, app-only `place`), templates refer to them by name, old keys keep working, presets stay project palette entries (proposed, [ADR 0011](docs/adr/0011-named-layouts-referenced-by-templates.md)).
 
 ## Verification
 

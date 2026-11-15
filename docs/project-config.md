@@ -31,6 +31,7 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
 - `layout`: the pane layout of a new space, `panes[]` as in the README (`spaces.layout`): `name`,
   optional `command`, and from the second pane on `split.from`, `split.direction` (`right` or
   `down`), `split.ratio` (0 to 1, default 0.5).
+  Named layouts, tabs and nested tabs: [ADR 0011](adr/0011-named-layouts-referenced-by-templates.md).
 - `setup`: a command that runs once, visibly, in a tab labelled `setup` of a newly created space
   (in the space directory). It does not run when an existing space is focused or when the
   repository is not trusted. If it cannot be started, the space stays and a warning names the
