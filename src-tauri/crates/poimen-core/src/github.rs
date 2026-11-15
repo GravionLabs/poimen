@@ -572,6 +572,53 @@ pub fn open_issues<R: Runner>(client: &Client<R>, repo: &Repo) -> Result<Vec<Ope
     Ok(all)
 }
 
+/// The ids of the workflow runs to re-run, from a `actions/runs?head_sha=` answer: the newest run
+/// of each workflow, when it is completed and failed (`failure` or `timed_out`). Runs come newest
+/// first, so an older failed run of a workflow that passed since is left alone.
+pub fn failed_run_ids(body: &str) -> Result<Vec<u64>, GhError> {
+    let v: Value = serde_json::from_str(body).map_err(|e| GhError::Other {
+        message: format!("unexpected GitHub answer: {e}"),
+    })?;
+    let runs = v["workflow_runs"].as_array().ok_or(GhError::Other {
+        message: "unexpected GitHub answer".into(),
+    })?;
+    let mut seen = std::collections::HashSet::new();
+    let mut ids = Vec::new();
+    for run in runs {
+        let (Some(id), Some(workflow)) = (run["id"].as_u64(), run["workflow_id"].as_u64()) else {
+            continue;
+        };
+        if !seen.insert(workflow) {
+            continue;
+        }
+        let failed = run["status"] == "completed"
+            && matches!(run["conclusion"].as_str(), Some("failure" | "timed_out"));
+        if failed {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Failed workflow runs of commit `sha` in `repo` (REST `actions/runs?head_sha=` through the
+/// cached `rest`); reused by the re-run of failed checks.
+pub fn failed_runs<R: Runner>(
+    client: &Client<R>,
+    repo: &Repo,
+    sha: &str,
+) -> Result<Vec<u64>, GhError> {
+    if sha.is_empty() || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(GhError::Other {
+            message: "no commit to look up runs for".into(),
+        });
+    }
+    let path = format!(
+        "repos/{}/{}/actions/runs?head_sha={sha}&per_page=100",
+        repo.owner, repo.name
+    );
+    failed_run_ids(&client.rest(&path)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1045,5 +1092,41 @@ mod tests {
         let f = fake(vec![out(1, "", "gh: command failed: HTTP 404")]);
         let _ = std::fs::remove_dir_all(dir);
         assert!(open_issues(&Client::new(&f, temp_dir("open-issues-err")), &r).is_err());
+    }
+    #[test]
+    fn failed_runs_are_the_newest_failed_run_per_workflow() {
+        let body = include_str!("../fixtures/github-actions-runs.json");
+        assert_eq!(failed_run_ids(body).unwrap(), vec![102, 105]);
+        assert_eq!(
+            failed_run_ids(r#"{"workflow_runs":[]}"#).unwrap(),
+            Vec::<u64>::new()
+        );
+        assert!(failed_run_ids("{}").is_err());
+        assert!(failed_run_ids("nope").is_err());
+    }
+
+    #[test]
+    fn failed_runs_ask_for_the_sha_and_refuse_a_bad_one() {
+        let body = include_str!("../fixtures/github-actions-runs.json");
+        let f = fake(vec![out(
+            0,
+            &format!(
+                "HTTP/2.0 200 OK\r\nEtag: W/\"r\"\r\n\r\n{}",
+                body.replace('\n', " ")
+            ),
+            "",
+        )]);
+        let c = Client::new(&f, temp_dir("runs"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        assert_eq!(failed_runs(&c, &r, "abc123").unwrap(), vec![102, 105]);
+        assert!(
+            f.calls.borrow()[0]
+                .contains(&"repos/o/n/actions/runs?head_sha=abc123&per_page=100".to_string())
+        );
+        assert!(failed_runs(&c, &r, "abc; rm").is_err());
+        assert!(failed_runs(&c, &r, "").is_err());
     }
 }

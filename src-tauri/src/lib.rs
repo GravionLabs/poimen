@@ -436,6 +436,77 @@ async fn github_pr_action(
     })?
 }
 
+/// Merges a pull request (explicit user input only); refused unless the repository allows the
+/// method and the merge state is clean.
+#[tauri::command]
+async fn github_pr_merge(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+    method: github_pulls::MergeMethod,
+    delete_branch: bool,
+) -> Result<(), github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        github_pulls::run_merge(&client, &root, number, method, delete_branch)
+    })
+    .await
+    .map_err(|e| github::GhError::Other {
+        message: e.to_string(),
+    })?
+}
+
+/// Re-runs the failed jobs of the failed runs of the head commit; answers the number of runs.
+#[tauri::command]
+async fn github_pr_rerun(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+) -> Result<usize, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || github_pulls::run_rerun(&client, &root, number))
+        .await
+        .map_err(|e| github::GhError::Other {
+            message: e.to_string(),
+        })?
+}
+
+/// Adds and removes reviewers, labels and assignees of a pull request.
+#[tauri::command]
+async fn github_pr_edit(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+    edit: github_pulls::PrEdit,
+) -> Result<(), github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        github_pulls::run_edit(&client, &root, number, &edit)
+    })
+    .await
+    .map_err(|e| github::GhError::Other {
+        message: e.to_string(),
+    })?
+}
+
+/// The label names of the repository of `root`. Read-only.
+#[tauri::command]
+async fn github_labels(
+    client: State<'_, GithubClient>,
+    root: String,
+) -> Result<Vec<String>, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || github_pulls::repo_labels(&client, &root))
+        .await
+        .map_err(|e| github::GhError::Other {
+            message: e.to_string(),
+        })?
+}
+
 /// The pull request (open or merged) of the branch of each directory, one GraphQL query per
 /// repository; directories without one are left out. Read-only; `gh` errors give an empty answer.
 #[tauri::command]
@@ -2645,6 +2716,10 @@ pub fn run() {
             github_pulls,
             github_pull_detail,
             github_pr_action,
+            github_pr_merge,
+            github_pr_rerun,
+            github_pr_edit,
+            github_labels,
             branch_pulls,
             github_issues,
             github_issue_detail,

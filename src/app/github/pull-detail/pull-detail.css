@@ -10,3 +10,8 @@
   flex: 1 1 100%;
   font: inherit;
 }
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}

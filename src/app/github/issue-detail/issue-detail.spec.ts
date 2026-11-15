@@ -13,6 +13,7 @@ import { InboxSection } from "../inbox-section";
 import { MilestonesSection } from "../milestones-section";
 import { GithubPulls } from "../pulls";
 import { PullDetailPane } from "../pull-detail/pull-detail";
+import { ChipPicker } from "../chip-picker/chip-picker";
 import { IssueDetailPane } from "./issue-detail";
 
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
@@ -127,6 +128,7 @@ async function render(detail: () => unknown = () => DETAIL) {
   withTemplate(InboxSection, "inbox-section.html");
   withTemplate(MilestonesSection, "milestones-section.html");
   withTemplate(PullDetailPane, "pull-detail/pull-detail.html");
+  withTemplate(ChipPicker, "chip-picker/chip-picker.html");
   withTemplate(IssueDetailPane, "issue-detail/issue-detail.html");
   TestBed.inject(UiState).selectGithubPage("issues");
   const fixture = TestBed.createComponent(GithubView);

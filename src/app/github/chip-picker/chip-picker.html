@@ -1,0 +1,44 @@
+<div class="picker" role="group" [attr.aria-label]="label" data-testid="chip-picker">
+  <span class="name">{{ label }}</span>
+  <ul class="chips">
+    @for (s of selected; track s) {
+      <li class="chip" data-testid="chip">
+        <span>{{ s }}</span>
+        <button
+          type="button"
+          [attr.aria-label]="'Remove ' + s"
+          data-testid="chip-remove"
+          [disabled]="disabled"
+          (click)="remove.emit(s)"
+        >
+          ×
+        </button>
+      </li>
+    } @empty {
+      <li class="none">None</li>
+    }
+  </ul>
+  @if (!disabled && free().length > 0) {
+    <input
+      type="text"
+      [attr.list]="'chip-options-' + label"
+      [attr.aria-label]="'Add ' + label"
+      placeholder="Add..."
+      data-testid="chip-input"
+      [value]="query()"
+      (input)="query.set($any($event.target).value)"
+      (keydown.enter)="$event.preventDefault(); takeFirst()"
+    />
+    @if (query().trim()) {
+      <ul class="options" [attr.aria-label]="label + ' options'">
+        @for (o of matches(); track o) {
+          <li>
+            <button type="button" data-testid="chip-option" (click)="pick(o)">
+              {{ o }}
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  }
+</div>
