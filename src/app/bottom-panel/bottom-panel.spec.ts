@@ -39,11 +39,20 @@ describe("BottomPanel empty states", () => {
     supported: boolean,
     cards = signal<DeliverCard[]>([]),
   ) {
+    const eventsAll = signal<Record<string, string>>({});
     const ui = {
       panelTab: signal(tab),
       panelHeight: signal(200),
       togglePanel: vi.fn(),
       eventColumns: signal({ time: 80, task: 80, result: 80 }),
+      eventsAll,
+      setEventsAll: (root: string, key: string | null) =>
+        eventsAll.update((all) => {
+          const next = { ...all };
+          if (key) next[root] = key;
+          else delete next[root];
+          return next;
+        }),
     };
     const subagents = {
       supported: signal(supported),
@@ -230,5 +239,59 @@ describe("BottomPanel empty states", () => {
     cards.update((c) => [...c]);
     panel.fixture.detectChanges();
     expect(root.querySelectorAll("[data-testid=skipped-task]").length).toBe(2);
+  });
+
+  it("lists the events of all runs of a subject with a separator per run", () => {
+    const run = (id: string, ts: string): DeliverCard => {
+      const status = parseStatus({
+        v: 1,
+        run: id,
+        status: "running",
+        tasks: [],
+        finished: {},
+        attentions: [],
+        needsYou: false,
+        links: [],
+        updated: new Date().toISOString(),
+        tone: "neutral",
+        host: {},
+        subject: { kind: "github.milestone", id: "7", title: "M007" },
+        events: [
+          { type: "run.started", tone: "neutral", ts },
+          {
+            type: "step.finished",
+            tone: "info",
+            task: "t1",
+            step: "implement",
+            ts,
+            link: "https://x/pr/1",
+          },
+        ],
+      });
+      if (typeof status === "string") throw new Error(status);
+      return { root: "/repo", run: id, state: { kind: "ok", status } };
+    };
+    const cards = signal([
+      run("a", "2026-11-07T10:00:00.000Z"),
+      run("b", "2026-11-07T11:00:00.000Z"),
+    ]);
+    const panel = render("events", pane({ cwd: "/repo" }), false, cards);
+    const root = panel.fixture.nativeElement as HTMLElement;
+    panel.fixture.detectChanges();
+    // The default stays a single run.
+    expect(root.querySelectorAll("[data-testid=run-separator]").length).toBe(0);
+    const select = root.querySelector<HTMLSelectElement>("select[aria-label=Run]")!;
+    expect(select.querySelectorAll("optgroup").length).toBe(1);
+    expect(select.options[0]!.textContent).toContain("All runs (2)");
+    select.selectedIndex = 0;
+    select.dispatchEvent(new Event("change"));
+    panel.fixture.detectChanges();
+    expect(root.querySelectorAll("[data-testid=run-separator]").length).toBe(2);
+    expect(root.querySelectorAll("a.pr").length).toBe(2);
+    // Back to one run.
+    select.selectedIndex = 1;
+    select.dispatchEvent(new Event("change"));
+    panel.fixture.detectChanges();
+    expect(root.querySelectorAll("[data-testid=run-separator]").length).toBe(0);
   });
 });

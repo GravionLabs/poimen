@@ -8,6 +8,7 @@ import {
   type RunEventRow,
   runState,
   startedAt,
+  type Subject,
   type Tone,
 } from "../deliver/deliver-status";
 
@@ -64,6 +65,83 @@ export function runsOfSpace(
         : [],
     )
     .sort(newest);
+}
+
+/** The runs of one subject (#780); `subject` is null for a run without one. */
+export interface SubjectGroup {
+  /** Stable: `kind`, `id` (else title) of the subject, or the run id without a subject. */
+  key: string;
+  subject: Subject | null;
+  /** Newest first. */
+  runs: RunChoice[];
+}
+
+/** The group key of a run. */
+export const subjectKey = (run: RunChoice): string => {
+  const s = run.status.subject;
+  return s ? `${s.kind}\n${s.id || s.title}` : `run\n${run.status.run}`;
+};
+
+/**
+ * Groups runs by subject (`kind` and `id`); a run without a subject is a group of its own. Groups
+ * are ordered by their latest run, newest first, and inside a group the runs are newest first.
+ * Pure, so the Runs view can share it.
+ */
+export function groupBySubject(runs: readonly RunChoice[]): SubjectGroup[] {
+  const groups = new Map<string, SubjectGroup>();
+  for (const run of [...runs].sort(newest)) {
+    const key = subjectKey(run);
+    const group = groups.get(key);
+    if (group) group.runs.push(run);
+    else groups.set(key, { key, subject: run.status.subject, runs: [run] });
+  }
+  return [...groups.values()].sort((a, b) => newest(a.runs[0]!, b.runs[0]!));
+}
+
+/** The name of a group: its subject title, else the label of its only run. */
+export const groupTitle = (group: SubjectGroup): string =>
+  group.subject?.title || group.subject?.id || runTitle(group.runs[0]!.status, group.runs[0]!.root);
+
+/** The separator row of a run in the merged list: start, state and outcome. */
+export interface RunSeparator {
+  kind: "separator";
+  key: string;
+  start: string;
+  state: string;
+  outcome: string;
+}
+
+/** What the Events tab lists: rows, folds of skipped tasks and run separators. */
+export type ListItem = EventItem | RunSeparator;
+
+/** `2026-11-07 10:00:00` of an ISO timestamp in local time; empty when it is not a date. */
+function dateTime(iso: string | null): string {
+  const date = iso ? new Date(iso) : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${eventTime(iso)}`;
+}
+
+/**
+ * The events of all runs of a group in time order: runs oldest first, each behind a separator
+ * row, the events of a run in their own order (with its skipped tasks folded). Fold keys carry the
+ * run, so two runs never share an open fold.
+ */
+export function mergedItems(group: SubjectGroup, now: number): ListItem[] {
+  return [...group.runs].reverse().flatMap((run): ListItem[] => {
+    const s = run.status;
+    const separator: RunSeparator = {
+      kind: "separator",
+      key: run.key,
+      start: dateTime(startedAt(s) ?? s.updated),
+      state: runState(s, now),
+      outcome: s.outcome ?? "",
+    };
+    const items = foldSkipped(s.events).map((item) =>
+      item.kind === "skipped" ? { ...item, key: `${run.key}:${item.key}` } : item,
+    );
+    return [separator, ...items];
+  });
 }
 
 /** A run the user picked and the newest start among the runs when they picked it. */

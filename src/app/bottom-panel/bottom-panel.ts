@@ -18,14 +18,18 @@ import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import {
   eventTime,
+  foldSkipped,
+  groupBySubject,
+  groupTitle,
+  mergedItems,
   pickHolds,
   pickRunOf,
   runLabel,
   runsOfSpace,
   selectRun,
   toneStyle,
+  type ListItem,
   type Pick,
-  foldSkipped,
 } from "./run-events";
 import { TaskLog } from "../core/task-log";
 import {
@@ -44,6 +48,9 @@ import {
   toolSummary,
   type TranscriptItem,
 } from "../core/transcripts";
+
+/** Value prefix of the "all runs" entry of the run picker. */
+const ALL_PREFIX = "all:";
 
 /** The tabs of the panel: Output shows subagent transcripts, Flow the run as a graph. */
 export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
@@ -108,9 +115,22 @@ export class BottomPanel {
   protected readonly run = computed(() =>
     selectRun(this.spaceRuns(), this.activePane()?.terminal_id, this.pickedRun(), this.now()),
   );
-  protected readonly rows = computed(() => foldSkipped(this.run()?.status.events ?? []));
+  /** The runs by subject, for the picker (#780). */
+  protected readonly groups = computed(() => groupBySubject(this.spaceRuns()));
+  /** The group whose runs are listed together: the stored choice of the repository, if it holds. */
+  protected readonly allGroup = computed(() => {
+    const root = this.spaceRuns()[0]?.root;
+    const key = root === undefined ? undefined : this.ui.eventsAll()[root];
+    return this.groups().find((g) => g.key === key && g.runs.length > 1);
+  });
+  protected readonly rows = computed<ListItem[]>(() => {
+    const group = this.allGroup();
+    return group ? mergedItems(group, this.now()) : foldSkipped(this.run()?.status.events ?? []);
+  });
+  protected readonly groupTitle = groupTitle;
   /** Folds the user opened; kept while the panel lives. */
   protected readonly openFolds = signal<ReadonlySet<string>>(new Set());
+  protected readonly allPrefix = ALL_PREFIX;
   protected readonly runLabel = runLabel;
   protected readonly eventTime = eventTime;
   protected readonly toneStyle = toneStyle;
@@ -167,7 +187,18 @@ export class BottomPanel {
   }
 
   protected pickRun(event: Event): void {
-    this.pickedRun.set(pickRunOf(this.spaceRuns(), (event.target as HTMLSelectElement).value));
+    const value = (event.target as HTMLSelectElement).value;
+    const root = this.spaceRuns()[0]?.root;
+    if (root !== undefined) {
+      if (value.startsWith(ALL_PREFIX)) {
+        this.ui.setEventsAll(root, value.slice(ALL_PREFIX.length));
+        this.pickedRun.set(null);
+        this.following.set(true);
+        return;
+      }
+      if (this.ui.eventsAll()[root] !== undefined) this.ui.setEventsAll(root, null);
+    }
+    this.pickedRun.set(pickRunOf(this.spaceRuns(), value));
     this.following.set(true);
   }
 
