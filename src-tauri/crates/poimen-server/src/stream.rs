@@ -12,14 +12,14 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
 use poimen_protocol::{
     AttachMode, AttachResult, DetachReason, ErrorCode, Event, Response, encode_bytes,
 };
 use serde_json::json;
 
-use crate::emulator::{Colors, Emulator};
+use crate::emulator::{Colors, Emulator, Signal};
 use crate::pty::{MAX_BATCH, PtyWriter};
 
 /// Records a client may have queued before it counts as too slow.
@@ -77,7 +77,13 @@ pub(crate) struct TermStream {
     colors: Arc<RwLock<Colors>>,
     /// Where answers to terminal queries go while no controller is attached.
     writer: Mutex<Option<PtyWriter>>,
+    /// Where the agent status signals of the output go (OSC 7501, new prompts, RIS), called
+    /// outside the stream lock.
+    signals: OnceLock<SignalSink>,
 }
+
+/// Receives the signals of one output batch, in order.
+pub(crate) type SignalSink = Arc<dyn Fn(Vec<Signal>) + Send + Sync>;
 
 /// An attachment: the id the connection uses to detach and to prove it is the controller.
 #[derive(Debug)]
@@ -115,7 +121,13 @@ impl TermStream {
             publish,
             colors,
             writer: Mutex::new(None),
+            signals: OnceLock::new(),
         }
+    }
+
+    /// Where the agent status signals of the output go; set once.
+    pub fn set_signal_sink(&self, sink: SignalSink) {
+        let _ = self.signals.set(sink);
     }
 
     /// The PTY the server answers terminal queries on while no controller is attached.
@@ -153,9 +165,11 @@ impl TermStream {
     }
 
     fn feed(&self, bytes: &[u8], live: bool) {
+        let mut signals = Vec::new();
         for chunk in bytes.chunks(MAX_BATCH) {
             let mut st = self.lock();
             st.emulator.feed(chunk);
+            signals.extend(st.emulator.take_signals());
             let replies = {
                 let colors = self.colors.read().unwrap_or_else(|e| e.into_inner());
                 st.emulator.take_replies(&colors)
@@ -172,6 +186,12 @@ impl TermStream {
             if answer {
                 self.answer(&replies);
             }
+        }
+        // One call for the whole batch, so a replay changes the status at most once.
+        if !signals.is_empty()
+            && let Some(sink) = self.signals.get()
+        {
+            sink(signals);
         }
     }
 
@@ -636,5 +656,18 @@ mod tests {
         s.detach(c.client_id);
         s.output(b"x");
         assert_eq!(answered(&sink), "");
+    }
+
+    #[test]
+    fn a_replay_hands_all_its_signals_over_in_one_call() {
+        let (s, _events) = stream();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&calls);
+        s.set_signal_sink(Arc::new(move |signals| sink.lock().unwrap().push(signals)));
+        s.replay(b"\x1b]7501;state=working\x07$ \x1b]133;A\x07\x1b]7501;state=done\x07");
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].len(), 3);
+        drop(calls);
     }
 }
