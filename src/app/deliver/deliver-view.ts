@@ -219,7 +219,7 @@ export class DeliverView {
   /**
    * Up/Down move over groups and lines, Enter expands (again: collapses), Escape collapses. Enter
    * and Escape act on the cursor only from the view or a row toggle, so Enter on a link or an
-   * action button keeps doing what that button does.
+   * action button keeps doing what that button does. A focused row toggle takes the cursor first.
    */
   protected onKey(event: KeyboardEvent): void {
     const target = event.target as HTMLElement | null;
@@ -228,6 +228,9 @@ export class DeliverView {
     if ((event.key === "Enter" || event.key === "Escape") && !onRow) return;
     const rows = this.rows();
     if (rows.length === 0) return;
+    // A row toggle reached with Tab (or focused otherwise) is where the keys act.
+    const focused = target?.dataset["row"];
+    if (focused !== undefined && rows.some((r) => r.key === focused)) this.cursor.set(focused);
     const at = rows.findIndex((r) => r.key === this.cursor());
     const row = rows[at];
     switch (event.key) {

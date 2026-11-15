@@ -22,6 +22,7 @@ import {
   runState,
   runningRun,
   spanText,
+  startedAt,
   stateText,
   timelineLine,
   type Attention,
@@ -495,6 +496,39 @@ describe("Runs view: groups by subject (#584)", () => {
     );
     expect(spanText(status(local(7, 8), local(7, 9), "finished"), today)).toBe("11-07 08:00–09:00");
     expect(spanText(status(local(8, 11), local(8, 11, 58), "running"), today)).toBe("11:00–now");
+  });
+
+  it("starts a run at its first event with a date, skipping a malformed ts", () => {
+    const local = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+    const run = (id: string, events: { ts: string }[], updated: string) =>
+      must(
+        parseStatus({
+          run: id,
+          status: "finished",
+          outcome: "succeeded",
+          updated,
+          subject: { kind: "github.milestone", id: "o/r#1", title: "M1" },
+          events: events.map((e, i) => ({ seq: i + 1, type: "run.started", ...e })),
+        }),
+      );
+    const today = Date.parse(local(8, 12));
+    const broken = run("broken", [{ ts: "yesterday" }, { ts: local(8, 8) }], local(8, 9, 30));
+    expect(startedAt(broken)).toBe(local(8, 8));
+    expect(spanText(broken, today)).toBe("08:00–09:30");
+    // Only malformed ts: the run starts at its last update, nothing throws.
+    const none = run("none", [{ ts: "not a date" }], local(8, 10));
+    expect(startedAt(none)).toBeNull();
+    expect(spanText(none, today)).toBe("10:00–10:00");
+    // The sort sees the valid start, never NaN: the newest start (10:00, 08:00, 07:00) first.
+    const older = run("older", [{ ts: local(8, 7) }], local(8, 11));
+    const order = groupRuns(
+      [older, broken, none].map((status) => ({
+        root: "/r",
+        run: status.run,
+        state: { kind: "ok" as const, status },
+      })),
+    )[0]!.runs.map((r) => r.status.run);
+    expect(order).toEqual(["none", "broken", "older"]);
   });
 
   it("lists needs-you attentions of all runs once per task and reason", () => {

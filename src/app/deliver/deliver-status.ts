@@ -633,12 +633,16 @@ export function stepText(step: Step): string {
     : step.name;
 }
 
-/** `HH:MM` of an ISO timestamp in local time; empty when it is missing or not a date. */
-export function clockText(ts: string | null | undefined): string {
-  const date = ts ? new Date(ts) : null;
-  if (!date || Number.isNaN(date.getTime())) return "";
+/** `HH:MM` of a date in local time; empty when it is not a valid date. */
+function clockOf(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "";
   const two = (n: number) => String(n).padStart(2, "0");
   return `${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+/** `HH:MM` of an ISO timestamp in local time; empty when it is missing or not a date. */
+export function clockText(ts: string | null | undefined): string {
+  return ts ? clockOf(new Date(ts)) : "";
 }
 
 /** The last segment of a path (either separator), without a trailing separator. */
@@ -736,9 +740,12 @@ export function isAlert(attention: Attention, status: DeliverStatus): boolean {
   return tone === "warning" || tone === "danger";
 }
 
-/** When a run started: the `ts` of its first event; `null` without one (a legacy status file). */
+/**
+ * When a run started: the `ts` of its first event that is a date; `null` without one (a legacy
+ * status file, or only malformed `ts`).
+ */
 export const startedAt = (status: DeliverStatus): string | null =>
-  status.events.find((e) => e.ts)?.ts ?? null;
+  status.events.find((e) => e.ts && !Number.isNaN(Date.parse(e.ts)))?.ts ?? null;
 
 /** A run of a group with the key of its card. */
 export interface GroupRun {
@@ -921,8 +928,7 @@ const dayText = (d: Date) => `${two(d.getMonth() + 1)}-${two(d.getDate())}`;
 export function spanText(status: DeliverStatus, now: number): string {
   const start = new Date(startedAt(status) ?? status.updated);
   const end = new Date(status.updated);
-  const at = (d: Date, ref: Date) =>
-    `${sameDay(d, ref) ? "" : `${dayText(d)} `}${clockText(d.toISOString())}`;
+  const at = (d: Date, ref: Date) => `${sameDay(d, ref) ? "" : `${dayText(d)} `}${clockOf(d)}`;
   const from = at(start, new Date(now));
   if (runState(status, now) === "running") return `${from}–now`;
   return `${from}–${at(end, start)}`;

@@ -388,6 +388,36 @@ describe("Runs view", () => {
     el.remove();
   });
 
+  it("acts on the row toggle that has the focus, not on the row clicked before", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", FOUR);
+    deliver.apply("/s", events("milestone"));
+    deliver.now.set(AT);
+    await show();
+    const ui = TestBed.inject(UiState);
+    const toggle = (row: string) =>
+      [...el.querySelectorAll<HTMLElement>("[data-row]")].find((e) => e.dataset["row"] === row)!;
+    const m4 = "/s\ngithub.milestone\nGravionLabs/demo#4";
+    const m014 = "/r\ngithub.milestone\nGravionLabs/demo#14";
+    toggle(m4).click();
+    await show();
+    expect([...ui.expandedRunGroups()]).toEqual([m4]);
+    // Tab moves the focus to the next toggle without a click; Enter there expands that group.
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    toggle(m014).dispatchEvent(enter);
+    await show();
+    expect([...ui.expandedRunGroups()].sort()).toEqual([m014, m4]);
+    expect(enter.defaultPrevented).toBe(true);
+    // Down from that toggle goes to its first line, not to the line after the clicked group.
+    document.body.appendChild(el);
+    toggle(m014).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await show();
+    expect((document.activeElement as HTMLElement | null)?.dataset["row"]).toBe(
+      "/r\n20261108-080000-loop",
+    );
+    el.remove();
+  });
+
   it("leaves Enter and Escape on a link or action button to that button", async () => {
     const { el, deliver, show } = await render();
     deliver.apply("/r", FOUR);
