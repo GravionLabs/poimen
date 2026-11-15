@@ -1,0 +1,17 @@
+{
+  "comment": "Cases of the sidebar name order, read by order.rs and by snapshot.spec.ts. order: -1 a before b, 0 equal, 1 a after b. Case is ignored, accents are not (an accented letter sorts after its code point), digit runs compare as numbers.",
+  "cases": [
+    { "a": "alpha", "b": "Beta", "order": -1 },
+    { "a": "ABC", "b": "abc", "order": 0 },
+    { "a": "#9 y", "b": "#12 x", "order": -1 },
+    { "a": "a007", "b": "a7", "order": 0 },
+    { "a": "a2b", "b": "a10a", "order": -1 },
+    { "a": "ab", "b": "abc", "order": -1 },
+    { "a": "", "b": "a", "order": -1 },
+    { "a": "e", "b": "é", "order": -1 },
+    { "a": "é", "b": "e…", "order": 1 },
+    { "a": "é", "b": "É", "order": 0 },
+    { "a": "é", "b": "f", "order": 1 },
+    { "a": "ä", "b": "z", "order": 1 }
+  ]
+}

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   buildSpaces,
+  naturalCompare,
   dropAllowed,
   filterSpaces,
   groupWorktrees,
@@ -939,5 +940,18 @@ describe("sort by attention and recent (#712)", () => {
       "w1",
       "w4",
     ]);
+  });
+});
+
+describe("naturalCompare (#770)", () => {
+  const fixture = JSON.parse(
+    readFileSync("src-tauri/crates/poimen-core/fixtures/name-order.json", "utf8"),
+  ) as { cases: { a: string; b: string; order: number }[] };
+
+  it("agrees with the shared fixture cases of poimen-core", () => {
+    for (const c of fixture.cases) {
+      expect(Math.sign(naturalCompare(c.a, c.b)), `${c.a} vs ${c.b}`).toBe(c.order);
+      expect(Math.sign(naturalCompare(c.b, c.a)), `${c.b} vs ${c.a}`).toBe(0 - c.order);
+    }
   });
 });
