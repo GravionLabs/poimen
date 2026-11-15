@@ -144,6 +144,8 @@ export interface LayoutState {
   lineComments?: Record<string, CommentSet>;
   /** Per repository (`owner/name`), the numbers of the collapsed nodes of the GitHub issue tree. */
   collapsedIssues?: Record<string, number[]>;
+  /** Per repository root, the subject group whose events the Events tab merges (#780). */
+  eventsAll?: Record<string, string>;
   /** Per repository directory, the machine a task was last started on (absent: this Mac). */
   taskMachine?: Record<string, string>;
   /** The selected sub-page of the GitHub tab (`pulls`, `issues` or `milestones`). */
@@ -267,6 +269,7 @@ export function parseLayout(raw: string | null): LayoutState {
       recentSpaces,
       tabOrder,
       taskMachine,
+      eventsAll,
       changesLayout,
       flowDirection,
       eventColumns,
@@ -315,6 +318,12 @@ export function parseLayout(raw: string | null): LayoutState {
         Object.entries(taskMachine).filter(([, m]) => typeof m === "string" && m),
       );
       if (Object.keys(clean).length) state.taskMachine = clean;
+    }
+    if (eventsAll && typeof eventsAll === "object" && !Array.isArray(eventsAll)) {
+      const clean = Object.fromEntries(
+        Object.entries(eventsAll).filter(([, k]) => typeof k === "string" && k),
+      );
+      if (Object.keys(clean).length) state.eventsAll = clean;
     }
     if (isGithubPage(githubPage)) state.githubPage = githubPage;
     if (githubShowEmpty === true) state.githubShowEmpty = true;
@@ -432,6 +441,8 @@ export class UiState {
   );
   /** The machine a task was last started on per repository directory (persisted). */
   readonly taskMachine = signal<Readonly<Record<string, string>>>(this.initial.taskMachine ?? {});
+  /** The subject group whose runs the Events tab shows together, per repository root. */
+  readonly eventsAll = signal<Readonly<Record<string, string>>>(this.initial.eventsAll ?? {});
   readonly recentCommands = signal<readonly string[]>(this.initial.recentCommands ?? []);
   /** Collapsed nodes of the GitHub issue tree per repository (expanded is the default). */
   readonly collapsedIssues = signal<Readonly<Record<string, readonly number[]>>>(
@@ -667,6 +678,15 @@ export class UiState {
     this.save();
   }
 
+  /** Shows all runs of the subject group `key` in `root`; `null` goes back to a single run. */
+  setEventsAll(root: string, key: string | null): void {
+    const next = { ...this.eventsAll() };
+    if (key) next[root] = key;
+    else delete next[root];
+    this.eventsAll.set(next);
+    this.save();
+  }
+
   /** Stores the tab order of one space. */
   setTabOrder(spaceId: string, ids: readonly string[]): void {
     this.tabOrder.set({ ...this.tabOrder(), [spaceId]: [...new Set(ids)] });
@@ -806,6 +826,7 @@ export class UiState {
         ? Object.fromEntries(Object.entries(this.tabOrder()).map(([s, t]) => [s, [...t]]))
         : undefined,
       taskMachine: Object.keys(this.taskMachine()).length ? { ...this.taskMachine() } : undefined,
+      eventsAll: Object.keys(this.eventsAll()).length ? { ...this.eventsAll() } : undefined,
       collapsedIssues: Object.keys(this.collapsedIssues()).length
         ? Object.fromEntries(Object.entries(this.collapsedIssues()).map(([r, n]) => [r, [...n]]))
         : undefined,

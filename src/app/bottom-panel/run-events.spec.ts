@@ -9,6 +9,8 @@ import {
 import {
   eventTime,
   foldSkipped,
+  groupBySubject,
+  mergedItems,
   pickHolds,
   pickRunOf,
   runLabel,
@@ -361,5 +363,56 @@ describe("foldSkipped", () => {
     expect(one[0]!.kind === "skipped" && one[0]!.key).toBe(
       two[0]!.kind === "skipped" && two[0]!.key,
     );
+  });
+});
+
+describe("runs by subject (#780)", () => {
+  const withSubject = (c: DeliverCard, id: string | null, outcome?: string): DeliverCard => {
+    if (c.state.kind !== "ok") throw new Error("not ok");
+    return {
+      ...c,
+      state: {
+        kind: "ok",
+        status: {
+          ...c.state.status,
+          subject: id ? { kind: "github.milestone", id, title: `M${id}`, url: null } : null,
+          ...(outcome ? { status: "finished" as const, outcome } : {}),
+        },
+      },
+    };
+  };
+  const choices = (cards: DeliverCard[]) => runsOfSpace(cards, "/repo");
+  const cards = [
+    withSubject(card("a1", "2026-11-07T10:00:00.000Z"), "1"),
+    withSubject(card("b1", "2026-11-07T11:00:00.000Z"), "2"),
+    withSubject(card("a2", "2026-11-07T12:00:00.000Z"), "1"),
+    withSubject(card("solo", "2026-11-07T09:00:00.000Z"), null),
+  ];
+
+  it("groups by subject, newest group first, newest run first, no subject alone", () => {
+    const groups = groupBySubject(choices(cards));
+    expect(groups.map((g) => g.runs.map((r) => r.status.run))).toEqual([
+      ["a2", "a1"],
+      ["b1"],
+      ["solo"],
+    ]);
+    expect(groups[0]!.subject?.id).toBe("1");
+    expect(groups[2]!.subject).toBeNull();
+  });
+
+  it("merges the events of a group oldest run first behind a separator per run", () => {
+    const [group] = groupBySubject(
+      choices([cards[0]!, withSubject(card("a2", "2026-11-07T12:00:00.000Z"), "1", "succeeded")]),
+    );
+    const items = mergedItems(group!, NOW);
+    const perRun = foldSkipped(group!.runs[0]!.status.events).length;
+    expect(items.length).toBe(2 * (perRun + 1));
+    expect(items[0]!.kind).toBe("separator");
+    expect(items[perRun + 1]!.kind).toBe("separator");
+    const seps = items.filter((i) => i.kind === "separator");
+    expect(seps.map((s) => s.key)).toEqual([group!.runs[1]!.key, group!.runs[0]!.key]);
+    expect(seps[1]).toMatchObject({ state: "succeeded", outcome: "succeeded" });
+    expect(seps[0]).toMatchObject({ state: "stale", outcome: "" });
+    expect(seps[0]!.start).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   });
 });
