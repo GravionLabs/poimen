@@ -28,9 +28,7 @@ const snapshot = {
 const store = {
   refresh: vi.fn(async () => undefined),
   snapshot: () => snapshot,
-  spaceOrder: () => [],
-  sidebarSort: () => "manual",
-  pinnedSpaces: () => [],
+  spaces: () => snapshot.spaces.map((workspace) => ({ workspace })),
 };
 
 async function setup() {
