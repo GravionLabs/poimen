@@ -25,6 +25,30 @@ Notarization, one of:
   `APPLE_API_KEY_CONTENT` (the text of the `.p8` file; the workflow writes it to a temp file and sets
   `APPLE_API_KEY_PATH`). The API key wins when both are set.
 
+Only `release.yml` reads these secrets, and it runs on a push to `main` and on a manual dispatch, never for a
+pull request.
+
+### One certificate and one API key for the team
+
+The Developer ID Application certificate belongs to the team, not to an app: the same `.p12` and the same App Store
+Connect API key sign and notarize every GravionLabs app. The `.p12`, its password and the `.p8` are kept in the
+owner's password manager; the private key of the certificate and the `.p8` cannot be downloaded again.
+
+### Rotation
+
+- Certificate (valid for five years, or after a leak): generate a new private key and CSR (`openssl`, RSA 2048),
+  create a new Developer ID Application certificate at developer.apple.com (Account Holder only), combine the `.cer`
+  and the key into a password-protected `.p12`, then set `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` and, when
+  the name changed, `APPLE_SIGNING_IDENTITY` in every repository that signs. Revoke the old certificate only after a
+  leak: Gatekeeper can then reject the apps already signed with it.
+- API key: create a new team key at App Store Connect (Users and Access, Integrations, Team Keys, role Developer),
+  set `APPLE_API_KEY`, `APPLE_API_KEY_CONTENT` and `APPLE_API_ISSUER` (unchanged for the same team), then revoke the
+  old key.
+- Set a secret from a file without showing it: `base64 -i cert.p12 | gh secret set APPLE_CERTIFICATE` and
+  `gh secret set APPLE_API_KEY_CONTENT < AuthKey_<id>.p8`.
+- Check with an rc (`gh workflow run release.yml --ref release/next`): the job log says
+  `macOS bundle will be signed and notarized (api-key)` and the verify step passes.
+
 ## Behavior
 
 `scripts/macos-signing.sh plan` (tested by `scripts/macos-signing.test.sh`) decides per run:

@@ -274,20 +274,46 @@ jobs:
             bash scripts/windows-signing.sh sign src-tauri/binaries/*.exe
           fi
 
+      # Tauri decides from which APPLE_* variables exist, not from whether they are empty: an empty APPLE_ID and
+      # APPLE_PASSWORD select the Apple ID notarization with an empty team id ("Team ID must be at least 3
+      # characters", #791). So only the variables of the planned signing and notarization are exported, each with a
+      # random delimiter so that a line break in a value cannot end the entry.
+      - name: Export the macOS signing variables
+        if: ${{ runner.os == 'macOS' && steps.sign.outputs.sign == 'true' }}
+        shell: bash
+        env:
+          NOTARIZE: ${{ steps.sign.outputs.notarize }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -euo pipefail
+          names="APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY"
+          case "$NOTARIZE" in
+            api-key) names="$names APPLE_API_ISSUER APPLE_API_KEY" ;;
+            apple-id) names="$names APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID" ;;
+          esac
+          for name in $names; do
+            delimiter="EOF_$(openssl rand -hex 16)"
+            {
+              echo "$name<<$delimiter"
+              printf '%s\n' "${!name}"
+              echo "$delimiter"
+            } >> "$GITHUB_ENV"
+          done
+
       - uses: GravionLabs/ci/tauri/installers@v1
-        # tauri-action signs the app and its externalBin sidecars (hardened runtime) and notarizes when these are set.
+        # tauri-action signs the app and its externalBin sidecars (hardened runtime) and notarizes when the step above
+        # exported the Apple variables.
         env:
           AZURE_TENANT_ID: ${{ steps.winsign.outputs.sign == 'true' && secrets.AZURE_TENANT_ID || '' }}
           AZURE_CLIENT_ID: ${{ steps.winsign.outputs.sign == 'true' && secrets.AZURE_CLIENT_ID || '' }}
           AZURE_CLIENT_SECRET: ${{ steps.winsign.outputs.sign == 'true' && secrets.AZURE_CLIENT_SECRET || '' }}
-          APPLE_CERTIFICATE: ${{ steps.sign.outputs.sign == 'true' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ steps.sign.outputs.sign == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ steps.sign.outputs.sign == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ steps.sign.outputs.notarize == 'apple-id' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ steps.sign.outputs.notarize == 'apple-id' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ steps.sign.outputs.notarize == 'apple-id' && secrets.APPLE_TEAM_ID || '' }}
-          APPLE_API_ISSUER: ${{ steps.sign.outputs.notarize == 'api-key' && secrets.APPLE_API_ISSUER || '' }}
-          APPLE_API_KEY: ${{ steps.sign.outputs.notarize == 'api-key' && secrets.APPLE_API_KEY || '' }}
         with:
           checkout: "false"
           version: ${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
