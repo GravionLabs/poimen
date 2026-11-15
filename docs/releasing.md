@@ -49,7 +49,7 @@ Gatekeeper warning about an unidentified developer or an unverified app may appe
 ## Windows: Authenticode (#672)
 
 The NSIS installer (`-setup.exe`) and every shipped executable (`poimen-app.exe`, `poimen-server`, `poimen-pty-host`,
-`poimen`, and the `-rc` variants) are signed with Azure Trusted Signing by `release.yml`. The sidecars are signed first
+`poimen`, and the `-rc` variants; `poimen.exe` of the standalone CLI zip is signed and verified in the `cli` job's Windows leg) are signed with Azure Trusted Signing by `release.yml`. The sidecars are signed first
 (`scripts/windows-signing.sh sign`), then Tauri signs the app and the installer through
 `bundle.windows.signCommand` (a config overlay written at build time, so no account name is committed). After the build
 `scripts/windows-signing.sh verify` (sidecars) and `verify-installer` (the installer is opened with 7z and every
@@ -57,7 +57,13 @@ executable inside is checked, so `poimen-app.exe` and the rc's `poimen-rc.exe` a
 `Get-AuthenticodeSignature` and fail the job unless every status is `Valid`. Order: the release or pre-release is
 created and set to draft at once, the installers are attached to the draft, and the final `publish` job makes it public
 only after every installer, server archive, CLI package and the checksums succeeded. An unsigned build therefore fails
-the job and the release stays a draft (delete it, fix, run again); nothing unsigned is ever downloadable. The MSI is not built for pre-releases and stays unsigned for the stable one until a follow-up.
+the job and the release stays a draft; nothing unsigned is ever downloadable. The MSI (stable only) is neither signed nor verified: `windows-signing.sh` cannot verify `bundle/msi/*.msi` yet, so this is a documented gap until a follow-up.
+
+### Recovery after a failed signing run
+
+Use "Re-run failed jobs" on the same run. The release id output is kept, the secrets are read again, and `publish` runs
+after the repaired jobs. Do not delete the draft and dispatch again: for a stable release the tag exists and there is no
+dispatch on `main`. A left-over draft blocks nothing, it is only visible to maintainers.
 
 ### What the owner does by hand
 
@@ -65,8 +71,10 @@ the job and the release stays a draft (delete it, fix, run again); nothing unsig
    it and takes days), in a region with its endpoint (e.g. `https://weu.codesigning.azure.net`).
 2. Create an app registration (service principal) and give it the role `Trusted Signing Certificate Profile Signer`
    on the account.
-3. Create the GitHub environment `release` (Settings, Environments) and, if wanted, restrict it to `main` and
-   `release/**` and add required reviewers.
+3. Create the GitHub environment `release` (Settings, Environments) leave it without branch restriction and
+   without required reviewers. Restricting it to `main` and `release/**` makes beta dispatches from other branches fail
+   at job start, and required reviewers would demand an approval for each leg that uses it (macOS, Linux and Windows of
+   the installers job, plus the Windows leg of the `cli` job).
 4. Add these as secrets of that environment, not as repository secrets:
 
 | Secret | Content |

@@ -350,6 +350,8 @@ jobs:
     needs: [test, release, prerelease]
     if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) && contains(fromJSON('["success","skipped"]'), needs.prerelease.result) }}
     runs-on: ${{ matrix.os }}
+    # Only the Windows leg reads the signing secrets (#672); the other legs have no environment (empty string).
+    environment: ${{ matrix.environment }}
     permissions:
       contents: write # upload the assets to the release
     env:
@@ -373,6 +375,28 @@ jobs:
           rustup target add "${{ matrix.target }}"
           cd src-tauri
           cargo build --release --locked -p poimen-server -p poimen-pty-host --target "${{ matrix.target }}"
+
+      # poimen.exe of the standalone zip is signed and verified like the installers' executables (#672).
+      - name: Sign and verify the Windows CLI
+        if: ${{ runner.os == 'Windows' }}
+        shell: bash
+        env:
+          POIMEN_REQUIRE_SIGNING: ${{ needs.prerelease.outputs.channel != 'beta' }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
+        run: |
+          set -euo pipefail
+          bin="src-tauri/target/${{ matrix.target }}/release/poimen.exe"
+          plan="$(bash scripts/windows-signing.sh plan)"
+          if [ "$plan" = "sign=true" ]; then
+            cargo install trusted-signing-cli --locked --version 0.8.0
+            bash scripts/windows-signing.sh sign "$bin"
+            bash scripts/windows-signing.sh verify "$bin"
+          fi
 
       - name: Package
         run: |
@@ -428,7 +452,7 @@ jobs:
           - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl, arch: amd64 }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, arch: arm64 }
           - { os: macos-latest, target: aarch64-apple-darwin }
-          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, environment: release }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -486,7 +510,7 @@ jobs:
 
   # SHA256SUMS over the attached installers and update archives, and a build provenance attestation over the same
   # files (#522): `gh attestation verify <file> --repo GravionLabs/poimen` shows that a download was built by this
-  # workflow from the tag. The installers stay unsigned, so this is how a user checks a download. Runs only when every
+  # workflow from the tag. The macOS and Windows installers are signed (#45, #672); this also covers the files with no platform signature (Linux packages, archives, the MSI). Runs only when every
   # installer was attached (a partial release gets no SHA256SUMS) and never for a beta (no release).
   checksums:
     name: Checksums and provenance
