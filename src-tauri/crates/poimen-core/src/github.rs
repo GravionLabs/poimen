@@ -57,6 +57,11 @@ pub struct Output {
 pub trait Runner {
     /// Runs `gh` with `args`. `ErrorKind::NotFound` means `gh` is not installed.
     fn gh(&self, args: &[String]) -> io::Result<Output>;
+    /// Runs `gh` with `args` and `input` on its standard input (a body that must not go through
+    /// argv). A runner that cannot do this answers `ErrorKind::Unsupported`.
+    fn gh_input(&self, _args: &[String], _input: &str) -> io::Result<Output> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
     /// Wall-clock time since the Unix epoch.
     fn now(&self) -> Duration;
 }
@@ -65,46 +70,11 @@ pub struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn gh(&self, args: &[String]) -> io::Result<Output> {
-        let path = gui_path::child_path();
-        let program = gui_path::resolve_program("gh", &path)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "gh not found"))?;
-        let mut child = gui_path::command(program)
-            .args(args)
-            .env("PATH", &path)
-            .env("GH_PROMPT_DISABLED", "1")
-            .env("NO_COLOR", "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        let read = |pipe: Option<Box<dyn io::Read + Send>>| {
-            std::thread::spawn(move || {
-                let mut buf = Vec::new();
-                if let Some(mut pipe) = pipe {
-                    let _ = pipe.read_to_end(&mut buf);
-                }
-                String::from_utf8_lossy(&buf).into_owned()
-            })
-        };
-        let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
-        let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
-        let deadline = Instant::now() + GH_TIMEOUT;
-        let status = loop {
-            if let Some(status) = child.try_wait()? {
-                break status;
-            }
-            if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::new(io::ErrorKind::TimedOut, "gh timed out"));
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        Ok(Output {
-            code: status.code(),
-            stdout: stdout.join().unwrap_or_default(),
-            stderr: stderr.join().unwrap_or_default(),
-        })
+        run_gh(args, None)
+    }
+
+    fn gh_input(&self, args: &[String], input: &str) -> io::Result<Output> {
+        run_gh(args, Some(input))
     }
 
     fn now(&self) -> Duration {
@@ -112,6 +82,60 @@ impl Runner for SystemRunner {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
     }
+}
+
+fn run_gh(args: &[String], input: Option<&str>) -> io::Result<Output> {
+    let path = gui_path::child_path();
+    let program = gui_path::resolve_program("gh", &path)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "gh not found"))?;
+    let mut child = gui_path::command(program)
+        .args(args)
+        .env("PATH", &path)
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("NO_COLOR", "1")
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    if let (Some(text), Some(mut pipe)) = (input, child.stdin.take()) {
+        let text = text.to_owned();
+        // A thread, so a large body cannot block on a full pipe; dropping `pipe` closes it.
+        std::thread::spawn(move || {
+            let _ = io::Write::write_all(&mut pipe, text.as_bytes());
+        });
+    }
+    let read = |pipe: Option<Box<dyn io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            String::from_utf8_lossy(&buf).into_owned()
+        })
+    };
+    let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
+    let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
+    let deadline = Instant::now() + GH_TIMEOUT;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "gh timed out"));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    Ok(Output {
+        code: status.code(),
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
 }
 
 /// `owner/name` of a GitHub remote URL; `None` for any other host.
@@ -309,6 +333,47 @@ impl<R: Runner> Client<R> {
         }
     }
 
+    /// Like [`mutate`](Self::mutate) with `input` on standard input (a body of any length).
+    pub fn mutate_input(
+        &self,
+        repo: &Repo,
+        argv: &[String],
+        input: &str,
+    ) -> Result<String, GhError> {
+        let result = self
+            .runner
+            .gh_input(argv, input)
+            .map_err(|e| self.io_error(&e));
+        self.invalidate(repo);
+        let out = result?;
+        if out.code == Some(0) {
+            Ok(out.stdout)
+        } else {
+            Err(self.classify(None, None, &out.stderr))
+        }
+    }
+
+    /// Runs a reading `gh` command (`argv` without the program name) straight to GitHub, never
+    /// from or into a cache; for a check that needs the current state. Returns stdout.
+    pub fn read_fresh(&self, argv: &[String]) -> Result<String, GhError> {
+        let out = self.run(argv)?;
+        if out.code == Some(0) {
+            Ok(out.stdout)
+        } else {
+            Err(self.classify(None, None, &out.stderr))
+        }
+    }
+
+    fn io_error(&self, e: &io::Error) -> GhError {
+        if e.kind() == io::ErrorKind::NotFound {
+            GhError::GhMissing
+        } else {
+            GhError::Other {
+                message: e.to_string(),
+            }
+        }
+    }
+
     /// Drops every cached answer that may describe `repo`.
     fn invalidate(&self, repo: &Repo) {
         self.generation
@@ -339,15 +404,7 @@ impl<R: Runner> Client<R> {
     }
 
     fn run(&self, args: &[String]) -> Result<Output, GhError> {
-        self.runner.gh(args).map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                GhError::GhMissing
-            } else {
-                GhError::Other {
-                    message: e.to_string(),
-                }
-            }
-        })
+        self.runner.gh(args).map_err(|e| self.io_error(&e))
     }
 
     /// Turns a failed call into an error; asks `gh auth status` when the failure looks like
@@ -708,6 +765,7 @@ mod tests {
     struct Fake {
         answers: RefCell<VecDeque<io::Result<Output>>>,
         calls: RefCell<Vec<Vec<String>>>,
+        inputs: RefCell<Vec<String>>,
         clock: Cell<Duration>,
     }
 
@@ -719,6 +777,10 @@ mod tests {
                 .pop_front()
                 .expect("unexpected gh call")
         }
+        fn gh_input(&self, args: &[String], input: &str) -> io::Result<Output> {
+            self.inputs.borrow_mut().push(input.to_owned());
+            self.gh(args)
+        }
         fn now(&self) -> Duration {
             self.clock.get()
         }
@@ -728,6 +790,7 @@ mod tests {
         Fake {
             answers: RefCell::new(answers.into()),
             calls: RefCell::new(vec![]),
+            inputs: RefCell::new(vec![]),
             clock: Cell::new(Duration::from_secs(1_000_000)),
         }
     }
@@ -1067,6 +1130,44 @@ mod tests {
         c.mutate(&r, &argv).unwrap();
         assert_eq!(f.calls.borrow().len(), 7);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mutate_input_sends_the_body_on_stdin_not_in_argv_and_invalidates() {
+        let f = fake(vec![
+            out(0, "ok\n", ""),
+            out(1, "", "gh: Not Found (HTTP 404)"),
+        ]);
+        let c = Client::new(&f, temp_dir("mutate-in"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        let body = "line\n".repeat(100_000);
+        let argv = vec![
+            "issue".to_string(),
+            "edit".into(),
+            "--body-file".into(),
+            "-".into(),
+        ];
+        assert_eq!(c.mutate_input(&r, &argv, &body).unwrap(), "ok\n");
+        assert_eq!(f.inputs.borrow()[0], body);
+        assert_eq!(f.calls.borrow()[0], argv);
+        assert_eq!(c.mutate_input(&r, &argv, "x"), Err(GhError::NotFound));
+    }
+
+    #[test]
+    fn read_fresh_runs_every_time_and_maps_errors() {
+        let f = fake(vec![
+            out(0, "a", ""),
+            out(0, "b", ""),
+            out(1, "", "gh: Not Found (HTTP 404)"),
+        ]);
+        let c = Client::new(&f, temp_dir("fresh"));
+        let argv = vec!["issue".to_string(), "view".into()];
+        assert_eq!(c.read_fresh(&argv).unwrap(), "a");
+        assert_eq!(c.read_fresh(&argv).unwrap(), "b");
+        assert_eq!(c.read_fresh(&argv), Err(GhError::NotFound));
     }
 
     #[test]

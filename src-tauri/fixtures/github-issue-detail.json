@@ -25,7 +25,8 @@
             { "number": 540, "title": "feat(github): issue detail pane", "url": "https://github.com/GravionLabs/poimen/pull/540", "state": "MERGED", "repository": { "nameWithOwner": "GravionLabs/poimen" } }
           ]
         }
-      }
+      },
+      "assignableUsers": { "nodes": [{ "login": "jkaufmann" }, { "login": "octo" }] }
     }
   }
 }
