@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
   viewChild,
 } from "@angular/core";
 import { FlowView } from "./flow-view";
@@ -15,7 +16,16 @@ import { paneDir, transcriptEmptyText, type Terminal } from "../core/snapshot";
 import { Deliver } from "../deliver/deliver";
 import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
-import { eventTime, runLabel, runsOfSpace, selectRun, toneStyle } from "./run-events";
+import {
+  eventTime,
+  pickHolds,
+  pickRunOf,
+  runLabel,
+  runsOfSpace,
+  selectRun,
+  toneStyle,
+  type Pick,
+} from "./run-events";
 import { TaskLog } from "../core/task-log";
 import {
   EVENT_COLUMN_MAX,
@@ -93,9 +103,9 @@ export class BottomPanel {
       this.activePane()?.machine,
     ),
   );
-  private readonly pickedRun = signal<string | null>(null);
+  private readonly pickedRun = signal<Pick | null>(null);
   protected readonly run = computed(() =>
-    selectRun(this.spaceRuns(), this.activePane()?.terminal_id, this.pickedRun()),
+    selectRun(this.spaceRuns(), this.activePane()?.terminal_id, this.pickedRun(), this.now()),
   );
   protected readonly rows = computed(() => this.run()?.status.events ?? []);
   protected readonly runLabel = runLabel;
@@ -112,6 +122,12 @@ export class BottomPanel {
   constructor() {
     const timer = setInterval(() => this.now.set(Date.now()), 1000);
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    // A pick is dropped when a newer run starts, its run is gone or the repository changes.
+    effect(() => {
+      const runs = this.spaceRuns();
+      if (untracked(this.pickedRun) && !pickHolds(runs, untracked(this.pickedRun)))
+        this.pickedRun.set(null);
+    });
     effect(() => {
       this.subagents.items();
       this.rows();
@@ -140,7 +156,7 @@ export class BottomPanel {
   }
 
   protected pickRun(event: Event): void {
-    this.pickedRun.set((event.target as HTMLSelectElement).value);
+    this.pickedRun.set(pickRunOf(this.spaceRuns(), (event.target as HTMLSelectElement).value));
     this.following.set(true);
   }
 

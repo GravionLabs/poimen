@@ -11,6 +11,7 @@ import { Deliver } from "../deliver/deliver";
 import { TaskLog } from "../core/task-log";
 import { UiState } from "../core/ui-state";
 import { Subagents } from "../core/transcripts";
+import { parseStatus, type DeliverCard } from "../deliver/deliver-status";
 import { BottomPanel } from "./bottom-panel";
 import { FlowView } from "./flow-view";
 
@@ -36,8 +37,14 @@ describe("BottomPanel empty states", () => {
     tab: "output" | "flow" | "events",
     active: Terminal | undefined,
     supported: boolean,
+    cards = signal<DeliverCard[]>([]),
   ) {
-    const ui = { panelTab: signal(tab), panelHeight: signal(200), togglePanel: vi.fn() };
+    const ui = {
+      panelTab: signal(tab),
+      panelHeight: signal(200),
+      togglePanel: vi.fn(),
+      eventColumns: signal({ time: 80, task: 80, result: 80 }),
+    };
     const subagents = {
       supported: signal(supported),
       agents: signal([]),
@@ -69,7 +76,7 @@ describe("BottomPanel empty states", () => {
           provide: EditorTabs,
           useValue: { activeId: signal(active ? active.terminal_id : null), openFlow: vi.fn() },
         },
-        { provide: Deliver, useValue: { cards: signal([]), openUrl: vi.fn() } },
+        { provide: Deliver, useValue: { cards, openUrl: vi.fn() } },
         { provide: TaskLog, useValue: { lines: signal([]) } },
         { provide: SpacesStore, useValue: { panes: signal(panes) } },
       ],
@@ -77,6 +84,7 @@ describe("BottomPanel empty states", () => {
     const fixture = TestBed.createComponent(BottomPanel);
     fixture.detectChanges();
     return {
+      fixture,
       text: () =>
         (fixture.nativeElement as HTMLElement).querySelector(".empty")?.textContent?.trim(),
       show: (next: "output" | "flow" | "events") => {
@@ -127,5 +135,50 @@ describe("BottomPanel empty states", () => {
     expect(panel.text()).toBe(
       `Subagent output is available for ${named} agents. Select a pane that runs one.`,
     );
+  });
+
+  it("drops a picked run when a run of the repository starts after it", () => {
+    const run = (id: string, ts: string): DeliverCard => {
+      const status = parseStatus({
+        v: 1,
+        run: id,
+        status: "running",
+        tasks: [],
+        finished: {},
+        attentions: [],
+        needsYou: false,
+        links: [],
+        updated: new Date().toISOString(),
+        tone: "neutral",
+        host: { "poimen.terminal": "w1:p1" },
+        events: [{ type: "run.started", tone: "neutral", ts }],
+      });
+      if (typeof status === "string") throw new Error(status);
+      return { root: "/repo", run: id, state: { kind: "ok", status } };
+    };
+    const cards = signal([
+      run("a", "2026-11-07T10:00:00.000Z"),
+      run("b", "2026-11-07T11:00:00.000Z"),
+    ]);
+    const panel = render("events", pane({ cwd: "/repo" }), false, cards);
+    const root = panel.fixture.nativeElement as HTMLElement;
+    const select = () => root.querySelector<HTMLSelectElement>("select[aria-label=Run]")!;
+    const shown = () => select().selectedOptions[0]?.textContent ?? "";
+    panel.fixture.detectChanges();
+    // Newest first, and the newest run is shown.
+    expect(select().options.length).toBe(2);
+    select().selectedIndex = 1;
+    select().dispatchEvent(new Event("change"));
+    panel.fixture.detectChanges();
+    const picked = shown();
+    // The older run stays shown after the pick.
+    expect(select().selectedIndex).toBe(1);
+    expect(picked).not.toBe(select().options[0]!.textContent);
+    cards.update((c) => [...c, run("c", "2026-11-07T12:00:00.000Z")]);
+    panel.fixture.detectChanges();
+    panel.fixture.detectChanges();
+    expect(select().options.length).toBe(3);
+    expect(select().selectedIndex).toBe(0);
+    expect(shown()).not.toBe(picked);
   });
 });
