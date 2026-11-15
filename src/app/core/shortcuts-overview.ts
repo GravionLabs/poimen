@@ -10,7 +10,7 @@ export interface ShortcutGroup {
 
 /** The groups of the overview; every `ShortcutAction` belongs to one (tested). */
 export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
-  { title: "General", actions: ["commandPalette", "showShortcuts", "refresh"] },
+  { title: "General", actions: ["commandPalette", "jump", "showShortcuts", "refresh"] },
   {
     title: "Tabs and panes",
     actions: [
@@ -21,6 +21,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
       "previousTab",
       "splitRight",
       "splitDown",
+      "find",
     ],
   },
   { title: "View", actions: ["toggleSidebar", "toggleOutput", "zoomIn", "zoomOut", "zoomReset"] },

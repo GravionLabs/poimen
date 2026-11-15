@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Attention, workspaceUnread } from "./attention";
-import type { AgentStatus, SpaceNode } from "./snapshot";
+import { Attention, canMarkUnread, workspaceUnread } from "./attention";
+import type { AgentStatus, SpaceNode, Terminal } from "./snapshot";
 
 const st = (o: Record<string, AgentStatus>) => new Map(Object.entries(o));
 const none = new Set<string>();
@@ -125,5 +125,103 @@ describe("Attention changes", () => {
     expect(a.unread().size).toBe(0);
     expect(a.observe(st({ p1: "done" }), none)).toEqual([{ paneId: "p1", status: "done" }]);
     expect([...a.unread()]).toEqual(["p1"]);
+  });
+});
+
+describe("Attention.markUnread (#725)", () => {
+  const p1 = new Set(["p1"]);
+
+  it("marks a viewed pane and counts it, and keeps the mark while it stays viewed", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "done" }), p1);
+    a.markUnread("p1");
+    expect([...a.unread()]).toEqual(["p1"]);
+    expect(a.count()).toBe(1);
+    a.observe(st({ p1: "done" }), p1);
+    expect([...a.unread()]).toEqual(["p1"]);
+  });
+
+  it("clears when the pane is viewed again after not being viewed", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "done" }), p1);
+    a.markUnread("p1");
+    a.observe(st({ p1: "done" }), none);
+    expect([...a.unread()]).toEqual(["p1"]);
+    a.observe(st({ p1: "done" }), p1);
+    expect(a.unread().size).toBe(0);
+    a.observe(st({ p1: "done" }), p1);
+    expect(a.unread().size).toBe(0);
+  });
+
+  it("clears when the pane turns working or blocked", () => {
+    for (const next of ["working", "blocked"] as const) {
+      const a = new Attention();
+      a.observe(st({ p1: "done" }), p1);
+      a.markUnread("p1");
+      a.observe(st({ p1: next }), p1);
+      expect(a.unread().size).toBe(0);
+      a.observe(st({ p1: "done" }), p1);
+      expect(a.unread().size).toBe(0);
+    }
+  });
+
+  it("clears when the pane is gone", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "done" }), p1);
+    a.markUnread("p1");
+    a.observe(st({}), p1);
+    expect(a.unread().size).toBe(0);
+    a.observe(st({ p1: "done" }), p1);
+    expect(a.unread().size).toBe(0);
+  });
+
+  it("works for a qualified remote id", () => {
+    const a = new Attention();
+    a.observe(st({ "m::p1": "idle" }), new Set(["m::p1"]));
+    a.markUnread("m::p1");
+    expect(a.count()).toBe(1);
+  });
+});
+
+describe("canMarkUnread", () => {
+  const pane = (o: Partial<Terminal>) =>
+    ({ terminal_id: "p1", agent: "claude", agent_status: "done", ...o }) as Terminal;
+  it("is true for a done or idle agent that is not unread", () => {
+    expect(canMarkUnread(pane({}), none)).toBe(true);
+    expect(canMarkUnread(pane({ agent_status: "idle" }), none)).toBe(true);
+  });
+  it("is false for working, blocked, plain terminals, unread and missing panes", () => {
+    expect(canMarkUnread(pane({ agent_status: "working" }), none)).toBe(false);
+    expect(canMarkUnread(pane({ agent_status: "blocked" }), none)).toBe(false);
+    expect(canMarkUnread(pane({ agent: undefined }), none)).toBe(false);
+    expect(canMarkUnread(pane({}), new Set(["p1"]))).toBe(false);
+    expect(canMarkUnread(undefined, none)).toBe(false);
+  });
+});
+
+describe("Attention.changedAt (#722)", () => {
+  it("counts a pane first seen from the snapshot that showed it", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working", p2: "idle" }), none, 1000);
+    expect(Object.fromEntries(a.changedAt())).toEqual({ p1: 1000, p2: 1000 });
+  });
+
+  it("moves the time only when the status changes", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working", p2: "idle" }), none, 1000);
+    a.observe(st({ p1: "working", p2: "working" }), none, 2000);
+    a.observe(st({ p1: "working", p2: "working" }), none, 3000);
+    expect(Object.fromEntries(a.changedAt())).toEqual({ p1: 1000, p2: 2000 });
+  });
+
+  it("starts a new pane at its first snapshot and forgets a gone pane", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), none, 1000);
+    a.observe(st({ p2: "idle" }), none, 2000);
+    expect(Object.fromEntries(a.changedAt())).toEqual({ p2: 2000 });
+  });
+
+  it("is empty before the first snapshot", () => {
+    expect(new Attention().changedAt().size).toBe(0);
   });
 });

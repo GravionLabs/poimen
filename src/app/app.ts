@@ -33,10 +33,11 @@ import { fixedSchemeName, pickSchemeName } from "./core/color-scheme";
 import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
 import { RemoteSpaces } from "./core/remote-spaces";
-import { Attention } from "./core/attention";
+import { Attention, canMarkUnread } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
+import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
 import { SpacesStore } from "./core/spaces-store";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
@@ -65,6 +66,7 @@ import { GithubView } from "./github/github-view";
 import { Deliver } from "./deliver/deliver";
 import { DeliverView } from "./deliver/deliver-view";
 import { Keymap } from "./core/keymap";
+import { TerminalSearch } from "./terminal-view/search";
 import type { ShortcutAction } from "./core/shortcuts";
 import type { LayoutNode } from "./core/editor-layout";
 import { BottomPanel } from "./bottom-panel/bottom-panel";
@@ -78,6 +80,8 @@ import { PaneDialog } from "./pane-dialog/pane-dialog";
 import { SpaceActions } from "./core/space-actions";
 import { SpaceRebuild } from "./core/space-rebuild";
 import { CommandPalette } from "./core/command-palette";
+import { JumpPalette, type JumpEntry } from "./core/jump-palette";
+import { JumpPaletteView } from "./jump-palette/jump-palette";
 import { ExplorerSelection } from "./core/explorer-selection";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
@@ -140,6 +144,7 @@ const ZOOM_STEP = 1;
     TaskDialog,
     AgentActionDialog,
     PaletteView,
+    JumpPaletteView,
     ShortcutsDialog,
   ],
   templateUrl: "./app.html",
@@ -158,11 +163,13 @@ export class App {
   private readonly terminalColors = inject(TerminalColorSync);
   private readonly prefs = inject(SettingsStore);
   private readonly keymap = inject(Keymap);
+  private readonly terminalSearch = inject(TerminalSearch);
   private readonly paneActions = inject(PaneActions);
   private readonly explorerSelection = inject(ExplorerSelection);
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
+  private readonly jump = inject(JumpPalette);
   protected readonly shortcutsOverview = inject(ShortcutsOverview);
   private readonly subagents = inject(Subagents);
   private readonly tasks = inject(TaskStarter);
@@ -198,6 +205,7 @@ export class App {
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
+  private readonly sounds = inject(Sounds);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
   protected readonly groupItems = computed(() => {
@@ -291,6 +299,17 @@ export class App {
       const pane = id ? this.pane(id) : undefined;
       this.projectEntries.setDir(pane ? paneDir(pane) : undefined);
     });
+    // The space of the active tab (a pane or the overview) is the one the user focused last (#712).
+    effect(() => {
+      const id = this.editor.activeId();
+      const spaceId = id === null ? null : (spaceOfTab(id) ?? this.pane(id)?.space_id ?? null);
+      if (!spaceId) return;
+      untracked(() => {
+        // Only this Mac's spaces: `recent` falls back to the name for a machine's.
+        if (this.store.snapshot().spaces.some((s) => s.space_id === spaceId))
+          this.ui.touchSpace(spaceId, Date.now());
+      });
+    });
     // Every view shows the hook status combined with the runs a pane started (#540).
     effect(() => this.store.setStatusOf(this.deliver.paneStatus()));
     // Instantiated for its effect: the dock badge follows `Attention.count`.
@@ -305,6 +324,9 @@ export class App {
         const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
         this.center.record(observed, (id) => this.tabTitle(id), Date.now());
+        // Remote agents count like local ones, but nothing plays for a pane being viewed or for a
+        // machine that is not connected.
+        this.sounds.notify(soundChanges(observed, viewed, (id) => this.machines.blockedReason(id)));
       });
     });
     effect(() => {
@@ -474,6 +496,13 @@ export class App {
       else this.spaceActions.notify("Show Space Overview: there is no focused space");
       return;
     }
+    if (id === "markUnread") {
+      const paneId = this.activePaneId();
+      const pane = paneId ? this.pane(paneId) : undefined;
+      if (canMarkUnread(pane, this.attention.unread())) this.attention.markUnread(pane.terminal_id);
+      else this.spaceActions.notify("Mark as unread: the active pane is not an idle or done agent");
+      return;
+    }
     if (id === "showChanges") {
       this.showChangesOfActiveSpace();
       return;
@@ -504,10 +533,34 @@ export class App {
       if (spaceId) this.spaceActions.askRename(spaceId);
       return;
     }
+    if (id === "pinSpace" || id === "unpinSpace") {
+      const paneId = this.activePaneId();
+      const spaceId = paneId ? this.pane(paneId)?.space_id : undefined;
+      if (spaceId) this.spaceActions.setPinned(spaceId, id === "pinSpace");
+      return;
+    }
     if (id === "moveSpaceUp" || id === "moveSpaceDown") {
       const paneId = this.activePaneId();
       const spaceId = paneId ? this.pane(paneId)?.space_id : undefined;
       if (spaceId) this.spaceActions.shift(spaceId, id === "moveSpaceUp" ? -1 : 1);
+      return;
+    }
+    const sorts = {
+      sortSpacesManual: "manual",
+      sortSpacesByName: "name",
+      sortSpacesByAttention: "attention",
+      sortSpacesRecent: "recent",
+    } as const;
+    if (id in sorts) {
+      void this.prefs.setSidebarSort(sorts[id as keyof typeof sorts]);
+      return;
+    }
+    if (id === "agentsByPriority" || id === "agentsInSpaceOrder") {
+      void this.prefs.setSidebarAgents(id === "agentsByPriority" ? "priority" : "list");
+      return;
+    }
+    if (id === "sortSpacesNow") {
+      this.spaceActions.sortNow();
       return;
     }
     if (id === "closeSpace") {
@@ -551,8 +604,19 @@ export class App {
       case "commandPalette":
         this.palette.toggle();
         break;
+      case "jump":
+        {
+          const id = this.editor.activeId();
+          this.jump.toggle(
+            id === null ? null : (spaceOfTab(id) ?? this.pane(id)?.space_id ?? null),
+          );
+        }
+        break;
       case "showShortcuts":
         this.shortcutsOverview.open();
+        break;
+      case "find":
+        this.terminalSearch.open();
         break;
       case "nextWaiting":
         this.jumpToWaiting();
@@ -642,6 +706,8 @@ export class App {
   protected onSidebarMenu(event: SidebarMenuAction): void {
     if (event.action === "new-terminal") this.paneActions.askNew(event.id);
     else if (event.action === "close-space") this.closeSpace(event.id);
+    else if (event.action === "pin-space" || event.action === "unpin-space")
+      this.spaceActions.setPinned(event.id, event.action === "pin-space");
     else if (event.action === "rename-space") this.spaceActions.askRename(event.id);
     else if (event.action === "show-changes") {
       const dir = spaceRepoDir(this.store.spaces(), event.id);
@@ -713,7 +779,9 @@ export class App {
   }
 
   protected paneAction(paneId: string, action: string): void {
-    if (action === "split-right" || action === "split-down") {
+    if (action === "mark-unread") {
+      this.attention.markUnread(paneId);
+    } else if (action === "split-right" || action === "split-down") {
       const direction = action === "split-right" ? "right" : "down";
       void this.paneActions.split(paneId, direction).then((pane) => pane && this.open(pane, true));
     } else if (action === "start-agent") {
@@ -761,6 +829,12 @@ export class App {
       { action: "pane-split-right", label: "New pane to the right" },
       { action: "pane-split-down", label: "New pane below" },
       { action: "pane-start-agent", label: "Start agent..." },
+      {
+        action: "pane-mark-unread",
+        label: "Mark as unread",
+        appliesTo: (id) =>
+          tabKind(id) === "pane" && canMarkUnread(this.pane(id), this.attention.unread()),
+      },
       { action: "pane-rename", label: "Rename pane..." },
       {
         action: "pane-restart",
@@ -914,6 +988,14 @@ export class App {
   protected setControl(on: boolean): void {
     const id = this.activePaneId();
     if (id) this.editor.choose(id, on ? "control" : "observe");
+  }
+
+  /** A jump palette entry: focus its pane, else open the overview of its space. */
+  protected jumpTo(entry: JumpEntry): void {
+    if (entry.pane) {
+      this.open(entry.pane);
+      this.focusLeaf(entry.pane.tab_id, entry.pane.terminal_id);
+    } else this.editor.openSpace(entry.spaceId);
   }
 
   /** Opens the next blocked pane after the active one. */

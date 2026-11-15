@@ -14,12 +14,17 @@ pub struct RepoInfo {
     pub branch: Option<String>,
     /// True for a linked worktree (not the main checkout).
     pub worktree: bool,
+    /// Canonical common git dir, shared by the main checkout and its linked worktrees.
+    pub common_dir: String,
     /// Changed plus untracked files; `None` when `git status` failed or timed out.
     pub dirty: Option<u32>,
     /// Commits ahead of the upstream; `None` without upstream or when unknown.
     pub ahead: Option<u32>,
     /// Commits behind the upstream; `None` without upstream or when unknown.
     pub behind: Option<u32>,
+    /// True when the branch is the base branch of `base_ref` (compared without the `origin/`
+    /// prefix); false without a base and on a detached HEAD.
+    pub on_base: bool,
 }
 
 /// Working tree state read from `git status --porcelain=v2 --branch`.
@@ -121,10 +126,20 @@ pub fn parse_rev_parse(output: &str) -> Option<RepoInfo> {
     Some(RepoInfo {
         branch: (head != "HEAD").then(|| head.to_string()),
         worktree: git_dir != common,
+        common_dir: common.to_string(),
         dirty: None,
         ahead: None,
         behind: None,
+        on_base: false,
     })
+}
+
+/// Whether `branch` is the branch `base` (`origin/<name>`) names.
+fn is_base(branch: Option<&str>, base: Option<&str>) -> bool {
+    match (branch, base) {
+        (Some(b), Some(base)) => base.strip_prefix("origin/").unwrap_or(base) == b,
+        _ => false,
+    }
 }
 
 pub fn info(dir: &str) -> Option<RepoInfo> {
@@ -141,7 +156,13 @@ pub fn info(dir: &str) -> Option<RepoInfo> {
         return None;
     }
     let mut info = parse_rev_parse(&String::from_utf8_lossy(&out.stdout))?;
+    if let Ok(real) = std::fs::canonicalize(&info.common_dir) {
+        info.common_dir = real.to_string_lossy().into_owned();
+    }
     apply_status(&mut info, status_with(&GitRunner, dir, STATUS_TIMEOUT));
+    if info.branch.is_some() {
+        info.on_base = is_base(info.branch.as_deref(), base_ref(dir).as_deref());
+    }
     Some(info)
 }
 
@@ -282,9 +303,11 @@ mod tests {
             Some(RepoInfo {
                 branch: Some("main".into()),
                 worktree: false,
+                common_dir: "/r/.git".into(),
                 dirty: None,
                 ahead: None,
-                behind: None
+                behind: None,
+                on_base: false
             })
         );
     }
@@ -297,9 +320,11 @@ mod tests {
             Some(RepoInfo {
                 branch: Some("feat/x".into()),
                 worktree: true,
+                common_dir: "/r/.git".into(),
                 dirty: None,
                 ahead: None,
-                behind: None
+                behind: None,
+                on_base: false
             })
         );
     }
@@ -329,6 +354,39 @@ mod tests {
     #[test]
     fn no_roots_outside_a_repository() {
         assert!(repo_roots(&["/nonexistent-poimen-dir".to_owned()]).is_empty());
+    }
+
+    #[test]
+    fn a_linked_worktree_shares_the_common_dir_of_its_main_checkout() {
+        let tmp = std::env::temp_dir().join(format!("poimen-git-709-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let main = tmp.join("main");
+        let wt = tmp.join("wt");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |dir: &std::path::Path, args: &[&str]| {
+            let ok = crate::gui_path::command("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "i"]);
+        git(
+            &main,
+            &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()],
+        );
+        let a = info(main.to_str().unwrap()).unwrap();
+        let b = info(wt.to_str().unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(!a.worktree && b.worktree);
+        assert_eq!(a.common_dir, b.common_dir);
+        assert!(a.common_dir.ends_with(".git"));
     }
 
     #[test]
@@ -420,5 +478,132 @@ mod tests {
             GitRunner.status("/nonexistent-poimen-dir", Duration::from_secs(2)),
             None
         );
+    }
+
+    #[test]
+    fn base_is_compared_by_name_without_origin() {
+        assert!(is_base(Some("release/next"), Some("origin/release/next")));
+        assert!(is_base(Some("main"), Some("origin/main")));
+        assert!(!is_base(Some("feat/x"), Some("origin/main")));
+        assert!(!is_base(Some("main"), None));
+        assert!(!is_base(None, Some("origin/main")));
+    }
+
+    mod repo {
+        use super::*;
+        use std::path::{Path, PathBuf};
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        static N: AtomicU32 = AtomicU32::new(0);
+
+        fn run(dir: &Path, args: &[&str]) {
+            let out = crate::gui_path::command("git")
+                .arg("-C")
+                .arg(dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+
+        /// A clone `app` of a bare origin whose only branch is `main`, plus `release/next`
+        /// when asked; `app` has `main` checked out.
+        struct Fixture {
+            base: PathBuf,
+            repo: PathBuf,
+        }
+
+        impl Fixture {
+            fn new(release_next: bool) -> Self {
+                let base = std::env::temp_dir().join(format!(
+                    "poimen-git-{}-{}",
+                    std::process::id(),
+                    N.fetch_add(1, Ordering::SeqCst)
+                ));
+                let _ = std::fs::remove_dir_all(&base);
+                std::fs::create_dir_all(&base).unwrap();
+                // Windows canonicalizes to `\\?\C:\...`, which git reads as a host name.
+                let base = PathBuf::from(
+                    base.canonicalize()
+                        .unwrap()
+                        .to_string_lossy()
+                        .trim_start_matches(r"\\?\"),
+                );
+                let seed = base.join("seed");
+                std::fs::create_dir_all(&seed).unwrap();
+                run(&base, &["init", "--bare", "-b", "main", "origin.git"]);
+                run(&seed, &["init", "-b", "main"]);
+                std::fs::write(seed.join("a.txt"), "a").unwrap();
+                run(&seed, &["add", "."]);
+                run(&seed, &["commit", "-m", "init"]);
+                let origin = base.join("origin.git");
+                run(
+                    &seed,
+                    &["remote", "add", "origin", origin.to_str().unwrap()],
+                );
+                run(&seed, &["push", "origin", "main"]);
+                if release_next {
+                    run(&seed, &["push", "origin", "main:release/next"]);
+                }
+                run(&base, &["clone", origin.to_str().unwrap(), "app"]);
+                let repo = base.join("app");
+                Self { base, repo }
+            }
+
+            fn dir(&self) -> &str {
+                self.repo.to_str().unwrap()
+            }
+        }
+
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.base);
+            }
+        }
+
+        #[test]
+        fn main_is_the_base_without_release_next() {
+            let f = Fixture::new(false);
+            assert!(info(f.dir()).unwrap().on_base);
+        }
+
+        #[test]
+        fn main_is_not_the_base_when_release_next_exists() {
+            let f = Fixture::new(true);
+            assert!(!info(f.dir()).unwrap().on_base);
+            run(
+                &f.repo,
+                &["checkout", "-b", "release/next", "origin/release/next"],
+            );
+            assert!(info(f.dir()).unwrap().on_base);
+        }
+
+        #[test]
+        fn a_feature_branch_is_not_the_base() {
+            let f = Fixture::new(true);
+            run(&f.repo, &["checkout", "-b", "feat/1-x"]);
+            assert!(!info(f.dir()).unwrap().on_base);
+        }
+
+        #[test]
+        fn detached_head_is_not_on_the_base() {
+            let f = Fixture::new(false);
+            run(&f.repo, &["checkout", "--detach"]);
+            let i = info(f.dir()).unwrap();
+            assert_eq!(i.branch, None);
+            assert!(!i.on_base);
+        }
+
+        #[test]
+        fn no_origin_means_no_base() {
+            let f = Fixture::new(false);
+            run(&f.repo, &["remote", "remove", "origin"]);
+            assert!(!info(f.dir()).unwrap().on_base);
+        }
     }
 }

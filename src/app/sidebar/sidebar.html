@@ -39,6 +39,28 @@
   </button>
   <button
     type="button"
+    class="layout-toggle sort-toggle"
+    aria-label="Sort spaces"
+    title="Sort spaces"
+    aria-haspopup="menu"
+    (click)="openSortMenu($event)"
+  >
+    <svg
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 13V3M2.5 5.5L5 3l2.5 2.5M11 3v10M8.5 10.5L11 13l2.5-2.5" />
+    </svg>
+  </button>
+  <button
+    type="button"
     class="add"
     aria-label="New space"
     title="New space from a directory"
@@ -71,6 +93,7 @@
     <span
       class="space"
       [class.chosen]="d.selected"
+      [class.member]="d.member"
       [class.closing]="isClosing(d.workspace.space_id)"
       [attr.aria-busy]="isClosing(d.workspace.space_id) || null"
       [attr.draggable]="canDrag(d.workspace.space_id) ? 'true' : null"
@@ -123,6 +146,9 @@
                       (dblclick)="startEdit(d.workspace.space_id, $event)"
                       >{{ seg.text }}</span
                     >
+                    @if (isPinned(d.workspace.space_id)) {
+                      <span class="pin-mark" title="Pinned" aria-label="Pinned">📌</span>
+                    }
                   }
                 }
                 @case ("state") {
@@ -325,6 +351,9 @@
           </span>
         }
       </span>
+      @if (d.since; as since) {
+        <span class="since" title="Time since the last status change">{{ since }}</span>
+      }
       @if (isUnread(d.row.pane.terminal_id)) {
         <span class="badge dot-badge" role="img" aria-label="Unread"></span>
       }
@@ -384,30 +413,157 @@
         </section>
       } @else {
         <section class="section" aria-labelledby="split-agents">
-          <h2 id="split-agents" class="section-title">Agents</h2>
-          <hx-tree
-            #tree
-            class="spaces"
-            ariaLabel="Agents"
-            emptyMessage="No matching agents"
-            selectionMode="single"
-            [value]="split().agents"
-            [selection]="selection()"
-            (selectionChange)="onSelect($event)"
-          >
-            <ng-template hxTreeNode let-node let-expanded="expanded">
-              <ng-container
-                [ngTemplateOutlet]="nodeTpl"
-                [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
-              />
-            </ng-template>
-          </hx-tree>
+          <div class="section-head">
+            <h2 id="split-agents" class="section-title">Agents</h2>
+            <button
+              type="button"
+              class="layout-toggle agents-toggle"
+              [attr.aria-pressed]="agentsMode() === 'priority'"
+              [attr.aria-label]="
+                agentsMode() === 'priority' ? 'Agents in space order' : 'Agents by priority'
+              "
+              [title]="agentsMode() === 'priority' ? 'Agents in space order' : 'Agents by priority'"
+              (click)="toggleAgentsMode()"
+            >
+              <svg
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 4h10M3 8h7M3 12h4" />
+              </svg>
+            </button>
+          </div>
+          <div class="agents-scroll">
+            @if (agentsMode() === "priority") {
+              @for (section of split().agentSections; track section.id) {
+                <button
+                  type="button"
+                  class="agent-section"
+                  [attr.aria-expanded]="!section.folded"
+                  (click)="toggleAgentSection(section.id)"
+                >
+                  <span class="chevron" [class.open]="!section.folded" aria-hidden="true"></span>
+                  <span class="agent-section-title">{{ section.title }}</span>
+                  <span class="agent-section-count">{{ section.count }}</span>
+                </button>
+                @if (!section.folded && section.count) {
+                  <hx-tree
+                    #tree
+                    class="agents-tree"
+                    [ariaLabel]="section.title"
+                    selectionMode="single"
+                    [value]="section.nodes"
+                    [selection]="selection()"
+                    (selectionChange)="onSelect($event)"
+                  >
+                    <ng-template hxTreeNode let-node let-expanded="expanded">
+                      <ng-container
+                        [ngTemplateOutlet]="nodeTpl"
+                        [ngTemplateOutletContext]="{
+                          $implicit: node,
+                          expanded: expanded,
+                          tree: tree,
+                        }"
+                      />
+                    </ng-template>
+                  </hx-tree>
+                }
+              } @empty {
+                <p class="agents-empty">No matching agents</p>
+              }
+            } @else {
+              <hx-tree
+                #tree
+                class="agents-tree"
+                ariaLabel="Agents"
+                emptyMessage="No matching agents"
+                selectionMode="single"
+                [value]="split().agents"
+                [selection]="selection()"
+                (selectionChange)="onSelect($event)"
+              >
+                <ng-template hxTreeNode let-node let-expanded="expanded">
+                  <ng-container
+                    [ngTemplateOutlet]="nodeTpl"
+                    [ngTemplateOutletContext]="{ $implicit: node, expanded: expanded, tree: tree }"
+                  />
+                </ng-template>
+              </hx-tree>
+            }
+          </div>
         </section>
       }
     </ng-template>
   </app-split-pane>
 }
 <app-machines-section (selected)="selected.emit($event)" />
+@if (sortMenuAt(); as at) {
+  <button
+    type="button"
+    class="menu-backdrop"
+    tabindex="-1"
+    aria-label="Close menu"
+    (click)="sortMenuAt.set(null)"
+    (contextmenu)="$event.preventDefault(); sortMenuAt.set(null)"
+  ></button>
+  <div
+    #sortMenu
+    class="menu sort-menu"
+    role="menu"
+    tabindex="-1"
+    [style.left.px]="at.x"
+    [style.top.px]="at.y"
+    (keydown)="onMenuKey($event, sortMenu)"
+  >
+    <button
+      type="button"
+      role="menuitemradio"
+      class="menu-item"
+      [attr.aria-checked]="sort() === 'manual'"
+      (click)="chooseSort('manual')"
+    >
+      {{ sort() === "manual" ? "✓ " : "" }}Manual
+    </button>
+    <button
+      type="button"
+      role="menuitemradio"
+      class="menu-item"
+      [attr.aria-checked]="sort() === 'name'"
+      (click)="chooseSort('name')"
+    >
+      {{ sort() === "name" ? "✓ " : "" }}By name
+    </button>
+    <button
+      type="button"
+      role="menuitemradio"
+      class="menu-item"
+      [attr.aria-checked]="sort() === 'attention'"
+      (click)="chooseSort('attention')"
+    >
+      {{ sort() === "attention" ? "✓ " : "" }}By attention
+    </button>
+    <button
+      type="button"
+      role="menuitemradio"
+      class="menu-item"
+      [attr.aria-checked]="sort() === 'recent'"
+      (click)="chooseSort('recent')"
+    >
+      {{ sort() === "recent" ? "✓ " : "" }}Most recent
+    </button>
+    <div class="menu-separator" role="separator"></div>
+    <button type="button" role="menuitem" class="menu-item" (click)="chooseSort('now')">
+      Sort alphabetically now
+    </button>
+  </div>
+}
 @if (menuAt(); as at) {
   <button
     type="button"

@@ -11,10 +11,12 @@ export const SHORTCUT_ACTIONS = [
   "zoomOut",
   "zoomReset",
   "commandPalette",
+  "jump",
   "nextWaiting",
   "nextTab",
   "previousTab",
   "showShortcuts",
+  "find",
 ] as const;
 
 export type ShortcutAction = (typeof SHORTCUT_ACTIONS)[number];
@@ -34,10 +36,12 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
   zoomOut: "CmdOrCtrl+-",
   zoomReset: "CmdOrCtrl+0",
   commandPalette: "CmdOrCtrl+Shift+P",
+  jump: "CmdOrCtrl+K",
   nextWaiting: "CmdOrCtrl+Shift+A",
   nextTab: "CmdOrCtrl+Alt+Right",
   previousTab: "CmdOrCtrl+Alt+Left",
   showShortcuts: "CmdOrCtrl+/",
+  find: "CmdOrCtrl+Shift+F",
 };
 
 /** Accepts the resolved `shortcuts` of the settings payload; anything else keeps the default. */

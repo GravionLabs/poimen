@@ -224,7 +224,7 @@ fn sidebar_model_comes_from_the_server_with_agent_status_and_tokens() {
         ..SidebarRows::default()
     };
     let model = Model::load(&f.client).unwrap();
-    let rows = model.rows(&config, None);
+    let rows = model.rows(&config, poimen_core::settings::SidebarSort::Manual, None);
     let text = |i: usize| {
         rows[i].lines[0]
             .iter()
@@ -240,6 +240,43 @@ fn sidebar_model_comes_from_the_server_with_agent_status_and_tokens() {
     assert_eq!(text(2), "▲ claude blocked");
     // The first tab stays the active one.
     assert_eq!(model.initial(None).as_deref(), Some(shell.as_str()));
+}
+
+#[test]
+fn sidebar_sort_name_in_the_config_orders_the_spaces() {
+    let f = fixture("sort");
+    let alpha_dir = f.dir.join("alpha");
+    std::fs::create_dir_all(&alpha_dir).unwrap();
+    let alpha = f
+        .client
+        .create_space(
+            "Alpha",
+            &alpha_dir.canonicalize().unwrap().display().to_string(),
+        )
+        .unwrap()
+        .id;
+    let shell = f.cat_terminal("shell");
+    let home = f.dir.join("home");
+    let config_file = poimen_core::settings::config_path(&home);
+    std::fs::create_dir_all(config_file.parent().unwrap()).unwrap();
+    std::fs::write(&config_file, r#"{"sidebar": {"sort": "name"}}"#).unwrap();
+
+    let config = poimen_console::tui::config::load(Some(&home));
+    let model = Model::load(&f.client).unwrap();
+    let names = |sort| {
+        model
+            .rows(&SidebarRows::default(), sort, None)
+            .iter()
+            .filter(|r| r.kind == RowKind::Space)
+            .map(|r| r.lines[0][1].text.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(config.sort), ["Alpha", "work"]);
+    assert_eq!(
+        names(poimen_core::settings::SidebarSort::Manual),
+        ["work", "Alpha"]
+    );
+    let _ = (alpha, shell);
 }
 
 #[test]
@@ -814,4 +851,66 @@ fn an_empty_notification_list_says_so_and_escape_closes_it() {
     t.key(KeyCode::Esc, KeyModifiers::NONE);
     wait_until("closed", || !t.text().contains("no notifications"));
     assert_eq!(t.detach(), Outcome::Detached);
+}
+
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let out = poimen_core::gui_path::command("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {out:?}");
+}
+
+#[test]
+fn a_linked_worktree_space_is_listed_below_its_repository() {
+    let f = fixture("worktrees");
+    let main = f.dir.join("repo");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q", "-b", "main"]);
+    git(
+        &main,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    );
+    let wt = f.dir.join("repo-wt");
+    git(
+        &main,
+        &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()],
+    );
+    let path = |p: &std::path::Path| p.canonicalize().unwrap().display().to_string();
+    // The worktree space is created first, so only the grouping puts it below the head.
+    f.client.create_space("Awt", &path(&wt)).unwrap();
+    f.client.create_space("Zmain", &path(&main)).unwrap();
+
+    let mut cache = poimen_console::tui::sidebar::RepoCache::default();
+    let model = Model::load_grouped(&f.client, &mut cache).unwrap();
+    let rows: Vec<_> = model
+        .rows(
+            &SidebarRows::default(),
+            poimen_core::settings::SidebarSort::Name,
+            None,
+        )
+        .iter()
+        .filter(|r| r.kind == RowKind::Space)
+        .map(|r| (r.lines[0][1].text.clone(), r.depth))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("work".to_string(), 0),
+            ("Zmain".to_string(), 0),
+            ("Awt".to_string(), 1)
+        ]
+    );
 }

@@ -1,4 +1,5 @@
 import { Injectable, InjectionToken, inject, signal } from "@angular/core";
+import { AGENT_SECTIONS, type AgentSection } from "./agent-priority";
 
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
@@ -15,7 +16,9 @@ export const PANEL_DEFAULT_HEIGHT = 260;
 export const PANEL_TABS = ["output", "flow", "events", "log"] as const;
 export const DEFAULT_PANEL_TAB = "output";
 /** How many run command palette entries are remembered as "Recent". */
-export const RECENT_COMMANDS_LIMIT = 5;
+export /** How many spaces keep a focus time. */
+const RECENT_SPACES_LIMIT = 200;
+const RECENT_COMMANDS_LIMIT = 5;
 export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
@@ -113,6 +116,8 @@ export interface LayoutState {
   splitWorkspace?: string;
   /** Shares of the Spaces and Agents sections in the split sidebar layout; they sum to 1. */
   splitSizes?: [number, number];
+  /** Folded sections of the Agents list in `priority` order (`needs`, `done`, `working`, `idle`). */
+  agentSectionsFolded?: string[];
   /** Legacy: plugin panes poimen opened; read once so their tabs can be dropped, never written. */
   pluginPanes?: Record<string, string>;
   /** The bottom panel below the editor area: shown, its height and its selected tab. */
@@ -123,6 +128,10 @@ export interface LayoutState {
   recentCommands?: string[];
   /** The user's order of the spaces (`space_id`s); spaces not listed follow by number. */
   spaceOrder?: string[];
+  /** Pinned spaces (`space_id`s), shown first in the tree in every sort mode. */
+  pinnedSpaces?: string[];
+  /** When the user last focused each space (`space_id` to epoch ms), for `sidebar.sort: recent`. */
+  recentSpaces?: Record<string, number>;
   /** The user's order of the tabs (`tab_id`s) per `space_id`; tabs not listed follow by number. */
   tabOrder?: Record<string, string[]>;
   /** How the Changes tab shows a diff: `inline` (unified) or `split` (side by side). */
@@ -225,12 +234,15 @@ export function parseLayout(raw: string | null): LayoutState {
       expandedDirs,
       splitWorkspace,
       splitSizes,
+      agentSectionsFolded,
       pluginPanes,
       panelOpen,
       panelHeight,
       panelTab,
       recentCommands,
       spaceOrder,
+      pinnedSpaces,
+      recentSpaces,
       tabOrder,
       taskMachine,
       changesLayout,
@@ -296,6 +308,12 @@ export function parseLayout(raw: string | null): LayoutState {
     }
     const sizes = clampSplitSizes(splitSizes);
     if (sizes) state.splitSizes = sizes;
+    if (Array.isArray(agentSectionsFolded)) {
+      const ids = AGENT_SECTIONS.map((s) => s.id as string).filter((id) =>
+        agentSectionsFolded.includes(id),
+      );
+      if (ids.length) state.agentSectionsFolded = ids;
+    }
     if (typeof pluginPanes === "object" && pluginPanes !== null && !Array.isArray(pluginPanes)) {
       state.pluginPanes = Object.fromEntries(
         Object.entries(pluginPanes).filter(
@@ -315,6 +333,17 @@ export function parseLayout(raw: string | null): LayoutState {
     if (Array.isArray(spaceOrder)) {
       const ids = spaceOrder.filter((k): k is string => typeof k === "string" && k !== "");
       if (ids.length) state.spaceOrder = [...new Set(ids)];
+    }
+    if (Array.isArray(pinnedSpaces)) {
+      const ids = pinnedSpaces.filter((k): k is string => typeof k === "string" && k !== "");
+      if (ids.length) state.pinnedSpaces = [...new Set(ids)];
+    }
+    if (recentSpaces && typeof recentSpaces === "object" && !Array.isArray(recentSpaces)) {
+      const times = Object.entries(recentSpaces).filter(
+        (e): e is [string, number] => e[0] !== "" && typeof e[1] === "number" && e[1] >= 0,
+      );
+      const newest = times.sort((a, b) => b[1] - a[1]).slice(0, RECENT_SPACES_LIMIT);
+      if (newest.length) state.recentSpaces = Object.fromEntries(newest);
     }
     if (tabOrder && typeof tabOrder === "object" && !Array.isArray(tabOrder)) {
       const clean: Record<string, string[]> = {};
@@ -344,6 +373,10 @@ export class UiState {
   readonly expandedDirs = signal<ReadonlySet<string>>(new Set(this.initial.expandedDirs));
   /** The workspace selected in the split sidebar layout (UI state, not a setting). */
   readonly splitWorkspace = signal<string | null>(this.initial.splitWorkspace ?? null);
+  /** Folded sections of the priority Agents list (#722). */
+  readonly agentSectionsFolded = signal<ReadonlySet<AgentSection>>(
+    new Set((this.initial.agentSectionsFolded ?? []) as AgentSection[]),
+  );
   /** Shares of the Spaces and Agents sections of the split sidebar layout. */
   readonly splitSizes = signal<readonly [number, number]>(
     this.initial.splitSizes ?? SPLIT_DEFAULT_SIZES,
@@ -359,6 +392,9 @@ export class UiState {
   /** Keys of the last command palette entries run, newest first (at most 5). */
   /** The user's space order (`space_id`s, persisted). */
   readonly spaceOrder = signal<readonly string[]>(this.initial.spaceOrder ?? []);
+  readonly pinnedSpaces = signal<readonly string[]>(this.initial.pinnedSpaces ?? []);
+  /** When each space was last focused (epoch ms), newest 200 kept. */
+  readonly recentSpaces = signal<Readonly<Record<string, number>>>(this.initial.recentSpaces ?? {});
   /** The user's tab order per space (`tab_id`s, persisted). */
   readonly tabOrder = signal<Readonly<Record<string, readonly string[]>>>(
     this.initial.tabOrder ?? {},
@@ -527,6 +563,43 @@ export class UiState {
     this.save();
   }
 
+  /** Pins or unpins a space. */
+  setSpacePinned(id: string, pinned: boolean): void {
+    const has = this.pinnedSpaces().includes(id);
+    if (has === pinned) return;
+    this.pinnedSpaces.set(
+      pinned ? [...this.pinnedSpaces(), id] : this.pinnedSpaces().filter((p) => p !== id),
+    );
+    this.save();
+  }
+
+  /** Notes that the user focused `id` at `at` (epoch ms); only the newest 200 spaces are kept. */
+  touchSpace(id: string, at: number): void {
+    if (!id || this.recentSpaces()[id] === at) return;
+    const next = Object.entries({ ...this.recentSpaces(), [id]: at })
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, RECENT_SPACES_LIMIT);
+    this.recentSpaces.set(Object.fromEntries(next));
+    this.save();
+  }
+
+  /** Drops the focus times of spaces that no longer exist; saves only when something went. */
+  pruneRecentSpaces(existing: readonly string[]): void {
+    const entries = Object.entries(this.recentSpaces());
+    const keep = entries.filter(([id]) => existing.includes(id));
+    if (keep.length === entries.length) return;
+    this.recentSpaces.set(Object.fromEntries(keep));
+    this.save();
+  }
+
+  /** Drops the pins of spaces that no longer exist; saves only when something went. */
+  prunePinnedSpaces(existing: readonly string[]): void {
+    const keep = this.pinnedSpaces().filter((id) => existing.includes(id));
+    if (keep.length === this.pinnedSpaces().length) return;
+    this.pinnedSpaces.set(keep);
+    this.save();
+  }
+
   /** Remembers the machine of a task for `dir`; `null` (this Mac) forgets it. */
   setTaskMachine(dir: string, machine: string | null): void {
     const next = { ...this.taskMachine() };
@@ -579,6 +652,14 @@ export class UiState {
 
   setSplitWorkspace(id: string): void {
     this.splitWorkspace.set(id);
+    this.save();
+  }
+
+  /** Folds or opens one section of the priority Agents list. */
+  toggleAgentSection(id: AgentSection): void {
+    const next = new Set(this.agentSectionsFolded());
+    if (!next.delete(id)) next.add(id);
+    this.agentSectionsFolded.set(next);
     this.save();
   }
 
@@ -649,6 +730,9 @@ export class UiState {
       expandedDirs: [...this.expandedDirs()],
       splitWorkspace: this.splitWorkspace() ?? undefined,
       // Like splitWorkspace: stored only once it differs from the default.
+      agentSectionsFolded: this.agentSectionsFolded().size
+        ? [...this.agentSectionsFolded()]
+        : undefined,
       splitSizes:
         this.splitSizes()[0] === SPLIT_DEFAULT_SIZES[0] ? undefined : [...this.splitSizes()],
       panelOpen: this.panelOpen(),
@@ -656,6 +740,10 @@ export class UiState {
       panelTab: this.panelTab(),
       recentCommands: this.recentCommands().length ? [...this.recentCommands()] : undefined,
       spaceOrder: this.spaceOrder().length ? [...this.spaceOrder()] : undefined,
+      pinnedSpaces: this.pinnedSpaces().length ? [...this.pinnedSpaces()] : undefined,
+      recentSpaces: Object.keys(this.recentSpaces()).length
+        ? { ...this.recentSpaces() }
+        : undefined,
       tabOrder: Object.keys(this.tabOrder()).length
         ? Object.fromEntries(Object.entries(this.tabOrder()).map(([s, t]) => [s, [...t]]))
         : undefined,

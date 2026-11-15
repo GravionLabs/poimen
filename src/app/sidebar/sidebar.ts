@@ -2,11 +2,13 @@ import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   Directive,
   ElementRef,
   Injector,
   afterNextRender,
   computed,
+  effect,
   inject,
   input,
   output,
@@ -23,8 +25,9 @@ import {
   type PaneRow,
   type SpaceNode,
   type Space,
+  dropAllowed,
 } from "../core/snapshot";
-import { Attention, workspaceUnread } from "../core/attention";
+import { Attention, canMarkUnread, workspaceUnread } from "../core/attention";
 import { SpacesStore } from "../core/spaces-store";
 import {
   DEFAULT_SIDEBAR_ROWS,
@@ -36,7 +39,13 @@ import {
   type RowType,
   type SidebarRows,
 } from "./spaces";
-import { SettingsStore } from "../core/settings";
+import { SettingsStore, type SidebarAgents } from "../core/settings";
+import {
+  AGENT_SECTIONS,
+  formatElapsed,
+  orderAgents,
+  type AgentSection,
+} from "../core/agent-priority";
 import { TauriBridge } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
 import { UiState } from "../core/ui-state";
@@ -55,14 +64,27 @@ export type SpaceData =
       lines: Line[];
       /** Split layout only: the workspace whose terminals are listed. */
       selected?: boolean;
+      /** A linked worktree listed below the space of its repository: indented. */
+      member?: boolean;
     }
-  | { kind: "pane"; row: PaneRow; lines: Line[] };
+  | {
+      kind: "pane";
+      row: PaneRow;
+      lines: Line[];
+      /** Agents section: time since the last status change (`5m`, `2h`, `3d`). */
+      since?: string;
+    };
 
 const rowType = (row: PaneRow): RowType => (row.agent ? "agent" : "terminal");
 
 /** Texts of the shown tokens of a space and one of its panes: what the filter matches. */
-export function filterValues(space: SpaceNode, row: PaneRow, rows: SidebarRows): string[] {
-  const ctx = spaceContext(space);
+export function filterValues(
+  space: SpaceNode,
+  row: PaneRow,
+  rows: SidebarRows,
+  showBase = false,
+): string[] {
+  const ctx = spaceContext(space, showBase);
   const texts = (lines: Line[]) => lines.flatMap((l) => l.map((s) => s.text));
   return [
     ...texts(renderRow(rowType(row), rows[rowType(row)], row, ctx)),
@@ -77,9 +99,10 @@ const WORKSPACE_PREFIX = "workspace:";
 export function spaceNodes(
   spaces: SpaceNode[],
   rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
+  showBase = false,
 ): HxTreeNode<SpaceData>[] {
   return spaces.map((space) => {
-    const ctx = spaceContext(space);
+    const ctx = spaceContext(space, showBase);
     const status = aggregateStatus(space);
     return {
       key: WORKSPACE_PREFIX + space.workspace.space_id,
@@ -90,6 +113,7 @@ export function spaceNodes(
         workspace: space.workspace,
         status,
         lines: renderRow("workspace", rows.workspace, space, ctx),
+        member: !!space.parent,
       },
       children: space.rows.map((row) => ({
         key: row.pane.terminal_id,
@@ -113,6 +137,32 @@ export interface SplitSections {
   agents: HxTreeNode<SpaceData>[];
   /** The workspace whose panes are listed (the wanted one, else the first). */
   selectedId: string | null;
+  /** `priority` mode only: the agents in their sections, in order (`agents` is the flat list). */
+  agentSections: AgentSectionView[];
+}
+
+/** One section of the Agents list in `priority` mode. */
+export interface AgentSectionView {
+  id: AgentSection;
+  title: string;
+  count: number;
+  folded: boolean;
+  /** The agents of the section; empty while it is folded. */
+  nodes: HxTreeNode<SpaceData>[];
+}
+
+/** What the Agents section needs besides the spaces: order, fold state and the status clock. */
+export interface AgentView {
+  /** `priority` sorts and sections the list; `list` keeps the space order. */
+  mode: SidebarAgents;
+  /** Section of each agent (the settled one); an agent missing here is idle. */
+  sections: ReadonlyMap<string, AgentSection>;
+  folded: ReadonlySet<AgentSection>;
+  /** When each pane's status last changed (epoch ms). */
+  changedAt: ReadonlyMap<string, number>;
+  /** The change times the order inside a section uses (settled like `sections`). */
+  orderAt: ReadonlyMap<string, number>;
+  now: number;
 }
 
 /**
@@ -124,11 +174,13 @@ export function splitSections(
   spaces: SpaceNode[],
   selectedId: string | null,
   rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
+  showBase = false,
+  view?: AgentView,
 ): SplitSections {
   const selected =
     spaces.find((s) => s.workspace.space_id === selectedId) ?? spaces[0] ?? undefined;
   const spaceList = spaces.map<HxTreeNode<SpaceData>>((space) => {
-    const ctx = spaceContext(space);
+    const ctx = spaceContext(space, showBase);
     const isSelected = space === selected;
     return {
       key: WORKSPACE_PREFIX + space.workspace.space_id,
@@ -143,6 +195,7 @@ export function splitSections(
         status: aggregateStatus(space),
         lines: renderRow("workspace", rows.workspace, space, ctx),
         selected: isSelected,
+        member: !!space.parent,
       },
       children: isSelected
         ? space.rows
@@ -160,34 +213,71 @@ export function splitSections(
         : undefined,
     };
   });
-  const agents = spaces.flatMap((space) => {
-    const ctx = spaceContext(space);
+  const entries = spaces.flatMap((space) => {
+    const ctx = spaceContext(space, showBase);
     return space.rows
       .filter((row) => row.agent)
-      .map<HxTreeNode<SpaceData>>((row) => ({
-        key: row.pane.terminal_id,
-        label: row.name,
-        leaf: true,
-        data: {
-          kind: "pane",
-          row,
-          lines: [
-            ...renderRow("agent", rows.agent, row, ctx),
-            [
-              {
-                kind: "text",
-                text: space.workspace.label,
-                status: row.pane.agent_status,
-                bold: false,
-                dim: false,
-                sep: false,
-              },
+      .map((row) => ({
+        row,
+        node: {
+          key: row.pane.terminal_id,
+          label: row.name,
+          leaf: true,
+          data: {
+            kind: "pane",
+            row,
+            since: view?.changedAt.has(row.pane.terminal_id)
+              ? formatElapsed(view.now - view.changedAt.get(row.pane.terminal_id)!)
+              : undefined,
+            lines: [
+              ...renderRow("agent", rows.agent, row, ctx),
+              [
+                {
+                  kind: "text",
+                  text: space.workspace.label,
+                  status: row.pane.agent_status,
+                  bold: false,
+                  dim: false,
+                  sep: false,
+                },
+              ],
             ],
-          ],
-        },
+          },
+        } as HxTreeNode<SpaceData>,
       }));
   });
-  return { spaces: spaceList, agents, selectedId: selected?.workspace.space_id ?? null };
+  const priority = view?.mode === "priority";
+  const ordered = priority
+    ? orderAgents(
+        entries,
+        (e) => e.row.pane.terminal_id,
+        (e) => e.row.name,
+        view.sections,
+        view.orderAt,
+        view.now,
+      )
+    : entries;
+  const agentSections = priority
+    ? AGENT_SECTIONS.map<AgentSectionView>(({ id, title }) => {
+        const members = ordered.filter(
+          (e) => (view.sections.get(e.row.pane.terminal_id) ?? "idle") === id,
+        );
+        const folded = view.folded.has(id);
+        return {
+          id,
+          title,
+          count: members.length,
+          folded,
+          nodes: folded ? [] : members.map((e) => e.node),
+        };
+      })
+    : [];
+  return {
+    spaces: spaceList,
+    agents: ordered.map((e) => e.node),
+    selectedId: selected?.workspace.space_id ?? null,
+    agentSections,
+  };
 }
 
 /**
@@ -212,9 +302,12 @@ export interface SidebarMenuAction {
     | "start-agent"
     | "rename"
     | "restart"
+    | "mark-unread"
     | "close"
     | "close-space"
     | "rename-space"
+    | "pin-space"
+    | "unpin-space"
     | "start-task"
     | "cleanup-tasks"
     | "show-changes";
@@ -246,6 +339,10 @@ export function sidebarMenuItems(
   outdatedHost = false,
   /** The row is on a machine that is not connected: every entry is disabled with this reason. */
   blocked: string | null = null,
+  /** The row is an agent that is done or idle and not unread (#725). */
+  markable = false,
+  /** Whether a local space is pinned (#710); `null` offers no pin entry (pane, remote space). */
+  pinned: boolean | null = null,
 ): SidebarMenuGroup[] {
   const builtin: SidebarMenuGroup = {
     id: "builtin",
@@ -261,10 +358,18 @@ export function sidebarMenuItems(
                   { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
                 ]
               : []),
+            ...(pinned === null
+              ? []
+              : [
+                  pinned
+                    ? { action: "unpin-space" as const, label: "Unpin space" }
+                    : { action: "pin-space" as const, label: "Pin space" },
+                ]),
             { action: "rename-space", label: "Rename space..." },
             { action: "close-space", label: "Close space" },
           ]
         : [
+            ...(markable ? [{ action: "mark-unread" as const, label: "Mark as unread" }] : []),
             { action: "split-right", label: "Split right" },
             { action: "split-down", label: "Split down" },
             { action: "start-agent", label: "Start agent..." },
@@ -348,7 +453,13 @@ export class SpaceEditFocus {
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { "[class.split]": "layout() === 'split'" },
+  host: {
+    "[class.split]": "layout() === 'split'",
+    // The order stays while the pointer is pressed, so a row does not move under it (#712).
+    "(pointerdown)": "holdSort(true)",
+    "(window:pointerup)": "holdSort(false)",
+    "(window:pointercancel)": "holdSort(false)",
+  },
 })
 export class Sidebar {
   protected readonly machines = inject(Machines);
@@ -374,15 +485,24 @@ export class Sidebar {
   } | null>(null);
   protected menuItems(kind: SidebarMenuAction["kind"], id: string) {
     const repo = kind === "workspace" && spaceRepoDir(this.store.spaces(), id) !== undefined;
-    const older =
-      kind === "pane" &&
-      olderHost(
-        this.store
-          .spaces()
-          .flatMap((n) => n.rows)
-          .find((r) => r.pane.terminal_id === id)?.pane,
-      ) !== null;
-    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id));
+    const row =
+      kind === "pane"
+        ? this.store
+            .spaces()
+            .flatMap((n) => n.rows)
+            .find((r) => r.pane.terminal_id === id)?.pane
+        : undefined;
+    const older = row !== undefined && olderHost(row) !== null;
+    const markable = canMarkUnread(row, this.attn.unread());
+    const local =
+      kind === "workspace" && this.store.snapshot().spaces.some((s) => s.space_id === id);
+    const pinned = local ? this.isPinned(id) : null;
+    return sidebarMenuItems(kind, repo, older, this.machines.blockedReason(id), markable, pinned);
+  }
+
+  /** Whether the space row shows the pin mark (#710). */
+  protected isPinned(spaceId: string): boolean {
+    return this.store.pinnedSpaces?.().includes(spaceId) ?? false;
   }
 
   protected openMenu(event: MouseEvent, kind: SidebarMenuAction["kind"], id: string): void {
@@ -399,7 +519,9 @@ export class Sidebar {
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const items = [
+      ...menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]'),
+    ];
     const current = items.findIndex((e) => e === document.activeElement);
     const to = menuTarget(
       items.map((e) => e.textContent?.trim() ?? ""),
@@ -464,9 +586,9 @@ export class Sidebar {
   /** Where the dragged space would land: before or after `id`. */
   protected readonly dropMark = signal<{ id: string; after: boolean } | null>(null);
 
-  /** Dragging reorders the complete list, so it is off while a filter hides spaces. */
+  /** Dragging reorders the complete list, so it is off while a filter hides spaces or outside `manual`. */
   protected canDrag(workspaceId: string): boolean {
-    return this.query().trim() === "" && this.editing() !== workspaceId;
+    return this.sort() === "manual" && this.query().trim() === "" && this.editing() !== workspaceId;
   }
 
   protected dragStart(event: DragEvent, workspaceId: string): void {
@@ -482,6 +604,7 @@ export class Sidebar {
   protected dragOver(event: DragEvent, workspaceId: string): void {
     const source = this.dragging();
     if (source === null || source === workspaceId) return;
+    if (!dropAllowed(this.store.spaces(), source, workspaceId)) return;
     event.preventDefault();
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
     this.dropMark.set({ id: workspaceId, after: event.clientY > box.top + box.height / 2 });
@@ -609,6 +732,7 @@ export class Sidebar {
 
   private readonly settings = inject(SettingsStore);
   private readonly rows = computed(() => this.settings.settings().sidebarRows);
+  private readonly showBase = computed(() => this.settings.settings().sidebarShowBaseBranch);
 
   protected readonly ui = inject(UiState);
   protected readonly layout = computed(() => this.settings.settings().sidebarLayout);
@@ -616,22 +740,88 @@ export class Sidebar {
   /** The layout a click on the toggle switches to. */
   protected readonly otherLayout = computed(() => (this.layout() === "tree" ? "split" : "tree"));
 
+  protected readonly sort = computed(() => this.settings.settings().sidebarSort);
+
+  /** Keeps the order of the spaces while the pointer is pressed. */
+  holdSort(held: boolean): void {
+    this.store.holdSort(held);
+  }
+
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  /** A re-sort keeps the selected row in view (#712). */
+  protected readonly keepSelectedInView = effect(() => {
+    this.store.spaces();
+    afterNextRender(
+      () =>
+        this.host.nativeElement
+          .querySelector<HTMLElement>(".row.active, [aria-selected='true']")
+          ?.scrollIntoView?.({ block: "nearest" }),
+      { injector: this.injector },
+    );
+  });
+  /** Where the sort menu of the header is open (below its button); `null` when closed. */
+  protected readonly sortMenuAt = signal<{ x: number; y: number } | null>(null);
+
+  protected openSortMenu(event: MouseEvent): void {
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.sortMenuAt.set({ x: box.left, y: box.bottom + 2 });
+  }
+
+  protected chooseSort(choice: "manual" | "name" | "attention" | "recent" | "now"): void {
+    this.sortMenuAt.set(null);
+    if (choice === "now") this.spaceActions.sortNow();
+    else void this.settings.setSidebarSort(choice);
+  }
+
   protected toggleLayout(): void {
     void this.settings.setSidebarLayout(this.otherLayout());
   }
 
   private readonly filtered = computed(() => {
     const rows = this.rows();
+    const showBase = this.showBase();
     const spaces = this.store.spaces();
     const bySpace = new Map(spaces.flatMap((s) => s.rows.map((r) => [r, s] as const)));
-    return filterSpaces(spaces, this.query(), (row) => filterValues(bySpace.get(row)!, row, rows));
+    return filterSpaces(spaces, this.query(), (row) =>
+      filterValues(bySpace.get(row)!, row, rows, showBase),
+    );
   });
 
-  protected readonly nodes = computed(() => spaceNodes(this.filtered(), this.rows()));
+  protected readonly nodes = computed(() =>
+    spaceNodes(this.filtered(), this.rows(), this.showBase()),
+  );
+
+  /** The clock of the elapsed times in the Agents section; ticks once a minute. */
+  private readonly now = signal(Date.now());
+  protected readonly clock = (() => {
+    const timer = setInterval(() => this.now.set(Date.now()), 60_000);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    return timer;
+  })();
+
+  protected readonly agentsMode = computed(() => this.settings.settings().sidebarAgents);
+  protected readonly otherAgentsMode = computed(() =>
+    this.agentsMode() === "list" ? "priority" : "list",
+  );
 
   protected readonly split = computed(() =>
-    splitSections(this.filtered(), this.ui.splitWorkspace(), this.rows()),
+    splitSections(this.filtered(), this.ui.splitWorkspace(), this.rows(), this.showBase(), {
+      mode: this.agentsMode(),
+      sections: this.store.agentSections(),
+      folded: this.ui.agentSectionsFolded(),
+      changedAt: this.attn.changedAt(),
+      orderAt: this.store.agentChangedAt(),
+      now: this.now(),
+    }),
   );
+
+  protected toggleAgentsMode(): void {
+    void this.settings.setSidebarAgents(this.otherAgentsMode());
+  }
+
+  protected toggleAgentSection(id: AgentSection): void {
+    this.ui.toggleAgentSection(id);
+  }
 
   protected data(node: HxTreeNode): SpaceData {
     return node.data as SpaceData;

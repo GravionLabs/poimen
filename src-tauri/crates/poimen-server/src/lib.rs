@@ -13,8 +13,10 @@ pub mod claude;
 pub mod copilot;
 mod create;
 mod emulator;
+pub mod gemini;
 pub mod hook;
 mod host;
+pub mod integration;
 mod pty;
 pub mod report;
 mod runs;
@@ -1632,6 +1634,7 @@ fn spawn_terminal(
         .unwrap_or_else(|| pty::program_name(&command[0]));
     let stream = new_stream(shared, &id, cols, rows);
     let term = std::env::var("TERM").ok();
+    let locale_set = host::locale_set(|name| std::env::var(name).ok());
     let spawned = host::start(
         &shared.pty_host,
         &host::Spec {
@@ -1642,6 +1645,7 @@ fn spawn_terminal(
             cols,
             rows,
             term: term.as_deref(),
+            locale_set,
         },
         output_to(&stream),
         exit_to(shared, &id),

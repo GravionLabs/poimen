@@ -29,6 +29,8 @@ const store = {
   refresh: vi.fn(async () => undefined),
   snapshot: () => snapshot,
   spaceOrder: () => [],
+  sidebarSort: () => "manual",
+  pinnedSpaces: () => [],
 };
 
 async function setup() {

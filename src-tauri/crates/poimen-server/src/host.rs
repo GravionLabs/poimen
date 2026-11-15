@@ -106,6 +106,29 @@ pub(crate) struct Spec<'a> {
     pub rows: u16,
     /// The server's `TERM`, which the child inherits through the host.
     pub term: Option<&'a str>,
+    /// Whether the server has a locale (see [`locale_set`]); without one the child gets a UTF-8
+    /// `LC_CTYPE` ([`default_lc_ctype`]).
+    pub locale_set: bool,
+}
+
+/// Whether the server's environment names a locale: one of `LC_ALL`, `LC_CTYPE`, `LANG` with a
+/// non-empty value. `var` reads one variable of the server's environment.
+pub(crate) fn locale_set(var: impl Fn(&str) -> Option<String>) -> bool {
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .any(|name| var(name).is_some_and(|v| !v.is_empty()))
+}
+
+/// The `LC_CTYPE` a child gets when the server has no locale: `UTF-8` on macOS (the only
+/// spelling it knows), `C.UTF-8` on other Unix systems, none on Windows.
+pub(crate) fn default_lc_ctype() -> Option<&'static str> {
+    if cfg!(target_os = "macos") {
+        Some("UTF-8")
+    } else if cfg!(unix) {
+        Some("C.UTF-8")
+    } else {
+        None
+    }
 }
 
 /// The endpoint of the host of `terminal_id`: `hosts/<id>` next to the server's socket (shorter
@@ -120,11 +143,14 @@ pub(crate) fn endpoint_for(socket: &Path, terminal_id: &str) -> PathBuf {
 
 /// The start line of a host: the command, its directory and size, and the environment poimen
 /// adds (`POIMEN_SOCKET`, `POIMEN_TERMINAL_ID`, `TERM=xterm-256color` when the server has none
-/// or a dumb one).
+/// or a dumb one, `LC_CTYPE` when the server has no locale).
 pub(crate) fn start_line(spec: &Spec<'_>, endpoint: PathBuf) -> HostStart {
     let mut env = std::collections::BTreeMap::new();
     if spec.term.is_none_or(|t| t.is_empty() || t == "dumb") {
         env.insert("TERM".to_string(), "xterm-256color".to_string());
+    }
+    if let (false, Some(ctype)) = (spec.locale_set, default_lc_ctype()) {
+        env.insert("LC_CTYPE".to_string(), ctype.to_string());
     }
     env.insert(
         ENV_SOCKET.to_string(),
@@ -887,6 +913,7 @@ mod tests {
             cols: 100,
             rows: 30,
             term,
+            locale_set: false,
         }
     }
 
@@ -898,13 +925,14 @@ mod tests {
         assert_eq!(start.spawn.argv, command);
         assert_eq!(start.spawn.cwd, "/w");
         assert_eq!((start.spawn.cols, start.spawn.rows), (100, 30));
-        assert_eq!(
-            start.spawn.env,
-            std::collections::BTreeMap::from([
-                ("POIMEN_SOCKET".to_string(), "/run/s.sock".to_string()),
-                ("POIMEN_TERMINAL_ID".to_string(), "t3".to_string()),
-            ])
-        );
+        let mut expected = std::collections::BTreeMap::from([
+            ("POIMEN_SOCKET".to_string(), "/run/s.sock".to_string()),
+            ("POIMEN_TERMINAL_ID".to_string(), "t3".to_string()),
+        ]);
+        if let Some(ctype) = default_lc_ctype() {
+            expected.insert("LC_CTYPE".to_string(), ctype.to_string());
+        }
+        assert_eq!(start.spawn.env, expected);
         assert_eq!(start.orphan_timeout_ms, 86_400_000);
     }
 
@@ -918,6 +946,49 @@ mod tests {
                 Some("xterm-256color"),
                 "{term:?}"
             );
+        }
+    }
+
+    #[test]
+    fn a_server_without_a_locale_gives_its_children_a_utf8_ctype() {
+        let command = vec!["sh".to_string()];
+        let start = start_line(&spec(&command, None), PathBuf::from("/e"));
+        let expected = if cfg!(target_os = "macos") {
+            Some("UTF-8")
+        } else if cfg!(unix) {
+            Some("C.UTF-8")
+        } else {
+            None
+        };
+        assert_eq!(
+            start.spawn.env.get("LC_CTYPE").map(String::as_str),
+            expected
+        );
+    }
+
+    #[test]
+    fn each_locale_variable_of_the_server_suppresses_the_default() {
+        for name in ["LC_ALL", "LC_CTYPE", "LANG"] {
+            let set = locale_set(|k| (k == name).then(|| "de_DE.ISO-8859-1".to_string()));
+            assert!(set, "{name} counts as a locale");
+            let command = vec!["sh".to_string()];
+            let start = start_line(
+                &Spec {
+                    locale_set: set,
+                    ..spec(&command, None)
+                },
+                PathBuf::from("/e"),
+            );
+            assert_eq!(start.spawn.env.get("LC_CTYPE"), None, "{name}");
+        }
+        assert!(!locale_set(|_| None), "no variable is no locale");
+    }
+
+    #[test]
+    fn an_empty_locale_variable_counts_as_unset() {
+        for name in ["LC_ALL", "LC_CTYPE", "LANG"] {
+            let set = locale_set(|k| (k == name).then(String::new));
+            assert!(!set, "an empty {name} is unset");
         }
     }
 

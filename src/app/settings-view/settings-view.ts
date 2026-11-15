@@ -25,8 +25,11 @@ import {
   SettingsStore,
   type ColorSchemeSetting,
   type HarnessInfo,
+  type SoundKind,
   type ThemeSetting,
 } from "../core/settings";
+import { Sounds } from "../core/sounds";
+import { HOOK_AGENT_KINDS, agentSupport } from "../core/backend";
 import { HooksOffer, agentName } from "../core/hooks-offer";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
@@ -160,7 +163,10 @@ export class SettingsView {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState);
   protected readonly hooks = inject(HooksOffer);
+  private readonly sounds = inject(Sounds);
   protected readonly agentName = agentName;
+  protected readonly agentSupport = agentSupport;
+  protected readonly agentKinds = HOOK_AGENT_KINDS;
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The search text; filters the category tree and highlights the labels on the page. */
@@ -218,6 +224,7 @@ export class SettingsView {
       search &&
       (event.metaKey || event.ctrlKey) &&
       !event.altKey &&
+      !event.shiftKey &&
       event.key.toLowerCase() === "f"
     ) {
       event.preventDefault();
@@ -363,6 +370,37 @@ export class SettingsView {
 
   protected revokeProject(root: string): void {
     void this.store.revokeProject(root);
+  }
+
+  protected readonly soundKinds: readonly { id: SoundKind; label: string }[] = [
+    { id: "blocked", label: "Sound when blocked" },
+    { id: "done", label: "Sound when done" },
+  ];
+  protected readonly soundProblem = this.sounds.problem;
+
+  protected soundOn(kind: SoundKind): boolean {
+    return this.settings().sounds[kind] !== false;
+  }
+
+  protected soundFile(kind: SoundKind): string {
+    const v = this.settings().sounds[kind];
+    return typeof v === "string" ? v : "";
+  }
+
+  /** The switch: on writes `true` (the built-in tone), off writes `false`; either drops a file path, which is typed again. */
+  protected setSoundOn(kind: SoundKind, event: Event): void {
+    const on = (event.target as HTMLInputElement).checked;
+    void this.store.setSound(kind, on ? true : false);
+  }
+
+  /** The file field: a path sets it (and turns the sound on), empty is the built-in tone. */
+  protected setSoundFile(kind: SoundKind, event: Event): void {
+    const path = (event.target as HTMLInputElement).value.trim();
+    void this.store.setSound(kind, path === "" ? this.soundOn(kind) : path);
+  }
+
+  protected testSound(kind: SoundKind): void {
+    void this.sounds.test(kind);
   }
 
   protected setShowHidden(event: Event): void {

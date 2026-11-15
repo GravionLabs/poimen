@@ -101,3 +101,13 @@ describe("toggleOutput", () => {
     );
   });
 });
+
+describe("jump", () => {
+  it("is bound to CmdOrCtrl+K and leaves CmdOrCtrl+J to toggleOutput", () => {
+    expect(DEFAULT_SHORTCUTS.jump).toBe("CmdOrCtrl+K");
+    // On macOS Cmd+K is the native menu's: the webview skips it.
+    expect(matchShortcut(key("k", { metaKey: true }), DEFAULT_SHORTCUTS, mac)).toBeNull();
+    expect(matchShortcut(key("k", { ctrlKey: true }), DEFAULT_SHORTCUTS, other)).toBe("jump");
+    expect(DEFAULT_SHORTCUTS.toggleOutput).toBe("CmdOrCtrl+J");
+  });
+});

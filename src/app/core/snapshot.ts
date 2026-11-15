@@ -1,7 +1,9 @@
 // The backend-neutral model of spaces, tabs and terminals (the `snapshot` command, #586) and the
 // pure helpers on it. Every backend maps its own model onto it in Rust (`poimen_core::snapshot`).
 
+import { HOOK_AGENTS, agentName, hasTranscripts } from "./backend";
 import type { Checks } from "../github/pulls";
+import type { SidebarSort } from "./settings";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
@@ -149,11 +151,15 @@ export interface Terminal {
 export interface RepoInfo {
   branch: string | null;
   worktree: boolean;
+  /** Canonical git common dir: the same for a repository's main checkout and its worktrees. */
+  common_dir?: string;
   /** Changed plus untracked files; null/absent when unknown. */
   dirty?: number | null;
   /** Commits ahead of / behind the upstream; null/absent without upstream. */
   ahead?: number | null;
   behind?: number | null;
+  /** The branch is the base branch of the repository (`git::base_ref`). */
+  on_base?: boolean;
 }
 
 /** The pull request of a branch as `branch_pulls` returns it (`BranchPull` of `github_branches.rs`). */
@@ -277,14 +283,97 @@ export interface WorkspaceNode {
 
 const byNumber = <T extends { number: number }>(a: T, b: T) => a.number - b.number;
 
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+/** Alphabetical by label with numbers in numeric order (`#9` before `#12`); ties by backend number. */
+const byLabel = <T extends { label: string; number: number }>(a: T, b: T) =>
+  collator.compare(a.label, b.label) || a.number - b.number;
+
+/** What `attention` and `recent` sort by (#712); `manual` and `name` need none of it. */
+export interface SortKeys {
+  /** Attention rank per `space_id` (`spaceAttentionRanks`); lower comes first. */
+  attention?: ReadonlyMap<string, number>;
+  /** When the user last focused each space (epoch ms). */
+  recent?: Readonly<Record<string, number>>;
+}
+
+/** Rank of a space without an agent, and of one the map does not know. */
+export const NO_AGENT_RANK = 4;
+
+/**
+ * Rank of one terminal for `sidebar.sort: attention`: blocked 0, done and unread 1, working 2,
+ * idle or done and read 3, no agent 4.
+ */
+export function attentionRank(terminal: Terminal, unread: ReadonlySet<string>): number {
+  switch (terminal.agent_status) {
+    case "blocked":
+      return 0;
+    case "done":
+      return unread.has(terminal.terminal_id) ? 1 : 3;
+    case "working":
+      return 2;
+    case "idle":
+      return 3;
+    default:
+      return agentKind(terminal) ? 3 : NO_AGENT_RANK;
+  }
+}
+
+/** The rank of each space: its most urgent terminal (`attentionRank`). */
+export function spaceAttentionRanks(
+  terminals: readonly Terminal[],
+  unread: ReadonlySet<string>,
+): Map<string, number> {
+  const ranks = new Map<string, number>();
+  for (const t of terminals) {
+    const rank = attentionRank(t, unread);
+    ranks.set(t.space_id, Math.min(ranks.get(t.space_id) ?? NO_AGENT_RANK, rank));
+  }
+  return ranks;
+}
+
 /**
  * The spaces in the user's order: ids of `order` first (in that order), then the others in backend
- * number order (new spaces). Ids of `order` that no longer exist are skipped.
+ * number order (new spaces). Ids of `order` that no longer exist are skipped. Pinned spaces
+ * (`pinned`, #710) come first in every sort mode, ordered among themselves like the rest.
  */
-export function orderSpaces<T extends { space_id: string; number: number }>(
+export function orderSpaces<T extends { space_id: string; label: string; number: number }>(
   spaces: readonly T[],
   order: readonly string[] = [],
+  sort: SidebarSort = "manual",
+  pinned: readonly string[] = [],
+  keys: SortKeys = {},
 ): T[] {
+  const ordered = orderUnpinned(spaces, order, sort, keys);
+  if (!pinned.length) return ordered;
+  const pins = new Set(pinned);
+  return [
+    ...ordered.filter((s) => pins.has(s.space_id)),
+    ...ordered.filter((s) => !pins.has(s.space_id)),
+  ];
+}
+
+function orderUnpinned<T extends { space_id: string; label: string; number: number }>(
+  spaces: readonly T[],
+  order: readonly string[],
+  sort: SidebarSort,
+  keys: SortKeys,
+): T[] {
+  if (sort === "name") return [...spaces].sort(byLabel);
+  if (sort === "attention") {
+    const rank = (s: T) => keys.attention?.get(s.space_id) ?? NO_AGENT_RANK;
+    return [...spaces].sort((a, b) => rank(a) - rank(b) || byLabel(a, b));
+  }
+  if (sort === "recent") {
+    const at = (s: T) => keys.recent?.[s.space_id];
+    return [...spaces].sort((a, b) => {
+      const [x, y] = [at(a), at(b)];
+      if (x !== undefined && y !== undefined) return y - x || b.number - a.number;
+      if (x !== undefined) return -1;
+      if (y !== undefined) return 1;
+      return b.number - a.number;
+    });
+  }
   const rank = new Map(order.map((id, i) => [id, i]));
   const known = spaces
     .filter((s) => rank.has(s.space_id))
@@ -329,8 +418,11 @@ export function buildTree(
   snapshot: Snapshot,
   order: readonly string[] = [],
   tabOrder: TabOrder = {},
+  sort: SidebarSort = "manual",
+  pinned: readonly string[] = [],
+  keys: SortKeys = {},
 ): WorkspaceNode[] {
-  return orderSpaces(snapshot.spaces, order).map((workspace) => ({
+  return orderSpaces(snapshot.spaces, order, sort, pinned, keys).map((workspace) => ({
     workspace,
     tabs: orderTabs(
       snapshot.tabs.filter((tab) => tab.space_id === workspace.space_id),
@@ -387,8 +479,24 @@ export function waitingCount(panes: Terminal[]): number {
   return panes.filter((pane) => pane.agent_status === "blocked").length;
 }
 
-/** The blocked pane after `activeId` in list order, wrapping around; undefined when none waits. */
-export function nextWaiting(panes: Terminal[], activeId: string | null): Terminal | undefined {
+/**
+ * The blocked pane after `activeId` in list order, wrapping around; undefined when none waits.
+ * With `order` (terminal ids as the Agents section shows them) the panes follow it; panes not in
+ * it come after, in list order.
+ */
+export function nextWaiting(
+  all: Terminal[],
+  activeId: string | null,
+  order?: readonly string[],
+): Terminal | undefined {
+  const position = new Map(order?.map((id, i) => [id, i]));
+  const panes = order
+    ? [...all].sort(
+        (a, b) =>
+          (position.get(a.terminal_id) ?? order.length) -
+          (position.get(b.terminal_id) ?? order.length),
+      )
+    : all;
   const waiting = panes.filter((pane) => pane.agent_status === "blocked");
   if (!waiting.length) return undefined;
   const index = panes.findIndex((pane) => pane.terminal_id === activeId);
@@ -439,18 +547,10 @@ export function agentKind(pane: Terminal): string | undefined {
   return pane.agent?.trim() || undefined;
 }
 
-/** Agents whose session transcripts poimen reads (Output panel, Flow tab), with their names. */
-const TRANSCRIPT_AGENTS: Readonly<Record<string, string>> = {
-  claude: "Claude Code",
-  copilot: "GitHub Copilot CLI",
-};
-
 /** Display name of the agent of `pane` if its transcripts can be followed (`Claude Code`, ...). */
 export function flowAgentName(pane: Terminal | undefined): string | undefined {
   const kind = pane && agentKind(pane);
-  return kind !== undefined && Object.hasOwn(TRANSCRIPT_AGENTS, kind)
-    ? TRANSCRIPT_AGENTS[kind]
-    : undefined;
+  return kind !== undefined && hasTranscripts(kind) ? agentName(kind) : undefined;
 }
 
 /** Whether the Output panel and the Flow tab can follow the agent of `pane`. */
@@ -489,6 +589,8 @@ export interface PaneRow {
   agent?: string;
   branch?: string;
   worktree: boolean;
+  /** The branch is the repository's base branch. */
+  onBase?: boolean;
   dirty?: number;
   ahead?: number;
   behind?: number;
@@ -503,6 +605,73 @@ export interface SpaceNode {
   rows: PaneRow[];
   /** Branch and worktree of the space's own directory (`workspace.cwd`), when known. */
   repo?: RepoInfo;
+  /** `space_id` of the head when this space is a linked worktree listed below it. */
+  parent?: string;
+}
+
+/**
+ * Lists the spaces whose directory is a linked worktree directly after the space of the main
+ * checkout of the same repository (`common_dir`), keeping the given order inside heads and
+ * inside members. A group without a main checkout and a space without repository stay flat.
+ */
+export function groupWorktrees(nodes: readonly SpaceNode[]): SpaceNode[] {
+  const heads = new Map<string, SpaceNode>();
+  for (const n of nodes) {
+    const key = n.repo?.common_dir;
+    if (key && !n.repo!.worktree && !heads.has(key)) heads.set(key, n);
+  }
+  const members = new Map<string, SpaceNode[]>();
+  for (const n of nodes) {
+    const key = n.repo?.common_dir;
+    const head = key ? heads.get(key) : undefined;
+    if (!head || !n.repo!.worktree) continue;
+    members.set(head.workspace.space_id, [
+      ...(members.get(head.workspace.space_id) ?? []),
+      { ...n, parent: head.workspace.space_id },
+    ]);
+  }
+  const grouped = new Set([...members.values()].flat().map((m) => m.workspace.space_id));
+  return nodes
+    .filter((n) => !grouped.has(n.workspace.space_id))
+    .flatMap((n) => [n, ...(members.get(n.workspace.space_id) ?? [])]);
+}
+
+/**
+ * Whether dropping `sourceId` on `targetId` is allowed in the grouped list: a member only among
+ * its siblings (same head), a head or flat space on any head or flat space (not on a member).
+ */
+export function dropAllowed(
+  nodes: readonly SpaceNode[],
+  sourceId: string,
+  targetId: string,
+): boolean {
+  const source = nodes.find((n) => n.workspace.space_id === sourceId);
+  const target = nodes.find((n) => n.workspace.space_id === targetId);
+  if (!source || !target) return false;
+  return source.parent === target.parent;
+}
+
+/**
+ * The flat id order after dropping `sourceId` before or after `targetId` in the grouped list
+ * (a head moves with its members), or `null` when refused or nothing changes.
+ */
+export function reorderGrouped(
+  nodes: readonly SpaceNode[],
+  sourceId: string,
+  targetId: string,
+  after: boolean,
+): string[] | null {
+  if (!dropAllowed(nodes, sourceId, targetId)) return null;
+  const source = nodes.find((n) => n.workspace.space_id === sourceId)!;
+  const flat = nodes.map((n) => n.workspace.space_id);
+  if (source.parent) return reorderIds(flat, sourceId, targetId, after);
+  const blocks = new Map<string, string[]>();
+  for (const n of nodes) {
+    const head = n.parent ?? n.workspace.space_id;
+    blocks.set(head, [...(blocks.get(head) ?? []), n.workspace.space_id]);
+  }
+  const heads = reorderIds([...blocks.keys()], sourceId, targetId, after);
+  return heads ? heads.flatMap((h) => blocks.get(h)!) : null;
 }
 
 /** Workspaces with their pane rows (tab label as secondary text), enriched with repo info. */
@@ -512,31 +681,39 @@ export function buildSpaces(
   pulls: ReadonlyMap<string, BranchPull> = new Map(),
   order: readonly string[] = [],
   tabOrder: TabOrder = {},
+  sort: SidebarSort = "manual",
+  group = false,
+  pinned: readonly string[] = [],
+  keys: SortKeys = {},
 ): SpaceNode[] {
-  return buildTree(snapshot, order, tabOrder).map(({ workspace, tabs }) => ({
-    workspace,
-    ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
-    rows: tabs.flatMap(({ tab, panes }) =>
-      panes.map((pane): PaneRow => {
-        const dir = paneDir(pane);
-        const repo = dir ? repos.get(dir) : undefined;
-        return {
-          pane,
-          tab: tab.label,
-          name: rowName(pane, tab.label),
-          agent: agentKind(pane),
-          branch: repo?.branch ?? undefined,
-          worktree: repo?.worktree ?? false,
-          dirty: repo?.dirty ?? undefined,
-          ahead: repo?.ahead ?? undefined,
-          behind: repo?.behind ?? undefined,
-          pr: dir ? pulls.get(dir) : undefined,
-          dir,
-          text: statusText(pane),
-        };
-      }),
-    ),
-  }));
+  const nodes = buildTree(snapshot, order, tabOrder, sort, pinned, keys).map(
+    ({ workspace, tabs }) => ({
+      workspace,
+      ...(workspace.cwd && repos.has(workspace.cwd) ? { repo: repos.get(workspace.cwd) } : {}),
+      rows: tabs.flatMap(({ tab, panes }) =>
+        panes.map((pane): PaneRow => {
+          const dir = paneDir(pane);
+          const repo = dir ? repos.get(dir) : undefined;
+          return {
+            pane,
+            tab: tab.label,
+            name: rowName(pane, tab.label),
+            agent: agentKind(pane),
+            branch: repo?.branch ?? undefined,
+            worktree: repo?.worktree ?? false,
+            onBase: repo?.on_base ?? false,
+            dirty: repo?.dirty ?? undefined,
+            ahead: repo?.ahead ?? undefined,
+            behind: repo?.behind ?? undefined,
+            pr: dir ? pulls.get(dir) : undefined,
+            dir,
+            text: statusText(pane),
+          };
+        }),
+      ),
+    }),
+  );
+  return group ? groupWorktrees(nodes) : nodes;
 }
 
 /** Keeps rows matching `query` (name, agent, branch, tab, directory, text; every word must match). */
@@ -559,12 +736,20 @@ export function filterSpaces(
       .toLowerCase();
     return words.every((w) => hay.includes(w));
   };
-  return spaces
+  const kept = spaces
     .map((space) => ({
       ...space,
       rows: space.rows.filter((r) => matches(r, space.workspace.label)),
     }))
     .filter((space) => space.rows.length > 0);
+  // A matching worktree space keeps its head, shown without rows when the head itself has none.
+  const shown = new Set(kept.map((s) => s.workspace.space_id));
+  const needed = new Set(kept.flatMap((s) => (s.parent ? [s.parent] : [])));
+  return spaces
+    .filter((s) => shown.has(s.workspace.space_id) || needed.has(s.workspace.space_id))
+    .map(
+      (s) => kept.find((k) => k.workspace.space_id === s.workspace.space_id) ?? { ...s, rows: [] },
+    );
 }
 
 /** Where a split puts the new pane (`pane.split` direction). */
@@ -668,7 +853,9 @@ export function closeWarning(pane: Terminal | undefined): string {
 }
 
 /** The agents named in the empty states of the Output panel and the Flow tab. */
-export const TRANSCRIPT_AGENTS_LABEL = "Claude Code and GitHub Copilot CLI";
+export const TRANSCRIPT_AGENTS_LABEL = HOOK_AGENTS.filter((a) => a.transcripts)
+  .map((a) => a.name)
+  .join(" and ");
 
 /**
  * Empty-state text of the Output panel and the Flow tab for `pane`; `subject` names the view

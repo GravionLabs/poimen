@@ -52,6 +52,10 @@ export function modeTitle(blocked: string | null): string {
   templateUrl: "./status-bar.html",
   styleUrl: "./status-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: {
+    "(document:keydown.escape)": "closeDetails()",
+    "(document:click)": "onDocumentClick($event)",
+  },
 })
 export class StatusBar {
   readonly connection = input.required<ConnectionState>();
@@ -113,4 +117,16 @@ export class StatusBar {
   protected readonly errTitle = errorTitle;
   /** Whether the notes or the error of the update are shown above the bar. */
   protected readonly detailsOpen = signal(false);
+
+  /** Closes the update details (close button, Escape). */
+  closeDetails(): void {
+    this.detailsOpen.set(false);
+  }
+
+  /** Closes the details on a click outside them; the update buttons toggle on their own. */
+  onDocumentClick(event: Event): void {
+    const target = event.target;
+    if (target instanceof Element && target.closest(".update-details, .update-button")) return;
+    this.closeDetails();
+  }
 }

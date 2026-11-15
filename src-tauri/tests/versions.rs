@@ -14,7 +14,7 @@ fn read(path: &str) -> String {
 
 #[test]
 fn app_and_crates_share_the_workspace_version() {
-    let workspace: toml::Value = read("Cargo.toml").parse().unwrap();
+    let workspace: toml::Value = toml::from_str(&read("Cargo.toml")).unwrap();
     let version = workspace["workspace"]["package"]["version"]
         .as_str()
         .unwrap();
@@ -24,7 +24,8 @@ fn app_and_crates_share_the_workspace_version() {
         "the app must inherit the workspace version"
     );
     for krate in ["poimen-protocol", "poimen-client", "poimen-server"] {
-        let manifest: toml::Value = read(&format!("crates/{krate}/Cargo.toml")).parse().unwrap();
+        let manifest: toml::Value =
+            toml::from_str(&read(&format!("crates/{krate}/Cargo.toml"))).unwrap();
         assert_eq!(
             manifest["package"]["version"]["workspace"].as_bool(),
             Some(true),
@@ -36,7 +37,7 @@ fn app_and_crates_share_the_workspace_version() {
 #[test]
 fn lockfile_and_frontend_manifests_match() {
     let version = env!("CARGO_PKG_VERSION");
-    let lock: toml::Value = read("Cargo.lock").parse().unwrap();
+    let lock: toml::Value = toml::from_str(&read("Cargo.lock")).unwrap();
     for name in [
         "poimen-app",
         "poimen-protocol",

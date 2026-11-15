@@ -153,6 +153,7 @@ pub struct App {
     pub home: Option<String>,
     pub own_terminal: Option<String>,
     pub model: Model,
+    repo_cache: sidebar::RepoCache,
     pub rows: Vec<Row>,
     pub selected: Option<String>,
     /// One per visible terminal (the leaves of the selected terminal's tab).
@@ -186,6 +187,7 @@ impl App {
             home: opts.home.clone(),
             own_terminal: opts.own_terminal.clone(),
             model: Model::default(),
+            repo_cache: sidebar::RepoCache::default(),
             rows: Vec::new(),
             selected: None,
             panes: Vec::new(),
@@ -205,8 +207,17 @@ impl App {
     }
 
     fn refresh(&mut self, client: &Client) -> Result<(), Error> {
-        self.model = Model::load(client)?;
-        self.rows = self.model.rows(&self.config.rows, self.home.as_deref());
+        self.model = if self.config.group_worktrees {
+            Model::load_grouped(client, &mut self.repo_cache)?
+        } else {
+            Model::load(client)?
+        };
+        self.rows = self.model.rows_unread(
+            &self.config.rows,
+            self.config.sort,
+            self.home.as_deref(),
+            self.attention.unread(),
+        );
         Ok(())
     }
 

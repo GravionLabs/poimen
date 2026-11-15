@@ -4,6 +4,7 @@ import { fuzzyRank } from "./fuzzy";
 import { Keymap } from "./keymap";
 import { ProjectEntries, type ProjectEntry } from "./project-entries";
 import type { ShortcutAction } from "./shortcuts";
+import { SettingsStore } from "./settings";
 import { UiState } from "./ui-state";
 
 /** A poimen command the palette offers; `id` is what the app runs (`App.run`). */
@@ -18,11 +19,21 @@ export interface PoimenCommand {
     | "githubMilestones"
     | "openDeliver"
     | "showChanges"
+    | "markUnread"
     | "showSpaceOverview"
     | "closeSpace"
     | "renameSpace"
+    | "pinSpace"
+    | "unpinSpace"
     | "moveSpaceUp"
     | "moveSpaceDown"
+    | "sortSpacesManual"
+    | "sortSpacesByName"
+    | "sortSpacesByAttention"
+    | "sortSpacesRecent"
+    | "sortSpacesNow"
+    | "agentsByPriority"
+    | "agentsInSpaceOrder"
     | "startTask"
     | "openTerminalHere"
     | "cleanupTasks"
@@ -36,8 +47,17 @@ export interface PoimenCommand {
 export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "newTerminal", title: "New Terminal..." },
   { id: "renameSpace", title: "Rename Space..." },
+  { id: "pinSpace", title: "Pin Space" },
+  { id: "unpinSpace", title: "Unpin Space" },
   { id: "moveSpaceUp", title: "Move Space Up" },
   { id: "moveSpaceDown", title: "Move Space Down" },
+  { id: "sortSpacesManual", title: "Sort Spaces: Manual" },
+  { id: "sortSpacesByName", title: "Sort Spaces: By Name" },
+  { id: "sortSpacesByAttention", title: "Sort Spaces: By Attention" },
+  { id: "sortSpacesRecent", title: "Sort Spaces: Most Recent" },
+  { id: "sortSpacesNow", title: "Sort Spaces Alphabetically Now" },
+  { id: "agentsByPriority", title: "Agents: By Priority" },
+  { id: "agentsInSpaceOrder", title: "Agents: In Space Order" },
   { id: "closeSpace", title: "Close Space" },
   { id: "closeTab", title: "Close Tab" },
   { id: "closeAll", title: "Close All Tabs" },
@@ -48,11 +68,13 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "zoomIn", title: "Zoom In" },
   { id: "zoomOut", title: "Zoom Out" },
   { id: "zoomReset", title: "Reset Zoom" },
+  { id: "jump", title: "Jump to…" },
   { id: "nextWaiting", title: "Next Waiting Agent" },
   { id: "toggleOutput", title: "Toggle Output Panel" },
   { id: "nextTab", title: "Next Tab" },
   { id: "previousTab", title: "Previous Tab" },
   { id: "showShortcuts", title: "Keyboard Shortcuts" },
+  { id: "find", title: "Terminal: Find" },
   { id: "openSettings", title: "Open Settings" },
   { id: "openGithub", title: "Open GitHub" },
   { id: "githubInbox", title: "GitHub: Inbox" },
@@ -61,6 +83,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "githubMilestones", title: "GitHub: Milestones" },
   { id: "openDeliver", title: "Open Deliver" },
   { id: "showChanges", title: "Show Changes" },
+  { id: "markUnread", title: "Mark Agent as Unread" },
   { id: "showSpaceOverview", title: "Show Space Overview" },
   { id: "startTask", title: "Start task from issue…" },
   { id: "openTerminalHere", title: "Open terminal in the selected folder" },
@@ -109,6 +132,7 @@ export const GITHUB_GROUP = "GitHub";
 export class CommandPalette {
   private readonly keymap = inject(Keymap);
   private readonly ui = inject(UiState);
+  private readonly settings = inject(SettingsStore);
   private readonly project = inject(ProjectEntries);
   private readonly agentActions = inject(AgentActions);
 
@@ -120,7 +144,11 @@ export class CommandPalette {
   readonly query = this._query.asReadonly();
 
   private readonly all = computed<PaletteItem[]>(() => [
-    ...POIMEN_COMMANDS.map((c): PaletteItem => ({
+    ...POIMEN_COMMANDS.filter(
+      (c) =>
+        this.settings.settings().sidebarSort === "manual" ||
+        (c.id !== "moveSpaceUp" && c.id !== "moveSpaceDown"),
+    ).map((c): PaletteItem => ({
       key: `command:${c.id}`,
       title: c.title,
       shortcut:
@@ -132,11 +160,21 @@ export class CommandPalette {
         c.id === "githubMilestones" ||
         c.id === "openDeliver" ||
         c.id === "showChanges" ||
+        c.id === "markUnread" ||
         c.id === "showSpaceOverview" ||
         c.id === "closeSpace" ||
         c.id === "renameSpace" ||
+        c.id === "pinSpace" ||
+        c.id === "unpinSpace" ||
         c.id === "moveSpaceUp" ||
         c.id === "moveSpaceDown" ||
+        c.id === "sortSpacesManual" ||
+        c.id === "sortSpacesByName" ||
+        c.id === "sortSpacesByAttention" ||
+        c.id === "sortSpacesRecent" ||
+        c.id === "sortSpacesNow" ||
+        c.id === "agentsByPriority" ||
+        c.id === "agentsInSpaceOrder" ||
         c.id === "startTask" ||
         c.id === "openTerminalHere" ||
         c.id === "cleanupTasks" ||

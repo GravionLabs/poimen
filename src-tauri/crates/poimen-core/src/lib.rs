@@ -12,6 +12,7 @@ pub mod github;
 pub mod gui_path;
 pub mod harness;
 pub mod layout;
+pub mod order;
 pub mod project;
 pub mod remote;
 pub mod repos;

@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  buildSpaces,
+  dropAllowed,
+  filterSpaces,
+  groupWorktrees,
+  orderSpaces,
+  spaceAttentionRanks,
+  reorderGrouped,
   applyStatus,
   buildTree,
   flowAgentName,
@@ -248,6 +255,16 @@ describe("nextWaiting", () => {
   it("is undefined when nothing waits", () => {
     expect(nextWaiting([pane({ terminal_id: "b" })], "b")).toBeUndefined();
   });
+  it("follows the shown order when given one", () => {
+    const order = ["c", "b", "a"];
+    expect(nextWaiting(panes, null, order)?.terminal_id).toBe("c");
+    expect(nextWaiting(panes, "c", order)?.terminal_id).toBe("a");
+    expect(nextWaiting(panes, "a", order)?.terminal_id).toBe("c");
+  });
+  it("puts panes outside the order after it", () => {
+    expect(nextWaiting(panes, null, ["c"])?.terminal_id).toBe("c");
+    expect(nextWaiting(panes, "c", ["c"])?.terminal_id).toBe("a");
+  });
 });
 
 describe("tabHeader", () => {
@@ -443,6 +460,7 @@ describe("flow agents", () => {
       expect(supportsFlow(pane({ agent })), agent).toBe(true);
       expect(flowSession(pane({ agent, agent_session: session })), agent).toBe("0b7e-c0");
     }
+    expect(supportsFlow(pane({ agent: "gemini" }))).toBe(false);
     expect(flowAgentName(pane({ agent: "claude" }))).toBe("Claude Code");
     expect(flowAgentName(pane({ agent: "copilot" }))).toBe("GitHub Copilot CLI");
   });
@@ -675,5 +693,251 @@ describe("paneSuccessor", () => {
   it("has none for the last leaf of a tab or a pane the snapshot does not have", () => {
     expect(paneSuccessor(snap, "w1:p3")).toBeUndefined();
     expect(paneSuccessor(snap, "w1:p9")).toBeUndefined();
+  });
+});
+
+describe("worktrees below the space of their repository", () => {
+  const space = (n: number, label: string, cwd: string) => ({
+    space_id: `w${n}`,
+    label,
+    number: n,
+    agent_status: "idle" as const,
+    cwd,
+  });
+  const repo = (worktree: boolean, common = "/r/.git") => ({
+    branch: "main",
+    worktree,
+    common_dir: common,
+  });
+  const snap: Snapshot = {
+    spaces: [
+      space(1, "wt-b", "/wt-b"),
+      space(2, "main", "/r"),
+      space(3, "other", "/o"),
+      space(4, "wt-a", "/wt-a"),
+      space(5, "orphan wt", "/ow"),
+      space(6, "plain", "/p"),
+    ],
+    tabs: [],
+    terminals: [],
+  };
+  const repos = new Map([
+    ["/wt-b", repo(true)],
+    ["/r", repo(false)],
+    ["/o", repo(false, "/o/.git")],
+    ["/wt-a", repo(true)],
+    ["/ow", repo(true, "/x/.git")],
+  ]);
+  const ids = (nodes: { workspace: { space_id: string } }[]) =>
+    nodes.map((n) => n.workspace.space_id);
+
+  it("lists members right after their head, in the manual order", () => {
+    const nodes = buildSpaces(snap, repos, new Map(), [], {}, "manual", true);
+    expect(ids(nodes)).toEqual(["w2", "w1", "w4", "w3", "w5", "w6"]);
+    expect(nodes.filter((n) => n.parent).map((n) => [n.workspace.space_id, n.parent])).toEqual([
+      ["w1", "w2"],
+      ["w4", "w2"],
+    ]);
+  });
+
+  it("sorts heads and members by name in name mode", () => {
+    const nodes = buildSpaces(snap, repos, new Map(), [], {}, "name", true);
+    expect(ids(nodes)).toEqual(["w2", "w4", "w1", "w5", "w3", "w6"]);
+  });
+
+  it("keeps everything flat when grouping is off, for a group without head and without repository", () => {
+    expect(ids(buildSpaces(snap, repos, new Map(), [], {}, "manual", false))).toEqual([
+      "w1",
+      "w2",
+      "w3",
+      "w4",
+      "w5",
+      "w6",
+    ]);
+    const flat = groupWorktrees(buildSpaces(snap, repos, new Map(), [], {}, "manual", false));
+    expect(flat.find((n) => n.workspace.space_id === "w5")?.parent).toBeUndefined();
+    expect(flat.find((n) => n.workspace.space_id === "w6")?.parent).toBeUndefined();
+  });
+
+  it("shows the head of a matching member when filtering", () => {
+    const nodes = buildSpaces(snap, repos, new Map(), [], {}, "manual", true);
+    const withRow = nodes.map((n) =>
+      n.workspace.space_id === "w4"
+        ? {
+            ...n,
+            rows: [
+              {
+                pane: {
+                  terminal_id: "t",
+                  tab_id: "x",
+                  space_id: "w4",
+                  agent_status: "idle" as const,
+                },
+                tab: "t",
+                name: "findme",
+                worktree: true,
+              },
+            ],
+          }
+        : n,
+    );
+    const out = filterSpaces(withRow, "findme");
+    expect(ids(out)).toEqual(["w2", "w4"]);
+    expect(out[0].rows).toEqual([]);
+  });
+
+  it("moves a head with its members and keeps a member among its siblings", () => {
+    const nodes = buildSpaces(snap, repos, new Map(), [], {}, "manual", true);
+    expect(reorderGrouped(nodes, "w2", "w6", true)).toEqual(["w3", "w5", "w6", "w2", "w1", "w4"]);
+    expect(reorderGrouped(nodes, "w4", "w1", false)).toEqual(["w2", "w4", "w1", "w3", "w5", "w6"]);
+    expect(reorderGrouped(nodes, "w4", "w3", true)).toBeNull();
+    expect(dropAllowed(nodes, "w2", "w1")).toBe(false);
+    expect(dropAllowed(nodes, "w2", "w3")).toBe(true);
+  });
+});
+
+describe("pinned spaces (#710)", () => {
+  const sp = (n: number, label: string) => ({ space_id: `w${n}`, label, number: n });
+  const spaces = [sp(1, "delta"), sp(2, "alpha"), sp(3, "charlie"), sp(4, "bravo")];
+  const ids = (list: { space_id: string }[]) => list.map((s) => s.space_id);
+
+  it("puts pinned spaces first in manual mode, ordered by the manual order", () => {
+    expect(ids(orderSpaces(spaces, ["w4", "w3", "w2", "w1"], "manual", ["w1", "w3"]))).toEqual([
+      "w3",
+      "w1",
+      "w4",
+      "w2",
+    ]);
+  });
+
+  it("puts pinned spaces first in name mode, sorted by name among themselves", () => {
+    expect(ids(orderSpaces(spaces, [], "name", ["w1", "w3"]))).toEqual(["w3", "w1", "w2", "w4"]);
+  });
+
+  it("ignores pins of spaces that do not exist and changes nothing without pins", () => {
+    expect(ids(orderSpaces(spaces, [], "manual", ["gone"]))).toEqual(["w1", "w2", "w3", "w4"]);
+    expect(ids(orderSpaces(spaces, [], "name", []))).toEqual(["w2", "w4", "w3", "w1"]);
+  });
+
+  it("keeps a pinned head with its members and a pinned member first among its siblings", () => {
+    const snapshot: Snapshot = {
+      spaces: [
+        { ...sp(1, "wt-a"), agent_status: "idle", cwd: "/wt-a" },
+        { ...sp(2, "wt-b"), agent_status: "idle", cwd: "/wt-b" },
+        { ...sp(3, "main"), agent_status: "idle", cwd: "/r" },
+        { ...sp(4, "other"), agent_status: "idle", cwd: "/o" },
+      ],
+      tabs: [],
+      terminals: [],
+    };
+    const repo = (worktree: boolean) => ({ branch: "main", worktree, common_dir: "/r/.git" });
+    const repos = new Map([
+      ["/wt-a", repo(true)],
+      ["/wt-b", repo(true)],
+      ["/r", repo(false)],
+    ]);
+    const list = (pinned: string[]) =>
+      buildSpaces(snapshot, repos, new Map(), [], {}, "manual", true, pinned).map(
+        (n) => n.workspace.space_id,
+      );
+    expect(list(["w3"])).toEqual(["w3", "w1", "w2", "w4"]);
+    expect(list(["w2"])).toEqual(["w3", "w2", "w1", "w4"]);
+  });
+});
+
+describe("sort by attention and recent (#712)", () => {
+  const sp = (id: string, label: string, number: number) => ({
+    space_id: id,
+    label,
+    number,
+    agent_status: "idle" as const,
+  });
+  const spaces = [
+    sp("w1", "beta", 1),
+    sp("w2", "alpha", 2),
+    sp("w3", "gamma", 3),
+    sp("w4", "delta", 4),
+  ];
+  const term = (id: string, space: string, status: string, agent?: string) =>
+    ({
+      terminal_id: id,
+      tab_id: "t",
+      space_id: space,
+      agent_status: status,
+      ...(agent ? { agent } : {}),
+    }) as unknown as import("./snapshot").Terminal;
+  const ids = (list: { space_id: string }[]) => list.map((s) => s.space_id);
+
+  it("ranks blocked, done and unread, working, idle or read, no agent", () => {
+    const ranks = spaceAttentionRanks(
+      [
+        term("a", "w1", "done", "claude"),
+        term("b", "w2", "working", "claude"),
+        term("c", "w3", "blocked", "claude"),
+        term("d", "w4", "done", "claude"),
+        term("e", "w5", "unknown"),
+        term("f", "w6", "idle", "claude"),
+        term("g", "w2", "idle", "claude"),
+      ],
+      new Set(["a"]),
+    );
+    expect([...ranks]).toEqual([
+      ["w1", 1],
+      ["w2", 2],
+      ["w3", 0],
+      ["w4", 3],
+      ["w5", 4],
+      ["w6", 3],
+    ]);
+  });
+
+  it("takes the most urgent pane of a space", () => {
+    const ranks = spaceAttentionRanks(
+      [term("a", "w1", "working", "claude"), term("b", "w1", "blocked", "claude")],
+      new Set(),
+    );
+    expect(ranks.get("w1")).toBe(0);
+  });
+
+  it("orders by rank and by name inside a rank", () => {
+    const attention = new Map([
+      ["w1", 2],
+      ["w2", 2],
+      ["w3", 0],
+      ["w4", 4],
+    ]);
+    expect(ids(orderSpaces(spaces, [], "attention", [], { attention }))).toEqual([
+      "w3",
+      "w2",
+      "w1",
+      "w4",
+    ]);
+  });
+
+  it("treats a space without a rank as having no agent", () => {
+    expect(
+      ids(orderSpaces(spaces, [], "attention", [], { attention: new Map([["w4", 1]]) })),
+    ).toEqual(["w4", "w2", "w1", "w3"]);
+  });
+
+  it("orders recent by focus time, then never focused by newest number", () => {
+    const recent = { w1: 100, w3: 300 };
+    expect(ids(orderSpaces(spaces, [], "recent", [], { recent }))).toEqual([
+      "w3",
+      "w1",
+      "w4",
+      "w2",
+    ]);
+    expect(ids(orderSpaces(spaces, [], "recent"))).toEqual(["w4", "w3", "w2", "w1"]);
+  });
+
+  it("keeps pinned spaces first", () => {
+    const recent = { w1: 100, w3: 300 };
+    expect(ids(orderSpaces(spaces, [], "recent", ["w2"], { recent }))).toEqual([
+      "w2",
+      "w3",
+      "w1",
+      "w4",
+    ]);
   });
 });

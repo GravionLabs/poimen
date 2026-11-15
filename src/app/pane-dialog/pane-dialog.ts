@@ -7,7 +7,9 @@ import {
   signal,
 } from "@angular/core";
 import { type Terminal } from "../core/snapshot";
-import { agentKinds } from "../core/backend";
+import { HOOK_AGENT_KINDS, startableKinds, statusNote } from "../core/backend";
+import { TauriBridge } from "../core/tauri";
+import { parseHarnesses, type HarnessInfo } from "../core/settings";
 import { SpacesStore } from "../core/spaces-store";
 import { PaneActions, type PaneClosed } from "../core/pane-actions";
 
@@ -26,8 +28,23 @@ export class PaneDialog {
   readonly closed = output<PaneClosed>();
   private readonly store = inject(SpacesStore);
   /** Only the kinds that can report on the active backend (#410). */
-  protected readonly kinds = computed(() => agentKinds(this.store.backendKind()));
+  private readonly bridge = inject(TauriBridge);
+  private readonly harnesses = signal<HarnessInfo[]>([]);
+  protected readonly kinds = computed(() =>
+    startableKinds(
+      this.store.backendKind(),
+      this.harnesses().map((h) => h.id),
+    ),
+  );
+  protected readonly note = (kind: string) => statusNote(kind, this.store.backendKind());
   private readonly typed = signal<string | null>(null);
+
+  constructor() {
+    this.bridge
+      .invoke<unknown>("get_harnesses")
+      .then((raw) => this.harnesses.set(parseHarnesses(raw)))
+      .catch(() => this.harnesses.set([]));
+  }
 
   protected cwd(fallback: string): string {
     return this.typed() ?? fallback;
@@ -57,7 +74,16 @@ export class PaneDialog {
   protected async startAgent(form: HTMLFormElement): Promise<void> {
     const data = new FormData(form);
     const field = (key: string) => String(data.get(key) ?? "");
-    await this.actions.confirmStartAgent(field("kind"), field("name"), field("args"));
+    const kind = field("kind").trim();
+    const args = field("args");
+    // A harness without hooks runs its own program and arguments, not its id as the program.
+    const harness = this.harnesses().find((h) => h.id === kind);
+    if (harness && harness.command.length > 0 && !HOOK_AGENT_KINDS.includes(kind)) {
+      const [program = kind, ...base] = harness.command;
+      await this.actions.confirmStartAgent(program, field("name"), [...base, args].join(" "));
+      return;
+    }
+    await this.actions.confirmStartAgent(kind, field("name"), args);
   }
 
   protected async rename(form: HTMLFormElement): Promise<void> {

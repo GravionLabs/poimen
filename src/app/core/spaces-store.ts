@@ -3,8 +3,12 @@ import {
   applyStatus,
   buildSpaces,
   buildTree,
+  NO_AGENT_RANK,
   orderSpaces,
+  spaceAttentionRanks,
+  type SortKeys,
   paneDir,
+  agentKind,
   nextWaiting,
   waitingCount,
   type Terminal,
@@ -17,9 +21,12 @@ import {
   mergeSnapshots,
 } from "./snapshot";
 import { type BackendEvent, type BackendInfo, type AppChannel } from "./backend";
-import type { BackendKind } from "./settings";
+import { SettingsStore, type BackendKind, type SidebarSort } from "./settings";
 import { TauriBridge, type Unlisten } from "./tauri";
 import { UiState } from "./ui-state";
+import { Attention } from "./attention";
+import { agentSection, orderAgents, type AgentSection } from "./agent-priority";
+import { SortSettle } from "./sort-settle";
 import { RemoteSpaces } from "./remote-spaces";
 
 /** Delay that collapses a burst of backend events into one re-read. */
@@ -63,6 +70,8 @@ export class SpacesStore {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState, { optional: true });
   private readonly remote = inject(RemoteSpaces, { optional: true });
+  private readonly settings = inject(SettingsStore, { optional: true });
+  private readonly attention = inject(Attention, { optional: true });
 
   private readonly _snapshot = signal<Snapshot>(EMPTY);
   private readonly _connectionError = signal<string | null>(null);
@@ -152,15 +161,180 @@ export class SpacesStore {
   readonly pulls = this._pulls.asReadonly();
   /** The user's space order (ids); empty without UI state. Spaces outside it follow by number. */
   readonly spaceOrder = computed<readonly string[]>(() => this.ui?.spaceOrder() ?? []);
+  /** The pinned local spaces (ids), shown first in every sort mode (#710). */
+  readonly pinnedSpaces = computed<readonly string[]>(() => this.ui?.pinnedSpaces() ?? []);
+  /** `sidebar.sort`: `manual` uses the user's order, `name` sorts alphabetically. */
+  readonly sidebarSort = computed<SidebarSort>(
+    () => this.settings?.settings().sidebarSort ?? "manual",
+  );
+  /** Attention rank per space as the statuses are now (only computed in `attention` mode). */
+  private readonly liveRanks = computed<ReadonlyMap<string, number>>(() => {
+    if (this.sidebarSort() !== "attention") return new Map();
+    const all = this.all();
+    const ranks = spaceAttentionRanks(all.terminals, this.attention?.unread() ?? new Set());
+    return new Map(all.spaces.map((s) => [s.space_id, ranks.get(s.space_id) ?? NO_AGENT_RANK]));
+  });
+  /**
+   * The ranks the tree is sorted by: `liveRanks`, held back while statuses still change (#712).
+   * Evaluated lazily; the timer only asks it to look again once the settle time has passed.
+   */
+  private readonly settledRanks = computed<ReadonlyMap<string, number>>(() => {
+    const live = this.liveRanks();
+    const mode = this.sidebarSort();
+    this.settleTick();
+    clearTimeout(this.settleTimer);
+    if (this.sortHeld()) return this.shownRanks;
+    const result = this.settle.update(live, mode !== this.settleMode);
+    this.settleMode = mode;
+    this.shownRanks = result.keys;
+    if (result.wait > 0) {
+      this.settleTimer = setTimeout(() => this.settleTick.update((n) => n + 1), result.wait);
+    }
+    return result.keys;
+  });
+  private readonly settleTick = signal(0);
+  private shownRanks: ReadonlyMap<string, number> = new Map();
+  private readonly settle = new SortSettle<number>(() => Date.now());
+  private settleTimer: ReturnType<typeof setTimeout> | undefined;
+  private settleMode: SidebarSort | undefined;
+  /** Whether the Agents section is ordered by priority (`sidebar.agents`, #722). */
+  readonly agentsPriority = computed(() => this.settings?.settings().sidebarAgents === "priority");
+  /** The section of every agent as the statuses are now (only computed in `priority` mode). */
+  private readonly liveAgentSections = computed<ReadonlyMap<string, AgentSection>>(() => {
+    if (!this.agentsPriority()) return new Map();
+    const unread = this.attention?.unread() ?? new Set<string>();
+    return new Map(
+      this.all()
+        .terminals.filter((t) => agentKind(t) !== undefined)
+        .map((t) => [t.terminal_id, agentSection(t.agent_status, unread.has(t.terminal_id))]),
+    );
+  });
+  private readonly agentTick = signal(0);
+  private readonly agentSettle = new SortSettle<AgentSection>(() => Date.now());
+  private agentTimer: ReturnType<typeof setTimeout> | undefined;
+  private shownAgentSections: ReadonlyMap<string, AgentSection> = new Map();
+  private agentMode = false;
+  /**
+   * The section of each agent the list is ordered by: the live one, held back like the space
+   * ranks while statuses still change (#712, #722).
+   */
+  readonly agentSections = computed<ReadonlyMap<string, AgentSection>>(() => {
+    const live = this.liveAgentSections();
+    const mode = this.agentsPriority();
+    this.agentTick();
+    clearTimeout(this.agentTimer);
+    if (this.sortHeld()) return this.shownAgentSections;
+    const result = this.agentSettle.update(live, mode !== this.agentMode);
+    this.agentMode = mode;
+    this.shownAgentSections = result.keys;
+    if (result.wait > 0) {
+      this.agentTimer = setTimeout(() => this.agentTick.update((n) => n + 1), result.wait);
+    }
+    return result.keys;
+  });
+  private readonly timeTick = signal(0);
+  private readonly timeSettle = new SortSettle<number>(() => Date.now());
+  private timeTimer: ReturnType<typeof setTimeout> | undefined;
+  private shownTimes: ReadonlyMap<string, number> = new Map();
+  private timeMode = false;
+  /**
+   * When each agent's status last changed, as the order inside a section uses it: held back like
+   * the sections (#712, #722), so a change that keeps the section does not reorder at once, and a
+   * held row keeps its place.
+   */
+  readonly agentChangedAt = computed<ReadonlyMap<string, number>>(() => {
+    const mode = this.agentsPriority();
+    const all = this.attention?.changedAt() ?? new Map<string, number>();
+    const live = new Map([...this.liveAgentSections().keys()].map((id) => [id, all.get(id) ?? 0]));
+    this.timeTick();
+    clearTimeout(this.timeTimer);
+    if (this.sortHeld()) return this.shownTimes;
+    const result = this.timeSettle.update(live, mode !== this.timeMode);
+    this.timeMode = mode;
+    this.shownTimes = result.keys;
+    if (result.wait > 0) {
+      this.timeTimer = setTimeout(() => this.timeTick.update((n) => n + 1), result.wait);
+    }
+    return result.keys;
+  });
+  /** Terminal ids of the agents in the shown priority order, remote agents after the local ones. */
+  private readonly agentOrder = computed<string[]>(() => {
+    const sections = this.agentSections();
+    const changedAt = this.agentChangedAt();
+    const now = Date.now();
+    const local = this.spaces().flatMap((s) => s.rows.filter((r) => r.agent));
+    const localIds = new Set(local.map((r) => r.pane.terminal_id));
+    const remote = this.all().terminals.filter(
+      (t) => agentKind(t) !== undefined && !localIds.has(t.terminal_id),
+    );
+    return [
+      ...orderAgents(
+        local,
+        (r) => r.pane.terminal_id,
+        (r) => r.name,
+        sections,
+        changedAt,
+        now,
+      ),
+      ...orderAgents(
+        remote,
+        (t) => t.terminal_id,
+        (t) => t.label ?? t.terminal_id,
+        sections,
+        changedAt,
+        now,
+      ),
+    ].map((x) => ("pane" in x ? x.pane.terminal_id : x.terminal_id));
+  });
+
+  /** True while the pointer is pressed in the sidebar: the order does not change meanwhile. */
+  private readonly sortHeld = signal(false);
+  private readonly sortKeys = computed<SortKeys>(() => ({
+    attention: this.settledRanks(),
+    recent: this.ui?.recentSpaces(),
+  }));
+
+  /** Holds the order while the pointer is pressed on a row; releasing applies what waited. */
+  holdSort(held: boolean): void {
+    this.sortHeld.set(held);
+  }
+
   /** The spaces in the user's order; every list, shortcut and neighbour lookup reads this. */
-  readonly orderedSpaces = computed(() => orderSpaces(this._snapshot().spaces, this.spaceOrder()));
+  readonly orderedSpaces = computed(() =>
+    orderSpaces(
+      this._snapshot().spaces,
+      this.spaceOrder(),
+      this.sidebarSort(),
+      this.pinnedSpaces(),
+      this.sortKeys(),
+    ),
+  );
   /** The user's tab order per space (ids); tabs outside it follow by number. */
   readonly tabOrder = computed<Readonly<Record<string, readonly string[]>>>(
     () => this.ui?.tabOrder() ?? {},
   );
-  readonly tree = computed(() => buildTree(this.snapshot(), this.spaceOrder(), this.tabOrder()));
+  readonly tree = computed(() =>
+    buildTree(
+      this.snapshot(),
+      this.spaceOrder(),
+      this.tabOrder(),
+      this.sidebarSort(),
+      this.pinnedSpaces(),
+      this.sortKeys(),
+    ),
+  );
   readonly spaces = computed(() =>
-    buildSpaces(this.snapshot(), this._repos(), this._pulls(), this.spaceOrder(), this.tabOrder()),
+    buildSpaces(
+      this.snapshot(),
+      this._repos(),
+      this._pulls(),
+      this.spaceOrder(),
+      this.tabOrder(),
+      this.sidebarSort(),
+      this.settings?.settings().sidebarGroupWorktrees ?? true,
+      this.pinnedSpaces(),
+      this.sortKeys(),
+    ),
   );
   /** The spaces of one machine as a tree (`machine` set on every space), last known when offline. */
   remoteTree(machine: string) {
@@ -170,7 +344,10 @@ export class SpacesStore {
     const snapshot = this.remote?.snapshot();
     if (!snapshot) return new Map<string, ReturnType<typeof buildTree>>();
     const trees = new Map<string, ReturnType<typeof buildTree>>();
-    for (const node of buildTree(snapshot)) {
+    // Remote spaces have no manual order: server order, or by name in `name` mode. `attention`
+    // applies, `recent` falls back to the name (focus times are of this Mac's spaces).
+    const sort = this.sidebarSort() === "recent" ? "name" : this.sidebarSort();
+    for (const node of buildTree(snapshot, [], {}, sort, [], this.sortKeys())) {
       const name = node.workspace.machine!;
       trees.set(name, [...(trees.get(name) ?? []), node]);
     }
@@ -200,6 +377,9 @@ export class SpacesStore {
     this.watchRepoTriggers();
     inject(DestroyRef).onDestroy(() => {
       clearTimeout(this.refreshTimer);
+      clearTimeout(this.settleTimer);
+      clearTimeout(this.agentTimer);
+      clearTimeout(this.timeTimer);
       void this.unlisten?.then((stop) => stop());
     });
   }
@@ -248,7 +428,12 @@ export class SpacesStore {
 
   /** The next blocked pane after `activeId`, wrapping around. */
   nextWaiting(activeId: string | null): Terminal | undefined {
-    return nextWaiting(this.all().terminals, activeId);
+    // The shown order of the Agents section applies only to the split layout in priority mode.
+    const shown =
+      this.settings?.settings().sidebarLayout === "split" && this.agentsPriority()
+        ? this.agentOrder()
+        : undefined;
+    return nextWaiting(this.all().terminals, activeId, shown);
   }
 
   pane(paneId: string): Terminal | undefined {
@@ -269,7 +454,12 @@ export class SpacesStore {
       const snapshot = toSnapshot(await this.bridge.invoke<WireSnapshot>("snapshot"));
       this._snapshot.set(snapshot);
       // Closed spaces leave the stored order (not on an empty read, which may be transient).
-      if (snapshot.spaces.length) this.ui?.pruneSpaceOrder(snapshot.spaces.map((s) => s.space_id));
+      if (snapshot.spaces.length) {
+        const ids = snapshot.spaces.map((s) => s.space_id);
+        this.ui?.pruneSpaceOrder(ids);
+        this.ui?.prunePinnedSpaces(ids);
+        this.ui?.pruneRecentSpaces(ids);
+      }
       if (snapshot.spaces.length) {
         const alive = new Map<string, string[]>();
         for (const tab of snapshot.tabs) {

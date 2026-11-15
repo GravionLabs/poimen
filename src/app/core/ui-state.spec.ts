@@ -306,3 +306,90 @@ describe("GitHub empty repositories", () => {
     expect(parseLayout(JSON.stringify({ githubShowEmpty: "yes" })).githubShowEmpty).toBeUndefined();
   });
 });
+
+describe("pinned spaces (#710)", () => {
+  it("pins, unpins and persists", () => {
+    const storage = fakeStorage();
+    const ui = stateOn(storage);
+    ui.setSpacePinned("w1", true);
+    ui.setSpacePinned("w1", true);
+    ui.setSpacePinned("w2", true);
+    expect(ui.pinnedSpaces()).toEqual(["w1", "w2"]);
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).pinnedSpaces).toEqual(["w1", "w2"]);
+    ui.setSpacePinned("w1", false);
+    expect(stateOn(storage).pinnedSpaces()).toEqual(["w2"]);
+  });
+
+  it("validates the stored ids on load", () => {
+    const ui = stateOn(fakeStorage(JSON.stringify({ pinnedSpaces: ["w1", 3, "", "w1", "w2"] })));
+    expect(ui.pinnedSpaces()).toEqual(["w1", "w2"]);
+    expect(stateOn(fakeStorage(JSON.stringify({ pinnedSpaces: "w1" }))).pinnedSpaces()).toEqual([]);
+  });
+
+  it("prunes the pins of closed spaces and saves only on a change", () => {
+    const storage = fakeStorage(JSON.stringify({ pinnedSpaces: ["w1", "w2"] }));
+    const ui = stateOn(storage);
+    ui.prunePinnedSpaces(["w1", "w2", "w3"]);
+    expect(storage.data.get(UI_STATE_KEY)).toContain("w2");
+    ui.prunePinnedSpaces(["w2"]);
+    expect(ui.pinnedSpaces()).toEqual(["w2"]);
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).pinnedSpaces).toEqual(["w2"]);
+  });
+});
+
+describe("recent spaces (#712)", () => {
+  it("stores the focus time and persists it", () => {
+    const storage = fakeStorage();
+    const ui = stateOn(storage);
+    ui.touchSpace("w1", 100);
+    ui.touchSpace("w2", 200);
+    ui.touchSpace("w1", 300);
+    expect(ui.recentSpaces()).toEqual({ w1: 300, w2: 200 });
+    expect(stateOn(storage).recentSpaces()).toEqual({ w1: 300, w2: 200 });
+  });
+
+  it("keeps the newest 200", () => {
+    const ui = stateOn(fakeStorage());
+    for (let i = 1; i <= 205; i++) ui.touchSpace(`w${i}`, i);
+    const ids = Object.keys(ui.recentSpaces());
+    expect(ids).toHaveLength(200);
+    expect(ids).toContain("w205");
+    expect(ids).not.toContain("w5");
+  });
+
+  it("drops invalid entries on load", () => {
+    const ui = stateOn(
+      fakeStorage(JSON.stringify({ recentSpaces: { w1: 5, w2: "x", "": 3, w3: -1 } })),
+    );
+    expect(ui.recentSpaces()).toEqual({ w1: 5 });
+    expect(stateOn(fakeStorage(JSON.stringify({ recentSpaces: [1] }))).recentSpaces()).toEqual({});
+  });
+
+  it("prunes closed spaces and saves only on a change", () => {
+    const storage = fakeStorage(JSON.stringify({ recentSpaces: { w1: 1, w2: 2 } }));
+    const ui = stateOn(storage);
+    ui.pruneRecentSpaces(["w1", "w2"]);
+    ui.pruneRecentSpaces(["w2"]);
+    expect(ui.recentSpaces()).toEqual({ w2: 2 });
+    expect(JSON.parse(storage.data.get(UI_STATE_KEY)!).recentSpaces).toEqual({ w2: 2 });
+  });
+});
+
+describe("folded agent sections (#722)", () => {
+  it("toggles a section and persists it", () => {
+    const storage = fakeStorage();
+    const ui = stateOn(storage);
+    ui.toggleAgentSection("idle");
+    ui.toggleAgentSection("done");
+    expect([...ui.agentSectionsFolded()].sort()).toEqual(["done", "idle"]);
+    expect([...stateOn(storage).agentSectionsFolded()].sort()).toEqual(["done", "idle"]);
+    ui.toggleAgentSection("idle");
+    expect([...ui.agentSectionsFolded()]).toEqual(["done"]);
+  });
+
+  it("drops unknown ids on load and starts open", () => {
+    const ui = stateOn(fakeStorage(JSON.stringify({ agentSectionsFolded: ["needs", "x", 3] })));
+    expect([...ui.agentSectionsFolded()]).toEqual(["needs"]);
+    expect(stateOn(fakeStorage()).agentSectionsFolded().size).toBe(0);
+  });
+});

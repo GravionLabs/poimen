@@ -665,20 +665,38 @@ describe("SettingsView categories", () => {
     tauri.answer("hooks_status", () => [
       { agent: "claude", state: "missing" },
       { agent: "copilot", state: "installed" },
+      { agent: "gemini", state: "missing" },
     ]);
     await TestBed.inject(HooksOffer).refresh();
     fixture.detectChanges();
     const rows = [...host.querySelectorAll("ul.harnesses li")].map((li) =>
       li.textContent!.replace(/\s+/g, " ").trim(),
     );
-    expect(rows).toEqual(["Claude Codemissing Install hooks", "GitHub Copilot CLIinstalled"]);
+    expect(rows).toEqual([
+      "Claude Codemissing Install hooks",
+      "GitHub Copilot CLIinstalled",
+      "Gemini CLImissing Install hooks",
+    ]);
     const buttons = [...host.querySelectorAll("button")].filter(
       (b) => b.textContent!.trim() === "Install hooks",
     );
-    expect(buttons).toHaveLength(1);
+    expect(buttons).toHaveLength(2);
     buttons[0].click();
     await fixture.whenStable();
     expect(tauri.calls("hooks_install")).toEqual([{ agent: "claude" }]);
+  });
+
+  it("lists the supported agent kinds and what each gives on the Agents page", () => {
+    const { host } = setup(undefined, undefined, "agents");
+    const rows = [...host.querySelectorAll("ul[aria-label='Supported agents'] li")].map((li) =>
+      li.textContent!.replace(/\s+/g, " ").trim(),
+    );
+    expect(rows).toEqual([
+      "Claude Codestatus, transcript",
+      "GitHub Copilot CLIstatus, transcript",
+      "Gemini CLIstatus",
+    ]);
+    expect(host.textContent).toContain("show no status");
   });
 
   it("restores the collapsed groups from the stored state", () => {
@@ -744,6 +762,27 @@ describe("SettingsView categories", () => {
     type(fixture, host, "hidden");
     const hits = [...host.querySelectorAll(".hit")].map((e) => e.textContent!.trim());
     expect(hits).toEqual(["Show hidden folders"]);
+  });
+
+  it("writes the sound switches and files on the Appearance page", () => {
+    const { fixture, host } = setup();
+    tauri.answer("set_sound", () => null);
+    const boxes = host.querySelectorAll<HTMLInputElement>('input[role="switch"]');
+    expect(boxes).toHaveLength(2);
+    boxes[0].checked = true;
+    boxes[0].dispatchEvent(new Event("change"));
+    const files = host.querySelectorAll<HTMLInputElement>('input[placeholder="Built-in tone"]');
+    files[1].value = " ~/done.wav ";
+    files[1].dispatchEvent(new Event("change"));
+    fixture.detectChanges();
+    expect(tauri.calls("set_sound")).toEqual([
+      { kind: "blocked", value: true },
+      { kind: "done", value: "~/done.wav" },
+    ]);
+    const tests = [...host.querySelectorAll("button")].filter(
+      (b) => b.textContent!.trim() === "Test",
+    );
+    expect(tests).toHaveLength(2);
   });
 
   it("has every label of the category list in its page template", () => {
@@ -819,6 +858,16 @@ describe("SettingsView categories", () => {
     press(search(host), "Escape");
     fixture.detectChanges();
     expect(search(host).value).toBe("");
+    host.remove();
+  });
+
+  it("leaves Ctrl+Shift+F to the terminal search shortcut", () => {
+    const { host } = setup();
+    document.body.append(host);
+    const target = item(host, "p:appearance");
+    target.focus();
+    press(target, "f", { ctrlKey: true, shiftKey: true });
+    expect(document.activeElement).not.toBe(search(host));
     host.remove();
   });
 
