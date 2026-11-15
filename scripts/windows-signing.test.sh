@@ -58,5 +58,16 @@ check "verify-installer: unsigned exe inside fails" bash -c '! env -i PATH="$PAT
 check "verify-installer: nothing inside fails" bash -c '! env -i PATH="$PATH" POIMEN_SEVENZIP="$1" POIMEN_SIGNATURE_STATUS_CMD="$2" bash "$3" verify-installer "$4" > /dev/null 2>&1' _ "$fake7z" "$fake" "$script" "$tmp/empty-setup.exe"
 check "unknown command: exit 2" bash -c 'bash "$1" nope > /dev/null 2>&1; test $? = 2' _ "$script"
 
+if command -v pwsh > /dev/null 2>&1; then
+  # Real status_of path through pwsh: the stub reports Valid only when the exact path (spaces, quote) arrives intact.
+  odd="$tmp/we ird 'name.exe"
+  touch "$odd"
+  pre="function Get-AuthenticodeSignature { param([string]\$LiteralPath) [pscustomobject]@{ Status = \$(if (\$LiteralPath -ceq \$env:EXPECT) { 'Valid' } else { 'NotSigned' }) } }; "
+  check "status_of: real pwsh gets the path intact" env -i PATH="$PATH" EXPECT="$odd" POIMEN_PS_PREAMBLE="$pre" bash "$script" verify "$odd" > /dev/null 2>&1
+  check "status_of: real pwsh, wrong path is not signed" bash -c '! env -i PATH="$PATH" EXPECT=other POIMEN_PS_PREAMBLE="$1" bash "$2" verify "$3" > /dev/null 2>&1' _ "$pre" "$script" "$odd"
+else
+  echo "skip status_of via pwsh tests: pwsh not installed"
+fi
+
 ((failures == 0)) || { echo "$failures failed"; exit 1; }
 echo "all passed"

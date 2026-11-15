@@ -30,8 +30,11 @@ status_of() {
   if [ -n "${POIMEN_SIGNATURE_STATUS_CMD:-}" ]; then
     "$POIMEN_SIGNATURE_STATUS_CMD" "$1"
   else
+    # The path goes through the environment: in -Command mode trailing arguments are not $args.
+    # POIMEN_PS_PREAMBLE lets a test define a stand-in for Get-AuthenticodeSignature.
     # shellcheck disable=SC2016
-    pwsh -NoProfile -Command '(Get-AuthenticodeSignature -LiteralPath $args[0]).Status' "$1"
+    P="$1" pwsh -NoProfile -Command "${POIMEN_PS_PREAMBLE:-}"'(Get-AuthenticodeSignature -LiteralPath $env:P).Status' | tr -d '\r\n'
+    echo
   fi
 }
 

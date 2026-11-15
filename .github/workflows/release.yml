@@ -351,7 +351,7 @@ jobs:
     if: ${{ !cancelled() && needs.test.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.release.result) && contains(fromJSON('["success","skipped"]'), needs.prerelease.result) }}
     runs-on: ${{ matrix.os }}
     # Only the Windows leg reads the signing secrets (#672); the other legs have no environment (empty string).
-    environment: ${{ matrix.environment }}
+    environment: ${{ matrix.environment || '' }}
     permissions:
       contents: write # upload the assets to the release
     env:
@@ -449,9 +449,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl, arch: amd64 }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, arch: arm64 }
-          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl, arch: amd64, environment: '' }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, arch: arm64, environment: '' }
+          - { os: macos-latest, target: aarch64-apple-darwin, environment: '' }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, environment: release }
     steps:
       - uses: actions/checkout@v4
