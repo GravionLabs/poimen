@@ -5,6 +5,7 @@ import {
   stepText,
   type DeliverCard,
   type DeliverStatus,
+  type RunEventRow,
   runState,
   startedAt,
   type Tone,
@@ -161,4 +162,87 @@ export function eventTime(ts: string | null): string {
   if (!date || Number.isNaN(date.getTime())) return "";
   const two = (n: number) => String(n).padStart(2, "0");
   return `${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+}
+
+/** One skipped task of a fold: `task.started` followed at once by its `task.finished` skipped. */
+export interface SkippedTask {
+  task: string;
+  subject: string;
+  text: string;
+  reason: string;
+}
+
+/** What the Events tab lists: a plain row or a fold of consecutive skipped tasks (#781). */
+export type EventItem =
+  | { kind: "row"; row: RunEventRow }
+  | {
+      kind: "skipped";
+      /** Stable while the fold grows at its end: the first task and its start. */
+      key: string;
+      ts: string | null;
+      tasks: SkippedTask[];
+      /** `21 skipped (blocked)`. */
+      label: string;
+    };
+
+const quiet = (r: RunEventRow): boolean => r.tone !== "warning" && r.tone !== "danger";
+
+/** The skipped task of `started` + `finished` when they form such a pair (core fields only). */
+function skippedPair(started: RunEventRow | undefined, finished: RunEventRow | undefined) {
+  if (
+    !started ||
+    !finished ||
+    started.type !== "task.started" ||
+    finished.type !== "task.finished" ||
+    !started.task ||
+    started.task !== finished.task ||
+    finished.outcome !== "skipped" ||
+    !quiet(started) ||
+    !quiet(finished)
+  )
+    return null;
+  return {
+    task: started.task,
+    subject: started.subject || finished.subject || "",
+    text: finished.text || started.text || "",
+    reason: finished.reason || "",
+  } satisfies SkippedTask;
+}
+
+/**
+ * Folds consecutive skipped tasks into one item. A pair is a `task.started` directly followed by
+ * the `task.finished` of the same task with outcome `skipped`; rows with tone `warning` or
+ * `danger` are never folded. A single skipped task stays a fold of one.
+ */
+export function foldSkipped(rows: readonly RunEventRow[]): EventItem[] {
+  const items: EventItem[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    const pair = skippedPair(rows[i], rows[i + 1]);
+    if (!pair) {
+      items.push({ kind: "row", row: rows[i]! });
+      i += 1;
+      continue;
+    }
+    const tasks = [pair];
+    const first = rows[i]!;
+    i += 2;
+    for (
+      let next = skippedPair(rows[i], rows[i + 1]);
+      next;
+      next = skippedPair(rows[i], rows[i + 1])
+    ) {
+      tasks.push(next);
+      i += 2;
+    }
+    const reasons = [...new Set(tasks.map((t) => t.reason).filter((r) => r !== ""))];
+    items.push({
+      kind: "skipped",
+      key: `${first.seq ?? ""}:${pair.task}`,
+      ts: first.ts,
+      tasks,
+      label: `${tasks.length} skipped${reasons.length ? ` (${reasons.join(", ")})` : ""}`,
+    });
+  }
+  return items;
 }

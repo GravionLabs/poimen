@@ -236,6 +236,15 @@ pub struct RunEvent {
     pub outcome: Option<String>,
     /// URL of the first link of the event.
     pub link: Option<String>,
+    /// `reason` of the event (core field), when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// `text` of the event (core field), when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Title (else id) of the `subject` of the event, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
 }
 
 /// Seconds since the epoch of an ISO 8601 timestamp of the schema (`Z` or an offset, optional
@@ -456,6 +465,13 @@ impl Reducer {
                 .first()
                 .and_then(|l| l.get("url"))
                 .and_then(text),
+            reason: e.get("reason").and_then(text),
+            text: e.get("text").and_then(text),
+            subject: e.get("subject").filter(|s| s.is_object()).and_then(|s| {
+                s.get("title")
+                    .and_then(text)
+                    .or_else(|| s.get("id").and_then(text))
+            }),
         });
 
         match ty {

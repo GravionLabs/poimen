@@ -25,6 +25,7 @@ import {
   selectRun,
   toneStyle,
   type Pick,
+  foldSkipped,
 } from "./run-events";
 import { TaskLog } from "../core/task-log";
 import {
@@ -107,7 +108,9 @@ export class BottomPanel {
   protected readonly run = computed(() =>
     selectRun(this.spaceRuns(), this.activePane()?.terminal_id, this.pickedRun(), this.now()),
   );
-  protected readonly rows = computed(() => this.run()?.status.events ?? []);
+  protected readonly rows = computed(() => foldSkipped(this.run()?.status.events ?? []));
+  /** Folds the user opened; kept while the panel lives. */
+  protected readonly openFolds = signal<ReadonlySet<string>>(new Set());
   protected readonly runLabel = runLabel;
   protected readonly eventTime = eventTime;
   protected readonly toneStyle = toneStyle;
@@ -134,6 +137,14 @@ export class BottomPanel {
       const element = this.box()?.nativeElement;
       if (element && this.following())
         queueMicrotask(() => (element.scrollTop = element.scrollHeight));
+    });
+  }
+
+  protected toggleFold(key: string): void {
+    this.openFolds.update((s) => {
+      const next = new Set(s);
+      if (!next.delete(key)) next.add(key);
+      return next;
     });
   }
 
