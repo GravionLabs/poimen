@@ -5,6 +5,76 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.20.0] — 2026-11-15
+
+### Bug Fixes
+- **github**: Drop the pull request action draft when another row is selected (#338)
+- **github**: Fix failing checks of a pull request with an agent (#238) (#792)
+- **release**: Verify Windows signatures before the release is published (#672)
+- **release**: Sign and verify the Windows CLI, document recovery (#672)
+- **release**: Pass the path to pwsh through the environment, define matrix.environment (#672)
+- **release**: Put the signing environment on the cli job (#672)
+- **release**: Format release.yml with prettier (#672) (#799)
+- **settings**: Validate imported entries in the resulting settings (#581)
+- **settings**: Remove a last key with a comment above it in place (#581)
+- **deliver**: Survive malformed event ts and act on the focused row (#584)
+- **settings**: Named layouts take effect in resolve, server and rebuild (#609)
+- **settings**: Keep project layouts on panes behind the trust gate (#609)
+- **layouts**: Keep a template's layout name on save and warn about layouts[] in Settings
+- **hooks**: The hooks offer proposes Gemini when Gemini CLI is not installed (#769) (#810)
+- **sidebar**: The app and the TUI sort names differently (#770) (#811)
+- **sidebar**: The focus after Close Space ignores the sort keys and worktree grouping (#767) (#813)
+- **deliver**: A release gate for the human keeps the linked session blocked (#752) (#814)
+- **bottom-panel**: The Events tab keeps switching its source run (#801) (#815)
+- **events**: The Events tab shows the active run, newest first (#779) (#817)
+- **deliver**: Hide runs of closed milestones and resolve bare #nr titles everywhere (#585)
+- **settings**: Form fields have different sizes and misaligned labels (#772) (#824)
+
+
+### Documentation
+- **adr**: Named layouts referenced by templates (#608) (#802)
+- **adr**: MCP server for agent sessions (#612) (#804)
+- **adr**: Take the Paperclip plugin spec into ADR 0007 (#786) (#787)
+- **protocol**: The Start agent dialog also offers the harnesses of the registry (#768) (#812)
+
+
+### Features
+- **bundle**: Sign and notarize the macOS bundle on release (#45) (#773)
+- **github**: Start a task from the issues tree (#239) (#775)
+- **github**: Review, draft and close actions on a pull request (#338) (#776)
+- **github**: Review, draft and close actions on a pull request (#338)
+- **github**: Merge a pull request, re-run failed checks and edit reviewers, labels and assignees (#339) (#789)
+- **github**: Fix failing checks of a pull request with an agent (#238) (#792)
+- **github**: Edit an issue from its detail pane (#340) (#793)
+- **github**: Create, edit and close milestones (#343) (#790)
+- **github**: Create issues and sub-issues and change the parent (#341) (#794)
+- **github**: Multi-select and bulk actions in the issues tree (#795)
+- **agents**: Opt-in classic Claude Code renderer in poimen terminals (#501) (#777)
+- **settings**: Polish the Spaces page (#580) (#796)
+- **bundle**: Authenticode-signed Windows installer and executables (#672) (#798)
+- **bundle**: Authenticode-sign the Windows installer and executables (#672)
+- **settings**: Export and import settings as JSON (#581) (#797)
+- **settings**: Export and import settings as JSON (#581)
+- **mcp**: Poimen mcp with read-only tools (#805)
+- **deliver**: Runs view grouped by subject with a run timeline (#584) (#807)
+- **deliver**: Runs view grouped by subject with a run timeline (#584)
+- **settings**: Named layouts in the config, templates refer to them by name (#609) (#803)
+- **settings**: Named layouts in the config, templates refer to them by name (#609)
+- **mcp**: Install poimen mcp next to the agent hooks (#614) (#808)
+- **deliver**: Keep every run of an open milestone (#687) (#816)
+- **deliver**: Expandable milestone overview with issue states (#585) (#818)
+- **deliver**: Expandable milestone overview with issue states (#585)
+- **events**: Skipped tasks folded into one row (#781) (#819)
+- **deliver**: Keep the earlier runs of a shown subject (#783) (#820)
+- **deliver**: Notification-center entries for run attentions open the Runs view (#806) (#821)
+- **events**: Runs grouped by subject with all events of a milestone (#780) (#822)
+- **deliver**: One card per subject in the Deliver view (#782) (#823)
+
+
+### Refactoring
+- **backend**: Remove the herdr backend (#788)
+
+
 ## [0.19.0] — 2026-11-15
 
 ### Bug Fixes
@@ -25,6 +95,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - **site**: Screenshots of a Flow run with subagents and skills (#733)
+- Update CHANGELOG.md for v0.19.0 [skip ci]
 
 
 ### Features
