@@ -77,3 +77,24 @@ progress {
 .item:focus-within {
   background: var(--h-content-hover-background);
 }
+.compose {
+  display: grid;
+  gap: 8px;
+  max-width: 32rem;
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--h-content-border-color);
+}
+.compose label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.icon-btn.text {
+  font-size: 12px;
+}

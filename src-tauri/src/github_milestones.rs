@@ -1,12 +1,13 @@
 //! Open milestones per repository for the GitHub view (ADR 0005, #233): REST through the shared
 //! `github::Client` (ETag cache), ordered by version; the current one is the lowest versioned
 //! milestone that still has open issues. Versioned are the legacy `x.y.z` titles and `M<n>` /
-//! `M<n> (x.y.z)` (sprint number, version added when released); legacy ones sort first. Read-only.
+//! `M<n> (x.y.z)` (sprint number, version added when released); legacy ones sort first. Writes (#343:
+//! create, edit, close) go through `Client::mutate` as `gh api` calls, argv only.
 
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::github::{Client, GhError, Repo, Runner};
+use crate::github::{Client, GhError, Repo, Runner, repo_of};
 use crate::github_issues::unique_repos;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -17,6 +18,7 @@ pub struct Milestone {
     pub url: String,
     /// ISO 8601 timestamp, when the milestone has a due date.
     pub due_on: Option<String>,
+    pub description: String,
     pub open: u64,
     pub closed: u64,
     /// The lowest versioned milestone (`x.y.z`, `M<n>`, `M<n>.<m>`, `M<n> (x.y.z)`) with open issues.
@@ -130,6 +132,7 @@ pub fn parse_milestones(body: &str) -> Result<Vec<Milestone>, GhError> {
                 title: m["title"].as_str()?.to_owned(),
                 url: m["html_url"].as_str().unwrap_or_default().to_owned(),
                 due_on: m["due_on"].as_str().map(str::to_owned),
+                description: m["description"].as_str().unwrap_or_default().to_owned(),
                 open: m["open_issues"].as_u64().unwrap_or(0),
                 closed: m["closed_issues"].as_u64().unwrap_or(0),
                 current: false,
@@ -172,6 +175,159 @@ pub fn load<R: Runner + Sync>(client: &Client<R>, dirs: &[String]) -> Vec<RepoMi
             })
             .collect()
     })
+}
+
+/// A write on a milestone. `due_on` is a `YYYY-MM-DD` date; empty or `None` means no due date.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum MilestoneWrite {
+    Create {
+        title: String,
+        description: String,
+        due_on: Option<String>,
+    },
+    Update {
+        number: u64,
+        title: String,
+        description: String,
+        due_on: Option<String>,
+    },
+    Close {
+        number: u64,
+    },
+}
+
+fn invalid(message: &str) -> GhError {
+    GhError::Other {
+        message: message.into(),
+    }
+}
+
+/// `YYYY-MM-DD` as the GitHub timestamp at the start of that day (UTC); `None` for an empty value.
+fn due_timestamp(due_on: Option<&str>) -> Result<Option<String>, GhError> {
+    let Some(d) = due_on.map(str::trim).filter(|d| !d.is_empty()) else {
+        return Ok(None);
+    };
+    let b = d.as_bytes();
+    let shape = b.len() == 10
+        && b.iter().enumerate().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                *c == b'-'
+            } else {
+                c.is_ascii_digit()
+            }
+        });
+    let (month, day) = if shape {
+        (
+            d[5..7].parse::<u32>().unwrap_or(0),
+            d[8..10].parse::<u32>().unwrap_or(0),
+        )
+    } else {
+        (0, 0)
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return Err(invalid("the due date must be YYYY-MM-DD"));
+    }
+    Ok(Some(format!("{d}T00:00:00Z")))
+}
+
+/// The `gh` arguments (without the program name) of a milestone write.
+pub fn write_argv(repo: &Repo, write: &MilestoneWrite) -> Result<Vec<String>, GhError> {
+    let base = format!("repos/{}/{}/milestones", repo.owner, repo.name);
+    let s = |v: &str| v.to_owned();
+    let fields = |title: &str, description: &str, due_on: &Option<String>| {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(invalid("a milestone needs a title"));
+        }
+        let mut f = vec![s("-f"), format!("title={title}")];
+        f.extend([s("-f"), format!("description={description}")]);
+        match due_timestamp(due_on.as_deref())? {
+            Some(t) => f.extend([s("-f"), format!("due_on={t}")]),
+            None => f.extend([s("-F"), s("due_on=null")]),
+        }
+        Ok(f)
+    };
+    let (method, path, rest) = match write {
+        MilestoneWrite::Create {
+            title,
+            description,
+            due_on,
+        } => {
+            let mut f = fields(title, description, due_on)?;
+            // A new milestone without a date simply has none.
+            if due_on.as_deref().is_none_or(|d| d.trim().is_empty()) {
+                f.truncate(f.len() - 2);
+            }
+            ("POST", base, f)
+        }
+        MilestoneWrite::Update {
+            number,
+            title,
+            description,
+            due_on,
+        } => (
+            "PATCH",
+            format!("{base}/{number}"),
+            fields(title, description, due_on)?,
+        ),
+        MilestoneWrite::Close { number } => (
+            "PATCH",
+            format!("{base}/{number}"),
+            vec![s("-f"), s("state=closed")],
+        ),
+    };
+    let mut argv = vec![s("api"), s("-X"), s(method), path];
+    argv.extend(rest);
+    Ok(argv)
+}
+
+/// Runs `write` in the repository of `root` through `Client::mutate`.
+pub fn run_write<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    write: &MilestoneWrite,
+) -> Result<(), GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let argv = write_argv(&repo, write)?;
+    client.mutate(&repo, &argv).map(|_| ())
+}
+
+/// `M<n+1>` after the highest sprint number among `titles`, zero padded like that title
+/// (`M015` gives `M016`); `M1` without one. Inserted sprints (`M15.1`) count as `M15`.
+pub fn next_title<'a>(titles: impl IntoIterator<Item = &'a str>) -> String {
+    let highest = titles
+        .into_iter()
+        .filter_map(|t| {
+            let (n, _) = parse_sprint(t)?;
+            let digits = t.trim()[1..]
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .unwrap_or("")
+                .len();
+            Some((n, digits))
+        })
+        .max();
+    match highest {
+        Some((n, width)) => format!("M{:0width$}", n + 1),
+        None => "M1".into(),
+    }
+}
+
+/// The suggested title of a new milestone of the repository of `root`, from all its milestones
+/// (open and closed).
+pub fn suggest_title<R: Runner>(client: &Client<R>, root: &str) -> Result<String, GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let path = format!(
+        "repos/{}/{}/milestones?state=all&per_page=100",
+        repo.owner, repo.name
+    );
+    let milestones = parse_milestones(&client.rest(&path)?)?;
+    Ok(next_title(milestones.iter().map(|m| m.title.as_str())))
 }
 
 #[cfg(test)]
@@ -302,6 +458,7 @@ mod tests {
         assert_eq!(v.due_on.as_deref(), Some("2026-11-20T08:00:00Z"));
         assert_eq!(v.url, "https://github.com/o/n/milestone/3");
         assert_eq!(m[0].due_on, None);
+        assert_eq!(m[0].description, "");
     }
 
     #[test]
@@ -327,6 +484,174 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&repo).unwrap(),
             json!({"root":"/r","repo":"o/n","status":"error","error":{"kind":"not-logged-in"}})
+        );
+    }
+
+    fn repo() -> Repo {
+        Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        }
+    }
+
+    #[test]
+    fn a_write_arrives_in_the_camel_case_of_the_frontend() {
+        let w: MilestoneWrite = serde_json::from_value(
+            json!({"kind":"update","number":3,"title":"M4","description":"d","dueOn":"2026-12-01"}),
+        )
+        .unwrap();
+        assert_eq!(
+            w,
+            MilestoneWrite::Update {
+                number: 3,
+                title: "M4".into(),
+                description: "d".into(),
+                due_on: Some("2026-12-01".into())
+            }
+        );
+    }
+
+    #[test]
+    fn create_posts_title_description_and_due_date() {
+        let argv = write_argv(
+            &repo(),
+            &MilestoneWrite::Create {
+                title: " M4 ".into(),
+                description: "Sprint".into(),
+                due_on: Some("2026-12-01".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            argv,
+            [
+                "api",
+                "-X",
+                "POST",
+                "repos/o/n/milestones",
+                "-f",
+                "title=M4",
+                "-f",
+                "description=Sprint",
+                "-f",
+                "due_on=2026-12-01T00:00:00Z"
+            ]
+        );
+    }
+
+    #[test]
+    fn create_without_a_date_sends_none_and_update_clears_it() {
+        let create = write_argv(
+            &repo(),
+            &MilestoneWrite::Create {
+                title: "M4".into(),
+                description: String::new(),
+                due_on: Some(" ".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(create.len(), 8);
+        assert!(!create.iter().any(|a| a.starts_with("due_on")));
+        let update = write_argv(
+            &repo(),
+            &MilestoneWrite::Update {
+                number: 3,
+                title: "M4".into(),
+                description: String::new(),
+                due_on: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &update[..4],
+            ["api", "-X", "PATCH", "repos/o/n/milestones/3"]
+        );
+        assert_eq!(&update[update.len() - 2..], ["-F", "due_on=null"]);
+    }
+
+    #[test]
+    fn close_patches_the_state_only() {
+        assert_eq!(
+            write_argv(&repo(), &MilestoneWrite::Close { number: 7 }).unwrap(),
+            [
+                "api",
+                "-X",
+                "PATCH",
+                "repos/o/n/milestones/7",
+                "-f",
+                "state=closed"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_title_or_a_bad_date_is_refused() {
+        let w = |title: &str, due: &str| MilestoneWrite::Create {
+            title: title.into(),
+            description: String::new(),
+            due_on: Some(due.into()),
+        };
+        assert!(write_argv(&repo(), &w("  ", "")).is_err());
+        for bad in ["2026-13-01", "2026-1-01", "tomorrow", "2026-12-32"] {
+            assert!(write_argv(&repo(), &w("M1", bad)).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_next_title_follows_the_highest_sprint() {
+        assert_eq!(next_title(["M2", "M10 (1.3.0)", "Backlog", "1.2.0"]), "M11");
+        assert_eq!(next_title(["M015", "M015.1", "M014"]), "M016");
+        assert_eq!(next_title(["Backlog", "1.0.0"]), "M1");
+        assert_eq!(next_title([]), "M1");
+    }
+
+    struct Fake {
+        calls: std::cell::RefCell<Vec<Vec<String>>>,
+        code: i32,
+        stdout: String,
+    }
+
+    impl Runner for &Fake {
+        fn gh(&self, args: &[String]) -> std::io::Result<crate::github::Output> {
+            self.calls.borrow_mut().push(args.to_vec());
+            Ok(crate::github::Output {
+                code: Some(self.code),
+                stdout: self.stdout.clone(),
+                stderr: "boom".into(),
+            })
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::from_secs(1_000_000)
+        }
+    }
+
+    #[test]
+    fn a_write_runs_through_the_client_and_a_failure_is_an_error() {
+        let dir = std::env::temp_dir().join(format!("poimen-ms-{}", std::process::id()));
+        let ok = Fake {
+            calls: Default::default(),
+            code: 0,
+            stdout: "{}".into(),
+        };
+        let client = Client::new(&ok, dir.clone());
+        // `run_write` resolves the repository from a git directory; use the argv path directly.
+        let argv = write_argv(&repo(), &MilestoneWrite::Close { number: 2 }).unwrap();
+        client.mutate(&repo(), &argv).unwrap();
+        assert_eq!(ok.calls.borrow()[0], argv);
+        let bad = Fake {
+            calls: Default::default(),
+            code: 1,
+            stdout: String::new(),
+        };
+        let client = Client::new(&bad, dir);
+        assert!(client.mutate(&repo(), &argv).is_err());
+        assert!(
+            run_write(
+                &client,
+                "/nonexistent-dir",
+                &MilestoneWrite::Close { number: 1 }
+            )
+            .is_err()
         );
     }
 }

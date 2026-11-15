@@ -36,6 +36,7 @@ function ms(number: number, title: string, over: Partial<Milestone> = {}): Miles
     title,
     url: `https://github.com/o/n/milestone/${number}`,
     dueOn: null,
+    description: "",
     open: 0,
     closed: 0,
     current: false,
@@ -160,6 +161,81 @@ describe("MilestonesSection", () => {
     TestBed.inject(UiState).setGithubShowEmpty(true);
     fixture.detectChanges();
     expect(el.querySelector("[data-testid=milestones-empty]")).not.toBeNull();
+  });
+
+  describe("writes", () => {
+    const click = async (
+      fixture: { detectChanges(): void; whenStable(): Promise<unknown> },
+      el: HTMLElement,
+      sel: string,
+    ) => {
+      el.querySelector<HTMLButtonElement>(sel)!.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+    };
+
+    it("creates a milestone with the suggested title and reloads", async () => {
+      const fixture = await render();
+      const el: HTMLElement = fixture.nativeElement;
+      tauri.answer("github_milestone_title", () => "M4");
+      tauri.answer("github_milestone_write", () => null);
+      await click(fixture, el, "[data-testid=milestone-new]");
+      expect(tauri.calls("github_milestone_title")).toEqual([{ root: "/src/n" }]);
+      const title = el.querySelector<HTMLInputElement>("input[name=title]")!;
+      expect(title.value).toBe("M4");
+      el.querySelector<HTMLInputElement>("input[name=dueOn]")!.value = "2026-12-01";
+      el.querySelector("input[name=dueOn]")!.dispatchEvent(new Event("input"));
+      await click(fixture, el, "[data-testid=milestone-submit]");
+      expect(tauri.calls("github_milestone_write")).toEqual([
+        {
+          root: "/src/n",
+          write: { kind: "create", title: "M4", description: "", dueOn: "2026-12-01" },
+        },
+      ]);
+      expect(tauri.calls("github_milestones")).toHaveLength(2);
+      expect(el.querySelector("[data-testid=milestone-compose]")).toBeNull();
+    });
+
+    it("edits a milestone from its row", async () => {
+      const fixture = await render();
+      const el: HTMLElement = fixture.nativeElement;
+      tauri.answer("github_milestone_write", () => null);
+      await click(fixture, el, "[aria-label='Edit milestone 1.1.5']");
+      expect(el.querySelector<HTMLInputElement>("input[name=dueOn]")!.value).toBe("2026-11-20");
+      await click(fixture, el, "[data-testid=milestone-submit]");
+      expect(tauri.calls("github_milestone_write")[0]).toEqual({
+        root: "/src/n",
+        write: { kind: "update", number: 1, title: "1.1.5", description: "", dueOn: "2026-11-20" },
+      });
+    });
+
+    it("names the open issues in the close confirmation and closes only after it", async () => {
+      const fixture = await render();
+      const el: HTMLElement = fixture.nativeElement;
+      tauri.answer("github_milestone_write", () => null);
+      await click(fixture, el, "[aria-label='Close milestone 1.2.0']");
+      expect(el.querySelector("[data-testid=close-text]")!.textContent).toContain("3 open issues");
+      expect(tauri.calls("github_milestone_write")).toEqual([]);
+      await click(fixture, el, "[data-testid=milestone-submit]");
+      expect(tauri.calls("github_milestone_write")).toEqual([
+        { root: "/src/n", write: { kind: "close", number: 2 } },
+      ]);
+    });
+
+    it("offers Close first on a milestone without open issues and keeps the form on failure", async () => {
+      const fixture = await render();
+      const el: HTMLElement = fixture.nativeElement;
+      const row = el.querySelector("li[data-title=Backlog]")!;
+      expect(row.querySelector("[data-testid=milestone-close]")).not.toBeNull();
+      await click(fixture, el, "li[data-title=Backlog] [data-testid=milestone-close]");
+      expect(el.querySelector("[data-testid=close-text]")!.textContent).not.toContain("open issue");
+      tauri.answer("github_milestone_write", () => {
+        throw { kind: "offline" };
+      });
+      await click(fixture, el, "[data-testid=milestone-submit]");
+      expect(el.querySelector("[data-testid=milestone-compose]")).not.toBeNull();
+      expect(tauri.calls("github_milestones")).toHaveLength(1);
+    });
   });
 
   it("opens a milestone in the browser, GitHub links only", async () => {
