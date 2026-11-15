@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::git;
-use crate::github::{Client, GhError, Repo, Runner, failed_runs, repo_of};
+use crate::github::{Client, GhError, Repo, Runner, failed_logs, failed_runs, repo_of};
 
 pub(crate) const QUERY: &str = "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { \
 pullRequests(states: OPEN, first: 50, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { \
@@ -646,6 +646,23 @@ pub fn run_rerun<R: Runner>(client: &Client<R>, root: &str, number: u64) -> Resu
         }
     }
     first_error.map_or(Ok(runs.len()), Err)
+}
+
+/// Collects the failed logs of the head commit of pull request `number` and writes them to
+/// `<worktree>/.agents/state/ci-failed-<nr>.log`; returns the path (`{log}` of the `fix-checks`
+/// action). The file carries the log, never the command line.
+pub fn run_ci_log<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+    worktree: &str,
+    home: Option<&std::path::Path>,
+) -> Result<String, GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    let detail = load_detail(client, root, number)?;
+    let log = failed_logs(client, &repo, &detail.head_sha)?;
+    crate::changes::write_ci_log(worktree, number, &log, home)
+        .map_err(|message| GhError::Other { message })
 }
 
 /// People, labels and assignees to add and remove (`github_pr_edit`).

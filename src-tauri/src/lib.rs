@@ -469,6 +469,26 @@ async fn github_pr_rerun(
         })?
 }
 
+/// Writes the failed check logs of pull request `number` into `worktree`
+/// (`.agents/state/ci-failed-<nr>.log`) and answers the file's path.
+#[tauri::command]
+async fn github_pr_ci_log(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+    worktree: String,
+) -> Result<String, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        github_pulls::run_ci_log(&client, &root, number, &worktree, home_dir().as_deref())
+    })
+    .await
+    .map_err(|e| github::GhError::Other {
+        message: e.to_string(),
+    })?
+}
+
 /// Adds and removes reviewers, labels and assignees of a pull request.
 #[tauri::command]
 async fn github_pr_edit(
@@ -2498,6 +2518,7 @@ pub fn run() {
             github_pr_action,
             github_pr_merge,
             github_pr_rerun,
+            github_pr_ci_log,
             github_pr_edit,
             github_labels,
             branch_pulls,
