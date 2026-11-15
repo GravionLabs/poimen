@@ -11,10 +11,16 @@ import { UiState } from "../../core/ui-state";
 import { AgentRuns } from "../agent-runs";
 import { AgentActions, pullTarget, type ActionTarget } from "../agent-actions";
 import { GithubIssues } from "../issues";
+import { ChipPicker } from "../chip-picker/chip-picker";
 import { renderMarkdown } from "../markdown";
 import {
   GithubPulls,
+  MERGE_METHOD_LABELS,
   PR_ACTION_LABELS,
+  canEditPeople,
+  canMerge,
+  canRerun,
+  type MergeMethod,
   errorText,
   isGithubUrl,
   type LinkedIssue,
@@ -30,6 +36,7 @@ import {
   selector: "app-pull-detail",
   templateUrl: "./pull-detail.html",
   styleUrl: "./pull-detail.css",
+  imports: [ChipPicker],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PullDetailPane {
@@ -53,6 +60,10 @@ export class PullDetailPane {
   });
 
   protected readonly labels = PR_ACTION_LABELS;
+  protected readonly mergeLabels = MERGE_METHOD_LABELS;
+  protected readonly canMerge = canMerge;
+  protected readonly canRerun = canRerun;
+  protected readonly canEdit = canEditPeople;
   protected readonly text = signal("");
 
   constructor() {
@@ -72,6 +83,16 @@ export class PullDetailPane {
     const body = this.text().trim();
     if (action !== "close" && !body) return;
     if (await this.pulls.act(action, action === "close" ? undefined : body)) this.text.set("");
+  }
+
+  protected setMethod(method: MergeMethod): void {
+    const draft = this.pulls.mergeDraft();
+    if (draft) this.pulls.mergeDraft.set({ ...draft, method });
+  }
+
+  protected setDelete(deleteBranch: boolean): void {
+    const draft = this.pulls.mergeDraft();
+    if (draft) this.pulls.mergeDraft.set({ ...draft, deleteBranch });
   }
 
   protected cancel(): void {

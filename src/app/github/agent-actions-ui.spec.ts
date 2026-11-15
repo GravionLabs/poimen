@@ -14,6 +14,7 @@ import { IssueDetailPane } from "./issue-detail/issue-detail";
 import { IssuesSection } from "./issues-section";
 import { MilestonesSection } from "./milestones-section";
 import { PullDetailPane } from "./pull-detail/pull-detail";
+import { ChipPicker } from "./chip-picker/chip-picker";
 import { GithubPulls, type Pull, type PullsResult } from "./pulls";
 
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -108,6 +109,7 @@ async function openDetail() {
   withTemplate(InboxSection, "inbox-section.html");
   withTemplate(MilestonesSection, "milestones-section.html");
   withTemplate(PullDetailPane, "pull-detail/pull-detail.html");
+  withTemplate(ChipPicker, "chip-picker/chip-picker.html");
   withTemplate(IssueDetailPane, "issue-detail/issue-detail.html");
   withTemplate(AgentActionDialog, "agent-action-dialog/agent-action-dialog.html");
   TestBed.inject(UiState).selectGithubPage("pulls");

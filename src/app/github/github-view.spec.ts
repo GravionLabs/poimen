@@ -13,6 +13,7 @@ import { GithubView } from "./github-view";
 import { IssuesSection } from "./issues-section";
 import { IssueDetailPane } from "./issue-detail/issue-detail";
 import { PullDetailPane } from "./pull-detail/pull-detail";
+import { ChipPicker } from "./chip-picker/chip-picker";
 import { GithubIssues } from "./issues";
 import { MilestonesSection } from "./milestones-section";
 import { InboxSection } from "./inbox-section";
@@ -128,6 +129,13 @@ async function render(result: PullsResult = RESULT, page: GithubPage | null = "p
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/github/milestones-section.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(ChipPicker, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      template: readFileSync("src/app/github/chip-picker/chip-picker.html", "utf8"),
     },
   });
   TestBed.overrideComponent(PullDetailPane, {
