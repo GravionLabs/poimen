@@ -179,74 +179,6 @@ pub fn parse_layout(text: &str) -> Result<Layout, String> {
     parse_layout_value(&data)
 }
 
-/// The layout for a new space: the `layout` of the project file `.poimen/config.json`
-/// (`(path, text)`), else the deprecated `.agents/herdr-layout.json` (with a deprecation warning),
-/// else the `spaces.layout` of the poimen config, else the built-in default. An invalid layout in
-/// a project file is an `Err` with a warning naming the file and the problem; the caller then
-/// creates a single pane. The `Ok` warnings are non-fatal.
-pub fn resolve(
-    project: Option<(&str, &str)>,
-    legacy: Option<(&str, &str)>,
-    config: Option<&Layout>,
-) -> Result<(Layout, Vec<String>), String> {
-    resolve_origin(project, legacy, config).map(|(l, w, _)| (l, w))
-}
-
-/// `resolve` that also says whether the layout comes from a project file (`true`; its commands need
-/// trust) or from the user config or the built-in default (`false`).
-pub fn resolve_origin(
-    project: Option<(&str, &str)>,
-    legacy: Option<(&str, &str)>,
-    config: Option<&Layout>,
-) -> Result<(Layout, Vec<String>, bool), String> {
-    if let Some((path, text)) = project
-        && let Ok(data) = serde_json::from_str::<Value>(text)
-        && !data["layout"].is_null()
-    {
-        return parse_layout_value(&data["layout"])
-            .map(|l| (l, Vec::new(), true))
-            .map_err(|e| format!("{path}: layout: {e}"));
-    }
-    if let Some((path, text)) = legacy {
-        let layout = parse_layout(text).map_err(|e| format!("{path}: {e}"))?;
-        let warning = format!(
-            "{path} is deprecated; move it to \"layout\" in {}",
-            crate::project::PROJECT_FILE
-        );
-        return Ok((layout, vec![warning], true));
-    }
-    Ok((
-        config.cloned().unwrap_or_else(default_layout),
-        Vec::new(),
-        false,
-    ))
-}
-
-impl Layout {
-    /// The same layout with `command` as the command of the root pane (the one without a split).
-    pub fn with_root_command(&self, command: &str) -> Layout {
-        let mut layout = self.clone();
-        if let Some(root) = layout.panes.iter_mut().find(|p| p.split.is_none()) {
-            root.command = Some(command.to_owned());
-        }
-        layout
-    }
-
-    /// The same panes and splits with no command to type.
-    pub fn without_commands(&self) -> Layout {
-        Layout {
-            panes: self
-                .panes
-                .iter()
-                .map(|p| PaneSpec {
-                    command: None,
-                    ..p.clone()
-                })
-                .collect(),
-        }
-    }
-}
-
 /// A node of a tab's split tree (ADR 0011), as in the server protocol; `split_id` is the server's.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -613,10 +545,9 @@ impl TabLayout {
     }
 }
 
-/// [`resolve_origin`] in the tab shape: the project file and the deprecated file (both `panes[]`
-/// or `tabs[]`), else `config` (the template's layout or `spaces.layout`), else the built-in
-/// default. `panes[]` layouts are converted on read.
-pub fn resolve_origin_tabs(
+/// [`resolve`] that also says whether the layout comes from a project file (`true`; its commands
+/// need trust) or from the user config or the built-in default (`false`).
+pub fn resolve_origin(
     project: Option<(&str, &str)>,
     legacy: Option<(&str, &str)>,
     config: Option<&TabLayout>,
@@ -646,13 +577,108 @@ pub fn resolve_origin_tabs(
     ))
 }
 
-/// [`resolve_origin_tabs`] without the origin.
-pub fn resolve_tabs(
+impl TabLayout {
+    /// The first terminal of the first tab (the root terminal of the space): its name and command.
+    pub fn root_terminal(&self) -> Option<(Option<&str>, Option<&str>)> {
+        fn first(node: &Node) -> &Node {
+            match node {
+                Node::Split { children, .. } => first(&children[0]),
+                leaf => leaf,
+            }
+        }
+        let Node::Terminal { name, command, .. } = first(&self.tabs.first()?.root) else {
+            return None;
+        };
+        Some((name.as_deref(), command.as_deref()))
+    }
+
+    /// Every tab (parents before their children, in document order) as the ordered `panes[]` that
+    /// build it: the first pane is the tab's root terminal, each later one splits an earlier one
+    /// (`split.from`). A split node is built by splitting its first child's first terminal into
+    /// itself and the first terminal of the second child, then both children are built in place.
+    /// A pane without a name gets the tab's name (the first), else `shell` / `pane`; a repeated
+    /// name gets a number, so every `from` names one pane. `cwd` and `place` are not carried (the
+    /// panes have no such field).
+    pub fn pane_tabs(&self) -> Vec<Vec<PaneSpec>> {
+        fn first(node: &Node) -> (&Option<String>, &Option<String>) {
+            match node {
+                Node::Split { children, .. } => first(&children[0]),
+                Node::Terminal { name, command, .. } => (name, command),
+            }
+        }
+        fn unique(base: &str, used: &mut HashSet<String>) -> String {
+            let mut name = base.to_owned();
+            let mut n = 1;
+            while !used.insert(name.clone()) {
+                n += 1;
+                name = format!("{base} {n}");
+            }
+            name
+        }
+        fn emit(node: &Node, own: &str, out: &mut Vec<PaneSpec>, used: &mut HashSet<String>) {
+            if let Node::Split {
+                direction,
+                ratio,
+                children,
+            } = node
+            {
+                let (name, command) = first(&children[1]);
+                let second = unique(name.as_deref().unwrap_or("pane"), used);
+                out.push(PaneSpec {
+                    name: second.clone(),
+                    command: command.clone(),
+                    split: Some(Split {
+                        from: own.to_owned(),
+                        direction: *direction,
+                        ratio: *ratio,
+                    }),
+                });
+                emit(&children[0], own, out, used);
+                emit(&children[1], &second, out, used);
+            }
+        }
+        fn tab(t: &Tab, all: &mut Vec<Vec<PaneSpec>>) {
+            let mut used = HashSet::new();
+            let (name, command) = first(&t.root);
+            let fallback = t.name.as_deref().unwrap_or("shell");
+            let root = unique(name.as_deref().unwrap_or(fallback), &mut used);
+            let mut panes = vec![PaneSpec {
+                name: root.clone(),
+                command: command.clone(),
+                split: None,
+            }];
+            emit(&t.root, &root, &mut panes, &mut used);
+            all.push(panes);
+            for c in &t.children {
+                tab(c, all);
+            }
+        }
+        let mut all = Vec::new();
+        for t in &self.tabs {
+            tab(t, &mut all);
+        }
+        all
+    }
+
+    /// Every pane of every tab in [`pane_tabs`](Self::pane_tabs) order, for what lists or shows the
+    /// panes of a layout (the trust question, the rebuild's consent).
+    pub fn panes(&self) -> Vec<PaneSpec> {
+        self.pane_tabs().into_iter().flatten().collect()
+    }
+}
+
+/// The layout for a new space in the tab shape (ADR 0011): the `layout` of the project file
+/// `.poimen/config.json` (`(path, text)`), else the deprecated `.agents/herdr-layout.json` (with
+/// a deprecation warning), else `config` (the template's layout or `spaces.layout`), else the
+/// built-in default. `panes[]` layouts are converted on read. An invalid layout in a project file
+/// is an `Err` naming the file and the problem; the caller then creates a single pane. The `Ok`
+/// warnings are non-fatal.
+pub fn resolve(
     project: Option<(&str, &str)>,
     legacy: Option<(&str, &str)>,
     config: Option<&TabLayout>,
 ) -> Result<(TabLayout, Vec<String>), String> {
-    resolve_origin_tabs(project, legacy, config).map(|(l, w, _)| (l, w))
+    resolve_origin(project, legacy, config).map(|(l, w, _)| (l, w))
 }
 
 #[cfg(test)]
@@ -746,56 +772,66 @@ mod tests {
 
     const PROJECT: &str = "/work/app/.poimen/config.json";
 
+    fn tab_names(r: Result<(TabLayout, Vec<String>), String>) -> Vec<Option<String>> {
+        r.unwrap().0.tabs.into_iter().map(|t| t.name).collect()
+    }
+
+    fn cfg() -> TabLayout {
+        parse_tabs_value(&serde_json::json!({"tabs":[{"name":"cfg"}]}))
+            .unwrap()
+            .0
+    }
+
     #[test]
     fn resolution_order_project_then_deprecated_file_then_config_then_default() {
         let new = r#"{"layout":{"panes":[{"name":"new"}]}}"#;
         let old = r#"{"panes":[{"name":"old"}]}"#;
-        let config = parse_layout(r#"{"panes":[{"name":"cfg"}]}"#).unwrap();
-        let name = |r: Result<(Layout, Vec<String>), String>| r.unwrap().0.panes[0].name.clone();
+        let config = cfg();
+        let some = |n: &str| vec![Some(n.to_owned())];
         assert_eq!(
-            name(resolve(
+            tab_names(resolve(
                 Some((PROJECT, new)),
                 Some((FILE, old)),
                 Some(&config)
             )),
-            "new"
+            some("new")
         );
-        // A project file without `layout` falls through.
+        // A project file without `layout` falls through to the deprecated file.
         assert_eq!(
-            name(resolve(
+            tab_names(resolve(
                 Some((PROJECT, "{}")),
                 Some((FILE, old)),
                 Some(&config)
             )),
-            "old"
+            some("old")
         );
         assert_eq!(
-            name(resolve(Some((PROJECT, "{}")), None, Some(&config))),
-            "cfg"
+            tab_names(resolve(Some((PROJECT, "{}")), None, Some(&config))),
+            some("cfg")
         );
-        assert_eq!(name(resolve(None, None, Some(&config))), "cfg");
-        assert_eq!(resolve(None, None, None).unwrap().0, default_layout());
+        assert_eq!(tab_names(resolve(None, None, Some(&config))), some("cfg"));
+        assert_eq!(resolve(None, None, None).unwrap().0, default_tabs());
+    }
+
+    #[test]
+    fn a_project_file_in_the_tab_shape_wins_over_config() {
+        let project = r#"{"layout":{"tabs":[{"name":"a"},{"name":"b"}]}}"#;
+        let config = cfg();
+        let names = tab_names(resolve(Some((PROJECT, project)), None, Some(&config)));
+        assert_eq!(names, vec![Some("a".to_owned()), Some("b".to_owned())]);
     }
 
     #[test]
     fn origin_is_the_project_for_repo_files_only() {
         let new = r#"{"layout":{"panes":[{"name":"n"}]}}"#;
         let old = r#"{"panes":[{"name":"o"}]}"#;
-        let config = default_layout();
+        let config = default_tabs();
         let origin = |p, l, c| resolve_origin(p, l, c).unwrap().2;
         assert!(origin(Some((PROJECT, new)), None, Some(&config)));
         assert!(origin(None, Some((FILE, old)), Some(&config)));
         // A project file without `layout` leaves the user layout in charge.
         assert!(!origin(Some((PROJECT, "{}")), None, Some(&config)));
         assert!(!origin(None, None, None));
-    }
-
-    #[test]
-    fn without_commands_keeps_panes_and_splits() {
-        let l = default_layout().without_commands();
-        assert_eq!(l.panes.len(), 3);
-        assert!(l.panes.iter().all(|p| p.command.is_none()));
-        assert_eq!(l.panes[1].split, default_layout().panes[1].split);
     }
 
     #[test]
@@ -811,7 +847,7 @@ mod tests {
 
     #[test]
     fn an_invalid_layout_is_a_warning_naming_file_and_problem() {
-        let config = default_layout();
+        let config = default_tabs();
         let err = resolve(
             Some((PROJECT, r#"{"layout":{"panes":[]}}"#)),
             None,
@@ -975,25 +1011,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_tabs_converts_panes_of_project_file_and_prefers_it_to_config() {
-        let project = r#"{"layout":{"panes":[{"name":"p"}]}}"#;
-        let config = parse_tabs_value(&serde_json::json!({"tabs":[{"name":"cfg"}]}))
-            .unwrap()
-            .0;
-        let (l, _, from_project) =
-            resolve_origin_tabs(Some(("p.json", project)), None, Some(&config)).unwrap();
-        assert!(from_project);
-        assert_eq!(l.tabs[0].name.as_deref(), Some("p"));
-        let (l, _, from_project) = resolve_origin_tabs(None, None, Some(&config)).unwrap();
-        assert!(!from_project);
-        assert_eq!(l, config);
-        assert_eq!(resolve_tabs(None, None, None).unwrap().0, default_tabs());
-        let err =
-            resolve_tabs(Some(("p.json", r#"{"layout":{"tabs":[]}}"#)), None, None).unwrap_err();
-        assert!(err.starts_with("p.json: layout:"), "{err}");
-    }
-
-    #[test]
     fn root_command_and_stripping_work_on_tabs() {
         let t = default_tabs().with_root_command("copilot");
         let Node::Split { children, .. } = &t.tabs[0].root else {
@@ -1005,5 +1022,65 @@ mod tests {
             panic!()
         };
         assert_eq!(children[0], leaf("agent", None));
+    }
+
+    #[test]
+    fn an_unknown_split_from_is_rejected_in_both_shapes_and_never_drops_a_pane() {
+        let bad =
+            r#"{"panes":[{"name":"a"},{"name":"b","split":{"from":"zzz","direction":"right"}}]}"#;
+        assert!(parse_layout(bad).unwrap_err().contains("zzz"));
+        let err = parse_tabs_value(&serde_json::from_str(bad).unwrap()).unwrap_err();
+        assert!(err.contains("not an earlier pane"), "{err}");
+        let project = format!(r#"{{"layout":{bad}}}"#);
+        let err = resolve(Some((PROJECT, &project)), None, None).unwrap_err();
+        assert!(err.starts_with(PROJECT) && err.contains("zzz"), "{err}");
+        // Every pane of a valid layout survives the conversion.
+        let two = parse_layout(
+            r#"{"panes":[{"name":"a"},{"name":"b","split":{"from":"a","direction":"down"}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(two.to_tabs().pane_tabs(), vec![two.panes]);
+    }
+
+    #[test]
+    fn pane_tabs_rebuild_the_default_panes_in_order() {
+        assert_eq!(default_tabs().pane_tabs(), vec![default_layout().panes]);
+    }
+
+    #[test]
+    fn pane_tabs_walk_nested_splits_tabs_and_children() {
+        let l = parse_tabs_value(&serde_json::json!({"tabs":[
+            {"name":"claude","command":"claude","children":[{"name":"Logs","command":"tail"}]},
+            {"name":"w","root":{"kind":"split","direction":"down","ratio":0.3,"children":[
+                {"kind":"terminal","name":"x"},
+                {"kind":"split","direction":"right","children":[
+                    {"kind":"terminal"},{"kind":"terminal"}]}]}}
+        ]}))
+        .unwrap()
+        .0;
+        let tabs = l.pane_tabs();
+        assert_eq!(tabs.len(), 3);
+        // A parent tab comes before its children, then the next top-level tab.
+        assert_eq!(tabs[0][0].name, "claude");
+        assert_eq!(tabs[0][0].command.as_deref(), Some("claude"));
+        assert_eq!(tabs[1][0].command.as_deref(), Some("tail"));
+        let w: Vec<_> = tabs[2]
+            .iter()
+            .map(|p| {
+                let s = p.split.as_ref();
+                (
+                    p.name.as_str(),
+                    s.map(|s| (s.from.as_str(), s.direction, s.ratio)),
+                )
+            })
+            .collect();
+        assert_eq!(
+            w,
+            vec![
+                ("x", None),
+                ("pane", Some(("x", SplitDirection::Down, 0.3))),
+                ("pane 2", Some(("pane", SplitDirection::Right, 0.5))),
+            ]
+        );
     }
 }

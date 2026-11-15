@@ -149,33 +149,11 @@ pub fn template_for<'a>(
     templates::resolve(dir, remote.as_ref(), templates, home)
 }
 
-/// The template's agent command and the user layout (the template's, else `spaces.layout`) for a
-/// space of `dir`, with the template's warnings. `available` says whether a program is on the
-/// `PATH`; it is asked only for the agent of a matching template.
+/// The template's agent command and the user layout in the tab shape (ADR 0011: the template's
+/// inline layout or the one it names, else `spaces.layout` as `default`) for a space of `dir`, with
+/// the warnings of the template and of an unknown layout name. `available` says whether a program
+/// is on the `PATH`; it is asked only for the agent of a matching template.
 pub fn inputs(
-    dir: &str,
-    templates: &[Template],
-    harnesses: &[Harness],
-    spaces_layout: Option<&Layout>,
-    home: Option<&Path>,
-    available: impl Fn(&str) -> bool,
-) -> (Option<String>, Option<Layout>, Vec<String>) {
-    let template = template_for(dir, templates, home);
-    let mut warnings = Vec::new();
-    let agent_command = template.and_then(|t| {
-        templates::agent_command(t, harnesses, &available)
-            .map_err(|w| warnings.push(w))
-            .ok()
-    });
-    let user_layout = template
-        .and_then(|t| t.layout.clone())
-        .or_else(|| spaces_layout.cloned());
-    (agent_command, user_layout, warnings)
-}
-
-/// The template's agent command and the user layout in the tab shape (ADR 0011) for a space of
-/// `dir`, with the warnings of the template and of an unknown layout name.
-pub fn inputs_tabs(
     dir: &str,
     user: &UserSpaces,
     home: Option<&Path>,
@@ -199,11 +177,11 @@ pub fn inputs_tabs(
 /// without a command of its own (the built-in default's `claude` is not one).
 pub fn plan(
     sources: &Sources,
-    user_layout: Option<&Layout>,
+    user_layout: Option<&TabLayout>,
     allow_project_commands: bool,
     root_command: Option<&str>,
     agent_command: Option<&str>,
-) -> Result<(Layout, Vec<String>), String> {
+) -> Result<(TabLayout, Vec<String>), String> {
     let (project, legacy) = sources.refs();
     let (layout, warnings, from_project) = layout::resolve_origin(project, legacy, user_layout)?;
     let layout = if from_project && !allow_project_commands {
@@ -213,10 +191,8 @@ pub fn plan(
     };
     let explicit = from_project || user_layout.is_some();
     let root_free = layout
-        .panes
-        .iter()
-        .find(|p| p.split.is_none())
-        .is_none_or(|p| p.command.is_none() || !explicit);
+        .root_terminal()
+        .is_none_or(|(_, command)| command.is_none() || !explicit);
     let layout = match (root_command, agent_command) {
         (Some(command), _) => layout.with_root_command(command),
         (None, Some(agent)) if root_free => layout.with_root_command(agent),
@@ -228,7 +204,6 @@ pub fn plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::default_layout;
 
     const ROOT: &str = "/work/app";
 
@@ -240,11 +215,18 @@ mod tests {
         }
     }
 
-    fn names(l: &Layout) -> Vec<(&str, Option<&str>)> {
-        l.panes
-            .iter()
-            .map(|p| (p.name.as_str(), p.command.as_deref()))
-            .collect()
+    fn names(l: &TabLayout) -> Vec<(String, Option<String>)> {
+        l.panes().into_iter().map(|p| (p.name, p.command)).collect()
+    }
+
+    fn pair(n: &str, c: Option<&str>) -> (String, Option<String>) {
+        (n.to_owned(), c.map(str::to_owned))
+    }
+
+    fn tabs_of(json: &str) -> TabLayout {
+        layout::parse_layout_value(&serde_json::from_str(json).unwrap())
+            .unwrap()
+            .to_tabs()
     }
 
     #[test]
@@ -310,29 +292,36 @@ mod tests {
         }
     }
 
+    fn user(templates: Vec<Template>, spaces_layout: Option<Layout>) -> UserSpaces {
+        UserSpaces {
+            templates,
+            spaces_layout,
+            ..UserSpaces::default()
+        }
+    }
+
     #[test]
     fn inputs_take_the_template_agent_and_layout_over_spaces_layout() {
         let solo = layout::parse_layout(r#"{"panes":[{"name":"solo"}]}"#).unwrap();
         let mine = layout::parse_layout(r#"{"panes":[{"name":"mine"}]}"#).unwrap();
-        let harnesses = harness::default_harnesses();
-        let t = [template("claude", Some(mine.clone()))];
-        let (agent, user, warnings) = inputs(ROOT, &t, &harnesses, Some(&solo), None, |_| true);
+        let u = user(
+            vec![template("claude", Some(mine.clone()))],
+            Some(solo.clone()),
+        );
+        let (agent, layout, warnings) = inputs(ROOT, &u, None, |_| true);
         assert_eq!(agent.as_deref(), Some("claude"));
-        assert_eq!(user, Some(mine));
+        assert_eq!(layout, Some(mine.to_tabs()));
         assert!(warnings.is_empty());
         // Outside the template's directory: `spaces.layout`, no agent.
-        let (agent, user, _) = inputs("/elsewhere", &t, &harnesses, Some(&solo), None, |_| true);
-        assert_eq!((agent, user), (None, Some(solo)));
+        let (agent, layout, _) = inputs("/elsewhere", &u, None, |_| true);
+        assert_eq!((agent, layout), (None, Some(solo.to_tabs())));
     }
 
     #[test]
     fn a_template_agent_that_is_missing_warns_and_starts_nothing() {
-        let harnesses = harness::default_harnesses();
         let (agent, _, warnings) = inputs(
             ROOT,
-            &[template("claude", None)],
-            &harnesses,
-            None,
+            &user(vec![template("claude", None)], None),
             None,
             |_| false,
         );
@@ -340,9 +329,7 @@ mod tests {
         assert!(warnings[0].contains("not found"), "{warnings:?}");
         let (agent, _, warnings) = inputs(
             ROOT,
-            &[template("nope", None)],
-            &harnesses,
-            None,
+            &user(vec![template("nope", None)], None),
             None,
             |_| true,
         );
@@ -355,16 +342,16 @@ mod tests {
 
     #[test]
     fn plan_follows_the_precedence_and_strips_only_project_commands() {
-        let user = layout::parse_layout(r#"{"panes":[{"name":"u","command":"htop"}]}"#).unwrap();
+        let user = tabs_of(r#"{"panes":[{"name":"u","command":"htop"}]}"#);
         let (l, _) = plan(&sources(Some(PROJECT)), Some(&user), true, None, None).unwrap();
-        assert_eq!(names(&l), [("dev", Some("make dev")), ("sh", None)]);
+        assert_eq!(names(&l), [pair("dev", Some("make dev")), pair("sh", None)]);
         let (l, _) = plan(&sources(Some(PROJECT)), Some(&user), false, None, None).unwrap();
-        assert_eq!(names(&l), [("dev", None), ("sh", None)]);
+        assert_eq!(names(&l), [pair("dev", None), pair("sh", None)]);
         // The user's own layout is never stripped.
         let (l, _) = plan(&sources(None), Some(&user), false, None, None).unwrap();
-        assert_eq!(names(&l), [("u", Some("htop"))]);
+        assert_eq!(names(&l), [pair("u", Some("htop"))]);
         let (l, _) = plan(&sources(None), None, false, None, None).unwrap();
-        assert_eq!(l, default_layout());
+        assert_eq!(l, layout::default_tabs());
     }
 
     #[test]
@@ -377,13 +364,13 @@ mod tests {
             Some("claude"),
         )
         .unwrap();
-        assert_eq!(names(&l)[0], ("dev", Some("fix 7")));
+        assert_eq!(names(&l)[0], pair("dev", Some("fix 7")));
         // The project's root pane has a command: the agent does not replace it.
         let (l, _) = plan(&sources(Some(PROJECT)), None, true, None, Some("copilot")).unwrap();
-        assert_eq!(names(&l)[0], ("dev", Some("make dev")));
+        assert_eq!(names(&l)[0], pair("dev", Some("make dev")));
         // The built-in default's `claude` is not the user's choice: the agent replaces it.
         let (l, _) = plan(&sources(None), None, true, None, Some("copilot")).unwrap();
-        assert_eq!(names(&l)[0], ("agent", Some("copilot")));
+        assert_eq!(names(&l)[0], pair("agent", Some("copilot")));
     }
 
     #[test]
@@ -479,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn inputs_tabs_take_the_template_layout_over_default_and_nothing_is_rewritten() {
+    fn inputs_take_the_template_layout_over_default_and_nothing_is_rewritten() {
         let home = std::env::temp_dir().join(format!("poimen-609-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(config_path(&home).parent().unwrap()).unwrap();
@@ -488,10 +475,10 @@ mod tests {
             "spaceTemplates": [{"name": "w", "match": {"dir": "/work"}, "agent": "claude", "layout": "review"}]}"#;
         std::fs::write(config_path(&home), text).unwrap();
         let u = UserSpaces::load(&home);
-        let (_, l, w) = inputs_tabs("/work/app", &u, None, |_| true);
+        let (_, l, w) = inputs("/work/app", &u, None, |_| true);
         assert_eq!(l.unwrap().tabs[0].name.as_deref(), Some("r"));
         assert!(w.is_empty(), "{w:?}");
-        let (_, l, _) = inputs_tabs("/elsewhere", &u, None, |_| true);
+        let (_, l, _) = inputs("/elsewhere", &u, None, |_| true);
         assert_eq!(l.unwrap().tabs[0].name.as_deref(), Some("legacy"));
         assert_eq!(std::fs::read_to_string(config_path(&home)).unwrap(), text);
         std::fs::remove_dir_all(&home).unwrap();

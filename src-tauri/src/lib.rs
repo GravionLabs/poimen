@@ -882,36 +882,32 @@ fn create_space_with(
     Err("this backend cannot build a layout".into())
 }
 
-/// The template's agent command and the user layout (the template's, else `spaces.layout`) for a
-/// space of `dir`, with the template's warnings. Used by `rebuild_space`.
+/// The template's agent command and the user layout (ADR 0011: the template's inline layout or the
+/// one it names, else `spaces.layout`) for a space of `dir`, with the warnings. Used by
+/// `rebuild_space`, which only needs them to tell what would need consent.
 fn layout_inputs(
     dir: &str,
-    user: Option<&settings::Settings>,
     home: Option<&std::path::Path>,
-) -> (Option<String>, Option<layout::Layout>, Vec<String>) {
-    let Some(user) = user else {
+) -> (Option<String>, Option<layout::TabLayout>, Vec<String>) {
+    let Some(home) = home else {
         return (None, None, Vec::new());
     };
+    let user = poimen_core::space_layout::UserSpaces::load(home);
     let path = std::sync::OnceLock::new();
-    poimen_core::space_layout::inputs(
-        dir,
-        &user.space_templates,
-        &user.harnesses,
-        user.spaces_layout.as_ref(),
-        home,
-        |p| gui_path::resolve_program(p, path.get_or_init(gui_path::child_path)).is_some(),
-    )
+    poimen_core::space_layout::inputs(dir, &user, Some(home), |p| {
+        gui_path::resolve_program(p, path.get_or_init(gui_path::child_path)).is_some()
+    })
 }
 
 /// The layout a new space gets from the already read project `sources` (the precedence of
 /// [`build_layout`]) with the resolution warnings; `Err` when none could be resolved.
 fn plan_layout(
     sources: &trust::Sources,
-    user_layout: Option<&layout::Layout>,
+    user_layout: Option<&layout::TabLayout>,
     allow_project_commands: bool,
     root_command: Option<&str>,
     agent_command: Option<&str>,
-) -> Result<(layout::Layout, Vec<String>), String> {
+) -> Result<(layout::TabLayout, Vec<String>), String> {
     poimen_core::space_layout::plan(
         sources,
         user_layout,
@@ -961,13 +957,13 @@ fn is_agent_command(command: &str, harnesses: &[harness::Harness]) -> bool {
 
 /// Why rebuilding needs the user's go: every pane of `layout` that starts an agent, and `setup`.
 fn consent_reasons(
-    layout: Option<&layout::Layout>,
+    layout: Option<&layout::TabLayout>,
     harnesses: &[harness::Harness],
     setup: Option<&str>,
 ) -> Vec<String> {
     let mut reasons: Vec<String> = layout
         .into_iter()
-        .flat_map(|l| &l.panes)
+        .flat_map(|l| l.panes())
         .filter_map(|p| {
             let command = p.command.as_deref()?;
             is_agent_command(command, harnesses)
@@ -1031,7 +1027,7 @@ fn rebuild_space_with(
         trust::Gate::Run { .. } => true,
     };
     let plan = || {
-        let (agent_command, user_layout, warnings) = layout_inputs(&dir, user.as_ref(), home);
+        let (agent_command, user_layout, warnings) = layout_inputs(&dir, home);
         let planned = plan_layout(
             &sources,
             user_layout.as_ref(),

@@ -2217,6 +2217,16 @@ mod tests {
     }
 
     #[test]
+    fn saving_templates_keeps_a_layout_name_reference_as_a_string() {
+        let t = serde_json::json!([{"name": "a", "agent": "claude", "layout": "review"}]);
+        let out = set_space_templates_text("{}", &t).unwrap();
+        let back: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(back["spaceTemplates"][0]["layout"], "review");
+        let bad = serde_json::json!([{"name": "a", "agent": "claude", "layout": 3}]);
+        assert!(set_space_templates_text("{}", &bad).is_err());
+    }
+
+    #[test]
     fn save_space_templates_creates_the_file_and_rejects_invalid_input() {
         let ok = serde_json::json!([{"name": "a", "match": {"dir": "~/a"}, "agent": "claude"}]);
         assert!(

@@ -782,6 +782,15 @@ mod tests {
     }
 
     #[test]
+    fn export_template_keeps_a_layout_name_reference() {
+        let text =
+            r#"{ "spaceTemplates": [ { "name": "a", "agent": "claude", "layout": "review" } ] }"#;
+        let out: Value =
+            serde_json::from_str(&export_template_text(Some(text), "a").unwrap()).unwrap();
+        assert_eq!(out["spaceTemplates"][0]["layout"], "review");
+    }
+
+    #[test]
     fn comments_in_strings_stay() {
         let map = parse_object(
             r#"{ "a": "http://x/*y*/" /* c */, "b": 1 // d
