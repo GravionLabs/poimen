@@ -11,6 +11,138 @@
       appears here as soon as the file exists.
     </p>
   }
+  @if (overview.repos().length > 0 || overview.failure()) {
+    <section class="section" data-testid="overview" aria-labelledby="runs-overview">
+      <h2 id="runs-overview" class="section-title">
+        Milestones
+        <button
+          type="button"
+          class="link"
+          data-testid="overview-refresh"
+          [disabled]="overview.loading()"
+          (click)="overview.load()"
+        >
+          {{ overview.loading() ? "Refreshing…" : "Refresh" }}
+        </button>
+      </h2>
+      @if (overview.failure(); as f) {
+        <p class="hint" role="status" data-testid="overview-error">
+          {{ failureText(f) }} Showing the last state.
+        </p>
+      }
+      @for (repo of overview.repos(); track repo.key) {
+        <div class="repo" data-testid="overview-repo">
+          <h3 class="mono">{{ repoLabel(repo) }}</h3>
+          @if (repo.error; as e) {
+            <p class="hint" data-testid="overview-repo-error">
+              {{ failureText(e) }} The issue states are missing; the runs are shown.
+            </p>
+          }
+          @for (row of repo.rows; track row.key) {
+            @let rowOpen = milestoneOpen(row);
+            <article
+              class="card milestone tone-{{ row.run?.status?.tone ?? 'neutral' }}"
+              data-testid="milestone"
+              [attr.data-current]="row.current"
+            >
+              <div class="card-head">
+                <button
+                  type="button"
+                  class="toggle"
+                  data-testid="milestone-toggle"
+                  [attr.aria-expanded]="rowOpen"
+                  (click)="toggleMilestone(row)"
+                >
+                  <span class="chevron" aria-hidden="true">{{ rowOpen ? "▾" : "▸" }}</span>
+                  <span class="group-name">{{ row.title }}</span>
+                  @if (row.current) {
+                    <span class="hint">current</span>
+                  }
+                </button>
+                @if (row.milestone; as m) {
+                  <span class="state" data-testid="milestone-progress-text">
+                    {{ m.closed }}/{{ m.open + m.closed }} closed
+                  </span>
+                }
+              </div>
+              @if (row.milestone; as m) {
+                <div
+                  class="bar"
+                  role="progressbar"
+                  aria-label="Milestone progress"
+                  [attr.aria-valuenow]="m.closed"
+                  aria-valuemin="0"
+                  [attr.aria-valuemax]="m.open + m.closed"
+                >
+                  <div
+                    class="fill"
+                    [style.width.%]="percent({ done: m.closed, total: m.open + m.closed })"
+                  ></div>
+                </div>
+                <p class="progress" data-testid="milestone-counts">
+                  {{ row.counts["in-progress"] }} in progress · {{ row.counts.blocked }} blocked ·
+                  {{ row.counts["needs-you"] }} needs you · {{ row.counts.next }} open
+                </p>
+              }
+              @if (row.run; as run) {
+                @if (row.milestone === null && run.status.progress; as p) {
+                  <p class="progress" data-testid="milestone-run-progress">{{ progressText(p) }}</p>
+                }
+                <p class="hint" data-testid="milestone-run">
+                  {{ runLabel(run) }}
+                  @if (run.status.needsYou) {
+                    <span class="note" data-testid="milestone-needs-you">needs you</span>
+                  }
+                </p>
+                @for (t of run.status.tasks; track t.task) {
+                  <div class="current" data-testid="milestone-task">
+                    <span>{{ overview.titleOf(t, repo.root, repo.machine) }}</span>
+                    @if (t.step; as s) {
+                      <span class="step">{{ stepText(s) }}</span>
+                    }
+                  </div>
+                }
+                @if (run.status.links.length > 0) {
+                  <p class="links" data-testid="milestone-links">
+                    @for (l of run.status.links; track l.url) {
+                      <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                        {{ linkLabel(l) }}
+                      </button>
+                    }
+                  </p>
+                }
+                @if (paneOfRun(run); as pane) {
+                  <button
+                    type="button"
+                    data-testid="milestone-focus"
+                    (click)="paneChosen.emit(pane)"
+                  >
+                    Focus terminal
+                  </button>
+                }
+              }
+              @if (rowOpen && repo.repo) {
+                <ul class="issues" data-testid="milestone-issues">
+                  @for (e of row.issues; track e.issue.number) {
+                    <ng-container
+                      *ngTemplateOutlet="
+                        issueTpl;
+                        context: { $implicit: e, repo: repo.repo, row: row }
+                      "
+                    />
+                  }
+                  @if (row.issues.length === 0) {
+                    <li class="hint">No PBIs or bugs in this milestone.</li>
+                  }
+                </ul>
+              }
+            </article>
+          }
+        </div>
+      }
+    </section>
+  }
+
   @for (card of problems(); track cardKey(card)) {
     <section class="card" data-testid="problem">
       <h2 class="mono">{{ where(card) }}</h2>
@@ -104,7 +236,7 @@
       </button>
       <span class="state" data-testid="state">{{ stateText(head) }}</span>
     </div>
-    @if (head.progress; as p) {
+    @if (progressOf(g); as p) {
       <div
         class="bar"
         role="progressbar"
@@ -124,10 +256,10 @@
         <div class="current" data-testid="current">
           @if (t.subject.url; as url) {
             <button type="button" class="link" (click)="deliver.openUrl(url)">
-              {{ t.subject.title }}
+              {{ overview.titleOf(t, g.root, g.machine) }}
             </button>
           } @else {
-            <span>{{ t.subject.title }}</span>
+            <span>{{ overview.titleOf(t, g.root, g.machine) }}</span>
           }
           @if (t.step; as s) {
             <span class="step" data-testid="step">{{ stepText(s) }}</span>
@@ -225,7 +357,7 @@
                     <ul data-testid="tasks">
                       @for (t of r.status.tasks; track t.task) {
                         <li data-testid="task">
-                          <span>{{ t.subject.title }}</span>
+                          <span>{{ overview.titleOf(t, g.root, g.machine) }}</span>
                           @if (t.step; as s) {
                             <span class="step">{{ stepText(s) }}</span>
                           }
@@ -247,10 +379,10 @@
                         <li data-testid="left-task">
                           @if (t.task.subject.url; as url) {
                             <button type="button" class="link" (click)="deliver.openUrl(url)">
-                              {{ t.task.subject.title }}
+                              {{ overview.titleOf(t.task, g.root, g.machine) }}
                             </button>
                           } @else {
-                            <span>{{ t.task.subject.title }}</span>
+                            <span>{{ overview.titleOf(t.task, g.root, g.machine) }}</span>
                           }
                           @if (t.waiting) {
                             <span class="hint" data-testid="waiting">waiting for merge</span>
@@ -292,10 +424,10 @@
                       <li>
                         @if (t.subject.url; as url) {
                           <button type="button" class="link" (click)="deliver.openUrl(url)">
-                            {{ t.subject.title }}
+                            {{ overview.titleOf(t, g.root, g.machine) }}
                           </button>
                         } @else {
-                          <span>{{ t.subject.title }}</span>
+                          <span>{{ overview.titleOf(t, g.root, g.machine) }}</span>
                         }
                         <span class="hint"
                           >{{ t.outcome }}{{ outcomeText(t) ? ": " + outcomeText(t) : "" }}</span
@@ -353,4 +485,42 @@
       </ol>
     }
   </article>
+</ng-template>
+
+<ng-template #issueTpl let-e let-repo="repo" let-row="row">
+  <li data-testid="overview-issue" [attr.data-state]="e.state">
+    <span class="issue-state state-{{ e.state }}" data-testid="issue-state">{{
+      issueStateText(e.state)
+    }}</span>
+    <button
+      type="button"
+      class="link"
+      data-testid="issue-link"
+      (click)="overview.openIssue(repo, e.issue.number)"
+    >
+      #{{ e.issue.number }} {{ e.issue.title }}
+    </button>
+    @if (e.state === "blocked") {
+      <span class="hint" data-testid="issue-blockers">blocked by {{ blockers(e) }}</span>
+    }
+    @if (e.pr; as pr) {
+      <button type="button" class="link" (click)="deliver.openUrl(pr.url)">
+        PR #{{ pr.number }}
+      </button>
+    }
+    @if (e.state === "in-progress" && issuePane(row, e); as pane) {
+      <button type="button" class="link" data-testid="issue-run" (click)="paneChosen.emit(pane)">
+        Show run
+      </button>
+    }
+    @if (e.children.length > 0) {
+      <ul class="issues">
+        @for (c of e.children; track c.issue.number) {
+          <ng-container
+            *ngTemplateOutlet="issueTpl; context: { $implicit: c, repo: repo, row: row }"
+          />
+        }
+      </ul>
+    }
+  </li>
 </ng-template>
