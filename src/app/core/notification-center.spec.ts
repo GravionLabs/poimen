@@ -65,4 +65,16 @@ describe("NotificationCenter", () => {
     expect(c.unread()).toBe(0);
     expect(c.entries()).toHaveLength(2);
   });
+
+  it("records run alerts with the repository and machine to reveal", () => {
+    const c = center();
+    c.recordRuns([{ root: "/r", machine: "m", label: "M1", message: "M1: merge" }], 5);
+    c.recordRuns([], 6);
+    expect(c.entries()).toHaveLength(1);
+    expect(c.entries()[0]).toMatchObject({
+      message: "M1: merge",
+      deliver: { root: "/r", machine: "m" },
+      read: false,
+    });
+  });
 });

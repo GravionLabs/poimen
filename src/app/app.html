@@ -17,7 +17,10 @@
       @if (ui.activeView() === "explorer") {
         <app-explorer />
       } @else if (ui.activeView() === "notifications") {
-        <app-notifications (paneChosen)="openPaneById($event)" />
+        <app-notifications
+          (paneChosen)="openPaneById($event)"
+          (runChosen)="deliver.reveal($event.root, $event.machine)"
+        />
       } @else {
         <app-sidebar
           [openIds]="editor.openIds()"

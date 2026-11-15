@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, output } from "@angular/core";
-import { NotificationCenter } from "../core/notification-center";
+import { NotificationCenter, type NotificationEntry } from "../core/notification-center";
 
 /** Local time of day of a notification. */
 export function notificationTime(time: number): string {
@@ -17,10 +17,13 @@ export class Notifications {
   protected readonly center = inject(NotificationCenter);
   /** An entry was clicked: open the tab of its pane. */
   readonly paneChosen = output<string>();
+  /** An entry of a run was clicked: reveal its repository in the Runs view. */
+  readonly runChosen = output<{ root: string; machine?: string }>();
   protected readonly timeOf = notificationTime;
 
-  protected choose(id: number, paneId: string): void {
-    this.center.markRead(id);
-    this.paneChosen.emit(paneId);
+  protected choose(entry: NotificationEntry): void {
+    this.center.markRead(entry.id);
+    if (entry.deliver) this.runChosen.emit(entry.deliver);
+    else this.paneChosen.emit(entry.paneId);
   }
 }

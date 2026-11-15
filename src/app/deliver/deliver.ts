@@ -4,6 +4,7 @@ import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge, type Unlisten } from "../core/tauri";
+import { NotificationCenter, type RunAlert } from "../core/notification-center";
 import { EditorTabs } from "../core/editor-tabs";
 import { UiState } from "../core/ui-state";
 import { isGithubUrl } from "../github/pulls";
@@ -12,6 +13,8 @@ import {
   cardKey,
   cardsOf,
   groupRuns,
+  isAlert,
+  outcomeText,
   type DeliverCard,
   type DeliverRead,
   type DeliverStatus,
@@ -79,6 +82,11 @@ export class Deliver {
   private readonly machines = inject(Machines);
   private readonly ui = inject(UiState);
   private readonly editor = inject(EditorTabs);
+  private readonly center = inject(NotificationCenter);
+  /** Attentions already seen (notified or part of the first read), by machine, root, run and id. */
+  private readonly seenAlerts = new Set<string>();
+  /** Repositories whose first read is in; it only sets the baseline. */
+  private readonly baselined = new Set<string>();
 
   /** Every card received, local and remote, in the order they appeared. */
   private readonly received = signal<readonly DeliverCard[]>([]);
@@ -160,6 +168,7 @@ export class Deliver {
     const same = (c: DeliverCard) => c.root === root && c.machine === machine;
     const before = this.received().filter(same);
     const next = cardsOf(root, read, machine);
+    this.notify(root, machine, next);
     this.received.update((cards) => {
       const rest = cards.filter((c) => !same(c));
       // Keep the place of a card that is only updated; new cards come last.
@@ -169,6 +178,37 @@ export class Deliver {
       );
       return at < 0 ? [...rest, ...placed] : [...rest.slice(0, at), ...placed, ...rest.slice(at)];
     });
+  }
+
+  /**
+   * One notification-center entry per attention of a run that needs the user (#806); the first
+   * read of a repository only records what is already there.
+   */
+  private notify(root: string, machine: string | undefined, cards: readonly DeliverCard[]): void {
+    const where = `${machine ?? ""}\n${root}`;
+    const first = !this.baselined.has(where);
+    this.baselined.add(where);
+    const alerts: RunAlert[] = [];
+    for (const card of cards) {
+      if (card.state.kind !== "ok") continue;
+      const status = card.state.status;
+      for (const attention of status.attentions) {
+        if (!isAlert(attention, status)) continue;
+        const key = `${where}\n${card.run}\n${attention.id}`;
+        if (this.seenAlerts.has(key)) continue;
+        this.seenAlerts.add(key);
+        if (first) continue;
+        const label = status.subject?.title || root.split(/[\\/]/).filter(Boolean).pop() || root;
+        const said = outcomeText(attention) ?? "needs you";
+        alerts.push({
+          root,
+          ...(machine === undefined ? {} : { machine }),
+          label,
+          message: `${label}: ${said}`,
+        });
+      }
+    }
+    this.center.recordRuns(alerts, Date.now());
   }
 
   /**
