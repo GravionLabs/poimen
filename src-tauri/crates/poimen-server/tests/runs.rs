@@ -169,3 +169,42 @@ fn a_new_subscription_gets_the_replay_and_a_plain_one_no_run_events() {
     assert_eq!(run_seqs(&first, 1), [pair("r1", 3)]);
     no_run_events(&plain);
 }
+
+/// A run file of the subject `M16` (or none) whose last change was `days` days ago.
+fn old_run(env: &Env, run: &str, subject: Option<&str>, days: u64) {
+    let subject = subject.map_or(String::new(), |id| {
+        format!(r#","subject":{{"kind":"github.milestone","id":"{id}"}}"#)
+    });
+    let file = env.events_file(run);
+    let first = format!(
+        r#"{{"v":1,"seq":1,"ts":"2026-11-13T10:00:01Z","run":"{run}","type":"run.started","tone":"info"{subject}}}"#
+    ) + "\n";
+    std::fs::write(&file, first + &line(run, 2, "progress")).unwrap();
+    let f = std::fs::File::options().write(true).open(&file).unwrap();
+    f.set_modified(std::time::SystemTime::now() - Duration::from_secs(days * 86_400))
+        .unwrap();
+}
+
+#[test]
+fn earlier_runs_of_a_shown_subject_are_sent_and_other_old_runs_are_not() {
+    let env = Env::new("subject");
+    old_run(&env, "earlier", Some("M16"), 5);
+    old_run(&env, "other", Some("M15"), 5);
+    old_run(&env, "bare", None, 5);
+    old_run(&env, "ancient", Some("M16"), 20);
+    let rx = env.subscribe(true);
+    // No run of M16 is recent: nothing yet.
+    no_run_events(&rx);
+    old_run(&env, "current", Some("M16"), 0);
+    let mut got = run_seqs(&rx, 4);
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            pair("current", 1),
+            pair("current", 2),
+            pair("earlier", 1),
+            pair("earlier", 2)
+        ]
+    );
+}
