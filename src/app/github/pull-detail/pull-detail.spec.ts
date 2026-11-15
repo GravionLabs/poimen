@@ -311,6 +311,25 @@ describe("pull request write actions", () => {
     ]);
   });
 
+  it("drops the confirmation and the typed text when another pull request is selected", async () => {
+    tauri.answer("github_pr_action", () => null);
+    const { fixture, el } = await open();
+    q(el, "[data-testid=pr-request_changes]")!.click();
+    fixture.detectChanges();
+    const field = q(el, "[data-testid=pr-body]") as HTMLTextAreaElement;
+    field.value = "please fix";
+    field.dispatchEvent(new Event("input"));
+    fixture.detectChanges();
+    q(el, 'tr.row[data-key="o/n#2"]')!.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(q(el, "[data-testid=pr-compose]")).toBeNull();
+    q(el, "[data-testid=pr-request_changes]")!.click();
+    fixture.detectChanges();
+    expect((q(el, "[data-testid=pr-body]") as HTMLTextAreaElement).value).toBe("");
+    expect(tauri.calls("github_pr_action")).toHaveLength(0);
+  });
+
   it("notifies with the action and the gh message on failure", async () => {
     tauri.answer("github_pr_action", () => {
       throw { kind: "other", message: "not allowed" };

@@ -507,6 +507,7 @@ export class GithubPulls {
 
   /** Opens the detail pane of `row` and reads its detail (the backend caches for 30 s). */
   async openDetail(row: PullRow): Promise<void> {
+    this.compose.set(null);
     this._cursor.set(row.key);
     this._detailKey.set(row.key);
     this._detail.set(null);

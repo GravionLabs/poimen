@@ -3,6 +3,7 @@ import {
   Component,
   HostListener,
   computed,
+  effect,
   inject,
   signal,
 } from "@angular/core";
@@ -53,6 +54,15 @@ export class PullDetailPane {
 
   protected readonly labels = PR_ACTION_LABELS;
   protected readonly text = signal("");
+
+  constructor() {
+    // A draft belongs to one pull request: switching rows drops it.
+    effect(() => {
+      this.pulls.detailKey();
+      this.text.set("");
+    });
+  }
+
   protected choose(action: PrAction): void {
     this.text.set("");
     this.pulls.choose(action);
