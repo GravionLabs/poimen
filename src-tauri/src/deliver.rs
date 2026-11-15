@@ -16,7 +16,9 @@ use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::Value;
 
-use poimen_core::agent_events::{self, EVENTS_PATH, LineTail, MAX_EVENTS_BYTES, Reducer, Run};
+use poimen_core::agent_events::{
+    self, EVENTS_PATH, LineTail, MAX_EVENTS_BYTES, RECENT_SECS, Reducer, Run, SubjectKey,
+};
 
 /// The status file relative to a repository root.
 pub const STATUS_PATH: &str = ".agents/deliver-loop/status.json";
@@ -51,26 +53,10 @@ pub enum Read {
     },
 }
 
-/// Runs that ended or were abandoned longer ago than this are not shown, unless their subject is
-/// a milestone ([`is_milestone_run`]).
-const RECENT_SECS: f64 = 24.0 * 3600.0;
-
-/// At most this many runs per repository, not counting milestone runs.
+/// At most this many runs per repository inside the present limits ([`agent_events::RECENT_SECS`]
+/// after their end); runs of a shown subject kept beyond them are not counted
+/// ([`agent_events::SUBJECT_KEEP_SECS`], [`agent_events::MAX_SUBJECT_RUNS`]).
 const MAX_RUNS: usize = 12;
-
-/// At most this many milestone runs per repository, newest first.
-const MAX_MILESTONE_RUNS: usize = 100;
-
-/// A run of a GitHub milestone: kept regardless of age (the backend does not know whether the
-/// milestone is open; the frontend leaves out the closed ones).
-fn is_milestone_run(run: &Run) -> bool {
-    run.state
-        .subject
-        .as_ref()
-        .and_then(|s| s.get("kind"))
-        .and_then(Value::as_str)
-        == Some("github.milestone")
-}
 
 struct FileState {
     reducer: Reducer,
@@ -82,9 +68,9 @@ struct FileState {
 #[derive(Default)]
 pub struct Tailer {
     files: HashMap<PathBuf, FileState>,
-    /// Old files that held no milestone run, by modification time and length: not read again
-    /// until they change.
-    skipped: HashMap<PathBuf, (Option<SystemTime>, u64)>,
+    /// The subject of old files, from their first line, by modification time and length: the file
+    /// is not opened again until it changes.
+    subjects: HashMap<PathBuf, (Option<SystemTime>, u64, Option<SubjectKey>)>,
 }
 
 impl Tailer {
@@ -100,10 +86,25 @@ impl Tailer {
         Ok(())
     }
 
-    /// Reads what is new in `dir` (`*.jsonl`, regular files only) and returns the recent runs,
-    /// newest first, with the first unknown event version.
+    fn folded(&mut self, path: &Path, len: u64) {
+        let state = self
+            .files
+            .entry(path.to_path_buf())
+            .or_insert_with(|| FileState {
+                reducer: Reducer::new(),
+                tail: LineTail::default(),
+            });
+        let _ = Self::advance(state, path, len);
+    }
+
+    /// Reads what is new in `dir` (`*.jsonl`, regular files only) and returns the runs to show,
+    /// newest first, with the first unknown event version. Files changed within the last day are
+    /// read; an older one (up to [`agent_events::SUBJECT_KEEP_SECS`]) only has its first line read
+    /// and is replayed when a run of its subject is shown ([`recent`]); an older one is not opened.
     pub fn read(&mut self, dir: &Path, now: f64) -> (Vec<Run>, Option<i64>) {
         let mut seen = HashSet::new();
+        let mut fresh = HashSet::new();
+        let mut older = Vec::new();
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -117,34 +118,52 @@ impl Tailer {
                     continue;
                 }
                 let modified = meta.modified().ok();
-                let old = modified
+                let age = modified
                     .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
-                    .is_some_and(|m| now - m.as_secs_f64() >= RECENT_SECS + 3600.0);
-                if self.skipped.get(&path) == Some(&(modified, meta.len())) {
-                    seen.insert(path);
+                    .map_or(0.0, |m| now - m.as_secs_f64());
+                if age >= agent_events::SUBJECT_KEEP_SECS {
                     continue;
                 }
-                self.skipped.remove(&path);
-                seen.insert(path.clone());
-                let state = self.files.entry(path.clone()).or_insert_with(|| FileState {
-                    reducer: Reducer::new(),
-                    tail: LineTail::default(),
-                });
-                let _ = Self::advance(state, &path, meta.len());
-                // An old file is read once; it stays only when it holds a milestone run.
-                if old
-                    && !state
-                        .reducer
-                        .snapshot(now, &agent_events::pid_alive)
-                        .is_some_and(|r| is_milestone_run(&r))
-                {
-                    self.files.remove(&path);
-                    self.skipped.insert(path, (modified, meta.len()));
+                if age >= RECENT_SECS + 3600.0 {
+                    older.push((path, modified, meta.len()));
+                } else {
+                    seen.insert(path.clone());
+                    fresh.insert(path.clone());
+                    self.folded(&path, meta.len());
                 }
             }
         }
+        // The subjects shown by the files read in full.
+        let present: Vec<Run> = self
+            .files
+            .iter()
+            .filter(|(path, _)| fresh.contains(*path))
+            .filter_map(|(_, state)| state.reducer.snapshot(now, &agent_events::pid_alive))
+            .collect();
+        let shown = shown_subjects(&present, now);
+        let mut probed = HashSet::new();
+        for (path, modified, len) in older {
+            probed.insert(path.clone());
+            let cached = self
+                .subjects
+                .get(&path)
+                .filter(|(m, l, _)| *m == modified && *l == len);
+            let key = match cached {
+                Some((_, _, key)) => key.clone(),
+                None => {
+                    let key = agent_events::first_subject(&path);
+                    self.subjects
+                        .insert(path.clone(), (modified, len, key.clone()));
+                    key
+                }
+            };
+            if key.is_some_and(|k| shown.contains(&k)) {
+                seen.insert(path.clone());
+                self.folded(&path, len);
+            }
+        }
         self.files.retain(|path, _| seen.contains(path));
-        self.skipped.retain(|path, _| seen.contains(path));
+        self.subjects.retain(|path, _| probed.contains(path));
         let mut unknown = None;
         let mut runs = Vec::new();
         for (path, state) in &self.files {
@@ -165,29 +184,74 @@ pub fn named(mut run: Run, file_run: &str) -> Run {
     run
 }
 
-/// The runs the panel shows, newest first: milestone runs regardless of age, at most
-/// [`MAX_MILESTONE_RUNS`]; the others only when they did not end or get abandoned more than a day
-/// ago, at most [`MAX_RUNS`] of them.
+fn subject_of(run: &Run) -> Option<SubjectKey> {
+    run.state
+        .subject
+        .as_ref()
+        .and_then(agent_events::subject_key)
+}
+
+fn updated(run: &Run) -> Option<f64> {
+    run.state
+        .updated
+        .as_deref()
+        .and_then(agent_events::parse_ts)
+}
+
+/// The runs inside the present limits: not ended or abandoned more than a day ago, the newest
+/// [`MAX_RUNS`] of them.
+fn present(runs: &[Run], now: f64) -> Vec<&Run> {
+    let mut within: Vec<&Run> = runs
+        .iter()
+        .filter(|run| {
+            let over = run.state.status != "running";
+            !(over && updated(run).is_some_and(|t| now - t > RECENT_SECS))
+        })
+        .collect();
+    within.sort_by(|a, b| order(a, b));
+    within.truncate(MAX_RUNS);
+    within
+}
+
+/// The subjects of the runs inside the present limits.
+fn shown_subjects(runs: &[Run], now: f64) -> HashSet<SubjectKey> {
+    present(runs, now)
+        .into_iter()
+        .filter_map(subject_of)
+        .collect()
+}
+
+/// The runs the views show, newest first: those inside the present limits (not ended or abandoned
+/// more than a day ago, [`MAX_RUNS`] of them), and every other run of a subject one of them has,
+/// when its last event is at most [`agent_events::SUBJECT_KEEP_SECS`] old, the newest
+/// [`agent_events::MAX_SUBJECT_RUNS`] per subject. A run without a subject keeps the present limits.
 pub fn recent(runs: Vec<Run>, now: f64) -> Vec<Run> {
-    let (milestone, other): (Vec<Run>, Vec<Run>) = runs.into_iter().partition(is_milestone_run);
-    let mut runs = newest(milestone, MAX_MILESTONE_RUNS);
-    runs.extend(newest(
-        other
-            .into_iter()
-            .filter(|run| {
-                let last = run
-                    .state
-                    .updated
-                    .as_deref()
-                    .and_then(agent_events::parse_ts);
-                let over = run.state.status != "running";
-                !(over && last.is_some_and(|t| now - t > RECENT_SECS))
-            })
-            .collect(),
-        MAX_RUNS,
-    ));
-    runs.sort_by(order);
-    runs
+    let shown_runs: HashSet<String> = present(&runs, now)
+        .into_iter()
+        .map(|r| r.state.run.clone())
+        .collect();
+    let shown = shown_subjects(&runs, now);
+    let mut kept: Vec<Run> = runs
+        .into_iter()
+        .filter(|run| {
+            shown_runs.contains(&run.state.run)
+                || subject_of(run).is_some_and(|k| {
+                    shown.contains(&k)
+                        && updated(run).is_none_or(|t| now - t <= agent_events::SUBJECT_KEEP_SECS)
+                })
+        })
+        .collect();
+    kept.sort_by(order);
+    let mut per_subject: HashMap<SubjectKey, usize> = HashMap::new();
+    kept.retain(|run| match subject_of(run) {
+        Some(k) => {
+            let n = per_subject.entry(k).or_insert(0);
+            *n += 1;
+            *n <= agent_events::MAX_SUBJECT_RUNS
+        }
+        None => true,
+    });
+    kept
 }
 
 fn order(a: &Run, b: &Run) -> std::cmp::Ordering {
@@ -195,12 +259,6 @@ fn order(a: &Run, b: &Run) -> std::cmp::Ordering {
         .updated
         .cmp(&a.state.updated)
         .then_with(|| a.state.run.cmp(&b.state.run))
-}
-
-fn newest(mut runs: Vec<Run>, max: usize) -> Vec<Run> {
-    runs.sort_by(order);
-    runs.truncate(max);
-    runs
 }
 
 pub fn now_secs() -> f64 {
@@ -629,51 +687,156 @@ mod tests {
         assert_eq!(status, ["finished", "running"]);
     }
 
-    #[test]
-    fn old_milestone_runs_are_kept_and_old_session_runs_dropped() {
-        let dir = temp_dir("milestone");
-        let line = |run: &str, kind: &str| {
-            format!(
-                r#"{{"v":1,"seq":1,"ts":"2026-10-01T10:00:00Z","run":"{run}","type":"run.started","tone":"neutral","subject":{{"kind":"{kind}","id":"M1"}}}}
-{{"v":1,"seq":2,"ts":"2026-10-01T11:00:00Z","run":"{run}","type":"run.finished","tone":"success","outcome":"succeeded"}}
-"#
-            )
-        };
-        append(&dir.join("ms.jsonl"), &line("ms", "github.milestone"));
-        append(&dir.join("sess.jsonl"), &line("sess", "session"));
-        let mut tailer = Tailer::default();
-        // Well past the day: the file mtime (now) is in the "future" of the old events, so the
-        // reader runs at a later time to make the files old.
-        let later = now() + 40.0 * 24.0 * 3600.0;
-        let (runs, _) = tailer.read(&dir, later);
-        let ids: Vec<_> = runs.iter().map(|r| r.state.run.as_str()).collect();
-        assert_eq!(ids, ["ms"]);
-        assert_eq!(tailer.files.len(), 1);
-        // The dropped file is not read again, the kept one is followed.
-        let (runs, _) = tailer.read(&dir, later);
-        assert_eq!(runs.len(), 1);
+    const DAY: u64 = 86_400;
+
+    fn real_now() -> u64 {
+        now_secs() as u64
+    }
+
+    /// A run file of `run` with the subject `(kind, id)`; its last event `age` seconds ago, and
+    /// finished unless `running`. The file's modification time is that of the last event.
+    fn write_run(dir: &Path, run: &str, subject: Option<(&str, &str)>, age: u64, running: bool) {
+        let at = real_now();
+        let subject = subject.map_or(String::new(), |(k, i)| {
+            format!(r#","subject":{{"kind":"{k}","id":"{i}"}}"#)
+        });
+        let mut text = format!(
+            r#"{{"v":1,"seq":1,"ts":"{}","run":"{run}","type":"run.started","tone":"neutral"{subject}}}"#,
+            iso(at - age - 60)
+        ) + "\n";
+        if !running {
+            text += &format!(
+                r#"{{"v":1,"seq":2,"ts":"{}","run":"{run}","type":"run.finished","tone":"success","outcome":"succeeded"}}"#,
+                iso(at - age)
+            );
+            text += "\n";
+        }
+        let path = dir.join(format!("{run}.jsonl"));
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(&path, text).unwrap();
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        file.set_modified(UNIX_EPOCH + Duration::from_secs(at - age))
+            .unwrap();
+    }
+
+    fn ids(runs: &[Run]) -> Vec<&str> {
+        let mut ids: Vec<_> = runs.iter().map(|r| r.state.run.as_str()).collect();
+        ids.sort_unstable();
+        ids
     }
 
     #[test]
-    fn the_milestone_cap_keeps_the_newest_and_does_not_count_other_runs() {
-        let mk = |i: usize, kind: &str| {
-            let mut r = Reducer::new();
-            r.push_line(&format!(
-                r#"{{"v":1,"seq":1,"ts":"2026-11-07T11:00:00Z","run":"r{i}","type":"run.started","tone":"neutral","subject":{{"kind":"{kind}","id":"1"}}}}"#
-            ));
-            let mut run = r.snapshot(now(), &|_| true).unwrap();
-            run.state.updated = Some(format!("2026-11-07T11:{:02}:{:02}Z", i / 60, i % 60));
-            run
-        };
-        let mut runs: Vec<Run> = (0..130).map(|i| mk(i, "github.milestone")).collect();
-        runs.extend((200..220).map(|i| mk(i, "session")));
-        let kept = recent(runs, now());
-        let milestone: Vec<_> = kept.iter().filter(|r| is_milestone_run(r)).collect();
-        assert_eq!(milestone.len(), MAX_MILESTONE_RUNS);
-        // The newest of the milestone runs survive.
-        assert!(milestone.iter().any(|r| r.state.run == "r129"));
-        assert!(milestone.iter().all(|r| r.state.run != "r0"));
-        assert_eq!(kept.len() - milestone.len(), MAX_RUNS);
+    fn earlier_runs_of_a_shown_subject_are_kept_and_the_others_dropped() {
+        let dir = temp_dir("subject");
+        let ms = Some(("github.milestone", "M16"));
+        write_run(&dir, "cur", ms, 3600, true);
+        write_run(&dir, "old1", ms, 3 * DAY, false);
+        write_run(&dir, "old2", ms, 10 * DAY, false);
+        write_run(&dir, "ancient", ms, 20 * DAY, false);
+        write_run(
+            &dir,
+            "other",
+            Some(("github.milestone", "M15")),
+            3 * DAY,
+            false,
+        );
+        write_run(&dir, "bare", None, 3 * DAY, false);
+        let mut tailer = Tailer::default();
+        let (runs, _) = tailer.read(&dir, now_secs());
+        assert_eq!(ids(&runs), ["cur", "old1", "old2"]);
+        // Only the files of the subject are replayed; the others had their first line read.
+        assert_eq!(tailer.files.len(), 3);
+        assert_eq!(tailer.subjects.len(), 4);
+        // The same again reads nothing new and gives the same answer.
+        assert_eq!(
+            ids(&tailer.read(&dir, now_secs()).0),
+            ["cur", "old1", "old2"]
+        );
+    }
+
+    #[test]
+    fn nothing_of_a_subject_is_kept_when_none_of_its_runs_is_shown() {
+        let dir = temp_dir("subject-gone");
+        let ms = Some(("github.milestone", "M16"));
+        write_run(&dir, "old1", ms, 3 * DAY, false);
+        write_run(&dir, "old2", ms, 5 * DAY, false);
+        let mut tailer = Tailer::default();
+        let (runs, _) = tailer.read(&dir, now_secs());
+        assert!(runs.is_empty());
+        assert!(tailer.files.is_empty());
+        // A run of the subject starts: the earlier ones come back.
+        write_run(&dir, "new", ms, 60, true);
+        assert_eq!(
+            ids(&tailer.read(&dir, now_secs()).0),
+            ["new", "old1", "old2"]
+        );
+        // It ends more than a day ago: they go again.
+        std::fs::remove_file(dir.join("new.jsonl")).unwrap();
+        assert!(tailer.read(&dir, now_secs()).0.is_empty());
+        assert!(tailer.files.is_empty());
+    }
+
+    fn run_at(i: usize, subject: Option<&str>, age: u64) -> Run {
+        let at = real_now();
+        let subject = subject.map_or(String::new(), |id| {
+            format!(r#","subject":{{"kind":"github.milestone","id":"{id}"}}"#)
+        });
+        let mut r = Reducer::new();
+        r.push_line(&format!(
+            r#"{{"v":1,"seq":1,"ts":"{}","run":"r{i}","type":"run.started","tone":"neutral"{subject}}}"#,
+            iso(at - age)
+        ));
+        r.push_line(&format!(
+            r#"{{"v":1,"seq":2,"ts":"{}","run":"r{i}","type":"run.finished","tone":"success","outcome":"succeeded"}}"#,
+            iso(at - age)
+        ));
+        r.snapshot(now_secs(), &|_| true).unwrap()
+    }
+
+    #[test]
+    fn a_subject_keeps_its_newest_fifty_runs_within_fourteen_days() {
+        // One run inside the present limits shows the subject; 70 earlier runs, one a minute apart
+        // and the oldest 15 days back.
+        let mut runs = vec![run_at(0, Some("M1"), 60)];
+        runs.extend((1..=70).map(|i| run_at(i, Some("M1"), 2 * DAY + i as u64 * 60)));
+        runs.push(run_at(71, Some("M1"), 15 * DAY));
+        // Another subject with only old runs, and runs without a subject: the present limits,
+        // twelve of them.
+        runs.push(run_at(72, Some("M2"), 3 * DAY));
+        runs.extend((100..130).map(|i| run_at(i, None, 60 + i as u64)));
+        let kept = recent(runs, now_secs());
+        let m1: Vec<_> = kept.iter().filter(|r| subject_of(r).is_some()).collect();
+        assert_eq!(m1.len(), agent_events::MAX_SUBJECT_RUNS);
+        assert!(m1.iter().any(|r| r.state.run == "r0"));
+        assert!(m1.iter().any(|r| r.state.run == "r49"));
+        assert!(
+            m1.iter()
+                .all(|r| r.state.run != "r50" && r.state.run != "r71")
+        );
+        assert!(kept.iter().all(|r| r.state.run != "r72"));
+        assert_eq!(kept.len() - m1.len(), MAX_RUNS - 1);
+    }
+
+    #[test]
+    fn the_fourteen_day_limit_counts_from_the_last_event() {
+        let runs = vec![
+            run_at(0, Some("M1"), 60),
+            run_at(1, Some("M1"), 13 * DAY),
+            run_at(2, Some("M1"), 15 * DAY),
+        ];
+        assert_eq!(ids(&recent(runs, now_secs())), ["r0", "r1"]);
+    }
+
+    #[test]
+    fn a_kept_older_run_is_not_running() {
+        let dir = temp_dir("subject-status");
+        let ms = Some(("github.milestone", "M16"));
+        write_run(&dir, "cur", ms, 60, true);
+        // Its writer never finished: abandoned, never `running`.
+        write_run(&dir, "left", ms, 4 * DAY, true);
+        let (runs, _) = Tailer::default().read(&dir, now_secs());
+        let left = runs.iter().find(|r| r.state.run == "left").unwrap();
+        assert_ne!(left.state.status, "running");
     }
 
     #[test]
