@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use poimen_protocol::Channel;
 
 use crate::hook::HookEnv;
+use crate::mcp_config::{self, McpKind};
 use crate::{claude, copilot, gemini};
 
 /// One agent kind with hooks.
@@ -23,6 +24,8 @@ pub struct Kind {
     pub uninstall: fn(&Path, Channel) -> Result<bool, String>,
     /// The registered events whose hook is there.
     pub status: fn(&Path, Channel) -> Result<Vec<&'static str>, String>,
+    /// Where and how the agent's MCP config registers `poimen mcp` (#614); `None`: no MCP.
+    pub mcp: Option<McpKind>,
     /// `hook <kind> [event]`: reads stdin and reports; never fails the agent.
     pub run_hook: fn(Option<String>, &HookEnv),
 }
@@ -36,6 +39,7 @@ pub const KINDS: [Kind; 3] = [
         install: claude::install,
         uninstall: claude::uninstall,
         status: claude::status,
+        mcp: Some(mcp_config::CLAUDE),
         run_hook: |_, env| {
             claude::run_hook(std::io::stdin(), env);
         },
@@ -47,6 +51,7 @@ pub const KINDS: [Kind; 3] = [
         install: copilot::install,
         uninstall: copilot::uninstall,
         status: copilot::status,
+        mcp: Some(mcp_config::COPILOT),
         run_hook: |event, env| {
             copilot::run_hook(std::io::stdin(), event, env);
         },
@@ -58,6 +63,7 @@ pub const KINDS: [Kind; 3] = [
         install: gemini::install,
         uninstall: gemini::uninstall,
         status: gemini::status,
+        mcp: None,
         run_hook: |_, env| {
             gemini::run_hook(std::io::stdin(), env);
         },
@@ -87,6 +93,18 @@ mod tests {
         assert_eq!(kind("gemini").unwrap().events, gemini::EVENTS.len());
         assert!(kind("codex").is_none());
         assert_eq!(super::names(), "claude|copilot|gemini");
+    }
+
+    #[test]
+    fn claude_and_copilot_register_poimen_mcp_in_their_own_files_gemini_does_not() {
+        let home = Path::new("/h");
+        let path = |n: &str| (kind(n).unwrap().mcp.unwrap().default_path)(home);
+        assert_eq!(path("claude"), PathBuf::from("/h/.claude.json"));
+        assert_eq!(
+            path("copilot"),
+            PathBuf::from("/h/.copilot/mcp-config.json")
+        );
+        assert!(kind("gemini").unwrap().mcp.is_none());
     }
 
     #[test]

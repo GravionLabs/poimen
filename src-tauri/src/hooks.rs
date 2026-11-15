@@ -28,6 +28,9 @@ pub enum HookState {
 pub struct HookStatus {
     pub agent: String,
     pub state: HookState,
+    /// The `poimen mcp` entry in the agent's MCP config (#614); `None`: the agent has none, or
+    /// there is no `poimen` binary to register.
+    pub mcp: Option<HookState>,
 }
 
 /// Runs `poimen-server integration <args>`; faked in tests.
@@ -37,7 +40,8 @@ pub trait Exec {
 
 /// Maps the output of `integration status` to a state.
 pub fn parse_status(stdout: &str) -> HookState {
-    let text = stdout.trim();
+    // The first line is the hooks; `mcp: ...` follows it (see `parse_mcp`).
+    let text = stdout.lines().next().unwrap_or("").trim();
     if text == "installed" {
         HookState::Installed
     } else if text == "not installed" {
@@ -49,14 +53,28 @@ pub fn parse_status(stdout: &str) -> HookState {
     }
 }
 
+/// The `mcp:` line of `integration status`: `installed` and `not installed` map to a state,
+/// `unavailable` or no line (an agent without MCP) to `None`.
+pub fn parse_mcp(stdout: &str) -> Option<HookState> {
+    let line = stdout.lines().find_map(|l| l.trim().strip_prefix("mcp:"))?;
+    match line.trim() {
+        "installed" => Some(HookState::Installed),
+        "not installed" => Some(HookState::Missing),
+        "unavailable" => None,
+        _ => Some(HookState::Unknown),
+    }
+}
+
 pub fn status_all(exec: &impl Exec) -> Vec<HookStatus> {
     AGENTS
         .iter()
-        .map(|agent| HookStatus {
-            agent: (*agent).to_owned(),
-            state: exec
-                .run(&["integration", "status", agent])
-                .map_or(HookState::Unknown, |out| parse_status(&out)),
+        .map(|agent| {
+            let out = exec.run(&["integration", "status", agent]);
+            HookStatus {
+                agent: (*agent).to_owned(),
+                state: out.as_deref().map_or(HookState::Unknown, parse_status),
+                mcp: out.as_deref().ok().and_then(parse_mcp),
+            }
         })
         .collect()
 }
@@ -154,6 +172,27 @@ mod tests {
     }
 
     #[test]
+    fn the_mcp_line_follows_the_hooks_line() {
+        let out = "installed\nmcp: not installed\n";
+        assert_eq!(parse_status(out), HookState::Installed);
+        assert_eq!(parse_mcp(out), Some(HookState::Missing));
+        assert_eq!(
+            parse_mcp("not installed\nmcp: installed"),
+            Some(HookState::Installed)
+        );
+        assert_eq!(parse_mcp("installed\nmcp: unavailable"), None);
+        assert_eq!(parse_mcp("installed\n"), None);
+        assert_eq!(parse_mcp("installed\nmcp: ?"), Some(HookState::Unknown));
+    }
+
+    #[test]
+    fn status_carries_the_mcp_state_of_each_agent() {
+        let all = status_all(&fake(Ok("installed\nmcp: not installed\n")));
+        assert!(all.iter().all(|s| s.mcp == Some(HookState::Missing)));
+        assert!(all.iter().all(|s| s.state == HookState::Installed));
+    }
+
+    #[test]
     fn status_asks_for_every_agent() {
         let exec = fake(Ok("not installed\n"));
         let all = status_all(&exec);
@@ -162,15 +201,18 @@ mod tests {
             vec![
                 HookStatus {
                     agent: "claude".into(),
-                    state: HookState::Missing
+                    state: HookState::Missing,
+                    mcp: None
                 },
                 HookStatus {
                     agent: "copilot".into(),
-                    state: HookState::Missing
+                    state: HookState::Missing,
+                    mcp: None
                 },
                 HookStatus {
                     agent: "gemini".into(),
-                    state: HookState::Missing
+                    state: HookState::Missing,
+                    mcp: None
                 },
             ]
         );

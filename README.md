@@ -54,6 +54,17 @@ Panes are managed by `poimen-server`, so the result shows up through its events 
 - **Rename**: right click a pane (Rename... / Rename pane...). Renaming sets the name of the terminal; an empty name clears it.
 - **Send a prompt**: a read-only agent tab has a one-line input above the terminal (it is hidden while the tab controls the terminal, where you type into the terminal directly; the typed text is kept). It waits for the agent to start working (or block), so it needs no controller and works in a read-only tab. It reports a stalled agent and an agent that waits at an approval (nothing is sent); the text is kept after a block.
 
+### Agents
+
+The step that installs the hooks (the *Install hooks* button, or `poimen-server integration install claude|copilot`) also registers `poimen mcp` ([ADR 0012](docs/adr/0012-mcp-server-for-agent-sessions.md)) as an MCP server of the agent, so a session can look around in poimen. Claude Code gets the entry `mcpServers.poimen` in `~/.claude.json`, Copilot CLI in `~/.copilot/mcp-config.json` (`poimen-rc` on a pre-release build, which runs next to the stable one without touching its entries). The one consent covers both; an agent that is already running reads its MCP config when it starts. The read tools:
+
+- `list_spaces`: the spaces of the server with their tabs.
+- `list_terminals`: the terminals, with the agent status and the space of each.
+- `whoami`: the terminal the agent runs in (`POIMEN_TERMINAL_ID`); `{in_poimen: false}` outside poimen.
+- `list_runs`: the agent runs of a repository (`repository` directory), read from its `.agents/events` files.
+
+The entry needs the `poimen` binary next to `poimen-server` or on `PATH`; without it only the hooks are installed and the status says `mcp: unavailable`. Settings > Server shows the state per agent. To remove the MCP entry together with the hooks run `poimen-server integration uninstall claude|copilot`; only the entry marked as poimen's (name, `mcp` argument and binary) is removed, any other `mcpServers` entry stays untouched.
+
 ## Requirements
 
 - Nothing else to run: the installers bundle `poimen-server`. poimen starts it itself, see "Auto start" below.

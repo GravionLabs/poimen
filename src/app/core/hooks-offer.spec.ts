@@ -4,7 +4,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpacesStore, type BackendStatus } from "./spaces-store";
-import { HooksOffer, missingHooks, type HookStatus } from "./hooks-offer";
+import { HooksOffer, missingHooks, missingMcp, type HookStatus } from "./hooks-offer";
 import { TauriBridge } from "./tauri";
 import { UI_STATE_KEY, UI_STORAGE, parseLayout } from "./ui-state";
 
@@ -63,6 +63,19 @@ describe("missingHooks", () => {
   });
 });
 
+describe("missingMcp", () => {
+  it("lists agents with working hooks and no MCP entry", () => {
+    expect(
+      missingMcp([
+        { agent: "claude", state: "installed", mcp: "missing" },
+        { agent: "copilot", state: "missing", mcp: "missing" },
+        { agent: "gemini", state: "installed", mcp: null },
+        { agent: "x", state: "installed", mcp: "installed" },
+      ]),
+    ).toEqual(["claude"]);
+  });
+});
+
 describe("HooksOffer", () => {
   beforeAll(() => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting(), {
@@ -106,6 +119,19 @@ describe("HooksOffer", () => {
 
     const again = setup({ stored: first.data.get(UI_STATE_KEY) });
     await again.start();
+    expect(again.offer.visible()).toBe(false);
+  });
+
+  it("offers the MCP entry with the hooks until Not now, then not again", async () => {
+    bridge.invoke.mockResolvedValue([{ agent: "claude", state: "installed", mcp: "missing" }]);
+    const first = setup();
+    await first.start();
+    expect(first.offer.missing()).toEqual(["claude"]);
+    first.offer.dismiss();
+
+    const again = setup({ stored: first.data.get(UI_STATE_KEY) });
+    await again.start();
+    await again.offer.refresh();
     expect(again.offer.visible()).toBe(false);
   });
 

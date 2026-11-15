@@ -83,7 +83,7 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       {
         id: "server",
         title: "Server",
-        labels: ["Agent hooks", "Install hooks"],
+        labels: ["Agent hooks and MCP", "Install hooks"],
       },
       {
         id: "machines",
