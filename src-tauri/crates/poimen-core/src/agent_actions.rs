@@ -11,8 +11,9 @@ use serde_json::{Map, Value};
 
 use crate::harness::{self, Harness};
 
-/// Placeholders allowed in a `prompt`.
-pub const PLACEHOLDERS: &[&str] = &["nr", "nrs", "title", "url", "repo", "branch", "base"];
+/// Placeholders allowed in a `prompt`. `log` (the file with the failed check logs, #238) is valid
+/// only for `on: "pr"`.
+pub const PLACEHOLDERS: &[&str] = &["nr", "nrs", "title", "url", "repo", "branch", "base", "log"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,17 +154,20 @@ pub fn defaults() -> Vec<Spec> {
                  base {base}. Report your findings, blocking ones separately from notes.",
             )
         },
-        spec(
-            "fix-checks",
-            "Fix checks",
-            On::Pr,
-            When {
-                checks: Some("failed".into()),
-                ..When::default()
-            },
-            "The checks of pull request #{nr} in {repo} ({url}, branch {branch}) failed. Find out \
-             why from the logs and fix it.",
-        ),
+        Spec {
+            run: Run::Worktree,
+            ..spec(
+                "fix-checks",
+                "Fix checks",
+                On::Pr,
+                When {
+                    checks: Some("failed".into()),
+                    ..When::default()
+                },
+                "Fix the failing checks of pull request #{nr} in {repo} ({url}, branch {branch}). \
+                 The logs of the failed runs are in {log}.",
+            )
+        },
         spec(
             "address-review",
             "Address review comments",
@@ -266,6 +270,13 @@ fn parse_one(obj: &Map<String, Value>, id: &str) -> Result<Spec, String> {
         .find(|p| !PLACEHOLDERS.contains(&p.as_str()))
     {
         return Err(format!("unknown placeholder {{{p}}}"));
+    }
+    if on != On::Pr
+        && crate::tasks::placeholders(&prompt)
+            .iter()
+            .any(|p| p == "log")
+    {
+        return Err("{log} is only valid for actions on pull requests".into());
     }
     let when = match obj.get("when") {
         None => When::default(),
@@ -470,6 +481,10 @@ pub struct Item {
     pub url: String,
     pub branch: String,
     pub base: String,
+    /// Absolute path of the failed check logs of a pull request (`{log}`); empty until the app
+    /// has written them, then `{log}` stays as it is.
+    #[serde(default)]
+    pub log: String,
 }
 
 /// Replaces `{name}` placeholders in one pass, so a value that itself contains `{url}` stays text.
@@ -507,18 +522,19 @@ fn prompt_for(template: &str, repo: &str, items: &[&Item]) -> String {
         .map(|i| i.nr.to_string())
         .collect::<Vec<_>>()
         .join(" ");
-    fill(
-        template,
-        &[
-            ("nr", first.nr.to_string()),
-            ("nrs", nrs),
-            ("title", first.title),
-            ("url", first.url),
-            ("repo", repo.to_owned()),
-            ("branch", first.branch),
-            ("base", first.base),
-        ],
-    )
+    let mut values = vec![
+        ("nr", first.nr.to_string()),
+        ("nrs", nrs),
+        ("title", first.title),
+        ("url", first.url),
+        ("repo", repo.to_owned()),
+        ("branch", first.branch),
+        ("base", first.base),
+    ];
+    if !first.log.is_empty() {
+        values.push(("log", first.log));
+    }
+    fill(template, &values)
 }
 
 /// The argv to start for `action` on `items`: one per item for `each`, one for `once` (where `{nr}`
@@ -608,6 +624,7 @@ mod tests {
             url: format!("https://github.com/o/r/issues/{nr}"),
             branch: "feat/x".into(),
             base: "main".into(),
+            log: String::new(),
         }
     }
 
@@ -1039,5 +1056,38 @@ mod tests {
         );
         let none = plan(review, &hs, "o/r", &[item(7, "A")], None, None, Some("  ")).unwrap();
         assert!(!none[0].args.last().unwrap().contains("gh pr"));
+    }
+
+    #[test]
+    fn log_is_valid_only_on_pull_requests() {
+        let (s, w) = parsed(json!([
+            {"id": "ok", "on": "pr", "prompt": "see {log}"},
+            {"id": "bad", "on": "issue", "prompt": "see {log}"}
+        ]));
+        assert_eq!(s.iter().filter(|x| x.id == "ok").count(), 1);
+        assert!(
+            w.iter()
+                .any(|m| m.contains("bad") && m.contains("{log} is only valid"))
+        );
+    }
+
+    #[test]
+    fn fix_checks_is_a_worktree_action_pointing_to_the_log() {
+        let d = defaults();
+        let fix = d.iter().find(|s| s.id == "fix-checks").unwrap();
+        assert_eq!(fix.run, Run::Worktree);
+        let hs = harness::default_harnesses();
+        let mut it = item(9, "T");
+        it.log = "/w/.agents/state/ci-failed-9.log".into();
+        let l = plan(fix, &hs, "o/r", &[it], None, None, None).unwrap();
+        assert!(
+            l[0].args
+                .last()
+                .unwrap()
+                .contains("are in /w/.agents/state/ci-failed-9.log.")
+        );
+        // Without a log yet the placeholder stays for the second planning.
+        let l = plan(fix, &hs, "o/r", &[item(9, "T")], None, None, None).unwrap();
+        assert!(l[0].args.last().unwrap().contains("{log}"));
     }
 }

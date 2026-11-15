@@ -284,6 +284,17 @@ impl<R: Runner> Client<R> {
         }
     }
 
+    /// Runs a read-only `gh` command (`argv` without the program name) uncached, leaving the
+    /// caches alone. Returns stdout; errors map through `map_error`.
+    pub fn read(&self, argv: &[String]) -> Result<String, GhError> {
+        let out = self.run(argv)?;
+        if out.code == Some(0) {
+            Ok(out.stdout)
+        } else {
+            Err(self.classify(None, None, &out.stderr))
+        }
+    }
+
     /// Runs a writing `gh` command (`argv` without the program name) without touching the caches,
     /// then drops the GraphQL cache and the REST disk entries of `repo`, whatever the outcome (a
     /// failed write may have changed something). Returns stdout; errors map through `map_error`.
@@ -617,6 +628,74 @@ pub fn failed_runs<R: Runner>(
         repo.owner, repo.name
     );
     failed_run_ids(&client.rest(&path)?)
+}
+
+/// The most of one run's failed log that is kept: its last 200 KB.
+pub const LOG_LIMIT_PER_RUN: usize = 200 * 1024;
+
+/// The last `max` bytes of `log` (from a character boundary, after a marker line when cut): the
+/// end of a failed log holds the error.
+pub fn trim_log(log: &str, max: usize) -> String {
+    if log.len() <= max {
+        return log.to_owned();
+    }
+    let mut start = log.len() - max;
+    while !log.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("[... {start} earlier bytes trimmed ...]\n{}", &log[start..])
+}
+
+/// `gh run view <id> --log-failed` argv.
+pub fn run_log_argv(repo: &Repo, run_id: u64) -> Vec<String> {
+    vec![
+        "run".into(),
+        "view".into(),
+        run_id.to_string(),
+        "--log-failed".into(),
+        "-R".into(),
+        format!("{}/{}", repo.owner, repo.name),
+    ]
+}
+
+/// The failed logs of the failed runs of commit `sha`, each trimmed to its last
+/// `LOG_LIMIT_PER_RUN` bytes under a `=== run <id> ===` line. No failed run is an error; a run
+/// whose log cannot be read is named in the text, and the error is returned only when no run
+/// gave a log.
+pub fn failed_logs<R: Runner>(
+    client: &Client<R>,
+    repo: &Repo,
+    sha: &str,
+) -> Result<String, GhError> {
+    let runs = failed_runs(client, repo, sha)?;
+    if runs.is_empty() {
+        return Err(GhError::Other {
+            message: "no failed run found for the last commit".into(),
+        });
+    }
+    let mut text = String::new();
+    let mut first_error = None;
+    let mut read = 0;
+    for id in runs {
+        text.push_str(&format!("=== run {id} ===\n"));
+        match client.read(&run_log_argv(repo, id)) {
+            Ok(log) => {
+                read += 1;
+                text.push_str(&trim_log(&log, LOG_LIMIT_PER_RUN));
+            }
+            Err(e) => {
+                text.push_str("(the log could not be read)");
+                first_error.get_or_insert(e);
+            }
+        }
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+    match first_error {
+        Some(e) if read == 0 => Err(e),
+        _ => Ok(text),
+    }
 }
 
 #[cfg(test)]
@@ -1128,5 +1207,57 @@ mod tests {
         );
         assert!(failed_runs(&c, &r, "abc; rm").is_err());
         assert!(failed_runs(&c, &r, "").is_err());
+    }
+
+    #[test]
+    fn trim_log_keeps_the_end_on_a_character_boundary() {
+        assert_eq!(trim_log("short", 10), "short");
+        let t = trim_log("abcdefghij", 4);
+        assert!(t.ends_with("\nghij"), "{t}");
+        assert!(t.starts_with("[... 6 earlier bytes trimmed ...]"));
+        // "é" is two bytes; a cut inside it moves forward.
+        let t = trim_log("aéé", 3);
+        assert!(t.ends_with("\né"), "{t}");
+        let big = "x".repeat(LOG_LIMIT_PER_RUN + 5000);
+        assert!(trim_log(&big, LOG_LIMIT_PER_RUN).len() < LOG_LIMIT_PER_RUN + 100);
+    }
+
+    #[test]
+    fn failed_logs_read_each_failed_run_of_the_sha() {
+        let body = include_str!("../fixtures/github-actions-runs.json");
+        let runs = format!(
+            "HTTP/2.0 200 OK\r\nEtag: W/\"r\"\r\n\r\n{}",
+            body.replace('\n', " ")
+        );
+        let f = fake(vec![
+            out(0, &runs, ""),
+            out(0, "log of 102\n", ""),
+            out(0, &"y".repeat(LOG_LIMIT_PER_RUN + 10), ""),
+        ]);
+        let c = Client::new(&f, temp_dir("logs"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        let text = failed_logs(&c, &r, "abc123").unwrap();
+        assert!(text.starts_with("=== run 102 ===\nlog of 102\n=== run 105 ===\n[... 10 earlier"));
+        let calls = f.calls.borrow();
+        assert_eq!(
+            calls[1],
+            ["run", "view", "102", "--log-failed", "-R", "o/n"]
+        );
+        assert_eq!(calls[2][2], "105");
+    }
+
+    #[test]
+    fn failed_logs_without_runs_or_logs_are_errors() {
+        let none = "HTTP/2.0 200 OK\r\nEtag: W/\"r\"\r\n\r\n{\"workflow_runs\":[]}";
+        let f = fake(vec![out(0, none, "")]);
+        let c = Client::new(&f, temp_dir("nologs"));
+        let r = Repo {
+            owner: "o".into(),
+            name: "n".into(),
+        };
+        assert!(failed_logs(&c, &r, "abc123").is_err());
     }
 }

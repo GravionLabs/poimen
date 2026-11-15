@@ -370,6 +370,34 @@ pub fn write_comments(dir: &str, content: &str, home: Option<&Path>) -> Result<S
     write_comments_in(&validate(dir, home)?, content)
 }
 
+/// Writes `content` to `<top>/.agents/state/ci-failed-<nr>.log` (replacing an earlier one),
+/// creating the directories and excluding `.agents/state/` once; returns the absolute path.
+fn write_ci_log_in(top: &str, nr: u64, content: &str) -> Result<String, String> {
+    let agents = Path::new(top).join(".agents");
+    plain_dir(&agents)?;
+    let state = agents.join("state");
+    plain_dir(&state)?;
+    exclude_state(top)?;
+    let file = state.join(format!("ci-failed-{nr}.log"));
+    // A symlink left at that name is removed, never followed.
+    match std::fs::remove_file(&file) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", file.display())),
+    }
+    std::fs::write(&file, content).map_err(|e| format!("{}: {e}", file.display()))?;
+    Ok(file.to_string_lossy().into_owned())
+}
+
+pub fn write_ci_log(
+    dir: &str,
+    nr: u64,
+    content: &str,
+    home: Option<&Path>,
+) -> Result<String, String> {
+    write_ci_log_in(&validate(dir, home)?, nr, content)
+}
+
 /// Largest findings file the app reads.
 const MAX_FINDINGS: u64 = 1024 * 1024;
 const FINDINGS_PATH: [&str; 3] = [".agents", "state", "findings.json"];
@@ -784,6 +812,21 @@ mod tests {
         assert_ne!(first, second);
         assert!(first.starts_with(&format!("{}/.agents/state/comments-", fx.dir())));
         assert_eq!(std::fs::read_to_string(&first).unwrap(), "# one\n");
+        let exclude = std::fs::read_to_string(fx.app.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude.matches(".agents/state/").count(), 1);
+        let status = crate::git::run_bytes(&fx.dir(), &["status", "--porcelain"]).unwrap();
+        assert!(!text(&status).contains(".agents"));
+    }
+
+    #[test]
+    fn ci_log_is_written_replaced_and_excluded_once() {
+        let fx = Fixture::new(false);
+        let first = write_ci_log_in(&fx.dir(), 12, "one\n").unwrap();
+        let second = write_ci_log_in(&fx.dir(), 12, "two\n").unwrap();
+        assert_eq!(first, second);
+        assert!(first.ends_with("/.agents/state/ci-failed-12.log"));
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), "two\n");
+        write_comments_in(&fx.dir(), "# c\n").unwrap();
         let exclude = std::fs::read_to_string(fx.app.join(".git/info/exclude")).unwrap();
         assert_eq!(exclude.matches(".agents/state/").count(), 1);
         let status = crate::git::run_bytes(&fx.dir(), &["status", "--porcelain"]).unwrap();

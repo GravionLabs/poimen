@@ -15,6 +15,8 @@ import {
   matches,
   pullTarget,
   summaryText,
+  FORK_REASON,
+  usesLog,
   worktreeLabel,
   type ActionTarget,
 } from "./agent-actions";
@@ -198,6 +200,27 @@ describe("AgentActions", () => {
 
   const review = (): AgentAction => action({ id: "review", label: "Review", on: "pr" });
 
+  it("a log action is disabled with the reason for a pull request from a fork", async () => {
+    tauri.answer("get_agent_actions", () => ({
+      actions: [
+        { id: "fix", label: "Fix", on: "pr", prompt: "logs in {log}", source: "default" },
+        { id: "rev", label: "Rev", on: "pr", prompt: "p", source: "default" },
+      ],
+    }));
+    await actions.load("/src/n");
+    const own = actions.offered([pullTarget(pull(1))]);
+    expect(own.map((o) => [o.action.id, o.enabled, o.reason])).toEqual([
+      ["fix", true, null],
+      ["rev", true, null],
+    ]);
+    const fork = actions.offered([pullTarget(pull(2, { isCrossRepository: true }))]);
+    expect(fork.map((o) => [o.action.id, o.enabled, o.reason])).toEqual([
+      ["fix", false, FORK_REASON],
+      ["rev", true, null],
+    ]);
+    expect(usesLog(action({ on: "issue", prompt: "{log}" }))).toBe(false);
+  });
+
   it("loads the actions of a repository and offers the matching ones", async () => {
     tauri.answer("get_agent_actions", () => ({
       actions: [
@@ -250,6 +273,7 @@ describe("AgentActions", () => {
             url: "https://github.com/o/n/pull/7",
             branch: "feat/7-x",
             base: "main",
+            log: "",
           },
         ],
         harness: null,
@@ -378,6 +402,35 @@ describe("AgentActions", () => {
       ]);
       expect(tauri.calls("agent_start")[0]).toMatchObject({ terminalId: "root1" });
       expect(summary).toEqual({ started: [7], failed: [] });
+    });
+
+    it("a log action writes the failed logs into the worktree, then plans with the file", async () => {
+      tauri.answer("github_pr_ci_log", () => "/src/n-pr7/.agents/state/ci-failed-7.log");
+      tauri.answer("agent_action_plan", (args) => {
+        const log = (args?.["items"] as { log: string }[])[0].log;
+        return [{ kind: "claude", args: [`logs in ${log || "{log}"}`] }];
+      });
+      const fix = wt({ on: "pr", prompt: "fix, logs in {log}" });
+      const summary = await actions.request(fix, [pullTarget(pull(7))], false);
+      expect(tauri.calls("github_pr_ci_log")).toEqual([
+        { root: "/src/n", number: 7, worktree: "/src/n-pr7" },
+      ]);
+      expect(tauri.calls("agent_start")[0]).toMatchObject({
+        args: ["logs in /src/n-pr7/.agents/state/ci-failed-7.log"],
+      });
+      expect(summary).toEqual({ started: [7], failed: [] });
+    });
+
+    it("a failed log collection names the step and starts no space", async () => {
+      tauri.answer("github_pr_ci_log", () => {
+        throw "no failed run found";
+      });
+      const fix = wt({ on: "pr", prompt: "logs in {log}" });
+      const summary = await actions.request(fix, [pullTarget(pull(7))], false);
+      expect(summary?.failed).toEqual([
+        { numbers: [7], reason: "logs failed: no failed run found" },
+      ]);
+      expect(tauri.calls("create_space")).toEqual([]);
     });
 
     it("an existing space is focused and the agent starts in a new tab there", async () => {
