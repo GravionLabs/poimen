@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IssueFormPane } from "./issue-form/issue-form";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
@@ -219,5 +220,12 @@ describe("agent actions in the pull request views", () => {
     await fixture.whenStable();
     expect(tauri.calls("agent_action_plan")[0]).toMatchObject({ harness: "claude", model: "opus" });
     expect(tauri.calls("agent_start")).toHaveLength(1);
+  });
+});
+
+// The form has its own spec (issue-detail.spec.ts); here it stays empty.
+beforeEach(() => {
+  TestBed.overrideComponent(IssueFormPane, {
+    set: { templateUrl: undefined, styleUrl: undefined, template: "" },
   });
 });

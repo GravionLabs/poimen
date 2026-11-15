@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IssueFormPane } from "./issue-form/issue-form";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
@@ -9,6 +10,11 @@ import {
   GithubIssues,
   NO_ISSUE_FILTER,
   buildTree,
+  childLevel,
+  formReady,
+  levelPrefix,
+  newIssueForm,
+  parentCandidates,
   filterTree,
   flattenTree,
   issueLevel,
@@ -255,6 +261,9 @@ const RESULT: RepoIssues[] = [
 
 async function render(result: RepoIssues[] = RESULT) {
   tauri.answer("github_issues", () => result);
+  TestBed.overrideComponent(IssueFormPane, {
+    set: { templateUrl: undefined, styleUrl: undefined, template: "", imports: [] },
+  });
   TestBed.overrideComponent(IssuesSection, {
     set: {
       templateUrl: undefined,
@@ -366,6 +375,9 @@ describe("IssuesSection", () => {
     tauri.answer("github_issues", () => {
       throw new Error("boom");
     });
+    TestBed.overrideComponent(IssueFormPane, {
+      set: { templateUrl: undefined, styleUrl: undefined, template: "", imports: [] },
+    });
     TestBed.overrideComponent(IssuesSection, {
       set: {
         templateUrl: undefined,
@@ -377,5 +389,53 @@ describe("IssuesSection", () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector("[role=alert]").textContent).toContain("boom");
+  });
+});
+
+describe("new issue form (#341)", () => {
+  it("derives the child level: Epic gives Feature, Feature gives PBI, the rest none", () => {
+    expect(childLevel("epic")).toBe("feature");
+    expect(childLevel("feature")).toBe("pbi");
+    expect(childLevel("pbi")).toBeNull();
+    expect(childLevel("bug")).toBeNull();
+    expect(childLevel("other")).toBeNull();
+    expect(levelPrefix("feature")).toBe("[Feature] ");
+    expect(levelPrefix("pbi")).toBe("[Pbi] ");
+    expect(levelPrefix("other")).toBe("");
+    expect(levelPrefix(null)).toBe("");
+  });
+
+  it("presets title prefix and level label from the parent", () => {
+    const epic = newIssueForm("o/n", "/r", issue(1, { labels: ["epic"], title: "Big" }));
+    expect(epic).toMatchObject({ title: "[Feature] ", labels: ["feature"], parent: { number: 1 } });
+    const byPrefix = newIssueForm("o/n", "/r", issue(2, { title: "[Feature] F" }));
+    expect(byPrefix).toMatchObject({ title: "[Pbi] ", labels: ["pbi"] });
+    const top = newIssueForm("o/n", "/r", null);
+    expect(top).toMatchObject({ title: "", labels: [], parent: null });
+    expect(newIssueForm("o/n", "/r", issue(3, { labels: ["bug"] })).labels).toEqual([]);
+  });
+
+  it("is ready only with a title beyond the prefix", () => {
+    expect(formReady({ title: "" })).toBe(false);
+    expect(formReady({ title: "[Feature] " })).toBe(false);
+    expect(formReady({ title: "[Feature] Do it" })).toBe(true);
+    expect(formReady({ title: "Plain" })).toBe(true);
+  });
+
+  it("offers parents by number or title, never itself, its parent or its descendants", () => {
+    const all = [
+      issue(1),
+      issue(2, { parent: parent(1), title: "Child" }),
+      issue(3, { parent: parent(2), title: "Grandchild" }),
+      issue(4, { title: "Other thing" }),
+      issue(5, { title: "Another" }),
+    ];
+    const nums = (q: string) => parentCandidates(all, 1, null, q).map((i) => i.number);
+    expect(nums("")).toEqual([4, 5]);
+    expect(parentCandidates(all, 3, 2, "").map((i) => i.number)).toEqual([1, 4, 5]);
+    expect(nums("#4")).toEqual([4]);
+    expect(nums("another")).toEqual([5]);
+    expect(nums("child")).toEqual([]);
+    expect(parentCandidates(all, 1, null, "", 1)).toHaveLength(1);
   });
 });

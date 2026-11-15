@@ -57,6 +57,85 @@ export function issueLevel(issue: Pick<Issue, "labels" | "title">): Level {
   return prefix ? (prefix[1].toLowerCase() as Level) : "other";
 }
 
+/** The level a sub-issue of `parent` gets: Epic gets Feature, Feature gets PBI, else none. */
+export function childLevel(parent: Level): Level | null {
+  return parent === "epic" ? "feature" : parent === "feature" ? "pbi" : null;
+}
+
+/** The title prefix of a level (`[Feature] `), empty for none. */
+export function levelPrefix(level: Level | null): string {
+  return level === null || level === "other" ? "" : `[${level[0].toUpperCase()}${level.slice(1)}] `;
+}
+
+/** The form for a new issue (#341): level label and title prefix follow the parent, both editable. */
+export interface IssueForm {
+  repo: string;
+  root: string;
+  parent: { number: number; title: string } | null;
+  title: string;
+  body: string;
+  labels: string[];
+  milestone: string | null;
+  /** `body` shown rendered. */
+  previewing: boolean;
+}
+
+/** A blank form, or the one for a sub-issue of `parent` with the level of its children. */
+export function newIssueForm(
+  repo: string,
+  root: string,
+  parent: Pick<Issue, "number" | "title" | "labels"> | null,
+): IssueForm {
+  const level = parent ? childLevel(issueLevel(parent)) : null;
+  return {
+    repo,
+    root,
+    parent: parent ? { number: parent.number, title: parent.title } : null,
+    title: levelPrefix(level),
+    body: "",
+    labels: level && level !== "other" ? [level] : [],
+    milestone: null,
+    previewing: false,
+  };
+}
+
+/** Whether the form can be sent: a title beyond the bare prefix. */
+export function formReady(form: Pick<IssueForm, "title">): boolean {
+  return form.title.replace(/^\s*\[[^\]]*\]/, "").trim() !== "";
+}
+
+/**
+ * Issues that can become the parent of `number`: not itself, not its current parent, not one of
+ * its descendants; matched by number (`12`, `#12`) or title, at most `limit`.
+ */
+export function parentCandidates(
+  issues: readonly Issue[],
+  number: number,
+  currentParent: number | null,
+  query: string,
+  limit = 8,
+): Issue[] {
+  const below = new Set<number>([number]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const i of issues) {
+      if (i.parent && below.has(i.parent.number) && !below.has(i.number)) {
+        below.add(i.number);
+        grew = true;
+      }
+    }
+  }
+  const q = query.trim().toLowerCase().replace(/^#/, "");
+  return issues
+    .filter(
+      (i) =>
+        !below.has(i.number) &&
+        i.number !== currentParent &&
+        (q === "" || String(i.number) === q || i.title.toLowerCase().includes(q)),
+    )
+    .slice(0, limit);
+}
+
 /** An issue in the tree. */
 export interface IssueNode {
   issue: Issue;
@@ -419,6 +498,7 @@ export class GithubIssues {
     this._selected.set({ repo, number });
     this._cursor.set(key);
     this.resetEdit();
+    this.parentQuery.set(null);
     this._detailKey.set(key);
     this._detail.set(null);
     this._detailError.set(null);
@@ -450,6 +530,111 @@ export class GithubIssues {
   /** Label names and milestone titles of the repository of the open issue, for the pickers. */
   readonly labelOptions = signal<string[]>([]);
   readonly milestoneOptions = signal<string[]>([]);
+  /** The new-issue form, null while closed. */
+  readonly form = signal<IssueForm | null>(null);
+  /** The text of the "Change parent" search, null while the picker is closed. */
+  readonly parentQuery = signal<string | null>(null);
+
+  /** Opens the form for a top-level issue of `repo`, or a sub-issue of `parent`. */
+  openForm(repo: string, parent: number | null = null): void {
+    const r = this.okRepos().find((x) => x.repo === repo);
+    if (!r) return;
+    const p = parent === null ? null : (r.issues.find((i) => i.number === parent) ?? null);
+    if (parent !== null && !p) return;
+    this.form.set(newIssueForm(repo, r.root, p));
+    void this.loadFormOptions(repo, r.root);
+  }
+
+  closeForm(): void {
+    this.form.set(null);
+  }
+
+  patchForm(change: Partial<IssueForm>): void {
+    this.form.update((f) => (f ? { ...f, ...change } : f));
+  }
+
+  private async loadFormOptions(repo: string, root: string): Promise<void> {
+    const [labels, milestones] = await Promise.all([
+      this.bridge.invoke<string[]>("github_labels", { root }).catch(() => []),
+      this.bridge
+        .invoke<{ status: string; milestones?: { title: string }[] }[]>("github_milestones", {
+          dirs: [root],
+        })
+        .catch(() => []),
+    ]);
+    if (this.form()?.repo !== repo) return;
+    this.labelOptions.set(labels ?? []);
+    this.milestoneOptions.set(
+      (milestones ?? [])
+        .flatMap((r) => (r.status === "ok" ? (r.milestones ?? []) : []))
+        .map((m) => m.title),
+    );
+  }
+
+  /** Creates the issue, then selects it and opens its pane. A failure is a notification. */
+  async submitForm(): Promise<boolean> {
+    const f = this.form();
+    if (!f || !formReady(f) || this._busy()) return false;
+    this._busy.set(true);
+    let made: { number: number; url: string };
+    try {
+      made = await this.bridge.invoke("github_issue_create", {
+        root: f.root,
+        issue: {
+          title: f.title.trim(),
+          body: f.body,
+          labels: f.labels,
+          milestone: f.milestone,
+          parent: f.parent?.number ?? null,
+        },
+      });
+    } catch (err) {
+      const e = ghErrorOf(err);
+      this.spaces.notify(`Create issue: ${typeof e === "string" ? e : errorText(e)}`);
+      return false;
+    } finally {
+      this._busy.set(false);
+    }
+    this.form.set(null);
+    await this.load(true);
+    await this.openDetail(f.repo, made.number);
+    return true;
+  }
+
+  /** Moves the open issue under `newParent` (an issue of the same repository). */
+  async changeParent(newParent: number): Promise<boolean> {
+    const d = this._detail();
+    if (!d || !canEditIssue(d)) return false;
+    const old =
+      d.parent && d.parent.repo.toLowerCase() === this.detailRepo()?.toLowerCase()
+        ? d.parent.number
+        : null;
+    this.parentQuery.set(null);
+    return this.write("Change parent of", (root) =>
+      this.bridge.invoke("github_issue_change_parent", {
+        root,
+        number: d.number,
+        oldParent: old,
+        newParent,
+      }),
+    );
+  }
+
+  private detailRepo(): string | null {
+    const key = this._detailKey();
+    return key === null ? null : key.slice(0, key.lastIndexOf("#"));
+  }
+
+  /** Issues the open one can move under (see `parentCandidates`). */
+  parentOptions(): Issue[] {
+    const q = this.parentQuery();
+    const sel = this.detailIssue();
+    const d = this._detail();
+    if (q === null || !sel || !d) return [];
+    const all = this.okRepos().find((r) => r.repo === sel.repo)?.issues ?? [];
+    return parentCandidates(all, d.number, d.parent?.number ?? null, q);
+  }
+
   /** The title being edited, null while it is not. */
   readonly titleDraft = signal<string | null>(null);
   /** The description being edited, null while it is not; `previewing` shows it rendered. */

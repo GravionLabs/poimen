@@ -585,6 +585,173 @@ pub fn run_action<R: Runner>(
         .map(|_| ())
 }
 
+/// A new issue (`github_issue_create`); `parent` links it as a sub-issue of that issue.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NewIssue {
+    pub title: String,
+    pub body: String,
+    pub labels: Vec<String>,
+    /// Title of the milestone.
+    pub milestone: Option<String>,
+    pub parent: Option<u64>,
+}
+
+/// The issue `github_issue_create` made.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CreatedIssue {
+    pub number: u64,
+    pub url: String,
+}
+
+fn slug(repo: &Repo) -> String {
+    format!("{}/{}", repo.owner, repo.name)
+}
+
+/// `gh issue create` argv: the body is `--body-file -` (stdin), one `--label` per label; a blank or
+/// multi-line title and a blank value or one with a comma are refused.
+pub fn create_argv(repo: &Repo, new: &NewIssue) -> Result<Vec<String>, GhError> {
+    let title = new.title.trim();
+    if title.is_empty() || title.contains('\n') {
+        return Err(other("the title must be one non-blank line"));
+    }
+    let mut argv: Vec<String> = ["issue", "create", "--title", title, "--body-file", "-"]
+        .map(String::from)
+        .to_vec();
+    for label in &new.labels {
+        let label = label.trim();
+        if label.is_empty() || label.contains(',') {
+            return Err(other(&format!("invalid label: {label:?}")));
+        }
+        argv.extend(["--label".into(), label.to_owned()]);
+    }
+    if let Some(m) = &new.milestone {
+        let m = m.trim();
+        if m.is_empty() {
+            return Err(other("the milestone must not be blank"));
+        }
+        argv.extend(["--milestone".into(), m.to_owned()]);
+    }
+    argv.extend(["-R".into(), slug(repo)]);
+    Ok(argv)
+}
+
+/// The last non-blank line of what `gh issue create` prints (the issue URL).
+fn printed_url(output: &str) -> &str {
+    output
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+}
+
+/// The issue number at the end of the URL `gh issue create` prints.
+pub fn number_of_url(output: &str) -> Option<u64> {
+    printed_url(output).rsplit('/').next()?.parse().ok()
+}
+
+/// The REST id of issue `number` (the sub-issue endpoints take it, not the number).
+fn issue_id<R: Runner>(client: &Client<R>, repo: &Repo, number: u64) -> Result<u64, GhError> {
+    let argv: Vec<String> = [
+        "api",
+        &format!("repos/{}/issues/{number}", slug(repo)),
+        "--jq",
+        ".id",
+    ]
+    .map(String::from)
+    .to_vec();
+    client
+        .read_fresh(&argv)?
+        .trim()
+        .parse()
+        .map_err(|_| other("unexpected GitHub answer"))
+}
+
+/// REST call on the sub-issues of `parent`: `POST .../sub_issues` or `DELETE .../sub_issue`.
+pub fn sub_issue_argv(repo: &Repo, parent: u64, sub_id: u64, add: bool) -> Vec<String> {
+    let (method, path) = if add {
+        ("POST", "sub_issues")
+    } else {
+        ("DELETE", "sub_issue")
+    };
+    vec![
+        "api".into(),
+        "-X".into(),
+        method.into(),
+        format!("repos/{}/issues/{parent}/{path}", slug(repo)),
+        "-F".into(),
+        format!("sub_issue_id={sub_id}"),
+    ]
+}
+
+/// Creates an issue in the repository of `root` and, with `parent`, links it as its sub-issue.
+pub fn run_create<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    new: &NewIssue,
+) -> Result<CreatedIssue, GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    create_issue(client, &repo, new)
+}
+
+fn create_issue<R: Runner>(
+    client: &Client<R>,
+    repo: &Repo,
+    new: &NewIssue,
+) -> Result<CreatedIssue, GhError> {
+    let argv = create_argv(repo, new)?;
+    let out = client.mutate_input(repo, &argv, &new.body)?;
+    let number = number_of_url(&out).ok_or_else(|| other("unexpected gh answer"))?;
+    if let Some(parent) = new.parent {
+        let linked = issue_id(client, repo, number)
+            .and_then(|id| client.mutate(repo, &sub_issue_argv(repo, parent, id, true)));
+        if let Err(e) = linked {
+            let why = match e {
+                GhError::Other { message } => message,
+                e => format!("{e:?}"),
+            };
+            return Err(other(&format!(
+                "created #{number} but could not link it to #{parent}: {why}"
+            )));
+        }
+    }
+    Ok(CreatedIssue {
+        number,
+        url: printed_url(&out).to_owned(),
+    })
+}
+
+/// Moves issue `number` under `new_parent`: removed from `old_parent` first when it has one.
+pub fn run_change_parent<R: Runner>(
+    client: &Client<R>,
+    root: &str,
+    number: u64,
+    old_parent: Option<u64>,
+    new_parent: u64,
+) -> Result<(), GhError> {
+    let repo = repo_of(std::path::Path::new(root)).ok_or(GhError::NotFound)?;
+    change_parent(client, &repo, number, old_parent, new_parent)
+}
+
+fn change_parent<R: Runner>(
+    client: &Client<R>,
+    repo: &Repo,
+    number: u64,
+    old_parent: Option<u64>,
+    new_parent: u64,
+) -> Result<(), GhError> {
+    if new_parent == number || old_parent == Some(new_parent) {
+        return Err(other("pick another issue as the parent"));
+    }
+    let id = issue_id(client, repo, number)?;
+    if let Some(old) = old_parent {
+        client.mutate(repo, &sub_issue_argv(repo, old, id, false))?;
+    }
+    client.mutate(repo, &sub_issue_argv(repo, new_parent, id, true))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1000,5 +1167,212 @@ mod tests {
         let g = gh("a\r\nb");
         let out = edit_issue(&client(&g), &repo(), 7, &body_edit(Some("a\nb"), false));
         assert_eq!(out, Ok(EditOutcome::Saved));
+    }
+
+    /// Answers `issue create` with a URL, `api .../issues/<n> --jq .id` with `1000 + n`.
+    struct Rest {
+        calls: RefCell<Vec<Vec<String>>>,
+        inputs: RefCell<Vec<String>>,
+        fail_post: bool,
+    }
+
+    impl Runner for &Rest {
+        fn gh(&self, args: &[String]) -> io::Result<Output> {
+            self.calls.borrow_mut().push(args.to_vec());
+            let mut stdout = String::new();
+            let mut code = Some(0);
+            if args[0] == "issue" {
+                stdout = "https://github.com/o/n/issues/42\n".into();
+            } else if args.contains(&"--jq".to_owned()) {
+                let n: u64 = args[1].rsplit('/').next().unwrap().parse().unwrap();
+                stdout = format!("{}\n", 1000 + n);
+            } else if self.fail_post && args.contains(&"POST".to_owned()) {
+                code = Some(1);
+            }
+            Ok(Output {
+                code,
+                stdout,
+                stderr: if code == Some(1) {
+                    "boom".into()
+                } else {
+                    String::new()
+                },
+            })
+        }
+        fn gh_input(&self, args: &[String], input: &str) -> io::Result<Output> {
+            self.inputs.borrow_mut().push(input.into());
+            self.gh(args)
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::from_secs(1)
+        }
+    }
+
+    fn rest(fail_post: bool) -> Rest {
+        Rest {
+            calls: RefCell::new(vec![]),
+            inputs: RefCell::new(vec![]),
+            fail_post,
+        }
+    }
+
+    fn rclient(r: &Rest) -> Client<&Rest> {
+        Client::new(r, std::env::temp_dir().join("poimen-issues-create-test"))
+    }
+
+    fn new_issue() -> NewIssue {
+        NewIssue {
+            title: " Add thing ".into(),
+            body: "text\n".into(),
+            labels: vec!["pbi".into(), "ui".into()],
+            milestone: Some("M3".into()),
+            parent: None,
+        }
+    }
+
+    #[test]
+    fn create_argv_has_body_on_stdin_labels_and_milestone() {
+        assert_eq!(
+            create_argv(&repo(), &new_issue()).unwrap(),
+            [
+                "issue",
+                "create",
+                "--title",
+                "Add thing",
+                "--body-file",
+                "-",
+                "--label",
+                "pbi",
+                "--label",
+                "ui",
+                "--milestone",
+                "M3",
+                "-R",
+                "o/n"
+            ]
+        );
+    }
+
+    #[test]
+    fn create_argv_refuses_bad_input() {
+        for bad in [
+            NewIssue {
+                title: "  ".into(),
+                ..new_issue()
+            },
+            NewIssue {
+                title: "a\nb".into(),
+                ..new_issue()
+            },
+            NewIssue {
+                labels: vec!["a,b".into()],
+                ..new_issue()
+            },
+            NewIssue {
+                milestone: Some(" ".into()),
+                ..new_issue()
+            },
+        ] {
+            assert!(create_argv(&repo(), &bad).is_err());
+        }
+    }
+
+    #[test]
+    fn the_number_comes_from_the_printed_url() {
+        assert_eq!(
+            number_of_url("\nhttps://github.com/o/n/issues/42\n"),
+            Some(42)
+        );
+        assert_eq!(number_of_url("nope"), None);
+        assert_eq!(number_of_url(""), None);
+    }
+
+    #[test]
+    fn sub_issue_calls_are_post_and_delete_with_the_id() {
+        assert_eq!(
+            sub_issue_argv(&repo(), 5, 1007, true),
+            [
+                "api",
+                "-X",
+                "POST",
+                "repos/o/n/issues/5/sub_issues",
+                "-F",
+                "sub_issue_id=1007"
+            ]
+        );
+        assert_eq!(
+            sub_issue_argv(&repo(), 5, 1007, false),
+            [
+                "api",
+                "-X",
+                "DELETE",
+                "repos/o/n/issues/5/sub_issue",
+                "-F",
+                "sub_issue_id=1007"
+            ]
+        );
+    }
+
+    #[test]
+    fn creating_a_sub_issue_posts_the_new_issues_id_to_the_parent() {
+        let r = rest(false);
+        let new = NewIssue {
+            parent: Some(5),
+            ..new_issue()
+        };
+        let made = create_issue(&rclient(&r), &repo(), &new).unwrap();
+        assert_eq!(made.number, 42);
+        assert_eq!(made.url, "https://github.com/o/n/issues/42");
+        assert_eq!(r.inputs.borrow().as_slice(), ["text\n"]);
+        let calls = r.calls.borrow();
+        assert_eq!(calls[1][..2], ["api", "repos/o/n/issues/42"]);
+        assert_eq!(
+            calls[2],
+            [
+                "api",
+                "-X",
+                "POST",
+                "repos/o/n/issues/5/sub_issues",
+                "-F",
+                "sub_issue_id=1042"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_top_level_issue_makes_no_rest_call_and_a_link_failure_names_the_issue() {
+        let r = rest(false);
+        create_issue(&rclient(&r), &repo(), &new_issue()).unwrap();
+        assert_eq!(r.calls.borrow().len(), 1);
+        let r = rest(true);
+        let new = NewIssue {
+            parent: Some(5),
+            ..new_issue()
+        };
+        let err = create_issue(&rclient(&r), &repo(), &new).unwrap_err();
+        assert!(format!("{err:?}").contains("created #42"));
+    }
+
+    #[test]
+    fn changing_the_parent_deletes_from_the_old_then_posts_to_the_new() {
+        let r = rest(false);
+        change_parent(&rclient(&r), &repo(), 9, Some(2), 3).unwrap();
+        {
+            let calls = r.calls.borrow();
+            assert_eq!(calls[1][2..4], ["DELETE", "repos/o/n/issues/2/sub_issue"]);
+            assert_eq!(calls[2][2..4], ["POST", "repos/o/n/issues/3/sub_issues"]);
+            assert_eq!(calls[2][5], "sub_issue_id=1009");
+        }
+        let r = rest(false);
+        change_parent(&rclient(&r), &repo(), 9, None, 3).unwrap();
+        assert_eq!(r.calls.borrow().len(), 2, "no delete without an old parent");
+    }
+
+    #[test]
+    fn changing_to_itself_or_the_same_parent_is_refused() {
+        let r = rest(false);
+        assert!(change_parent(&rclient(&r), &repo(), 9, Some(2), 9).is_err());
+        assert!(change_parent(&rclient(&r), &repo(), 9, Some(2), 2).is_err());
+        assert!(r.calls.borrow().is_empty());
     }
 }

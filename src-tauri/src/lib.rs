@@ -573,6 +573,42 @@ async fn github_issue_edit(
     })?
 }
 
+/// Creates an issue, as a sub-issue of `parent` when given. Explicit user input only.
+#[tauri::command]
+async fn github_issue_create(
+    client: State<'_, GithubClient>,
+    root: String,
+    issue: github_issues::NewIssue,
+) -> Result<github_issues::CreatedIssue, github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || github_issues::run_create(&client, &root, &issue))
+        .await
+        .map_err(|e| github::GhError::Other {
+            message: e.to_string(),
+        })?
+}
+
+/// Moves an issue under another parent (removed from the old one first).
+#[tauri::command]
+async fn github_issue_change_parent(
+    client: State<'_, GithubClient>,
+    root: String,
+    number: u64,
+    old_parent: Option<u64>,
+    new_parent: u64,
+) -> Result<(), github::GhError> {
+    let client = client.inner().clone();
+    let root = github_pulls::expand_home(&root, home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        github_issues::run_change_parent(&client, &root, number, old_parent, new_parent)
+    })
+    .await
+    .map_err(|e| github::GhError::Other {
+        message: e.to_string(),
+    })?
+}
+
 /// Closes an issue (completed or not planned) or reopens it. Explicit user input only.
 #[tauri::command]
 async fn github_issue_action(
@@ -2599,6 +2635,8 @@ pub fn run() {
             github_issue_detail,
             github_issue_edit,
             github_issue_action,
+            github_issue_create,
+            github_issue_change_parent,
             github_milestones,
             github_milestone_write,
             github_milestone_title,

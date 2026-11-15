@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { IssueFormPane } from "../issue-form/issue-form";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
@@ -513,5 +514,12 @@ describe("merge, re-run and people", () => {
     q(el, "[data-testid=merge-submit]")!.click();
     await fixture.whenStable();
     expect(TestBed.inject(SpaceActions).warning()).toBe("Merge #1: base branch was modified");
+  });
+});
+
+// The form has its own spec (issue-detail.spec.ts); here it stays empty.
+beforeEach(() => {
+  TestBed.overrideComponent(IssueFormPane, {
+    set: { templateUrl: undefined, styleUrl: undefined, template: "" },
   });
 });
