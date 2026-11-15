@@ -100,6 +100,12 @@ export interface RunEventRow {
   step: string | null;
   outcome: string | null;
   link: string | null;
+  /** Core `reason` of the event (#781). */
+  reason?: string | null;
+  /** Core `text` of the event. */
+  text?: string | null;
+  /** Title (else id) of the event's `subject`. */
+  subject?: string | null;
 }
 
 /** A run as the panel shows it: the core run state plus tone and host. */
@@ -275,6 +281,9 @@ function eventRows(value: unknown): RunEventRow[] {
       step: str(v["step"]),
       outcome: str(v["outcome"]),
       link: str(v["link"]),
+      reason: str(v["reason"]),
+      text: str(v["text"]),
+      subject: str(v["subject"]),
     });
   }
   return rows;

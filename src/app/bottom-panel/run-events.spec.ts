@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { clockText, parseStatus, runTitle, type DeliverCard } from "../deliver/deliver-status";
+import {
+  clockText,
+  parseStatus,
+  runTitle,
+  type DeliverCard,
+  type RunEventRow,
+} from "../deliver/deliver-status";
 import {
   eventTime,
+  foldSkipped,
   pickHolds,
   pickRunOf,
   runLabel,
@@ -288,5 +295,71 @@ describe("run label", () => {
     const run = choice({});
     expect(runTitle(run.status)).toBe("20261110-042412-3a7a");
     expect(runTitle(run.status, "/src/poimen\\")).toBe("poimen");
+  });
+});
+
+describe("foldSkipped", () => {
+  const row = (over: Partial<RunEventRow>): RunEventRow => ({
+    seq: null,
+    ts: null,
+    type: "progress",
+    tone: "neutral",
+    task: null,
+    step: null,
+    outcome: null,
+    link: null,
+    ...over,
+  });
+  const skip = (task: string, tone: RunEventRow["tone"] = "neutral", reason = "blocked") => [
+    row({ type: "task.started", task, subject: `PBI ${task}`, tone }),
+    row({ type: "task.finished", task, outcome: "skipped", reason, text: `why ${task}`, tone }),
+  ];
+
+  it("folds consecutive skipped pairs into one item with count and reason", () => {
+    const items = foldSkipped([
+      row({ type: "run.started" }),
+      ...skip("a"),
+      ...skip("b"),
+      row({ type: "task.started", task: "c" }),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(["row", "skipped", "row"]);
+    const fold = items[1]!;
+    if (fold.kind !== "skipped") throw new Error("fold");
+    expect(fold.label).toBe("2 skipped (blocked)");
+    expect(fold.tasks).toEqual([
+      { task: "a", subject: "PBI a", text: "why a", reason: "blocked" },
+      { task: "b", subject: "PBI b", text: "why b", reason: "blocked" },
+    ]);
+  });
+
+  it("lists several reasons and none", () => {
+    const [a, b] = [skip("a", "neutral", "blocked"), skip("b", "neutral", "no repro")];
+    const fold = foldSkipped([...a, ...b])[0]!;
+    expect(fold.kind === "skipped" && fold.label).toBe("2 skipped (blocked, no repro)");
+    const none = foldSkipped(skip("a", "neutral", ""))[0]!;
+    expect(none.kind === "skipped" && none.label).toBe("1 skipped");
+  });
+
+  it("does not fold when an event sits between, the task differs or the outcome is not skipped", () => {
+    const [s, f] = skip("a");
+    expect(foldSkipped([s!, row({ type: "step.started", task: "a" }), f!]).length).toBe(3);
+    expect(foldSkipped([s!, { ...f!, task: "b" }]).length).toBe(2);
+    expect(foldSkipped([s!, { ...f!, outcome: "succeeded" }]).length).toBe(2);
+  });
+
+  it("never folds warning or danger rows", () => {
+    expect(foldSkipped(skip("a", "warning")).length).toBe(2);
+    expect(foldSkipped(skip("a", "danger")).length).toBe(2);
+    const mixed = foldSkipped([...skip("a"), ...skip("b", "warning"), ...skip("c")]);
+    expect(mixed.map((i) => i.kind)).toEqual(["skipped", "row", "row", "skipped"]);
+  });
+
+  it("keeps the key of a fold stable while it grows", () => {
+    const start = { ...skip("a")[0]!, seq: 4 };
+    const one = foldSkipped([start, skip("a")[1]!]);
+    const two = foldSkipped([start, skip("a")[1]!, ...skip("b")]);
+    expect(one[0]!.kind === "skipped" && one[0]!.key).toBe(
+      two[0]!.kind === "skipped" && two[0]!.key,
+    );
   });
 });

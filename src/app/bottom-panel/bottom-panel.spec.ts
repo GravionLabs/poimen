@@ -181,4 +181,54 @@ describe("BottomPanel empty states", () => {
     expect(select().selectedIndex).toBe(0);
     expect(shown()).not.toBe(picked);
   });
+
+  it("shows skipped tasks as one row that opens to the list and stays open", () => {
+    const ev = (type: string, task: string, extra: Record<string, unknown> = {}) => ({
+      type,
+      tone: "neutral",
+      ts: "2026-11-07T10:00:00.000Z",
+      task,
+      ...extra,
+    });
+    const status = parseStatus({
+      v: 1,
+      run: "a",
+      status: "running",
+      tasks: [],
+      finished: {},
+      attentions: [],
+      needsYou: false,
+      links: [],
+      updated: new Date().toISOString(),
+      tone: "neutral",
+      host: { "poimen.terminal": "w1:p1" },
+      events: [
+        ev("task.started", "t1", { subject: "PBI one" }),
+        ev("task.finished", "t1", { outcome: "skipped", reason: "blocked", text: "waits" }),
+        ev("task.started", "t2", { subject: "PBI two" }),
+        ev("task.finished", "t2", { outcome: "skipped", reason: "blocked" }),
+      ],
+    });
+    if (typeof status === "string") throw new Error(status);
+    const cards = signal<DeliverCard[]>([
+      { root: "/repo", run: "a", state: { kind: "ok", status } },
+    ]);
+    const panel = render("events", pane({ cwd: "/repo" }), false, cards);
+    const root = panel.fixture.nativeElement as HTMLElement;
+    panel.fixture.detectChanges();
+    expect(root.querySelectorAll("[data-testid=skipped-fold]").length).toBe(1);
+    expect(root.querySelector("[data-testid=skipped-fold]")!.textContent).toContain(
+      "2 skipped (blocked)",
+    );
+    expect(root.querySelectorAll("[data-testid=skipped-task]").length).toBe(0);
+    root.querySelector<HTMLButtonElement>(".fold-toggle")!.click();
+    panel.fixture.detectChanges();
+    const tasks = root.querySelectorAll("[data-testid=skipped-task]");
+    expect(tasks.length).toBe(2);
+    expect(tasks[0]!.textContent).toContain("PBI one: waits");
+    // A new event keeps the fold open.
+    cards.update((c) => [...c]);
+    panel.fixture.detectChanges();
+    expect(root.querySelectorAll("[data-testid=skipped-task]").length).toBe(2);
+  });
 });
