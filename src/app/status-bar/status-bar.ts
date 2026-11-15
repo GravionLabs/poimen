@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
 import { SERVER_RESTART_NOTE, errorTitle, type UpdateState } from "../core/updater";
-import type { BackendKind } from "../core/settings";
 import type { BarSummary } from "../deliver/deliver-status";
 import type { ConnectionState } from "../core/spaces-store";
 import {
@@ -17,7 +16,7 @@ export const CHANNEL_TITLE =
   "Release candidate: installed next to the stable poimen, with its own server, settings and hooks; it does not update itself";
 
 /** The connection as one line of text. */
-export function connectionLabel(c: ConnectionState, backend = "herdr"): string {
+export function connectionLabel(c: ConnectionState, backend = "poimen"): string {
   switch (c.state) {
     case "connected":
       return `${backend} connected`;
@@ -46,7 +45,7 @@ export function modeTitle(blocked: string | null): string {
     : "Switch between read-only and input";
 }
 
-/** Bottom bar: herdr connection, waiting agents (click jumps to the next) and the active tab. */
+/** Bottom bar: server connection, waiting agents (click jumps to the next) and the active tab. */
 @Component({
   selector: "app-status-bar",
   templateUrl: "./status-bar.html",
@@ -71,8 +70,6 @@ export class StatusBar {
   readonly channel = input<AppChannel>("stable");
   protected readonly channelTitle = CHANNEL_TITLE;
   readonly info = input<BackendInfo | null>(null);
-  /** The backend this run talks to; names the connection and the server version. */
-  readonly backend = input<BackendKind>("herdr");
   /** A notice such as a pane layout problem of a new space; empty hides it. */
   readonly notice = input<string | null>(null);
   /** The running poimen-server is outdated or incompatible: the notice text; `null` hides it. */
@@ -112,7 +109,7 @@ export class StatusBar {
   protected readonly modeHint = modeTitle;
   protected readonly sizeText = sizeLabel;
   protected readonly appLabel = appVersionLabel;
-  protected readonly herdrLabel = backendVersionLabel;
+  protected readonly versionLabel = backendVersionLabel;
   protected readonly warning = protocolWarning;
   protected readonly errTitle = errorTitle;
   /** Whether the notes or the error of the update are shown above the bar. */

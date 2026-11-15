@@ -285,9 +285,8 @@ The open M10 checks (W-S-9 to W-S-14) run once, here. The `.msi` section repeats
   window and run a full-screen program (for example `less` on a long file). Compose Japanese text with
   the Microsoft IME in the terminal.
 - **Expected:** the cursor sits where the text ends after moves and resizes. The IME composition shows
-  at the cursor and commits once, without a duplicate. Known ConPTY limits are listed in herdr's
-  Windows notes (`docs/next/website/src/content/docs/windows-beta.mdx` in `herdrdev/herdr`). Record
-  each difference from them.
+  at the cursor and commits once, without a duplicate. Known ConPTY limits are listed in
+  `src-tauri/vendor/portable-pty/POIMEN.md` and ADR 0009. Record each difference from them.
 - **Source:** #416 (open check, PR #422).
 
 ### W-S-15 CLI on the user PATH

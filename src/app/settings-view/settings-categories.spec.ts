@@ -20,7 +20,9 @@ describe("settings categories", () => {
   });
 
   it("finds a page with its group, or null", () => {
-    expect(findPage("herdr")?.group.title).toBe("Backend");
+    expect(findPage("server")?.group.title).toBe("Backend");
+    // The page of the former herdr backend keeps its stored selection.
+    expect(findPage("herdr")?.page.id).toBe("server");
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");

@@ -8,11 +8,11 @@ use poimen_client::protocol::{AgentTranscriptResult, TranscriptState};
 
 use serde_json::json;
 
+use crate::agent_session::{AgentSession, PromptOutcome};
 use crate::backend::{
-    ApplyRequest, Backend, BackendEvent, BackendInfo, LaidOut, LayoutRequest, NewSpace, OnRecord,
+    ApplyRequest, Backend, BackendEvent, BackendInfo, LaidOut, LayoutRequest, OnRecord,
     OpenedStream, Outcome, Snapshot, SplitDirection, StartError, StreamRecord, StreamRequest,
 };
-use crate::herdr::{AgentSession, PromptOutcome};
 
 pub struct FakeBackend {
     calls: Mutex<Vec<String>>,
@@ -21,10 +21,8 @@ pub struct FakeBackend {
     pub snapshot: Mutex<Snapshot>,
     /// Records `open_stream` delivers before it returns.
     pub records: Mutex<Vec<StreamRecord>>,
-    /// Whether opened streams are emulated.
-    pub emulated: bool,
     /// What `create_space_with_layout` and `apply_layout` answer; `None`: the fake does not
-    /// build layouts (herdr).
+    /// build layouts.
     pub laid_out: Mutex<Option<LaidOut>>,
     /// What the next `agent_transcript` calls answer, in order; then `no_agent`.
     pub transcripts: Mutex<VecDeque<Result<AgentTranscriptResult, String>>>,
@@ -37,7 +35,6 @@ impl Default for FakeBackend {
             fail_on: Mutex::default(),
             snapshot: Mutex::new(Snapshot::default()),
             records: Mutex::default(),
-            emulated: false,
             laid_out: Mutex::default(),
             transcripts: Mutex::default(),
         }
@@ -90,7 +87,7 @@ fn dir(direction: SplitDirection) -> &'static str {
 impl Backend for FakeBackend {
     fn ensure_running(&self, auto_start: bool) -> Result<Outcome, StartError> {
         self.record(format!("ensure_running {auto_start}"))
-            .map_err(StartError::Spawn)?;
+            .map_err(StartError::Other)?;
         Ok(Outcome::AlreadyRunning)
     }
 
@@ -101,14 +98,6 @@ impl Backend for FakeBackend {
     fn snapshot(&self) -> Result<Snapshot, String> {
         self.record("snapshot".into())?;
         Ok(self.snapshot.lock().unwrap().clone())
-    }
-
-    fn create_space(&self, cwd: &str, label: &str) -> Result<NewSpace, String> {
-        self.record(format!("create_space {cwd} {label}"))?;
-        Ok(NewSpace {
-            space_id: "w9".into(),
-            root_terminal: Some("w9:root".into()),
-        })
     }
 
     fn create_space_with_layout(
@@ -266,20 +255,13 @@ impl Backend for FakeBackend {
         on_record: OnRecord,
     ) -> Result<OpenedStream, String> {
         self.record(format!(
-            "open {:?} {} {}x{} {}",
-            request.mode, request.target, request.cols, request.rows, request.takeover
+            "open {:?} {} {}",
+            request.mode, request.target, request.takeover
         ))?;
         for record in self.records.lock().unwrap().drain(..) {
             on_record(1, record);
         }
-        Ok(OpenedStream {
-            id: 1,
-            emulated: self.emulated,
-        })
-    }
-
-    fn emulated(&self) -> bool {
-        self.emulated
+        Ok(OpenedStream { id: 1 })
     }
 
     fn stream_input(&self, id: u32, text: &str) -> Result<(), String> {
@@ -289,26 +271,6 @@ impl Backend for FakeBackend {
     fn stream_resize(&self, id: u32, cols: u16, rows: u16) -> Result<(), String> {
         self.record(format!("stream_resize {id} {cols}x{rows}"))
             .map(drop)
-    }
-
-    fn stream_scroll(&self, id: u32, up: bool, lines: u16) -> Result<(), String> {
-        self.record(format!("stream_scroll {id} {up} {lines}"))
-            .map(drop)
-    }
-
-    fn stream_mouse(
-        &self,
-        id: u32,
-        action: &str,
-        button: &str,
-        column: u16,
-        row: u16,
-        modifiers: u8,
-    ) -> Result<(), String> {
-        self.record(format!(
-            "stream_mouse {id} {action} {button} {column},{row} {modifiers}"
-        ))
-        .map(drop)
     }
 
     fn close_stream(&self, id: u32) {

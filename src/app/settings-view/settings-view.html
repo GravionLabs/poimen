@@ -352,19 +352,8 @@
               }
             </section>
           }
-          @case ("herdr") {
+          @case ("server") {
             <section aria-label="Server">
-              <label
-                class="check"
-                [class.hit]="hit('Start the backend server when it is not running')"
-              >
-                <input
-                  type="checkbox"
-                  [checked]="settings().herdrAutoStart"
-                  (change)="setAutoStart($event)"
-                />
-                Start the backend server when it is not running
-              </label>
               <h3 [class.hit]="hit('Agent hooks')">Agent hooks</h3>
               <ul class="harnesses">
                 @for (h of hooks.statuses(); track h.agent) {

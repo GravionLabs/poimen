@@ -1,18 +1,7 @@
 //! The project file `.poimen/config.json`: parsing, entries and teardown live in
-//! `poimen_core::project`; what needs a `Backend` (setup tab, palette entries) is here.
+//! `poimen_core::project`; what needs a `Backend` (palette entries) is here.
 
 pub use poimen_core::project::*;
-
-/// Runs `command` visibly in a new tab of the workspace, labelled `setup`, in `cwd`: the tab is
-/// created, named, and the command typed with Enter. The caller decides whether it may run (trust).
-pub fn start_setup(
-    backend: &dyn crate::backend::Backend,
-    space_id: &str,
-    cwd: &str,
-    command: &str,
-) -> Result<(), String> {
-    start_tab(backend, space_id, cwd, SETUP_LABEL, command)
-}
 
 /// Opens a tab named `name` in a space, in `cwd`, and types `command` into it.
 pub fn start_tab(
@@ -24,7 +13,7 @@ pub fn start_tab(
 ) -> Result<(), String> {
     let pane = backend
         .create_terminal(space_id, Some(cwd))?
-        .ok_or("herdr did not report the new tab")?;
+        .ok_or("the backend did not report the new tab")?;
     backend.rename_terminal(&pane, Some(name))?;
     backend.send_input(&pane, command)?;
     Ok(())
@@ -32,9 +21,8 @@ pub fn start_tab(
 
 /// Runs a palette entry of the project file in `sources` through `trust::gate`. A `terminal`
 /// command opens a tab named after it in `dir` and types the command; a preset opens a tab built
-/// by the backend (`Backend::apply_layout`, which then gates and stores the trust itself) or,
-/// when the backend does not build layouts (herdr), with `layout::apply`; an `agent` command is
-/// handed back. `persist(hash)` stores a fresh trust.
+/// by the backend (`Backend::apply_layout`, which then gates and stores the trust itself); an
+/// `agent` command is handed back. `persist(hash)` stores a fresh trust.
 #[allow(clippy::too_many_arguments)]
 pub fn run_entry(
     backend: &dyn crate::backend::Backend,
@@ -70,8 +58,8 @@ pub fn run_entry(
         return Ok(EntryOutcome::Missing);
     };
     let gate = crate::trust::gate(sources, trusted, decision);
-    // A backend that builds layouts itself (poimen-server) gates the preset, stores the trust and
-    // builds the tab; a declined trust runs nothing on either backend.
+    // poimen-server gates the preset, stores the trust and builds the tab; a declined trust runs
+    // nothing.
     if let (Found::Preset(p), false) = (&found, matches!(gate, crate::trust::Gate::Strip)) {
         let request = crate::backend::ApplyRequest {
             space_id,
@@ -79,12 +67,13 @@ pub fn run_entry(
             preset: Some(&p.name),
             decision,
         };
-        if let Some(result) = backend.apply_layout(request) {
-            return Ok(match result? {
-                crate::backend::LaidOut::Trust(request) => EntryOutcome::Ask { request },
-                crate::backend::LaidOut::Created { .. } => EntryOutcome::Done,
-            });
-        }
+        let result = backend
+            .apply_layout(request)
+            .ok_or("this backend cannot build a layout")??;
+        return Ok(match result {
+            crate::backend::LaidOut::Trust(request) => EntryOutcome::Ask { request },
+            crate::backend::LaidOut::Created { .. } => EntryOutcome::Done,
+        });
     }
     match gate {
         crate::trust::Gate::Ask(request) => return Ok(EntryOutcome::Ask { request }),
@@ -103,13 +92,8 @@ pub fn run_entry(
             start_tab(backend, space_id, dir, &c.name, &c.command)?;
             Ok(EntryOutcome::Done)
         }
-        Found::Preset(p) => {
-            let root = backend
-                .create_terminal(space_id, Some(dir))?
-                .ok_or("herdr did not report the new tab")?;
-            crate::layout::apply(backend, &p.layout, dir, &root)?;
-            Ok(EntryOutcome::Done)
-        }
+        // A preset is built by the backend above, or declined with the gate.
+        Found::Preset(_) => Ok(EntryOutcome::Declined),
     }
 }
 
@@ -231,22 +215,14 @@ mod palette {
     }
 
     #[test]
-    fn a_preset_builds_a_new_tab_from_its_panes() {
+    fn a_preset_on_a_backend_that_cannot_build_layouts_is_an_error() {
         let fake = FakeBackend::default();
         let preset = Entry::Preset { name: "duo".into() };
         assert_eq!(
             run(&fake, &trusted(), None, &preset),
-            Ok(EntryOutcome::Done)
+            Err("this backend cannot build a layout".into())
         );
-        let calls = fake.calls();
-        assert_eq!(calls[0], "create_terminal w1 /work/app");
-        assert!(
-            calls
-                .iter()
-                .any(|c| c.starts_with("split ") && c.contains("right"))
-        );
-        assert!(calls.iter().any(|c| c.ends_with(" vim")));
-        assert_eq!(calls.iter().filter(|c| c.starts_with("rename ")).count(), 2);
+        assert!(fake.calls().is_empty());
     }
 
     // Presets on a backend that builds layouts itself (poimen-server, #645).
@@ -287,7 +263,7 @@ mod palette {
     fn a_layout_backend_builds_the_preset_itself() {
         let fake = layout_fake(applied());
         assert_eq!(run_preset(&fake, &trusted(), None), Ok(EntryOutcome::Done));
-        // No terminal, split, rename or input from the app: `layout::apply` is herdr's only.
+        // No terminal, split, rename or input from the app: the server builds the layout.
         assert_eq!(fake.calls(), ["apply_layout w1 /work/app duo -"]);
     }
 

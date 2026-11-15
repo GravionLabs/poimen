@@ -4,39 +4,22 @@ import { TauriBridge } from "./tauri";
 
 export interface OpenTerminal {
   mode: Mode;
-  /** The backend's terminal id (herdr: the pane id). */
+  /** The backend's terminal id. */
   target: string;
-  cols: number;
-  rows: number;
   /** Replaces the current controller (control mode only). */
   takeover: boolean;
   /** The machine whose backend runs the terminal (#280); absent for this Mac. */
   machine?: string;
 }
 
-/** A mouse command for a rendered stream; `modifiers` combines Shift = 1, Ctrl = 2, Alt = 4. */
-export interface MouseCommand {
-  action: "down" | "up" | "drag" | "move";
-  button: "left" | "middle" | "right";
-  column: number;
-  row: number;
-  modifiers: number;
-}
-
 /**
- * One live terminal stream. Closing it ends the stream only (for herdr, the CLI child process); the
- * terminal keeps running.
+ * One live terminal stream. Closing it ends the stream only ; the terminal keeps running.
  */
 export class TerminalSession {
   private closed = false;
 
   constructor(
     readonly id: number,
-    /**
-     * Raw PTY bytes: xterm.js tracks the terminal modes, so the view sends no mouse and wheel
-     * commands. Otherwise the stream is rendered (finished frames) and the view forwards them.
-     */
-    readonly emulated: boolean,
     private readonly bridge: TauriBridge,
   ) {}
 
@@ -56,17 +39,6 @@ export class TerminalSession {
     return this.bridge.invoke<void>("terminal_resize", { id: this.id, cols, rows });
   }
 
-  scroll(up: boolean, lines: number): void {
-    if (this.closed) return;
-    void this.bridge.invoke("terminal_scroll", { id: this.id, up, lines });
-  }
-
-  /** One mouse event at a zero-based cell; herdr drops it unless the pane app tracks the mouse. */
-  mouse(event: MouseCommand): void {
-    if (this.closed) return;
-    void this.bridge.invoke("terminal_mouse", { id: this.id, ...event });
-  }
-
   /** Stops the stream. Safe to call twice or after the backend closed it. */
   close(): void {
     if (this.closed) return;
@@ -80,7 +52,7 @@ export class TerminalSession {
   }
 }
 
-/** What arrives on the channel of a stream: a JSON record, or raw PTY bytes of an emulated stream. */
+/** What arrives on the channel of a stream: a JSON record, or raw PTY bytes. */
 type ChannelMessage = StreamRecord | ArrayBuffer | ArrayBufferView;
 
 /** The record for a message of the channel. */
@@ -95,7 +67,7 @@ export function recordOf(message: ChannelMessage): StreamRecord {
 
 /**
  * Opens terminal streams. Each stream has a channel of its own that the backend pushes its records
- * through (raw bytes as an `ArrayBuffer` on an emulated stream), so there is no global event to
+ * through (raw bytes as an `ArrayBuffer`), so there is no global event to
  * route and nothing to hold back for a stream whose id is not known yet: the view that opened the
  * stream gets its records from the first one on.
  */
@@ -125,7 +97,7 @@ export class TerminalStreamService {
       ...options,
       onRecord: channel,
     });
-    const session = new TerminalSession(opened.id, opened.emulated, this.bridge);
+    const session = new TerminalSession(opened.id, this.bridge);
     state.session = session;
     if (state.closed) session.ended();
     return session;

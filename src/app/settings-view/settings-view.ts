@@ -299,7 +299,7 @@ export class SettingsView {
 
   constructor() {
     effect(() => {
-      if (this.current().page.id === "herdr") untracked(() => void this.hooks.refresh());
+      if (this.current().page.id === "server") untracked(() => void this.hooks.refresh());
     });
     // The harnesses come from config.json, so they are read again when the settings change.
     effect(() => {
@@ -439,10 +439,6 @@ export class SettingsView {
       if (!ok)
         input.value = String(this.settings()[which === "terminal" ? "fontSize" : "uiFontSize"]);
     });
-  }
-
-  protected setAutoStart(event: Event): void {
-    void this.store.setHerdrAutoStart((event.target as HTMLInputElement).checked);
   }
 
   protected setMode(mode: SchemeMode): void {

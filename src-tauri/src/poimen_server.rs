@@ -4,7 +4,7 @@
 //! server" ([`stop`]: ends every terminal); otherwise the server and the PTY hosts of its
 //! terminals outlive the app. The wire protocol lives in `crates/poimen-protocol`, the client
 //! in `crates/poimen-client`; this module only decides whether to start a server and does so
-//! detached, like `backend.rs` does for herdr. On Windows it starts a per-version copy under
+//! detached. On Windows it starts a per-version copy under
 //! `%LOCALAPPDATA%\poimen-server\bin` (see [`stage`]), breaking away from the app's job; inside
 //! a Linux AppImage one under `$XDG_DATA_HOME/poimen-server/bin` (see [`stage_root`]).
 
@@ -22,7 +22,11 @@ use std::time::{Duration, Instant};
 use poimen_client::protocol::{CHANNEL, Channel};
 use poimen_client::{Client, ClientError};
 
-use crate::backend::{Outcome, POLL_INTERVAL, START_TIMEOUT};
+use crate::backend::Outcome;
+
+/// How long a started server may take to answer, and how often it is asked.
+pub const START_TIMEOUT: Duration = Duration::from_secs(10);
+pub const POLL_INTERVAL: Duration = Duration::from_millis(100);
 use crate::gui_path;
 
 /// This build's server program: `poimen-server`, on rc `poimen-server-rc` (the sidecar of the rc

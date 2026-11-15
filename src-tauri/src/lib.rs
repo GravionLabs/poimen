@@ -1,5 +1,6 @@
 use poimen_core::agent_actions;
 use poimen_core::{copilot, transcripts};
+mod agent_session;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
@@ -15,11 +16,8 @@ mod github_milestones;
 mod github_pulls;
 use poimen_core::gui_path;
 use poimen_core::harness;
-mod herdr;
 mod hooks;
 mod layout;
-#[cfg(test)]
-mod live;
 mod machines;
 mod poimen_backend;
 mod poimen_server;
@@ -30,14 +28,12 @@ mod remote_transcripts;
 mod schemes;
 mod settings;
 mod spaces;
-mod stream;
 mod task_start;
 use poimen_core::tasks;
 use poimen_core::templates;
 mod terminal_colors;
 use poimen_core::trust;
 mod updater;
-mod watch;
 mod worktree;
 
 use std::collections::{BTreeMap, HashMap};
@@ -51,7 +47,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
 use backend::{Backend, Mode, SplitDirection, StreamRequest};
 
-/// The backend the commands talk to (herdr or poimen-server, see the `backend` setting).
+/// The backend the commands talk to (poimen-server).
 type Shared = std::sync::Arc<dyn Backend>;
 
 /// Serializes `ensure_backend`.
@@ -354,7 +350,7 @@ async fn agent_prompt(
     machines: State<'_, SharedMachines>,
     target: String,
     text: String,
-) -> Result<herdr::PromptOutcome, String> {
+) -> Result<agent_session::PromptOutcome, String> {
     on_routed(backend.inner(), machines.inner(), &target, move |b, id| {
         Ok(b.agent_prompt(id, &text))
     })
@@ -628,10 +624,8 @@ async fn create_space(
 }
 
 /// The body of `create_space`, against any backend. `root_command` replaces the command of the
-/// layout's root pane in a new space (a task's command); an existing space runs nothing. A backend
-/// that builds layouts itself (poimen-server) gets the request as it is and answers the trust
-/// question; for the others (herdr) the app gates the project file, creates the space and applies
-/// the layout (`layout::apply`).
+/// layout's root pane in a new space (a task's command); an existing space runs nothing.
+/// poimen-server resolves and builds the layout itself and answers the trust question.
 fn create_space_with(
     backend: &dyn Backend,
     home: Option<&std::path::Path>,
@@ -653,7 +647,6 @@ fn create_space_with(
         });
     }
     let label = spaces::space_label(&dir, label.unwrap_or_default(), home, &snapshot.spaces);
-    // poimen-server resolves and builds the layout itself and asks for trust first.
     let request = backend::LayoutRequest {
         cwd: &dir,
         label: &label,
@@ -685,108 +678,11 @@ fn create_space_with(
             }
         };
     }
-    // The project files are read once; the trust check, the listed commands and the layout all
-    // use this read.
-    let root = git::toplevel(&dir).unwrap_or_else(|| dir.clone());
-    let sources = trust::Sources::read(&root);
-    let user = home.map(settings::load);
-    let trusted = user
-        .as_ref()
-        .map(|s| s.trusted_projects.clone())
-        .unwrap_or_default();
-    let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
-        trust::Gate::Ask(request) => {
-            return Ok(spaces::SpaceOutcome {
-                space_id: String::new(),
-                created: false,
-                warnings: Vec::new(),
-                setup_started: false,
-                trust: Some(request),
-            });
-        }
-        trust::Gate::Strip => false,
-        trust::Gate::Run { store } => {
-            if let Some(hash) = store {
-                let home = home.ok_or("the home directory is not known")?;
-                settings::trust_project(home, &sources.root, &hash)?;
-            }
-            true
-        }
-    };
-    let created = backend.create_space(&dir, &label)?;
-    let space_id = created.space_id.clone();
-    backend.focus_space(&space_id)?;
-    let (agent_command, user_layout, mut warnings) = layout_inputs(&dir, user.as_ref(), home);
-    warnings.extend(build_layout(
-        backend,
-        &dir,
-        created.root_terminal.as_deref(),
-        &sources,
-        user_layout.as_ref(),
-        allow,
-        root_command,
-        agent_command.as_deref(),
-    ));
-    let (setup_started, warning) = run_setup(backend, &space_id, &dir, &sources, allow);
-    warnings.extend(warning);
-    Ok(spaces::SpaceOutcome {
-        space_id,
-        created: true,
-        warnings,
-        setup_started,
-        trust: None,
-    })
-}
-
-/// Builds the pane layout in a just-created space from the already read project `sources`:
-/// `.poimen/config.json`, else the deprecated `.agents/herdr-layout.json`, else `spaces.layout` of
-/// the config (`user_layout`), else the default. With `allow_project_commands` false the commands
-/// of a layout that comes from a project file are not typed; the panes are still created and named.
-/// Problems come back as warnings; the space then keeps the panes created so far (at least its
-/// single root pane).
-#[allow(clippy::too_many_arguments)]
-fn build_layout(
-    backend: &dyn Backend,
-    dir: &str,
-    root_pane: Option<&str>,
-    sources: &trust::Sources,
-    user_layout: Option<&layout::Layout>,
-    allow_project_commands: bool,
-    root_command: Option<&str>,
-    agent_command: Option<&str>,
-) -> Vec<String> {
-    let planned = plan_layout(
-        sources,
-        user_layout,
-        allow_project_commands,
-        root_command,
-        agent_command,
-    );
-    apply_planned(backend, planned, dir, root_pane)
-}
-
-/// Applies a layout of [`plan_layout`] from `root_pane`; every problem is a warning.
-fn apply_planned(
-    backend: &dyn Backend,
-    planned: Result<(layout::Layout, Vec<String>), String>,
-    dir: &str,
-    root_pane: Option<&str>,
-) -> Vec<String> {
-    let (layout, mut warnings) = match planned {
-        Ok(planned) => planned,
-        Err(warning) => return vec![warning],
-    };
-    let Some(root_pane) = root_pane else {
-        return vec!["the backend did not report the root pane; no layout applied".into()];
-    };
-    if let Err(e) = layout::apply(backend, &layout, dir, root_pane) {
-        warnings.push(format!("layout not fully applied: {e}"));
-    }
-    warnings
+    Err("this backend cannot build a layout".into())
 }
 
 /// The template's agent command and the user layout (the template's, else `spaces.layout`) for a
-/// space of `dir`, with the template's warnings. Shared by `create_space` and `rebuild_space`.
+/// space of `dir`, with the template's warnings. Used by `rebuild_space`.
 fn layout_inputs(
     dir: &str,
     user: Option<&settings::Settings>,
@@ -886,10 +782,9 @@ fn consent_reasons(
 /// Rebuilds the layout of a space without terminals (after a server restart: spaces persist,
 /// terminals do not) in the space's own directory, through the path of `create_space`: the
 /// layout is resolved again (project file > template > `spaces.layout` > default), the project
-/// file goes through `trust::gate` and the setup runs only when allowed. A backend that builds
-/// layouts itself (poimen-server, `Backend::apply_layout`) gets the confirmed rebuild and the
-/// trust answer and stores the trust; for the others (herdr) the app stores it and applies the
-/// layout (`layout::apply`). Unconfirmed, it builds
+/// file goes through `trust::gate` and the setup runs only when allowed. poimen-server
+/// (`Backend::apply_layout`) gets the confirmed rebuild and the trust answer and stores the
+/// trust. Unconfirmed, it builds
 /// only when nothing needs consent (no agent pane, no setup, nothing to trust); otherwise it
 /// answers `Consent` and creates nothing. A space with terminals is left alone.
 fn rebuild_space_with(
@@ -924,16 +819,15 @@ fn rebuild_space_with(
         .as_ref()
         .map(|s| s.trusted_projects.clone())
         .unwrap_or_default();
-    // Nothing is stored yet: a backend that builds layouts itself stores the trust on its own.
-    let (allow, store, asked) = match trust::gate(&sources, &trusted, decision.as_ref()) {
+    // Nothing is stored here: the server stores the trust on its own.
+    let allow = match trust::gate(&sources, &trusted, decision.as_ref()) {
         trust::Gate::Ask(_) if !confirmed => {
             return Ok(RebuildOutcome::Consent {
                 reasons: vec!["the project file is not trusted yet".into()],
             });
         }
-        trust::Gate::Ask(request) => (false, None, Some(request)),
-        trust::Gate::Strip => (false, None, None),
-        trust::Gate::Run { store } => (true, store, None),
+        trust::Gate::Ask(_) | trust::Gate::Strip => false,
+        trust::Gate::Run { .. } => true,
     };
     let plan = || {
         let (agent_command, user_layout, warnings) = layout_inputs(&dir, user.as_ref(), home);
@@ -980,22 +874,7 @@ fn rebuild_space_with(
             },
         });
     }
-    if let Some(request) = asked {
-        return Ok(RebuildOutcome::Trust { request });
-    }
-    if let Some(hash) = store {
-        let home = home.ok_or("the home directory is not known")?;
-        settings::trust_project(home, &sources.root, &hash)?;
-    }
-    let (planned, mut warnings) = plan();
-    let root_pane = backend.create_terminal(space_id, Some(&dir))?;
-    warnings.extend(apply_planned(backend, planned, &dir, root_pane.as_deref()));
-    let (setup_started, warning) = run_setup(backend, space_id, &dir, &sources, allow);
-    warnings.extend(warning);
-    Ok(RebuildOutcome::Rebuilt {
-        warnings,
-        setup_started,
-    })
+    Err("this backend cannot build a layout".into())
 }
 
 /// Rebuilds the layout of a space without terminals (see [`rebuild_space_with`]); `confirmed` is
@@ -1011,29 +890,6 @@ async fn rebuild_space(
         rebuild_space_with(b, home_dir().as_deref(), &space_id, decision, confirmed)
     })
     .await
-}
-
-/// Starts the `setup` command of the project file in a `setup` tab of a just-created space. Only
-/// when project commands are allowed (trusted); a failure is a warning, never a reason to close
-/// the space. Returns whether it started and the warning, if any.
-fn run_setup(
-    backend: &dyn Backend,
-    space_id: &str,
-    dir: &str,
-    sources: &trust::Sources,
-    allow_project_commands: bool,
-) -> (bool, Option<String>) {
-    if !allow_project_commands {
-        return (false, None);
-    }
-    let (project, _) = sources.refs();
-    let Some(command) = project::setup_of(project) else {
-        return (false, None);
-    };
-    match project::start_setup(backend, space_id, dir, &command) {
-        Ok(()) => (true, None),
-        Err(e) => (false, Some(format!("setup not started: {e}"))),
-    }
 }
 
 /// Revokes the trust of the project file of `root`; the settings watcher emits the change.
@@ -1151,14 +1007,6 @@ async fn list_child_dirs(path: String, hidden: bool) -> Result<Vec<spaces::DirEn
     })
     .await
     .map_err(|e| e.to_string())
-}
-
-/// The backend this run talks to (`herdr` or `poimen`), fixed at start from the `backend` setting.
-struct BackendKind(&'static str);
-
-#[tauri::command]
-fn backend_kind(kind: State<'_, BackendKind>) -> &'static str {
-    kind.0
 }
 
 type SharedMachines = std::sync::Arc<machines::Machines>;
@@ -1447,22 +1295,17 @@ fn sync_machines(
 
 /// Gives `poimen-server` the colors of the active scheme (`foreground`, `background`, `cursor`,
 /// 16 `palette` entries as `#rrggbb`), so it answers color queries while no app is attached. Kept
-/// for when the server starts; a no-op for the herdr backend, and an unreachable server is no error.
+/// for when the server starts; an unreachable server is no error.
 #[tauri::command]
 async fn set_terminal_colors(
     colors: poimen_client::protocol::SetColors,
     store: State<'_, terminal_colors::TerminalColors>,
-    kind: State<'_, BackendKind>,
 ) -> Result<(), String> {
-    let poimen = kind.0 == "poimen";
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let client = poimen_client::Client::default();
         // The server may not be up yet: the colors are pushed after `ensure_backend`.
-        let _ = store.set(
-            colors,
-            poimen.then_some(&client as &dyn terminal_colors::ColorSink),
-        );
+        let _ = store.set(colors, Some(&client as &dyn terminal_colors::ColorSink));
         Ok(())
     })
     .await
@@ -1471,11 +1314,11 @@ async fn set_terminal_colors(
 
 /// Version and protocol of the running backend; `None` when unreachable or too old.
 #[tauri::command]
-async fn herdr_info(backend: State<'_, Shared>) -> Result<Option<backend::BackendInfo>, String> {
+async fn backend_info(backend: State<'_, Shared>) -> Result<Option<backend::BackendInfo>, String> {
     on_backend(backend.inner(), |b| Ok(b.info())).await
 }
 
-/// Starts the backend server when nothing answers on its socket (and `herdr.autoStart` allows it),
+/// Starts the backend server when nothing answers on its socket ,
 /// then waits until it answers. Runs at start and on Retry; one at a time so a retry during a
 /// start never launches a second server.
 #[tauri::command]
@@ -1483,21 +1326,14 @@ async fn ensure_backend(
     backend: State<'_, Shared>,
     lock: State<'_, StartLock>,
     colors: State<'_, terminal_colors::TerminalColors>,
-    kind: State<'_, BackendKind>,
 ) -> Result<backend::BackendStatus, String> {
     let lock = lock.0.clone();
     let colors = colors.inner().clone();
-    let poimen = kind.0 == "poimen";
     on_backend(backend.inner(), move |b| {
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let auto_start = home_dir()
-            .map(|h| settings::load(&h).herdr_auto_start)
-            .unwrap_or(true);
-        let status: backend::BackendStatus = b.ensure_running(auto_start).into();
-        if poimen {
-            // The server answers color queries with the scheme the frontend sent before it ran.
-            let _ = colors.push(&poimen_client::Client::default());
-        }
+        let status: backend::BackendStatus = b.ensure_running(true).into();
+        // The server answers color queries with the scheme the frontend sent before it ran.
+        let _ = colors.push(&poimen_client::Client::default());
         Ok(status)
     })
     .await
@@ -1510,15 +1346,13 @@ async fn restart_server(
     backend: State<'_, Shared>,
     lock: State<'_, StartLock>,
     colors: State<'_, terminal_colors::TerminalColors>,
-    kind: State<'_, BackendKind>,
 ) -> Result<backend::BackendStatus, String> {
     let lock = lock.0.clone();
     let colors = colors.inner().clone();
-    let poimen = kind.0 == "poimen";
     on_backend(backend.inner(), move |b| {
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let status: backend::BackendStatus = b.restart_server().into();
-        if poimen && status.state == "started" {
+        if status.state == "started" {
             let _ = colors.push(&poimen_client::Client::default());
         }
         Ok(status)
@@ -1929,13 +1763,6 @@ fn set_ui_font_size(size: f64) -> Result<(), String> {
     settings::save_ui_font_size(&home, size)
 }
 
-/// Writes only `herdr.autoStart`; the settings watcher emits the change.
-#[tauri::command]
-fn set_herdr_auto_start(on: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_herdr_auto_start(&home, on)
-}
-
 /// Writes only `spaces.layout` after validating it; the settings watcher emits the change.
 #[tauri::command]
 fn set_spaces_layout(layout: serde_json::Value) -> Result<(), String> {
@@ -2127,12 +1954,12 @@ async fn subagents_watch(
     let found = session.and_then(|s| {
         let home = home_dir()?;
         let dir = match s.agent {
-            herdr::TranscriptAgent::Claude => transcripts::locate_project_dir(
+            agent_session::TranscriptAgent::Claude => transcripts::locate_project_dir(
                 &transcripts::projects_root(&home),
                 &s.cwd,
                 &s.session,
             )?,
-            herdr::TranscriptAgent::Copilot => {
+            agent_session::TranscriptAgent::Copilot => {
                 copilot::locate_session_dir(&copilot::sessions_root(&home), &s.session)?
             }
         };
@@ -2149,10 +1976,12 @@ async fn subagents_watch(
         let _ = app.emit("subagents", event);
     };
     let handle = match agent {
-        herdr::TranscriptAgent::Claude => {
+        agent_session::TranscriptAgent::Claude => {
             Box::new(transcripts::watch(&dir, &session, emit)?) as FollowHandle
         }
-        herdr::TranscriptAgent::Copilot => Box::new(copilot::watch(&dir, emit)?) as FollowHandle,
+        agent_session::TranscriptAgent::Copilot => {
+            Box::new(copilot::watch(&dir, emit)?) as FollowHandle
+        }
     };
     let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
     // A stale handle is dropped here, which stops its watcher; so is one whose key was unwatched.
@@ -2197,10 +2026,9 @@ async fn deliver_watch(
     Ok(roots)
 }
 
-/// What goes over the channel of a stream for one record. On an emulated stream the PTY bytes
-/// (snapshot and output) are sent raw, which the webview receives as an `ArrayBuffer`; the other
-/// records are JSON. A rendered stream (herdr frames) sends JSON only.
-fn channel_messages(record: &backend::StreamRecord, emulated: bool) -> Vec<InvokeResponseBody> {
+/// What goes over the channel of a stream for one record. The PTY bytes (snapshot and
+/// output) are sent raw, which the webview receives as an `ArrayBuffer`; the other records are JSON.
+fn channel_messages(record: &backend::StreamRecord) -> Vec<InvokeResponseBody> {
     use backend::StreamRecord;
     let json = |record: &StreamRecord| {
         InvokeResponseBody::Json(serde_json::to_string(record).unwrap_or_default())
@@ -2212,11 +2040,11 @@ fn channel_messages(record: &backend::StreamRecord, emulated: bool) -> Vec<Invok
         })
     };
     match record {
-        StreamRecord::Output { bytes } if emulated => {
+        StreamRecord::Output { bytes } => {
             vec![InvokeResponseBody::Raw(decode(bytes))]
         }
         // The reset announces the size and clears the screen; the snapshot follows as raw bytes.
-        StreamRecord::Reset { cols, rows, bytes } if emulated => {
+        StreamRecord::Reset { cols, rows, bytes } => {
             let mut messages = vec![json(&StreamRecord::Reset {
                 cols: *cols,
                 rows: *rows,
@@ -2234,15 +2062,13 @@ fn channel_messages(record: &backend::StreamRecord, emulated: bool) -> Vec<Invok
 
 /// Opens a terminal stream; its records go through `on_record`, a channel of this stream (no
 /// global event, so no record is lost or mixed up before the view has its id). The result says
-/// whether the stream is emulated (raw PTY bytes) or rendered (finished frames).
+/// the stream id (the stream carries raw PTY bytes).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn open_terminal(
     backend: State<'_, Shared>,
     mode: Mode,
     target: String,
-    cols: u16,
-    rows: u16,
     takeover: bool,
     machine: Option<String>,
     on_record: Channel<InvokeResponseBody>,
@@ -2257,15 +2083,12 @@ fn open_terminal(
     let request = StreamRequest {
         mode,
         target: &target,
-        cols,
-        rows,
         takeover,
     };
-    let emulated = backend.emulated();
     let opened = backend.open_stream(
         request,
         Box::new(move |_, record| {
-            for message in channel_messages(&record, emulated) {
+            for message in channel_messages(&record) {
                 let _ = on_record.send(message);
             }
         }),
@@ -2275,7 +2098,6 @@ fn open_terminal(
     }
     Ok(backend::OpenedStream {
         id: remote.add(backend, opened.id),
-        ..opened
     })
 }
 
@@ -2311,34 +2133,6 @@ fn terminal_resize(
 ) -> Result<(), String> {
     let (backend, id) = stream_of(&backend, &remote, id);
     backend.stream_resize(id, cols, rows)
-}
-
-#[tauri::command]
-fn terminal_scroll(
-    backend: State<'_, Shared>,
-    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
-    id: u32,
-    up: bool,
-    lines: u16,
-) -> Result<(), String> {
-    let (backend, id) = stream_of(&backend, &remote, id);
-    backend.stream_scroll(id, up, lines)
-}
-
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-fn terminal_mouse(
-    backend: State<'_, Shared>,
-    remote: State<'_, std::sync::Arc<machines::RemoteStreams>>,
-    id: u32,
-    action: String,
-    button: String,
-    column: u16,
-    row: u16,
-    modifiers: u8,
-) -> Result<(), String> {
-    let (backend, id) = stream_of(&backend, &remote, id);
-    backend.stream_mouse(id, &action, &button, column, row, modifiers)
 }
 
 #[tauri::command]
@@ -2504,27 +2298,16 @@ fn build_menu(
     Ok(menu)
 }
 
-/// The backend named by the `backend` setting (anything but `herdr` is poimen) and its name.
-fn make_backend(kind: &str) -> (Shared, &'static str) {
-    if kind == "herdr" {
-        let client = herdr::Client::from_env();
-        let backend = backend::HerdrBackend::new(
-            backend::SystemRunner::new(client.clone()),
-            client,
-            stream::resolve_bin_from_env(),
-        );
-        return (std::sync::Arc::new(backend), "herdr");
-    }
-    let backend = poimen_backend::PoimenBackend::new(poimen_client::Client::default());
-    (std::sync::Arc::new(backend), "poimen")
+/// The backend of this run: poimen-server.
+fn make_backend() -> Shared {
+    std::sync::Arc::new(poimen_backend::PoimenBackend::new(
+        poimen_client::Client::default(),
+    ))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let kind = home_dir()
-        .map(|h| settings::load(&h).backend)
-        .unwrap_or_else(|| "poimen".into());
-    let (backend, kind) = make_backend(&kind);
+    let backend = make_backend();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -2538,7 +2321,6 @@ pub fn run() {
     builder
         .manage(updater::PendingUpdate::default())
         .manage(backend.clone())
-        .manage(BackendKind(kind))
         .manage::<GithubClient>(std::sync::Arc::new(github::Client::system(
             home_dir()
                 .map(|h| {
@@ -2598,18 +2380,17 @@ pub fn run() {
             }
             std::thread::spawn(move || {
                 backend.watch(&|event| {
-                    let _ = handle.emit("herdr", event);
+                    let _ = handle.emit("backend", event);
                 });
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
-            herdr_info,
+            backend_info,
             ensure_backend,
             restart_server,
             quit_and_stop_server,
-            backend_kind,
             list_machines,
             reconnect_machine,
             machine_snapshot,
@@ -2622,7 +2403,6 @@ pub fn run() {
             set_terminal_colors,
             hooks_status,
             hooks_install,
-            set_herdr_auto_start,
             set_terminal_font_family,
             set_terminal_font_size,
             clear_terminal_font_size,
@@ -2710,15 +2490,13 @@ pub fn run() {
             open_terminal,
             terminal_input,
             terminal_resize,
-            terminal_scroll,
-            terminal_mouse,
             close_terminal
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                // Release controllers and stop the CLI children; herdr panes keep running.
+                // Release controllers; the terminals keep running.
                 app.state::<Shared>().close_streams();
             }
         });
@@ -2791,153 +2569,6 @@ mod build_layout_tests {
         serde_json::from_value(wire).unwrap()
     }
 
-    const PROJECT_TEXT: &str = r#"{"layout":{"panes":[{"name":"agent","command":"evil"},
-        {"name":"sh","command":"worse","split":{"direction":"down"}}]}}"#;
-
-    fn sources(text: &str) -> trust::Sources {
-        trust::Sources {
-            root: "/work/app".into(),
-            project: Some(("/work/app/.poimen/config.json".into(), text.into())),
-            legacy: None,
-        }
-    }
-
-    fn run(sources: &trust::Sources, user: Option<&layout::Layout>, allow: bool) -> Vec<String> {
-        let fake = FakeBackend::default();
-        let warnings = build_layout(
-            &fake,
-            "/work/app",
-            Some("w1:root"),
-            sources,
-            user,
-            allow,
-            None,
-            None,
-        );
-        assert!(warnings.is_empty(), "{warnings:?}");
-        fake.calls()
-    }
-
-    fn typed(calls: &[String]) -> Vec<&String> {
-        calls.iter().filter(|c| c.starts_with("input ")).collect()
-    }
-
-    #[test]
-    fn missing_root_pane_warning_names_no_backend() {
-        let fake = FakeBackend::default();
-        let warnings = build_layout(
-            &fake,
-            "/work/app",
-            None,
-            &sources(PROJECT_TEXT),
-            None,
-            false,
-            None,
-            None,
-        );
-        assert_eq!(
-            warnings,
-            ["the backend did not report the root pane; no layout applied"]
-        );
-    }
-
-    #[test]
-    fn untrusted_project_layout_builds_panes_but_types_nothing() {
-        let calls = run(&sources(PROJECT_TEXT), None, false);
-        assert_eq!(
-            calls,
-            [
-                "rename w1:root agent",
-                "split w1:root down /work/app 0.5",
-                "rename w1:p11 sh"
-            ]
-        );
-    }
-
-    #[test]
-    fn trusted_project_layout_types_its_commands() {
-        let calls = run(&sources(PROJECT_TEXT), None, true);
-        assert_eq!(typed(&calls).len(), 2);
-    }
-
-    #[test]
-    fn a_missing_root_pane_is_a_warning_and_nothing_is_called() {
-        let fake = FakeBackend::default();
-        let warnings = build_layout(
-            &fake,
-            "/work/app",
-            None,
-            &sources(PROJECT_TEXT),
-            None,
-            true,
-            None,
-            None,
-        );
-        assert_eq!(warnings.len(), 1);
-        assert!(fake.calls().is_empty());
-    }
-
-    type SetupRun = ((bool, Option<String>), Vec<String>);
-
-    fn setup_calls(sources: &trust::Sources, allow: bool, fail_on: Option<&str>) -> SetupRun {
-        let fake = FakeBackend::default();
-        if let Some(prefix) = fail_on {
-            fake.fail_on(prefix);
-        }
-        let out = run_setup(&fake, "w1", "/work/app", sources, allow);
-        (out, fake.calls())
-    }
-
-    #[test]
-    fn a_trusted_setup_runs_in_a_setup_tab_of_the_new_space() {
-        let ((started, warning), calls) =
-            setup_calls(&sources(r#"{"setup":"pnpm install"}"#), true, None);
-        assert!(started && warning.is_none());
-        assert_eq!(
-            calls,
-            [
-                "create_terminal w1 /work/app",
-                "rename w1:t0 setup",
-                "input w1:t0 pnpm install"
-            ]
-        );
-    }
-
-    #[test]
-    fn an_untrusted_project_runs_no_setup() {
-        let ((started, warning), calls) =
-            setup_calls(&sources(r#"{"setup":"pnpm install"}"#), false, None);
-        assert!(!started && warning.is_none());
-        assert!(calls.is_empty());
-    }
-
-    #[test]
-    fn no_setup_in_the_file_means_no_tab() {
-        let ((started, _), calls) = setup_calls(&sources(PROJECT_TEXT), true, None);
-        assert!(!started);
-        assert!(calls.is_empty());
-        let ((started, _), calls) = setup_calls(&trust::Sources::default(), true, None);
-        assert!(!started && calls.is_empty());
-    }
-
-    #[test]
-    fn a_failing_setup_start_is_a_warning() {
-        let ((started, warning), _) =
-            setup_calls(&sources(r#"{"setup":"make"}"#), true, Some("input"));
-        assert!(!started);
-        assert_eq!(warning.as_deref(), Some("setup not started: boom"));
-    }
-
-    #[test]
-    fn the_user_layout_needs_no_trust() {
-        let user = layout::default_layout();
-        // No project layout: the user's `claude` is typed although project commands are blocked.
-        let calls = run(&sources("{\"setup\":\"make\"}"), Some(&user), false);
-        assert_eq!(typed(&calls).len(), 1);
-        let calls = run(&trust::Sources::default(), Some(&user), false);
-        assert_eq!(typed(&calls).len(), 1);
-    }
-
     // The command layer through a fake backend.
 
     fn tmp_dir() -> String {
@@ -2945,22 +2576,6 @@ mod build_layout_tests {
             .to_string_lossy()
             .trim_end_matches('/')
             .to_owned()
-    }
-
-    #[test]
-    fn create_space_creates_focuses_and_lays_out_a_new_space() {
-        let fake = FakeBackend::default();
-        let dir = tmp_dir();
-        let outcome = create_space_with(&fake, None, &dir, Some("demo"), None, None).unwrap();
-        assert!(outcome.created && outcome.trust.is_none());
-        assert_eq!(outcome.space_id, "w9");
-        let calls = fake.calls();
-        assert_eq!(calls[0], "snapshot");
-        assert_eq!(calls[1], format!("create_space {dir} demo"));
-        assert_eq!(calls[2], "focus w9");
-        // The default layout: agent, tests, shell.
-        assert!(calls.contains(&"rename w9:root agent".to_owned()));
-        assert_eq!(calls.iter().filter(|c| c.starts_with("split ")).count(), 2);
     }
 
     #[test]
@@ -3000,19 +2615,6 @@ mod build_layout_tests {
         assert!(!outcome.created);
         assert_eq!(outcome.space_id, "s3");
         assert_eq!(fake.calls(), ["snapshot", "focus s3"]);
-    }
-
-    #[test]
-    fn create_space_runs_the_task_command_in_the_root_pane_of_the_layout() {
-        let fake = FakeBackend::default();
-        let dir = tmp_dir();
-        let label = "#12 Add picker";
-        create_space_with(&fake, None, &dir, Some(label), None, Some("claude 'x'")).unwrap();
-        let calls = fake.calls();
-        assert_eq!(calls[1], format!("create_space {dir} {label}"));
-        assert!(calls.contains(&"rename w9:root agent".to_owned()));
-        assert!(calls.contains(&"input w9:root claude 'x'".to_owned()));
-        assert!(!calls.iter().any(|c| c == "input w9:root claude"));
     }
 
     fn home_with_templates(config: &str) -> (PathBuf, String) {
@@ -3064,107 +2666,11 @@ mod build_layout_tests {
     }
 
     #[test]
-    fn create_space_starts_the_template_agent_in_the_root_pane_and_uses_its_layout() {
-        let (home, dir) = home_with_templates(
-            r#"{"harnesses":{"sh1":{"command":["sh"],"modelArgs":["-m","{model}"]}},
-            "spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"sh1","model":"x",
-              "layout":{"panes":[{"name":"main"},
-                {"name":"b","split":{"from":"main","direction":"down","ratio":0.5}}]}}]}"#,
-        );
+    fn a_backend_that_cannot_build_layouts_is_refused_and_creates_nothing() {
         let fake = FakeBackend::default();
-        let out = create_space_with(&fake, Some(&home), &dir, None, None, None).unwrap();
-        assert!(out.warnings.is_empty(), "{:?}", out.warnings);
-        let calls = fake.calls();
-        assert!(calls.contains(&"rename w9:root main".to_owned()));
-        assert!(
-            calls.contains(&"input w9:root sh -m x".to_owned()),
-            "{calls:?}"
-        );
-        assert_eq!(calls.iter().filter(|c| c.starts_with("split ")).count(), 1);
-    }
-
-    #[test]
-    fn a_task_command_beats_the_template_agent() {
-        let (home, dir) = home_with_templates(
-            r#"{"harnesses":{"sh1":{"command":["sh"]}},
-            "spaceTemplates":[{"name":"app","match":{"dir":"~/src"},"agent":"sh1"}]}"#,
-        );
-        let fake = FakeBackend::default();
-        create_space_with(&fake, Some(&home), &dir, None, None, Some("task")).unwrap();
-        let calls = fake.calls();
-        assert!(calls.contains(&"input w9:root task".to_owned()));
-        assert!(!calls.iter().any(|c| c == "input w9:root sh"));
-    }
-
-    #[test]
-    fn an_unknown_or_missing_agent_warns_with_the_template_name() {
-        for agent in ["nope", "nosuchprogram-xyz"] {
-            let (home, dir) = home_with_templates(&format!(
-                r#"{{"harnesses":{{"gone":{{"command":["nosuchprogram-xyz"]}}}},
-                "spaceTemplates":[{{"name":"app","match":{{"dir":"~/src"}},"agent":"{}"}}]}}"#,
-                if agent == "nope" { "nope" } else { "gone" }
-            ));
-            let fake = FakeBackend::default();
-            let out = create_space_with(&fake, Some(&home), &dir, None, None, None).unwrap();
-            assert!(out.created);
-            assert_eq!(out.warnings.len(), 1, "{:?}", out.warnings);
-            assert!(out.warnings[0].contains("\"app\""));
-            assert!(
-                !fake
-                    .calls()
-                    .iter()
-                    .any(|c| c.starts_with("input w9:root") && c != "input w9:root claude")
-            );
-        }
-    }
-
-    #[test]
-    fn build_layout_fills_a_free_root_pane_but_not_an_explicit_command() {
-        let free = layout::parse_layout(r#"{"panes":[{"name":"a"}]}"#).unwrap();
-        let own = layout::parse_layout(r#"{"panes":[{"name":"a","command":"vim"}]}"#).unwrap();
-        let no_files = trust::Sources {
-            root: "/w".into(),
-            project: None,
-            legacy: None,
-        };
-        let typed = |user: Option<&layout::Layout>| {
-            let fake = FakeBackend::default();
-            build_layout(
-                &fake,
-                "/w",
-                Some("w1:root"),
-                &no_files,
-                user,
-                true,
-                None,
-                Some("agent"),
-            );
-            fake.calls()
-                .into_iter()
-                .filter(|c| c.starts_with("input "))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(typed(Some(&free)), ["input w1:root agent"]);
-        assert_eq!(typed(Some(&own)), ["input w1:root vim"]);
-        // The built-in default's `claude` is replaced by the template agent.
-        assert_eq!(typed(None), ["input w1:root agent"]);
-    }
-
-    #[test]
-    fn create_space_with_a_failing_create_runs_no_command() {
-        let fake = FakeBackend::default();
-        fake.fail_on("create_space");
-        let err = create_space_with(&fake, None, &tmp_dir(), None, None, Some("c")).unwrap_err();
-        assert_eq!(err, "boom");
-        assert!(!fake.calls().iter().any(|c| c.starts_with("input")));
-    }
-
-    #[test]
-    fn create_space_reports_a_backend_error() {
-        let fake = FakeBackend::default();
-        fake.fail_on("create_space");
         let err = create_space_with(&fake, None, &tmp_dir(), None, None, None).unwrap_err();
-        assert_eq!(err, "boom");
+        assert_eq!(err, "this backend cannot build a layout");
+        assert_eq!(fake.calls(), ["snapshot"]);
     }
 
     #[test]
@@ -3303,7 +2809,7 @@ mod build_layout_tests {
                 trust: None,
             }
         );
-        // No terminal, split, rename or input from the app: `layout::apply` is herdr's only.
+        // No terminal, split, rename or input from the app: the server builds the layout.
         assert_eq!(
             fake.calls(),
             [
@@ -3371,11 +2877,8 @@ mod build_layout_tests {
 
     #[test]
     fn the_app_does_not_gate_the_project_file_of_a_layout_backend() {
-        // On herdr this directory asks for trust first; on poimen-server the server asks.
+        // The server asks for trust; the app creates the space as it is.
         let dir = untrusted_project();
-        let herdr = FakeBackend::default();
-        let asked = create_space_with(&herdr, None, &dir, None, None, None).unwrap();
-        assert!(asked.trust.is_some());
         let fake = layout_backend(built("s9"));
         let outcome = create_space_with(&fake, None, &dir, None, None, None).unwrap();
         assert!(outcome.created && outcome.trust.is_none());
@@ -3429,30 +2932,6 @@ mod build_layout_tests {
         {"name":"logs","split":{"from":"main","direction":"down","ratio":0.5}}]}}}"#;
 
     #[test]
-    fn an_empty_space_without_agents_is_rebuilt_in_its_directory() {
-        let (home, dir) = home_with_templates(SHELLS);
-        let fake = restarted(&dir);
-        let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
-        assert_eq!(
-            out,
-            RebuildOutcome::Rebuilt {
-                warnings: vec![],
-                setup_started: false
-            }
-        );
-        assert_eq!(
-            fake.calls(),
-            [
-                "snapshot".to_owned(),
-                format!("create_terminal s1 {dir}"),
-                "rename s1:t1 main".to_owned(),
-                format!("split s1:t1 down {dir} 0.5"),
-                "rename w1:p13 logs".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
     fn an_agent_pane_needs_consent_and_nothing_is_created() {
         // No user config: the built-in default with `claude` in the root pane.
         let fake = restarted(&tmp_dir());
@@ -3462,21 +2941,6 @@ mod build_layout_tests {
         };
         assert_eq!(reasons, ["pane \"agent\" starts an agent: claude"]);
         assert_eq!(fake.calls(), ["snapshot"]);
-    }
-
-    #[test]
-    fn a_confirmed_rebuild_starts_the_agent_like_create_space() {
-        let dir = tmp_dir();
-        let fake = restarted(&dir);
-        let out = rebuild_space_with(&fake, None, "s1", None, true).unwrap();
-        assert!(matches!(out, RebuildOutcome::Rebuilt { .. }), "{out:?}");
-        let calls = fake.calls();
-        assert_eq!(calls[1], format!("create_terminal s1 {dir}"));
-        assert!(
-            calls.contains(&"input s1:t1 claude".to_owned()),
-            "{calls:?}"
-        );
-        assert_eq!(calls.iter().filter(|c| c.starts_with("split ")).count(), 2);
     }
 
     #[test]
@@ -3525,7 +2989,7 @@ mod build_layout_tests {
     }
 
     #[test]
-    fn an_untrusted_project_file_asks_through_the_trust_gate() {
+    fn an_untrusted_project_file_needs_consent_until_it_is_trusted() {
         let (home, dir) = home_with_templates(SHELLS);
         let poimen_dir = std::path::Path::new(&dir).join(".poimen");
         std::fs::create_dir_all(&poimen_dir).unwrap();
@@ -3543,29 +3007,10 @@ mod build_layout_tests {
                 reasons: vec!["the project file is not trusted yet".into()]
             }
         );
-        // Confirmed without an answer: the trust request, still nothing created.
-        let out = rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap();
-        assert!(matches!(out, RebuildOutcome::Trust { .. }), "{out:?}");
-        assert_eq!(fake.calls(), ["snapshot", "snapshot"]);
-        // "Run without project commands": the panes, but neither the command nor the setup.
-        let decision = Some(trust::Decision::Without);
-        let out = rebuild_space_with(&fake, Some(&home), "s1", decision, true).unwrap();
-        assert_eq!(
-            out,
-            RebuildOutcome::Rebuilt {
-                warnings: vec![],
-                setup_started: false
-            }
-        );
-        assert!(!fake.calls().iter().any(|c| c.starts_with("input ")));
-        // Trusted: the setup needs consent, unconfirmed nothing more is created.
-        let RebuildOutcome::Trust { request } =
-            rebuild_space_with(&fake, Some(&home), "s1", None, true).unwrap()
-        else {
-            panic!("expected the trust request");
-        };
-        settings::trust_project(&home, &request.root, &request.hash).unwrap();
-        let before = fake.calls().len();
+        assert_eq!(fake.calls(), ["snapshot"]);
+        // Trusted: the setup needs consent, unconfirmed nothing is created.
+        let sources = trust::Sources::read(&dir);
+        settings::trust_project(&home, &sources.root, &sources.hash().unwrap()).unwrap();
         let out = rebuild_space_with(&fake, Some(&home), "s1", None, false).unwrap();
         assert_eq!(
             out,
@@ -3573,7 +3018,14 @@ mod build_layout_tests {
                 reasons: vec!["setup runs: pnpm i".into()]
             }
         );
-        assert_eq!(fake.calls().len(), before + 1);
+        assert_eq!(fake.calls(), ["snapshot", "snapshot"]);
+    }
+
+    #[test]
+    fn a_confirmed_rebuild_on_a_backend_that_cannot_build_layouts_is_refused() {
+        let fake = restarted(&tmp_dir());
+        let err = rebuild_space_with(&fake, None, "s1", None, true).unwrap_err();
+        assert_eq!(err, "this backend cannot build a layout");
     }
 
     // The same rebuilds on a backend that builds layouts itself (poimen-server, #645).
@@ -3606,7 +3058,7 @@ mod build_layout_tests {
                 setup_started: true
             }
         );
-        // No terminal, split, rename or input from the app: `layout::apply` is herdr's only.
+        // No terminal, split, rename or input from the app: the server builds the layout.
         assert_eq!(
             fake.calls(),
             ["snapshot".to_owned(), format!("apply_layout s1 {dir} - -")]
@@ -3708,9 +3160,8 @@ mod build_layout_tests {
     }
 
     #[test]
-    fn a_fake_stream_delivers_neutral_records_and_says_if_it_is_emulated() {
-        let mut fake = FakeBackend::default();
-        fake.emulated = true;
+    fn a_fake_stream_delivers_neutral_records() {
+        let fake = FakeBackend::default();
         fake.records.lock().unwrap().push(StreamRecord::Output {
             bytes: "AA==".into(),
         });
@@ -3722,14 +3173,12 @@ mod build_layout_tests {
                 StreamRequest {
                     mode: Mode::Observe,
                     target: "w1:p1",
-                    cols: 80,
-                    rows: 24,
                     takeover: false,
                 },
                 Box::new(move |_, record| sink.lock().unwrap().push(record)),
             )
             .unwrap();
-        assert!(opened.emulated);
+        assert_eq!(opened.id, 1);
         assert_eq!(
             *seen.lock().unwrap(),
             [StreamRecord::Output {
@@ -3754,12 +3203,9 @@ mod build_layout_tests {
 
     #[test]
     fn emulated_output_goes_over_the_channel_as_raw_bytes() {
-        let messages = channel_messages(
-            &StreamRecord::Output {
-                bytes: "aGk=".into(),
-            },
-            true,
-        );
+        let messages = channel_messages(&StreamRecord::Output {
+            bytes: "aGk=".into(),
+        });
         assert_eq!(messages.len(), 1);
         assert_eq!(raw(&messages[0]), Some(&b"hi"[..]));
     }
@@ -3771,7 +3217,7 @@ mod build_layout_tests {
             rows: 30,
             bytes: "aGk=".into(),
         };
-        let messages = channel_messages(&record, true);
+        let messages = channel_messages(&record);
         assert_eq!(messages.len(), 2);
         let head: serde_json::Value = serde_json::from_str(text(&messages[0]).unwrap()).unwrap();
         assert_eq!(
@@ -3788,25 +3234,19 @@ mod build_layout_tests {
             rows: 24,
             bytes: String::new(),
         };
-        assert_eq!(channel_messages(&record, true).len(), 1);
+        assert_eq!(channel_messages(&record).len(), 1);
     }
 
     #[test]
-    fn other_records_and_rendered_streams_are_json() {
+    fn other_records_are_json() {
         let closed = StreamRecord::Closed {
             reason: "x".into(),
             exit_code: None,
             code: Some(backend::CloseCode::Exited),
         };
-        let messages = channel_messages(&closed, true);
+        let messages = channel_messages(&closed);
         let value: serde_json::Value = serde_json::from_str(text(&messages[0]).unwrap()).unwrap();
         assert_eq!(value["code"], "exited");
-        let frame = StreamRecord::Output {
-            bytes: "aGk=".into(),
-        };
-        let messages = channel_messages(&frame, false);
-        let value: serde_json::Value = serde_json::from_str(text(&messages[0]).unwrap()).unwrap();
-        assert_eq!(value, json!({"type": "output", "bytes": "aGk="}));
     }
 
     #[test]
@@ -3866,14 +3306,5 @@ mod build_layout_tests {
             base["app"]["windows"][0]["title"],
             window_title(Channel::Stable)
         );
-    }
-
-    #[test]
-    fn the_backend_setting_picks_the_backend_() {
-        assert_eq!(make_backend("poimen").1, "poimen");
-        assert_eq!(make_backend("herdr").1, "herdr");
-        assert_eq!(make_backend("").1, "poimen");
-        assert!(make_backend("poimen").0.emulated());
-        assert!(!make_backend("herdr").0.emulated());
     }
 }

@@ -1,18 +1,15 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
-import { signal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { SpacesStore } from "../core/spaces-store";
 import { PaneActions } from "../core/pane-actions";
-import type { BackendKind } from "../core/settings";
 import { TauriBridge } from "../core/tauri";
 import { PaneDialog } from "./pane-dialog";
 
-async function setup(backend: BackendKind, harnesses: unknown[] = []) {
+async function setup(harnesses: unknown[] = []) {
   const store = {
-    backendKind: signal(backend).asReadonly(),
     pane: () => undefined,
     snapshot: () => ({ tabs: [] }),
     refresh: vi.fn(async () => undefined),
@@ -56,20 +53,13 @@ describe("PaneDialog start agent (#410)", () => {
     });
   });
 
-  it("offers only the kinds with hooks on the poimen backend", async () => {
-    const { options } = await setup("poimen");
+  it("offers only the kinds with hooks", async () => {
+    const { options } = await setup();
     expect(options).toEqual(["claude", "copilot", "gemini"]);
   });
 
-  it("offers herdr's full list on the herdr backend", async () => {
-    const { options } = await setup("herdr");
-    expect(options).toHaveLength(24);
-    expect(options).toContain("codex");
-    expect(options).toContain("gemini");
-  });
-
   it("starts a harness without hooks with its own program and arguments, not its id", async () => {
-    const { bridge, root } = await setup("poimen", [
+    const { bridge, root } = await setup([
       { id: "aider", command: ["aider-bin", "--no-auto-commits"], available: true },
     ]);
     const form = root.querySelector<HTMLFormElement>("form:has(select[name='kind'])")!;

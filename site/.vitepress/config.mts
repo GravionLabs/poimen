@@ -7,7 +7,7 @@ const REPO_URL = "https://github.com/GravionLabs/poimen";
 export default defineConfig({
   title: "poimen",
   description:
-    "A desktop GUI for herdr: watch and steer your AI coding agent sessions with editor tabs, menus and a status sidebar.",
+    "A desktop GUI to watch and steer your AI coding agent sessions with editor tabs, menus and a status sidebar.",
   lang: "en",
   base,
   cleanUrls: true,

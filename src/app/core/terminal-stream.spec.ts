@@ -13,12 +13,10 @@ vi.mock("@tauri-apps/api/core", async () => {
 const OBSERVE: OpenTerminal = {
   mode: "observe",
   target: "w1:p1",
-  cols: 80,
-  rows: 24,
   takeover: false,
 };
 
-const frame = (bytes: string): StreamRecord => ({ type: "output", bytes });
+const frame = (byte: number): StreamRecord => ({ type: "bytes", data: new Uint8Array([byte]) });
 
 type Push = (message: unknown) => void;
 
@@ -36,7 +34,7 @@ describe("TerminalStreamService", () => {
     tauri.answer("open_terminal", (args) => {
       const channel = args?.["onRecord"] as { onmessage: Push };
       channels.push((message) => channel.onmessage(message));
-      return { id: nextId++, emulated: false };
+      return { id: nextId++ };
     });
     injector = Injector.create({ providers: [TauriBridge, TerminalStreamService] });
     service = injector.get(TerminalStreamService);
@@ -46,7 +44,7 @@ describe("TerminalStreamService", () => {
 
   it("opens a stream with the given mode, terminal and size, and a channel for the records", async () => {
     const session = await service.open(
-      { mode: "control", target: "w1:p2", cols: 120, rows: 40, takeover: true },
+      { mode: "control", target: "w1:p2", takeover: true },
       () => {},
     );
 
@@ -55,8 +53,6 @@ describe("TerminalStreamService", () => {
     expect(args).toMatchObject({
       mode: "control",
       target: "w1:p2",
-      cols: 120,
-      rows: 40,
       takeover: true,
     });
     expect(args?.["onRecord"]).toBeInstanceOf(tauri.Channel);
@@ -68,11 +64,11 @@ describe("TerminalStreamService", () => {
     await service.open(OBSERVE, (r) => first.push(r));
     await service.open(OBSERVE, (r) => second.push(r));
 
-    channels[1](frame("Yg=="));
-    channels[0](frame("YQ=="));
+    channels[1](frame(2));
+    channels[0](frame(1));
 
-    expect(first).toEqual([frame("YQ==")]);
-    expect(second).toEqual([frame("Yg==")]);
+    expect(first).toEqual([frame(1)]);
+    expect(second).toEqual([frame(2)]);
   });
 
   it("turns raw bytes into a bytes record", async () => {
@@ -116,56 +112,40 @@ describe("TerminalStreamService", () => {
     expect(tauri.calls("close_terminal")).toEqual([]);
   });
 
-  it("sends input, resize and scroll for the session id", async () => {
+  it("sends input and resize for the session id", async () => {
     const session = await service.open(OBSERVE, () => {});
 
     session.input("ls\r");
     session.resize(100, 30);
-    session.scroll(true, 3);
 
     expect(tauri.calls("terminal_input")).toEqual([{ id: 7, text: "ls\r" }]);
     expect(tauri.calls("terminal_resize")).toEqual([{ id: 7, cols: 100, rows: 30 }]);
-    expect(tauri.calls("terminal_scroll")).toEqual([{ id: 7, up: true, lines: 3 }]);
-  });
-
-  it("sends a mouse event for the session id", async () => {
-    const session = await service.open(OBSERVE, () => {});
-    const event = { action: "down", button: "left", column: 12, row: 5, modifiers: 0 } as const;
-
-    session.mouse(event);
-
-    expect(tauri.calls("terminal_mouse")).toEqual([{ id: 7, ...event }]);
   });
 
   it("sends nothing on a closed session", async () => {
     const session = await service.open(OBSERVE, () => {});
     session.close();
-    session.mouse({ action: "up", button: "left", column: 0, row: 0, modifiers: 0 });
 
     session.input("x");
     session.resize(100, 30);
-    session.scroll(false, 1);
 
     expect(tauri.calls("terminal_input")).toEqual([]);
     expect(tauri.calls("terminal_resize")).toEqual([]);
-    expect(tauri.calls("terminal_scroll")).toEqual([]);
-    expect(tauri.calls("terminal_mouse")).toEqual([]);
   });
 
-  it("tells whether the opened stream is emulated", async () => {
-    tauri.answer("open_terminal", () => ({ id: 9, emulated: true }));
+  it("gives the session the id the backend answered", async () => {
+    tauri.answer("open_terminal", () => ({ id: 9 }));
     const session = await service.open(OBSERVE, () => {});
     expect(session.id).toBe(9);
-    expect(session.emulated).toBe(true);
   });
 
   it("delivers records that arrive before open resolves, with no buffering of its own", async () => {
     tauri.answer("open_terminal", (args) => {
       const channel = args?.["onRecord"] as { onmessage: Push };
-      channel.onmessage({ type: "reset", cols: 80, rows: 24, bytes: "" });
+      channel.onmessage({ type: "reset", cols: 80, rows: 24 });
       channel.onmessage(new Uint8Array([1]).buffer);
       channel.onmessage({ type: "closed", reason: "pane gone" });
-      return { id: 7, emulated: true };
+      return { id: 7 };
     });
     const got: StreamRecord[] = [];
 

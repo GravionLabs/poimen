@@ -14,7 +14,7 @@ export interface Space {
   agent_status: AgentStatus;
   /**
    * The space's own directory (poimen backend: persisted in `server.json`, so it outlives the
-   * terminals across a server restart); herdr workspaces have none.
+   * terminals across a server restart).
    */
   cwd?: string;
   /** The machine the space lives on (remote spaces only, #280); its ids are qualified. */
@@ -28,8 +28,8 @@ export interface Tab {
   number: number;
   agent_status: AgentStatus;
   /**
-   * The split tree of the tab as the server keeps it (poimen backend); absent for a herdr tab and
-   * for a terminal without a leaf (an exited one), which is a tab of its own.
+   * The split tree of the tab as the server keeps it (poimen backend); absent for a terminal
+   * without a leaf (an exited one), which is a tab of its own.
    */
   root?: TabTree;
   /** The focused leaf of the tab, shared by every client (poimen backend). */
@@ -181,7 +181,7 @@ export interface Snapshot {
 
 /**
  * The answer of the `snapshot` and `machine_snapshot` commands (`poimen_core::snapshot::Snapshot`):
- * already the neutral model, each backend maps its own onto it (herdr in `herdr.rs`). Only
+ * already the neutral model, the server's model is mapped onto it in `poimen_backend.rs`. Only
  * `toSnapshot` reads it; everything else works on `Snapshot`.
  */
 export type WireSnapshot = Partial<Snapshot>;

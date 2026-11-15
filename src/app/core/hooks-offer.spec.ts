@@ -18,7 +18,7 @@ const missing: HookStatus[] = [
   { agent: "copilot", state: "installed" },
 ];
 
-function setup(opts: { kind?: "poimen" | "herdr"; stored?: string } = {}) {
+function setup(opts: { stored?: string } = {}) {
   const data = new Map<string, string>();
   if (opts.stored) data.set(UI_STATE_KEY, opts.stored);
   const backend = signal<BackendStatus | null>(null);
@@ -28,7 +28,7 @@ function setup(opts: { kind?: "poimen" | "herdr"; stored?: string } = {}) {
       { provide: TauriBridge, useValue: bridge },
       {
         provide: SpacesStore,
-        useValue: { backend, backendKind: signal(opts.kind ?? "poimen") },
+        useValue: { backend },
       },
       {
         provide: UI_STORAGE,
@@ -84,12 +84,7 @@ describe("HooksOffer", () => {
     expect(bridge.invoke).toHaveBeenCalledWith("hooks_status");
   });
 
-  it("stays quiet on the herdr backend, when all is installed or the check fails", async () => {
-    bridge.invoke.mockResolvedValue(missing);
-    const herdr = setup({ kind: "herdr" });
-    await herdr.start();
-    expect(bridge.invoke).not.toHaveBeenCalled();
-
+  it("stays quiet when all is installed or the check fails", async () => {
     bridge.invoke.mockResolvedValue([{ agent: "claude", state: "installed" }]);
     const done = setup();
     await done.start();
