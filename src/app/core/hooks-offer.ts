@@ -1,5 +1,6 @@
 import { Injectable, computed, effect, inject, signal, untracked } from "@angular/core";
 import { agentName } from "./backend";
+import { parseHarnesses } from "./settings";
 import { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 import { UiState } from "./ui-state";
@@ -75,13 +76,16 @@ export class HooksOffer {
     try {
       const statuses = (await this.bridge.invoke<HookStatus[]>("hooks_status")) ?? [];
       this._statuses.set(statuses);
-      const gone = missingHooks(statuses);
+      // Only a CLI that is installed is offered (#769): its harness is reported available.
+      const installed = await this.availableAgents();
+      const offerable = statuses.filter((s) => installed.has(s.agent));
+      const gone = missingHooks(offerable);
       const seen = this.ui.hooksSeen();
       // An agent that only lacks its MCP entry is offered until "Not now", never again after.
       this._missing.set(
         this.ui.hooksOfferDismissed()
           ? gone.filter((a) => seen.includes(a))
-          : [...gone, ...missingMcp(statuses)],
+          : [...gone, ...missingMcp(offerable)],
       );
       // After the offer is computed: a vanished agent stays "seen" until the user declines it.
       this.ui.setHooksSeen(
@@ -90,6 +94,20 @@ export class HooksOffer {
       );
     } catch {
       // no bundled server found: nothing to offer
+    }
+  }
+
+  /** Agent kinds whose harness `get_harnesses` reports available; none when it cannot be read. */
+  private async availableAgents(): Promise<Set<string>> {
+    try {
+      const raw = await this.bridge.invoke<unknown>("get_harnesses");
+      return new Set(
+        parseHarnesses(raw)
+          .filter((h) => h.available)
+          .map((h) => h.id),
+      );
+    } catch {
+      return new Set();
     }
   }
 

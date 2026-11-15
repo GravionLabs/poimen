@@ -18,6 +18,18 @@ const missing: HookStatus[] = [
   { agent: "copilot", state: "installed" },
 ];
 
+const harness = (id: string, available: boolean) => ({ id, command: [id], available });
+
+/** Answers `hooks_status` with `statuses` and `get_harnesses` with `harnesses` (default: all available). */
+function answer(
+  statuses: HookStatus[],
+  harnesses = [harness("claude", true), harness("copilot", true), harness("gemini", true)],
+) {
+  bridge.invoke.mockImplementation(async (cmd: string) =>
+    cmd === "hooks_status" ? statuses : cmd === "get_harnesses" ? harnesses : undefined,
+  );
+}
+
 function setup(opts: { stored?: string } = {}) {
   const data = new Map<string, string>();
   if (opts.stored) data.set(UI_STATE_KEY, opts.stored);
@@ -88,7 +100,7 @@ describe("HooksOffer", () => {
   });
 
   it("offers the missing agents once the poimen backend runs", async () => {
-    bridge.invoke.mockResolvedValue(missing);
+    answer(missing);
     const { offer, start } = setup();
     expect(offer.visible()).toBe(false);
     await start();
@@ -97,8 +109,33 @@ describe("HooksOffer", () => {
     expect(bridge.invoke).toHaveBeenCalledWith("hooks_status");
   });
 
+  it("offers only agents whose CLI is installed", async () => {
+    answer(
+      [
+        { agent: "claude", state: "missing" },
+        { agent: "copilot", state: "missing" },
+        { agent: "gemini", state: "missing" },
+      ],
+      [harness("claude", true), harness("copilot", false)],
+    );
+    const { offer, start } = setup();
+    await start();
+    expect(offer.missing()).toEqual(["claude"]);
+    expect(offer.statuses().map((s) => s.agent)).toContain("gemini");
+  });
+
+  it("offers nothing when the harnesses cannot be read", async () => {
+    bridge.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_harnesses") throw new Error("x");
+      return missing;
+    });
+    const { offer, start } = setup();
+    await start();
+    expect(offer.visible()).toBe(false);
+  });
+
   it("stays quiet when all is installed or the check fails", async () => {
-    bridge.invoke.mockResolvedValue([{ agent: "claude", state: "installed" }]);
+    answer([{ agent: "claude", state: "installed" }]);
     const done = setup();
     await done.start();
     expect(done.offer.visible()).toBe(false);
@@ -110,7 +147,7 @@ describe("HooksOffer", () => {
   });
 
   it("does not ask again after Not now", async () => {
-    bridge.invoke.mockResolvedValue(missing);
+    answer(missing);
     const first = setup();
     await first.start();
     first.offer.dismiss();
@@ -123,7 +160,7 @@ describe("HooksOffer", () => {
   });
 
   it("offers the MCP entry with the hooks until Not now, then not again", async () => {
-    bridge.invoke.mockResolvedValue([{ agent: "claude", state: "installed", mcp: "missing" }]);
+    answer([{ agent: "claude", state: "installed", mcp: "missing" }]);
     const first = setup();
     await first.start();
     expect(first.offer.missing()).toEqual(["claude"]);
@@ -136,13 +173,13 @@ describe("HooksOffer", () => {
   });
 
   it("offers again after Not now when installed hooks go missing", async () => {
-    bridge.invoke.mockResolvedValue([{ agent: "claude", state: "installed" }]);
+    answer([{ agent: "claude", state: "installed" }]);
     const first = setup();
     await first.start();
     await first.offer.refresh();
     first.offer.dismiss();
 
-    bridge.invoke.mockResolvedValue([{ agent: "claude", state: "missing" }]);
+    answer([{ agent: "claude", state: "missing" }]);
     const again = setup({ stored: first.data.get(UI_STATE_KEY) });
     await again.start();
     await again.offer.refresh();
@@ -154,7 +191,7 @@ describe("HooksOffer", () => {
   });
 
   it("installs one agent from the settings page and refreshes the states", async () => {
-    bridge.invoke.mockResolvedValue(missing);
+    answer(missing);
     const { offer, start } = setup();
     await start();
     offer.dismiss();
@@ -167,7 +204,7 @@ describe("HooksOffer", () => {
   });
 
   it("installs the offered agents and closes", async () => {
-    bridge.invoke.mockResolvedValue(missing);
+    answer(missing);
     const { offer, start } = setup();
     await start();
     bridge.invoke.mockResolvedValue(undefined);
@@ -178,7 +215,7 @@ describe("HooksOffer", () => {
   });
 
   it("keeps the offer open with the error when the install fails", async () => {
-    bridge.invoke.mockResolvedValue(missing);
+    answer(missing);
     const { offer, start } = setup();
     await start();
     rejecting("settings.json is not valid JSON");
