@@ -1,19 +1,44 @@
-import { ChangeDetectionStrategy, Component, inject, output } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  computed,
+  inject,
+  linkedSignal,
+  output,
+} from "@angular/core";
+import { NgTemplateOutlet } from "@angular/common";
+import { UiState } from "../core/ui-state";
+import { eventTime, toneStyle } from "../bottom-panel/run-events";
 import { Deliver } from "./deliver";
 import {
   SUPPORTED_EVENTS,
   SUPPORTED_SCHEMA,
+  ageText,
   cardKey,
+  isAlert,
+  leftOpen,
+  needsYouItems,
+  outcomeText,
   percent,
   progressText,
+  runSections,
   runState,
+  runningRun,
   runTitle,
   stepText,
   stateText,
+  timelineLine,
   type Attention,
   type DeliverCard,
   type DeliverStatus,
+  type GroupRun,
+  type LeftTask,
   type Link,
+  type RunGroup,
+  type RunSections,
+  type Step,
+  type TimelineLine,
 } from "./deliver-status";
 
 /** "PR #343" for a pull request URL, the URL itself when it has no number at the end. */
@@ -30,50 +55,140 @@ export function linkLabel(link: Link): string {
 
 export { stepText };
 
-/** The Deliver panel as an editor tab: one card per run (any writer of agent-events). */
+/** A row the keyboard moves over: a group head or, in an expanded group, a timeline line. */
+export type NavRow = { kind: "group"; key: string } | { kind: "run"; key: string; group: string };
+
+/** The rows of the cursor in display order: Running now, then History. */
+export function navRows(sections: RunSections, expanded: ReadonlySet<string>): NavRow[] {
+  return [...sections.running, ...sections.history].flatMap((g): NavRow[] => [
+    { kind: "group", key: g.key },
+    ...(expanded.has(g.key)
+      ? g.runs.map((r): NavRow => ({ kind: "run", key: r.key, group: g.key }))
+      : []),
+  ]);
+}
+
+/** The words after the outcome of a timeline line: skipped, left open, waiting for merge. */
+export function lineCounts(line: TimelineLine): string[] {
+  return [
+    line.skipped ? `${line.skipped} skipped` : "",
+    line.leftOpen ? `${line.leftOpen} left open` : "",
+    line.waiting ? `${line.waiting} waiting for merge` : "",
+  ].filter((t) => t !== "");
+}
+
+/**
+ * The Runs view as an editor tab (#584): the runs of the open repositories grouped by subject;
+ * first what runs now and what needs the user, then each subject's history as a timeline.
+ */
 @Component({
   selector: "app-deliver-view",
+  imports: [NgTemplateOutlet],
   templateUrl: "./deliver-view.html",
   styleUrl: "./deliver-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { tabindex: "0", "aria-label": "Runs", "(keydown)": "onKey($event)" },
 })
 export class DeliverView {
   protected readonly deliver = inject(Deliver);
+  protected readonly ui = inject(UiState);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly supported = SUPPORTED_SCHEMA;
   protected readonly eventsVersion = SUPPORTED_EVENTS;
   protected readonly cardKey = cardKey;
   protected readonly percent = percent;
   protected readonly progressText = progressText;
   protected readonly linkLabel = linkLabel;
+  protected readonly prLabel = prLabel;
   protected readonly stepText = stepText;
   protected readonly title = runTitle;
+  protected readonly outcomeText = outcomeText;
+  protected readonly eventTime = eventTime;
+  protected readonly toneStyle = toneStyle;
+  protected readonly lineCounts = lineCounts;
   /** The terminal of a run was asked for. */
   readonly paneChosen = output<string>();
 
-  protected runState(status: DeliverStatus): string {
-    return runState(status, this.deliver.now());
-  }
+  /** Cards that are not a readable run: unknown versions and broken files. */
+  protected readonly problems = computed(() =>
+    this.deliver.cards().filter((c) => c.state.kind !== "ok"),
+  );
+  protected readonly sections = computed(() =>
+    runSections(this.deliver.groups(), this.deliver.now()),
+  );
+  protected readonly needsYou = computed(() => {
+    const { running, history } = this.sections();
+    return needsYouItems([...running, ...history]);
+  });
+  private readonly rows = computed(() => navRows(this.sections(), this.ui.expandedRunGroups()));
+  /** The key of the row under the cursor; a revealed group takes it. */
+  protected readonly cursor = linkedSignal<string | null>(() => this.deliver.revealed());
 
   protected stateText(status: DeliverStatus): string {
     return stateText(status, this.deliver.now());
   }
 
-  protected needsYou(status: DeliverStatus): Attention[] {
-    return status.attentions.filter((a) => a.needsYou);
+  protected age(status: DeliverStatus): string {
+    return ageText(status.updated, this.deliver.now());
   }
 
-  protected notices(status: DeliverStatus): Attention[] {
-    return status.attentions.filter((a) => !a.needsYou);
+  protected newest(group: RunGroup): DeliverStatus {
+    return group.runs[0]!.status;
+  }
+
+  protected running(group: RunGroup): GroupRun | undefined {
+    return runningRun(group, this.deliver.now());
+  }
+
+  protected line(group: RunGroup, index: number): TimelineLine {
+    return timelineLine(group, index, this.deliver.now());
+  }
+
+  protected leftOpen(group: RunGroup, index: number): LeftTask[] {
+    return leftOpen(group, index, this.deliver.now());
+  }
+
+  protected isRunning(run: GroupRun): boolean {
+    return runState(run.status, this.deliver.now()) === "running";
+  }
+
+  /** The attentions of a run that ask for a look: needs you, or a warning/danger tone. */
+  protected alerts(status: DeliverStatus): Attention[] {
+    return status.attentions.filter((a) => isAlert(a, status));
+  }
+
+  /** "Start loop" once per milestone group of this Mac, only while none of its runs runs. */
+  protected canStart(group: RunGroup): boolean {
+    return (
+      group.machine === undefined &&
+      group.subject?.kind === "github.milestone" &&
+      this.running(group) === undefined
+    );
+  }
+
+  protected startLoop(group: RunGroup): void {
+    void this.deliver.startLoop(this.newest(group), group.root, group.machine);
+  }
+
+  /** The terminal of a group's running run, else of its newest run. */
+  protected paneOf(group: RunGroup): string | undefined {
+    return this.deliver.paneOf((this.running(group) ?? group.runs[0]!).card);
+  }
+
+  protected step(step: Step): { n: number; total: number } | null {
+    return step.n !== null && step.total !== null && step.total > 0
+      ? { n: step.n, total: step.total }
+      : null;
   }
 
   /** "milestone" for `github.milestone`, else the generic "subject". */
-  protected subjectLabel(status: DeliverStatus): string {
-    const kind = status.subject?.kind ?? "";
+  protected subjectLabel(group: RunGroup): string {
+    const kind = group.subject?.kind ?? "";
     return kind.includes(".") ? kind.slice(kind.indexOf(".") + 1).replace("-", " ") : "subject";
   }
 
   /** Where the repository is: its path, with the machine in front for a remote one (`box:/src/api`). */
-  protected where(card: DeliverCard): string {
+  protected where(card: Pick<DeliverCard, "root" | "machine">): string {
     return card.machine ? `${card.machine}:${card.root}` : card.root;
   }
 
@@ -81,5 +196,82 @@ export class DeliverView {
   protected agentText(status: DeliverStatus): string {
     const agent = [status.harness, status.model].filter(Boolean).join(" ");
     return agent ? `${agent} · ` : "";
+  }
+
+  protected groupOpen(group: RunGroup): boolean {
+    return this.ui.expandedRunGroups().has(group.key);
+  }
+
+  protected runOpen(run: GroupRun): boolean {
+    return this.ui.expandedRuns().has(run.key);
+  }
+
+  protected toggleGroup(group: RunGroup): void {
+    this.cursor.set(group.key);
+    this.ui.setRunGroupExpanded(group.key, !this.groupOpen(group));
+  }
+
+  protected toggleRun(run: GroupRun): void {
+    this.cursor.set(run.key);
+    this.ui.setRunExpanded(run.key, !this.runOpen(run));
+  }
+
+  /**
+   * Up/Down move over groups and lines, Enter expands (again: collapses), Escape collapses. Enter
+   * and Escape act on the cursor only from the view or a row toggle, so Enter on a link or an
+   * action button keeps doing what that button does.
+   */
+  protected onKey(event: KeyboardEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("input, textarea, select")) return;
+    const onRow = target === this.host.nativeElement || target?.dataset["row"] !== undefined;
+    if ((event.key === "Enter" || event.key === "Escape") && !onRow) return;
+    const rows = this.rows();
+    if (rows.length === 0) return;
+    const at = rows.findIndex((r) => r.key === this.cursor());
+    const row = rows[at];
+    switch (event.key) {
+      case "ArrowDown":
+      case "ArrowUp": {
+        const next =
+          at < 0
+            ? event.key === "ArrowDown"
+              ? 0
+              : rows.length - 1
+            : Math.max(0, Math.min(rows.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)));
+        this.cursor.set(rows[next]!.key);
+        this.focus(rows[next]!.key);
+        break;
+      }
+      case "Enter":
+        if (!row) return;
+        if (row.kind === "group")
+          this.ui.setRunGroupExpanded(row.key, !this.ui.expandedRunGroups().has(row.key));
+        else this.ui.setRunExpanded(row.key, !this.ui.expandedRuns().has(row.key));
+        break;
+      case "Escape":
+        if (!row) return;
+        if (row.kind === "run" && this.ui.expandedRuns().has(row.key)) {
+          this.ui.setRunExpanded(row.key, false);
+        } else if (row.kind === "run") {
+          this.ui.setRunGroupExpanded(row.group, false);
+          this.cursor.set(row.group);
+          this.focus(row.group);
+        } else if (this.ui.expandedRunGroups().has(row.key)) {
+          this.ui.setRunGroupExpanded(row.key, false);
+        } else return;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  }
+
+  /** Moves the focus to the toggle of a row once it is rendered. */
+  private focus(key: string): void {
+    const el = [...this.host.nativeElement.querySelectorAll<HTMLElement>("[data-row]")].find(
+      (e) => e.dataset["row"] === key,
+    );
+    el?.focus();
   }
 }

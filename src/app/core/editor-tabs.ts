@@ -19,7 +19,7 @@ const LEGACY_BOARD_TAB = "poimen:deliver-board";
 /** The id of the GitHub pull request tab; like settings it is no herdr pane. */
 export const GITHUB_TAB = "poimen:github";
 
-/** The id of the Deliver tab (live deliver loops); no herdr pane either. */
+/** The id of the Runs tab (agent runs grouped by subject, #584); no terminal either. */
 export const DELIVER_TAB = "poimen:deliver";
 
 /** Prefix of a flow tab id; the rest is the id of the pane whose agent run the tab shows. */
@@ -284,7 +284,7 @@ export class EditorTabs {
     this.openPinned(GITHUB_TAB);
   }
 
-  /** Opens the Deliver tab (at most one) as a pinned tab, or activates it. */
+  /** Opens the Runs tab (at most one) as a pinned tab, or activates it. */
   openDeliver(): void {
     this.openPinned(DELIVER_TAB);
   }

@@ -18,7 +18,7 @@ export const ACTIVITY_VIEWS: readonly ActivityView[] = [
   { id: "explorer", label: "Explorer", icon: "folder" },
   { id: "notifications", label: "Notifications", icon: "bell" },
   { id: "github", label: "GitHub", icon: "github", tab: "github" },
-  { id: "deliver", label: "Deliver", icon: "deliver", tab: "deliver" },
+  { id: "deliver", label: "Runs", icon: "deliver", tab: "deliver" },
 ];
 
 /** Narrow icon rail at the far left; clicking a view selects it. */

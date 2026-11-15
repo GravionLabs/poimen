@@ -8,7 +8,7 @@ import { POIMEN_COMMANDS } from "../core/command-palette";
 import { DELIVER_TAB, EditorTabs, tabKind } from "../core/editor-tabs";
 import type { Terminal } from "../core/snapshot";
 import { tauri } from "../core/tauri.mock";
-import { UI_STORAGE } from "../core/ui-state";
+import { UI_STATE_KEY, UI_STORAGE, UiState } from "../core/ui-state";
 import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { Deliver, loopPane, milestoneNumber } from "./deliver";
@@ -33,7 +33,7 @@ beforeAll(() => {
   }
 });
 
-const events = (...names: string[]): DeliverRead => ({
+const events = (...names: string[]): Extract<DeliverRead, { kind: "events" }> => ({
   kind: "events",
   runs: names.map((n) =>
     JSON.parse(readFileSync(`src/app/deliver/fixtures/events-${n}.json`, "utf8")),
@@ -45,8 +45,23 @@ const read = (name: string): DeliverRead => ({
   status: JSON.parse(readFileSync(`src/app/deliver/fixtures/status-${name}.json`, "utf8")),
 });
 
+/** The UI state storage of a test: empty at each render. */
+const storage = new Map<string, string>();
+
 async function render() {
   TestBed.resetTestingModule();
+  storage.clear();
+  TestBed.configureTestingModule({
+    providers: [
+      {
+        provide: UI_STORAGE,
+        useValue: {
+          getItem: (k: string) => storage.get(k) ?? null,
+          setItem: (k: string, v: string) => storage.set(k, v),
+        },
+      },
+    ],
+  });
   TestBed.overrideComponent(DeliverView, {
     set: {
       templateUrl: undefined,
@@ -66,6 +81,8 @@ async function render() {
 }
 
 const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+/** The texts of the child elements, joined by a space (the template drops the whitespace). */
+const parts = (el: Element) => [...el.children].map((c) => text(c)).join(" ");
 const button = (el: HTMLElement, label: string) =>
   [...el.querySelectorAll("button")].find((b) => text(b).includes(label))!;
 
@@ -74,88 +91,336 @@ beforeEach(() => {
   opener.openUrl.mockReset();
 });
 
-describe("Deliver panel", () => {
-  it("explains where runs come from while there are none", async () => {
+/** Four runs of M014.1 (one abandoned, one with a merging task after `run.finished`). */
+const FOUR_RUNS = JSON.parse(
+  readFileSync("src/app/deliver/fixtures/runs-milestone.json", "utf8"),
+) as Record<string, unknown>[];
+const FOUR: DeliverRead = { kind: "events", runs: FOUR_RUNS };
+/** Two minutes after the last event of the running M4 run. */
+const AT = Date.parse("2026-11-08T12:00:00Z");
+
+const groups = (el: HTMLElement, section: string) => [
+  ...el.querySelectorAll(`[data-testid=${section}] [data-testid=group]`),
+];
+const lines = (el: Element) => [...el.querySelectorAll("[data-testid=line]")];
+const key = (el: HTMLElement, name: string) =>
+  el.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+
+describe("Runs view", () => {
+  it("names the page and says how a run starts while there is none", async () => {
     const { el } = await render();
-    expect(text(el.querySelector("[data-testid=empty]"))).toContain(".agents/events/<run>.jsonl");
-    expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(0);
-  });
-
-  it("shows a run from the core: subject, progress, open tasks with step, links", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", events("milestone"));
-    deliver.now.set(Date.parse("2026-11-08T12:00:00Z"));
-    await show();
-    expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(1);
-    expect(text(el.querySelector("h2"))).toContain("M4 Deliver loop");
-    expect(text(el.querySelector("[data-testid=progress]"))).toBe("3/9 issues");
-    expect(el.querySelector(".fill")?.getAttribute("style")).toContain("33");
-    const tasks = [...el.querySelectorAll("[data-testid=task]")].map((t) => text(t));
-    expect(tasks).toHaveLength(2);
-    expect(tasks[0]).toContain("Second");
-    expect(tasks[0]).toContain("implement 2/3");
-    expect(tasks[0]).toContain("tests green");
-    expect(text(el.querySelector("[data-testid=task-progress]"))).toBe("1/3 steps");
-    // A subject of a kind poimen does not know is shown generically.
-    expect(tasks[1]).toContain("A thing of a kind poimen does not know");
-    expect(text(el.querySelector("[data-testid=state]"))).toBe("running, updated 2 min ago");
-    expect(text(el.querySelector("[data-testid=links]"))).toContain("PR #21");
-    expect(text(el.querySelector("[data-testid=links]"))).toContain("log");
-  });
-
-  it("lists what finished per outcome with reasons and links", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", events("milestone"));
-    await show();
-    const rows = [...el.querySelectorAll("[data-testid=finished] li")].map((r) => text(r));
-    expect(rows[0]).toContain("First");
-    expect(rows[0]).toContain("succeeded");
-    expect(rows[0]).toContain("PR #21");
-    expect(rows[1]).toContain("Zero");
-    expect(rows[1]).toContain("failed: review rejected");
-  });
-
-  it("shows needs-you attentions apart from other notices, with their links", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", events("milestone"));
-    await show();
-    expect(text(el.querySelector("[data-testid=needs-you]"))).toContain(
-      "decide whether the field names are final",
+    expect(text(el.querySelector("h1"))).toBe("Runs");
+    expect(text(el.querySelector("header .hint"))).toBe(
+      "Agent runs (deliver loops and sessions) of the open repositories.",
     );
-    expect(text(el.querySelector("[data-testid=needs-you]"))).toContain("log");
-    expect(text(el.querySelector("[data-testid=notices]"))).toContain("run-wide notice");
-    expect(text(el.querySelector("[data-testid=notices]"))).not.toContain("decide");
+    const empty = text(el.querySelector("[data-testid=empty]"));
+    expect(empty).toContain(".agents/events/<run>.jsonl");
+    expect(empty).toContain("Start task");
+    expect(el.querySelectorAll("[data-testid=group]")).toHaveLength(0);
+    expect(el.querySelector("[data-testid=needs-you]")).toBeNull();
   });
 
-  it("colors the card by the tone of the run and shows the writer's agent", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", events("milestone", "failed"));
+  it("shows a running run under Running now: subject, current task, step bar, age, focus", async () => {
+    const { el, deliver, fixture, show } = await render();
+    deliver.apply("/r", events("milestone"));
+    deliver.now.set(AT);
+    vi.spyOn(deliver, "paneOf").mockReturnValue("t7");
+    const chosen: string[] = [];
+    fixture.componentInstance.paneChosen.subscribe((id) => chosen.push(id));
     await show();
-    const cards = [...el.querySelectorAll("[data-testid=card]")];
-    expect(cards.map((c) => c.getAttribute("data-tone"))).toEqual(["warning", "danger"]);
-    expect(text(cards[0].querySelector("footer .hint"))).toBe("claude sonnet · /r");
-    expect(text(cards[1].querySelector("[data-testid=state]"))).toContain("failed");
+    const [group] = groups(el, "running");
+    expect(group).toBeDefined();
+    expect(text(group!.querySelector(".group-name"))).toBe("M4 Deliver loop");
+    expect(text(group!.querySelector("[data-testid=state]"))).toBe("running, updated 2 min ago");
+    expect(text(group!.querySelector("[data-testid=progress]"))).toBe("3/9 issues");
+    const current = group!.querySelector("[data-testid=current]")!;
+    expect(text(current)).toContain("Second");
+    expect(text(current.querySelector("[data-testid=step]"))).toBe("implement 2/3");
+    const bar = current.querySelector("[aria-label=Step]")!;
+    expect([bar.getAttribute("aria-valuenow"), bar.getAttribute("aria-valuemax")]).toEqual([
+      "2",
+      "3",
+    ]);
+    expect(text(current.querySelector("[data-testid=step-text]"))).toBe("tests green");
+    expect(text(group!.querySelector("[data-testid=age]"))).toBe("last event 2 min ago");
+    expect(text(group!.querySelector("footer .hint"))).toBe("claude sonnet · /r");
+    const focus = group!.querySelector<HTMLButtonElement>("[data-testid=focus]")!;
+    expect(focus.classList).toContain("primary");
+    focus.click();
+    expect(chosen).toEqual(["t7"]);
+    // A running loop is not started again.
+    expect(group!.querySelector("[data-testid=start]")).toBeNull();
+    expect(el.querySelector("[data-testid=history]")).toBeNull();
   });
 
-  it("shows a run without subject, progress or agent from the core alone", async () => {
+  it("lists what needs the user once, with its group and links", async () => {
     const { el, deliver, show } = await render();
-    deliver.apply("/r", events("session"));
+    deliver.apply("/r", {
+      kind: "events",
+      runs: [...FOUR_RUNS, { ...FOUR_RUNS[2], run: "again" }],
+    });
+    deliver.apply("/s", events("milestone"));
+    deliver.now.set(AT);
     await show();
-    const card = el.querySelector("[data-testid=card]")!;
-    expect(text(card.querySelector("h2"))).toBe("r");
-    expect(card.querySelector("[data-testid=progress]")).toBeNull();
-    expect(card.querySelector("[data-testid=start]")).toBeNull();
-    expect(card.querySelector("[data-testid=open-subject]")).toBeNull();
-    expect(text(card.querySelector("[data-testid=step]"))).toBe("review");
+    const needs = [...el.querySelectorAll("[data-testid=need]")].map(parts);
+    expect(needs).toEqual([
+      "M4 Deliver loop decide whether the field names are final log",
+      "M014.1 Runs view Decide whether #104 ships in M014.1 issue",
+    ]);
+    // Sections in order: Running now, Needs you, History.
+    expect([...el.querySelectorAll(".section-title")].map((h) => text(h))).toEqual([
+      "Running now",
+      "Needs you",
+      "History",
+    ]);
   });
 
-  it("marks a running run without updates for over an hour, and an abandoned one, as stale", async () => {
+  it("collapses a subject's runs into one history group, the head with its newest run", async () => {
     const { el, deliver, show } = await render();
-    deliver.apply("/r", events("milestone", "abandoned"));
-    deliver.now.set(Date.parse("2026-11-08T11:58:00Z") + 61 * 60_000);
+    deliver.apply("/r", FOUR);
+    deliver.now.set(AT);
     await show();
-    expect(el.querySelectorAll(".card.state-stale")).toHaveLength(2);
-    expect(text(el.querySelector("[data-testid=state]"))).toContain("stale");
+    const all = groups(el, "history");
+    expect(all).toHaveLength(1);
+    const [group] = all;
+    expect(text(group!.querySelector(".group-name"))).toBe("M014.1 Runs view");
+    expect(text(group!.querySelector("[data-testid=group-toggle]"))).toContain("4 runs");
+    expect(text(group!.querySelector("[data-testid=state]"))).toContain(
+      "failed 2 h ago: deliver.partial",
+    );
+    // The color follows the tone of the newest run.
+    expect(group!.getAttribute("data-tone")).toBe("warning");
+    expect(group!.querySelector("[data-testid=timeline]")).toBeNull();
+    expect(el.querySelector("[data-testid=running]")).toBeNull();
+  });
+
+  it("shows the timeline of a group newest first, one line per run", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", FOUR);
+    deliver.now.set(AT);
+    await show();
+    button(el, "M014.1 Runs view").click();
+    await show();
+    const rows = lines(el);
+    expect(rows.map((l) => text(l.querySelector("[data-testid=outcome]")))).toEqual([
+      "failed: deliver.partial",
+      "abandoned",
+      "failed: 2 of 4 PBIs delivered",
+      "failed: deliver.partial",
+    ]);
+    expect(text(rows[2]!)).toContain("PR #201");
+    expect(text(rows[2]!)).toContain("PR #202");
+    expect(text(rows[2]!)).toContain("1 skipped");
+    expect(text(rows[2]!)).toContain("1 waiting for merge");
+    expect(text(rows[1]!)).toContain("1 left open");
+    // #101 was taken up by a later run: nothing left open in the first run.
+    expect(text(rows[3]!)).not.toContain("left open");
+    // A failed run with tone neutral is not shown as an error.
+    expect(rows.map((l) => l.getAttribute("data-tone"))).toEqual([
+      "warning",
+      "neutral",
+      "neutral",
+      "neutral",
+    ]);
+    expect(el.querySelectorAll(".tone-danger")).toHaveLength(0);
+  });
+
+  it("expands a line: left open, waiting for merge with its PR, finished, links, events", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", FOUR);
+    deliver.now.set(AT);
+    await show();
+    button(el, "M014.1 Runs view").click();
+    await show();
+    lines(el)[2]!.querySelector<HTMLButtonElement>("[data-testid=line-toggle]")!.click();
+    await show();
+    const details = el.querySelector("[data-testid=details]")!;
+    expect(details.querySelector("[data-testid=tasks]")).toBeNull();
+    const left = [...details.querySelectorAll("[data-testid=left-task]")].map(parts);
+    expect(left).toEqual(["#102 Timeline waiting for merge PR #202"]);
+    const finished = [...details.querySelectorAll("[data-testid=finished] li")].map(parts);
+    expect(finished).toEqual([
+      "#101 Group runs succeeded PR #201",
+      "#103 Keyboard skipped: blocked",
+    ]);
+    expect(text(details.querySelector("[data-testid=links]"))).toBe("Links PR #201 PR #202");
+    const rows = [...details.querySelectorAll("[data-testid=event]")].map((e) => e.className);
+    expect(rows).toEqual([
+      "event tone-neutral",
+      "event tone-success",
+      "event tone-neutral",
+      "event tone-neutral",
+    ]);
+    button(details as HTMLElement, "PR #202").click();
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/GravionLabs/demo/pull/202");
+  });
+
+  it("lists the tasks of a running run as open and of an abandoned run as left open", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", { kind: "events", runs: [...FOUR_RUNS, ...events("milestone").runs] });
+    deliver.now.set(AT);
+    await show();
+    for (const toggle of el.querySelectorAll<HTMLButtonElement>("[data-testid=group-toggle]"))
+      toggle.click();
+    await show();
+    for (const toggle of el.querySelectorAll<HTMLButtonElement>("[data-testid=line-toggle]"))
+      toggle.click();
+    await show();
+    const [running] = groups(el, "running");
+    const open = [...running!.querySelectorAll("[data-testid=task]")].map(parts);
+    expect(open[0]).toBe("Second implement 2/3 1/3 steps");
+    expect(running!.querySelector("[data-testid=left-open]")).toBeNull();
+    const [history] = groups(el, "history");
+    expect(history!.querySelectorAll("[data-testid=tasks]")).toHaveLength(0);
+    const left = [...history!.querySelectorAll("[data-testid=left-task]")].map(parts);
+    expect(left).toEqual([
+      "#104 Needs you section left open at review 1/2",
+      "#102 Timeline waiting for merge PR #202",
+    ]);
+  });
+
+  it("lists only warning, danger and needs-you attentions; success and info go in the line", async () => {
+    const { el, deliver, show } = await render();
+    const raw = events("milestone").runs[0] as Record<string, unknown>;
+    deliver.apply("/r", {
+      kind: "events",
+      runs: [
+        {
+          ...raw,
+          attentions: [
+            ...(raw["attentions"] as unknown[]),
+            { id: "a3", task: "t11", reason: "pr.opened", text: "PR opened", tone: "success" },
+            { id: "a4", reason: "CI red", tone: "danger" },
+          ],
+        },
+      ],
+    });
+    deliver.now.set(AT);
+    await show();
+    button(el, "M4 Deliver loop").click();
+    await show();
+    const [line] = lines(el);
+    expect(text(line!.querySelector("[data-testid=note]"))).toBe("PR opened");
+    line!.querySelector<HTMLButtonElement>("[data-testid=line-toggle]")!.click();
+    await show();
+    const alerts = [...el.querySelectorAll("[data-testid=alerts] li")].map((a) => text(a));
+    expect(alerts).toEqual([
+      "decide whether the field names are final log",
+      "run-wide notice",
+      "CI red",
+    ]);
+  });
+
+  it("offers Start loop once per milestone group, only while none of its runs runs", async () => {
+    tauri.answer("task_plan", () => {
+      throw new Error("no task mode named deliver-loop");
+    });
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", FOUR);
+    deliver.apply("/s", events("milestone", "session"));
+    deliver.now.set(AT);
+    await show();
+    const starts = [...el.querySelectorAll<HTMLButtonElement>("[data-testid=start]")];
+    expect(starts).toHaveLength(1);
+    expect(starts[0]!.closest("[data-testid=group]")!.textContent).toContain("M014.1 Runs view");
+    starts[0]!.click();
+    await vi.waitFor(() => expect(tauri.calls("task_plan")).toHaveLength(1));
+    expect(tauri.calls("task_plan")[0]).toMatchObject({
+      repoDir: "/r",
+      mode: "deliver-loop",
+      issue: { nr: 14, title: "M014.1 Runs view" },
+    });
+  });
+
+  it("keeps expanded groups and lines in the UI state", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", FOUR);
+    deliver.now.set(AT);
+    await show();
+    button(el, "M014.1 Runs view").click();
+    await show();
+    lines(el)[0]!.querySelector<HTMLButtonElement>("[data-testid=line-toggle]")!.click();
+    await show();
+    const ui = TestBed.inject(UiState);
+    expect([...ui.expandedRunGroups()]).toEqual(["/r\ngithub.milestone\nGravionLabs/demo#14"]);
+    expect([...ui.expandedRuns()]).toEqual(["/r\n20261108-080000-loop"]);
+    expect(JSON.parse(storage.get(UI_STATE_KEY)!)).toMatchObject({
+      expandedRunGroups: ["/r\ngithub.milestone\nGravionLabs/demo#14"],
+      expandedRuns: ["/r\n20261108-080000-loop"],
+    });
+  });
+
+  it("moves over groups and lines with Up/Down, expands with Enter, collapses with Escape", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", FOUR);
+    deliver.apply("/s", events("milestone"));
+    deliver.now.set(AT);
+    await show();
+    const ui = TestBed.inject(UiState);
+    const focused = () => (document.activeElement as HTMLElement | null)?.dataset["row"];
+    document.body.appendChild(el);
+    key(el, "ArrowDown");
+    await show();
+    expect(focused()).toBe("/s\ngithub.milestone\nGravionLabs/demo#4");
+    key(el, "ArrowDown");
+    await show();
+    expect(focused()).toBe("/r\ngithub.milestone\nGravionLabs/demo#14");
+    key(el, "Enter");
+    await show();
+    expect(lines(el)).toHaveLength(4);
+    key(el, "ArrowDown");
+    await show();
+    expect(focused()).toBe("/r\n20261108-080000-loop");
+    key(el, "Enter");
+    await show();
+    expect(el.querySelectorAll("[data-testid=details]")).toHaveLength(1);
+    key(el, "Escape");
+    await show();
+    expect(el.querySelectorAll("[data-testid=details]")).toHaveLength(0);
+    key(el, "Escape");
+    await show();
+    expect(lines(el)).toHaveLength(0);
+    expect(focused()).toBe("/r\ngithub.milestone\nGravionLabs/demo#14");
+    expect(ui.expandedRunGroups().size).toBe(0);
+    key(el, "ArrowUp");
+    await show();
+    expect(focused()).toBe("/s\ngithub.milestone\nGravionLabs/demo#4");
+    el.remove();
+  });
+
+  it("leaves Enter and Escape on a link or action button to that button", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", FOUR);
+    deliver.now.set(AT);
+    await show();
+    const ui = TestBed.inject(UiState);
+    key(el, "ArrowDown");
+    const open = button(el, "Open milestone");
+    open.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await show();
+    expect(ui.expandedRunGroups().size).toBe(0);
+    // From the view itself Enter expands the group under the cursor.
+    key(el, "Enter");
+    await show();
+    expect(ui.expandedRunGroups().size).toBe(1);
+  });
+
+  it("opens with the group of a repository's run expanded, as a deliverRoot notification asks", async () => {
+    const { el, deliver, show } = await render();
+    deliver.apply("/r", FOUR);
+    deliver.apply("/s", events("session"));
+    deliver.now.set(AT);
+    expect(deliver.reveal("/r")).toBe(true);
+    await show();
+    expect(
+      TestBed.inject(EditorTabs)
+        .tabs()
+        .map((t) => t.paneId),
+    ).toContain(DELIVER_TAB);
+    const [group] = groups(el, "history").filter((g) => g.textContent?.includes("M014.1"));
+    expect(group!.classList).toContain("cursor");
+    expect(lines(group!)).toHaveLength(4);
+    expect(deliver.reveal("/nowhere")).toBe(false);
   });
 
   it("hints at events of a version it does not know, keeping the readable runs", async () => {
@@ -163,7 +428,7 @@ describe("Deliver panel", () => {
     deliver.apply("/r", { ...events("failed"), unknownVersion: 2 } as DeliverRead);
     await show();
     expect(text(el.querySelector("[data-testid=events-version]"))).toContain("version 2");
-    expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(2);
+    expect(el.querySelectorAll("[data-testid=group]")).toHaveLength(1);
   });
 
   it("shows a hint for an unknown legacy schema version and for a broken file", async () => {
@@ -173,24 +438,24 @@ describe("Deliver panel", () => {
     await show();
     expect(text(el.querySelector("[data-testid=unsupported]"))).toContain("schema version 2");
     expect(text(el.querySelector("[data-testid=invalid]"))).toContain("expected value");
-    expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(2);
+    expect(el.querySelectorAll("[data-testid=problem]")).toHaveLength(2);
   });
 
-  it("shows a legacy status file like any other run and drops the card when it disappears", async () => {
+  it("shows a legacy status file like any other run and drops it when it disappears", async () => {
     const { el, deliver, show } = await render();
     deliver.apply("/src/skills", read("running"));
     await show();
-    expect(text(el.querySelector("h2"))).toContain("M4");
+    expect(text(el.querySelector(".group-name"))).toContain("M4");
     expect(text(el.querySelector("[data-testid=progress]"))).toBe("3/9");
-    expect(text(el.querySelector("[data-testid=finished]"))).toContain("#325");
     deliver.apply("/src/skills", { kind: "missing" });
     await show();
-    expect(el.querySelectorAll("[data-testid=card]")).toHaveLength(0);
+    expect(el.querySelectorAll("[data-testid=group]")).toHaveLength(0);
   });
 
-  it("opens subject, task and link URLs in the browser, GitHub only", async () => {
+  it("opens subject and link URLs in the browser, GitHub only", async () => {
     const { el, deliver, show } = await render();
     deliver.apply("/r", events("milestone"));
+    deliver.now.set(AT);
     await show();
     button(el, "Open milestone").click();
     expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/GravionLabs/demo/milestone/4");
@@ -202,41 +467,6 @@ describe("Deliver panel", () => {
     await deliver.openUrl("https://evil.example/x");
     await deliver.openUrl(null);
     expect(opener.openUrl).not.toHaveBeenCalled();
-  });
-
-  it("focuses the terminal of the run when there is one", async () => {
-    const { fixture, el, deliver, show } = await render();
-    deliver.apply("/r", events("milestone"));
-    vi.spyOn(deliver, "paneOf").mockReturnValue("t7");
-    const chosen: string[] = [];
-    fixture.componentInstance.paneChosen.subscribe((id) => chosen.push(id));
-    await show();
-    button(el, "Focus terminal").click();
-    expect(chosen).toEqual(["t7"]);
-  });
-
-  it("starts the loop for a finished milestone run through the deliver-loop task mode", async () => {
-    tauri.answer("task_plan", () => {
-      throw new Error("no task mode named deliver-loop");
-    });
-    const { el, deliver, show } = await render();
-    deliver.apply("/src/skills", read("done"));
-    await show();
-    button(el, "Start loop").click();
-    await vi.waitFor(() => expect(tauri.calls("task_plan")).toHaveLength(1));
-    expect(tauri.calls("task_plan")[0]).toMatchObject({
-      repoDir: "/src/skills",
-      mode: "deliver-loop",
-      issue: { nr: 3, title: "M3 Roadmap and release" },
-    });
-  });
-
-  it("offers no loop for a running run or a subject that is not a milestone", async () => {
-    const { el, deliver, show } = await render();
-    deliver.apply("/r", events("milestone", "abandoned"));
-    deliver.now.set(Date.parse("2026-11-08T12:00:00Z"));
-    await show();
-    expect(el.querySelectorAll("[data-testid=start]")).toHaveLength(0);
   });
 });
 
@@ -317,7 +547,7 @@ describe("remote runs (#692)", () => {
     tauri.emit("deliver", { root: "/r", machine: "box", read: events("session") });
     await show();
     expect(deliver.cards().map((c) => c.machine)).toEqual([undefined, "box"]);
-    const cards = el.querySelectorAll("[data-testid=card]");
+    const cards = el.querySelectorAll("[data-testid=group]");
     expect(cards).toHaveLength(2);
     expect(cards[0]!.querySelector("[data-testid=machine]")).toBeNull();
     expect(text(cards[1]!.querySelector("[data-testid=machine]"))).toBe("box");
@@ -331,7 +561,7 @@ describe("remote runs (#692)", () => {
     deliver.apply("/r", events("milestone", "failed"), "box");
     tauri.emit("machine:state_changed", machine("offline"));
     await show();
-    const card = el.querySelector("[data-testid=card]")!;
+    const card = el.querySelector("[data-testid=group]")!;
     expect(text(card.querySelector("[data-testid=offline]"))).toContain("offline");
     expect(card.classList).toContain("offline");
     expect(deliver.cards()).toHaveLength(2);
@@ -438,10 +668,10 @@ describe("helpers", () => {
 describe("entry points", () => {
   it("is a tab in the activity bar, the palette and the editor tabs", () => {
     expect(ACTIVITY_VIEWS.find((v) => v.id === "deliver")).toMatchObject({
-      label: "Deliver",
+      label: "Runs",
       tab: "deliver",
     });
-    expect(POIMEN_COMMANDS).toContainEqual({ id: "openDeliver", title: "Open Deliver" });
+    expect(POIMEN_COMMANDS).toContainEqual({ id: "openDeliver", title: "Open Runs" });
     expect(tabKind(DELIVER_TAB)).toBe("deliver");
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({

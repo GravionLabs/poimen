@@ -233,7 +233,7 @@ export class App {
             };
           }
           if (tabKind(tab.paneId) === "deliver") {
-            return { id: tab.paneId, label: "Deliver", title: "Deliver loops" };
+            return { id: tab.paneId, label: "Runs", title: "Agent runs" };
           }
           const spaceOf = spaceOfTab(tab.paneId);
           if (spaceOf !== null) {
