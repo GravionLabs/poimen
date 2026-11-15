@@ -139,7 +139,10 @@ export class DeliverView {
     this.deliver.cards().filter((c) => c.state.kind !== "ok"),
   );
   protected readonly sections = computed(() =>
-    runSections(this.deliver.groups(), this.deliver.now()),
+    runSections(
+      this.deliver.groups().filter((g) => this.overview.shown(g)),
+      this.deliver.now(),
+    ),
   );
   protected readonly needsYou = computed(() => {
     const { running, history } = this.sections();

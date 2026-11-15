@@ -844,4 +844,36 @@ describe("Runs view: milestone overview (#585)", () => {
     const group = [...el.querySelectorAll("[data-testid=group]")][0]!;
     expect(text(group.querySelector("[data-testid=progress]"))).toBe("4/7 issues");
   });
+
+  it("leaves out the group of a milestone GitHub no longer lists open", async () => {
+    answerGithub();
+    tauri.answer("github_milestones", () => [
+      {
+        root: "/r",
+        repo: "GravionLabs/demo",
+        status: "ok",
+        milestones: [milestone({ title: "M020", url: "u20" })],
+      },
+    ]);
+    const { el } = await showOverview();
+    expect(el.querySelectorAll("[data-testid=group]")).toHaveLength(0);
+  });
+
+  it("shows the issue title for a task whose subject title is only #<nr>", async () => {
+    answerGithub();
+    const { el, deliver, show } = await showOverview();
+    const run = JSON.parse(JSON.stringify(FOUR_RUNS[3])) as Record<string, unknown>;
+    run["status"] = "running";
+    run["tasks"] = [
+      {
+        task: "t101",
+        subject: { kind: "github.issue", id: "GravionLabs/demo#101", title: "#101" },
+        step: null,
+      },
+    ];
+    deliver.apply("/r", { kind: "events", runs: [run] });
+    deliver.now.set(Date.parse(run["updated"] as string) + 1000);
+    await show();
+    expect(text(el.querySelector("[data-testid=current]"))).toContain("#101 Issue 101");
+  });
 });

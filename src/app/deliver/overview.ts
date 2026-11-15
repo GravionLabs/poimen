@@ -79,6 +79,17 @@ export class Overview {
     return null;
   }
 
+  /**
+   * Whether the Runs view shows the group: a milestone group of this Mac is left out once GitHub
+   * answered for its repository and no longer lists the milestone as open (it is closed).
+   */
+  shown(group: RunGroup): boolean {
+    if (group.machine !== undefined || group.subject?.kind !== "github.milestone") return true;
+    const repo = this.milestones().find((r) => r.root === group.root);
+    if (repo?.status !== "ok") return true;
+    return repo.milestones.some((m) => groupsOf([group], group.root, m).length > 0);
+  }
+
   /** The title of a task: the issue's own for a bare `#<nr>`, else what the run said. */
   titleOf(task: Pick<OpenTask, "subject">, root: string, machine?: string): string {
     return machine === undefined

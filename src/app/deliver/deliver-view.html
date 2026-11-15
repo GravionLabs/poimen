@@ -256,10 +256,10 @@
         <div class="current" data-testid="current">
           @if (t.subject.url; as url) {
             <button type="button" class="link" (click)="deliver.openUrl(url)">
-              {{ t.subject.title }}
+              {{ overview.titleOf(t, g.root, g.machine) }}
             </button>
           } @else {
-            <span>{{ t.subject.title }}</span>
+            <span>{{ overview.titleOf(t, g.root, g.machine) }}</span>
           }
           @if (t.step; as s) {
             <span class="step" data-testid="step">{{ stepText(s) }}</span>
@@ -357,7 +357,7 @@
                     <ul data-testid="tasks">
                       @for (t of r.status.tasks; track t.task) {
                         <li data-testid="task">
-                          <span>{{ t.subject.title }}</span>
+                          <span>{{ overview.titleOf(t, g.root, g.machine) }}</span>
                           @if (t.step; as s) {
                             <span class="step">{{ stepText(s) }}</span>
                           }
@@ -379,10 +379,10 @@
                         <li data-testid="left-task">
                           @if (t.task.subject.url; as url) {
                             <button type="button" class="link" (click)="deliver.openUrl(url)">
-                              {{ t.task.subject.title }}
+                              {{ overview.titleOf(t.task, g.root, g.machine) }}
                             </button>
                           } @else {
-                            <span>{{ t.task.subject.title }}</span>
+                            <span>{{ overview.titleOf(t.task, g.root, g.machine) }}</span>
                           }
                           @if (t.waiting) {
                             <span class="hint" data-testid="waiting">waiting for merge</span>
@@ -424,10 +424,10 @@
                       <li>
                         @if (t.subject.url; as url) {
                           <button type="button" class="link" (click)="deliver.openUrl(url)">
-                            {{ t.subject.title }}
+                            {{ overview.titleOf(t, g.root, g.machine) }}
                           </button>
                         } @else {
-                          <span>{{ t.subject.title }}</span>
+                          <span>{{ overview.titleOf(t, g.root, g.machine) }}</span>
                         }
                         <span class="hint"
                           >{{ t.outcome }}{{ outcomeText(t) ? ": " + outcomeText(t) : "" }}</span
