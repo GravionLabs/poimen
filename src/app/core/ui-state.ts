@@ -15,10 +15,10 @@ export const PANEL_DEFAULT_HEIGHT = 260;
 /** Tabs of the bottom panel: subagent transcripts (Output) and the run as a graph (Flow). */
 export const PANEL_TABS = ["output", "flow", "events", "log"] as const;
 export const DEFAULT_PANEL_TAB = "output";
+/** How many spaces keep a focus time. */
+export const RECENT_SPACES_LIMIT = 200;
 /** How many run command palette entries are remembered as "Recent". */
-export /** How many spaces keep a focus time. */
-const RECENT_SPACES_LIMIT = 200;
-const RECENT_COMMANDS_LIMIT = 5;
+export const RECENT_COMMANDS_LIMIT = 5;
 export const SPLIT_DEFAULT_SIZES: readonly [number, number] = [0.5, 0.5];
 
 /** Minimal slice of `Storage`, so tests can inject a fake. */
