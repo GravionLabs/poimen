@@ -234,6 +234,7 @@ impl Emulator {
     /// The answers to the queries fed so far (DA1/DA2, DSR, OSC 10/11/12/4 color queries), as
     /// bytes for the PTY, in order. Taken once: the next call only returns newer ones. A color
     /// the program set itself (OSC 4, 10, 11) wins over `colors`.
+    #[cfg(test)]
     pub fn take_replies(&mut self, colors: &Colors) -> Vec<u8> {
         self.take_answers(colors).all
     }
