@@ -334,6 +334,7 @@ impl Link for Client {
             .ping_and_subscribe_with(wire::EventsSubscribe {
                 client: Some(me),
                 run_events: true,
+                confirms: false,
             })
             .map_err(|e| e.to_string())?;
         let session =

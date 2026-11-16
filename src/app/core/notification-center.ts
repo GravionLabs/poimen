@@ -17,6 +17,8 @@ export interface NotificationEntry {
   read: boolean;
   /** Set for an attention of a run (#806): the repository (and machine) the Runs view reveals. */
   deliver?: { root: string; machine?: string };
+  /** Set for a write of an agent through `poimen mcp` (#615): what it typed. */
+  detail?: string;
 }
 
 /** An attention of a run that asks for the user (needs you, warning or danger). */
@@ -95,6 +97,21 @@ export class NotificationCenter {
       deliver: { root: a.root, ...(a.machine === undefined ? {} : { machine: a.machine }) },
     }));
     this.entries.update((list) => prependCapped(list, added));
+  }
+
+  /** Records a write of an agent through `poimen mcp` (#615); `label` is the calling terminal. */
+  recordAgentWrite(label: string, message: string, detail: string, now: number): void {
+    const entry: NotificationEntry = {
+      id: this.nextId++,
+      paneId: "",
+      label,
+      status: "done",
+      message,
+      time: now,
+      read: false,
+      detail,
+    };
+    this.entries.update((list) => prependCapped(list, [entry]));
   }
 
   markRead(id: number): void {

@@ -1,0 +1,42 @@
+@if (confirm.current(); as request) {
+  <button
+    type="button"
+    class="backdrop"
+    tabindex="-1"
+    aria-label="Decline"
+    (click)="confirm.answer(false)"
+  ></button>
+  <div
+    class="dialog"
+    role="alertdialog"
+    aria-modal="true"
+    aria-label="An agent asks to write into another space"
+    (keydown.escape)="confirm.answer(false)"
+  >
+    <h2>
+      <strong>{{ request.callerName }}</strong>
+      {{
+        request.action === "start_agent" ? "wants to start an agent" : "wants to prompt an agent"
+      }}
+      in <strong>{{ request.spaceName }}</strong>
+    </h2>
+    <p class="hint">
+      {{ request.action === "start_agent" ? "It runs:" : "It types:" }}
+    </p>
+    <pre class="text">{{ request.text }}</pre>
+    <p class="hint">
+      That space is not the one of {{ request.callerName }}. It waits up to 60 seconds for your
+      answer.
+    </p>
+    @if (confirm.waiting() > 1) {
+      <p class="hint">{{ confirm.waiting() - 1 }} more waiting.</p>
+    }
+    @if (confirm.error(); as error) {
+      <p class="error" role="alert">{{ error }}</p>
+    }
+    <div class="buttons">
+      <button type="button" class="decline" (click)="confirm.answer(false)">Decline</button>
+      <button type="button" class="allow" (click)="confirm.answer(true)">Allow once</button>
+    </div>
+  </div>
+}

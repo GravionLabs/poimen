@@ -10,6 +10,7 @@
 
 pub mod check;
 pub mod claude;
+mod confirm;
 pub mod copilot;
 mod create;
 mod emulator;
@@ -325,6 +326,8 @@ struct Subscriber {
     declared: bool,
     /// It asked for `run_events` ([`Event::RunEvents`], #692).
     runs: bool,
+    /// It shows the confirmations of agents' writes (#615).
+    confirms: bool,
     tx: Sender<Event>,
 }
 
@@ -343,6 +346,8 @@ pub(crate) struct Shared {
     run_repos: Mutex<runs::Repos>,
     /// The transcript readers of `agent.transcript`, per terminal and follower.
     transcripts: Mutex<HashMap<(String, String), Followed>>,
+    /// The open `agent.confirm` requests (#615): the answer of the app goes to the waiting one.
+    confirms: Mutex<HashMap<String, Sender<bool>>>,
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
@@ -384,6 +389,7 @@ impl Shared {
         kind: ClientKind,
         declared: bool,
         runs: bool,
+        confirms: bool,
         tx: Sender<Event>,
     ) -> u64 {
         let id = NEXT_SUBSCRIBER.fetch_add(1, Ordering::Relaxed);
@@ -409,6 +415,7 @@ impl Shared {
             kind,
             declared,
             runs,
+            confirms,
             tx,
         });
         id
@@ -478,6 +485,14 @@ impl Shared {
 
     fn new_id(&self, prefix: &str) -> String {
         format!("{prefix}{}", self.next_id.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// An id nobody can guess (confirmations, #615): the counter and a random part.
+    fn secret_id(&self, prefix: &str) -> String {
+        use std::hash::{BuildHasher, Hasher};
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(self.next_id.load(Ordering::Relaxed));
+        format!("{}-{:016x}", self.new_id(prefix), h.finish())
     }
 
     /// Writes spaces, tabs, the id counter and the running terminals. Called on every change of
@@ -663,6 +678,7 @@ impl Server {
             runs: Mutex::default(),
             run_repos: Mutex::default(),
             transcripts: Mutex::default(),
+            confirms: Mutex::default(),
             next_id: AtomicU64::new(next_id),
             socket: config.socket,
             state_file: config.state_file,
@@ -814,7 +830,7 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
             let declared = info.client.is_some();
             let kind = info.client.map_or(ClientKind::Unknown, |c| c.kind);
             let (tx, rx) = mpsc::channel();
-            let id = shared.add_subscriber(kind, declared, info.run_events, tx);
+            let id = shared.add_subscriber(kind, declared, info.run_events, info.confirms, tx);
             // The client sends nothing more; the end of its side of the connection removes
             // the subscription, which also ends the loop below.
             let reader = stream.clone();
@@ -1028,6 +1044,9 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             proto::CHANNEL,
         ))),
         "agent.transcript" => agent_transcript(shared, parsed(request)?),
+        "agent.confirm" => confirm::agent_confirm(shared, parsed(request)?),
+        "agent.confirm_answer" => confirm::agent_confirm_answer(shared, parsed(request)?),
+        "agent.write_notice" => confirm::agent_write_notice(shared, parsed(request)?),
         "repo.ensure" => repo_ensure(shared, parsed(request)?),
         "worktree.create" => worktree_create(shared, parsed(request)?),
         "worktree.cleanup" => worktree_cleanup(shared, parsed(request)?),
