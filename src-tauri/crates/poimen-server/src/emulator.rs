@@ -96,6 +96,9 @@ struct Shared {
     title: Option<String>,
     /// Answers the grid wants written to the PTY.
     replies: Vec<String>,
+    /// The part of `replies` the server gives itself, also with a controller attached (the OSC 7501
+    /// detection answer: xterm.js does not know it).
+    own: Vec<String>,
     /// Color queries; the formatter is applied once the grid is up to date.
     color_requests: Vec<(usize, Formatter)>,
 }
@@ -140,6 +143,19 @@ impl Dimensions for Size {
         self.cols
     }
 }
+
+/// The answers to the queries fed so far.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Answers {
+    /// Every answer, in order.
+    pub all: Vec<u8>,
+    /// The ones the server writes even while a controller is attached.
+    pub own: Vec<u8>,
+}
+
+/// The answer to `OSC 7501 ; ? ST`: what the server understands, nothing from any report.
+pub const DETECTION_REPLY: &str =
+    "\x1b]7501;?:states=idle,working,blocked,done,error,clear:kinds=permission,question,auth\x1b\\";
 
 pub struct Emulator {
     term: Term<Listener>,
@@ -218,22 +234,33 @@ impl Emulator {
     /// The answers to the queries fed so far (DA1/DA2, DSR, OSC 10/11/12/4 color queries), as
     /// bytes for the PTY, in order. Taken once: the next call only returns newer ones. A color
     /// the program set itself (OSC 4, 10, 11) wins over `colors`.
+    #[cfg(test)]
     pub fn take_replies(&mut self, colors: &Colors) -> Vec<u8> {
-        let (replies, requests) = {
+        self.take_answers(colors).all
+    }
+
+    /// Like [`take_replies`](Self::take_replies), plus the part of the answers that the server
+    /// gives itself even while a controller is attached (the OSC 7501 detection answer).
+    pub fn take_answers(&mut self, colors: &Colors) -> Answers {
+        let (replies, own, requests) = {
             let mut shared = self.title.lock();
             (
                 std::mem::take(&mut shared.replies),
+                std::mem::take(&mut shared.own),
                 std::mem::take(&mut shared.color_requests),
             )
         };
-        let mut out = replies.concat().into_bytes();
+        let mut all = replies.concat().into_bytes();
         for (index, format) in requests {
             let own = self.term.colors()[index];
             if let Some(rgb) = own.or_else(|| colors.get(index)) {
-                out.extend(format(rgb).into_bytes());
+                all.extend(format(rgb).into_bytes());
             }
         }
-        out
+        Answers {
+            all,
+            own: own.concat().into_bytes(),
+        }
     }
 
     pub fn feed(&mut self, bytes: &[u8]) {
@@ -257,6 +284,14 @@ impl Emulator {
                 Hit::Ris => self.signals.push(Signal::Ris),
                 Hit::Prompt => self.signals.push(Signal::Prompt),
                 Hit::Report(report) => self.signals.push(Signal::Report(report)),
+                Hit::Detect(at) => {
+                    // The grid answers what came before the query first.
+                    self.processor.advance(&mut self.term, &bytes[done..at]);
+                    done = at;
+                    let mut shared = self.title.lock();
+                    shared.replies.push(DETECTION_REPLY.to_string());
+                    shared.own.push(DETECTION_REPLY.to_string());
+                }
             }
         }
         self.processor.advance(&mut self.term, &bytes[done..]);
@@ -648,6 +683,8 @@ enum Hit {
     Prompt,
     /// A complete, valid OSC 7501 report.
     Report(Report),
+    /// `OSC 7501 ; ? ST` ended at this index (exclusive).
+    Detect(usize),
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -702,7 +739,7 @@ impl Scanner {
                 },
                 State::Str => match b {
                     0x07 => {
-                        self.finish(&mut hits);
+                        self.finish(i, &mut hits);
                         self.state = State::Ground;
                     }
                     0x18 | 0x1a => self.state = State::Ground,
@@ -711,7 +748,7 @@ impl Scanner {
                 },
                 State::StrEsc => {
                     if b == b'\\' {
-                        self.finish(&mut hits);
+                        self.finish(i, &mut hits);
                         self.state = State::Ground;
                     } else {
                         // ESC inside a string aborts it and starts a new sequence.
@@ -773,13 +810,15 @@ impl Scanner {
     }
 
     /// The OSC string ended with a terminator.
-    fn finish(&mut self, hits: &mut Vec<Hit>) {
+    fn finish(&mut self, at: usize, hits: &mut Vec<Hit>) {
         if !self.collect || self.spoiled {
             return;
         }
         let body = std::mem::take(&mut self.body);
         if let Some(rest) = body.strip_prefix(b"7501;") {
-            if let Some(report) = parse_report(rest) {
+            if rest == b"?" {
+                hits.push(Hit::Detect(at + 1));
+            } else if let Some(report) = parse_report(rest) {
                 hits.push(Hit::Report(report));
             }
         } else if body == b"133;A" || body.starts_with(b"133;A;") {
@@ -1025,6 +1064,42 @@ mod tests {
             String::from_utf8(e.take_replies(&colors)).unwrap(),
             "\x1b]11;rgb:1010/2020/3030\x07"
         );
+    }
+
+    #[test]
+    fn the_detection_query_is_answered_ahead_of_the_following_da1() {
+        assert_eq!(
+            replies(b"\x1b]7501;?\x1b\\\x1b[c"),
+            format!("{DETECTION_REPLY}\x1b[?6c")
+        );
+        assert_eq!(replies(b"\x1b]7501;?\x07"), DETECTION_REPLY);
+        // What came before the query is answered before it, also in one chunk.
+        assert_eq!(
+            replies(b"\x1b[c\x1b]7501;?\x07\x1b[c"),
+            format!("\x1b[?6c{DETECTION_REPLY}\x1b[?6c")
+        );
+        // Split over feeds.
+        let mut e = fresh(10, 3);
+        e.feed(b"\x1b]7501;");
+        e.feed(b"?\x1b");
+        e.feed(b"\\\x1b[c");
+        assert_eq!(
+            String::from_utf8(e.take_replies(&Colors::default())).unwrap(),
+            format!("{DETECTION_REPLY}\x1b[?6c")
+        );
+    }
+
+    #[test]
+    fn the_detection_answer_is_also_given_separately_and_carries_no_report() {
+        let mut e = fresh(10, 3);
+        e.feed(b"\x1b]7501;state=blocked:msg=aGk\x07\x1b[c\x1b]7501;?\x07");
+        let a = e.take_answers(&Colors::default());
+        assert_eq!(a.own, DETECTION_REPLY.as_bytes());
+        assert_eq!(a.all, format!("\x1b[?6c{DETECTION_REPLY}").into_bytes());
+        assert!(!a.own.windows(3).any(|w| w == b"msg"));
+        // A report is not a query and a query with more is not either.
+        assert!(replies(b"\x1b]7501;state=idle\x07\x1b]7501;?x\x07").is_empty());
+        assert!(e.take_answers(&Colors::default()).own.is_empty());
     }
 
     #[test]
