@@ -7,6 +7,7 @@ import type { NamedLayout } from "../core/named-layouts";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import type { SpaceTemplate } from "../core/space-templates";
 import { tauri } from "../core/tauri.mock";
+import { LayoutTabsEditor } from "./layout-tabs-editor";
 import { LayoutsEditor } from "./layouts-editor";
 
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -61,6 +62,14 @@ async function setup(layouts: NamedLayout[] = [REVIEW, OTHER], templates: SpaceT
   tauri.reset();
   tauri.answer("set_layouts", () => null);
   TestBed.resetTestingModule();
+  TestBed.overrideComponent(LayoutTabsEditor, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      styleUrls: undefined,
+      template: readFileSync("src/app/settings-view/layout-tabs-editor.html", "utf8"),
+    },
+  });
   TestBed.overrideComponent(LayoutsEditor, {
     set: {
       templateUrl: undefined,

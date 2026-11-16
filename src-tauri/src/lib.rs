@@ -18,6 +18,7 @@ use poimen_core::gui_path;
 use poimen_core::harness;
 mod hooks;
 mod layout;
+mod layout_file;
 mod machines;
 mod poimen_backend;
 mod poimen_server;
@@ -1095,6 +1096,24 @@ async fn rebuild_space(
         rebuild_space_with(b, home_dir().as_deref(), &space_id, decision, confirmed)
     })
     .await
+}
+
+/// Writes one layout (`tabs[]` or `panes[]`) to `path`, a file chosen in the save dialog.
+#[tauri::command]
+async fn layout_export(path: String, layout: serde_json::Value) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        layout_file::export(std::path::Path::new(&path), &layout)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Reads and validates the layout file `path`; writes nothing.
+#[tauri::command]
+async fn layout_import(path: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || layout_file::import(std::path::Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Exports the user settings (without `trustedProjects`) to `path`, a file chosen in the save
@@ -2750,6 +2769,8 @@ pub fn run() {
             resolve_space_template,
             revoke_project,
             settings_export,
+            layout_export,
+            layout_import,
             settings_import_plan,
             settings_import_apply,
             remove_spaces_layout,

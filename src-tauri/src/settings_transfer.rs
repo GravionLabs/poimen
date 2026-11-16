@@ -650,7 +650,7 @@ fn read_config(home: &Path) -> Result<Option<String>, String> {
 }
 
 /// Writes `text` to `path`, which must end in `.json` (the save dialog's filter).
-fn write_export(path: &Path, text: &str) -> Result<(), String> {
+pub fn write_export(path: &Path, text: &str) -> Result<(), String> {
     let json = path
         .extension()
         .and_then(|e| e.to_str())

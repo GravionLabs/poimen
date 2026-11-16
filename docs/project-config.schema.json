@@ -126,8 +126,16 @@
     },
     "layout": {
       "type": "object",
-      "required": ["panes"],
-      "properties": { "panes": { "$ref": "#/$defs/panes" } }
+      "description": "The panes of one tab, or tabs with a command or a root split tree, children[] tabs and an app-only place (ADR 0011).",
+      "oneOf": [{ "required": ["panes"] }, { "required": ["tabs"] }],
+      "properties": {
+        "panes": { "$ref": "#/$defs/panes" },
+        "tabs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "object" }
+        }
+      }
     },
     "panes": {
       "type": "array",
