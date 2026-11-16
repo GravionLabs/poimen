@@ -215,6 +215,22 @@ struct Subject<'a> {
     space: &'a Space,
 }
 
+/// Text a program reported is shown as plain text whatever server sent it (an older or remote
+/// one may not clean it): bidi overrides and invisible characters go, an unknown kind goes.
+pub fn plain_agent_text(t: &mut Terminal) {
+    let Some(a) = t.agent.as_mut() else { return };
+    a.message = a
+        .message
+        .as_deref()
+        .and_then(poimen_protocol::clean_message);
+    a.title = a.title.as_deref().and_then(poimen_protocol::clean_message);
+    a.kind = a
+        .kind
+        .take()
+        .filter(|k| poimen_protocol::BLOCK_KINDS.contains(&k.as_str()));
+    a.progress = a.progress.map(|p| p.min(100));
+}
+
 /// `blocked: permission`, `working 40%`: the status word with what OSC 7501 adds.
 fn state_text(s: &Subject<'_>) -> Option<String> {
     let mut text = status_name(s.status?)?.to_owned();
@@ -310,7 +326,8 @@ impl Model {
     /// Reads spaces, tabs and terminals from the server.
     pub fn load(client: &Client) -> Result<Self, ClientError> {
         let layout = client.list_layout()?;
-        let terminals = client.list_terminals(None)?;
+        let mut terminals = client.list_terminals(None)?;
+        terminals.iter_mut().for_each(plain_agent_text);
         Ok(Self {
             spaces: layout.spaces,
             tabs: layout.tabs,
@@ -1031,6 +1048,25 @@ mod tests {
         assert_eq!(rows[0].status, Some(AgentStatus::Error));
         assert!(texts(&rows[0])[0].starts_with("✗"), "{:?}", texts(&rows[0]));
         assert!(texts(&rows[0])[0].contains("error"));
+    }
+
+    #[test]
+    fn reported_text_is_plain_text() {
+        let mut t = term("t9", "s1", "x", "/w");
+        t.agent = Some(AgentInfo {
+            status: AgentStatus::Blocked,
+            agent: None,
+            session_id: None,
+            message: Some("Allow \u{202E}gnp.exe\u{200B}?".into()),
+            message_at: None,
+            progress: Some(200),
+            kind: Some("evil\u{202E}".into()),
+            title: Some("\u{202E}".into()),
+        });
+        plain_agent_text(&mut t);
+        let a = t.agent.unwrap();
+        assert_eq!(a.message.as_deref(), Some("Allow gnp.exe?"));
+        assert_eq!((a.kind, a.title, a.progress), (None, None, Some(100)));
     }
 
     #[test]

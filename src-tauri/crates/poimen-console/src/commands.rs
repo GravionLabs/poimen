@@ -193,7 +193,12 @@ fn status(client: &Client, id: &str, json: bool, out: &mut dyn Write) -> Result<
             state_word(&t),
             agent_word(&t)
         )?;
-        if let Some(m) = t.agent.as_ref().and_then(|a| a.message.as_deref()) {
+        if let Some(m) = t
+            .agent
+            .as_ref()
+            .and_then(|a| a.message.as_deref())
+            .and_then(poimen_protocol::clean_message)
+        {
             writeln!(out, "message: {m}")?;
         }
     }
