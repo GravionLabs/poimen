@@ -99,6 +99,12 @@ describe("PaneActions", () => {
       ]);
     });
 
+    it("says so for a pane it has no tab for (a remote machine)", () => {
+      actions.askSaveLayout("m::p1");
+      expect(actions.dialog()).toBeNull();
+      expect(actions.error()).toContain("this Mac");
+    });
+
     it("refuses an empty name and keeps the dialog", async () => {
       actions.askSaveLayout("w1:p1");
       expect(await actions.confirmSaveLayout("  ")).toBe(false);

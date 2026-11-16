@@ -125,7 +125,10 @@ export class PaneActions {
   askSaveLayout(paneId: string): void {
     const pane = this.store.pane(paneId);
     const tab = this.store.snapshot().tabs.find((t) => t.tab_id === pane?.tab_id);
-    if (!tab) return;
+    if (!tab) {
+      this._error.set("Only a tab of this Mac can be saved as a layout.");
+      return;
+    }
     const taken = (this.settings?.settings().layouts ?? []).map((l) => l.name);
     this._error.set(null);
     this._dialog.set({

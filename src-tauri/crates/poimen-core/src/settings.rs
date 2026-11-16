@@ -699,6 +699,17 @@ pub fn set_layouts_text(text: &str, layouts: &Value) -> Result<String, String> {
     if old.as_ref() == Some(layouts) {
         return Ok(text.to_owned());
     }
+    if let Some(old) = &old {
+        // Entries the loader skips would be lost by the rewrite, so the file is left to the user.
+        let mut skipped = Vec::new();
+        let kept = parse_layouts(old, &mut skipped).len();
+        if !skipped.is_empty() || kept != old.as_array().map_or(0, Vec::len) {
+            return Err(format!(
+                "layouts in config.json has entries poimen cannot read ({}); it was not changed, fix the file by hand",
+                skipped.join("; ")
+            ));
+        }
+    }
     if let Some(templates) = top_value(text, "spaceTemplates")? {
         let mut ignored = Vec::new();
         let old_names: Vec<String> = old
@@ -1084,6 +1095,15 @@ mod tests {
         // Deleting an unused one is fine, and so is editing a used one in place.
         let edited = serde_json::json!([{"name": "review", "tabs": [{"name": "z"}]}]);
         assert!(set_layouts_text(text, &edited).is_ok());
+    }
+
+    #[test]
+    fn set_layouts_never_drops_entries_it_cannot_read() {
+        let text =
+            r#"{"layouts": [{"name": "a", "tabs": [{"name": "x"}]}, {"name": "bad", "tabs": []}]}"#;
+        let new = serde_json::json!([{"name": "a", "tabs": [{"name": "y"}]}]);
+        let err = set_layouts_text(text, &new).unwrap_err();
+        assert!(err.contains("cannot read"), "{err}");
     }
 
     #[test]
