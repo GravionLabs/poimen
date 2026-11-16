@@ -1,10 +1,15 @@
 import type { TrustRequest } from "../core/space-actions";
 
-/** The editable fields of `.poimen/config.json`; `layout` is the JSON text of the layout object. */
+/**
+ * The editable fields of `.poimen/config.json`; `layout` is the JSON text of the layout object and
+ * `presets` the JSON text of the `presets` list (blank: none). The layout editor and "Advanced"
+ * both edit these texts.
+ */
 export interface ConfigForm {
   setup: string;
   teardown: string;
   layout: string;
+  presets: string;
 }
 
 /** The reply of `project_file`. */
@@ -27,7 +32,7 @@ export interface SaveOutcome {
   store: string | null;
 }
 
-export const EMPTY_FORM: ConfigForm = { setup: "", teardown: "", layout: "" };
+export const EMPTY_FORM: ConfigForm = { setup: "", teardown: "", layout: "", presets: "" };
 
 /** The form values of a file text; unreadable text gives an empty form and the reason. */
 export function formOf(text: string): { form: ConfigForm; error: string | null } {
@@ -47,6 +52,7 @@ export function formOf(text: string): { form: ConfigForm; error: string | null }
       setup: typeof o["setup"] === "string" ? o["setup"] : "",
       teardown: typeof o["teardown"] === "string" ? o["teardown"] : "",
       layout: o["layout"] === undefined ? "" : JSON.stringify(o["layout"], null, 2),
+      presets: o["presets"] === undefined ? "" : JSON.stringify(o["presets"], null, 2),
     },
     error: null,
   };
@@ -69,6 +75,15 @@ export function patchOf(form: ConfigForm): {
       patch["layout"] = JSON.parse(form.layout);
     } catch (e) {
       errors.push({ field: "layout", message: `Not valid JSON: ${String(e)}` });
+    }
+  }
+  if (form.presets.trim() === "") {
+    patch["presets"] = null;
+  } else {
+    try {
+      patch["presets"] = JSON.parse(form.presets);
+    } catch (e) {
+      errors.push({ field: "presets", message: `Not valid JSON: ${String(e)}` });
     }
   }
   return { patch, errors };

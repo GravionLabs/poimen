@@ -340,7 +340,7 @@ fn command_for(value: &Value, platform: &str) -> Result<Option<String>, String> 
 }
 
 /// The unique, non-empty `name` of a list entry, or the warning to record.
-fn entry_name(raw: &Value, names: &mut HashSet<String>) -> Result<String, String> {
+pub fn entry_name(raw: &Value, names: &mut HashSet<String>) -> Result<String, String> {
     let name = raw["name"].as_str().map(str::trim).unwrap_or_default();
     if name.is_empty() {
         return Err("\"name\" is required".into());
@@ -367,8 +367,9 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
     };
 
     if !data["layout"].is_null() {
-        match parse_layout_value(&data["layout"]) {
-            Ok(l) => out.config.layout = Some(l),
+        // `panes[]` or `tabs[]`; the flattened panes are what trust lists.
+        match parse_preset(&data["layout"]) {
+            Ok((l, _)) => out.config.layout = Some(l),
             Err(e) => warn(&mut out, "layout", e),
         }
     }
@@ -474,7 +475,7 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
 }
 
 /// A preset: `panes[]` (one tab) or `tabs[]` of the named-layout shape (#655).
-fn parse_preset(raw: &Value) -> Result<(Layout, TabLayout), String> {
+pub fn parse_preset(raw: &Value) -> Result<(Layout, TabLayout), String> {
     if raw.get("tabs").is_some() {
         let (tabs, _) = parse_tabs_value(raw)?;
         Ok((

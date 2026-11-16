@@ -30,7 +30,13 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
 
 - `layout`: the pane layout of a new space, `panes[]` as in the README (`spaces.layout`): `name`,
   optional `command`, and from the second pane on `split.from`, `split.direction` (`right` or
-  `down`), `split.ratio` (0 to 1, default 0.5).
+  `down`), `split.ratio` (0 to 1, default 0.5). Instead of `panes[]` it may hold `tabs[]` (tabs with
+  a `command` or a `root` split tree, nested `children[]` and an app-only `place`, as in a named
+  layout; #611). The commands of every tab are listed for trust like those of `panes[]`.
+  The space overview edits `layout` and `presets[]` with the layout editor of the Layouts page
+  (JSON stays under "Advanced"; one layout can be exported to and imported from a JSON file); a
+  save changes the file hash, so a layout or preset that adds a command asks for trust again.
+  Presets are palette entries of the project and are not offered as layouts in the settings.
   Named layouts, tabs and nested tabs: [ADR 0011](adr/0011-named-layouts-referenced-by-templates.md).
 - `setup`: a command that runs once, visibly, in a tab labelled `setup` of a newly created space
   (in the space directory). It does not run when an existing space is focused or when the

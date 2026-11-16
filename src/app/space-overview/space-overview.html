@@ -120,20 +120,42 @@
           <p class="error" role="alert">{{ message }}</p>
         }
       </div>
-      <div class="field">
-        <label for="cfg-layout">Layout (panes, JSON)</label>
-        <textarea
-          id="cfg-layout"
-          class="cfg-layout"
-          rows="8"
-          spellcheck="false"
-          [value]="form().layout"
-          (input)="setField('layout', $event)"
-        ></textarea>
-        @if (errorOf("layout"); as message) {
-          <p class="error" role="alert">{{ message }}</p>
-        }
-      </div>
+      @defer (on immediate) {
+        <app-project-layouts
+          [layout]="form().layout"
+          [presets]="form().presets"
+          [layoutErr]="errorOf('layout') ?? null"
+          [presetsErr]="errorOf('presets') ?? null"
+          (layoutChange)="setText('layout', $event)"
+          (presetsChange)="setText('presets', $event)"
+          (problemsChange)="problems.set($event)"
+        />
+      }
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="field">
+          <label for="cfg-layout">Layout (JSON)</label>
+          <textarea
+            id="cfg-layout"
+            class="cfg-layout"
+            rows="8"
+            spellcheck="false"
+            [value]="form().layout"
+            (input)="setField('layout', $event)"
+          ></textarea>
+        </div>
+        <div class="field">
+          <label for="cfg-presets">Presets (JSON)</label>
+          <textarea
+            id="cfg-presets"
+            class="cfg-presets"
+            rows="8"
+            spellcheck="false"
+            [value]="form().presets"
+            (input)="setField('presets', $event)"
+          ></textarea>
+        </div>
+      </details>
       @if (trust(); as request) {
         <div class="trust" role="alert">
           <p>The saved file would run these commands. Trust them for this repository?</p>

@@ -48,7 +48,7 @@ export function text(v: unknown): string | null {
   return typeof v === "string" && v.trim() !== "" ? v : null;
 }
 
-function parseNode(raw: unknown): LayoutNode | null {
+export function parseNode(raw: unknown): LayoutNode | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
   if (r["kind"] === "terminal") {
@@ -73,7 +73,7 @@ function parseNode(raw: unknown): LayoutNode | null {
   };
 }
 
-function parsePlace(raw: unknown): LayoutPlace | null {
+export function parsePlace(raw: unknown): LayoutPlace | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
   return {

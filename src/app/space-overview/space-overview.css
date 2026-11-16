@@ -67,8 +67,21 @@ td {
   min-width: 200px;
   font-family: inherit;
 }
-.cfg-layout {
+.cfg-layout,
+.cfg-presets {
   font-family: monospace;
+}
+.layout-section h4 {
+  margin: 12px 0 4px;
+  font-size: 0.9rem;
+}
+.preset {
+  margin-bottom: 12px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(128, 128, 128, 0.4);
+}
+.advanced {
+  margin-bottom: 8px;
 }
 .error {
   flex-basis: 100%;

