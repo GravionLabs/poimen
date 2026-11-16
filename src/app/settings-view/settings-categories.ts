@@ -55,7 +55,7 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
       },
       {
         id: "spaces",
-        title: "Spaces",
+        title: "Templates",
         labels: [
           "Space templates",
           "Template",
@@ -66,6 +66,23 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
           "Agent",
           "Model",
           "Layout",
+        ],
+      },
+      {
+        id: "layouts",
+        title: "Layouts",
+        labels: [
+          "Named layouts",
+          "New layout",
+          "Duplicate",
+          "Tabs",
+          "Add tab",
+          "Indent",
+          "Outdent",
+          "Terminal",
+          "Split tree",
+          "Place",
+          "Preview",
         ],
       },
       {

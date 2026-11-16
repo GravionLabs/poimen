@@ -797,6 +797,8 @@ export class App {
       this.paneActions.askStartAgent(paneId);
     } else if (action === "rename") {
       this.paneActions.askRename(paneId);
+    } else if (action === "save-layout") {
+      this.paneActions.askSaveLayout(paneId);
     } else if (action === "restart") {
       this.paneActions.askRestart(paneId);
     } else if (action === "close") {
@@ -845,6 +847,11 @@ export class App {
           tabKind(id) === "pane" && canMarkUnread(this.pane(id), this.attention.unread()),
       },
       { action: "pane-rename", label: "Rename pane..." },
+      {
+        action: "pane-save-layout",
+        label: "Save current tab as layout…",
+        appliesTo: (id) => tabKind(id) === "pane",
+      },
       {
         action: "pane-restart",
         label: "Restart terminal on the new host...",

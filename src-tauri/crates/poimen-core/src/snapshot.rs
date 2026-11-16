@@ -96,6 +96,9 @@ pub struct Tab {
     /// The focused leaf of the tab, shared by every client (poimen-server).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_terminal: Option<String>,
+    /// The tab this one belongs below (a layout's `children[]`, protocol 7); absent when top level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// A child record of a terminal (OSC 7501 with an `id`, #684): one row below the terminal.

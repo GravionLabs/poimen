@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from "@angular/core";
 import { DEFAULT_SHORTCUTS, parseShortcuts, type Shortcuts } from "./shortcuts";
 import { parseSpaceLayout, type SpaceLayout } from "./space-layout";
+import { layoutConfig, parseNamedLayouts, type NamedLayout } from "./named-layouts";
 import { parseSpaceTemplates, templateConfig, type SpaceTemplate } from "./space-templates";
 import { TauriBridge } from "./tauri";
 import {
@@ -265,6 +266,8 @@ export interface Settings {
   scrollback: number;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
   spacesLayout: SpaceLayout | null;
+  /** `layouts[]`: named layouts with tabs, nested tabs and split trees (ADR 0011). */
+  layouts: NamedLayout[];
   /** `spaceTemplates`: directory or remote matched templates with agent and layout. */
   spaceTemplates: SpaceTemplate[];
   /** `trustedProjects`: repository root to the hash of the project file the user trusted. */
@@ -358,6 +361,7 @@ export const DEFAULT_SETTINGS: Settings = {
   claudeClassicRenderer: false,
   scrollback: 10000,
   spacesLayout: null,
+  layouts: [],
   spaceTemplates: [],
   trustedProjects: {},
   tasks: DEFAULT_TASKS,
@@ -468,6 +472,7 @@ export function parseSettings(raw: unknown): Settings {
         ? r["scrollback"]
         : DEFAULT_SETTINGS.scrollback,
     spacesLayout: parseSpaceLayout(r["spacesLayout"]),
+    layouts: parseNamedLayouts(r["layouts"]),
     spaceTemplates: parseSpaceTemplates(r["spaceTemplates"]),
     trustedProjects: parseTrusted(r["trustedProjects"]),
     tasks: parseTaskModes(r["tasks"]),
@@ -669,6 +674,13 @@ export class SettingsStore {
     } catch {
       return null;
     }
+  }
+
+  /** Writes `layouts` (validated again by the backend); `false` when the write failed. */
+  setLayouts(layouts: NamedLayout[]): Promise<boolean> {
+    return this.write({ layouts }, "the layouts", "set_layouts", {
+      layouts: layouts.map(layoutConfig),
+    });
   }
 
   /** Writes `spaceTemplates` (validated again by the backend); `false` when the write failed. */

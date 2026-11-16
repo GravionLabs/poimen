@@ -81,6 +81,8 @@ export interface Tab {
   root?: TabTree;
   /** The focused leaf of the tab, shared by every client (poimen backend). */
   active_terminal?: string;
+  /** The tab this one belongs below (a layout's `children[]`, #655); absent when top level. */
+  parent?: string;
   /** The machine of a remote tab (#280). */
   machine?: string;
 }

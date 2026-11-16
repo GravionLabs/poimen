@@ -26,6 +26,7 @@ import {
   withRoot,
 } from "./settings-view";
 import { allPages, SETTINGS_GROUPS } from "./settings-categories";
+import { LayoutsEditor } from "./layouts-editor";
 import { SpaceLayoutEditor } from "./space-layout-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
@@ -149,6 +150,14 @@ function setup(
       templateUrl: undefined,
       styleUrl: undefined,
       template: readFileSync("src/app/settings-view/space-layout-editor.html", "utf8"),
+    },
+  });
+  TestBed.overrideComponent(LayoutsEditor, {
+    set: {
+      templateUrl: undefined,
+      styleUrl: undefined,
+      styleUrls: undefined,
+      template: readFileSync("src/app/settings-view/layouts-editor.html", "utf8"),
     },
   });
   TestBed.overrideComponent(SettingsImportPanel, {
@@ -657,7 +666,8 @@ describe("SettingsView categories", () => {
       "Appearance",
       "Workspace",
       "Explorer",
-      "Spaces",
+      "Templates",
+      "Layouts",
       "New space layout",
       "Trusted projects",
       "Backend",
@@ -750,7 +760,7 @@ describe("SettingsView categories", () => {
     expect(titles(host)).toEqual([]);
     expect(host.textContent).toContain("No settings match.");
     type(fixture, host, "");
-    expect(titles(host)).toHaveLength(13);
+    expect(titles(host)).toHaveLength(14);
   });
 
   it("opens the removed notifications page as Appearance, without notification switches (#676)", () => {
@@ -895,16 +905,19 @@ describe("SettingsView categories", () => {
       readFileSync("src/app/settings-view/settings-view.ts", "utf8");
     const editor = readFileSync("src/app/settings-view/space-layout-editor.html", "utf8");
     const templates = readFileSync("src/app/settings-view/space-templates-editor.html", "utf8");
+    const layouts = readFileSync("src/app/settings-view/layouts-editor.html", "utf8");
     const machinesPage = readFileSync("src/app/machines-page/machines-page.ts", "utf8");
     for (const page of allPages()) {
       const source =
         page.id === "space-layout"
           ? editor
-          : page.id === "spaces"
-            ? templates
-            : page.id === "machines"
-              ? machinesPage
-              : html;
+          : page.id === "layouts"
+            ? layouts
+            : page.id === "spaces"
+              ? templates
+              : page.id === "machines"
+                ? machinesPage
+                : html;
       for (const label of page.labels) {
         expect(source.toLowerCase(), `${page.id}: ${label}`).toContain(label.toLowerCase());
       }

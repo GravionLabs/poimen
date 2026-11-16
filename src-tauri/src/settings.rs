@@ -79,13 +79,10 @@ pub const MAX_SOUND_BYTES: u64 = 1024 * 1024;
 /// `layouts[]` (ADR 0011) warns like the server's loader does, and a template naming a layout that
 /// neither `layouts[]` nor `spaces.layout` (as `default`) provides warns too.
 fn resolve_layout_names(root: &Value, s: &mut Settings) {
-    let mut names: Vec<String> = Vec::new();
     if let Some(value) = root.get("layouts") {
-        names = poimen_core::settings::parse_layouts(value, &mut s.warnings)
-            .into_iter()
-            .map(|l| l.name)
-            .collect();
+        s.layouts = poimen_core::settings::parse_layouts(value, &mut s.warnings);
     }
+    let mut names: Vec<String> = s.layouts.iter().map(|l| l.name.clone()).collect();
     if s.spaces_layout.is_some() {
         names.push(crate::layout::DEFAULT_NAME.to_owned());
     }
@@ -190,6 +187,8 @@ pub struct Settings {
     pub scrollback: u32,
     /// The pane layout of a new space (`spaces.layout`); `None` uses the built-in default.
     pub spaces_layout: Option<crate::layout::Layout>,
+    /// The named layouts (`layouts[]`, ADR 0011); invalid entries are skipped with a warning.
+    pub layouts: Vec<poimen_core::layout::NamedLayout>,
     /// The space templates (`spaceTemplates`); invalid entries are skipped with a warning.
     pub space_templates: Vec<crate::templates::Template>,
     /// Repository root to the SHA-256 of the project file the user trusted (`trustedProjects`).
@@ -386,6 +385,7 @@ impl Default for Settings {
             explorer_show_hidden: false,
             scrollback: DEFAULT_SCROLLBACK,
             spaces_layout: None,
+            layouts: Vec::new(),
             space_templates: Vec::new(),
             trusted_projects: BTreeMap::new(),
             tasks: crate::tasks::TaskModes::default(),

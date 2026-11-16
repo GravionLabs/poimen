@@ -233,6 +233,43 @@ describe("SpaceTemplatesEditor", () => {
     expect(host.querySelectorAll("li.row-item")).toHaveLength(3);
   });
 
+  it("picks a named layout by name and writes it as a string", async () => {
+    const layouts = [
+      {
+        name: "review",
+        tabs: [
+          {
+            name: "agent",
+            root: { kind: "terminal" as const, name: null, command: null, cwd: null },
+            children: [],
+            place: null,
+          },
+        ],
+      },
+    ];
+    const { host, input, select, type, choose, saved, press } = await setup([], { layouts });
+    press("Add template");
+    await choose(select("agent"), "claude");
+    type(input("name"), "Flex");
+    expect([...select("layout").options].map((o) => o.textContent?.trim())).toContain(
+      "Layout: review",
+    );
+    await choose(select("layout"), "named:review");
+    // A named layout has no panes to edit here.
+    expect(host.querySelector(".panes")).toBeNull();
+    await saved();
+    expect(tauri.calls("set_space_templates")).toEqual([
+      { templates: [{ name: "Flex", match: {}, agent: "claude", layout: "review" }] },
+    ]);
+  });
+
+  it("shows a template's missing layout name instead of dropping it", async () => {
+    const { select, press } = await setup([{ ...WORK, layout: "gone" }]);
+    press("Edit Work");
+    const options = [...select("layout").options];
+    expect(options.find((o) => o.selected)?.textContent?.trim()).toBe("Layout: gone (missing)");
+  });
+
   it("edits a template in place", async () => {
     const { input, type, saved, press } = await setup([WORK, AZ]);
     press("Edit Work");
