@@ -646,6 +646,7 @@ fn a_program_without_an_app_gets_answers_to_its_terminal_queries() {
     wait_for_file(&f, "da.txt", "\x1b[?6c");
 }
 
+#[cfg(unix)]
 const DETECT: &str =
     "\x1b]7501;?:states=idle,working,blocked,done,error,clear:kinds=permission,question,auth\x1b\\";
 
