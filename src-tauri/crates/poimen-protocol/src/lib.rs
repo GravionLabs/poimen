@@ -1091,6 +1091,11 @@ pub struct EventsSubscribe {
     /// new ones. Off by default, so a client that does not ask never sees the event.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub run_events: bool,
+    /// The client shows the confirmations of agents' writes ([`Event::AgentConfirmRequested`],
+    /// [`Event::AgentWrote`], #615): only a subscription of kind `app` with this set counts as
+    /// an app that can be asked. A machine's link does not set it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirms: bool,
 }
 
 /// `space.create`. With `layout` (the default) the server resolves the layout of `cwd` (project

@@ -14,11 +14,11 @@ use serde_json::json;
 use crate::{ApiResult, Shared, lock, not_found};
 
 impl Shared {
-    /// Sends the event to the subscriptions that said they are an app; false when there is none.
+    /// Sends the event to the subscriptions that said they are an app and show confirmations; false when there is none.
     fn publish_to_apps(&self, event: &Event) -> bool {
         let mut sent = false;
         lock(&self.subscribers).retain(|s| {
-            if s.kind != ClientKind::App {
+            if s.kind != ClientKind::App || !s.confirms {
                 return true;
             }
             let alive = s.tx.send(event.clone()).is_ok();
@@ -55,7 +55,7 @@ impl Shared {
 pub(crate) fn agent_confirm(shared: &Shared, p: AgentConfirm) -> ApiResult {
     let (caller_name, space_name) = shared.names_for_write(&p.caller_terminal_id, &p.space_id)?;
     let wait_ms = p.wait_ms.unwrap_or(CONFIRM_WAIT_MS).min(CONFIRM_WAIT_MS);
-    let id = shared.new_id("confirm");
+    let id = shared.secret_id("confirm");
     let (tx, rx) = mpsc::channel();
     lock(&shared.confirms).insert(id.clone(), tx);
     let sent = shared.publish_to_apps(&Event::AgentConfirmRequested {

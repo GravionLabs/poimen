@@ -326,6 +326,8 @@ struct Subscriber {
     declared: bool,
     /// It asked for `run_events` ([`Event::RunEvents`], #692).
     runs: bool,
+    /// It shows the confirmations of agents' writes (#615).
+    confirms: bool,
     tx: Sender<Event>,
 }
 
@@ -387,6 +389,7 @@ impl Shared {
         kind: ClientKind,
         declared: bool,
         runs: bool,
+        confirms: bool,
         tx: Sender<Event>,
     ) -> u64 {
         let id = NEXT_SUBSCRIBER.fetch_add(1, Ordering::Relaxed);
@@ -412,6 +415,7 @@ impl Shared {
             kind,
             declared,
             runs,
+            confirms,
             tx,
         });
         id
@@ -481,6 +485,14 @@ impl Shared {
 
     fn new_id(&self, prefix: &str) -> String {
         format!("{prefix}{}", self.next_id.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// An id nobody can guess (confirmations, #615): the counter and a random part.
+    fn secret_id(&self, prefix: &str) -> String {
+        use std::hash::{BuildHasher, Hasher};
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(self.next_id.load(Ordering::Relaxed));
+        format!("{}-{:016x}", self.new_id(prefix), h.finish())
     }
 
     /// Writes spaces, tabs, the id counter and the running terminals. Called on every change of
@@ -818,7 +830,7 @@ fn serve_requests(shared: &Arc<Shared>, stream: Conn, attachment: &mut Option<At
             let declared = info.client.is_some();
             let kind = info.client.map_or(ClientKind::Unknown, |c| c.kind);
             let (tx, rx) = mpsc::channel();
-            let id = shared.add_subscriber(kind, declared, info.run_events, tx);
+            let id = shared.add_subscriber(kind, declared, info.run_events, info.confirms, tx);
             // The client sends nothing more; the end of its side of the connection removes
             // the subscription, which also ends the loop below.
             let reader = stream.clone();

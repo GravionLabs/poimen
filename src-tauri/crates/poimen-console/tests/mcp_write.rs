@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use poimen_client::Client;
 use poimen_client::protocol::{
-    AgentStatus, ClientInfo, ClientKind, Event, TerminalCreate, TerminalStatus,
+    AgentStatus, ClientInfo, ClientKind, Event, EventsSubscribe, TerminalCreate, TerminalStatus,
 };
 use poimen_console::mcp::{self, Env};
 use poimen_server::{Config, PtyHost, Server};
@@ -99,10 +99,14 @@ fn fixture(name: &str) -> Fixture {
 /// An app stand-in: subscribed as `app`, it sends every event on the channel.
 fn app(client: &Client) -> Receiver<Event> {
     let stream = client
-        .subscribe_as(Some(ClientInfo {
-            kind: ClientKind::App,
-            pid: std::process::id(),
-        }))
+        .subscribe_with(EventsSubscribe {
+            client: Some(ClientInfo {
+                kind: ClientKind::App,
+                pid: std::process::id(),
+            }),
+            confirms: true,
+            ..Default::default()
+        })
         .unwrap();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -308,6 +312,26 @@ fn without_an_app_another_space_is_refused() {
         json!({"terminal": f.other, "text": "hi"}),
     );
     assert_eq!(r["isError"], true);
+    assert!(text(&r).contains("not open"), "{r}");
+}
+
+#[test]
+fn a_subscription_that_does_not_show_confirmations_is_no_app() {
+    let f = fixture("link");
+    // Like the link of a machine: kind app, but it never shows a question.
+    let _link = f
+        .client
+        .subscribe_as(Some(ClientInfo {
+            kind: ClientKind::App,
+            pid: std::process::id(),
+        }))
+        .unwrap();
+    let r = call(
+        &f.client,
+        &env(Some(&f.caller), None, WAIT),
+        "prompt_agent",
+        json!({"terminal": f.other, "text": "hi"}),
+    );
     assert!(text(&r).contains("not open"), "{r}");
 }
 
