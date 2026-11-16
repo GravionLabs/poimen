@@ -5,6 +5,25 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.21.0] — 2026-11-16
+
+### Bug Fixes
+- **server**: Keep the OSC 7501 precedence across adoption, abort a report at ESC
+- **console**: Show reported text as plain text in the TUI and poimen status (#682)
+- **server**: Keep take_replies for tests only (#683)
+- **server**: Gate the OSC 7501 test constant to unix (#683)
+
+
+### Features
+- **server**: Read the OSC 7501 root status of a terminal (#681) (#827)
+- **server**: Read the OSC 7501 root status of a terminal
+- **app**: Show OSC 7501 message, progress, blocked kind and error (#682) (#829)
+- **app**: Show OSC 7501 message, progress, blocked kind and error (#682)
+- **server**: Answer the OSC 7501 detection query (#683) (#830)
+- **server**: Answer the OSC 7501 detection query (#683)
+- **server**: Keep OSC 7501 child records per terminal (#684) (#831)
+
+
 ## [0.20.1] — 2026-11-15
 
 ### Bug Fixes
@@ -15,6 +34,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - **release**: The macOS notarization fails and the Windows signing blocks every release (#826) (#825)
+- Update CHANGELOG.md for v0.20.1 [skip ci]
 
 
 ## [0.20.0] — 2026-11-15
