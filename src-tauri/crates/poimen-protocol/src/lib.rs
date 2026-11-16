@@ -1594,7 +1594,8 @@ mod tests {
     #[test]
     fn ping_result_without_clients_and_the_clients_event() {
         let p: PingResult =
-            serde_json::from_value(json!({"version":"1","protocol":4,"pid":2})).unwrap();
+            serde_json::from_value(serde_json::json!({"version":"1","protocol":4,"pid":2}))
+                .unwrap();
         assert!(p.clients.is_empty());
         let e: Event = serde_json::from_value(
             json!({"event":"server.clients_changed","data":{"clients":["app","unknown"]}}),
@@ -1688,7 +1689,8 @@ mod tests {
 
     #[test]
     fn error_state_progress_kind_and_title_are_additive() {
-        let old: AgentInfo = serde_json::from_value(json!({"status":"blocked"})).unwrap();
+        let old: AgentInfo =
+            serde_json::from_value(serde_json::json!({"status":"blocked"})).unwrap();
         assert_eq!((old.progress, &old.kind, &old.title), (None, &None, &None));
         assert_eq!(
             serde_json::to_value(&old).unwrap(),
@@ -1710,9 +1712,10 @@ mod tests {
             json!({"status":"error","progress":40,"kind":"permission","title":"build"})
         );
         assert_eq!(serde_json::from_value::<AgentInfo>(value).unwrap(), info);
-        let event: Event = serde_json::from_value(json!({"event":"agent.status_changed",
+        let event: Event =
+            serde_json::from_value(serde_json::json!({"event":"agent.status_changed",
             "data":{"terminal_id":"t1","status":"error","progress":7}}))
-        .unwrap();
+            .unwrap();
         assert!(matches!(
             event,
             Event::AgentStatusChanged {
@@ -1781,15 +1784,18 @@ mod tests {
 
     #[test]
     fn set_colors_params_have_optional_cursor_and_palette() {
-        let p: SetColors =
-            serde_json::from_value(json!({"foreground":"#ffffff","background":"#000000"})).unwrap();
+        let p: SetColors = serde_json::from_value(
+            serde_json::json!({"foreground":"#ffffff","background":"#000000"}),
+        )
+        .unwrap();
         assert_eq!((p.cursor, p.palette), (None, None));
     }
 
     #[test]
     fn report_agent_params_and_the_terminal_agent_wire_shape() {
         let p: TerminalReportAgent =
-            serde_json::from_value(json!({"terminal_id":"t1","seq":5,"status":"gone"})).unwrap();
+            serde_json::from_value(serde_json::json!({"terminal_id":"t1","seq":5,"status":"gone"}))
+                .unwrap();
         assert_eq!(p.status, AgentStatus::Gone);
         assert_eq!((p.agent, p.session_id, p.message), (None, None, None));
         let p: TerminalReportAgent = serde_json::from_value(
@@ -1797,23 +1803,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p.message.as_deref(), Some("Allow Bash?"));
-        let t: Terminal = serde_json::from_value(json!({"id":"t1","space_id":"s1","name":"n",
+        let t: Terminal =
+            serde_json::from_value(serde_json::json!({"id":"t1","space_id":"s1","name":"n",
             "cwd":"/","cols":80,"rows":24,"status":"running",
             "agent":{"status":"working","agent":"claude","session_id":"abc"}}))
-        .unwrap();
+            .unwrap();
         assert_eq!(t.agent.unwrap().session_id.as_deref(), Some("abc"));
     }
 
     #[test]
     fn token_wire_shapes_and_names() {
-        let p: TerminalReportTokens = serde_json::from_value(json!({"terminal_id":"t1",
+        let p: TerminalReportTokens =
+            serde_json::from_value(serde_json::json!({"terminal_id":"t1",
             "tokens":{"deliver_step":"build","deliver_pr":null},"ttl_s":30,"source":"deliver"}))
-        .unwrap();
+            .unwrap();
         assert_eq!(p.tokens["deliver_step"].as_deref(), Some("build"));
         assert_eq!(p.tokens["deliver_pr"], None);
         assert_eq!(p.ttl_s, Some(30));
-        let p: TerminalReportTokens =
-            serde_json::from_value(json!({"terminal_id":"t1","tokens":{},"source":"s"})).unwrap();
+        let p: TerminalReportTokens = serde_json::from_value(
+            serde_json::json!({"terminal_id":"t1","tokens":{},"source":"s"}),
+        )
+        .unwrap();
         assert_eq!(p.ttl_s, None);
         assert!(
             serde_json::from_value::<TerminalReportTokens>(
@@ -1822,11 +1832,13 @@ mod tests {
             .is_err()
         );
         let c: TerminalClearTokens =
-            serde_json::from_value(json!({"terminal_id":"t1","source":"deliver"})).unwrap();
+            serde_json::from_value(serde_json::json!({"terminal_id":"t1","source":"deliver"}))
+                .unwrap();
         assert_eq!(c.source, "deliver");
-        let t: Terminal = serde_json::from_value(json!({"id":"t1","space_id":"s1","name":"n",
+        let t: Terminal =
+            serde_json::from_value(serde_json::json!({"id":"t1","space_id":"s1","name":"n",
             "cwd":"/","cols":80,"rows":24,"status":"running","tokens":{"deliver":"on"}}))
-        .unwrap();
+            .unwrap();
         assert_eq!(t.tokens["deliver"], "on");
         let event: Event = serde_json::from_str(
             r#"{"event":"terminal.tokens_changed","data":{"terminal_id":"t1","tokens":{"a":"b"}}}"#,
@@ -1850,19 +1862,22 @@ mod tests {
 
     #[test]
     fn attach_wire_shapes() {
-        let p: TerminalAttach =
-            serde_json::from_value(json!({"terminal_id":"t1","mode":"control","take_over":true}))
-                .unwrap();
+        let p: TerminalAttach = serde_json::from_value(
+            serde_json::json!({"terminal_id":"t1","mode":"control","take_over":true}),
+        )
+        .unwrap();
         assert_eq!(p.mode, AttachMode::Control);
         assert!(p.take_over);
         let p: TerminalAttach =
-            serde_json::from_value(json!({"terminal_id":"t1","mode":"observe"})).unwrap();
+            serde_json::from_value(serde_json::json!({"terminal_id":"t1","mode":"observe"}))
+                .unwrap();
         assert!(!p.take_over);
         assert!(
             serde_json::from_value::<TerminalAttach>(json!({"terminal_id":"t1","mode":"x"}))
                 .is_err()
         );
-        let d: TerminalDetach = serde_json::from_value(json!({"terminal_id":"t1"})).unwrap();
+        let d: TerminalDetach =
+            serde_json::from_value(serde_json::json!({"terminal_id":"t1"})).unwrap();
         assert_eq!(d.terminal_id, "t1");
         assert!(serde_json::from_value::<TerminalDetach>(json!({})).is_err());
 
@@ -1886,7 +1901,8 @@ mod tests {
 
     #[test]
     fn a_protocol_3_space_has_no_tabs_and_a_protocol_4_space_lists_them() {
-        let old: Space = serde_json::from_value(json!({"id":"s1","name":"a","cwd":"/x"})).unwrap();
+        let old: Space =
+            serde_json::from_value(serde_json::json!({"id":"s1","name":"a","cwd":"/x"})).unwrap();
         assert_eq!((old.tabs.len(), old.active_tab), (0, None));
         let space: Space = serde_json::from_value(
             json!({"id":"s1","name":"a","cwd":"/x","tabs":["tab2","tab3"],"active_tab":"tab3"}),
@@ -1934,7 +1950,8 @@ mod tests {
         }
         assert_eq!(serde_json::to_value(&tab).unwrap(), wire);
         let leaf: Node =
-            serde_json::from_value(json!({"kind":"terminal","terminal_id":"t1"})).unwrap();
+            serde_json::from_value(serde_json::json!({"kind":"terminal","terminal_id":"t1"}))
+                .unwrap();
         assert_eq!(leaf, Node::terminal("t1"));
     }
 
@@ -1966,64 +1983,74 @@ mod tests {
 
     #[test]
     fn the_space_list_carries_tabs_and_defaults_them_for_protocol_3() {
-        let list: SpaceList = serde_json::from_value(json!({"spaces":[{"id":"s1","name":"a",
+        let list: SpaceList =
+            serde_json::from_value(serde_json::json!({"spaces":[{"id":"s1","name":"a",
             "cwd":"/x","tabs":["tab2"],"active_tab":"tab2"}],"tabs":[{"tab_id":"tab2",
             "space_id":"s1","name":"zsh","root":{"kind":"terminal","terminal_id":"t3"},
             "active_terminal":"t3"}]}))
-        .unwrap();
+            .unwrap();
         assert_eq!(list.tabs[0].root, Node::terminal("t3"));
-        let old: SpaceList =
-            serde_json::from_value(json!({"spaces":[{"id":"s1","name":"a","cwd":"/x"}]})).unwrap();
+        let old: SpaceList = serde_json::from_value(
+            serde_json::json!({"spaces":[{"id":"s1","name":"a","cwd":"/x"}]}),
+        )
+        .unwrap();
         assert!(old.tabs.is_empty());
     }
 
     #[test]
     fn tab_request_params() {
-        let p: TabCreate = serde_json::from_value(json!({"space_id":"s1"})).unwrap();
+        let p: TabCreate = serde_json::from_value(serde_json::json!({"space_id":"s1"})).unwrap();
         assert_eq!((p.name, p.terminal_id), (None, None));
-        let p: TabCreate =
-            serde_json::from_value(json!({"space_id":"s1","name":"logs","terminal_id":"t2"}))
-                .unwrap();
+        let p: TabCreate = serde_json::from_value(
+            serde_json::json!({"space_id":"s1","name":"logs","terminal_id":"t2"}),
+        )
+        .unwrap();
         assert_eq!(
             (p.name.as_deref(), p.terminal_id.as_deref()),
             (Some("logs"), Some("t2"))
         );
         assert!(serde_json::from_value::<TabCreate>(json!({})).is_err());
 
-        let p: TabRename = serde_json::from_value(json!({"tab_id":"tab2","name":"x"})).unwrap();
+        let p: TabRename =
+            serde_json::from_value(serde_json::json!({"tab_id":"tab2","name":"x"})).unwrap();
         assert_eq!(p.name, "x");
-        let p: TabClose = serde_json::from_value(json!({"tab_id":"tab2"})).unwrap();
+        let p: TabClose = serde_json::from_value(serde_json::json!({"tab_id":"tab2"})).unwrap();
         assert_eq!(p.tab_id, "tab2");
-        let p: TabMove = serde_json::from_value(json!({"tab_id":"tab2","index":0})).unwrap();
+        let p: TabMove =
+            serde_json::from_value(serde_json::json!({"tab_id":"tab2","index":0})).unwrap();
         assert_eq!(p.index, 0);
         assert!(serde_json::from_value::<TabMove>(json!({"tab_id":"tab2","index":-1})).is_err());
 
         let p: TabSplit =
-            serde_json::from_value(json!({"terminal_id":"t1","direction":"down"})).unwrap();
+            serde_json::from_value(serde_json::json!({"terminal_id":"t1","direction":"down"}))
+                .unwrap();
         assert_eq!(p.direction, SplitDirection::Down);
         assert_eq!(
             (p.ratio, p.cwd, p.name, p.command),
             (None, None, None, None)
         );
-        let p: TabSplit = serde_json::from_value(json!({"terminal_id":"t1","direction":"right",
+        let p: TabSplit =
+            serde_json::from_value(serde_json::json!({"terminal_id":"t1","direction":"right",
             "ratio":0.3,"cwd":"/w","name":"logs","command":["tail","-f","x"]}))
-        .unwrap();
+            .unwrap();
         assert_eq!(p.ratio, Some(0.3));
         assert_eq!(p.command.unwrap(), ["tail", "-f", "x"]);
         assert!(serde_json::from_value::<TabSplit>(json!({"terminal_id":"t1"})).is_err());
 
-        let p: TabResizeSplit =
-            serde_json::from_value(json!({"tab_id":"tab2","split_id":"split3","ratio":0.7}))
-                .unwrap();
+        let p: TabResizeSplit = serde_json::from_value(
+            serde_json::json!({"tab_id":"tab2","split_id":"split3","ratio":0.7}),
+        )
+        .unwrap();
         assert_eq!((p.split_id.as_str(), p.ratio), ("split3", 0.7));
         assert!(
             serde_json::from_value::<TabResizeSplit>(json!({"tab_id":"tab2","ratio":0.7})).is_err()
         );
 
-        let p: TabFocus = serde_json::from_value(json!({"tab_id":"tab2"})).unwrap();
+        let p: TabFocus = serde_json::from_value(serde_json::json!({"tab_id":"tab2"})).unwrap();
         assert_eq!(p.terminal_id, None);
         let p: TabFocus =
-            serde_json::from_value(json!({"tab_id":"tab2","terminal_id":"t4"})).unwrap();
+            serde_json::from_value(serde_json::json!({"tab_id":"tab2","terminal_id":"t4"}))
+                .unwrap();
         assert_eq!(p.terminal_id.as_deref(), Some("t4"));
     }
 
@@ -2033,7 +2060,8 @@ mod tests {
             "active_terminal":"t1"});
         for name in ["tab.created", "tab.changed"] {
             let event: Event =
-                serde_json::from_value(json!({"event":name,"data":{"tab":tab}})).unwrap();
+                serde_json::from_value(serde_json::json!({"event":name,"data":{"tab":tab}}))
+                    .unwrap();
             let parsed = match &event {
                 Event::TabCreated { tab } | Event::TabChanged { tab } => tab,
                 other => panic!("{other:?}"),
@@ -2052,9 +2080,10 @@ mod tests {
             serde_json::to_value(&closed).unwrap(),
             json!({"event":"tab.closed","data":{"tab_id":"tab2","space_id":"s1"}})
         );
-        let changed: Event = serde_json::from_value(json!({"event":"space.changed","data":{
+        let changed: Event =
+            serde_json::from_value(serde_json::json!({"event":"space.changed","data":{
             "space":{"id":"s1","name":"a","cwd":"/x","tabs":["tab3","tab2"],"active_tab":"tab2"}}}))
-        .unwrap();
+            .unwrap();
         match changed {
             Event::SpaceChanged { space } => assert_eq!(space.tabs, ["tab3", "tab2"]),
             other => panic!("{other:?}"),
@@ -2116,7 +2145,7 @@ mod tests {
 
     #[test]
     fn machine_check_result_parses_and_ok_ignores_warnings() {
-        let r: MachineCheckResult = serde_json::from_value(json!({
+        let r: MachineCheckResult = serde_json::from_value(serde_json::json!({
             "version": "0.18.0", "protocol": 6,
             "checks": [
                 {"id": "git", "status": "ok"},
@@ -2128,7 +2157,7 @@ mod tests {
         assert_eq!(r.checks[1].fix.as_deref(), Some("copilot"));
         assert_eq!(r.checks[0].detail, None);
         assert!(r.ok());
-        let bad: MachineCheckResult = serde_json::from_value(json!({
+        let bad: MachineCheckResult = serde_json::from_value(serde_json::json!({
             "version": "1", "protocol": 6, "checks": [{"id": "gh", "status": "missing"}]
         }))
         .unwrap();
@@ -2141,7 +2170,7 @@ mod tests {
 
     #[test]
     fn worktree_cleanup_parses() {
-        let p: WorktreeCleanup = serde_json::from_value(json!({
+        let p: WorktreeCleanup = serde_json::from_value(serde_json::json!({
             "owner": "o", "repo": "app",
             "merged": [{"branch": "feat/7-x", "number": 12}]
         }))
@@ -2159,7 +2188,7 @@ mod tests {
             }))
             .is_err()
         );
-        let r: WorktreeCleanupResult = serde_json::from_value(json!({
+        let r: WorktreeCleanupResult = serde_json::from_value(serde_json::json!({
             "path": "/s/o/app",
             "removed": [{"path": "/s/o/app-7", "branch": "feat/7-x", "pr": 12, "branch_deleted": true}],
             "left": [{"path": "/s/o/app-8", "branch": "feat/8-y", "pr": 13,
@@ -2170,21 +2199,23 @@ mod tests {
         assert_eq!(r.removed[0].note, None);
         assert!(r.removed[0].branch_deleted);
         assert_eq!(r.left[0].reason, "dirty");
-        let none: WorktreeCleanupResult = serde_json::from_value(json!({"path": null})).unwrap();
+        let none: WorktreeCleanupResult =
+            serde_json::from_value(serde_json::json!({"path": null})).unwrap();
         assert_eq!(none, WorktreeCleanupResult::default());
     }
 
     #[test]
     fn agent_transcript_request_and_result_wire_shapes() {
         let p: AgentTranscript =
-            serde_json::from_value(json!({"terminal_id": "t1", "follower": "f1"})).unwrap();
+            serde_json::from_value(serde_json::json!({"terminal_id": "t1", "follower": "f1"}))
+                .unwrap();
         assert!(!p.restart);
         assert_eq!(
             serde_json::to_value(AgentTranscript { restart: true, ..p }).unwrap(),
             json!({"terminal_id": "t1", "follower": "f1", "restart": true})
         );
         assert!(serde_json::from_value::<AgentTranscript>(json!({"terminal_id": "t1"})).is_err());
-        let r: AgentTranscriptResult = serde_json::from_value(json!({
+        let r: AgentTranscriptResult = serde_json::from_value(serde_json::json!({
             "state": "ok", "session": "s1", "fresh": true,
             "updates": [{"kind": "main", "calls": [], "tools": 0, "usage": []}]
         }))
@@ -2194,7 +2225,8 @@ mod tests {
             (TranscriptState::Ok, true, 1)
         );
         let r: AgentTranscriptResult =
-            serde_json::from_value(json!({"state": "unreadable", "reason": "denied"})).unwrap();
+            serde_json::from_value(serde_json::json!({"state": "unreadable", "reason": "denied"}))
+                .unwrap();
         assert_eq!(r.state, TranscriptState::Unreadable);
         assert_eq!(r.reason.as_deref(), Some("denied"));
         assert!(r.updates.is_empty() && !r.fresh);
@@ -2207,17 +2239,18 @@ mod tests {
     #[test]
     fn repo_and_worktree_requests_parse() {
         let p: RepoEnsure =
-            serde_json::from_value(json!({"owner": "GravionLabs", "repo": "poimen"})).unwrap();
+            serde_json::from_value(serde_json::json!({"owner": "GravionLabs", "repo": "poimen"}))
+                .unwrap();
         assert_eq!(
             (p.owner.as_str(), p.repo.as_str()),
             ("GravionLabs", "poimen")
         );
         assert!(serde_json::from_value::<RepoEnsure>(json!({"owner": "o"})).is_err());
         let r: RepoEnsureResult =
-            serde_json::from_value(json!({"path": "/s/o/r", "cloned": true})).unwrap();
+            serde_json::from_value(serde_json::json!({"path": "/s/o/r", "cloned": true})).unwrap();
         assert!(r.cloned);
 
-        let w: WorktreeCreate = serde_json::from_value(json!({
+        let w: WorktreeCreate = serde_json::from_value(serde_json::json!({
             "repo_dir": "/s/o/r", "issue": {"nr": 7, "title": "feat: X"}, "mode": "agent"
         }))
         .unwrap();
@@ -2377,7 +2410,7 @@ mod tests {
 
     #[test]
     fn space_create_params_carry_the_layout_flag_trust_answer_and_command() {
-        let p: SpaceCreate = serde_json::from_value(json!({
+        let p: SpaceCreate = serde_json::from_value(serde_json::json!({
             "name": "a", "cwd": "/x", "layout": false,
             "trust": {"kind": "trust", "hash": "ab12"}, "command": "claude"
         }))
@@ -2390,7 +2423,8 @@ mod tests {
             })
         );
         assert_eq!(p.command.as_deref(), Some("claude"));
-        let without: TrustAnswer = serde_json::from_value(json!({"kind": "without"})).unwrap();
+        let without: TrustAnswer =
+            serde_json::from_value(serde_json::json!({"kind": "without"})).unwrap();
         assert_eq!(without, TrustAnswer::Without);
         assert!(serde_json::from_value::<TrustAnswer>(json!({"kind": "maybe"})).is_err());
         assert_eq!(
@@ -2402,7 +2436,7 @@ mod tests {
 
     #[test]
     fn space_create_result_is_the_trust_question_or_the_space() {
-        let asked: SpaceCreateResult = serde_json::from_value(json!({"trust_required": {
+        let asked: SpaceCreateResult = serde_json::from_value(serde_json::json!({"trust_required": {
             "root": "/r", "files": ["/r/.poimen/config.json"], "hash": "ab12",
             "commands": [{"what": "setup", "command": "make"}],
             "layout": [{"name": "agent", "command": "claude"},
@@ -2425,7 +2459,7 @@ mod tests {
             })
         );
 
-        let created: SpaceCreateResult = serde_json::from_value(json!({
+        let created: SpaceCreateResult = serde_json::from_value(serde_json::json!({
             "space": {"id": "s1", "name": "a", "cwd": "/x", "tabs": ["tab2"], "active_tab": "tab2"},
             "tabs": [{"tab_id": "tab2", "space_id": "s1", "name": "agent",
                       "root": {"kind": "terminal", "terminal_id": "t3"}, "active_terminal": "t3"}],
@@ -2441,9 +2475,10 @@ mod tests {
         assert!(created.setup_started);
 
         // A protocol 4 server answers only `{space}`.
-        let old: SpaceCreateResult =
-            serde_json::from_value(json!({"space": {"id": "s1", "name": "a", "cwd": "/x"}}))
-                .unwrap();
+        let old: SpaceCreateResult = serde_json::from_value(
+            serde_json::json!({"space": {"id": "s1", "name": "a", "cwd": "/x"}}),
+        )
+        .unwrap();
         assert!(
             matches!(old, SpaceCreateResult::Created(c) if c.tabs.is_empty() && !c.setup_started)
         );
@@ -2464,7 +2499,8 @@ mod tests {
         assert_eq!(p.trust, Some(TrustAnswer::Without));
 
         // Only `space_id` is required; the defaults stay off the wire.
-        let bare: SpaceApplyLayout = serde_json::from_value(json!({"space_id": "s2"})).unwrap();
+        let bare: SpaceApplyLayout =
+            serde_json::from_value(serde_json::json!({"space_id": "s2"})).unwrap();
         assert_eq!(bare, SpaceApplyLayout::resolved("s2"));
         assert_eq!(
             serde_json::to_value(SpaceApplyLayout::preset("s2", "duo")).unwrap(),
@@ -2475,19 +2511,20 @@ mod tests {
 
     #[test]
     fn space_apply_layout_result_is_the_trust_question_or_the_new_tabs() {
-        let asked: SpaceApplyLayoutResult = serde_json::from_value(json!({"trust_required": {
-            "root": "/x", "files": ["/x/.poimen/config.json"], "hash": "h",
-            "commands": [{"what": "preset \"duo\": pane \"a\"", "command": "vim"}],
-            "layout": [{"name": "a", "command": "vim"}]
-        }}))
-        .unwrap();
+        let asked: SpaceApplyLayoutResult =
+            serde_json::from_value(serde_json::json!({"trust_required": {
+                "root": "/x", "files": ["/x/.poimen/config.json"], "hash": "h",
+                "commands": [{"what": "preset \"duo\": pane \"a\"", "command": "vim"}],
+                "layout": [{"name": "a", "command": "vim"}]
+            }}))
+            .unwrap();
         let SpaceApplyLayoutResult::TrustRequired { trust_required } = asked else {
             panic!("{asked:?}")
         };
         assert_eq!(trust_required.hash, "h");
         assert_eq!(trust_required.commands[0].command, "vim");
 
-        let applied: SpaceApplyLayoutResult = serde_json::from_value(json!({
+        let applied: SpaceApplyLayoutResult = serde_json::from_value(serde_json::json!({
             "space": {"id": "s1", "name": "a", "cwd": "/x", "tabs": ["tab2", "tab4"]},
             "tabs": [{"tab_id": "tab4", "space_id": "s1", "name": "a",
                       "root": {"kind": "terminal", "terminal_id": "t5"}, "active_terminal": "t5"}],
@@ -2560,14 +2597,14 @@ mod private_dir_tests {
 
     #[test]
     fn a_tab_parent_is_optional_on_the_wire() {
-        let tab: Tab = serde_json::from_value(json!({
+        let tab: Tab = serde_json::from_value(serde_json::json!({
             "tab_id": "tab3", "space_id": "s1", "name": "logs",
             "root": {"kind": "terminal", "terminal_id": "t3"},
             "active_terminal": "t3", "parent": "tab2"
         }))
         .unwrap();
         assert_eq!(tab.parent.as_deref(), Some("tab2"));
-        let top: Tab = serde_json::from_value(json!({
+        let top: Tab = serde_json::from_value(serde_json::json!({
             "tab_id": "tab2", "space_id": "s1", "name": "claude",
             "root": {"kind": "terminal", "terminal_id": "t2"}
         }))
