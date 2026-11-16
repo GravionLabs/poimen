@@ -1012,3 +1012,31 @@ describe("naturalCompare (#770)", () => {
     }
   });
 });
+
+describe("child records in the snapshot (#684)", () => {
+  it("cleans the texts of a record and drops an invalid progress", () => {
+    const snap = toSnapshot({
+      terminals: [
+        {
+          terminal_id: "t1",
+          tab_id: "x",
+          space_id: "s",
+          agent_status: "idle",
+          records: [
+            {
+              id: "run/a",
+              status: "blocked",
+              message: "Al\u202Elow",
+              title: "\u200b",
+              progress: 400,
+              kind: "permission",
+            },
+          ],
+        },
+      ],
+    });
+    expect(snap.terminals[0].records).toEqual([
+      { id: "run/a", status: "blocked", message: "Allow", kind: "permission" },
+    ]);
+  });
+});

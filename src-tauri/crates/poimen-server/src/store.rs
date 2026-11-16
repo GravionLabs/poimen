@@ -59,6 +59,9 @@ pub(crate) struct StoredTerminal {
     /// The `seq` of the last accepted agent report, so a stale report stays dropped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) agent_seq: Option<u64>,
+    /// The child records of OSC 7501 reports with an `id` (#684), as reported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) records: Vec<poimen_protocol::ChildRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) tokens: Vec<StoredToken>,
 }
@@ -319,6 +322,16 @@ mod tests {
             }),
             osc: false,
             hook_agent: None,
+            records: vec![poimen_protocol::ChildRecord {
+                id: "run/a".into(),
+                status: poimen_protocol::AgentStatus::Working,
+                app: Some("codex".into()),
+                message: None,
+                message_at: None,
+                progress: Some(5),
+                kind: None,
+                title: None,
+            }],
             agent_seq: Some(17),
             tokens: vec![StoredToken {
                 name: "deliver_step".into(),

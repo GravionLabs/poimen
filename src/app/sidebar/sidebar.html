@@ -350,6 +350,34 @@
             }
           </span>
         }
+        @if (recordView(d.row); as rv) {
+          <span class="records" role="group" aria-label="Child records">
+            @if (rv.many) {
+              <button
+                type="button"
+                class="records-toggle"
+                [attr.aria-expanded]="rv.open"
+                (click)="toggleRecords(d.row.pane.terminal_id, $event)"
+                (keydown)="$event.stopPropagation()"
+              >
+                <span class="chevron" [class.open]="rv.open" aria-hidden="true"></span>
+                {{ rv.summary ?? "Hide records" }}
+              </button>
+            }
+            @for (r of rv.rows; track r.id) {
+              <span class="record" [style.padding-left.px]="r.depth * 10" [title]="r.id">
+                <span class="dot status-{{ r.status }}"></span>
+                <span class="name">{{ r.name }}</span>
+                @if (r.state; as state) {
+                  <span class="state state-{{ r.status }}">{{ state }}</span>
+                }
+                @if (r.message; as message) {
+                  <span class="text">{{ message }}</span>
+                }
+              </span>
+            }
+          </span>
+        }
       </span>
       @if (d.since; as since) {
         <span class="since" title="Time since the last status change">{{ since }}</span>

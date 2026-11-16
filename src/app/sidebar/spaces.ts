@@ -4,9 +4,11 @@ import {
   validProgress,
   type AgentStatus,
   type BranchPull,
+  type ChildRecord,
   type PaneRow,
   type SpaceNode,
   type StateDetails,
+  type Terminal,
 } from "../core/snapshot";
 import { checksText } from "../github/pulls";
 
@@ -366,4 +368,46 @@ export function renderRow(
       return out;
     })
     .filter((l) => l.some((s) => s.kind !== "dot"));
+}
+
+/** More child records than this are folded into one summary line until the user opens them. */
+export const RECORDS_SHOWN = 4;
+
+/** One child record as a row below its terminal. */
+export interface RecordRow {
+  id: string;
+  /** Nesting level: the number of `/` in the id. */
+  depth: number;
+  status: AgentStatus;
+  /** The record's title, else the last segment of its id. */
+  name: string;
+  state: string | undefined;
+  message?: string;
+}
+
+/** The records of `pane` as rows: ordered by id, so a parent comes right before its children. */
+export function recordRows(pane: Terminal): RecordRow[] {
+  return [...(pane.records ?? [])]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((r) => {
+      const name = r.title || r.id.slice(r.id.lastIndexOf("/") + 1);
+      return {
+        id: r.id,
+        depth: r.id.split("/").length - 1,
+        status: r.status,
+        name,
+        state: stateLabel(r.status, { kind: r.kind, progress: r.progress }),
+        message: r.message && same(r.message) !== same(name) ? r.message : undefined,
+      };
+    });
+}
+
+/** `5 records · 1 error · 2 working` for the folded line. */
+export function recordsSummary(records: readonly ChildRecord[]): string {
+  const parts = [`${records.length} records`];
+  for (const status of ["error", "blocked", "working"] as const) {
+    const n = records.filter((r) => r.status === status).length;
+    if (n) parts.push(`${n} ${status}`);
+  }
+  return parts.join(" · ");
 }

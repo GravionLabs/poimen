@@ -31,11 +31,15 @@ import { Attention, canMarkUnread, workspaceUnread } from "../core/attention";
 import { SpacesStore } from "../core/spaces-store";
 import {
   DEFAULT_SIDEBAR_ROWS,
+  RECORDS_SHOWN,
   aggregateStatus,
   paneMarks,
+  recordRows,
+  recordsSummary,
   renderRow,
   spaceContext,
   type Line,
+  type RecordRow,
   type RowType,
   type SidebarRows,
 } from "./spaces";
@@ -677,6 +681,37 @@ export class Sidebar {
   protected toggle(tree: HxTree, key: string, event: Event): void {
     event.stopPropagation();
     tree.toggle(key);
+  }
+
+  /** Terminals whose folded child records the user opened. */
+  protected readonly openRecords = signal<ReadonlySet<string>>(new Set());
+
+  /**
+   * The child records of a pane (#684): all rows, or one summary line when there are more than a
+   * few and the user has not opened them. `undefined` without records.
+   */
+  protected recordView(
+    row: PaneRow,
+  ): { rows: RecordRow[]; summary: string | undefined; many: boolean; open: boolean } | undefined {
+    const records = row.pane.records;
+    if (!records?.length) return undefined;
+    const many = records.length > RECORDS_SHOWN;
+    const open = !many || this.openRecords().has(row.pane.terminal_id);
+    return {
+      rows: open ? recordRows(row.pane) : [],
+      summary: many && !open ? recordsSummary(records) : undefined,
+      many,
+      open,
+    };
+  }
+
+  protected toggleRecords(terminalId: string, event: Event): void {
+    event.stopPropagation();
+    this.openRecords.update((set) => {
+      const next = new Set(set);
+      if (!next.delete(terminalId)) next.add(terminalId);
+      return next;
+    });
   }
 
   /** The close icon of a workspace row: the close flow of the context menu, no selection or toggle. */

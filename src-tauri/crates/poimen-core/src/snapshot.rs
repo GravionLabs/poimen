@@ -98,6 +98,25 @@ pub struct Tab {
     pub active_terminal: Option<String>,
 }
 
+/// A child record of a terminal (OSC 7501 with an `id`, #684): one row below the terminal.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChildRecord {
+    /// `/`-separated path, e.g. `run/issue-12`.
+    pub id: String,
+    pub status: AgentStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Terminal {
@@ -125,6 +144,9 @@ pub struct Terminal {
     /// The program's own title (#682).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_title: Option<String>,
+    /// The child records of the terminal, least recently updated first (#684).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub records: Vec<ChildRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     /// Directory of the foreground process (herdr); follows `cd`.

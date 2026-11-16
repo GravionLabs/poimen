@@ -7,6 +7,8 @@ import {
   paneMarks,
   paneMeta,
   prText,
+  recordRows,
+  recordsSummary,
   prTooltip,
   renderRow,
   DEFAULT_SIDEBAR_ROWS,
@@ -449,5 +451,40 @@ describe("worktree member row", () => {
         .map((s) => s.text);
     expect(text(head)).toEqual(["wt feat/x"]);
     expect(text(member)).toEqual(["feat/x"]);
+  });
+});
+
+describe("child records (#684)", () => {
+  const pane = (records: NonNullable<Terminal["records"]>): Terminal =>
+    row({ pane: { records } }).pane;
+
+  it("lists records by id with depth, name, state and message", () => {
+    const rows = recordRows(
+      pane([
+        { id: "run/b", status: "blocked", kind: "permission", message: "Allow?" },
+        { id: "run", status: "working", progress: 30 },
+        { id: "run/a", status: "done", title: "Issue A", message: "issue a" },
+      ]),
+    );
+    expect(rows.map((r) => [r.id, r.depth, r.name, r.state, r.message])).toEqual([
+      ["run", 0, "run", "working 30%", undefined],
+      ["run/a", 1, "Issue A", "done", undefined],
+      ["run/b", 1, "b", "waiting: permission", "Allow?"],
+    ]);
+  });
+
+  it("summarizes many records by their urgent statuses", () => {
+    const records = [
+      { id: "a", status: "error" },
+      { id: "b", status: "working" },
+      { id: "c", status: "working" },
+      { id: "d", status: "done" },
+      { id: "e", status: "blocked" },
+    ] as const;
+    expect(recordsSummary([...records])).toBe("5 records · 1 error · 1 blocked · 2 working");
+  });
+
+  it("has no rows without records", () => {
+    expect(recordRows(pane([]))).toEqual([]);
   });
 });

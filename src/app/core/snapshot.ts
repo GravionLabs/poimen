@@ -163,6 +163,18 @@ export function spaceRoot(snapshot: Snapshot, spaceId: string): Terminal | undef
   return first ?? snapshot.terminals.find((t) => t.space_id === spaceId);
 }
 
+/** A child record of a terminal (OSC 7501 with an `id`, #684): a row below the terminal. */
+export interface ChildRecord {
+  /** `/`-separated path such as `run/issue-12`; a parent's id is a prefix of its children's. */
+  id: string;
+  status: AgentStatus;
+  app?: string;
+  message?: string;
+  progress?: number;
+  kind?: string;
+  title?: string;
+}
+
 export interface Terminal {
   terminal_id: string;
   tab_id: string;
@@ -178,6 +190,8 @@ export interface Terminal {
   agent_progress?: number;
   agent_kind?: string;
   agent_title?: string;
+  /** Child records, least recently updated first (poimen backend, #684). */
+  records?: ChildRecord[];
   cwd?: string;
   /** Directory of the foreground process; follows `cd` and is more precise than `cwd`. */
   foreground_cwd?: string;
@@ -248,6 +262,7 @@ export function toSnapshot(wire: WireSnapshot | null | undefined): Snapshot {
 
 /** The terminal with the texts a program reported cleaned (`plainText`); unchanged when none is set. */
 function plainTerminal(t: Terminal): Terminal {
+  if (t.records?.length) t = { ...t, records: t.records.map(plainRecord) };
   if (t.agent_message === undefined && t.agent_title === undefined && t.agent_kind === undefined)
     return t;
   const next = { ...t };
@@ -256,6 +271,18 @@ function plainTerminal(t: Terminal): Terminal {
     const clean = plainText(next[key]);
     if (clean) next[key] = clean;
     else delete next[key];
+  }
+  return next;
+}
+
+/** A child record with its texts as plain text and a valid progress. */
+function plainRecord(r: ChildRecord): ChildRecord {
+  const next: ChildRecord = { id: plainText(r.id), status: r.status };
+  const progress = validProgress(r.progress);
+  if (progress !== undefined) next.progress = progress;
+  for (const key of ["app", "message", "kind", "title"] as const) {
+    const clean = plainText(r[key]);
+    if (clean) next[key] = clean;
   }
   return next;
 }
