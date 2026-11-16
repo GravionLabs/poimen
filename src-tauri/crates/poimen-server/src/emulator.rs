@@ -582,7 +582,6 @@ const MAX_MSG: usize = 2048;
 const MAX_TITLE: usize = 192;
 const MAX_APP: usize = 32;
 const MAX_KEY: usize = 16;
-const MAX_ID: usize = 64;
 
 fn value_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b',' | b'+' | b'/' | b'=' | b'-')
@@ -640,7 +639,7 @@ fn parse_report(body: &[u8]) -> Option<Report> {
                 });
             }
             "id" => {
-                if !clean || value.is_empty() || value.len() > MAX_ID {
+                if !clean || !poimen_protocol::valid_record_id(value) {
                     return None;
                 }
                 report.id = Some(value.to_string());
@@ -1219,6 +1218,20 @@ mod tests {
         }
         let child = reports(b"\x1b]7501;state=working:id=sub-1\x07");
         assert_eq!(child[0].id.as_deref(), Some("sub-1"));
+    }
+
+    #[test]
+    fn a_child_id_follows_the_segment_rules() {
+        let ok = reports(b"\x1b]7501;state=idle:id=run/issue-12\x07");
+        assert_eq!(ok[0].id.as_deref(), Some("run/issue-12"));
+        let seg33 = format!("\x1b]7501;state=idle:id={}\x07", "a".repeat(33));
+        let deep = format!("\x1b]7501;state=idle:id={}\x07", ["a"; 9].join("/"));
+        for bad in ["id=a//b", "id=/a", "id=a/", "id=a=b"] {
+            let text = format!("\x1b]7501;state=idle:{bad}\x07");
+            assert!(reports(text.as_bytes()).is_empty(), "{bad}");
+        }
+        assert!(reports(seg33.as_bytes()).is_empty());
+        assert!(reports(deep.as_bytes()).is_empty());
     }
 
     #[test]

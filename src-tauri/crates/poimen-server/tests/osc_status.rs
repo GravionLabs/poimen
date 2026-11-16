@@ -153,10 +153,61 @@ fn a_new_prompt_drops_working_but_not_done() {
 }
 
 #[test]
-fn a_child_record_is_ignored() {
+fn a_child_record_leaves_the_root_status_alone() {
     let env = Env::new("child");
     env.print(r"\033]7501;state=working:id=sub\007\033]7501;state=error\007");
     wait_for(&env, Some(AgentStatus::Error));
+}
+
+fn records(env: &Env) -> Vec<(String, AgentStatus, Option<String>)> {
+    let t = env.client.list_terminals(None).unwrap().remove(0);
+    t.records
+        .into_iter()
+        .map(|r| (r.id, r.status, r.app))
+        .collect()
+}
+
+fn wait_records(env: &Env, want: usize) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while records(env).len() != want {
+        assert!(Instant::now() < deadline, "records stay {:?}", records(env));
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn child_records_are_listed_published_and_cleared() {
+    let env = Env::new("records");
+    let rx = events(&env.client);
+    env.print(r"\033]7501;state=working:app=codex\007");
+    env.print(r"\033]7501;state=working:id=run\007\033]7501;state=blocked:id=run/a\007");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let got = loop {
+        match rx
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("records event did not arrive")
+        {
+            Event::TerminalRecordsChanged { records, .. } if records.len() == 2 => break records,
+            _ => {}
+        }
+    };
+    assert_eq!(got[1].id, "run/a");
+    // `app` comes from the root record, the root status stays.
+    assert_eq!(got[1].app.as_deref(), Some("codex"));
+    assert_eq!(env.status(), Some(AgentStatus::Working));
+    // An invalid id drops the report.
+    env.print(r"\033]7501;state=working:id=a//b\007");
+    env.print(r"\033]7501;state=clear:id=run\007");
+    wait_records(&env, 0);
+    env.print(r"\033]7501;state=done:id=x\007\033]7501;state=working:id=y\007");
+    wait_records(&env, 2);
+    // A new prompt drops the working one.
+    env.print(r"\033]133;A\007");
+    wait_records(&env, 1);
+    assert_eq!(records(&env)[0].0, "x");
+    env.print(r"\033]7501;state=clear\007");
+    wait_records(&env, 0);
+    assert_eq!(env.status(), None);
 }
 
 #[test]

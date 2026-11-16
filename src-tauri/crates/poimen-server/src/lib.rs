@@ -19,6 +19,7 @@ mod host;
 pub mod integration;
 pub mod mcp_config;
 mod pty;
+mod records;
 pub mod report;
 mod runs;
 pub mod stdio;
@@ -144,6 +145,8 @@ struct TerminalEntry {
     osc: Option<AgentInfo>,
     /// The status of the hooks while `osc` is set, back in `agent` when `osc` ends.
     hook_agent: Option<AgentInfo>,
+    /// The child records of OSC 7501 reports with an `id` (#684); `info.records` is their view.
+    records: records::Records,
     /// Who set which token and until when; `info.tokens` is the visible name-to-value view.
     tokens: Vec<TokenEntry>,
 }
@@ -192,6 +195,7 @@ impl TerminalEntry {
             osc: self.osc.is_some(),
             hook_agent: self.hook_agent.clone(),
             agent_seq: self.agent_seq,
+            records: self.records.raw().to_vec(),
             tokens,
         })
     }
@@ -202,8 +206,12 @@ impl TerminalEntry {
     fn apply_signal(&mut self, signal: emulator::Signal, now_ms: u64) {
         use emulator::{ReportState, Signal};
         match signal {
-            Signal::Ris => self.end_osc(),
+            Signal::Ris => {
+                self.end_osc();
+                self.records.clear();
+            }
             Signal::Prompt => {
+                self.records.end_active();
                 if self.osc.as_ref().is_some_and(|a| {
                     matches!(a.status, AgentStatus::Working | AgentStatus::Blocked)
                 }) {
@@ -212,7 +220,7 @@ impl TerminalEntry {
             }
             Signal::Report(report) => {
                 if report.id.is_some() {
-                    return;
+                    return self.records.apply(report, now_ms);
                 }
                 let status = match report.state {
                     Some(ReportState::Idle) => AgentStatus::Idle,
@@ -220,7 +228,10 @@ impl TerminalEntry {
                     Some(ReportState::Blocked) => AgentStatus::Blocked,
                     Some(ReportState::Done) => AgentStatus::Done,
                     Some(ReportState::Error) => AgentStatus::Error,
-                    Some(ReportState::Clear) => return self.end_osc(),
+                    Some(ReportState::Clear) => {
+                        self.records.clear();
+                        return self.end_osc();
+                    }
                     None => return,
                 };
                 let text = report
@@ -261,6 +272,14 @@ impl TerminalEntry {
                 self.info.agent = Some(next);
             }
         }
+    }
+
+    /// `info.records` follows the records (and the root's `app` they inherit); true when it changed.
+    fn sync_records(&mut self) -> bool {
+        let view = self.records.view(self.info.agent.as_ref());
+        let changed = view != self.info.records;
+        self.info.records = view;
+        changed
     }
 
     /// The program's status ends: the status of the hooks applies again.
@@ -520,8 +539,15 @@ impl Shared {
         for signal in signals {
             entry.apply_signal(signal, now_millis());
         }
-        if entry.info.agent != before {
+        let agent_changed = entry.info.agent != before;
+        let records_changed = entry.sync_records();
+        if agent_changed {
             self.publish(agent_event(terminal_id, entry.info.agent.as_ref()));
+        }
+        if records_changed {
+            self.publish(records_event(entry));
+        }
+        if agent_changed || records_changed {
             self.persist(&inner);
         }
     }
@@ -558,6 +584,10 @@ impl Shared {
                 terminal_id: terminal_id.to_string(),
                 tokens: Default::default(),
             });
+        }
+        entry.records.exited();
+        if entry.sync_records() {
+            self.publish(records_event(entry));
         }
         entry.stream.exited(exit_code);
         self.publish(Event::TerminalExited {
@@ -1814,6 +1844,7 @@ fn spawn_terminal(
         survives_restart: true,
         host_version: Some(spawned.version().to_string()),
         host_bundled_version: Some(host_bundled_version()),
+        records: Vec::new(),
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
@@ -1822,6 +1853,7 @@ fn spawn_terminal(
         agent_seq: None,
         osc: None,
         hook_agent: None,
+        records: records::Records::default(),
         tokens: Vec::new(),
     });
     shared.publish(Event::TerminalCreated {
@@ -1938,6 +1970,8 @@ fn adopted(
     let handle = host::adopt(reached, output_to(&stream), exit_to(shared, &t.id));
     stream.set_writer(handle.writer());
     let (now, now_ms) = (Instant::now(), now_millis());
+    let records = records::Records::from(t.records.clone());
+    let view = records.view(t.agent.as_ref());
     let mut visible = std::collections::BTreeMap::new();
     let mut tokens = Vec::new();
     for token in t.tokens {
@@ -1971,12 +2005,14 @@ fn adopted(
             survives_restart: true,
             host_version: Some(handle.version().to_string()),
             host_bundled_version: Some(host_bundled_version()),
+            records: view,
         },
         host: Some(handle),
         stream,
         agent_seq: t.agent_seq,
         osc: t.osc.then(|| t.agent.clone()).flatten(),
         hook_agent: t.hook_agent.clone(),
+        records,
         tokens,
     }
 }
@@ -2158,6 +2194,14 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     // the status comes back after a restart.
     shared.persist(&inner);
     Ok(json!({ "accepted": true }))
+}
+
+/// The event for the child records of a terminal (#684): the whole list.
+fn records_event(entry: &TerminalEntry) -> Event {
+    Event::TerminalRecordsChanged {
+        terminal_id: entry.info.id.clone(),
+        records: entry.info.records.clone(),
+    }
 }
 
 /// The event for the agent of a terminal; no agent is `gone`.

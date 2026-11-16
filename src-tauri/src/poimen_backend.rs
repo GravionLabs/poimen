@@ -293,6 +293,19 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         agent_progress: agent.and_then(|a| a.progress),
         agent_kind: agent.and_then(|a| a.kind.clone()),
         agent_title: agent.and_then(|a| a.title.clone()),
+        records: terminal
+            .records
+            .iter()
+            .map(|r| snap::ChildRecord {
+                id: r.id.clone(),
+                status: snap_status(r.status),
+                app: r.app.clone(),
+                message: r.message.clone(),
+                progress: r.progress,
+                kind: r.kind.clone(),
+                title: r.title.clone(),
+            })
+            .collect(),
         cwd: Some(terminal.cwd.clone()),
         // The name of a terminal is its label only once it was renamed: the default is the
         // directory name, which the sidebar already shows for a terminal without a label.
@@ -973,7 +986,30 @@ mod tests {
             survives_restart: false,
             host_version: None,
             host_bundled_version: None,
+            records: Vec::new(),
         }
+    }
+
+    #[test]
+    fn child_records_reach_the_snapshot_terminal() {
+        let mut t = terminal("t1", "s1", "zsh");
+        t.records.push(poimen_protocol::ChildRecord {
+            id: "run/a".into(),
+            status: AgentStatus::Error,
+            app: Some("codex".into()),
+            message: Some("boom".into()),
+            message_at: Some(1),
+            progress: Some(40),
+            kind: None,
+            title: Some("A".into()),
+        });
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        assert_eq!(
+            snapshot["terminals"][0]["records"],
+            json!([{"id": "run/a", "status": "error", "app": "codex", "message": "boom",
+                    "progress": 40, "title": "A"}])
+        );
+        assert!(snapshot["terminals"][1].get("records").is_none());
     }
 
     #[test]

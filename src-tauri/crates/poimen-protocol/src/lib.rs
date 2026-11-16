@@ -574,6 +574,11 @@ pub struct Terminal {
     /// together with `host_version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_bundled_version: Option<String>,
+    /// The child records the program reported with OSC 7501 `id=` (#684), least recently updated
+    /// first; each `app` is resolved from the nearest ancestor. Absent when there are none and
+    /// from older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub records: Vec<ChildRecord>,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the
@@ -615,6 +620,46 @@ pub struct AgentInfo {
     /// The program's own title (OSC 7501 `title`, #682), plain text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+}
+
+/// A child record of a terminal: what a program reported with OSC 7501 and an `id` (a
+/// `/`-separated path such as `run/issue-12`, #684). Everything but `id` and `status` is optional.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildRecord {
+    pub id: String,
+    pub status: AgentStatus,
+    /// The reporting program; the nearest ancestor's when the record names none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// Most child records a terminal keeps; the least recently updated one goes first.
+pub const MAX_CHILD_RECORDS: usize = 256;
+/// Longest `id` of a child record, in bytes.
+pub const MAX_RECORD_ID: usize = 128;
+/// Most levels (segments) of an `id`.
+pub const MAX_RECORD_DEPTH: usize = 8;
+
+/// Whether `id` is a valid child record id: 1 to 8 segments split by `/`, each 1 to 32 of
+/// `[A-Za-z0-9_.+-]`, at most 128 bytes in all.
+pub fn valid_record_id(id: &str) -> bool {
+    id.len() <= MAX_RECORD_ID
+        && id.split('/').count() <= MAX_RECORD_DEPTH
+        && id.split('/').all(|s| {
+            (1..=32).contains(&s.len())
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'+' | b'-'))
+        })
 }
 
 /// Kinds of a block an OSC 7501 report may name.
@@ -1444,6 +1489,12 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
+    /// The child records of a terminal changed (#684); `records` is the whole list.
+    #[serde(rename = "terminal.records_changed")]
+    TerminalRecordsChanged {
+        terminal_id: String,
+        records: Vec<ChildRecord>,
+    },
 }
 
 #[cfg(test)]
@@ -1666,6 +1717,35 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn record_ids_follow_the_segment_rules() {
+        let eight = ["a"; 8].join("/");
+        for ok in ["a", "run/issue-12", "a.b_c+d-e", &eight] {
+            assert!(valid_record_id(ok), "{ok}");
+        }
+        let too_deep = ["a"; 9].join("/");
+        let seg33 = "a".repeat(33);
+        let long = vec!["a".repeat(32); 5].join("/");
+        for bad in [
+            "", "/", "a/", "/a", "a//b", "a b", "a=b", "a,b", &too_deep, &seg33, &long,
+        ] {
+            assert!(!valid_record_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_records_event_and_field_round_trip() {
+        let event: Event = serde_json::from_str(
+            r#"{"event":"terminal.records_changed","data":{"terminal_id":"t1","records":[{"id":"run/a","status":"working","progress":3}]}}"#,
+        )
+        .unwrap();
+        let Event::TerminalRecordsChanged { records, .. } = &event else {
+            panic!("{event:?}");
+        };
+        assert_eq!(records[0].progress, Some(3));
+        assert_eq!(records[0].app, None);
     }
 
     #[test]

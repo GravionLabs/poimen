@@ -80,7 +80,12 @@ pub enum RowKind {
     /// A tab with more than one terminal; a tab of one terminal is just its terminal row.
     Tab,
     Terminal,
+    /// A child record of the terminal above (OSC 7501 with an `id`, #684).
+    Record,
 }
+
+/// More child records than this are folded into one summary row.
+pub const RECORDS_SHOWN: usize = 4;
 
 /// What a segment of a row line is, for its style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,6 +223,19 @@ struct Subject<'a> {
 /// Text a program reported is shown as plain text whatever server sent it (an older or remote
 /// one may not clean it): bidi overrides and invisible characters go, an unknown kind goes.
 pub fn plain_agent_text(t: &mut Terminal) {
+    for r in &mut t.records {
+        r.message = r
+            .message
+            .as_deref()
+            .and_then(poimen_protocol::clean_message);
+        r.title = r.title.as_deref().and_then(poimen_protocol::clean_message);
+        r.app = r.app.as_deref().and_then(poimen_protocol::clean_message);
+        r.progress = r.progress.map(|p| p.min(100));
+        r.kind = r
+            .kind
+            .take()
+            .filter(|k| poimen_protocol::BLOCK_KINDS.contains(&k.as_str()));
+    }
     let Some(a) = t.agent.as_mut() else { return };
     a.message = a
         .message
@@ -244,6 +262,84 @@ fn state_text(s: &Subject<'_>) -> Option<String> {
         text.push_str(&format!(" {progress}%"));
     }
     Some(text)
+}
+
+/// The rows of the child records of a terminal: one per record in id order (a parent before its
+/// children, indented by its level), or one summary row when there are more than
+/// [`RECORDS_SHOWN`].
+fn record_rows(t: &Terminal, depth: u16) -> Vec<Row> {
+    let seg = |kind, text: String, dim| Segment {
+        kind,
+        text,
+        bold: false,
+        dim,
+    };
+    if t.records.len() > RECORDS_SHOWN {
+        let count = |s: AgentStatus| t.records.iter().filter(|r| r.status == s).count();
+        let mut parts = vec![format!("{} records", t.records.len())];
+        for (status, word) in [
+            (AgentStatus::Error, "error"),
+            (AgentStatus::Blocked, "blocked"),
+            (AgentStatus::Working, "working"),
+        ] {
+            if count(status) > 0 {
+                parts.push(format!("{} {word}", count(status)));
+            }
+        }
+        let worst = AgentStatus::Error;
+        let status = [
+            worst,
+            AgentStatus::Blocked,
+            AgentStatus::Working,
+            AgentStatus::Done,
+        ]
+        .into_iter()
+        .find(|s| count(*s) > 0);
+        return vec![Row {
+            kind: RowKind::Record,
+            terminal_id: None,
+            depth,
+            status,
+            lines: vec![vec![
+                seg(SegmentKind::Dot, icon(status).into(), false),
+                seg(SegmentKind::Text, parts.join(", "), true),
+            ]],
+        }];
+    }
+    let mut sorted: Vec<&poimen_protocol::ChildRecord> = t.records.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    sorted
+        .into_iter()
+        .map(|r| {
+            let level = u16::try_from(r.id.matches('/').count()).unwrap_or(0);
+            let leaf = r.id.rsplit('/').next().unwrap_or(&r.id);
+            let name = r.title.clone().unwrap_or_else(|| leaf.to_owned());
+            let mut state = status_name(r.status).unwrap_or("").to_owned();
+            if r.status == AgentStatus::Blocked
+                && let Some(kind) = &r.kind
+            {
+                state.push_str(&format!(": {kind}"));
+            }
+            if let Some(p) = r.progress {
+                state.push_str(&format!(" {p}%"));
+            }
+            let mut line = vec![
+                seg(SegmentKind::Dot, icon(Some(r.status)).into(), false),
+                seg(SegmentKind::Name, name.clone(), false),
+                seg(SegmentKind::State, state, false),
+            ];
+            if let Some(m) = r.message.as_ref().filter(|m| same(m) != same(&name)) {
+                line.push(seg(SegmentKind::Text, m.clone(), true));
+            }
+            Row {
+                kind: RowKind::Record,
+                terminal_id: None,
+                depth: depth + level,
+                status: Some(r.status),
+                lines: vec![line],
+            }
+        })
+        .collect()
 }
 
 /// The progress shown for `status` among `terminals`: the first one with that status that has one.
@@ -537,6 +633,7 @@ impl Model {
                         status,
                         lines: render(lines, &subject, home),
                     });
+                    rows.extend(record_rows(t, depth + 1));
                 }
             }
         }
@@ -684,6 +781,7 @@ mod tests {
             survives_restart: false,
             host_version: None,
             host_bundled_version: None,
+            records: Vec::new(),
         }
     }
 
@@ -764,6 +862,53 @@ mod tests {
                     .join(" ")
             })
             .collect()
+    }
+
+    fn record(id: &str, status: AgentStatus) -> poimen_protocol::ChildRecord {
+        poimen_protocol::ChildRecord {
+            id: id.into(),
+            status,
+            app: None,
+            message: None,
+            message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
+        }
+    }
+
+    #[test]
+    fn child_records_are_rows_below_their_terminal_and_fold_when_many() {
+        let mut t = term("t1", "s1", "zsh", "/w");
+        let mut a = record("run/a", AgentStatus::Blocked);
+        a.kind = Some("permission".into());
+        a.progress = Some(30);
+        a.message = Some("Allow?\u{202E}".into());
+        t.records = vec![record("run", AgentStatus::Working), a];
+        plain_agent_text(&mut t);
+        let rows = record_rows(&t, 2);
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter()
+                .all(|r| r.kind == RowKind::Record && r.terminal_id.is_none())
+        );
+        assert_eq!((rows[0].depth, rows[1].depth), (2, 3));
+        let text = |r: &Row| {
+            r.lines[0]
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>()
+                .join("|")
+        };
+        assert_eq!(text(&rows[0]), "●|run|working");
+        assert_eq!(text(&rows[1]), "▲|a|blocked: permission 30%|Allow?");
+        t.records = (0..5)
+            .map(|i| record(&format!("r{i}"), AgentStatus::Working))
+            .collect();
+        t.records[0].status = AgentStatus::Error;
+        let folded = record_rows(&t, 2);
+        assert_eq!(folded.len(), 1);
+        assert_eq!(text(&folded[0]), "✗|5 records, 1 error, 4 working");
     }
 
     #[test]
