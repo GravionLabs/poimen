@@ -147,6 +147,7 @@ pub fn icon(status: Option<AgentStatus>) -> &'static str {
     match status {
         Some(AgentStatus::Working) => "●",
         Some(AgentStatus::Blocked) => "▲",
+        Some(AgentStatus::Error) => "✗",
         Some(AgentStatus::Done) => "✓",
         Some(AgentStatus::Idle) => "○",
         Some(AgentStatus::Gone) | None => "·",
@@ -159,12 +160,14 @@ fn status_name(status: AgentStatus) -> Option<&'static str> {
         AgentStatus::Working => Some("working"),
         AgentStatus::Blocked => Some("blocked"),
         AgentStatus::Done => Some("done"),
+        AgentStatus::Error => Some("error"),
         AgentStatus::Gone => None,
     }
 }
 
 fn rank(status: Option<AgentStatus>) -> u8 {
     match status {
+        Some(AgentStatus::Error) => 5,
         Some(AgentStatus::Blocked) => 4,
         Some(AgentStatus::Working) => 3,
         Some(AgentStatus::Done) => 2,
@@ -203,16 +206,47 @@ fn same(text: &str) -> String {
 struct Subject<'a> {
     name: &'a str,
     status: Option<AgentStatus>,
+    /// 0 to 100, of the terminal or of the terminals that give a space its status.
+    progress: Option<u8>,
+    /// Why the agent is blocked (`permission`, `question`, `auth`).
+    kind: Option<&'a str>,
     terminal: Option<&'a Terminal>,
     tab: Option<&'a str>,
     space: &'a Space,
+}
+
+/// `blocked: permission`, `working 40%`: the status word with what OSC 7501 adds.
+fn state_text(s: &Subject<'_>) -> Option<String> {
+    let mut text = status_name(s.status?)?.to_owned();
+    if s.status == Some(AgentStatus::Blocked)
+        && let Some(kind) = s.kind
+    {
+        text.push_str(": ");
+        text.push_str(kind);
+    }
+    if let Some(progress) = s.progress {
+        text.push_str(&format!(" {progress}%"));
+    }
+    Some(text)
+}
+
+/// The progress shown for `status` among `terminals`: the first one with that status that has one.
+fn progress_of<'a>(
+    status: Option<AgentStatus>,
+    terminals: impl Iterator<Item = &'a Terminal>,
+) -> Option<u8> {
+    let status = status?;
+    terminals
+        .filter(|t| terminal_status(t) == Some(status))
+        .find_map(|t| t.agent.as_ref()?.progress)
+        .map(|p| p.min(100))
 }
 
 fn value(token: &str, s: &Subject<'_>, home: Option<&str>) -> Option<String> {
     let t = s.terminal;
     match token {
         "name" => Some(s.name.to_owned()),
-        "state_text" => s.status.and_then(status_name).map(str::to_owned),
+        "state_text" => state_text(s),
         "agent" => t.and_then(|t| t.agent.as_ref()?.agent.clone()),
         // As the app: an agent's step (`deliver_step`), nothing for a plain terminal.
         "title" => t
@@ -436,6 +470,8 @@ impl Model {
             let subject = Subject {
                 name: &space.name,
                 status,
+                progress: progress_of(status, tabs.iter().flat_map(|(_, ts)| ts.iter().copied())),
+                kind: None,
                 terminal: None,
                 tab: None,
                 space,
@@ -466,9 +502,12 @@ impl Model {
                 }
                 for t in terms {
                     let status = terminal_status(t);
+                    let agent_info = t.agent.as_ref();
                     let subject = Subject {
                         name: &t.name,
                         status,
+                        progress: agent_info.and_then(|a| a.progress).map(|p| p.min(100)),
+                        kind: agent_info.and_then(|a| a.kind.as_deref()),
                         terminal: Some(t),
                         tab: tab.map(|t| t.name.as_str()),
                         space,
@@ -638,6 +677,9 @@ mod tests {
             session_id: None,
             message: Some("needs approval".into()),
             message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
         })
     }
 
@@ -942,6 +984,53 @@ mod tests {
         assert!(texts(&rows[1])[0].contains("work"), "{:?}", texts(&rows[1]));
         // Terminal rows keep their tab order below the second space; step walks them as shown.
         assert_eq!(step(&rows, Some("t3"), 1, None).as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn error_progress_and_the_kind_of_a_block_show_in_the_rows() {
+        let mut m = model();
+        let info = |status, progress, kind: Option<&str>| {
+            Some(AgentInfo {
+                status,
+                agent: Some("codex".into()),
+                session_id: None,
+                message: None,
+                message_at: None,
+                progress,
+                kind: kind.map(str::to_owned),
+                title: None,
+            })
+        };
+        m.terminals[1].agent = info(AgentStatus::Blocked, None, Some("permission"));
+        m.terminals[2].agent = info(AgentStatus::Working, Some(40), None);
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        let line = |name: &str| {
+            rows.iter()
+                .find(|r| texts(r)[0].contains(name))
+                .map(|r| texts(r)[0].clone())
+                .unwrap()
+        };
+        assert!(
+            line("claude").contains("blocked: permission"),
+            "{}",
+            line("claude")
+        );
+        assert!(line("logs").contains("working 40%"), "{}", line("logs"));
+        // The space row shows the progress only when its own status is the one that has it.
+        assert!(!line("work").contains('%'), "{}", line("work"));
+        m.terminals[1].agent = info(AgentStatus::Idle, None, None);
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        assert!(
+            texts(&rows[0])[0].contains("working 40%"),
+            "{:?}",
+            texts(&rows[0])
+        );
+        // Error has its own icon and outranks blocked on the space row.
+        m.terminals[1].agent = info(AgentStatus::Error, None, None);
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        assert_eq!(rows[0].status, Some(AgentStatus::Error));
+        assert!(texts(&rows[0])[0].starts_with("✗"), "{:?}", texts(&rows[0]));
+        assert!(texts(&rows[0])[0].contains("error"));
     }
 
     #[test]

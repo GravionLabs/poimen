@@ -14,6 +14,8 @@ import {
   flowAgentName,
   flowSession,
   nextWaiting,
+  plainText,
+  statusText,
   paneLabel,
   rowName,
   supportsFlow,
@@ -234,6 +236,61 @@ describe("status", () => {
     const next = applyStatus(snapshot, "w1:p2", "blocked");
     expect(waitingCount(next.terminals)).toBe(2);
     expect(waitingCount(snapshot.terminals)).toBe(1);
+  });
+});
+
+describe("error, progress, kind and title (#682)", () => {
+  it("counts an error as waiting and finds it with nextWaiting", () => {
+    const panes = [
+      pane({ terminal_id: "a", agent_status: "idle" }),
+      pane({ terminal_id: "b", agent_status: "error" }),
+    ];
+    expect(waitingCount(panes)).toBe(1);
+    expect(nextWaiting(panes, "a")?.terminal_id).toBe("b");
+  });
+
+  it("applies the details of an event and drops those it no longer carries", () => {
+    const first = applyStatus(snapshot, "w1:p2", "working", undefined, {
+      progress: 40,
+      kind: "permission",
+      title: "build",
+    });
+    const pane2 = first.terminals.find((t) => t.terminal_id === "w1:p2")!;
+    expect(pane2).toMatchObject({
+      agent_status: "working",
+      agent_progress: 40,
+      agent_kind: "permission",
+      agent_title: "build",
+    });
+    const next = applyStatus(first, "w1:p2", "error");
+    const after = next.terminals.find((t) => t.terminal_id === "w1:p2")!;
+    expect(after.agent_status).toBe("error");
+    expect(after.agent_progress).toBeUndefined();
+    expect(after.agent_kind).toBeUndefined();
+    // Progress outside 0 to 100 is not kept.
+    const bad = applyStatus(snapshot, "w1:p2", "working", undefined, { progress: 250 });
+    expect(bad.terminals.find((t) => t.terminal_id === "w1:p2")!.agent_progress).toBeUndefined();
+  });
+
+  it("shows reported text as plain text: bidi overrides and invisible characters are gone", () => {
+    expect(plainText("a\u202Eb\u200Bc\u2066d\ufeffe\u0007f")).toBe("abcdef");
+    const next = applyStatus(snapshot, "w1:p2", "blocked", {
+      text: "Allow \u202Egnp.exe?",
+      at: 5,
+    });
+    expect(next.terminals.find((t) => t.terminal_id === "w1:p2")!.agent_message).toBe(
+      "Allow gnp.exe?",
+    );
+    const wire = toSnapshot({
+      terminals: [
+        pane({ terminal_id: "x", agent_message: "\u202E\u200B", agent_title: "t\u202Ea" }),
+      ],
+    });
+    expect(wire.terminals[0]!.agent_message).toBeUndefined();
+    expect(wire.terminals[0]!.agent_title).toBe("ta");
+    expect(
+      statusText(pane({ agent: "codex", agent_status: "blocked", agent_kind: "question" })),
+    ).toBe("waiting: question");
   });
 });
 

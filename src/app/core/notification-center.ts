@@ -4,7 +4,7 @@ import type { StatusChange } from "./attention";
 /** How many entries the center keeps; older ones fall off. */
 export const MAX_NOTIFICATIONS = 100;
 
-/** One agent status change: a pane turned blocked or done. */
+/** One agent status change: a pane turned blocked, failed or done. */
 export interface NotificationEntry {
   id: number;
   paneId: string;
@@ -30,6 +30,7 @@ export interface RunAlert {
 
 /** The message of a status change, the same wording as the system notification. */
 export function notificationMessage(label: string, status: StatusChange["status"]): string {
+  if (status === "error") return `${label} failed`;
   return status === "blocked" ? `${label} is waiting for you` : `${label} is done`;
 }
 

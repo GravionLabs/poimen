@@ -128,6 +128,21 @@ describe("Attention changes", () => {
   });
 });
 
+describe("Attention error (#682)", () => {
+  it("rings like blocked until viewed and reports the change", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), none);
+    expect(a.observe(st({ p1: "error" }), none)).toEqual([{ paneId: "p1", status: "error" }]);
+    expect([...a.attention()]).toEqual(["p1"]);
+    expect(a.count()).toBe(1);
+    a.observe(st({ p1: "error" }), new Set(["p1"]));
+    expect(a.attention().size).toBe(0);
+    a.observe(st({ p1: "error" }), none);
+    a.observe(st({ p1: "working" }), none);
+    expect(a.attention().size).toBe(0);
+  });
+});
+
 describe("Attention.markUnread (#725)", () => {
   const p1 = new Set(["p1"]);
 

@@ -89,7 +89,7 @@ pub fn row_at(app: &App, sidebar: Rect, y: u16) -> Option<String> {
 fn status_color(status: Option<AgentStatus>) -> Color {
     match status {
         Some(AgentStatus::Working) => Color::Yellow,
-        Some(AgentStatus::Blocked) => Color::Red,
+        Some(AgentStatus::Blocked | AgentStatus::Error) => Color::Red,
         Some(AgentStatus::Done) => Color::Green,
         Some(AgentStatus::Idle) => Color::Blue,
         _ => Color::DarkGray,
@@ -237,7 +237,7 @@ fn draw_notifications(buf: &mut Buffer, area: Rect, app: &App) {
             e.text
         );
         let color = match e.kind {
-            super::attention::Kind::Blocked => Color::Red,
+            super::attention::Kind::Blocked | super::attention::Kind::Error => Color::Red,
             super::attention::Kind::Done => Color::Green,
         };
         let mut style = Style::default().fg(color);

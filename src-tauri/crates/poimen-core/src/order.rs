@@ -54,7 +54,7 @@ pub fn compare_space_names(a_name: &str, a_id: &str, b_name: &str, b_id: &str) -
 /// for a terminal without an agent; `unread` comes from the client's own attention marks.
 pub fn attention_rank(status: Option<AgentStatus>, unread: bool) -> u8 {
     match status {
-        Some(AgentStatus::Blocked) => 0,
+        Some(AgentStatus::Blocked | AgentStatus::Error) => 0,
         Some(AgentStatus::Done) if unread => 1,
         Some(AgentStatus::Working) => 2,
         Some(_) => 3, // idle, done and read, gone

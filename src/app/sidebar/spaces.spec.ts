@@ -43,6 +43,45 @@ describe("stateLabel", () => {
   });
 });
 
+describe("error, progress and the kind of a block (#682)", () => {
+  it("labels error, a block with its kind and progress", () => {
+    expect(stateLabel("error")).toBe("error");
+    expect(stateLabel("blocked", { kind: "permission" })).toBe("waiting: permission");
+    expect(stateLabel("blocked", { kind: "" })).toBe("blocked");
+    expect(stateLabel("working", { progress: 40 })).toBe("working 40%");
+    // Out of range or not whole: no progress; progress means nothing for done and idle.
+    expect(stateLabel("working", { progress: 101 })).toBe("working");
+    expect(stateLabel("working", { progress: 4.5 })).toBe("working");
+    expect(stateLabel("done", { progress: 100 })).toBe("done");
+  });
+
+  it("shows the kind and progress of a pane in its state text", () => {
+    const text = (r: PaneRow) =>
+      renderRow("agent", DEFAULT_SIDEBAR_ROWS.agent, r, { worktree: false })[0]!.find(
+        (s) => s.kind === "state",
+      )?.text;
+    expect(text(row({ pane: { agent_status: "blocked", agent_kind: "auth" } }))).toBe(
+      "waiting: auth",
+    );
+    expect(text(row({ pane: { agent_status: "working", agent_progress: 40 } }))).toBe(
+      "working 40%",
+    );
+    expect(text(row({ pane: { agent_status: "error" } }))).toBe("error");
+  });
+
+  it("ranks error above blocked on the space row and shows the progress there", () => {
+    const failing = row({ pane: { terminal_id: "a", agent_status: "error" } });
+    const blocked = row({ pane: { terminal_id: "b", agent_status: "blocked" } });
+    expect(aggregateStatus(space([blocked, failing]))).toBe("error");
+    const busy = space([
+      row({ pane: { terminal_id: "a", agent_status: "working", agent_progress: 60 } }),
+      row({ pane: { terminal_id: "b", agent_status: "idle" } }),
+    ]);
+    const line = renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, busy, spaceContext(busy));
+    expect(line[0]!.find((s) => s.kind === "state")?.text).toBe("working 60%");
+  });
+});
+
 describe("paneDetail and subline", () => {
   it("prefers the deliver_step token over the terminal title", () => {
     const r = row({

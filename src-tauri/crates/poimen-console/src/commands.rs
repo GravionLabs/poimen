@@ -116,6 +116,7 @@ fn status_word(s: AgentStatus) -> &'static str {
         AgentStatus::Working => "working",
         AgentStatus::Blocked => "blocked",
         AgentStatus::Done => "done",
+        AgentStatus::Error => "error",
         AgentStatus::Gone => "gone",
     }
 }

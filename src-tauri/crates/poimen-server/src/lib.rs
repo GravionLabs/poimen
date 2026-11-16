@@ -218,8 +218,8 @@ impl TerminalEntry {
                     Some(ReportState::Idle) => AgentStatus::Idle,
                     Some(ReportState::Working) => AgentStatus::Working,
                     Some(ReportState::Blocked) => AgentStatus::Blocked,
-                    // `error` has no state of its own yet.
-                    Some(ReportState::Done | ReportState::Error) => AgentStatus::Done,
+                    Some(ReportState::Done) => AgentStatus::Done,
+                    Some(ReportState::Error) => AgentStatus::Error,
                     Some(ReportState::Clear) => return self.end_osc(),
                     None => return,
                 };
@@ -249,6 +249,13 @@ impl TerminalEntry {
                     session_id: None,
                     message,
                     message_at,
+                    progress: report.progress,
+                    // The kind of a block only means something while blocked.
+                    kind: report.kind.filter(|_| status == AgentStatus::Blocked),
+                    title: report
+                        .title
+                        .as_deref()
+                        .and_then(poimen_protocol::clean_message),
                 };
                 self.osc = Some(next.clone());
                 self.info.agent = Some(next);
@@ -2126,6 +2133,9 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         session_id: p.session_id.clone(),
         message: message.clone(),
         message_at,
+        progress: None,
+        kind: None,
+        title: None,
     });
     if entry.osc.is_some() {
         // The program reports its own status (OSC 7501): the hook's is kept for when that ends.
@@ -2139,6 +2149,9 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
             session_id: p.session_id,
             message,
             message_at,
+            progress: None,
+            kind: None,
+            title: None,
         });
     }
     // The status and its `seq` go into the terminal list, so a stale report stays dropped and
@@ -2156,6 +2169,9 @@ fn agent_event(terminal_id: &str, agent: Option<&AgentInfo>) -> Event {
         session_id: agent.and_then(|a| a.session_id.clone()),
         message: agent.and_then(|a| a.message.clone()),
         message_at: agent.and_then(|a| a.message_at),
+        progress: agent.and_then(|a| a.progress),
+        kind: agent.and_then(|a| a.kind.clone()),
+        title: agent.and_then(|a| a.title.clone()),
     }
 }
 
