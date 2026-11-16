@@ -229,7 +229,7 @@ impl Client {
             None | Some(AgentStatus::Gone) => return Ok(PromptResult::NoAgent),
             Some(AgentStatus::Working) => return Ok(PromptResult::Working),
             Some(AgentStatus::Blocked) => return Ok(PromptResult::Blocked),
-            Some(AgentStatus::Idle | AgentStatus::Done) => {}
+            Some(AgentStatus::Idle | AgentStatus::Done | AgentStatus::Error) => {}
         }
         self.input(terminal_id, &format!("{text}\r"))?;
         let deadline = Instant::now() + wait;

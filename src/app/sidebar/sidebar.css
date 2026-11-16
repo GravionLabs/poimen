@@ -111,6 +111,10 @@
   color: var(--status-done-on-active);
 }
 
+.row.active .state-error {
+  color: var(--status-error-on-active);
+}
+
 .pr-link {
   padding: 0;
   border: 0;
@@ -302,6 +306,10 @@
 
 .state-done {
   color: var(--status-done);
+}
+
+.state-error {
+  color: var(--status-error);
 }
 
 .text {

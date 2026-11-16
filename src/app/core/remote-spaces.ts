@@ -33,7 +33,13 @@ export function remoteSnapshot(
 export interface MachineEvent {
   machine: string;
   kind: string;
-  data: { terminal_id?: string; agent_status?: AgentStatus } | null;
+  data: {
+    terminal_id?: string;
+    agent_status?: AgentStatus;
+    agent_progress?: number;
+    agent_kind?: string;
+    agent_title?: string;
+  } | null;
 }
 
 /**
@@ -93,7 +99,16 @@ export class RemoteSpaces {
       const pane = data.terminal_id;
       this.read.update((m) => {
         const snapshot = m.get(machine);
-        return snapshot ? new Map(m).set(machine, applyStatus(snapshot, pane, status)) : m;
+        return snapshot
+          ? new Map(m).set(
+              machine,
+              applyStatus(snapshot, pane, status, undefined, {
+                progress: data.agent_progress,
+                kind: data.agent_kind,
+                title: data.agent_title,
+              }),
+            )
+          : m;
       });
     }
     clearTimeout(this.timers.get(machine));

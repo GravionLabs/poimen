@@ -2,7 +2,15 @@ import { Injectable, computed, inject, signal } from "@angular/core";
 import { Attention } from "./attention";
 import { fuzzyRank } from "./fuzzy";
 import { Machines } from "./machines";
-import { agentKind, paneDir, paneTitle, withMachine, type Space, type Terminal } from "./snapshot";
+import {
+  agentKind,
+  needsAttention,
+  paneDir,
+  paneTitle,
+  withMachine,
+  type Space,
+  type Terminal,
+} from "./snapshot";
 import { SpacesStore } from "./spaces-store";
 import { UiState } from "./ui-state";
 
@@ -108,8 +116,8 @@ export class JumpPalette {
     const terminals = this.store.all().terminals;
     const unread = this.attention.unread();
     return [
-      ...terminals.filter((t) => t.agent_status === "blocked"),
-      ...terminals.filter((t) => t.agent_status !== "blocked" && unread.has(t.terminal_id)),
+      ...terminals.filter((t) => needsAttention(t.agent_status)),
+      ...terminals.filter((t) => !needsAttention(t.agent_status) && unread.has(t.terminal_id)),
     ].map((t) => this.paneEntry(t));
   });
 

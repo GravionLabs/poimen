@@ -277,7 +277,7 @@ impl App {
                 .and_then(|a| a.message.clone())
                 .unwrap_or_else(|| format!("{} is {}", t.name, c.kind.label())),
             at_ms: agent
-                .filter(|_| c.kind == Kind::Blocked)
+                .filter(|_| c.kind != Kind::Done)
                 .and_then(|a| a.message_at)
                 .unwrap_or_else(epoch_ms),
         })

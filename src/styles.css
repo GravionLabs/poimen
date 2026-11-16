@@ -32,10 +32,12 @@
   --status-blocked: var(--h-orange-500);
   --status-done: var(--h-green-500);
   --status-unknown: var(--h-surface-300);
+  --status-error: var(--h-danger-color, #d14);
   /* State text on the tinted active sidebar row (see sidebar.css): AA >= 4.5 on that tint. */
   --status-working-on-active: var(--h-blue-800);
   --status-blocked-on-active: var(--h-orange-800);
   --status-done-on-active: var(--h-green-800);
+  --status-error-on-active: color-mix(in srgb, var(--status-error) 65%, #000);
 }
 
 :root.app-dark {
@@ -65,6 +67,7 @@
   --status-working-on-active: var(--h-blue-300);
   --status-blocked-on-active: var(--h-orange-300);
   --status-done-on-active: var(--h-green-300);
+  --status-error-on-active: color-mix(in srgb, var(--status-error) 65%, #fff);
 }
 
 * {
@@ -110,6 +113,11 @@ body {
 
 .status-done {
   background: var(--status-done);
+}
+
+.status-error {
+  background: var(--status-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-error) 30%, transparent);
 }
 
 @keyframes pulse {

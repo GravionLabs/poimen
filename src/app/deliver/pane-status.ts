@@ -16,7 +16,8 @@ export function effectiveStatus<S extends AgentStatus | "gone">(
   runs: readonly DeliverStatus[],
   now: number,
 ): S | "working" | "blocked" {
-  if (hook === "gone") return hook;
+  // A failure the program reported stays visible; `gone` always wins.
+  if (hook === "gone" || hook === "error") return hook;
   const running = runs.filter((run) => runState(run, now) === "running");
   if (running.length === 0) return hook;
   // A gate for the human (`needsYou`) blocks the pane only when nothing is left to do for the run:

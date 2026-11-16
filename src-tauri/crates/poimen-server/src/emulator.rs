@@ -535,6 +535,10 @@ pub struct Report {
     pub app: Option<String>,
     pub msg: Option<String>,
     pub title: Option<String>,
+    /// 0 to 100 (`progress`).
+    pub progress: Option<u8>,
+    /// `permission`, `question` or `auth` (`kind`).
+    pub kind: Option<String>,
 }
 
 /// Longest OSC 7501 sequence read, in bytes after `ESC ]`.
@@ -614,6 +618,15 @@ fn parse_report(body: &[u8]) -> Option<Report> {
             }
             "msg" if clean => report.msg = Some(text_of(value, MAX_MSG)?),
             "title" if clean => report.title = Some(text_of(value, MAX_TITLE)?),
+            // A value outside the spec is ignored like an unknown key; the state still counts.
+            "progress" if clean => {
+                report.progress = value.parse::<u8>().ok().filter(|p| *p <= 100);
+            }
+            "kind" if clean => {
+                report.kind = poimen_protocol::BLOCK_KINDS
+                    .contains(&value)
+                    .then(|| value.to_string());
+            }
             _ => {}
         }
     }
@@ -1110,6 +1123,25 @@ mod tests {
         // A value with characters outside the set makes a malformed pair: skipped.
         let bad = reports(b"\x1b]7501;state=idle:app=a b\x07");
         assert_eq!(bad[0].app, None);
+        let rich = reports(b"\x1b]7501;state=blocked:progress=40:kind=permission\x07");
+        assert_eq!(rich[0].progress, Some(40));
+        assert_eq!(rich[0].kind.as_deref(), Some("permission"));
+        // Out of range, not a number or an unknown kind: ignored, the state still counts.
+        for body in [
+            "progress=101",
+            "progress=-1",
+            "progress=4.5",
+            "progress=",
+            "kind=other",
+        ] {
+            let got = reports(format!("\x1b]7501;state=working:{body}\x07").as_bytes());
+            assert_eq!(got[0].state, Some(ReportState::Working), "{body}");
+            assert_eq!(
+                (got[0].progress, got[0].kind.as_deref()),
+                (None, None),
+                "{body}"
+            );
+        }
         let child = reports(b"\x1b]7501;state=working:id=sub-1\x07");
         assert_eq!(child[0].id.as_deref(), Some("sub-1"));
     }

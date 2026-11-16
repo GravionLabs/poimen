@@ -1,15 +1,18 @@
 import {
   shortPath,
+  stateText,
+  validProgress,
   type AgentStatus,
   type BranchPull,
   type PaneRow,
   type SpaceNode,
+  type StateDetails,
 } from "../core/snapshot";
 import { checksText } from "../github/pulls";
 
 /** State word shown next to the name; `undefined` while herdr reports no known state. */
-export function stateLabel(status: AgentStatus): string | undefined {
-  return status === "unknown" ? undefined : status;
+export function stateLabel(status: AgentStatus, details?: StateDetails): string | undefined {
+  return stateText(status, details);
 }
 
 /**
@@ -160,6 +163,7 @@ export function paneLine2(row: PaneRow, ctx: SpaceContext): string {
 }
 
 const STATUS_RANK: Record<AgentStatus, number> = {
+  error: 5,
   blocked: 4,
   working: 3,
   done: 2,
@@ -172,6 +176,18 @@ export function aggregateStatus(space: SpaceNode): AgentStatus {
   return [space.workspace.agent_status, ...space.rows.map((r) => r.pane.agent_status)].reduce(
     (best, s) => ((STATUS_RANK[s] ?? 0) > (STATUS_RANK[best] ?? 0) ? s : best),
   );
+}
+
+/**
+ * The details of a space row's state word: the progress of the first pane that has the space's
+ * aggregate status and reports one (`working 40%`), and the kind of the first block.
+ */
+export function spaceDetails(space: SpaceNode, status: AgentStatus): StateDetails {
+  const rows = space.rows.filter((r) => r.pane.agent_status === status);
+  return {
+    kind: rows.find((r) => r.pane.agent_kind)?.pane.agent_kind,
+    progress: rows.map((r) => validProgress(r.pane.agent_progress)).find((p) => p !== undefined),
+  };
 }
 
 /** Row types whose layout the user configures (`sidebar.rows`). */
@@ -260,7 +276,14 @@ export function renderRow(
       case "name":
         return name;
       case "state_text":
-        return stateLabel(status);
+        return stateLabel(
+          status,
+          pane
+            ? { kind: pane.pane.agent_kind, progress: pane.pane.agent_progress }
+            : space
+              ? spaceDetails(space, status)
+              : undefined,
+        );
       case "agent":
         return pane?.agent;
       case "title":

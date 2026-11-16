@@ -14,6 +14,9 @@ export interface BackendEvent {
     agent_status?: AgentStatus;
     agent_message?: string;
     agent_message_at?: number;
+    agent_progress?: number;
+    agent_kind?: string;
+    agent_title?: string;
     reason?: string;
   } | null;
 }

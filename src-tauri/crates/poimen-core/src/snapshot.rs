@@ -17,6 +17,8 @@ pub enum AgentStatus {
     Working,
     Blocked,
     Done,
+    /// The program reported `error` (OSC 7501, #682).
+    Error,
     #[default]
     #[serde(other)]
     Unknown,
@@ -26,6 +28,7 @@ impl AgentStatus {
     /// Orders statuses for a tab or space row: blocked first, then working, done, idle.
     pub fn urgency(self) -> u8 {
         match self {
+            AgentStatus::Error => 5,
             AgentStatus::Blocked => 4,
             AgentStatus::Working => 3,
             AgentStatus::Done => 2,
@@ -113,6 +116,15 @@ pub struct Terminal {
     pub agent_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_message_at: Option<u64>,
+    /// 0 to 100, from OSC 7501 `progress` (#682).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_progress: Option<u8>,
+    /// Why the agent is blocked: `permission`, `question` or `auth` (#682).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_kind: Option<String>,
+    /// The program's own title (#682).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     /// Directory of the foreground process (herdr); follows `cd`.

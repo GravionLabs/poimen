@@ -156,8 +156,57 @@ fn a_new_prompt_drops_working_but_not_done() {
 fn a_child_record_is_ignored() {
     let env = Env::new("child");
     env.print(r"\033]7501;state=working:id=sub\007\033]7501;state=error\007");
-    // `error` maps to done for now.
-    wait_for(&env, Some(AgentStatus::Done));
+    wait_for(&env, Some(AgentStatus::Error));
+}
+
+#[test]
+fn error_progress_kind_and_title_reach_the_terminal_and_the_event() {
+    let env = Env::new("rich");
+    let rx = events(&env.client);
+    // title "build <RLO>x" (a bidi override), as base64 of UTF-8.
+    env.print(r"\033]7501;state=working:progress=40:title=YnVpbGQg4oCueA==\007");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let event = loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(left).expect("status event did not arrive") {
+            e @ Event::AgentStatusChanged { .. } => break e,
+            _ => continue,
+        }
+    };
+    let Event::AgentStatusChanged {
+        status,
+        progress,
+        title,
+        ..
+    } = event
+    else {
+        unreachable!()
+    };
+    assert_eq!((status, progress), (AgentStatus::Working, Some(40)));
+    assert_eq!(title.as_deref(), Some("build x"));
+    env.print(r"\033]7501;state=blocked:kind=auth\007");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let agent = loop {
+        let a = env.client.list_terminals(None).unwrap().remove(0).agent;
+        if a.as_ref().is_some_and(|a| a.status == AgentStatus::Blocked) {
+            break a.unwrap();
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(20));
+    };
+    // The kind belongs to the block; the progress of the earlier report is gone.
+    assert_eq!(agent.kind.as_deref(), Some("auth"));
+    assert_eq!(agent.progress, None);
+    env.print(r"\033]7501;state=error:kind=auth\007");
+    wait_for(&env, Some(AgentStatus::Error));
+    let agent = env
+        .client
+        .list_terminals(None)
+        .unwrap()
+        .remove(0)
+        .agent
+        .unwrap();
+    assert_eq!(agent.kind, None);
 }
 
 #[test]
