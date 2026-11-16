@@ -1065,6 +1065,7 @@ mod tests {
             space_id: space_id.into(),
             name: name.into(),
             active_terminal: root.first_terminal().to_owned(),
+            parent: None,
             root,
         }
     }
@@ -2226,7 +2227,7 @@ mod tests {
         let info = backend.info().unwrap();
         assert_eq!(
             (info.version.as_str(), info.protocol, info.supported),
-            ("0.9.0", Some(6), 6)
+            ("0.9.0", Some(7), 7)
         );
     }
 

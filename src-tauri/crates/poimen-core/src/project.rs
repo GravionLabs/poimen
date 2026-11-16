@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::layout::{Layout, parse_layout_value};
+use crate::layout::{Layout, TabLayout, parse_layout_value, parse_tabs_value};
 
 /// The project file, relative to the repository root.
 pub const PROJECT_FILE: &str = ".poimen/config.json";
@@ -34,7 +34,10 @@ pub struct ProjectCommand {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Preset {
     pub name: String,
+    /// The panes of every tab in order (what trust lists and the clients that build panes read).
     pub layout: Layout,
+    /// The tabs the preset builds: its one `panes[]` tab, or the `tabs[]` it names (#655).
+    pub tabs: TabLayout,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -459,8 +462,8 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
                         continue;
                     }
                 };
-                match parse_layout_value(raw) {
-                    Ok(layout) => out.config.presets.push(Preset { name, layout }),
+                match parse_preset(raw) {
+                    Ok((layout, tabs)) => out.config.presets.push(Preset { name, layout, tabs }),
                     Err(e) => warn(&mut out, &key, format!("\"{name}\": {e}")),
                 }
             }
@@ -468,6 +471,23 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
         _ => warn(&mut out, "presets", "expected a list".into()),
     }
     out
+}
+
+/// A preset: `panes[]` (one tab) or `tabs[]` of the named-layout shape (#655).
+fn parse_preset(raw: &Value) -> Result<(Layout, TabLayout), String> {
+    if raw.get("tabs").is_some() {
+        let (tabs, _) = parse_tabs_value(raw)?;
+        Ok((
+            Layout {
+                panes: tabs.panes(),
+            },
+            tabs,
+        ))
+    } else {
+        let layout = parse_layout_value(raw)?;
+        let tabs = layout.to_tabs();
+        Ok((layout, tabs))
+    }
 }
 
 /// Loads `<repo_root>/.poimen/config.json`; a missing file is an empty config without warnings.

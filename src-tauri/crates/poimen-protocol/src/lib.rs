@@ -14,7 +14,7 @@ pub mod host;
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Environment variable that overrides the socket path (and is set in every terminal).
 pub const ENV_SOCKET: &str = "POIMEN_SOCKET";
@@ -515,6 +515,10 @@ pub struct Tab {
     /// The focused leaf of the tab, shared by every client (the last `tab.focus` wins).
     #[serde(default)]
     pub active_terminal: String,
+    /// The tab this one belongs below (since protocol 7, set from the nesting of a layout's
+    /// `children[]`); absent for a top-level tab. Closing the parent makes its children top level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// Result of `space.list`: the spaces with the tabs of all of them.
@@ -2552,6 +2556,24 @@ mod private_dir_tests {
         }
         let err = check_private_dir(std::path::Path::new("/"), true).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn a_tab_parent_is_optional_on_the_wire() {
+        let tab: Tab = serde_json::from_value(json!({
+            "tab_id": "tab3", "space_id": "s1", "name": "logs",
+            "root": {"kind": "terminal", "terminal_id": "t3"},
+            "active_terminal": "t3", "parent": "tab2"
+        }))
+        .unwrap();
+        assert_eq!(tab.parent.as_deref(), Some("tab2"));
+        let top: Tab = serde_json::from_value(json!({
+            "tab_id": "tab2", "space_id": "s1", "name": "claude",
+            "root": {"kind": "terminal", "terminal_id": "t2"}
+        }))
+        .unwrap();
+        assert_eq!(top.parent, None);
+        assert!(serde_json::to_value(&top).unwrap().get("parent").is_none());
     }
 
     #[test]

@@ -806,6 +806,7 @@ mod tests {
             name: name.into(),
             root,
             active_terminal: active,
+            parent: None,
         }
     }
 

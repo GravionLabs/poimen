@@ -91,7 +91,7 @@ fn preset_of(sources: &Sources, name: &str) -> Option<TabLayout> {
         .presets
         .into_iter()
         .find(|p| p.name == name)
-        .map(|p| p.layout.to_tabs())
+        .map(|p| p.tabs)
 }
 
 /// Decides what `space.create` or `space.apply_layout` builds in `cwd` (an existing directory).
