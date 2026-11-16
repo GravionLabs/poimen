@@ -1520,11 +1520,13 @@ fn build_tabs(
     // Every tab of the layout (a parent before its children) as the panes that build it; a space
     // with no layout gets one tab with one terminal. The server has no parent link of a tab yet
     // (ADR 0011), so a child tab is a tab of the space after its parent.
-    let mut tab_panes = build.layout.map(|l| l.pane_tabs()).unwrap_or_default();
+    let mut tab_panes = build.layout.map(|l| l.tab_plan()).unwrap_or_default();
     if tab_panes.is_empty() {
-        tab_panes.push(Vec::new());
+        tab_panes.push((None, Vec::new()));
     }
-    'tabs: for (index, panes) in tab_panes.iter().enumerate() {
+    // The tab id each tab of the plan got (the plan lists a parent before its children).
+    let mut built_ids: Vec<String> = Vec::new();
+    'tabs: for (index, (parent, panes)) in tab_panes.iter().enumerate() {
         let root_name = panes.first().map(|p| p.name.clone()).unwrap_or_default();
         let root = match spawn_terminal(shared, inner, shell(&root_name)) {
             Ok(t) => t,
@@ -1537,26 +1539,29 @@ fn build_tabs(
             }
         };
         let root_tab = shared.new_id("tab");
-        let events =
-            match inner
-                .layout
-                .add_tab(space_id, root_tab.clone(), root.name.clone(), &root.id)
-            {
-                Ok(events) => events,
-                Err(e) => {
-                    // A terminal is never left without a leaf.
-                    drop_terminal(shared, inner, &root.id);
-                    if index == 0 {
-                        return Err(e);
-                    }
-                    warnings.push(format!(
-                        "layout not fully applied: tab \"{root_name}\": {}",
-                        e.1
-                    ));
-                    break 'tabs;
+        let events = match inner.layout.add_child_tab(
+            space_id,
+            root_tab.clone(),
+            root.name.clone(),
+            &root.id,
+            parent.and_then(|p| built_ids.get(p)).map(String::as_str),
+        ) {
+            Ok(events) => events,
+            Err(e) => {
+                // A terminal is never left without a leaf.
+                drop_terminal(shared, inner, &root.id);
+                if index == 0 {
+                    return Err(e);
                 }
-            };
+                warnings.push(format!(
+                    "layout not fully applied: tab \"{root_name}\": {}",
+                    e.1
+                ));
+                break 'tabs;
+            }
+        };
         publish_all(shared, events);
+        built_ids.push(root_tab.clone());
         tab_ids.push(root_tab);
         queue(
             inner,

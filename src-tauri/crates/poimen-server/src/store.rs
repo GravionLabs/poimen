@@ -291,6 +291,7 @@ mod tests {
                 children: Box::new([Node::terminal("t2"), Node::terminal("t6")]),
             },
             active_terminal: "t6".into(),
+            parent: None,
         });
         save(&path, &saved, 40, Vec::new()).unwrap();
         let loaded = load(&path);

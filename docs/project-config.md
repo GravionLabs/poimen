@@ -55,8 +55,10 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
   entry `Project: <name>`: `terminal` opens a tab named after it in the directory of the focused
   space and types the command; `agent` sends it as a prompt to the space's agent (a picker when
   there are several).
-- `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`. Each is a palette entry
-  `Preset: <name>` that builds a new tab in the focused space from its panes.
+- `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`, or `tabs[]` (#655: tabs with a
+  `command` or a `root` split tree and `children[]` tabs, as in a named layout). Each is a palette
+  entry `Preset: <name>` that builds new tabs at the end of the focused space, a child tab below
+  its parent; a `tabs[]` preset is built by `poimen-server` (protocol 7).
 
 The entries are read for the focused space and again when the palette opens. While the project
 file is not trusted they show a lock; running one opens the trust dialog (see Trust).

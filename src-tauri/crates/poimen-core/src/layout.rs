@@ -602,6 +602,16 @@ impl TabLayout {
     /// name gets a number, so every `from` names one pane. `cwd` and `place` are not carried (the
     /// panes have no such field).
     pub fn pane_tabs(&self) -> Vec<Vec<PaneSpec>> {
+        self.tab_plan()
+            .into_iter()
+            .map(|(_, panes)| panes)
+            .collect()
+    }
+
+    /// [`pane_tabs`](Self::pane_tabs) with the nesting: for each tab the index (in the same list)
+    /// of the tab it is a child of, `None` for a top-level tab. A parent's index is always lower
+    /// than its children's.
+    pub fn tab_plan(&self) -> Vec<(Option<usize>, Vec<PaneSpec>)> {
         fn first(node: &Node) -> (&Option<String>, &Option<String>) {
             match node {
                 Node::Split { children, .. } => first(&children[0]),
@@ -639,7 +649,7 @@ impl TabLayout {
                 emit(&children[1], &second, out, used);
             }
         }
-        fn tab(t: &Tab, all: &mut Vec<Vec<PaneSpec>>) {
+        fn tab(t: &Tab, parent: Option<usize>, all: &mut Vec<(Option<usize>, Vec<PaneSpec>)>) {
             let mut used = HashSet::new();
             let (name, command) = first(&t.root);
             let fallback = t.name.as_deref().unwrap_or("shell");
@@ -650,14 +660,15 @@ impl TabLayout {
                 split: None,
             }];
             emit(&t.root, &root, &mut panes, &mut used);
-            all.push(panes);
+            let me = all.len();
+            all.push((parent, panes));
             for c in &t.children {
-                tab(c, all);
+                tab(c, Some(me), all);
             }
         }
         let mut all = Vec::new();
         for t in &self.tabs {
-            tab(t, &mut all);
+            tab(t, None, &mut all);
         }
         all
     }
@@ -1049,6 +1060,18 @@ mod tests {
     #[test]
     fn pane_tabs_rebuild_the_default_panes_in_order() {
         assert_eq!(default_tabs().pane_tabs(), vec![default_layout().panes]);
+    }
+
+    #[test]
+    fn tab_plan_names_the_parent_of_each_tab() {
+        let l = parse_tabs_value(&serde_json::json!({"tabs":[
+            {"name":"claude","children":[{"name":"Terminal"},{"name":"Logs","children":[{"name":"Deep"}]}]},
+            {"name":"other"}
+        ]}))
+        .unwrap()
+        .0;
+        let parents: Vec<_> = l.tab_plan().into_iter().map(|(p, _)| p).collect();
+        assert_eq!(parents, [None, Some(0), Some(0), Some(2), None]);
     }
 
     #[test]

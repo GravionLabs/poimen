@@ -89,13 +89,20 @@
     },
     "presets": {
       "type": "array",
-      "description": "Entries need a unique name and the panes of a layout.",
+      "description": "Entries need a unique name and the panes or the tabs of a layout.",
       "items": {
         "type": "object",
-        "required": ["name", "panes"],
+        "required": ["name"],
+        "oneOf": [{ "required": ["panes"] }, { "required": ["tabs"] }],
         "properties": {
           "name": { "type": "string", "minLength": 1 },
-          "panes": { "$ref": "#/$defs/panes" }
+          "panes": { "$ref": "#/$defs/panes" },
+          "tabs": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Tabs of a named layout (poimen-server protocol 7): each with a command or a root split tree and children[] tabs.",
+            "items": { "type": "object" }
+          }
         }
       }
     }
