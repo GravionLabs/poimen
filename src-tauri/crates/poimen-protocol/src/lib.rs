@@ -519,6 +519,20 @@ pub struct Tab {
     /// `children[]`); absent for a top-level tab. Closing the parent makes its children top level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// App-only hint (#657, additive in protocol 7): the editor group this tab opens in. The server
+    /// stores and passes it on; the TUI ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<TabPlace>,
+}
+
+/// Where the app opens a tab: in an editor group split off the group of tab `of`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TabPlace {
+    pub direction: SplitDirection,
+    /// A tab of the same space.
+    pub of: String,
+    /// The share the group of `of` keeps.
+    pub ratio: f64,
 }
 
 /// Result of `space.list`: the spaces with the tabs of all of them.

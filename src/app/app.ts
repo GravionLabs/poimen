@@ -40,6 +40,7 @@ import { NotificationCenter } from "./core/notification-center";
 import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
 import { SpacesStore } from "./core/spaces-store";
+import { openAtFor } from "./core/tab-place";
 import { SettingsStore, type ThemeSetting } from "./core/settings";
 import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
@@ -941,8 +942,29 @@ export class App {
   }
 
   protected open(pane: Terminal, pin = false): void {
+    this.openIn(pane, pin, new Set());
+  }
+
+  /**
+   * Opens `pane` in the editor group its layout tab names (#657). The pane the placement is
+   * relative to is opened first, so "claude left, Terminal right" works from any tab.
+   */
+  private openIn(pane: Terminal, pin: boolean, seen: Set<string>): void {
     this.known.set(pane.terminal_id, pane);
-    this.editor.open(pane.terminal_id, pin);
+    seen.add(pane.terminal_id);
+    const snapshot = this.store.all();
+    const tab = snapshot.tabs.find((t) => t.tab_id === pane.tab_id);
+    const at = openAtFor(snapshot, tab);
+    if (!at || this.editor.groupOf(pane.terminal_id)) {
+      this.editor.open(pane.terminal_id, pin);
+      return;
+    }
+    const anchor = at.place?.ofPaneId ?? at.besidePaneId;
+    const anchorPane = anchor ? this.pane(anchor) : undefined;
+    if (anchor && anchorPane && !this.editor.groupOf(anchor) && !seen.has(anchor)) {
+      this.openIn(anchorPane, true, seen);
+    }
+    this.editor.openAt(pane.terminal_id, at, pin);
   }
 
   /** The active tab's pane id; `null` for no tab or the settings tab. */

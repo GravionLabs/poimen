@@ -192,6 +192,17 @@ function without<V>(map: ReadonlyMap<string, V>, key: string): ReadonlyMap<strin
  * and each tab's read-only/input mode. A pane is open in at most one group; `tabs` and `activeId`
  * are those of the focused group. UI state only: closing a tab never touches the herdr pane.
  */
+/**
+ * Where a pane of a layout tab opens (#657). `place`: in the group split off the group of `ofPaneId`
+ * (tabs with the same `key` share it); `besidePaneId`: in the group that holds that pane (a child
+ * tab opens with its parent); `main`: in the main (first) group.
+ */
+export interface OpenAt {
+  place?: { ofPaneId: string; dir: SplitDirection; ratio: number; key: string };
+  besidePaneId?: string;
+  main?: boolean;
+}
+
 @Injectable({ providedIn: "root" })
 export class EditorTabs {
   private readonly ui = inject(UiState);
@@ -201,6 +212,8 @@ export class EditorTabs {
   );
   readonly layout = signal<LayoutNode>(this.restored?.layout ?? { kind: "group", id: 1 });
   readonly focusedId = signal(this.restored?.focusedId ?? 1);
+  /** The group each placement key (#657) opened, so tabs with the same `place` share it. */
+  private readonly sharedGroups = new Map<string, number>();
   private nextId = this.restored
     ? Math.max(...this.groups().map((g) => g.id), maxId(this.layout())) + 1
     : 2;
@@ -410,6 +423,45 @@ export class EditorTabs {
     this.groups.update((gs) => [...gs, { id, tabs: [tab], activeId: paneId }]);
     this.layout.update((l) => splitGroup(l, group.id, id, dir, splitId));
     this.focusedId.set(id);
+  }
+
+  /**
+   * Opens a pane of a layout tab in the group its placement names (#657); an open pane is only
+   * activated. Without a usable target (the pane `of` is not open, the group is gone) it opens like
+   * [`open`](#open). The tab is pinned so a later preview does not replace it; the user may move it
+   * afterwards, which changes nothing on the server.
+   */
+  openAt(paneId: string, at: OpenAt, pin = false): void {
+    if (this.groupOf(paneId)) {
+      this.open(paneId, pin);
+      return;
+    }
+    const tab = { paneId, pinned: true };
+    let target: number | undefined;
+    if (at.place) {
+      const base = this.groupOf(at.place.ofPaneId);
+      const shared = this.sharedGroups.get(at.place.key);
+      if (shared !== undefined && this.groups().some((g) => g.id === shared)) target = shared;
+      else if (base) {
+        const id = this.nextId++;
+        const splitId = this.nextId++;
+        this.groups.update((gs) => [...gs, { id, tabs: [tab], activeId: paneId }]);
+        this.layout.update((l) =>
+          splitGroup(l, base.id, id, at.place!.dir, splitId, at.place!.ratio),
+        );
+        this.sharedGroups.set(at.place.key, id);
+        this.focusedId.set(id);
+        return;
+      }
+    } else if (at.besidePaneId) target = this.groupOf(at.besidePaneId)?.id;
+    else if (at.main) target = groupIds(this.layout())[0];
+    const group = this.groups().find((g) => g.id === target);
+    if (!group) {
+      this.open(paneId, pin);
+      return;
+    }
+    this.patch(group.id, { tabs: [...group.tabs, tab], activeId: paneId });
+    this.focusedId.set(group.id);
   }
 
   /** Moves a tab into another group at `index` (default: the end); an emptied group is removed. */

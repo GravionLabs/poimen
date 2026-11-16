@@ -205,6 +205,14 @@ pub struct Place {
     pub ratio: f64,
 }
 
+/// A [`Place`] with `of` resolved to the index of a tab in [`TabLayout::tab_plan`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedPlace {
+    pub direction: SplitDirection,
+    pub of: usize,
+    pub ratio: f64,
+}
+
 /// One tab of a layout. A flat tab (one terminal) is read as a `root` leaf.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Tab {
@@ -674,6 +682,40 @@ impl TabLayout {
         all
     }
 
+    /// The placement of each tab of [`tab_plan`](Self::tab_plan) (same order) with `of` resolved to
+    /// the index of a tab in that list: the named tab, else the parent, else the first tab. A tab
+    /// without `place`, or whose target is itself (the first tab), has none.
+    pub fn tab_places(&self) -> Vec<Option<ResolvedPlace>> {
+        fn walk<'a>(
+            tabs: &'a [Tab],
+            parent: Option<usize>,
+            out: &mut Vec<(&'a Tab, Option<usize>)>,
+        ) {
+            for t in tabs {
+                let me = out.len();
+                out.push((t, parent));
+                walk(&t.children, Some(me), out);
+            }
+        }
+        let mut all = Vec::new();
+        walk(&self.tabs, None, &mut all);
+        all.iter()
+            .enumerate()
+            .map(|(i, (t, parent))| {
+                let p = t.place.as_ref()?;
+                let of = match &p.of {
+                    Some(n) => all.iter().position(|(o, _)| o.name.as_deref() == Some(n))?,
+                    None => parent.unwrap_or(0),
+                };
+                (of != i).then_some(ResolvedPlace {
+                    direction: p.direction,
+                    of,
+                    ratio: p.ratio,
+                })
+            })
+            .collect()
+    }
+
     /// Every pane of every tab in [`pane_tabs`](Self::pane_tabs) order, for what lists or shows the
     /// panes of a layout (the trust question, the rebuild's consent).
     pub fn panes(&self) -> Vec<PaneSpec> {
@@ -1064,6 +1106,33 @@ mod tests {
     #[test]
     fn pane_tabs_rebuild_the_default_panes_in_order() {
         assert_eq!(default_tabs().pane_tabs(), vec![default_layout().panes]);
+    }
+
+    #[test]
+    fn tab_places_resolve_of_to_a_tab_index() {
+        let l = parse_tabs_value(&serde_json::json!({"tabs":[
+            {"name":"claude","children":[
+                {"name":"Terminal","place":{"direction":"right","ratio":0.6}},
+                {"name":"Logs","place":{"direction":"down","of":"Terminal"}},
+                {"name":"Free"}]},
+            {"name":"other","place":{"direction":"down"}},
+            {"name":"first","place":{"direction":"right","of":"claude"}}
+        ]}))
+        .unwrap()
+        .0;
+        let places = l.tab_places();
+        assert_eq!(places.len(), 6);
+        assert_eq!(places[0], None);
+        let t = places[1].as_ref().unwrap();
+        assert_eq!(
+            (t.of, t.direction, t.ratio),
+            (0, SplitDirection::Right, 0.6)
+        );
+        assert_eq!(places[2].as_ref().unwrap().of, 1);
+        assert_eq!(places[3], None);
+        // A top-level tab without `of` is placed against the first tab.
+        assert_eq!(places[4].as_ref().unwrap().of, 0);
+        assert_eq!(places[5].as_ref().unwrap().of, 0);
     }
 
     #[test]
