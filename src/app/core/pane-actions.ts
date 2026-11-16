@@ -13,6 +13,8 @@ import {
   type SplitDirection,
 } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
+import { SettingsStore } from "./settings";
+import { uniqueName } from "./named-layouts";
 import { Machines } from "./machines";
 import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
@@ -23,7 +25,8 @@ export type PaneDialogState =
   | { kind: "close"; paneId: string; name: string; warning: string }
   | { kind: "restart"; paneId: string; name: string; have: string; bundled: string }
   | { kind: "agent"; paneId: string; name: string }
-  | { kind: "rename"; paneId: string; agent: boolean; current: string };
+  | { kind: "rename"; paneId: string; agent: boolean; current: string }
+  | { kind: "save-layout"; tabId: string; current: string };
 
 /**
  * A pane that was closed, and the leaf of its split tab that takes over its editor tab (resolved
@@ -44,6 +47,7 @@ export class PaneActions {
   private readonly store = inject(SpacesStore);
   private readonly spaces = inject(SpaceActions);
   private readonly machines = inject(Machines, { optional: true });
+  private readonly settings = inject(SettingsStore, { optional: true });
 
   /** Ratios waiting behind a request in flight, per `tab/split`; `null` = nothing waiting. */
   private readonly resizing = new Map<string, number | null>();
@@ -115,6 +119,55 @@ export class PaneActions {
       agent: !!pane && !!agentKind(pane),
       current: pane ? rowName(pane, tab?.label) : "",
     });
+  }
+
+  /** Asks for the name of a layout made from the tab of `paneId` (with the tabs below it). */
+  askSaveLayout(paneId: string): void {
+    const pane = this.store.pane(paneId);
+    const tab = this.store.snapshot().tabs.find((t) => t.tab_id === pane?.tab_id);
+    if (!tab) return;
+    const taken = (this.settings?.settings().layouts ?? []).map((l) => l.name);
+    this._error.set(null);
+    this._dialog.set({
+      kind: "save-layout",
+      tabId: tab.tab_id,
+      current: uniqueName(tab.label.trim() || "layout", taken),
+    });
+  }
+
+  /**
+   * Saves the tab of the open dialog as a named layout of `layouts[]`: the server's tab and tree
+   * with its child tabs. A name that exists or an invalid layout is an error, nothing is written.
+   */
+  async confirmSaveLayout(name: string): Promise<boolean> {
+    const dialog = this._dialog();
+    if (dialog?.kind !== "save-layout" || !this.settings) return false;
+    const label = name.trim();
+    const existing = this.settings.settings().layouts;
+    if (!label) {
+      this._error.set("A layout needs a name.");
+      return false;
+    }
+    if (existing.some((l) => l.name === label)) {
+      this._error.set(`A layout called "${label}" exists already.`);
+      return false;
+    }
+    if (this.blocked(dialog.tabId)) return false;
+    // The layout editor code is loaded only when a tab is saved.
+    const { layoutFromTab } = await import("./named-layouts-edit");
+    const layout = layoutFromTab(this.store.snapshot(), dialog.tabId, label);
+    if (!layout) {
+      this._error.set("The tab is gone.");
+      return false;
+    }
+    this._dialog.set(null);
+    this._error.set(null);
+    if (!(await this.settings.setLayouts([...existing, layout]))) {
+      this._error.set(this.settings.writeError() ?? "Cannot save the layout.");
+      return false;
+    }
+    this.spaces.notify(`Saved layout "${label}"; edit it in Settings > Layouts.`);
+    return true;
   }
 
   cancel(): void {

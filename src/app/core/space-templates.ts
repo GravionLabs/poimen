@@ -68,7 +68,12 @@ export function parseSpaceTemplates(raw: unknown): SpaceTemplate[] {
         remote: parseRemote(r["remote"]),
         agent: r["agent"],
         model: typeof r["model"] === "string" ? r["model"] : null,
-        layout: typeof r["layout"] === "string" ? r["layout"] : parseSpaceLayout(r["layout"]),
+        layout:
+          typeof r["layoutName"] === "string"
+            ? r["layoutName"]
+            : typeof r["layout"] === "string"
+              ? r["layout"]
+              : parseSpaceLayout(r["layout"]),
       },
     ];
   });

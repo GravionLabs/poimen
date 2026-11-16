@@ -218,6 +218,7 @@ pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
                 agent_status: most_urgent(members.iter().copied()),
                 root: Some(tab.root.clone()),
                 active_terminal: Some(tab.active_terminal.clone()).filter(|t| !t.is_empty()),
+                parent: tab.parent.clone(),
             });
             count += 1;
             for terminal in members {
@@ -236,6 +237,7 @@ pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
                 agent_status: status_of(terminal),
                 root: None,
                 active_terminal: None,
+                parent: None,
             });
             count += 1;
             snapshot
@@ -1093,6 +1095,21 @@ mod tests {
                 tab("tab2", "s1", "logs", leaf("t4")),
             ],
         }
+    }
+
+    #[test]
+    fn a_child_tab_keeps_its_parent_in_the_snapshot() {
+        let mut layout = split_layout();
+        layout.tabs[1].parent = Some("tab1".into());
+        let terminals = [
+            terminal("t1", "s1", "agent"),
+            terminal("t2", "s1", "shell"),
+            terminal("t3", "s1", "tests"),
+            terminal("t4", "s1", "logs"),
+        ];
+        let snapshot = wire(&layout, &terminals);
+        assert_eq!(snapshot["tabs"][0]["parent"], "tab1");
+        assert!(snapshot["tabs"][1].get("parent").is_none());
     }
 
     #[test]

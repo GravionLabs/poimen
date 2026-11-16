@@ -4,6 +4,7 @@ import type { Terminal, Snapshot } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
 import { PaneActions } from "./pane-actions";
 import { UI_STORAGE, UiState } from "./ui-state";
+import { SettingsStore } from "./settings";
 import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
@@ -43,6 +44,7 @@ describe("PaneActions", () => {
         UiState,
         TauriBridge,
         SpacesStore,
+        SettingsStore,
         SpaceActions,
         PaneActions,
       ],
@@ -50,6 +52,60 @@ describe("PaneActions", () => {
     store = injector.get(SpacesStore);
     actions = injector.get(PaneActions);
     await store.refresh();
+  });
+
+  describe("save the tab as a layout", () => {
+    beforeEach(async () => {
+      tauri.answer("set_layouts", () => null);
+      current = {
+        ...current,
+        tabs: [
+          {
+            tab_id: "w1:t1",
+            space_id: "w1",
+            label: "main",
+            number: 1,
+            agent_status: "idle",
+            root: { kind: "terminal", terminal_id: "w1:p1" },
+          },
+          {
+            tab_id: "w1:t2",
+            space_id: "w1",
+            label: "docs",
+            number: 2,
+            agent_status: "idle",
+            parent: "w1:t1",
+            root: { kind: "terminal", terminal_id: "w1:p2" },
+          },
+        ],
+        terminals: [pane("w1:p1"), pane("w1:p2", { tab_id: "w1:t2" })],
+      };
+      await store.refresh();
+    });
+
+    it("offers the tab's name and writes the tab with its child tabs", async () => {
+      actions.askSaveLayout("w1:p1");
+      expect(actions.dialog()).toMatchObject({
+        kind: "save-layout",
+        tabId: "w1:t1",
+        current: "main",
+      });
+      expect(await actions.confirmSaveLayout("saved")).toBe(true);
+      expect(actions.dialog()).toBeNull();
+      expect(tauri.calls("set_layouts")).toEqual([
+        {
+          layouts: [{ name: "saved", tabs: [{ name: "main", children: [{ name: "docs" }] }] }],
+        },
+      ]);
+    });
+
+    it("refuses an empty name and keeps the dialog", async () => {
+      actions.askSaveLayout("w1:p1");
+      expect(await actions.confirmSaveLayout("  ")).toBe(false);
+      expect(actions.error()).toBe("A layout needs a name.");
+      expect(actions.dialog()).not.toBeNull();
+      expect(tauri.calls("set_layouts")).toEqual([]);
+    });
   });
 
   describe("restart on the new host", () => {

@@ -243,6 +243,14 @@
             @if (settings().spacesLayout) {
               <option value="user" [selected]="source() === 'user'">New space layout</option>
             }
+            @for (n of layoutNames(); track n) {
+              <option [value]="'named:' + n" [selected]="source() === 'named:' + n">
+                Layout: {{ n }}
+              </option>
+            }
+            @if (unknownLayout(); as missing) {
+              <option [value]="'named:' + missing" selected>Layout: {{ missing }} (missing)</option>
+            }
             @for (p of presetNames(); track p) {
               <option [value]="'preset:' + p" [selected]="source() === 'preset:' + p">
                 Project preset: {{ p }}

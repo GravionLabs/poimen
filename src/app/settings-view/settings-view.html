@@ -445,6 +445,11 @@
           @case ("spaces") {
             <app-space-templates-editor />
           }
+          @case ("layouts") {
+            @defer {
+              <app-layouts-editor />
+            }
+          }
           @case ("space-layout") {
             <app-space-layout-editor />
           }

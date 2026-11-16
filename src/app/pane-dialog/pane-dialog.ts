@@ -83,6 +83,10 @@ export class PaneDialog {
     await this.actions.confirmRename(String(new FormData(form).get("name") ?? ""));
   }
 
+  protected async saveLayout(form: HTMLFormElement): Promise<void> {
+    await this.actions.confirmSaveLayout(String(new FormData(form).get("name") ?? ""));
+  }
+
   protected cancel(): void {
     this.typed.set(null);
     this.actions.cancel();
