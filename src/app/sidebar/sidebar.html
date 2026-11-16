@@ -286,9 +286,9 @@
       [class.dragging]="tabDrag()?.pane === d.row.pane.terminal_id"
       [class.drop-before]="tabMark()?.pane === d.row.pane.terminal_id && !tabMark()!.after"
       [class.drop-after]="tabMark()?.pane === d.row.pane.terminal_id && tabMark()!.after"
-      (dragstart)="tabDragStart($event, d.row.pane)"
-      (dragover)="tabDragOver($event, d.row.pane)"
-      (drop)="tabDrop($event, d.row.pane)"
+      (dragstart)="tabDragStart($event, d.row)"
+      (dragover)="tabDragOver($event, d.row)"
+      (drop)="tabDrop($event, d.row)"
       (dragend)="tabDragEnd()"
       (contextmenu)="openMenu($event, 'pane', d.row.pane.terminal_id)"
     >
@@ -384,6 +384,14 @@
       }
       @if (isUnread(d.row.pane.terminal_id)) {
         <span class="badge dot-badge" role="img" aria-label="Unread"></span>
+      }
+      @if (node.children?.length) {
+        <span
+          class="chevron"
+          [class.open]="expanded"
+          aria-hidden="true"
+          (click)="toggle(tree, node.key, $event)"
+        ></span>
       }
     </span>
   }

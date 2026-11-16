@@ -728,6 +728,9 @@ export function shortPath(path: string): string {
 export interface PaneRow {
   pane: Terminal;
   tab: string;
+  /** The tab of the pane and the tab it sits below (#656); absent for a top-level tab. */
+  tabId?: string;
+  tabParent?: string;
   name: string;
   agent?: string;
   branch?: string;
@@ -840,6 +843,8 @@ export function buildSpaces(
           return {
             pane,
             tab: tab.label,
+            tabId: tab.tab_id,
+            ...(tab.parent ? { tabParent: tab.parent } : {}),
             name: rowName(pane, tab.label),
             agent: agentKind(pane),
             branch: repo?.branch ?? undefined,
@@ -857,6 +862,25 @@ export function buildSpaces(
     }),
   );
   return group ? groupWorktrees(nodes) : nodes;
+}
+
+/**
+ * `hits` plus, for each hit in a child tab, the first row of every ancestor tab (#656), so a
+ * matching child is shown below its parent; in the order of `all`.
+ */
+function withTabAncestors(all: readonly PaneRow[], hits: readonly PaneRow[]): PaneRow[] {
+  const first = new Map<string, PaneRow>();
+  for (const r of all) if (r.tabId && !first.has(r.tabId)) first.set(r.tabId, r);
+  const keep = new Set(hits);
+  for (const hit of hits) {
+    const seen = new Set<string>();
+    for (let tab = hit.tabParent; tab && !seen.has(tab); tab = first.get(tab)?.tabParent) {
+      seen.add(tab);
+      const row = first.get(tab);
+      if (row) keep.add(row);
+    }
+  }
+  return all.filter((r) => keep.has(r));
 }
 
 /** Keeps rows matching `query` (name, agent, branch, tab, directory, text; every word must match). */
@@ -880,10 +904,10 @@ export function filterSpaces(
     return words.every((w) => hay.includes(w));
   };
   const kept = spaces
-    .map((space) => ({
-      ...space,
-      rows: space.rows.filter((r) => matches(r, space.workspace.label)),
-    }))
+    .map((space) => {
+      const hits = space.rows.filter((r) => matches(r, space.workspace.label));
+      return { ...space, rows: withTabAncestors(space.rows, hits) };
+    })
     .filter((space) => space.rows.length > 0);
   // A matching worktree space keeps its head, shown without rows when the head itself has none.
   const shown = new Set(kept.map((s) => s.workspace.space_id));
