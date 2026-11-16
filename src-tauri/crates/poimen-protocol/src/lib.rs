@@ -574,6 +574,11 @@ pub struct Terminal {
     /// together with `host_version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_bundled_version: Option<String>,
+    /// The child records the program reported with OSC 7501 `id=` (#684), least recently updated
+    /// first; each `app` is resolved from the nearest ancestor. Absent when there are none and
+    /// from older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub records: Vec<ChildRecord>,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the
@@ -585,6 +590,8 @@ pub enum AgentStatus {
     Working,
     Blocked,
     Done,
+    /// The program failed (OSC 7501 `state=error`, #682). Older clients do not know it.
+    Error,
     Gone,
 }
 
@@ -604,6 +611,71 @@ pub struct AgentInfo {
     /// When `message` was accepted, milliseconds since the epoch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_at: Option<u64>,
+    /// Progress of the program, 0 to 100 (OSC 7501 `progress`, #682).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+    /// Why the agent is blocked: `permission`, `question` or `auth` (OSC 7501 `kind`, #682).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The program's own title (OSC 7501 `title`, #682), plain text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// A child record of a terminal: what a program reported with OSC 7501 and an `id` (a
+/// `/`-separated path such as `run/issue-12`, #684). Everything but `id` and `status` is optional.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChildRecord {
+    pub id: String,
+    pub status: AgentStatus,
+    /// The reporting program; the nearest ancestor's when the record names none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// Most child records a terminal keeps; the least recently updated one goes first.
+pub const MAX_CHILD_RECORDS: usize = 256;
+/// Longest `id` of a child record, in bytes.
+pub const MAX_RECORD_ID: usize = 128;
+/// Most levels (segments) of an `id`.
+pub const MAX_RECORD_DEPTH: usize = 8;
+
+/// Whether `id` is a valid child record id: 1 to 8 segments split by `/`, each 1 to 32 of
+/// `[A-Za-z0-9_.+-]`, at most 128 bytes in all.
+pub fn valid_record_id(id: &str) -> bool {
+    id.len() <= MAX_RECORD_ID
+        && id.split('/').count() <= MAX_RECORD_DEPTH
+        && id.split('/').all(|s| {
+            (1..=32).contains(&s.len())
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'+' | b'-'))
+        })
+}
+
+/// Kinds of a block an OSC 7501 report may name.
+pub const BLOCK_KINDS: [&str; 3] = ["permission", "question", "auth"];
+
+/// Bidirectional overrides and isolates, zero-width and other invisible formatting characters:
+/// text from a report must not reorder or hide what the user reads (#682).
+pub fn is_invisible_format(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}'
+        | '\u{200B}'..='\u{200F}'
+        | '\u{202A}'..='\u{202E}'
+        | '\u{2060}'..='\u{206F}'
+        | '\u{FEFF}'
+        | '\u{FFF9}'..='\u{FFFB}'
+        | '\u{E0000}'..='\u{E007F}')
 }
 
 /// Longest notification text, in characters.
@@ -615,6 +687,7 @@ pub const MAX_MESSAGE_CHARS: usize = 300;
 pub fn clean_message(text: &str) -> Option<String> {
     let flat: String = text
         .chars()
+        .filter(|c| !is_invisible_format(*c))
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     let joined = flat.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1409,6 +1482,18 @@ pub enum Event {
         message: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message_at: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        progress: Option<u8>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+    /// The child records of a terminal changed (#684); `records` is the whole list.
+    #[serde(rename = "terminal.records_changed")]
+    TerminalRecordsChanged {
+        terminal_id: String,
+        records: Vec<ChildRecord>,
     },
 }
 
@@ -1589,9 +1674,87 @@ mod tests {
                 agent: None,
                 session_id: None,
                 message: None,
-                message_at: None
+                message_at: None,
+                progress: None,
+                kind: None,
+                title: None,
             }
         );
+    }
+
+    #[test]
+    fn error_state_progress_kind_and_title_are_additive() {
+        let old: AgentInfo = serde_json::from_value(json!({"status":"blocked"})).unwrap();
+        assert_eq!((old.progress, &old.kind, &old.title), (None, &None, &None));
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            json!({"status":"blocked"})
+        );
+        let info = AgentInfo {
+            status: AgentStatus::Error,
+            agent: None,
+            session_id: None,
+            message: None,
+            message_at: None,
+            progress: Some(40),
+            kind: Some("permission".into()),
+            title: Some("build".into()),
+        };
+        let value = serde_json::to_value(&info).unwrap();
+        assert_eq!(
+            value,
+            json!({"status":"error","progress":40,"kind":"permission","title":"build"})
+        );
+        assert_eq!(serde_json::from_value::<AgentInfo>(value).unwrap(), info);
+        let event: Event = serde_json::from_value(json!({"event":"agent.status_changed",
+            "data":{"terminal_id":"t1","status":"error","progress":7}}))
+        .unwrap();
+        assert!(matches!(
+            event,
+            Event::AgentStatusChanged {
+                status: AgentStatus::Error,
+                progress: Some(7),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn record_ids_follow_the_segment_rules() {
+        let eight = ["a"; 8].join("/");
+        for ok in ["a", "run/issue-12", "a.b_c+d-e", &eight] {
+            assert!(valid_record_id(ok), "{ok}");
+        }
+        let too_deep = ["a"; 9].join("/");
+        let seg33 = "a".repeat(33);
+        let long = vec!["a".repeat(32); 5].join("/");
+        for bad in [
+            "", "/", "a/", "/a", "a//b", "a b", "a=b", "a,b", &too_deep, &seg33, &long,
+        ] {
+            assert!(!valid_record_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_records_event_and_field_round_trip() {
+        let event: Event = serde_json::from_str(
+            r#"{"event":"terminal.records_changed","data":{"terminal_id":"t1","records":[{"id":"run/a","status":"working","progress":3}]}}"#,
+        )
+        .unwrap();
+        let Event::TerminalRecordsChanged { records, .. } = &event else {
+            panic!("{event:?}");
+        };
+        assert_eq!(records[0].progress, Some(3));
+        assert_eq!(records[0].app, None);
+    }
+
+    #[test]
+    fn clean_message_removes_bidi_overrides_and_invisible_characters() {
+        assert_eq!(
+            clean_message("a\u{202E}b\u{200B}c\u{2066}d\u{FEFF}").as_deref(),
+            Some("abcd")
+        );
+        assert_eq!(clean_message("\u{202E}\u{200B}"), None);
     }
 
     #[test]

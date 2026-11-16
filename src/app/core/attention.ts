@@ -1,5 +1,11 @@
 import { Injectable, computed, signal } from "@angular/core";
-import { agentKind, type AgentStatus, type SpaceNode, type Terminal } from "./snapshot";
+import {
+  agentKind,
+  needsAttention,
+  type AgentStatus,
+  type SpaceNode,
+  type Terminal,
+} from "./snapshot";
 
 const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
   a.size === b.size && [...a].every((id) => b.has(id));
@@ -7,10 +13,10 @@ const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
 const sameTimes = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>) =>
   a.size === b.size && [...a].every(([id, t]) => b.get(id) === t);
 
-/** A pane whose agent turned blocked or finished since the previous snapshot. */
+/** A pane whose agent turned blocked, failed or finished since the previous snapshot. */
 export interface StatusChange {
   paneId: string;
-  status: "blocked" | "done";
+  status: "blocked" | "error" | "done";
 }
 
 /**
@@ -67,9 +73,13 @@ export class Attention {
     const unread = new Set(this.unread());
     for (const [id, status] of statuses) {
       const before = this.previous?.get(id);
-      if (before !== undefined && status !== before && (status === "blocked" || status === "done"))
-        changes.push({ paneId: id, status });
-      if (this.manual.has(id) && (status === "working" || status === "blocked")) {
+      if (
+        before !== undefined &&
+        status !== before &&
+        (needsAttention(status) || status === "done")
+      )
+        changes.push({ paneId: id, status: status as StatusChange["status"] });
+      if (this.manual.has(id) && (status === "working" || needsAttention(status))) {
         this.manual.delete(id);
         unread.delete(id);
       }
@@ -82,10 +92,10 @@ export class Attention {
           unread.delete(id);
         }
       } else if (status !== before) {
-        if (status === "blocked") attention.add(id);
+        if (needsAttention(status)) attention.add(id);
         else if (status === "done" && before !== undefined) unread.add(id);
       }
-      if (status !== "blocked") attention.delete(id);
+      if (!needsAttention(status)) attention.delete(id);
     }
     for (const id of [...attention, ...unread]) {
       if (!statuses.has(id)) {

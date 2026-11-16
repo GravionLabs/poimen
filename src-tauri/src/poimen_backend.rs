@@ -290,6 +290,22 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         agent_status: status_of(terminal),
         agent_message_at: message.as_ref().and(agent.and_then(|a| a.message_at)),
         agent_message: message,
+        agent_progress: agent.and_then(|a| a.progress),
+        agent_kind: agent.and_then(|a| a.kind.clone()),
+        agent_title: agent.and_then(|a| a.title.clone()),
+        records: terminal
+            .records
+            .iter()
+            .map(|r| snap::ChildRecord {
+                id: r.id.clone(),
+                status: snap_status(r.status),
+                app: r.app.clone(),
+                message: r.message.clone(),
+                progress: r.progress,
+                kind: r.kind.clone(),
+                title: r.title.clone(),
+            })
+            .collect(),
         cwd: Some(terminal.cwd.clone()),
         // The name of a terminal is its label only once it was renamed: the default is the
         // directory name, which the sidebar already shows for a terminal without a label.
@@ -327,6 +343,7 @@ fn status_name(status: AgentStatus) -> &'static str {
         snap::AgentStatus::Working => "working",
         snap::AgentStatus::Blocked => "blocked",
         snap::AgentStatus::Done => "done",
+        snap::AgentStatus::Error => "error",
         snap::AgentStatus::Unknown => "unknown",
     }
 }
@@ -337,6 +354,7 @@ fn snap_status(status: AgentStatus) -> snap::AgentStatus {
         AgentStatus::Working => snap::AgentStatus::Working,
         AgentStatus::Blocked => snap::AgentStatus::Blocked,
         AgentStatus::Done => snap::AgentStatus::Done,
+        AgentStatus::Error => snap::AgentStatus::Error,
         AgentStatus::Gone => snap::AgentStatus::Unknown,
     }
 }
@@ -884,6 +902,9 @@ pub fn backend_event(event: &Event) -> BackendEvent {
         status,
         message,
         message_at,
+        progress,
+        kind,
+        title,
         ..
     } = event
     {
@@ -891,6 +912,15 @@ pub fn backend_event(event: &Event) -> BackendEvent {
         if let Some(message) = message {
             data["agent_message"] = json!(message);
             data["agent_message_at"] = json!(message_at);
+        }
+        if let Some(progress) = progress {
+            data["agent_progress"] = json!(progress);
+        }
+        if let Some(kind) = kind {
+            data["agent_kind"] = json!(kind);
+        }
+        if let Some(title) = title {
+            data["agent_title"] = json!(title);
         }
         return BackendEvent {
             kind: crate::backend::AGENT_STATUS_CHANGED.into(),
@@ -956,7 +986,30 @@ mod tests {
             survives_restart: false,
             host_version: None,
             host_bundled_version: None,
+            records: Vec::new(),
         }
+    }
+
+    #[test]
+    fn child_records_reach_the_snapshot_terminal() {
+        let mut t = terminal("t1", "s1", "zsh");
+        t.records.push(poimen_protocol::ChildRecord {
+            id: "run/a".into(),
+            status: AgentStatus::Error,
+            app: Some("codex".into()),
+            message: Some("boom".into()),
+            message_at: Some(1),
+            progress: Some(40),
+            kind: None,
+            title: Some("A".into()),
+        });
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        assert_eq!(
+            snapshot["terminals"][0]["records"],
+            json!([{"id": "run/a", "status": "error", "app": "codex", "message": "boom",
+                    "progress": 40, "title": "A"}])
+        );
+        assert!(snapshot["terminals"][1].get("records").is_none());
     }
 
     #[test]
@@ -1101,6 +1154,9 @@ mod tests {
             session_id: Some("abc-1".into()),
             message: None,
             message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
         });
         let mut exited = terminal("t5", "s1", "build");
         exited.status = TerminalStatus::Exited;
@@ -1126,6 +1182,9 @@ mod tests {
             session_id: None,
             message: None,
             message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
         });
         let terminals = [
             terminal("t1", "s1", "agent"),
@@ -1393,6 +1452,9 @@ mod tests {
             session_id: None,
             message: None,
             message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
         });
         let mut blocked = terminal("t2", "s1", "b");
         blocked.agent = Some(AgentInfo {
@@ -1401,6 +1463,9 @@ mod tests {
             session_id: None,
             message: None,
             message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
         });
         let snapshot = snap(
             &[space("s1", "api"), space("s2", "web")],
@@ -1431,6 +1496,9 @@ mod tests {
                 session_id: None,
                 message: None,
                 message_at: None,
+                progress: None,
+                kind: None,
+                title: None,
             })
         };
         let event = changed(AgentStatus::Blocked);
@@ -1443,6 +1511,45 @@ mod tests {
     }
 
     #[test]
+    fn error_progress_kind_and_title_reach_the_pane_and_its_event() {
+        let event = backend_event(&Event::AgentStatusChanged {
+            terminal_id: "t1".into(),
+            status: AgentStatus::Error,
+            agent: None,
+            session_id: None,
+            message: None,
+            message_at: None,
+            progress: Some(40),
+            kind: Some("auth".into()),
+            title: Some("build".into()),
+        });
+        assert_eq!(
+            event.data,
+            json!({"terminal_id": "t1", "agent_status": "error", "agent_progress": 40,
+                "agent_kind": "auth", "agent_title": "build"})
+        );
+        let mut t = terminal("t1", "s1", "a");
+        t.agent = Some(AgentInfo {
+            status: AgentStatus::Error,
+            agent: None,
+            session_id: None,
+            message: None,
+            message_at: None,
+            progress: Some(40),
+            kind: Some("auth".into()),
+            title: Some("build".into()),
+        });
+        let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
+        let pane = &snapshot["terminals"][0];
+        assert_eq!(pane["agent_status"], "error");
+        assert_eq!(pane["agent_progress"], 40);
+        assert_eq!(pane["agent_kind"], "auth");
+        assert_eq!(pane["agent_title"], "build");
+        assert_eq!(snapshot["spaces"][0]["agent_status"], "error");
+        assert!(snapshot["terminals"][1].get("agent_progress").is_none());
+    }
+
+    #[test]
     fn the_notification_text_reaches_the_pane_and_its_event() {
         let event = backend_event(&Event::AgentStatusChanged {
             terminal_id: "t1".into(),
@@ -1451,6 +1558,9 @@ mod tests {
             session_id: None,
             message: Some("Allow Bash?".into()),
             message_at: Some(1700),
+            progress: None,
+            kind: None,
+            title: None,
         });
         assert_eq!(
             event.data,
@@ -1464,6 +1574,9 @@ mod tests {
             session_id: None,
             message: Some("Allow Bash?".into()),
             message_at: Some(1700),
+            progress: None,
+            kind: None,
+            title: None,
         });
         let snapshot = snap(&[space("s1", "api")], &[t, terminal("t2", "s1", "b")]);
         assert_eq!(snapshot["terminals"][0]["agent_message"], "Allow Bash?");
@@ -2310,6 +2423,9 @@ mod tests {
             session_id: Some("s-9".into()),
             message: None,
             message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
         });
         let plain = terminal("t2", "s1", "zsh");
         let panes = snap(&[space("s1", "api")], &[with, plain])["terminals"].clone();

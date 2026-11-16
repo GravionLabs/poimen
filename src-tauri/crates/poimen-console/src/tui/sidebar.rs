@@ -80,7 +80,12 @@ pub enum RowKind {
     /// A tab with more than one terminal; a tab of one terminal is just its terminal row.
     Tab,
     Terminal,
+    /// A child record of the terminal above (OSC 7501 with an `id`, #684).
+    Record,
 }
+
+/// More child records than this are folded into one summary row.
+pub const RECORDS_SHOWN: usize = 4;
 
 /// What a segment of a row line is, for its style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,6 +152,7 @@ pub fn icon(status: Option<AgentStatus>) -> &'static str {
     match status {
         Some(AgentStatus::Working) => "●",
         Some(AgentStatus::Blocked) => "▲",
+        Some(AgentStatus::Error) => "✗",
         Some(AgentStatus::Done) => "✓",
         Some(AgentStatus::Idle) => "○",
         Some(AgentStatus::Gone) | None => "·",
@@ -159,12 +165,14 @@ fn status_name(status: AgentStatus) -> Option<&'static str> {
         AgentStatus::Working => Some("working"),
         AgentStatus::Blocked => Some("blocked"),
         AgentStatus::Done => Some("done"),
+        AgentStatus::Error => Some("error"),
         AgentStatus::Gone => None,
     }
 }
 
 fn rank(status: Option<AgentStatus>) -> u8 {
     match status {
+        Some(AgentStatus::Error) => 5,
         Some(AgentStatus::Blocked) => 4,
         Some(AgentStatus::Working) => 3,
         Some(AgentStatus::Done) => 2,
@@ -203,16 +211,154 @@ fn same(text: &str) -> String {
 struct Subject<'a> {
     name: &'a str,
     status: Option<AgentStatus>,
+    /// 0 to 100, of the terminal or of the terminals that give a space its status.
+    progress: Option<u8>,
+    /// Why the agent is blocked (`permission`, `question`, `auth`).
+    kind: Option<&'a str>,
     terminal: Option<&'a Terminal>,
     tab: Option<&'a str>,
     space: &'a Space,
+}
+
+/// Text a program reported is shown as plain text whatever server sent it (an older or remote
+/// one may not clean it): bidi overrides and invisible characters go, an unknown kind goes.
+pub fn plain_agent_text(t: &mut Terminal) {
+    for r in &mut t.records {
+        r.message = r
+            .message
+            .as_deref()
+            .and_then(poimen_protocol::clean_message);
+        r.title = r.title.as_deref().and_then(poimen_protocol::clean_message);
+        r.app = r.app.as_deref().and_then(poimen_protocol::clean_message);
+        r.progress = r.progress.map(|p| p.min(100));
+        r.kind = r
+            .kind
+            .take()
+            .filter(|k| poimen_protocol::BLOCK_KINDS.contains(&k.as_str()));
+    }
+    let Some(a) = t.agent.as_mut() else { return };
+    a.message = a
+        .message
+        .as_deref()
+        .and_then(poimen_protocol::clean_message);
+    a.title = a.title.as_deref().and_then(poimen_protocol::clean_message);
+    a.kind = a
+        .kind
+        .take()
+        .filter(|k| poimen_protocol::BLOCK_KINDS.contains(&k.as_str()));
+    a.progress = a.progress.map(|p| p.min(100));
+}
+
+/// `blocked: permission`, `working 40%`: the status word with what OSC 7501 adds.
+fn state_text(s: &Subject<'_>) -> Option<String> {
+    let mut text = status_name(s.status?)?.to_owned();
+    if s.status == Some(AgentStatus::Blocked)
+        && let Some(kind) = s.kind
+    {
+        text.push_str(": ");
+        text.push_str(kind);
+    }
+    if let Some(progress) = s.progress {
+        text.push_str(&format!(" {progress}%"));
+    }
+    Some(text)
+}
+
+/// The rows of the child records of a terminal: one per record in id order (a parent before its
+/// children, indented by its level), or one summary row when there are more than
+/// [`RECORDS_SHOWN`].
+fn record_rows(t: &Terminal, depth: u16) -> Vec<Row> {
+    let seg = |kind, text: String, dim| Segment {
+        kind,
+        text,
+        bold: false,
+        dim,
+    };
+    if t.records.len() > RECORDS_SHOWN {
+        let count = |s: AgentStatus| t.records.iter().filter(|r| r.status == s).count();
+        let mut parts = vec![format!("{} records", t.records.len())];
+        for (status, word) in [
+            (AgentStatus::Error, "error"),
+            (AgentStatus::Blocked, "blocked"),
+            (AgentStatus::Working, "working"),
+        ] {
+            if count(status) > 0 {
+                parts.push(format!("{} {word}", count(status)));
+            }
+        }
+        let worst = AgentStatus::Error;
+        let status = [
+            worst,
+            AgentStatus::Blocked,
+            AgentStatus::Working,
+            AgentStatus::Done,
+        ]
+        .into_iter()
+        .find(|s| count(*s) > 0);
+        return vec![Row {
+            kind: RowKind::Record,
+            terminal_id: None,
+            depth,
+            status,
+            lines: vec![vec![
+                seg(SegmentKind::Dot, icon(status).into(), false),
+                seg(SegmentKind::Text, parts.join(", "), true),
+            ]],
+        }];
+    }
+    let mut sorted: Vec<&poimen_protocol::ChildRecord> = t.records.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    sorted
+        .into_iter()
+        .map(|r| {
+            let level = u16::try_from(r.id.matches('/').count()).unwrap_or(0);
+            let leaf = r.id.rsplit('/').next().unwrap_or(&r.id);
+            let name = r.title.clone().unwrap_or_else(|| leaf.to_owned());
+            let mut state = status_name(r.status).unwrap_or("").to_owned();
+            if r.status == AgentStatus::Blocked
+                && let Some(kind) = &r.kind
+            {
+                state.push_str(&format!(": {kind}"));
+            }
+            if let Some(p) = r.progress {
+                state.push_str(&format!(" {p}%"));
+            }
+            let mut line = vec![
+                seg(SegmentKind::Dot, icon(Some(r.status)).into(), false),
+                seg(SegmentKind::Name, name.clone(), false),
+                seg(SegmentKind::State, state, false),
+            ];
+            if let Some(m) = r.message.as_ref().filter(|m| same(m) != same(&name)) {
+                line.push(seg(SegmentKind::Text, m.clone(), true));
+            }
+            Row {
+                kind: RowKind::Record,
+                terminal_id: None,
+                depth: depth + level,
+                status: Some(r.status),
+                lines: vec![line],
+            }
+        })
+        .collect()
+}
+
+/// The progress shown for `status` among `terminals`: the first one with that status that has one.
+fn progress_of<'a>(
+    status: Option<AgentStatus>,
+    terminals: impl Iterator<Item = &'a Terminal>,
+) -> Option<u8> {
+    let status = status?;
+    terminals
+        .filter(|t| terminal_status(t) == Some(status))
+        .find_map(|t| t.agent.as_ref()?.progress)
+        .map(|p| p.min(100))
 }
 
 fn value(token: &str, s: &Subject<'_>, home: Option<&str>) -> Option<String> {
     let t = s.terminal;
     match token {
         "name" => Some(s.name.to_owned()),
-        "state_text" => s.status.and_then(status_name).map(str::to_owned),
+        "state_text" => state_text(s),
         "agent" => t.and_then(|t| t.agent.as_ref()?.agent.clone()),
         // As the app: an agent's step (`deliver_step`), nothing for a plain terminal.
         "title" => t
@@ -276,7 +422,8 @@ impl Model {
     /// Reads spaces, tabs and terminals from the server.
     pub fn load(client: &Client) -> Result<Self, ClientError> {
         let layout = client.list_layout()?;
-        let terminals = client.list_terminals(None)?;
+        let mut terminals = client.list_terminals(None)?;
+        terminals.iter_mut().for_each(plain_agent_text);
         Ok(Self {
             spaces: layout.spaces,
             tabs: layout.tabs,
@@ -436,6 +583,8 @@ impl Model {
             let subject = Subject {
                 name: &space.name,
                 status,
+                progress: progress_of(status, tabs.iter().flat_map(|(_, ts)| ts.iter().copied())),
+                kind: None,
                 terminal: None,
                 tab: None,
                 space,
@@ -466,9 +615,12 @@ impl Model {
                 }
                 for t in terms {
                     let status = terminal_status(t);
+                    let agent_info = t.agent.as_ref();
                     let subject = Subject {
                         name: &t.name,
                         status,
+                        progress: agent_info.and_then(|a| a.progress).map(|p| p.min(100)),
+                        kind: agent_info.and_then(|a| a.kind.as_deref()),
                         terminal: Some(t),
                         tab: tab.map(|t| t.name.as_str()),
                         space,
@@ -481,6 +633,7 @@ impl Model {
                         status,
                         lines: render(lines, &subject, home),
                     });
+                    rows.extend(record_rows(t, depth + 1));
                 }
             }
         }
@@ -628,6 +781,7 @@ mod tests {
             survives_restart: false,
             host_version: None,
             host_bundled_version: None,
+            records: Vec::new(),
         }
     }
 
@@ -638,6 +792,9 @@ mod tests {
             session_id: None,
             message: Some("needs approval".into()),
             message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
         })
     }
 
@@ -705,6 +862,53 @@ mod tests {
                     .join(" ")
             })
             .collect()
+    }
+
+    fn record(id: &str, status: AgentStatus) -> poimen_protocol::ChildRecord {
+        poimen_protocol::ChildRecord {
+            id: id.into(),
+            status,
+            app: None,
+            message: None,
+            message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
+        }
+    }
+
+    #[test]
+    fn child_records_are_rows_below_their_terminal_and_fold_when_many() {
+        let mut t = term("t1", "s1", "zsh", "/w");
+        let mut a = record("run/a", AgentStatus::Blocked);
+        a.kind = Some("permission".into());
+        a.progress = Some(30);
+        a.message = Some("Allow?\u{202E}".into());
+        t.records = vec![record("run", AgentStatus::Working), a];
+        plain_agent_text(&mut t);
+        let rows = record_rows(&t, 2);
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows.iter()
+                .all(|r| r.kind == RowKind::Record && r.terminal_id.is_none())
+        );
+        assert_eq!((rows[0].depth, rows[1].depth), (2, 3));
+        let text = |r: &Row| {
+            r.lines[0]
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>()
+                .join("|")
+        };
+        assert_eq!(text(&rows[0]), "●|run|working");
+        assert_eq!(text(&rows[1]), "▲|a|blocked: permission 30%|Allow?");
+        t.records = (0..5)
+            .map(|i| record(&format!("r{i}"), AgentStatus::Working))
+            .collect();
+        t.records[0].status = AgentStatus::Error;
+        let folded = record_rows(&t, 2);
+        assert_eq!(folded.len(), 1);
+        assert_eq!(text(&folded[0]), "✗|5 records, 1 error, 4 working");
     }
 
     #[test]
@@ -942,6 +1146,72 @@ mod tests {
         assert!(texts(&rows[1])[0].contains("work"), "{:?}", texts(&rows[1]));
         // Terminal rows keep their tab order below the second space; step walks them as shown.
         assert_eq!(step(&rows, Some("t3"), 1, None).as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn error_progress_and_the_kind_of_a_block_show_in_the_rows() {
+        let mut m = model();
+        let info = |status, progress, kind: Option<&str>| {
+            Some(AgentInfo {
+                status,
+                agent: Some("codex".into()),
+                session_id: None,
+                message: None,
+                message_at: None,
+                progress,
+                kind: kind.map(str::to_owned),
+                title: None,
+            })
+        };
+        m.terminals[1].agent = info(AgentStatus::Blocked, None, Some("permission"));
+        m.terminals[2].agent = info(AgentStatus::Working, Some(40), None);
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        let line = |name: &str| {
+            rows.iter()
+                .find(|r| texts(r)[0].contains(name))
+                .map(|r| texts(r)[0].clone())
+                .unwrap()
+        };
+        assert!(
+            line("claude").contains("blocked: permission"),
+            "{}",
+            line("claude")
+        );
+        assert!(line("logs").contains("working 40%"), "{}", line("logs"));
+        // The space row shows the progress only when its own status is the one that has it.
+        assert!(!line("work").contains('%'), "{}", line("work"));
+        m.terminals[1].agent = info(AgentStatus::Idle, None, None);
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        assert!(
+            texts(&rows[0])[0].contains("working 40%"),
+            "{:?}",
+            texts(&rows[0])
+        );
+        // Error has its own icon and outranks blocked on the space row.
+        m.terminals[1].agent = info(AgentStatus::Error, None, None);
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        assert_eq!(rows[0].status, Some(AgentStatus::Error));
+        assert!(texts(&rows[0])[0].starts_with("✗"), "{:?}", texts(&rows[0]));
+        assert!(texts(&rows[0])[0].contains("error"));
+    }
+
+    #[test]
+    fn reported_text_is_plain_text() {
+        let mut t = term("t9", "s1", "x", "/w");
+        t.agent = Some(AgentInfo {
+            status: AgentStatus::Blocked,
+            agent: None,
+            session_id: None,
+            message: Some("Allow \u{202E}gnp.exe\u{200B}?".into()),
+            message_at: None,
+            progress: Some(200),
+            kind: Some("evil\u{202E}".into()),
+            title: Some("\u{202E}".into()),
+        });
+        plain_agent_text(&mut t);
+        let a = t.agent.unwrap();
+        assert_eq!(a.message.as_deref(), Some("Allow gnp.exe?"));
+        assert_eq!((a.kind, a.title, a.progress), (None, None, Some(100)));
     }
 
     #[test]

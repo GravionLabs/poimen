@@ -5,7 +5,54 @@ import { HOOK_AGENTS, agentName, hasTranscripts } from "./backend";
 import type { Checks } from "../github/pulls";
 import type { SidebarSort } from "./settings";
 
-export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+export type AgentStatus = "idle" | "working" | "blocked" | "done" | "error" | "unknown";
+
+/** The agent waits for the user or failed: it rings like a block (OSC 7501 `error`, #682). */
+export function needsAttention(status: AgentStatus): boolean {
+  return status === "blocked" || status === "error";
+}
+
+/**
+ * Text a program reported (OSC 7501, hooks) as plain text for display: bidi overrides, isolates,
+ * zero-width and other invisible formatting characters and control characters are removed, so
+ * a report cannot reorder or hide what the user reads (#682).
+ */
+export function plainText(text: string | undefined): string {
+  return (text ?? "")
+    .replace(
+      // eslint-disable-next-line no-control-regex
+      /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb]|\udb40[\udc00-\udc7f]/g,
+      "",
+    )
+    .trim();
+}
+
+/** 0 to 100 as the backend reports it; anything else is no progress. */
+export function validProgress(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100
+    ? value
+    : undefined;
+}
+
+/** What a status label adds to the plain state (#682). */
+export interface StateDetails {
+  kind?: string;
+  progress?: number;
+}
+
+/**
+ * The state word with what OSC 7501 adds: `waiting: permission` for a block of a known kind,
+ * `working 40%` with progress, else the status itself; `undefined` for `unknown`.
+ */
+export function stateText(status: AgentStatus, details: StateDetails = {}): string | undefined {
+  if (status === "unknown") return undefined;
+  const kind = plainText(details.kind);
+  const progress = validProgress(details.progress);
+  let text: string = status;
+  if (status === "blocked" && kind) text = `waiting: ${kind}`;
+  if (progress !== undefined && status !== "done" && status !== "idle") text += ` ${progress}%`;
+  return text;
+}
 
 export interface Space {
   space_id: string;
@@ -116,6 +163,18 @@ export function spaceRoot(snapshot: Snapshot, spaceId: string): Terminal | undef
   return first ?? snapshot.terminals.find((t) => t.space_id === spaceId);
 }
 
+/** A child record of a terminal (OSC 7501 with an `id`, #684): a row below the terminal. */
+export interface ChildRecord {
+  /** `/`-separated path such as `run/issue-12`; a parent's id is a prefix of its children's. */
+  id: string;
+  status: AgentStatus;
+  app?: string;
+  message?: string;
+  progress?: number;
+  kind?: string;
+  title?: string;
+}
+
 export interface Terminal {
   terminal_id: string;
   tab_id: string;
@@ -127,6 +186,12 @@ export interface Terminal {
   /** Latest notification text of the agent (poimen backend only), with its time in epoch ms. */
   agent_message?: string;
   agent_message_at?: number;
+  /** Progress 0 to 100, why the agent is blocked (`permission`, `question`, `auth`) and the program's own title (OSC 7501, #682). */
+  agent_progress?: number;
+  agent_kind?: string;
+  agent_title?: string;
+  /** Child records, least recently updated first (poimen backend, #684). */
+  records?: ChildRecord[];
   cwd?: string;
   /** Directory of the foreground process; follows `cd` and is more precise than `cwd`. */
   foreground_cwd?: string;
@@ -191,8 +256,35 @@ export function toSnapshot(wire: WireSnapshot | null | undefined): Snapshot {
   return {
     spaces: wire?.spaces ?? [],
     tabs: wire?.tabs ?? [],
-    terminals: wire?.terminals ?? [],
+    terminals: (wire?.terminals ?? []).map(plainTerminal),
   };
+}
+
+/** The terminal with the texts a program reported cleaned (`plainText`); unchanged when none is set. */
+function plainTerminal(t: Terminal): Terminal {
+  if (t.records?.length) t = { ...t, records: t.records.map(plainRecord) };
+  if (t.agent_message === undefined && t.agent_title === undefined && t.agent_kind === undefined)
+    return t;
+  const next = { ...t };
+  for (const key of ["agent_message", "agent_title", "agent_kind"] as const) {
+    if (next[key] === undefined) continue;
+    const clean = plainText(next[key]);
+    if (clean) next[key] = clean;
+    else delete next[key];
+  }
+  return next;
+}
+
+/** A child record with its texts as plain text and a valid progress. */
+function plainRecord(r: ChildRecord): ChildRecord {
+  const next: ChildRecord = { id: plainText(r.id), status: r.status };
+  const progress = validProgress(r.progress);
+  if (progress !== undefined) next.progress = progress;
+  for (const key of ["app", "message", "kind", "title"] as const) {
+    const clean = plainText(r[key]);
+    if (clean) next[key] = clean;
+  }
+  return next;
 }
 
 const QUALIFIER = "::";
@@ -344,6 +436,7 @@ export const NO_AGENT_RANK = 4;
 export function attentionRank(terminal: Terminal, unread: ReadonlySet<string>): number {
   switch (terminal.agent_status) {
     case "blocked":
+    case "error":
       return 0;
     case "done":
       return unread.has(terminal.terminal_id) ? 1 : 3;
@@ -513,7 +606,7 @@ export function tabHeader(
 
 /** Panes whose agent waits for the user. */
 export function waitingCount(panes: Terminal[]): number {
-  return panes.filter((pane) => pane.agent_status === "blocked").length;
+  return panes.filter((pane) => needsAttention(pane.agent_status)).length;
 }
 
 /**
@@ -534,10 +627,10 @@ export function nextWaiting(
           (position.get(b.terminal_id) ?? order.length),
       )
     : all;
-  const waiting = panes.filter((pane) => pane.agent_status === "blocked");
+  const waiting = panes.filter((pane) => needsAttention(pane.agent_status));
   if (!waiting.length) return undefined;
   const index = panes.findIndex((pane) => pane.terminal_id === activeId);
-  const after = panes.slice(index + 1).find((pane) => pane.agent_status === "blocked");
+  const after = panes.slice(index + 1).find((pane) => needsAttention(pane.agent_status));
   return after ?? waiting[0];
 }
 
@@ -551,20 +644,28 @@ export function applyStatus(
   paneId: string,
   status: AgentStatus,
   message?: { text: string; at: number },
+  details: { progress?: number; kind?: string; title?: string } = {},
 ): Snapshot {
   return {
     ...snapshot,
     terminals: snapshot.terminals.map((pane) => {
       if (pane.terminal_id !== paneId) return pane;
+      // The event carries the whole state: progress, kind and title are what it says, or gone.
+      const base: Terminal = { ...pane, agent_status: status };
+      delete base.agent_progress;
+      delete base.agent_kind;
+      delete base.agent_title;
+      const progress = validProgress(details.progress);
+      const kind = plainText(details.kind);
+      const title = plainText(details.title);
+      if (progress !== undefined) base.agent_progress = progress;
+      if (kind) base.agent_kind = kind;
+      if (title) base.agent_title = title;
       if (message) {
-        return {
-          ...pane,
-          agent_status: status,
-          agent_message: message.text,
-          agent_message_at: message.at,
-        };
+        const text = plainText(message.text);
+        if (text) return { ...base, agent_message: text, agent_message_at: message.at };
       }
-      const next = { ...pane, agent_status: status };
+      const next = base;
       if (status === "working" || status === "unknown") {
         delete next.agent_message;
         delete next.agent_message_at;
@@ -607,7 +708,10 @@ export function flowSession(pane: Terminal | undefined): string | null {
  */
 export function statusText(pane: Terminal): string | undefined {
   if (!agentKind(pane)) return undefined;
-  const state = pane.agent_status === "unknown" ? undefined : pane.agent_status;
+  const state = stateText(pane.agent_status, {
+    kind: pane.agent_kind,
+    progress: pane.agent_progress,
+  });
   const step = pane.tokens?.["deliver_step"]?.trim() || undefined;
   return [state, step].filter(Boolean).join(" · ") || undefined;
 }

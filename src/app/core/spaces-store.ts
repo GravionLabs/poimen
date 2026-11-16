@@ -599,6 +599,11 @@ export class SpacesStore {
                     at: event.data!.agent_message_at ?? Date.now(),
                   }
                 : undefined,
+              {
+                progress: event.data!.agent_progress,
+                kind: event.data!.agent_kind,
+                title: event.data!.agent_title,
+              },
             ),
           );
           const status = event.data.agent_status;

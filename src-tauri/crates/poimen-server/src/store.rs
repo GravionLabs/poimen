@@ -50,9 +50,18 @@ pub(crate) struct StoredTerminal {
     pub(crate) seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) agent: Option<AgentInfo>,
+    /// `agent` is the status the program reported with OSC 7501 (#681); `hook_agent` is the
+    /// status of the hooks meanwhile.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) osc: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) hook_agent: Option<AgentInfo>,
     /// The `seq` of the last accepted agent report, so a stale report stays dropped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) agent_seq: Option<u64>,
+    /// The child records of OSC 7501 reports with an `id` (#684), as reported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) records: Vec<poimen_protocol::ChildRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) tokens: Vec<StoredToken>,
 }
@@ -307,7 +316,22 @@ mod tests {
                 session_id: Some("abc".into()),
                 message: Some("Allow Bash?".into()),
                 message_at: Some(1_700_000_000_000),
+                progress: Some(40),
+                kind: Some("permission".into()),
+                title: Some("build".into()),
             }),
+            osc: false,
+            hook_agent: None,
+            records: vec![poimen_protocol::ChildRecord {
+                id: "run/a".into(),
+                status: poimen_protocol::AgentStatus::Working,
+                app: Some("codex".into()),
+                message: None,
+                message_at: None,
+                progress: Some(5),
+                kind: None,
+                title: None,
+            }],
             agent_seq: Some(17),
             tokens: vec![StoredToken {
                 name: "deliver_step".into(),

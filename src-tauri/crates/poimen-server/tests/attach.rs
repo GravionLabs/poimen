@@ -646,6 +646,35 @@ fn a_program_without_an_app_gets_answers_to_its_terminal_queries() {
     wait_for_file(&f, "da.txt", "\x1b[?6c");
 }
 
+#[cfg(unix)]
+const DETECT: &str =
+    "\x1b]7501;?:states=idle,working,blocked,done,error,clear:kinds=permission,question,auth\x1b\\";
+
+#[cfg(unix)]
+#[test]
+fn the_osc_7501_query_is_answered_ahead_of_da1_without_a_controller() {
+    let f = fixture("detect");
+    f.run(&format!(
+        "stty raw -echo; printf '\\033]7501;?\\033\\\\\\033[c'; head -c {} > det.txt",
+        DETECT.len() + 5
+    ));
+    wait_for_file(&f, "det.txt", &format!("{DETECT}\x1b[?6c"));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_osc_7501_query_is_answered_once_while_a_controller_is_attached() {
+    let f = fixture("detect-controller");
+    // The controller attaches during the pause; the query comes after it. (xterm.js is not
+    // there, so the DA1 gets no answer and only the 7501 reply arrives.)
+    let id = f.run(&format!(
+        "stty raw -echo; sleep 1; printf '\\033]7501;?\\033\\\\\\033[c'; head -c {} > det.txt",
+        DETECT.len()
+    ));
+    let _controller = f.attach(&id, AttachMode::Control);
+    wait_for_file(&f, "det.txt", DETECT);
+}
+
 #[test]
 fn set_colors_rejects_a_bad_color_or_palette() {
     let f = fixture("colors-bad");

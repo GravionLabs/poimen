@@ -83,6 +83,10 @@
   color: #2ea043;
 }
 
+.status-error {
+  color: var(--status-error, #d14);
+}
+
 .text {
   flex: 1;
   min-width: 0;

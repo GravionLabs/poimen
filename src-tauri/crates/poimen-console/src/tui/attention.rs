@@ -17,6 +17,8 @@ pub const LOG_CAP: usize = 50;
 pub enum Kind {
     Blocked,
     Done,
+    /// The program reported `error` (OSC 7501); needs attention like a block.
+    Error,
 }
 
 impl Kind {
@@ -24,11 +26,12 @@ impl Kind {
         match self {
             Kind::Blocked => "blocked",
             Kind::Done => "done",
+            Kind::Error => "error",
         }
     }
 }
 
-/// A terminal whose agent turned blocked or done since the previous read.
+/// A terminal whose agent turned blocked, failed or done since the previous read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Change {
     pub terminal_id: String,
@@ -83,6 +86,7 @@ impl Attention {
             let before = self.previous.as_ref().and_then(|p| p.get(id)).copied();
             let kind = match status {
                 AgentStatus::Blocked => Some(Kind::Blocked),
+                AgentStatus::Error => Some(Kind::Error),
                 AgentStatus::Done => Some(Kind::Done),
                 _ => None,
             };
@@ -98,13 +102,13 @@ impl Attention {
                 self.attention.remove(id);
                 self.unread.remove(id);
             } else if before != Some(status) {
-                if status == AgentStatus::Blocked {
+                if matches!(status, AgentStatus::Blocked | AgentStatus::Error) {
                     self.attention.insert(id.clone());
                 } else if status == AgentStatus::Done && before.is_some() {
                     self.unread.insert(id.clone());
                 }
             }
-            if status != AgentStatus::Blocked {
+            if !matches!(status, AgentStatus::Blocked | AgentStatus::Error) {
                 self.attention.remove(id);
             }
         }
@@ -165,7 +169,7 @@ pub fn age(now_ms: u64, at_ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use AgentStatus::{Blocked, Done, Idle, Working};
+    use AgentStatus::{Blocked, Done, Error, Idle, Working};
 
     fn st(items: &[(&str, AgentStatus)]) -> HashMap<String, AgentStatus> {
         items.iter().map(|(i, s)| ((*i).into(), *s)).collect()
@@ -193,6 +197,25 @@ mod tests {
         a.observe(&st(&[("a", Blocked)]), &set(&["a"]));
         assert!(!a.has_attention("a"));
         assert_eq!(a.count(), 0);
+    }
+
+    #[test]
+    fn error_while_not_viewed_rings_like_blocked_until_viewed() {
+        let mut a = Attention::default();
+        a.observe(&st(&[("a", Working)]), &set(&[]));
+        let changes = a.observe(&st(&[("a", Error)]), &set(&[]));
+        assert_eq!(changes, vec![change("a", Kind::Error)]);
+        assert!(a.has_attention("a"));
+        a.observe(&st(&[("a", Error)]), &set(&["a"]));
+        assert!(!a.has_attention("a"));
+        // Error to blocked is a change of its own and keeps the ring.
+        a.observe(&st(&[("a", Working)]), &set(&[]));
+        a.observe(&st(&[("a", Error)]), &set(&[]));
+        let changes = a.observe(&st(&[("a", Blocked)]), &set(&[]));
+        assert_eq!(changes, vec![change("a", Kind::Blocked)]);
+        assert!(a.has_attention("a"));
+        a.observe(&st(&[("a", Idle)]), &set(&[]));
+        assert!(!a.has_attention("a"));
     }
 
     #[test]

@@ -96,6 +96,9 @@ struct Shared {
     title: Option<String>,
     /// Answers the grid wants written to the PTY.
     replies: Vec<String>,
+    /// The part of `replies` the server gives itself, also with a controller attached (the OSC 7501
+    /// detection answer: xterm.js does not know it).
+    own: Vec<String>,
     /// Color queries; the formatter is applied once the grid is up to date.
     color_requests: Vec<(usize, Formatter)>,
 }
@@ -141,6 +144,19 @@ impl Dimensions for Size {
     }
 }
 
+/// The answers to the queries fed so far.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Answers {
+    /// Every answer, in order.
+    pub all: Vec<u8>,
+    /// The ones the server writes even while a controller is attached.
+    pub own: Vec<u8>,
+}
+
+/// The answer to `OSC 7501 ; ? ST`: what the server understands, nothing from any report.
+pub const DETECTION_REPLY: &str =
+    "\x1b]7501;?:states=idle,working,blocked,done,error,clear:kinds=permission,question,auth\x1b\\";
+
 pub struct Emulator {
     term: Term<Listener>,
     processor: Processor<StdSyncHandler>,
@@ -150,6 +166,8 @@ pub struct Emulator {
     region: Option<(usize, usize)>,
     /// The primary screen with its scrollback, dumped when the alternate screen was entered.
     primary: Option<Vec<u8>>,
+    /// What the scanner saw that concerns the agent status, until [`Emulator::take_signals`].
+    signals: Vec<Signal>,
 }
 
 impl Emulator {
@@ -174,7 +192,14 @@ impl Emulator {
             scanner: Scanner::default(),
             region: None,
             primary: None,
+            signals: Vec::new(),
         }
+    }
+
+    /// The agent status signals fed since the last call (OSC 7501 reports, new prompts, RIS), in
+    /// order.
+    pub fn take_signals(&mut self) -> Vec<Signal> {
+        std::mem::take(&mut self.signals)
     }
 
     #[cfg(test)]
@@ -209,22 +234,33 @@ impl Emulator {
     /// The answers to the queries fed so far (DA1/DA2, DSR, OSC 10/11/12/4 color queries), as
     /// bytes for the PTY, in order. Taken once: the next call only returns newer ones. A color
     /// the program set itself (OSC 4, 10, 11) wins over `colors`.
+    #[cfg(test)]
     pub fn take_replies(&mut self, colors: &Colors) -> Vec<u8> {
-        let (replies, requests) = {
+        self.take_answers(colors).all
+    }
+
+    /// Like [`take_replies`](Self::take_replies), plus the part of the answers that the server
+    /// gives itself even while a controller is attached (the OSC 7501 detection answer).
+    pub fn take_answers(&mut self, colors: &Colors) -> Answers {
+        let (replies, own, requests) = {
             let mut shared = self.title.lock();
             (
                 std::mem::take(&mut shared.replies),
+                std::mem::take(&mut shared.own),
                 std::mem::take(&mut shared.color_requests),
             )
         };
-        let mut out = replies.concat().into_bytes();
+        let mut all = replies.concat().into_bytes();
         for (index, format) in requests {
             let own = self.term.colors()[index];
             if let Some(rgb) = own.or_else(|| colors.get(index)) {
-                out.extend(format(rgb).into_bytes());
+                all.extend(format(rgb).into_bytes());
             }
         }
-        out
+        Answers {
+            all,
+            own: own.concat().into_bytes(),
+        }
     }
 
     pub fn feed(&mut self, bytes: &[u8]) {
@@ -245,6 +281,17 @@ impl Emulator {
                         .filter(|&(t, b)| t < b && !(t == 0 && b == rows - 1));
                 }
                 Hit::Reset => self.region = None,
+                Hit::Ris => self.signals.push(Signal::Ris),
+                Hit::Prompt => self.signals.push(Signal::Prompt),
+                Hit::Report(report) => self.signals.push(Signal::Report(report)),
+                Hit::Detect(at) => {
+                    // The grid answers what came before the query first.
+                    self.processor.advance(&mut self.term, &bytes[done..at]);
+                    done = at;
+                    let mut shared = self.title.lock();
+                    shared.replies.push(DETECTION_REPLY.to_string());
+                    shared.own.push(DETECTION_REPLY.to_string());
+                }
             }
         }
         self.processor.advance(&mut self.term, &bytes[done..]);
@@ -492,7 +539,136 @@ fn color(out: &mut String, c: Color, base: u8, bright: u8, ext: u8) {
 
 // --- the scanner -------------------------------------------------------------------------------
 
+/// What the output said about the agent status of the terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Signal {
+    /// An OSC 7501 report.
+    Report(Report),
+    /// OSC 133 `A`: the shell shows a new prompt.
+    Prompt,
+    /// RIS (`ESC c`).
+    Ris,
+}
+
+/// The state of an OSC 7501 report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportState {
+    Idle,
+    Working,
+    Blocked,
+    Done,
+    Error,
+    Clear,
+}
+
+/// A parsed OSC 7501 report (`ESC ] 7501 ; key=value:… ST`). Everything in it is untrusted.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Report {
+    pub state: Option<ReportState>,
+    /// Absent for the root record.
+    pub id: Option<String>,
+    pub app: Option<String>,
+    pub msg: Option<String>,
+    pub title: Option<String>,
+    /// 0 to 100 (`progress`).
+    pub progress: Option<u8>,
+    /// `permission`, `question` or `auth` (`kind`).
+    pub kind: Option<String>,
+}
+
+/// Longest OSC 7501 sequence read, in bytes after `ESC ]`.
+const MAX_REPORT: usize = 4096;
+const MAX_MSG: usize = 2048;
+const MAX_TITLE: usize = 192;
+const MAX_APP: usize = 32;
+const MAX_KEY: usize = 16;
+
+fn value_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b',' | b'+' | b'/' | b'=' | b'-')
+}
+
+/// Standard base64 of UTF-8 without control characters, padding optional, at most `max` decoded
+/// bytes.
+fn text_of(value: &str, max: usize) -> Option<String> {
+    use base64::Engine as _;
+    use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
+    // Bound the work before decoding: 4 characters give 3 bytes.
+    if value.len() > max.div_ceil(3) * 4 + 4 {
+        return None;
+    }
+    let engine = GeneralPurpose::new(
+        &base64::alphabet::STANDARD,
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+    );
+    let bytes = engine.decode(value).ok()?;
+    if bytes.len() > max {
+        return None;
+    }
+    let text = String::from_utf8(bytes).ok()?;
+    (!text.chars().any(char::is_control)).then_some(text)
+}
+
+/// Parses the body of an OSC 7501 (after `7501;`). `None` drops the whole report.
+fn parse_report(body: &[u8]) -> Option<Report> {
+    let body = std::str::from_utf8(body).ok()?;
+    let mut state = None;
+    let mut report = Report::default();
+    for pair in body.split(':') {
+        let pair = pair.trim();
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_lowercase()) {
+            continue;
+        }
+        if key.len() > MAX_KEY {
+            return None;
+        }
+        let clean = value.bytes().all(value_byte);
+        match key {
+            "state" if clean => {
+                state = Some(match value {
+                    "idle" => ReportState::Idle,
+                    "working" => ReportState::Working,
+                    "blocked" => ReportState::Blocked,
+                    "done" => ReportState::Done,
+                    "error" => ReportState::Error,
+                    "clear" => ReportState::Clear,
+                    _ => return None,
+                });
+            }
+            "id" => {
+                if !clean || !poimen_protocol::valid_record_id(value) {
+                    return None;
+                }
+                report.id = Some(value.to_string());
+            }
+            "app" if clean => {
+                if value.len() > MAX_APP {
+                    return None;
+                }
+                report.app = (!value.is_empty()).then(|| value.to_string());
+            }
+            "msg" if clean => report.msg = Some(text_of(value, MAX_MSG)?),
+            "title" if clean => report.title = Some(text_of(value, MAX_TITLE)?),
+            // A value outside the spec is ignored like an unknown key; the state still counts.
+            "progress" if clean => {
+                report.progress = value.parse::<u8>().ok().filter(|p| *p <= 100);
+            }
+            "kind" if clean => {
+                report.kind = poimen_protocol::BLOCK_KINDS
+                    .contains(&value)
+                    .then(|| value.to_string());
+            }
+            _ => {}
+        }
+    }
+    report.state = Some(state?);
+    Some(report)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Hit {
     /// The final byte of a sequence that enters the alternate screen is at this index.
     EnterAlt(usize),
@@ -500,6 +676,14 @@ enum Hit {
     Region(Option<(usize, usize)>),
     /// RIS or DECSTR.
     Reset,
+    /// RIS only.
+    Ris,
+    /// OSC 133 `A`.
+    Prompt,
+    /// A complete, valid OSC 7501 report.
+    Report(Report),
+    /// `OSC 7501 ; ? ST` ended at this index (exclusive).
+    Detect(usize),
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -519,6 +703,12 @@ enum State {
 struct Scanner {
     state: State,
     params: Vec<u8>,
+    /// The string in `Str` is an OSC and its body is collected in `body` (the start of an OSC 7501
+    /// or an OSC 133 is wanted, nothing else).
+    collect: bool,
+    body: Vec<u8>,
+    /// More bytes than the limit of the sequence came, or it was cut off: nothing is reported.
+    spoiled: bool,
 }
 
 impl Scanner {
@@ -531,21 +721,7 @@ impl Scanner {
                         self.state = State::Esc;
                     }
                 }
-                State::Esc => {
-                    self.state = match b {
-                        b'[' => {
-                            self.params.clear();
-                            State::Csi
-                        }
-                        b']' | b'P' | b'_' | b'^' | b'X' => State::Str,
-                        b'c' => {
-                            hits.push(Hit::Reset);
-                            State::Ground
-                        }
-                        0x1b => State::Esc,
-                        _ => State::Ground,
-                    };
-                }
+                State::Esc => self.state = self.esc(b, &mut hits),
                 State::Csi => match b {
                     0x20..=0x3f => {
                         if self.params.len() < 64 {
@@ -561,24 +737,94 @@ impl Scanner {
                     _ => {}
                 },
                 State::Str => match b {
-                    0x07 | 0x18 | 0x1a => self.state = State::Ground,
+                    0x07 => {
+                        self.finish(i, &mut hits);
+                        self.state = State::Ground;
+                    }
+                    0x18 | 0x1a => self.state = State::Ground,
                     0x1b => self.state = State::StrEsc,
-                    _ => {}
+                    _ => self.collect_byte(b),
                 },
                 State::StrEsc => {
-                    self.state = if b == b'\\' {
-                        State::Ground
+                    if b == b'\\' {
+                        self.finish(i, &mut hits);
+                        self.state = State::Ground;
                     } else {
-                        State::Str
-                    };
-                    if b == b'[' {
-                        self.params.clear();
-                        self.state = State::Csi;
+                        // ESC inside a string aborts it and starts a new sequence.
+                        self.state = self.esc(b, &mut hits);
                     }
                 }
             }
         }
         hits
+    }
+
+    /// The byte after ESC: the state it leads to.
+    fn esc(&mut self, b: u8, hits: &mut Vec<Hit>) -> State {
+        match b {
+            b'[' => {
+                self.params.clear();
+                State::Csi
+            }
+            b']' | b'P' | b'_' | b'^' | b'X' => {
+                self.collect = b == b']';
+                self.spoiled = false;
+                self.body.clear();
+                State::Str
+            }
+            b'c' => {
+                hits.push(Hit::Reset);
+                hits.push(Hit::Ris);
+                State::Ground
+            }
+            0x1b => State::Esc,
+            _ => State::Ground,
+        }
+    }
+
+    /// Keeps the start of an OSC string: 7501 up to its limit, anything else only as far as it
+    /// takes to tell it is not wanted (the buffer never grows past `MAX_REPORT`).
+    fn collect_byte(&mut self, b: u8) {
+        if !self.collect || self.spoiled {
+            return;
+        }
+        let limit = if self.body.starts_with(b"7501;") {
+            MAX_REPORT
+        } else {
+            32
+        };
+        if self.body.len() >= limit {
+            // Too long for a report; an OSC 133 never needs this much either.
+            self.spoiled = true;
+            self.body.clear();
+            return;
+        }
+        self.body.push(b);
+        let near = |p: &[u8]| p.starts_with(&self.body) || self.body.starts_with(p);
+        let wanted = near(b"7501;") || near(b"133;");
+        if !wanted {
+            self.spoiled = true;
+            self.body.clear();
+        }
+    }
+
+    /// The OSC string ended with a terminator.
+    fn finish(&mut self, at: usize, hits: &mut Vec<Hit>) {
+        if !self.collect || self.spoiled {
+            return;
+        }
+        let body = std::mem::take(&mut self.body);
+        if let Some(rest) = body.strip_prefix(b"7501;") {
+            if rest == b"?" {
+                hits.push(Hit::Detect(at + 1));
+            } else if let Some(report) = parse_report(rest) {
+                hits.push(Hit::Report(report));
+            }
+        } else if body == b"133;A" || body.starts_with(b"133;A;") {
+            hits.push(Hit::Prompt);
+        }
+        self.body = body;
+        self.body.clear();
     }
 
     fn csi(&self, fin: u8, at: usize, hits: &mut Vec<Hit>) {
@@ -820,6 +1066,42 @@ mod tests {
     }
 
     #[test]
+    fn the_detection_query_is_answered_ahead_of_the_following_da1() {
+        assert_eq!(
+            replies(b"\x1b]7501;?\x1b\\\x1b[c"),
+            format!("{DETECTION_REPLY}\x1b[?6c")
+        );
+        assert_eq!(replies(b"\x1b]7501;?\x07"), DETECTION_REPLY);
+        // What came before the query is answered before it, also in one chunk.
+        assert_eq!(
+            replies(b"\x1b[c\x1b]7501;?\x07\x1b[c"),
+            format!("\x1b[?6c{DETECTION_REPLY}\x1b[?6c")
+        );
+        // Split over feeds.
+        let mut e = fresh(10, 3);
+        e.feed(b"\x1b]7501;");
+        e.feed(b"?\x1b");
+        e.feed(b"\\\x1b[c");
+        assert_eq!(
+            String::from_utf8(e.take_replies(&Colors::default())).unwrap(),
+            format!("{DETECTION_REPLY}\x1b[?6c")
+        );
+    }
+
+    #[test]
+    fn the_detection_answer_is_also_given_separately_and_carries_no_report() {
+        let mut e = fresh(10, 3);
+        e.feed(b"\x1b]7501;state=blocked:msg=aGk\x07\x1b[c\x1b]7501;?\x07");
+        let a = e.take_answers(&Colors::default());
+        assert_eq!(a.own, DETECTION_REPLY.as_bytes());
+        assert_eq!(a.all, format!("\x1b[?6c{DETECTION_REPLY}").into_bytes());
+        assert!(!a.own.windows(3).any(|w| w == b"msg"));
+        // A report is not a query and a query with more is not either.
+        assert!(replies(b"\x1b]7501;state=idle\x07\x1b]7501;?x\x07").is_empty());
+        assert!(e.take_answers(&Colors::default()).own.is_empty());
+    }
+
+    #[test]
     fn replies_are_taken_once() {
         let mut e = fresh(20, 5);
         e.feed(b"\x1b[c");
@@ -843,5 +1125,194 @@ mod tests {
         assert_eq!(row_text(&copy, 1), "01234567");
         assert_eq!(row_text(&copy, 2), "89");
         assert_eq!(copy.cursor(), (0, 5));
+    }
+
+    // --- OSC 7501 -------------------------------------------------------------------------
+
+    fn reports(bytes: &[u8]) -> Vec<Report> {
+        let mut s = Scanner::default();
+        s.scan(bytes)
+            .into_iter()
+            .filter_map(|h| match h {
+                Hit::Report(r) => Some(r),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn b64(text: &str) -> String {
+        poimen_protocol::encode_bytes(text.as_bytes())
+    }
+
+    #[test]
+    fn a_report_is_parsed_with_either_terminator() {
+        for end in ["\x07", "\x1b\\"] {
+            let got = reports(format!("a\x1b]7501;state=working:app=codex{end}b").as_bytes());
+            assert_eq!(got.len(), 1, "{end:?}");
+            assert_eq!(got[0].state, Some(ReportState::Working));
+            assert_eq!(got[0].app.as_deref(), Some("codex"));
+            assert_eq!(got[0].id, None);
+        }
+    }
+
+    #[test]
+    fn a_report_split_at_every_byte_is_the_same_report() {
+        let text = format!(
+            "x\x1b]7501;state=blocked:app=aider:msg={}\x1b\\y",
+            b64("Allow? é")
+        );
+        let whole = reports(text.as_bytes());
+        assert_eq!(whole.len(), 1);
+        assert_eq!(whole[0].msg.as_deref(), Some("Allow? é"));
+        for cut in 1..text.len() {
+            let mut s = Scanner::default();
+            let (a, b) = text.as_bytes().split_at(cut);
+            let mut hits = s.scan(a);
+            hits.extend(s.scan(b));
+            assert_eq!(hits, vec![Hit::Report(whole[0].clone())], "cut at {cut}");
+        }
+        let mut s = Scanner::default();
+        let mut hits = Vec::new();
+        for byte in text.as_bytes() {
+            hits.extend(s.scan(std::slice::from_ref(byte)));
+        }
+        assert_eq!(hits, vec![Hit::Report(whole[0].clone())]);
+    }
+
+    #[test]
+    fn pairs_follow_the_spec() {
+        let got = reports(
+            b"\x1b]7501; state = idle :junk:=x:Bad=1:nokey:foo=bar:app=a:app=b:title=aGk\x07",
+        );
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].state, Some(ReportState::Idle));
+        assert_eq!(got[0].app.as_deref(), Some("b"));
+        // Padding is optional.
+        assert_eq!(got[0].title.as_deref(), Some("hi"));
+        let padded = reports(b"\x1b]7501;state=idle:title=aGk=\x07");
+        assert_eq!(padded[0].title.as_deref(), Some("hi"));
+        // The last duplicate wins, also for the state.
+        let dup = reports(b"\x1b]7501;state=idle:state=done\x07");
+        assert_eq!(dup[0].state, Some(ReportState::Done));
+        // A value with characters outside the set makes a malformed pair: skipped.
+        let bad = reports(b"\x1b]7501;state=idle:app=a b\x07");
+        assert_eq!(bad[0].app, None);
+        let rich = reports(b"\x1b]7501;state=blocked:progress=40:kind=permission\x07");
+        assert_eq!(rich[0].progress, Some(40));
+        assert_eq!(rich[0].kind.as_deref(), Some("permission"));
+        // Out of range, not a number or an unknown kind: ignored, the state still counts.
+        for body in [
+            "progress=101",
+            "progress=-1",
+            "progress=4.5",
+            "progress=",
+            "kind=other",
+        ] {
+            let got = reports(format!("\x1b]7501;state=working:{body}\x07").as_bytes());
+            assert_eq!(got[0].state, Some(ReportState::Working), "{body}");
+            assert_eq!(
+                (got[0].progress, got[0].kind.as_deref()),
+                (None, None),
+                "{body}"
+            );
+        }
+        let child = reports(b"\x1b]7501;state=working:id=sub-1\x07");
+        assert_eq!(child[0].id.as_deref(), Some("sub-1"));
+    }
+
+    #[test]
+    fn a_child_id_follows_the_segment_rules() {
+        let ok = reports(b"\x1b]7501;state=idle:id=run/issue-12\x07");
+        assert_eq!(ok[0].id.as_deref(), Some("run/issue-12"));
+        let seg33 = format!("\x1b]7501;state=idle:id={}\x07", "a".repeat(33));
+        let deep = format!("\x1b]7501;state=idle:id={}\x07", ["a"; 9].join("/"));
+        for bad in ["id=a//b", "id=/a", "id=a/", "id=a=b"] {
+            let text = format!("\x1b]7501;state=idle:{bad}\x07");
+            assert!(reports(text.as_bytes()).is_empty(), "{bad}");
+        }
+        assert!(reports(seg33.as_bytes()).is_empty());
+        assert!(reports(deep.as_bytes()).is_empty());
+    }
+
+    #[test]
+    fn invalid_reports_are_dropped_whole() {
+        let long_msg = b64(&"a".repeat(2049));
+        let long_title = b64(&"a".repeat(193));
+        let cases = [
+            "state=nope".to_string(),
+            "app=codex".to_string(),
+            "state=idle:id=".to_string(),
+            "state=idle:id=a b".to_string(),
+            "state=idle:msg=ab-_".to_string(),
+            format!("state=idle:msg={}", b64("a\nb")),
+            format!("state=idle:msg={}", b64("a\u{1b}b")),
+            "state=idle:msg=/w==".to_string(),
+            format!("state=idle:msg={long_msg}"),
+            format!("state=idle:title={long_title}"),
+            format!("state=idle:app={}", "a".repeat(33)),
+            format!("state=idle:{}=1", "a".repeat(17)),
+            format!("state=idle:app={}", "a".repeat(5000)),
+        ];
+        for body in cases {
+            let text = format!("\x1b]7501;{body}\x07");
+            assert!(reports(text.as_bytes()).is_empty(), "{body:.60}");
+        }
+        // The limits themselves are fine.
+        let ok = format!(
+            "\x1b]7501;state=idle:app={}:msg={}:title={}\x07",
+            "a".repeat(32),
+            b64(&"a".repeat(2048)),
+            b64(&"b".repeat(192))
+        );
+        assert_eq!(reports(ok.as_bytes()).len(), 1);
+    }
+
+    #[test]
+    fn a_sequence_over_4096_bytes_is_dropped_and_the_next_one_read() {
+        let pad = "a".repeat(4096);
+        let text = format!("\x1b]7501;state=idle:x={pad}\x07\x1b]7501;state=done\x07");
+        let got = reports(text.as_bytes());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].state, Some(ReportState::Done));
+        // Exactly 4096 bytes is still read.
+        let fill = "a".repeat(4096 - "7501;state=idle:x=".len());
+        let exact = format!("\x1b]7501;state=idle:x={fill}\x07");
+        assert_eq!(reports(exact.as_bytes()).len(), 1);
+    }
+
+    #[test]
+    fn other_strings_and_aborted_sequences_report_nothing() {
+        assert!(reports(b"\x1bP7501;state=idle\x07").is_empty());
+        assert!(reports(b"\x1b]7500;state=idle\x07").is_empty());
+        assert!(reports(b"\x1b]7501;state=idle\x18").is_empty());
+        assert!(reports(b"\x1b]7501;state=idle\x1bxy\x07").is_empty());
+        // An aborted report does not swallow the next one.
+        assert_eq!(
+            reports(b"\x1b]7501;state=idle\x1b]7501;state=done\x07").len(),
+            1
+        );
+        assert!(reports(b"\x1b]7501;state=idle").is_empty());
+    }
+
+    #[test]
+    fn prompts_and_ris_are_signals_decstr_is_not() {
+        let mut e = fresh(20, 5);
+        e.feed(b"\x1b]133;A\x07\x1b]133;A;k=1\x1b\\\x1b]133;B\x07\x1b]133;C\x07");
+        assert_eq!(e.take_signals(), vec![Signal::Prompt, Signal::Prompt]);
+        e.feed(b"\x1b[!p");
+        assert_eq!(e.take_signals(), vec![]);
+        e.feed(b"\x1b]7501;state=working\x07\x1bc");
+        let signals = e.take_signals();
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[1], Signal::Ris);
+    }
+
+    #[test]
+    fn a_report_does_not_change_the_grid() {
+        let mut e = fresh(20, 3);
+        e.feed(b"ab\x1b]7501;state=working\x07cd");
+        let mut plain = fresh(20, 3);
+        plain.feed(b"abcd");
+        assert_eq!(e.snapshot(), plain.snapshot());
     }
 }

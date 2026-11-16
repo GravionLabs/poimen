@@ -518,7 +518,10 @@ fn agent_reports_update_the_terminal_emit_an_event_and_stale_ones_are_dropped() 
             agent: Some("claude".into()),
             session_id: Some("s1".into()),
             message: None,
-            message_at: None
+            message_at: None,
+            progress: None,
+            kind: None,
+            title: None,
         }
     );
     assert_eq!(agent().unwrap().status, AgentStatus::Working);

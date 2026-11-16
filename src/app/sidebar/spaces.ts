@@ -1,15 +1,20 @@
 import {
   shortPath,
+  stateText,
+  validProgress,
   type AgentStatus,
   type BranchPull,
+  type ChildRecord,
   type PaneRow,
   type SpaceNode,
+  type StateDetails,
+  type Terminal,
 } from "../core/snapshot";
 import { checksText } from "../github/pulls";
 
 /** State word shown next to the name; `undefined` while herdr reports no known state. */
-export function stateLabel(status: AgentStatus): string | undefined {
-  return status === "unknown" ? undefined : status;
+export function stateLabel(status: AgentStatus, details?: StateDetails): string | undefined {
+  return stateText(status, details);
 }
 
 /**
@@ -160,6 +165,7 @@ export function paneLine2(row: PaneRow, ctx: SpaceContext): string {
 }
 
 const STATUS_RANK: Record<AgentStatus, number> = {
+  error: 5,
   blocked: 4,
   working: 3,
   done: 2,
@@ -172,6 +178,18 @@ export function aggregateStatus(space: SpaceNode): AgentStatus {
   return [space.workspace.agent_status, ...space.rows.map((r) => r.pane.agent_status)].reduce(
     (best, s) => ((STATUS_RANK[s] ?? 0) > (STATUS_RANK[best] ?? 0) ? s : best),
   );
+}
+
+/**
+ * The details of a space row's state word: the progress of the first pane that has the space's
+ * aggregate status and reports one (`working 40%`), and the kind of the first block.
+ */
+export function spaceDetails(space: SpaceNode, status: AgentStatus): StateDetails {
+  const rows = space.rows.filter((r) => r.pane.agent_status === status);
+  return {
+    kind: rows.find((r) => r.pane.agent_kind)?.pane.agent_kind,
+    progress: rows.map((r) => validProgress(r.pane.agent_progress)).find((p) => p !== undefined),
+  };
 }
 
 /** Row types whose layout the user configures (`sidebar.rows`). */
@@ -260,7 +278,14 @@ export function renderRow(
       case "name":
         return name;
       case "state_text":
-        return stateLabel(status);
+        return stateLabel(
+          status,
+          pane
+            ? { kind: pane.pane.agent_kind, progress: pane.pane.agent_progress }
+            : space
+              ? spaceDetails(space, status)
+              : undefined,
+        );
       case "agent":
         return pane?.agent;
       case "title":
@@ -343,4 +368,46 @@ export function renderRow(
       return out;
     })
     .filter((l) => l.some((s) => s.kind !== "dot"));
+}
+
+/** More child records than this are folded into one summary line until the user opens them. */
+export const RECORDS_SHOWN = 4;
+
+/** One child record as a row below its terminal. */
+export interface RecordRow {
+  id: string;
+  /** Nesting level: the number of `/` in the id. */
+  depth: number;
+  status: AgentStatus;
+  /** The record's title, else the last segment of its id. */
+  name: string;
+  state: string | undefined;
+  message?: string;
+}
+
+/** The records of `pane` as rows: ordered by id, so a parent comes right before its children. */
+export function recordRows(pane: Terminal): RecordRow[] {
+  return [...(pane.records ?? [])]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((r) => {
+      const name = r.title || r.id.slice(r.id.lastIndexOf("/") + 1);
+      return {
+        id: r.id,
+        depth: r.id.split("/").length - 1,
+        status: r.status,
+        name,
+        state: stateLabel(r.status, { kind: r.kind, progress: r.progress }),
+        message: r.message && same(r.message) !== same(name) ? r.message : undefined,
+      };
+    });
+}
+
+/** `5 records · 1 error · 2 working` for the folded line. */
+export function recordsSummary(records: readonly ChildRecord[]): string {
+  const parts = [`${records.length} records`];
+  for (const status of ["error", "blocked", "working"] as const) {
+    const n = records.filter((r) => r.status === status).length;
+    if (n) parts.push(`${n} ${status}`);
+  }
+  return parts.join(" · ");
 }

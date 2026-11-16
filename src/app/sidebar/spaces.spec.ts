@@ -7,6 +7,8 @@ import {
   paneMarks,
   paneMeta,
   prText,
+  recordRows,
+  recordsSummary,
   prTooltip,
   renderRow,
   DEFAULT_SIDEBAR_ROWS,
@@ -40,6 +42,45 @@ describe("stateLabel", () => {
   it("returns the state word, nothing for unknown", () => {
     expect(stateLabel("blocked")).toBe("blocked");
     expect(stateLabel("unknown")).toBeUndefined();
+  });
+});
+
+describe("error, progress and the kind of a block (#682)", () => {
+  it("labels error, a block with its kind and progress", () => {
+    expect(stateLabel("error")).toBe("error");
+    expect(stateLabel("blocked", { kind: "permission" })).toBe("waiting: permission");
+    expect(stateLabel("blocked", { kind: "" })).toBe("blocked");
+    expect(stateLabel("working", { progress: 40 })).toBe("working 40%");
+    // Out of range or not whole: no progress; progress means nothing for done and idle.
+    expect(stateLabel("working", { progress: 101 })).toBe("working");
+    expect(stateLabel("working", { progress: 4.5 })).toBe("working");
+    expect(stateLabel("done", { progress: 100 })).toBe("done");
+  });
+
+  it("shows the kind and progress of a pane in its state text", () => {
+    const text = (r: PaneRow) =>
+      renderRow("agent", DEFAULT_SIDEBAR_ROWS.agent, r, { worktree: false })[0]!.find(
+        (s) => s.kind === "state",
+      )?.text;
+    expect(text(row({ pane: { agent_status: "blocked", agent_kind: "auth" } }))).toBe(
+      "waiting: auth",
+    );
+    expect(text(row({ pane: { agent_status: "working", agent_progress: 40 } }))).toBe(
+      "working 40%",
+    );
+    expect(text(row({ pane: { agent_status: "error" } }))).toBe("error");
+  });
+
+  it("ranks error above blocked on the space row and shows the progress there", () => {
+    const failing = row({ pane: { terminal_id: "a", agent_status: "error" } });
+    const blocked = row({ pane: { terminal_id: "b", agent_status: "blocked" } });
+    expect(aggregateStatus(space([blocked, failing]))).toBe("error");
+    const busy = space([
+      row({ pane: { terminal_id: "a", agent_status: "working", agent_progress: 60 } }),
+      row({ pane: { terminal_id: "b", agent_status: "idle" } }),
+    ]);
+    const line = renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, busy, spaceContext(busy));
+    expect(line[0]!.find((s) => s.kind === "state")?.text).toBe("working 60%");
   });
 });
 
@@ -410,5 +451,40 @@ describe("worktree member row", () => {
         .map((s) => s.text);
     expect(text(head)).toEqual(["wt feat/x"]);
     expect(text(member)).toEqual(["feat/x"]);
+  });
+});
+
+describe("child records (#684)", () => {
+  const pane = (records: NonNullable<Terminal["records"]>): Terminal =>
+    row({ pane: { records } }).pane;
+
+  it("lists records by id with depth, name, state and message", () => {
+    const rows = recordRows(
+      pane([
+        { id: "run/b", status: "blocked", kind: "permission", message: "Allow?" },
+        { id: "run", status: "working", progress: 30 },
+        { id: "run/a", status: "done", title: "Issue A", message: "issue a" },
+      ]),
+    );
+    expect(rows.map((r) => [r.id, r.depth, r.name, r.state, r.message])).toEqual([
+      ["run", 0, "run", "working 30%", undefined],
+      ["run/a", 1, "Issue A", "done", undefined],
+      ["run/b", 1, "b", "waiting: permission", "Allow?"],
+    ]);
+  });
+
+  it("summarizes many records by their urgent statuses", () => {
+    const records = [
+      { id: "a", status: "error" },
+      { id: "b", status: "working" },
+      { id: "c", status: "working" },
+      { id: "d", status: "done" },
+      { id: "e", status: "blocked" },
+    ] as const;
+    expect(recordsSummary([...records])).toBe("5 records · 1 error · 1 blocked · 2 working");
+  });
+
+  it("has no rows without records", () => {
+    expect(recordRows(pane([]))).toEqual([]);
   });
 });

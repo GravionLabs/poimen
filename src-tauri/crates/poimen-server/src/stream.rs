@@ -12,14 +12,14 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
 use poimen_protocol::{
     AttachMode, AttachResult, DetachReason, ErrorCode, Event, Response, encode_bytes,
 };
 use serde_json::json;
 
-use crate::emulator::{Colors, Emulator};
+use crate::emulator::{Colors, Emulator, Signal};
 use crate::pty::{MAX_BATCH, PtyWriter};
 
 /// Records a client may have queued before it counts as too slow.
@@ -77,7 +77,13 @@ pub(crate) struct TermStream {
     colors: Arc<RwLock<Colors>>,
     /// Where answers to terminal queries go while no controller is attached.
     writer: Mutex<Option<PtyWriter>>,
+    /// Where the agent status signals of the output go (OSC 7501, new prompts, RIS), called
+    /// outside the stream lock.
+    signals: OnceLock<SignalSink>,
 }
+
+/// Receives the signals of one output batch, in order.
+pub(crate) type SignalSink = Arc<dyn Fn(Vec<Signal>) + Send + Sync>;
 
 /// An attachment: the id the connection uses to detach and to prove it is the controller.
 #[derive(Debug)]
@@ -115,7 +121,13 @@ impl TermStream {
             publish,
             colors,
             writer: Mutex::new(None),
+            signals: OnceLock::new(),
         }
+    }
+
+    /// Where the agent status signals of the output go; set once.
+    pub fn set_signal_sink(&self, sink: SignalSink) {
+        let _ = self.signals.set(sink);
     }
 
     /// The PTY the server answers terminal queries on while no controller is attached.
@@ -153,14 +165,23 @@ impl TermStream {
     }
 
     fn feed(&self, bytes: &[u8], live: bool) {
+        let mut signals = Vec::new();
         for chunk in bytes.chunks(MAX_BATCH) {
             let mut st = self.lock();
             st.emulator.feed(chunk);
-            let replies = {
+            signals.extend(st.emulator.take_signals());
+            let answers = {
                 let colors = self.colors.read().unwrap_or_else(|e| e.into_inner());
-                st.emulator.take_replies(&colors)
+                st.emulator.take_answers(&colors)
             };
-            let answer = live && st.controller.is_none() && !replies.is_empty();
+            // With a controller, xterm.js answers the standard queries; only the answer to
+            // OSC 7501 (which it does not know) is the server's.
+            let replies = if st.controller.is_none() {
+                answers.all
+            } else {
+                answers.own
+            };
+            let answer = live && !replies.is_empty();
             st.seq += 1;
             let line = line_of(&Event::TerminalOutput {
                 terminal_id: self.terminal_id.clone(),
@@ -172,6 +193,12 @@ impl TermStream {
             if answer {
                 self.answer(&replies);
             }
+        }
+        // One call for the whole batch, so a replay changes the status at most once.
+        if !signals.is_empty()
+            && let Some(sink) = self.signals.get()
+        {
+            sink(signals);
         }
     }
 
@@ -595,10 +622,25 @@ mod tests {
     }
 
     #[test]
+    fn the_detection_query_is_answered_with_and_without_a_controller_once() {
+        let (s, sink) = answering();
+        s.output(b"\x1b]7501;?\x07\x1b[c");
+        assert_eq!(
+            answered(&sink),
+            format!("{}\x1b[?6c", crate::emulator::DETECTION_REPLY)
+        );
+        let (c, _rx) = client(&s, AttachMode::Control, false, 8).unwrap();
+        let before = answered(&sink).len();
+        s.output(b"\x1b]7501;?\x07\x1b[c\x1b[6n");
+        assert_eq!(&answered(&sink)[before..], crate::emulator::DETECTION_REPLY);
+        s.detach(c.client_id);
+    }
+
+    #[test]
     fn replayed_output_reaches_the_grid_and_the_clients_but_its_queries_get_no_answer() {
         let (s, sink) = answering();
         let (_, rx) = client(&s, AttachMode::Observe, false, 8).unwrap();
-        s.replay(b"prompt$ \x1b[c\x1b[6n");
+        s.replay(b"prompt$ \x1b[c\x1b[6n\x1b]7501;?\x07");
         assert_eq!(answered(&sink), "");
         let lines = texts(&rx);
         assert!(lines[1].contains("terminal.output"), "{lines:?}");
@@ -636,5 +678,18 @@ mod tests {
         s.detach(c.client_id);
         s.output(b"x");
         assert_eq!(answered(&sink), "");
+    }
+
+    #[test]
+    fn a_replay_hands_all_its_signals_over_in_one_call() {
+        let (s, _events) = stream();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&calls);
+        s.set_signal_sink(Arc::new(move |signals| sink.lock().unwrap().push(signals)));
+        s.replay(b"\x1b]7501;state=working\x07$ \x1b]133;A\x07\x1b]7501;state=done\x07");
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].len(), 3);
+        drop(calls);
     }
 }

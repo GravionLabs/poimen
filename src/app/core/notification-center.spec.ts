@@ -5,6 +5,13 @@ const label = (id: string) => `tab ${id}`;
 const center = () => new NotificationCenter();
 
 describe("NotificationCenter", () => {
+  it("words a failure and records it like a block", () => {
+    const c = center();
+    c.record([{ paneId: "p1", status: "error" }], label, 1000);
+    expect(c.entries()[0]).toMatchObject({ status: "error", message: "tab p1 failed" });
+    expect(c.unread()).toBe(1);
+  });
+
   it("starts empty", () => {
     const c = center();
     expect(c.entries()).toEqual([]);

@@ -68,9 +68,11 @@ export class Sounds {
     this.fresh = false;
     if (first || changes.length === 0) return;
     const sounds = this.prefs.settings().sounds;
-    const wanted = changes.filter((c) => sounds[c.status as SoundKind] !== false);
+    // A failure asks for the user like a block: it plays the blocked sound.
+    const soundOf = (c: StatusChange): SoundKind => (c.status === "done" ? "done" : "blocked");
+    const wanted = changes.filter((c) => sounds[soundOf(c)] !== false);
     if (wanted.length === 0) return;
-    const kind: SoundKind = wanted.some((c) => c.status === "blocked") ? "blocked" : "done";
+    const kind: SoundKind = wanted.some((c) => soundOf(c) === "blocked") ? "blocked" : "done";
     const last = this.last;
     if (last && now - last.at < SOUND_WINDOW_MS && !(kind === "blocked" && last.kind === "done"))
       return;

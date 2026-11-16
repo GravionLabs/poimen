@@ -12,7 +12,7 @@ export const AGENT_SECTIONS: readonly { id: AgentSection; title: string }[] = [
 
 /** The section of an agent: blocked, done and unread, working, else idle (also done and read, unknown). */
 export function agentSection(status: AgentStatus, unread: boolean): AgentSection {
-  if (status === "blocked") return "needs";
+  if (status === "blocked" || status === "error") return "needs";
   if (status === "done" && unread) return "done";
   if (status === "working") return "working";
   return "idle";

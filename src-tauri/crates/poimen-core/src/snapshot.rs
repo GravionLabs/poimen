@@ -17,6 +17,8 @@ pub enum AgentStatus {
     Working,
     Blocked,
     Done,
+    /// The program reported `error` (OSC 7501, #682).
+    Error,
     #[default]
     #[serde(other)]
     Unknown,
@@ -26,6 +28,7 @@ impl AgentStatus {
     /// Orders statuses for a tab or space row: blocked first, then working, done, idle.
     pub fn urgency(self) -> u8 {
         match self {
+            AgentStatus::Error => 5,
             AgentStatus::Blocked => 4,
             AgentStatus::Working => 3,
             AgentStatus::Done => 2,
@@ -95,6 +98,25 @@ pub struct Tab {
     pub active_terminal: Option<String>,
 }
 
+/// A child record of a terminal (OSC 7501 with an `id`, #684): one row below the terminal.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChildRecord {
+    /// `/`-separated path, e.g. `run/issue-12`.
+    pub id: String,
+    pub status: AgentStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Terminal {
@@ -113,6 +135,18 @@ pub struct Terminal {
     pub agent_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_message_at: Option<u64>,
+    /// 0 to 100, from OSC 7501 `progress` (#682).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_progress: Option<u8>,
+    /// Why the agent is blocked: `permission`, `question` or `auth` (#682).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_kind: Option<String>,
+    /// The program's own title (#682).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_title: Option<String>,
+    /// The child records of the terminal, least recently updated first (#684).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub records: Vec<ChildRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     /// Directory of the foreground process (herdr); follows `cd`.
