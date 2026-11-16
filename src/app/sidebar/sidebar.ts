@@ -119,7 +119,7 @@ export function spaceNodes(
         lines: renderRow("workspace", rows.workspace, space, ctx),
         member: !!space.parent,
       },
-      children: space.rows.map((row) => ({
+      children: nestTabs(space.rows, (row) => ({
         key: row.pane.terminal_id,
         label: row.name,
         leaf: true,
@@ -131,6 +131,49 @@ export function spaceNodes(
       })),
     };
   });
+}
+
+/**
+ * Nodes of pane rows nested by tab (#656): the rows of a tab with `parent` become children of the
+ * first row of that parent tab, in tab order; the other rows of a tab stay siblings of its first
+ * row. A tab whose parent has no row here (or a parent cycle) is top level. A node with children
+ * is expandable and starts expanded.
+ */
+export function nestTabs(
+  rows: readonly PaneRow[],
+  make: (row: PaneRow) => HxTreeNode<SpaceData>,
+): HxTreeNode<SpaceData>[] {
+  const entries = rows.map((row) => ({ row, node: make(row) }));
+  const firstOf = new Map<string, HxTreeNode<SpaceData>>();
+  const parentOf = new Map<string, string | undefined>();
+  for (const { row, node } of entries) {
+    if (!row.tabId) continue;
+    if (!firstOf.has(row.tabId)) firstOf.set(row.tabId, node);
+    parentOf.set(row.tabId, row.tabParent);
+  }
+  const containerOf = (tab: string | undefined): HxTreeNode<SpaceData> | undefined => {
+    const parent = tab ? parentOf.get(tab) : undefined;
+    if (!tab || !parent || !firstOf.has(parent)) return undefined;
+    // Only a chain that comes back to this tab is a cycle; one that joins another is fine.
+    const seen = new Set<string>();
+    for (let up: string | undefined = parent; up && !seen.has(up); up = parentOf.get(up)) {
+      if (up === tab) return undefined;
+      seen.add(up);
+    }
+    return firstOf.get(parent);
+  };
+  const top: HxTreeNode<SpaceData>[] = [];
+  for (const { row, node } of entries) {
+    const container = containerOf(row.tabId);
+    if (!container) {
+      top.push(node);
+      continue;
+    }
+    container.children = [...(container.children ?? []), node];
+    container.leaf = false;
+    container.expanded = true;
+  }
+  return top;
 }
 
 /** The two lists of the `split` layout. */
@@ -202,9 +245,9 @@ export function splitSections(
         member: !!space.parent,
       },
       children: isSelected
-        ? space.rows
-            .filter((row) => !row.agent)
-            .map((row) => ({
+        ? nestTabs(
+            space.rows.filter((row) => !row.agent),
+            (row) => ({
               key: row.pane.terminal_id,
               label: row.name,
               leaf: true,
@@ -213,7 +256,8 @@ export function splitSections(
                 row,
                 lines: renderRow("terminal", rows.terminal, row, ctx),
               },
-            }))
+            }),
+          )
         : undefined,
     };
   });
@@ -630,7 +674,12 @@ export class Sidebar {
   }
 
   /** The tab row being dragged (its pane, tab and space); `null` when no drag runs. */
-  protected readonly tabDrag = signal<{ pane: string; tab: string; space: string } | null>(null);
+  protected readonly tabDrag = signal<{
+    pane: string;
+    tab: string;
+    space: string;
+    parent?: string;
+  } | null>(null);
   /** Where the dragged tab would land: before or after the row of `pane`. */
   protected readonly tabMark = signal<{ pane: string; after: boolean } | null>(null);
 
@@ -639,20 +688,35 @@ export class Sidebar {
     return this.query().trim() === "";
   }
 
-  protected tabDragStart(event: DragEvent, pane: Terminal): void {
+  protected tabDragStart(event: DragEvent, row: PaneRow): void {
+    const pane = row.pane;
     if (!this.canDragTab()) {
       event.preventDefault();
       return;
     }
-    this.tabDrag.set({ pane: pane.terminal_id, tab: pane.tab_id, space: pane.space_id });
+    this.tabDrag.set({
+      pane: pane.terminal_id,
+      tab: pane.tab_id,
+      space: pane.space_id,
+      parent: row.tabParent,
+    });
     event.dataTransfer?.setData("text/plain", pane.terminal_id);
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
   }
 
-  /** A row of another space, or of the dragged tab itself, is no target: no marker, no drop. */
-  protected tabDragOver(event: DragEvent, pane: Terminal): void {
+  /**
+   * A row of another space, of another parent tab (tabs reorder among siblings only, #656) or of
+   * the dragged tab itself is no target: no marker, no drop.
+   */
+  protected tabDragOver(event: DragEvent, row: PaneRow): void {
+    const pane = row.pane;
     const source = this.tabDrag();
-    if (source === null || source.space !== pane.space_id || source.tab === pane.tab_id) {
+    if (
+      source === null ||
+      source.space !== pane.space_id ||
+      source.tab === pane.tab_id ||
+      source.parent !== row.tabParent
+    ) {
       this.tabMark.set(null);
       return;
     }
@@ -661,12 +725,18 @@ export class Sidebar {
     this.tabMark.set({ pane: pane.terminal_id, after: event.clientY > box.top + box.height / 2 });
   }
 
-  protected tabDrop(event: DragEvent, pane: Terminal): void {
+  protected tabDrop(event: DragEvent, row: PaneRow): void {
+    const pane = row.pane;
     event.preventDefault();
     const source = this.tabDrag();
     const mark = this.tabMark();
     this.tabDragEnd();
-    if (source === null || mark?.pane !== pane.terminal_id || source.space !== pane.space_id)
+    if (
+      source === null ||
+      mark?.pane !== pane.terminal_id ||
+      source.space !== pane.space_id ||
+      source.parent !== row.tabParent
+    )
       return;
     this.spaceActions.reorderTabs(source.space, source.tab, pane.tab_id, mark.after);
   }
