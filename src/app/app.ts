@@ -91,6 +91,8 @@ import { SpaceDialog } from "./space-dialog/space-dialog";
 import { TaskDialog } from "./task-dialog/task-dialog";
 import { HooksDialog } from "./hooks-dialog/hooks-dialog";
 import { ServerDialog } from "./server-dialog/server-dialog";
+import { AgentConfirmDialog } from "./agent-confirm-dialog/agent-confirm-dialog";
+import { AgentConfirm } from "./core/agent-confirm";
 import { ServerRestart } from "./core/server-restart";
 import { ResultDialog } from "./result-dialog/result-dialog";
 import { TrustDialog } from "./trust-dialog/trust-dialog";
@@ -141,6 +143,7 @@ const ZOOM_STEP = 1;
     SpaceDialog,
     HooksDialog,
     ServerDialog,
+    AgentConfirmDialog,
     TrustDialog,
     ResultDialog,
     AgentPickerView,
@@ -158,6 +161,7 @@ export class App {
   protected readonly store = inject(SpacesStore);
   protected readonly updater = inject(Updater);
   protected readonly serverRestart = inject(ServerRestart);
+  private readonly agentConfirm = inject(AgentConfirm);
   private readonly bridge = inject(TauriBridge);
   private readonly theme = inject(HxTheme);
   private readonly schemes = inject(ColorSchemeService);
@@ -345,6 +349,8 @@ export class App {
     destroyRef.onDestroy(this.deliver.start());
     // Spaces back from a server restart without terminals get their layout again.
     destroyRef.onDestroy(this.spaceRebuild.start());
+    // Questions of agents that want to write into another space (#615).
+    destroyRef.onDestroy(this.agentConfirm.start());
     effect(() => {
       const dirs = this.store
         .snapshot()

@@ -10,6 +10,7 @@
 
 pub mod check;
 pub mod claude;
+mod confirm;
 pub mod copilot;
 mod create;
 mod emulator;
@@ -343,6 +344,8 @@ pub(crate) struct Shared {
     run_repos: Mutex<runs::Repos>,
     /// The transcript readers of `agent.transcript`, per terminal and follower.
     transcripts: Mutex<HashMap<(String, String), Followed>>,
+    /// The open `agent.confirm` requests (#615): the answer of the app goes to the waiting one.
+    confirms: Mutex<HashMap<String, Sender<bool>>>,
     next_id: AtomicU64,
     socket: PathBuf,
     state_file: PathBuf,
@@ -663,6 +666,7 @@ impl Server {
             runs: Mutex::default(),
             run_repos: Mutex::default(),
             transcripts: Mutex::default(),
+            confirms: Mutex::default(),
             next_id: AtomicU64::new(next_id),
             socket: config.socket,
             state_file: config.state_file,
@@ -1028,6 +1032,9 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
             proto::CHANNEL,
         ))),
         "agent.transcript" => agent_transcript(shared, parsed(request)?),
+        "agent.confirm" => confirm::agent_confirm(shared, parsed(request)?),
+        "agent.confirm_answer" => confirm::agent_confirm_answer(shared, parsed(request)?),
+        "agent.write_notice" => confirm::agent_write_notice(shared, parsed(request)?),
         "repo.ensure" => repo_ensure(shared, parsed(request)?),
         "worktree.create" => worktree_create(shared, parsed(request)?),
         "worktree.cleanup" => worktree_cleanup(shared, parsed(request)?),

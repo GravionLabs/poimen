@@ -50,7 +50,7 @@ Results are text and structured content with ids that the tools accept. Tool err
 - A write tool acts freely in the space of the calling terminal (the space of `POIMEN_TERMINAL_ID`).
 - A write tool that targets any other space needs a confirmation in the app. The app shows the agent, the target space and terminal, and the prompt or command; the call waits for the user's answer, and a timeout counts as "no". The confirmation is per call; there is no "always".
 - Without a connected app, or outside a poimen terminal (no `POIMEN_TERMINAL_ID`), a write to another space is refused with the reason. Read tools do not need the app.
-- The check uses the space id of the target, resolved by the server, and not names that the agent supplies. How the request reaches the app (a request and event pair in `docs/protocol.md`) is decided with the write tools (#615).
+- The check uses the space id of the target, resolved by the server, and not names that the agent supplies. The request reaches the app as `agent.confirm` and the event `agent.confirm_requested` for subscriptions of kind `app`, answered with `agent.confirm_answer` (`docs/protocol.md`, #615); every write is also announced to the app (`agent.write_notice`, `agent.wrote`) for the notification center. The confirmation guards `poimen mcp`; a process that speaks the socket protocol itself is not stopped by it.
 
 ### Relation to agent-events
 
@@ -59,7 +59,7 @@ Deliver runs come from the same core reader as the app: `poimen_core::agent_even
 ## Consequences
 
 - An agent can plan with knowledge of the workspace, and a lead agent can start and prompt others. Both use the status the user sees.
-- The app gains a confirmation dialog for cross-space writes, and the protocol gains the request that carries it (#615). Until then the write tools do not exist.
+- The app gains a confirmation dialog for cross-space writes, and the protocol gains the request that carries it (#615).
 - Writes by an agent stay bounded to its own space unless the user agrees each time. That costs interruptions for cross-space work; "always allow" can come later as a separate decision.
 - The tool list becomes an interface to keep stable and documented. New tools (GitHub, Changes, Flow) need their own decision.
 - Delivery is split: read-only tools #613, installation as an integration next to the hooks (`poimen-server integration install`, the kinds of `integration.rs`) #614, write tools #615.

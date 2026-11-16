@@ -29,12 +29,12 @@ fn main() -> ExitCode {
             let client = Client::new(poimen_protocol::terminal_socket_path());
             let terminal = std::env::var(poimen_protocol::ENV_TERMINAL_ID).ok();
             let stdin = std::io::stdin().lock();
-            match poimen_console::mcp::serve(
-                &client,
-                terminal.as_deref(),
-                stdin,
-                &mut std::io::stdout(),
-            ) {
+            let env = poimen_console::mcp::Env {
+                terminal_id: terminal.as_deref(),
+                home: std::env::home_dir().filter(|h| !h.as_os_str().is_empty()),
+                confirm_wait: poimen_console::mcp::CONFIRM_WAIT,
+            };
+            match poimen_console::mcp::serve_with(&client, &env, stdin, &mut std::io::stdout()) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("poimen: {e}");

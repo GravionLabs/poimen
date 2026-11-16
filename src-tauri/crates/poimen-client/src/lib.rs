@@ -430,6 +430,42 @@ impl Client {
             .map_err(|e| ClientError::Protocol(format!("worktree.cleanup: {e}")))
     }
 
+    /// `agent.confirm` (#615): asks the user, through a connected app, to allow an agent's write
+    /// into another space. Waits for the answer, at most `wait` plus a margin.
+    pub fn confirm_agent_write(
+        &self,
+        params: &poimen_protocol::AgentConfirm,
+        wait: Duration,
+    ) -> Result<poimen_protocol::ConfirmResult, ClientError> {
+        let mut params = params.clone();
+        params.wait_ms = Some(u64::try_from(wait.as_millis()).unwrap_or(u64::MAX));
+        let value =
+            self.request_within("agent.confirm", to_value(&params), wait + REQUEST_TIMEOUT)?;
+        serde_json::from_value(value)
+            .map_err(|e| ClientError::Protocol(format!("agent.confirm: {e}")))
+    }
+
+    /// `agent.confirm_answer`: the app's answer to a confirmation request.
+    pub fn answer_agent_confirm(&self, id: &str, approve: bool) -> Result<(), ClientError> {
+        self.request(
+            "agent.confirm_answer",
+            to_value(&poimen_protocol::AgentConfirmAnswer {
+                id: id.to_owned(),
+                approve,
+            }),
+        )
+        .map(drop)
+    }
+
+    /// `agent.write_notice`: tells the apps what an agent wrote (#615).
+    pub fn notice_agent_write(
+        &self,
+        notice: &poimen_protocol::AgentWriteNotice,
+    ) -> Result<(), ClientError> {
+        self.request("agent.write_notice", to_value(notice))
+            .map(drop)
+    }
+
     pub fn ping(&self) -> Result<PingResult, ClientError> {
         self.typed("ping", Value::Null, None)
     }

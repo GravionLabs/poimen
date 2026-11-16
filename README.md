@@ -62,6 +62,10 @@ The step that installs the hooks (the *Install hooks* button, or `poimen-server 
 - `list_terminals`: the terminals, with the agent status and the space of each.
 - `whoami`: the terminal the agent runs in (`POIMEN_TERMINAL_ID`); `{in_poimen: false}` outside poimen.
 - `list_runs`: the agent runs of a repository (`repository` directory), read from its `.agents/events` files.
+- `start_agent` (`harness`, `space?`, `model?`, `prompt?`, `name?`): a new terminal running a harness of your `harnesses` config.
+- `prompt_agent` (`terminal`, `text`): types a prompt into the agent of a terminal, refused while it works or waits.
+
+The write tools act freely in the space of the agent that calls them. For any other space poimen asks you in the app (who asks, what, where) and the call waits up to 60 s; declined, no answer, poimen closed or an agent outside a poimen terminal are refused. Every write shows in the notification center with the calling terminal.
 
 The entry needs the `poimen` binary next to `poimen-server` or on `PATH`; without it only the hooks are installed and the status says `mcp: unavailable`. Settings > Server shows the state per agent. To remove the MCP entry together with the hooks run `poimen-server integration uninstall claude|copilot`; only the entry marked as poimen's (name, `mcp` argument and binary) is removed, any other `mcpServers` entry stays untouched.
 

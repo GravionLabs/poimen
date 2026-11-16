@@ -709,6 +709,12 @@ impl Backend for PoimenBackend {
         self.rename_terminal(target, name)
     }
 
+    fn agent_confirm_answer(&self, id: &str, approve: bool) -> Result<(), String> {
+        self.client
+            .answer_agent_confirm(id, approve)
+            .map_err(|e| e.to_string())
+    }
+
     fn agent_prompt(&self, target: &str, text: &str) -> PromptOutcome {
         let failed = |message: &str| PromptOutcome::Failed {
             message: message.into(),

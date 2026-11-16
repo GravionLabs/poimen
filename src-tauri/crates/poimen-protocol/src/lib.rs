@@ -884,6 +884,78 @@ pub struct WorktreeCreateResult {
     pub created: bool,
 }
 
+/// What an agent writes through `poimen mcp` (ADR 0012, #615).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentWriteAction {
+    /// Starts an agent in a terminal of the space.
+    StartAgent,
+    /// Types a prompt into the agent of a terminal.
+    PromptAgent,
+}
+
+/// Params of `agent.confirm` (#615): an agent (the terminal `caller_terminal_id`) wants to write
+/// into `space_id`, which is not its own space. The server asks the connected app and answers
+/// when the user did, or after `wait_ms` (default and cap [`CONFIRM_WAIT_MS`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfirm {
+    pub caller_terminal_id: String,
+    pub action: AgentWriteAction,
+    /// The space written into; the server resolves its name.
+    pub space_id: String,
+    /// The terminal prompted; absent for a start in a new terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
+    /// The prompt or the command line, shown to the user as is.
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_ms: Option<u64>,
+}
+
+/// How long `agent.confirm` waits for the user at most.
+pub const CONFIRM_WAIT_MS: u64 = 60_000;
+
+/// Why `agent.confirm` answered as it did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmReason {
+    Approved,
+    Declined,
+    /// The user did not answer in time.
+    Timeout,
+    /// No app is subscribed, so nobody can be asked.
+    NoApp,
+}
+
+/// Result of `agent.confirm`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfirmResult {
+    pub approved: bool,
+    pub reason: ConfirmReason,
+}
+
+/// Params of `agent.confirm_answer`: the app's answer to an [`Event::AgentConfirmRequested`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfirmAnswer {
+    pub id: String,
+    pub approve: bool,
+}
+
+/// Params of `agent.write_notice` (#615): an agent wrote through `poimen mcp`; the server tells
+/// the apps ([`Event::AgentWrote`]) so the notification center lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentWriteNotice {
+    pub caller_terminal_id: String,
+    pub action: AgentWriteAction,
+    pub space_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_id: Option<String>,
+    pub text: String,
+    /// The user approved it in the app; false for a write in the caller's own space.
+    #[serde(default)]
+    pub confirmed: bool,
+}
+
 /// Params of `agent.transcript` (#698): the next updates of the agent transcript of a terminal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentTranscript {
@@ -1488,6 +1560,38 @@ pub enum Event {
         run: String,
         events: Vec<Value>,
     },
+    /// An agent asks to write into another space (#615); only to subscriptions of kind `app`.
+    /// Answered by `agent.confirm_answer`; gone with [`Event::AgentConfirmResolved`].
+    #[serde(rename = "agent.confirm_requested")]
+    AgentConfirmRequested {
+        id: String,
+        caller_terminal_id: String,
+        caller_name: String,
+        action: AgentWriteAction,
+        space_id: String,
+        space_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_id: Option<String>,
+        text: String,
+        /// How long the request stays open.
+        wait_ms: u64,
+    },
+    /// The confirmation `id` is settled (answered, timed out or abandoned).
+    #[serde(rename = "agent.confirm_resolved")]
+    AgentConfirmResolved { id: String },
+    /// An agent wrote through `poimen mcp` (#615); only to subscriptions of kind `app`.
+    #[serde(rename = "agent.wrote")]
+    AgentWrote {
+        caller_terminal_id: String,
+        caller_name: String,
+        action: AgentWriteAction,
+        space_id: String,
+        space_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_id: Option<String>,
+        text: String,
+        confirmed: bool,
+    },
     #[serde(rename = "agent.status_changed")]
     AgentStatusChanged {
         terminal_id: String,
@@ -1583,6 +1687,53 @@ mod tests {
             serde_json::to_value(EventsSubscribe::default()).unwrap(),
             json!({})
         );
+    }
+
+    #[test]
+    fn agent_confirmation_wire_shapes() {
+        let c: AgentConfirm = serde_json::from_value(json!({
+            "caller_terminal_id": "t1", "action": "prompt_agent", "space_id": "s2",
+            "terminal_id": "t9", "text": "go"
+        }))
+        .unwrap();
+        assert_eq!((c.action, c.wait_ms), (AgentWriteAction::PromptAgent, None));
+        assert_eq!(
+            serde_json::to_value(ConfirmResult {
+                approved: false,
+                reason: ConfirmReason::NoApp
+            })
+            .unwrap(),
+            json!({"approved": false, "reason": "no_app"})
+        );
+        let line = r#"{"event":"agent.confirm_requested","data":{"id":"c1","caller_terminal_id":"t1","caller_name":"lead","action":"start_agent","space_id":"s2","space_name":"api","text":"claude","wait_ms":60000}}"#;
+        let ServerLine::Event(e) = parse_server_line(line).unwrap() else {
+            panic!("not an event");
+        };
+        assert!(matches!(
+            e,
+            Event::AgentConfirmRequested {
+                terminal_id: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            serde_json::to_value(&e).unwrap(),
+            serde_json::from_str::<Value>(line).unwrap()
+        );
+        let wrote: Event = serde_json::from_value(json!({"event":"agent.wrote","data":{
+            "caller_terminal_id":"t1","caller_name":"lead","action":"prompt_agent",
+            "space_id":"s1","space_name":"web","terminal_id":"t2","text":"hi","confirmed":false}}))
+        .unwrap();
+        assert!(matches!(
+            wrote,
+            Event::AgentWrote {
+                confirmed: false,
+                ..
+            }
+        ));
+        let answer: AgentConfirmAnswer =
+            serde_json::from_value(json!({"id": "c1", "approve": true})).unwrap();
+        assert!(answer.approve);
     }
 
     #[test]

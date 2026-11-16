@@ -24,6 +24,6 @@ export class Notifications {
   protected choose(entry: NotificationEntry): void {
     this.center.markRead(entry.id);
     if (entry.deliver) this.runChosen.emit(entry.deliver);
-    else this.paneChosen.emit(entry.paneId);
+    else if (entry.paneId) this.paneChosen.emit(entry.paneId);
   }
 }
