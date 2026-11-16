@@ -170,11 +170,18 @@ impl TermStream {
             let mut st = self.lock();
             st.emulator.feed(chunk);
             signals.extend(st.emulator.take_signals());
-            let replies = {
+            let answers = {
                 let colors = self.colors.read().unwrap_or_else(|e| e.into_inner());
-                st.emulator.take_replies(&colors)
+                st.emulator.take_answers(&colors)
             };
-            let answer = live && st.controller.is_none() && !replies.is_empty();
+            // With a controller, xterm.js answers the standard queries; only the answer to
+            // OSC 7501 (which it does not know) is the server's.
+            let replies = if st.controller.is_none() {
+                answers.all
+            } else {
+                answers.own
+            };
+            let answer = live && !replies.is_empty();
             st.seq += 1;
             let line = line_of(&Event::TerminalOutput {
                 terminal_id: self.terminal_id.clone(),
@@ -615,10 +622,25 @@ mod tests {
     }
 
     #[test]
+    fn the_detection_query_is_answered_with_and_without_a_controller_once() {
+        let (s, sink) = answering();
+        s.output(b"\x1b]7501;?\x07\x1b[c");
+        assert_eq!(
+            answered(&sink),
+            format!("{}\x1b[?6c", crate::emulator::DETECTION_REPLY)
+        );
+        let (c, _rx) = client(&s, AttachMode::Control, false, 8).unwrap();
+        let before = answered(&sink).len();
+        s.output(b"\x1b]7501;?\x07\x1b[c\x1b[6n");
+        assert_eq!(&answered(&sink)[before..], crate::emulator::DETECTION_REPLY);
+        s.detach(c.client_id);
+    }
+
+    #[test]
     fn replayed_output_reaches_the_grid_and_the_clients_but_its_queries_get_no_answer() {
         let (s, sink) = answering();
         let (_, rx) = client(&s, AttachMode::Observe, false, 8).unwrap();
-        s.replay(b"prompt$ \x1b[c\x1b[6n");
+        s.replay(b"prompt$ \x1b[c\x1b[6n\x1b]7501;?\x07");
         assert_eq!(answered(&sink), "");
         let lines = texts(&rx);
         assert!(lines[1].contains("terminal.output"), "{lines:?}");
