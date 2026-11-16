@@ -32,7 +32,9 @@ export function splitGroup(
   newId: number,
   dir: SplitDirection,
   splitId: number,
+  ratio = 0.5,
 ): LayoutNode {
+  const keep = ratio > 0 && ratio < 1 ? ratio : 0.5;
   if (node.kind === "group") {
     if (node.id !== groupId) return node;
     return {
@@ -40,7 +42,7 @@ export function splitGroup(
       id: splitId,
       dir,
       children: [node, { kind: "group", id: newId }],
-      sizes: [0.5, 0.5],
+      sizes: [keep, 1 - keep],
     };
   }
   const at = node.children.findIndex((c) => c.kind === "group" && c.id === groupId);
@@ -48,12 +50,12 @@ export function splitGroup(
     const children = [...node.children];
     children.splice(at + 1, 0, { kind: "group", id: newId });
     const sizes = [...node.sizes];
-    sizes.splice(at, 1, node.sizes[at] / 2, node.sizes[at] / 2);
+    sizes.splice(at, 1, node.sizes[at] * keep, node.sizes[at] * (1 - keep));
     return { ...node, children, sizes };
   }
   return {
     ...node,
-    children: node.children.map((c) => splitGroup(c, groupId, newId, dir, splitId)),
+    children: node.children.map((c) => splitGroup(c, groupId, newId, dir, splitId, ratio)),
   };
 }
 

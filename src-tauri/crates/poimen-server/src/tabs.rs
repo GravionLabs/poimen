@@ -5,7 +5,7 @@
 //! Invariant (kept by the server): every leaf is a running terminal and every running terminal is
 //! in exactly one leaf. A `split_id` is never given to another node (the id counter is persisted).
 
-use poimen_protocol::{ErrorCode, Event, Node, Space, SplitDirection, Tab, valid_ratio};
+use poimen_protocol::{ErrorCode, Event, Node, Space, SplitDirection, Tab, TabPlace, valid_ratio};
 
 pub(crate) type Failure = (ErrorCode, String);
 
@@ -132,6 +132,7 @@ impl Layout {
             root: Node::terminal(terminal_id),
             active_terminal: terminal_id.to_string(),
             parent: parent.map(str::to_owned),
+            place: None,
         };
         self.tabs.push(tab.clone());
         let mut events = vec![Event::TabCreated { tab }];
@@ -164,6 +165,26 @@ impl Layout {
                 }
                 vec![Event::TabChanged { tab: tab.clone() }]
             }
+        }
+    }
+
+    /// Stores the app-only placement hint of a tab (`of` must be another tab of the same space,
+    /// else it is not stored); the server has no behaviour of its own for it.
+    pub(crate) fn set_place(&mut self, tab_id: &str, place: TabPlace) -> Vec<Event> {
+        let same_space =
+            |this: &Self, id: &str, space: &str| this.tab(id).is_ok_and(|t| t.space_id == space);
+        let Ok(space) = self.tab(tab_id).map(|t| t.space_id.clone()) else {
+            return Vec::new();
+        };
+        if place.of == tab_id || !same_space(self, &place.of, &space) {
+            return Vec::new();
+        }
+        match self.tab_mut(tab_id) {
+            Ok(tab) => {
+                tab.place = Some(place);
+                vec![Event::TabChanged { tab: tab.clone() }]
+            }
+            Err(_) => Vec::new(),
         }
     }
 
@@ -839,6 +860,7 @@ mod tests {
                     ),
                     active_terminal: "t2".into(),
                     parent: None,
+                    place: None,
                 },
                 Tab {
                     tab_id: "tab2".into(),
@@ -847,6 +869,7 @@ mod tests {
                     root: leaf("t4"),
                     active_terminal: "t4".into(),
                     parent: None,
+                    place: None,
                 },
             ],
         )
@@ -929,6 +952,7 @@ mod tests {
             root: leaf("t8"),
             active_terminal: "t8".into(),
             parent: None,
+            place: None,
         });
         let all = [
             live("t1", "s1"),

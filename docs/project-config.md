@@ -38,6 +38,15 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
   save changes the file hash, so a layout or preset that adds a command asks for trust again.
   Presets are palette entries of the project and are not offered as layouts in the settings.
   Named layouts, tabs and nested tabs: [ADR 0011](adr/0011-named-layouts-referenced-by-templates.md).
+  `place` (#657) is `{direction, of?, ratio?}`: `direction` `right` or `down`, `of` the name of a
+  tab of the same layout (default the parent tab; the first tab for a top-level tab) and `ratio`
+  the share `of` keeps (default 0.5). The Tauri app opens that tab in an editor group split off the
+  group of `of`; tabs with the same `place` share the group, a tab without `place` opens in the
+  group of its parent and a top-level one in the main group (only in a space whose layout uses
+  `children[]` or `place`). The server stores the hint as `Tab.place` (`of` as a tab id) and does
+  nothing with it. **The TUI (`poimen`) ignores it**: every tab stays a tab of the sidebar. An
+  unknown `of`, a cycle or an invalid direction is a warning and the tab opens without placement.
+  Moving tabs between groups later changes nothing on the server.
 - `setup`: a command that runs once, visibly, in a tab labelled `setup` of a newly created space
   (in the space directory). It does not run when an existing space is focused or when the
   repository is not trusted. If it cannot be started, the space stays and a warning names the

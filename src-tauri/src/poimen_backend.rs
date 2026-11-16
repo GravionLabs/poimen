@@ -219,6 +219,7 @@ pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
                 root: Some(tab.root.clone()),
                 active_terminal: Some(tab.active_terminal.clone()).filter(|t| !t.is_empty()),
                 parent: tab.parent.clone(),
+                place: tab.place.clone(),
             });
             count += 1;
             for terminal in members {
@@ -238,6 +239,7 @@ pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
                 root: None,
                 active_terminal: None,
                 parent: None,
+                place: None,
             });
             count += 1;
             snapshot
@@ -1068,6 +1070,7 @@ mod tests {
             name: name.into(),
             active_terminal: root.first_terminal().to_owned(),
             parent: None,
+            place: None,
             root,
         }
     }

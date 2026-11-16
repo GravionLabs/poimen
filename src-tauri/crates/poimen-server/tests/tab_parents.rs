@@ -46,6 +46,25 @@ impl Env {
         }
     }
 
+    /// A layout with the #608 example: claude left, Terminal right top, Logs right bottom, and a
+    /// tab whose `of` names nothing.
+    fn write_placed(&self) {
+        let dir = self.work();
+        std::fs::write(
+            settings::config_path(&self.home()),
+            format!(
+                r#"{{"layouts": [{{"name": "placed", "tabs": [
+                  {{"name": "claude", "children": [
+                    {{"name": "Terminal", "place": {{"direction": "right", "ratio": 0.6}}}},
+                    {{"name": "Logs", "place": {{"direction": "down", "of": "Terminal"}}}},
+                    {{"name": "Lost", "place": {{"direction": "down", "of": "nowhere"}}}}]}}]}}],
+                 "spaceTemplates": [{{"name": "t", "agent": "claude", "layout": "placed",
+                   "match": {{"dir": {dir:?}}}}}]}}"#
+            ),
+        )
+        .unwrap();
+    }
+
     /// A template for `work` that names a layout with a parent tab, two children (the second has a
     /// child of its own) and a second top-level tab, one of them split.
     fn write_layout(&self) {
@@ -215,4 +234,38 @@ fn the_parent_link_survives_a_restart() {
     down_rx.recv_timeout(Duration::from_secs(10)).unwrap();
     let client = start(&env.config("run2"));
     assert_eq!(shape(&client), expected());
+}
+
+#[test]
+fn a_tab_place_is_stored_with_of_as_a_tab_id() {
+    let env = Env::new("place");
+    env.write_placed();
+    let client = start(&env.config("run"));
+    create(&client, &env.work());
+    let layout = client.list_layout().unwrap();
+    let id = |name: &str| {
+        layout
+            .tabs
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap()
+            .tab_id
+            .clone()
+    };
+    let place = |name: &str| {
+        layout
+            .tabs
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap()
+            .place
+            .clone()
+    };
+    let terminal = place("Terminal").unwrap();
+    assert_eq!((terminal.of, terminal.ratio), (id("claude"), 0.6));
+    let logs = place("Logs").unwrap();
+    assert_eq!((logs.of, logs.ratio), (id("Terminal"), 0.5));
+    // An unknown `of` is dropped by the parser: the tab opens without placement.
+    assert_eq!(place("Lost"), None);
+    assert_eq!(place("claude"), None);
 }

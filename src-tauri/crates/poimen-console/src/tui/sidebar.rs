@@ -850,6 +850,7 @@ mod tests {
             root,
             active_terminal: active,
             parent: None,
+            place: None,
         }
     }
 

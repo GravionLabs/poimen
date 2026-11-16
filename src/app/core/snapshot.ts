@@ -83,8 +83,20 @@ export interface Tab {
   active_terminal?: string;
   /** The tab this one belongs below (a layout's `children[]`, #655); absent when top level. */
   parent?: string;
+  /**
+   * App-only hint (#657): the editor group this tab opens in, split off the group of the tab `of`
+   * (a tab id of the same space) in `direction`, `ratio` being the share `of` keeps.
+   */
+  place?: TabPlace;
   /** The machine of a remote tab (#280). */
   machine?: string;
+}
+
+/** `Tab.place` of the poimen-server protocol. */
+export interface TabPlace {
+  direction: SplitDirection;
+  of: string;
+  ratio: number;
 }
 
 /**
@@ -330,6 +342,8 @@ export function qualifySnapshot(machine: string, snapshot: Snapshot, stale = fal
       space_id: qualifyId(machine, t.space_id),
       ...(t.root ? { root: qualifyTree(machine, t.root) } : {}),
       ...(t.active_terminal ? { active_terminal: qualifyId(machine, t.active_terminal) } : {}),
+      ...(t.parent ? { parent: qualifyId(machine, t.parent) } : {}),
+      ...(t.place ? { place: { ...t.place, of: qualifyId(machine, t.place.of) } } : {}),
       ...(stale ? { agent_status: "unknown" as const } : {}),
     })),
     terminals: snapshot.terminals.map((p) => ({

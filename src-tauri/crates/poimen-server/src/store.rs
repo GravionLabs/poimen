@@ -292,6 +292,7 @@ mod tests {
             },
             active_terminal: "t6".into(),
             parent: None,
+            place: None,
         });
         save(&path, &saved, 40, Vec::new()).unwrap();
         let loaded = load(&path);

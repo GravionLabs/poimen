@@ -21,6 +21,21 @@ describe("splitGroup", () => {
     });
   });
 
+  it("gives the source the ratio and the new group the rest", () => {
+    expect(splitGroup(g(1), 1, 2, "row", 10, 0.6)).toEqual({
+      kind: "split",
+      id: 10,
+      dir: "row",
+      children: [g(1), g(2)],
+      sizes: [0.6, 0.4],
+    });
+    const row = splitGroup(g(1), 1, 2, "row", 10);
+    const sizes = (splitGroup(row, 2, 3, "row", 11, 0.8) as unknown as { sizes: number[] }).sizes;
+    expect(sizes[0]).toBe(0.5);
+    expect(sizes[1]).toBeCloseTo(0.4);
+    expect(sizes[2]).toBeCloseTo(0.1);
+  });
+
   it("adds a sibling in a split of the same direction and halves the source", () => {
     const row = splitGroup(g(1), 1, 2, "row", 10);
     expect(splitGroup(row, 2, 3, "row", 11)).toEqual({

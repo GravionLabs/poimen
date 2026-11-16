@@ -47,9 +47,9 @@ use poimen_protocol::{
     ClientKind, DetachReason, ErrorCode, Event, EventsSubscribe, PROTOCOL_VERSION, PingResult,
     RepoEnsure, RepoEnsureResult, Request, Response, ServerShutdown, SetColors, Space,
     SpaceApplyLayout, SpaceApplyLayoutResult, SpaceClose, SpaceCreate, SpaceCreateResult,
-    SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabRename,
-    TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens, TerminalClose,
-    TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
+    SpaceCreated, SpaceList, SpaceRename, TabClose, TabCreate, TabFocus, TabMove, TabPlace,
+    TabRename, TabResizeSplit, TabSplit, Terminal, TerminalAttach, TerminalClearTokens,
+    TerminalClose, TerminalCreate, TerminalDetach, TerminalInput, TerminalList, TerminalRename,
     TerminalReportAgent, TerminalReportTokens, TerminalResize, TerminalStatus, TranscriptState,
     WorktreeCleanup, WorktreeCleanupResult, WorktreeCreate, WorktreeCreateResult,
 };
@@ -1520,6 +1520,11 @@ fn build_tabs(
     // Every tab of the layout (a parent before its children) as the panes that build it; a space
     // with no layout gets one tab with one terminal. The server has no parent link of a tab yet
     // (ADR 0011), so a child tab is a tab of the space after its parent.
+    let places = build
+        .layout
+        .as_ref()
+        .map(|l| l.tab_places())
+        .unwrap_or_default();
     let mut tab_panes = build.layout.map(|l| l.tab_plan()).unwrap_or_default();
     if tab_panes.is_empty() {
         tab_panes.push((None, Vec::new()));
@@ -1622,6 +1627,24 @@ fn build_tabs(
             );
             ids.push((spec.name.clone(), terminal.id));
         }
+    }
+    // The app-only placements, now that every tab of the plan has its id.
+    for (index, place) in places.iter().enumerate() {
+        let (Some(place), Some(id)) = (place, built_ids.get(index)) else {
+            continue;
+        };
+        let Some(of) = built_ids.get(place.of) else {
+            continue;
+        };
+        let events = inner.layout.set_place(
+            id,
+            TabPlace {
+                direction: create::direction(place.direction),
+                of: of.clone(),
+                ratio: place.ratio,
+            },
+        );
+        publish_all(shared, events);
     }
     let mut setup_started = false;
     if let Some(setup) = &build.setup {
