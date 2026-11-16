@@ -3312,6 +3312,7 @@ name = "poimen-server"
 version = "0.20.1"
 dependencies = [
  "alacritty_terminal",
+ "base64 0.23.1",
  "poimen-client",
  "poimen-core",
  "poimen-protocol",

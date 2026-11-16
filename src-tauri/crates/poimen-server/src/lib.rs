@@ -139,6 +139,11 @@ struct TerminalEntry {
     stream: Arc<TermStream>,
     /// `seq` of the last accepted agent report; older or equal reports are dropped.
     agent_seq: Option<u64>,
+    /// The status the program itself reports with OSC 7501 (#681); while it is set it is the
+    /// terminal's `agent` and hook reports do not change it.
+    osc: Option<AgentInfo>,
+    /// The status of the hooks while `osc` is set, back in `agent` when `osc` ends.
+    hook_agent: Option<AgentInfo>,
     /// Who set which token and until when; `info.tokens` is the visible name-to-value view.
     tokens: Vec<TokenEntry>,
 }
@@ -184,9 +189,78 @@ impl TerminalEntry {
             endpoint: host.endpoint().to_path_buf(),
             seq: host.seq(),
             agent: self.info.agent.clone(),
+            osc: self.osc.is_some(),
+            hook_agent: self.hook_agent.clone(),
             agent_seq: self.agent_seq,
             tokens,
         })
+    }
+
+    /// One signal of the output. Only the root record of OSC 7501 counts; the program's status
+    /// replaces the hook status until it clears it, at RIS, or when a new prompt drops
+    /// `working` and `blocked`.
+    fn apply_signal(&mut self, signal: emulator::Signal, now_ms: u64) {
+        use emulator::{ReportState, Signal};
+        match signal {
+            Signal::Ris => self.end_osc(),
+            Signal::Prompt => {
+                if self.osc.as_ref().is_some_and(|a| {
+                    matches!(a.status, AgentStatus::Working | AgentStatus::Blocked)
+                }) {
+                    self.end_osc();
+                }
+            }
+            Signal::Report(report) => {
+                if report.id.is_some() {
+                    return;
+                }
+                let status = match report.state {
+                    Some(ReportState::Idle) => AgentStatus::Idle,
+                    Some(ReportState::Working) => AgentStatus::Working,
+                    Some(ReportState::Blocked) => AgentStatus::Blocked,
+                    // `error` has no state of its own yet.
+                    Some(ReportState::Done | ReportState::Error) => AgentStatus::Done,
+                    Some(ReportState::Clear) => return self.end_osc(),
+                    None => return,
+                };
+                let text = report
+                    .msg
+                    .as_deref()
+                    .and_then(poimen_protocol::clean_message);
+                let before = self.osc.clone();
+                let (message, message_at) = match text {
+                    Some(text)
+                        if before.as_ref().and_then(|a| a.message.as_ref()) == Some(&text) =>
+                    {
+                        (Some(text), before.as_ref().and_then(|a| a.message_at))
+                    }
+                    Some(text) => (Some(text), Some(now_ms)),
+                    None if status == AgentStatus::Working => (None, None),
+                    None => before
+                        .as_ref()
+                        .map_or((None, None), |a| (a.message.clone(), a.message_at)),
+                };
+                if self.osc.is_none() {
+                    self.hook_agent = self.info.agent.take();
+                }
+                let next = AgentInfo {
+                    status,
+                    agent: report.app,
+                    session_id: None,
+                    message,
+                    message_at,
+                };
+                self.osc = Some(next.clone());
+                self.info.agent = Some(next);
+            }
+        }
+    }
+
+    /// The program's status ends: the status of the hooks applies again.
+    fn end_osc(&mut self) {
+        if self.osc.take().is_some() {
+            self.info.agent = self.hook_agent.take();
+        }
     }
 
     /// Drops the tokens whose time is up; true when any went.
@@ -421,6 +495,30 @@ impl Shared {
     }
 
     /// Marks a terminal exited when its process ends (unless it was closed meanwhile).
+    /// The signals of a terminal's output (#681): OSC 7501 reports, new prompts, RIS. The status
+    /// event is published once, and only when the visible status changed.
+    pub(crate) fn output_signals(&self, terminal_id: &str, signals: Vec<emulator::Signal>) {
+        let mut inner = lock(&self.inner);
+        let Some(entry) = inner
+            .terminals
+            .iter_mut()
+            .find(|t| t.info.id == terminal_id)
+        else {
+            return;
+        };
+        if entry.info.status == TerminalStatus::Exited {
+            return;
+        }
+        let before = entry.info.agent.clone();
+        for signal in signals {
+            entry.apply_signal(signal, now_millis());
+        }
+        if entry.info.agent != before {
+            self.publish(agent_event(terminal_id, entry.info.agent.as_ref()));
+            self.persist(&inner);
+        }
+    }
+
     pub(crate) fn terminal_exited(&self, terminal_id: &str, exit_code: Option<u32>) {
         let mut inner = lock(&self.inner);
         let Some(entry) = inner
@@ -440,7 +538,12 @@ impl Shared {
         entry.info.host_version = None;
         entry.info.host_bundled_version = None;
         entry.host = None;
-        entry.info.agent = None;
+        // A program's own `idle` or `done` stays; the rest of the status goes with the process.
+        entry.hook_agent = None;
+        entry.info.agent = entry
+            .osc
+            .take()
+            .filter(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Done));
         if !entry.info.tokens.is_empty() {
             entry.info.tokens.clear();
             entry.tokens.clear();
@@ -1710,6 +1813,8 @@ fn spawn_terminal(
         host: Some(spawned),
         stream,
         agent_seq: None,
+        osc: None,
+        hook_agent: None,
         tokens: Vec::new(),
     });
     shared.publish(Event::TerminalCreated {
@@ -1720,7 +1825,7 @@ fn spawn_terminal(
 
 /// The screen and attachments of a new or adopted terminal.
 fn new_stream(shared: &Arc<Shared>, id: &str, cols: u16, rows: u16) -> Arc<TermStream> {
-    Arc::new(TermStream::new(
+    let stream = Arc::new(TermStream::new(
         id,
         cols,
         rows,
@@ -1734,7 +1839,14 @@ fn new_stream(shared: &Arc<Shared>, id: &str, cols: u16, rows: u16) -> Arc<TermS
                 }
             })
         },
-    ))
+    ));
+    let (weak, id) = (Arc::downgrade(shared), id.to_string());
+    stream.set_signal_sink(Arc::new(move |signals| {
+        if let Some(shared) = weak.upgrade() {
+            shared.output_signals(&id, signals);
+        }
+    }));
+    stream
 }
 
 /// Where a host's output goes: the grid and the clients; a replay answers no query.
@@ -1847,7 +1959,7 @@ fn adopted(
             exit_code: None,
             program: t.program,
             args: t.args,
-            agent: t.agent,
+            agent: t.agent.clone(),
             tokens: visible,
             survives_restart: true,
             host_version: Some(handle.version().to_string()),
@@ -1856,6 +1968,8 @@ fn adopted(
         host: Some(handle),
         stream,
         agent_seq: t.agent_seq,
+        osc: t.osc.then(|| t.agent.clone()).flatten(),
+        hook_agent: t.hook_agent.clone(),
         tokens,
     }
 }
@@ -1999,11 +2113,12 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     {
         Some(text) => (Some(text), Some(now_millis())),
         None if p.status == AgentStatus::Working => (None, None),
-        None => entry
-            .info
-            .agent
-            .as_ref()
-            .map_or((None, None), |a| (a.message.clone(), a.message_at)),
+        None => if entry.osc.is_some() {
+            entry.hook_agent.as_ref()
+        } else {
+            entry.info.agent.as_ref()
+        }
+        .map_or((None, None), |a| (a.message.clone(), a.message_at)),
     };
     let next = (p.status != AgentStatus::Gone).then(|| AgentInfo {
         status: p.status,
@@ -2012,7 +2127,10 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         message: message.clone(),
         message_at,
     });
-    if entry.info.agent != next {
+    if entry.osc.is_some() {
+        // The program reports its own status (OSC 7501): the hook's is kept for when that ends.
+        entry.hook_agent = next;
+    } else if entry.info.agent != next {
         entry.info.agent = next;
         shared.publish(Event::AgentStatusChanged {
             terminal_id: p.terminal_id,
@@ -2027,6 +2145,18 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     // the status comes back after a restart.
     shared.persist(&inner);
     Ok(json!({ "accepted": true }))
+}
+
+/// The event for the agent of a terminal; no agent is `gone`.
+fn agent_event(terminal_id: &str, agent: Option<&AgentInfo>) -> Event {
+    Event::AgentStatusChanged {
+        terminal_id: terminal_id.to_string(),
+        status: agent.map_or(AgentStatus::Gone, |a| a.status),
+        agent: agent.and_then(|a| a.agent.clone()),
+        session_id: agent.and_then(|a| a.session_id.clone()),
+        message: agent.and_then(|a| a.message.clone()),
+        message_at: agent.and_then(|a| a.message_at),
+    }
 }
 
 fn invalid(message: impl Into<String>) -> (ErrorCode, String) {
