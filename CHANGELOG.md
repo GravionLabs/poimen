@@ -5,6 +5,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.22.0] — 2026-11-16
+
+### Bug Fixes
+- **settings**: Never rewrite layouts the loader cannot read, explain a remote tab save (#610)
+- **console**: The TUI tests no longer take the controller they check (#832) (#838)
+
+
+### Features
+- **server**: Build every tab of a layout, tabs with a parent (#655) (#833)
+- **server**: Build every tab of a layout, tabs with a parent (#655)
+- **settings**: Layouts and Templates pages with the visual layout editor (#610) (#835)
+- **settings**: Layouts and Templates pages with the visual layout editor (#610)
+- **sidebar**: Child tabs below their parent tab in the spaces tree (#656) (#837)
+- **app**: Layout tabs open in editor groups by their place (#657) (#840)
+
+
 ## [0.21.0] — 2026-11-16
 
 ### Bug Fixes
@@ -12,6 +28,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **console**: Show reported text as plain text in the TUI and poimen status (#682)
 - **server**: Keep take_replies for tests only (#683)
 - **server**: Gate the OSC 7501 test constant to unix (#683)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.21.0 [skip ci]
 
 
 ### Features
