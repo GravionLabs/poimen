@@ -578,7 +578,13 @@ pub fn save_with(home: &Path, edit: impl Fn(&str) -> Result<String, String>) -> 
     static NEXT_TMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let path = config_path(home);
     let next = match std::fs::read_to_string(&path) {
-        Ok(text) => edit(&text)?,
+        Ok(text) => {
+            let next = edit(&text)?;
+            if next == text {
+                return Ok(());
+            }
+            next
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => edit("{}").map(|t| t + "\n")?,
         Err(e) => return Err(format!("cannot read config.json: {e}")),
     };
@@ -644,6 +650,94 @@ pub fn parse_layouts(value: &Value, warnings: &mut Vec<String>) -> Vec<crate::la
         }
     }
     out
+}
+
+/// The value of the top-level `key` of the config `text`, read from that value alone; `None` when
+/// the key is missing, an error when it is not valid JSON.
+fn top_value(text: &str, key: &str) -> Result<Option<Value>, String> {
+    let Some((start, _)) = find_value(text, root_open(text)?, key) else {
+        return Ok(None);
+    };
+    serde_json::Deserializer::from_str(&text[start..])
+        .into_iter::<Value>()
+        .next()
+        .and_then(Result::ok)
+        .map(Some)
+        .ok_or(format!(
+            "{key} in config.json is not valid JSON; it was not changed"
+        ))
+}
+
+/// The names of the templates of `templates` (`spaceTemplates`) that refer to the layout `name`.
+pub fn layout_users(templates: &Value, name: &str) -> Vec<String> {
+    templates
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter(|t| t["layout"].as_str().map(str::trim) == Some(name))
+                .filter_map(|t| t["name"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Returns `text` with `layouts` replaced by `layouts` (a list of `{name, tabs}`) after validating
+/// it like the loader does (any warning rejects the write). A layout of the old `layouts[]` that
+/// is gone from the new list (deleted or renamed) while a template of `spaceTemplates` refers to
+/// it is refused, naming the templates. Other keys and comments stay; an unchanged list leaves
+/// the text as it is.
+pub fn set_layouts_text(text: &str, layouts: &Value) -> Result<String, String> {
+    let mut warnings = Vec::new();
+    let parsed = parse_layouts(layouts, &mut warnings);
+    if warnings.is_empty() && parsed.len() != layouts.as_array().map_or(0, Vec::len) {
+        warnings.push("a layout was not accepted".into());
+    }
+    if !warnings.is_empty() {
+        return Err(format!("layouts: {}", warnings.join("; ")));
+    }
+    let old = top_value(text, "layouts")?;
+    if old.as_ref() == Some(layouts) {
+        return Ok(text.to_owned());
+    }
+    if let Some(old) = &old {
+        // Entries the loader skips would be lost by the rewrite, so the file is left to the user.
+        let mut skipped = Vec::new();
+        let kept = parse_layouts(old, &mut skipped).len();
+        if !skipped.is_empty() || kept != old.as_array().map_or(0, Vec::len) {
+            return Err(format!(
+                "layouts in config.json has entries poimen cannot read ({}); it was not changed, fix the file by hand",
+                skipped.join("; ")
+            ));
+        }
+    }
+    if let Some(templates) = top_value(text, "spaceTemplates")? {
+        let mut ignored = Vec::new();
+        let old_names: Vec<String> = old
+            .as_ref()
+            .map(|o| parse_layouts(o, &mut ignored))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|l| l.name)
+            .collect();
+        for name in old_names
+            .iter()
+            .filter(|n| !parsed.iter().any(|l| &l.name == *n))
+        {
+            let users = layout_users(&templates, name);
+            if !users.is_empty() {
+                return Err(format!(
+                    "layout \"{name}\" is used by the templates {}; change them first",
+                    users.join(", ")
+                ));
+            }
+        }
+    }
+    set_key_text(text, "layouts", &layouts.to_string())
+}
+
+/// Writes `layouts` below `home`, like `save_theme`.
+pub fn save_layouts(home: &Path, layouts: &Value) -> Result<(), String> {
+    save_with(home, |text| set_layouts_text(text, layouts))
 }
 
 /// Parses `spaceTemplates[]`: `name` (unique), `match.dir` and/or `match.remote`, `agent`, optional `model` and `layout`.
@@ -960,6 +1054,80 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_layouts_validates_and_keeps_the_rest() {
+        let text = "{\n  // mine\n  \"theme\": \"dark\"\n}";
+        let layouts = serde_json::json!([{"name": "review", "tabs": [
+            {"name": "agent", "command": "claude", "children": [
+                {"name": "tests", "place": {"direction": "right", "ratio": 0.4}}]}]}]);
+        let out = set_layouts_text(text, &layouts).unwrap();
+        assert!(out.contains("// mine") && out.contains("\"theme\": \"dark\""));
+        let back: Value = serde_json::from_str(&out.replace("  // mine\n", "")).unwrap();
+        assert_eq!(back["layouts"][0]["name"], "review");
+        for bad in [
+            serde_json::json!({"name": "a"}),
+            serde_json::json!([{"name": "a", "tabs": []}]),
+            serde_json::json!([{"name": "a", "tabs": [{"name": "x"}]}, {"name": "a", "tabs": [{"name": "y"}]}]),
+            serde_json::json!([{"name": "a", "tabs": [{"name": "x", "place": {"direction": "left"}}]}]),
+        ] {
+            let err = set_layouts_text("{}", &bad).unwrap_err();
+            assert!(err.starts_with("layouts: "), "{err}");
+        }
+    }
+
+    #[test]
+    fn set_layouts_refuses_to_drop_a_layout_a_template_uses() {
+        let text = r#"{"layouts": [{"name": "review", "tabs": [{"name": "a"}]},
+            {"name": "other", "tabs": [{"name": "b"}]}],
+          "spaceTemplates": [{"name": "t1", "agent": "claude", "layout": "review"},
+            {"name": "t2", "agent": "claude", "layout": "review"}]}"#;
+        let only_other = serde_json::json!([{"name": "other", "tabs": [{"name": "b"}]}]);
+        let err = set_layouts_text(text, &only_other).unwrap_err();
+        assert!(
+            err.contains("\"review\"") && err.contains("t1, t2"),
+            "{err}"
+        );
+        // A rename is a drop of the old name.
+        let renamed = serde_json::json!([{"name": "look", "tabs": [{"name": "a"}]},
+            {"name": "other", "tabs": [{"name": "b"}]}]);
+        assert!(set_layouts_text(text, &renamed).is_err());
+        // Deleting an unused one is fine, and so is editing a used one in place.
+        let edited = serde_json::json!([{"name": "review", "tabs": [{"name": "z"}]}]);
+        assert!(set_layouts_text(text, &edited).is_ok());
+    }
+
+    #[test]
+    fn set_layouts_never_drops_entries_it_cannot_read() {
+        let text =
+            r#"{"layouts": [{"name": "a", "tabs": [{"name": "x"}]}, {"name": "bad", "tabs": []}]}"#;
+        let new = serde_json::json!([{"name": "a", "tabs": [{"name": "y"}]}]);
+        let err = set_layouts_text(text, &new).unwrap_err();
+        assert!(err.contains("cannot read"), "{err}");
+    }
+
+    #[test]
+    fn set_layouts_leaves_an_unchanged_list_alone() {
+        let layouts = serde_json::json!([{"name": "a", "tabs": [{"name": "x"}]}]);
+        let text = format!("{{ /* keep */ \"layouts\": {}  }}", layouts);
+        assert_eq!(set_layouts_text(&text, &layouts).unwrap(), text);
+    }
+
+    #[test]
+    fn save_with_does_not_rewrite_an_unchanged_file() {
+        let dir = std::env::temp_dir().join(format!("poimen-nowrite-{}", std::process::id()));
+        let path = config_path(&dir);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{ }").unwrap();
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        save_with(&dir, |t| Ok(t.to_owned())).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn removed(text: &str, path: &[&str]) -> String {
         remove_path_text(text, path).unwrap()

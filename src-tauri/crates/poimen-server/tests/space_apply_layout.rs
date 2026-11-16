@@ -340,3 +340,66 @@ fn a_missing_directory_is_invalid_params() {
         .unwrap_err();
     assert_eq!(server_error(err), ErrorCode::InvalidParams);
 }
+
+/// A project file whose preset has two tabs, the second below the first.
+fn tab_preset_file() -> String {
+    format!(
+        r#"{{
+  "presets": [{{"name": "pair", "tabs": [
+    {{"name": "main", "command": "{main}", "children": [{{"name": "logs"}}]}}
+  ]}}]
+}}"#,
+        main = marker("main-ran"),
+    )
+}
+
+#[test]
+fn a_preset_with_tabs_builds_them_at_the_end_with_the_parent_link() {
+    let env = Env::new("tabpreset");
+    env.project("repo", &tab_preset_file());
+    let client = env.start();
+    let repo = env.repo("repo");
+    let space = client.create_space("work", &repo).unwrap();
+    let (first, _) = client
+        .create_tab(&TabCreate {
+            space_id: space.id.clone(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    // The trust question lists the panes of every tab.
+    let question = asked(apply(&client, SpaceApplyLayout::preset(&space.id, "pair")));
+    let panes: Vec<_> = question
+        .layout
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(panes, ["main", "logs"]);
+
+    let done = applied(apply(
+        &client,
+        with_trust(
+            SpaceApplyLayout::preset(&space.id, "pair"),
+            TrustAnswer::Trust {
+                hash: question.hash.clone(),
+            },
+        ),
+    ));
+    let names: Vec<_> = done.tabs.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["main", "logs"]);
+    assert_eq!(done.tabs[0].parent, None);
+    assert_eq!(
+        done.tabs[1].parent.as_deref(),
+        Some(done.tabs[0].tab_id.as_str())
+    );
+    // After the tab that was there before.
+    assert_eq!(done.space.tabs[0], first.tab_id);
+    assert_eq!(
+        done.space.tabs[1..],
+        [done.tabs[0].tab_id.clone(), done.tabs[1].tab_id.clone()]
+    );
+    wait_for_file(&env.dir.join("repo/main-ran"));
+    client.close_space(&space.id).unwrap();
+}

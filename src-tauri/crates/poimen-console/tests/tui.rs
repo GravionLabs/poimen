@@ -2,6 +2,7 @@
 //! drawn on ratatui's test backend. Unix-only: the terminals run POSIX shell scripts.
 #![cfg(unix)]
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -29,6 +30,10 @@ struct Fixture {
     dir: PathBuf,
     client: Client,
     space: String,
+    /// Terminals with a controller, folded from the server's `terminal.controller_*` events so
+    /// that checking never attaches (a probe that attaches as controller takes it for a moment
+    /// and makes the TUI's own attach fail with `conflict`).
+    controllers: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Drop for Fixture {
@@ -56,7 +61,28 @@ fn fixture(name: &str) -> Fixture {
         .create_space("work", &work.display().to_string())
         .unwrap()
         .id;
-    Fixture { dir, client, space }
+    let controllers = Arc::new(Mutex::new(HashSet::new()));
+    let events = client.subscribe().unwrap();
+    let folded = Arc::clone(&controllers);
+    thread::spawn(move || {
+        for event in events.map_while(Result::ok) {
+            match event {
+                Event::TerminalControllerAttached { terminal_id } => {
+                    folded.lock().unwrap().insert(terminal_id);
+                }
+                Event::TerminalControllerDetached { terminal_id } => {
+                    folded.lock().unwrap().remove(&terminal_id);
+                }
+                _ => {}
+            }
+        }
+    });
+    Fixture {
+        dir,
+        client,
+        space,
+        controllers,
+    }
 }
 
 impl Fixture {
@@ -502,13 +528,7 @@ impl Fixture {
 }
 
 fn is_control_held(f: &Fixture, id: &str) -> bool {
-    matches!(
-        f.client.attach(id, AttachMode::Control, false),
-        Err(ClientError::Server {
-            code: poimen_client::protocol::ErrorCode::Conflict,
-            ..
-        })
-    )
+    f.controllers.lock().unwrap().contains(id)
 }
 
 #[test]

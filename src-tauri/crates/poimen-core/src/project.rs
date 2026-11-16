@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::layout::{Layout, parse_layout_value};
+use crate::layout::{Layout, TabLayout, parse_layout_value, parse_tabs_value};
 
 /// The project file, relative to the repository root.
 pub const PROJECT_FILE: &str = ".poimen/config.json";
@@ -34,7 +34,10 @@ pub struct ProjectCommand {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Preset {
     pub name: String,
+    /// The panes of every tab in order (what trust lists and the clients that build panes read).
     pub layout: Layout,
+    /// The tabs the preset builds: its one `panes[]` tab, or the `tabs[]` it names (#655).
+    pub tabs: TabLayout,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -337,7 +340,7 @@ fn command_for(value: &Value, platform: &str) -> Result<Option<String>, String> 
 }
 
 /// The unique, non-empty `name` of a list entry, or the warning to record.
-fn entry_name(raw: &Value, names: &mut HashSet<String>) -> Result<String, String> {
+pub fn entry_name(raw: &Value, names: &mut HashSet<String>) -> Result<String, String> {
     let name = raw["name"].as_str().map(str::trim).unwrap_or_default();
     if name.is_empty() {
         return Err("\"name\" is required".into());
@@ -364,8 +367,9 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
     };
 
     if !data["layout"].is_null() {
-        match parse_layout_value(&data["layout"]) {
-            Ok(l) => out.config.layout = Some(l),
+        // `panes[]` or `tabs[]`; the flattened panes are what trust lists.
+        match parse_preset(&data["layout"]) {
+            Ok((l, _)) => out.config.layout = Some(l),
             Err(e) => warn(&mut out, "layout", e),
         }
     }
@@ -459,8 +463,8 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
                         continue;
                     }
                 };
-                match parse_layout_value(raw) {
-                    Ok(layout) => out.config.presets.push(Preset { name, layout }),
+                match parse_preset(raw) {
+                    Ok((layout, tabs)) => out.config.presets.push(Preset { name, layout, tabs }),
                     Err(e) => warn(&mut out, &key, format!("\"{name}\": {e}")),
                 }
             }
@@ -468,6 +472,23 @@ pub fn parse(file: &str, text: &str, platform: &str) -> Loaded {
         _ => warn(&mut out, "presets", "expected a list".into()),
     }
     out
+}
+
+/// A preset: `panes[]` (one tab) or `tabs[]` of the named-layout shape (#655).
+pub fn parse_preset(raw: &Value) -> Result<(Layout, TabLayout), String> {
+    if raw.get("tabs").is_some() {
+        let (tabs, _) = parse_tabs_value(raw)?;
+        Ok((
+            Layout {
+                panes: tabs.panes(),
+            },
+            tabs,
+        ))
+    } else {
+        let layout = parse_layout_value(raw)?;
+        let tabs = layout.to_tabs();
+        Ok((layout, tabs))
+    }
 }
 
 /// Loads `<repo_root>/.poimen/config.json`; a missing file is an empty config without warnings.

@@ -246,6 +246,27 @@ mod tests {
     }
 
     #[test]
+    fn lists_the_commands_of_a_tabs_layout_and_a_tabs_preset_with_children() {
+        let file = r#"{
+            "layout": {"tabs": [{"name": "agent", "command": "claude", "children": [
+                {"name": "t", "root": {"kind": "split", "direction": "right", "children": [
+                    {"kind": "terminal", "name": "a", "command": "pnpm test"},
+                    {"kind": "terminal", "name": "b", "command": "pnpm lint"}]}}]}]},
+            "presets": [{"name": "p", "tabs": [{"name": "x", "command": "vim",
+                "children": [{"name": "y", "command": "htop"}]}]}]
+        }"#;
+        let commands: Vec<_> = sources(Some(file), None)
+            .commands()
+            .into_iter()
+            .map(|c| c.command)
+            .collect();
+        assert_eq!(
+            commands,
+            ["claude", "pnpm test", "pnpm lint", "vim", "htop"]
+        );
+    }
+
+    #[test]
     fn lists_every_command_of_the_project_file() {
         let what: Vec<_> = sources(Some(FILE), None)
             .commands()

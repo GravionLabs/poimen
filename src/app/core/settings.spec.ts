@@ -75,6 +75,33 @@ describe("UI font settings", () => {
   });
 });
 
+describe("parseSettings layouts", () => {
+  it("reads the named layouts and a template's layout name", () => {
+    const s = parseSettings({
+      layouts: [
+        {
+          name: "review",
+          layout: {
+            tabs: [
+              {
+                name: "agent",
+                root: { kind: "terminal", name: null, command: "claude", cwd: null },
+                children: [],
+                place: null,
+              },
+            ],
+          },
+        },
+        { name: "broken" },
+      ],
+      spaceTemplates: [{ name: "t", agent: "claude", layout: null, layoutName: "review" }],
+    });
+    expect(s.layouts.map((l) => l.name)).toEqual(["review"]);
+    expect(s.layouts[0].tabs[0].root).toMatchObject({ command: "claude" });
+    expect(s.spaceTemplates[0].layout).toBe("review");
+  });
+});
+
 describe("parseSettings", () => {
   it("reads the wire shape", () => {
     expect(
@@ -134,6 +161,7 @@ describe("parseSettings", () => {
       claudeClassicRenderer: false,
       scrollback: 10000,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
+      layouts: [],
       spaceTemplates: [
         { name: "w", dir: "~/src", remote: null, agent: "claude", model: "opus", layout: null },
         {

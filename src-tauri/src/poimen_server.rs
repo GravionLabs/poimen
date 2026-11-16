@@ -1074,6 +1074,19 @@ mod tests {
     }
 
     #[test]
+    fn a_protocol_6_server_without_tab_parents_is_incompatible() {
+        // Protocol 7 adds `Tab.parent` and nested layouts; the app refuses a protocol 6 server
+        // like any other protocol.
+        assert_eq!(
+            classify(pong_of("0.21.0", 6), false, "0.21.0"),
+            Ping::Incompatible {
+                running: "0.21.0".into(),
+                protocol: 6
+            }
+        );
+    }
+
+    #[test]
     fn another_protocol_is_incompatible_not_absent() {
         let current = poimen_client::protocol::PROTOCOL_VERSION;
         assert_eq!(
@@ -1109,7 +1122,7 @@ mod tests {
     fn a_protocol_5_server_without_apply_layout_is_incompatible() {
         // Rebuild and presets go through `space.apply_layout` (protocol 6) on the poimen
         // backend; a protocol 5 server answers it with `unknown_method`.
-        assert_eq!(poimen_client::protocol::PROTOCOL_VERSION, 6);
+        assert_eq!(poimen_client::protocol::PROTOCOL_VERSION, 7);
         for running in ["0.14.0", "0.15.0"] {
             assert_eq!(
                 classify(pong_of(running, 5), false, "0.14.0"),

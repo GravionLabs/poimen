@@ -1,0 +1,312 @@
+<div class="layout-form">
+  <h3>Tabs</h3>
+  <ol class="rows panes" aria-label="Tabs of the layout">
+    @for (item of flat(); track item.path.join("."); let ti = $index) {
+      <li
+        class="pane-row"
+        [class.invalid]="errs()?.tab?.[ti]"
+        [style.margin-left.rem]="item.depth * 1.5"
+      >
+        <div class="pane-fields">
+          <label class="field">
+            <span>Tab name</span>
+            <input
+              type="text"
+              [attr.data-tab]="ti"
+              [value]="item.tab.name"
+              (input)="setTabName(item.path, $event)"
+            />
+          </label>
+          <label class="field">
+            <span>Shape</span>
+            <select
+              [attr.aria-label]="'Shape of ' + item.tab.name"
+              (change)="setShape(item.path, value($event))"
+            >
+              <option value="terminal" [selected]="item.tab.root.kind === 'terminal'">
+                Terminal
+              </option>
+              <option value="split" [selected]="item.tab.root.kind === 'split'">Split tree</option>
+            </select>
+          </label>
+          <span class="actions">
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Move ' + item.tab.name + ' up'"
+              title="Move up"
+              (click)="moveTab(item.path, -1)"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Move ' + item.tab.name + ' down'"
+              title="Move down"
+              (click)="moveTab(item.path, 1)"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Indent ' + item.tab.name"
+              title="Indent: make it a child of the tab above"
+              [disabled]="!canIndent(item.path)"
+              (click)="indent(item.path)"
+            >
+              →
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Outdent ' + item.tab.name"
+              title="Outdent: make it a sibling of its parent"
+              [disabled]="!canOutdent(item.path)"
+              (click)="outdent(item.path)"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Add child tab to ' + item.tab.name"
+              title="Add child tab"
+              (click)="addTab(item.path)"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              class="icon-btn"
+              [attr.aria-label]="'Delete ' + item.tab.name"
+              title="Delete the tab with its children"
+              [disabled]="flat().length === 1"
+              (click)="removeTab(item.path)"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+        <ng-container
+          [ngTemplateOutlet]="nodeTpl"
+          [ngTemplateOutletContext]="{ node: item.tab.root, tab: item.path, at: [], ti: ti }"
+        />
+        <div class="pane-fields place">
+          <label class="field">
+            <span>Place</span>
+            <input
+              type="checkbox"
+              [attr.aria-label]="'Place ' + item.tab.name + ' in its own editor group'"
+              [checked]="item.tab.place !== null"
+              (change)="setPlaced(item.path, $any($event.target).checked)"
+            />
+          </label>
+          @if (item.tab.place; as p) {
+            <label class="field">
+              <span>Direction</span>
+              <select
+                [attr.aria-label]="'Place direction of ' + item.tab.name"
+                (change)="setPlace(item.path, { direction: $any(value($event)) })"
+              >
+                <option value="right" [selected]="p.direction === 'right'">right</option>
+                <option value="down" [selected]="p.direction === 'down'">down</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Of</span>
+              <select
+                [attr.aria-label]="'Place of for ' + item.tab.name"
+                (change)="setPlace(item.path, { of: value($event) || null })"
+              >
+                <option value="" [selected]="p.of === null">parent tab</option>
+                @for (n of placeTargets(ti); track n) {
+                  <option [value]="n" [selected]="p.of === n">{{ n }}</option>
+                }
+              </select>
+            </label>
+            <label class="field ratio">
+              <span>Ratio</span>
+              <input
+                type="number"
+                step="0.05"
+                [min]="ratioMin"
+                [max]="ratioMax"
+                [attr.aria-label]="'Place ratio of ' + item.tab.name"
+                [value]="p.ratio"
+                (input)="setPlace(item.path, { ratio: ratioOf($event) })"
+              />
+            </label>
+          }
+        </div>
+        @if (errs()?.tab?.[ti]; as m) {
+          <p class="field-error">{{ m }}</p>
+        }
+      </li>
+    }
+  </ol>
+  @if (errs()?.tabs; as m) {
+    <p class="field-error">{{ m }}</p>
+  }
+  <div class="toolbar-row">
+    <button type="button" class="btn" (click)="addTab(null)">Add tab</button>
+  </div>
+
+  <h3>Preview</h3>
+  <div class="layout-preview" aria-label="Preview">
+    <ul class="preview-tree" aria-label="Spaces tree">
+      <li class="preview-space">New space</li>
+      @for (row of preview(); track $index) {
+        <li [style.padding-left.rem]="1 + row.depth * 1.25">
+          {{ row.name }} <span class="hint">{{ row.detail }}</span>
+        </li>
+      }
+    </ul>
+    @if (groups(); as g) {
+      <div class="preview-groups" aria-label="Editor groups">
+        <ng-container [ngTemplateOutlet]="groupTpl" [ngTemplateOutletContext]="{ g: g }" />
+      </div>
+    }
+  </div>
+</div>
+
+<ng-template #nodeTpl let-node="node" let-tab="tab" let-at="at" let-ti="ti">
+  @if (node.kind === "terminal") {
+    <div class="pane-fields leaf">
+      @if (at.length > 0) {
+        <label class="field">
+          <span>Terminal name</span>
+          <input
+            type="text"
+            [attr.aria-label]="'Terminal name in ' + flat()[ti].tab.name"
+            [value]="node.name ?? ''"
+            (input)="setLeaf(tab, at, 'name', $event)"
+          />
+        </label>
+      }
+      <label class="field grow">
+        <span>Command</span>
+        <input
+          type="text"
+          placeholder="shell"
+          [attr.aria-label]="'Command in ' + flat()[ti].tab.name"
+          [value]="node.command ?? ''"
+          (input)="setLeaf(tab, at, 'command', $event)"
+        />
+      </label>
+      <label class="field">
+        <span>Directory</span>
+        <input
+          type="text"
+          [attr.aria-label]="'Directory in ' + flat()[ti].tab.name"
+          [value]="node.cwd ?? ''"
+          (input)="setLeaf(tab, at, 'cwd', $event)"
+        />
+      </label>
+      @if (flat()[ti].tab.root.kind === "split") {
+        <span class="actions">
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="Split right"
+            title="Split right"
+            (click)="splitLeaf(tab, at, 'right')"
+          >
+            ⇥
+          </button>
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="Split down"
+            title="Split down"
+            (click)="splitLeaf(tab, at, 'down')"
+          >
+            ⤓
+          </button>
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="Remove terminal"
+            title="Remove terminal"
+            (click)="removeLeaf(tab, at)"
+          >
+            ×
+          </button>
+        </span>
+      }
+    </div>
+  } @else {
+    <div class="split-node">
+      <div class="pane-fields">
+        <label class="field">
+          <span>Split</span>
+          <select
+            [attr.aria-label]="'Split direction in ' + flat()[ti].tab.name"
+            (change)="setSplit(tab, at, { direction: $any(value($event)) })"
+          >
+            <option value="right" [selected]="node.direction === 'right'">side by side</option>
+            <option value="down" [selected]="node.direction === 'down'">stacked</option>
+          </select>
+        </label>
+        <label class="field ratio">
+          <span>Ratio</span>
+          <input
+            type="number"
+            step="0.05"
+            [min]="ratioMin"
+            [max]="ratioMax"
+            [attr.aria-label]="'Split ratio in ' + flat()[ti].tab.name"
+            [value]="node.ratio"
+            (input)="setSplit(tab, at, { ratio: ratioOf($event) })"
+          />
+        </label>
+      </div>
+      <div class="split-children">
+        <ng-container
+          [ngTemplateOutlet]="nodeTpl"
+          [ngTemplateOutletContext]="{
+            node: node.children[0],
+            tab: tab,
+            at: at.concat([0]),
+            ti: ti,
+          }"
+        />
+        <ng-container
+          [ngTemplateOutlet]="nodeTpl"
+          [ngTemplateOutletContext]="{
+            node: node.children[1],
+            tab: tab,
+            at: at.concat([1]),
+            ti: ti,
+          }"
+        />
+      </div>
+    </div>
+  }
+</ng-template>
+
+<ng-template #groupTpl let-g="g">
+  @if (g.kind === "group") {
+    <div class="preview-group">
+      @for (t of g.tabs; track t) {
+        <span class="preview-tab">{{ t }}</span>
+      }
+    </div>
+  } @else {
+    <div class="preview-split" [style]="groupStyle(g)">
+      <div class="preview-cell" [style.flex]="flexOf(g, 0)">
+        <ng-container
+          [ngTemplateOutlet]="groupTpl"
+          [ngTemplateOutletContext]="{ g: g.children[0] }"
+        />
+      </div>
+      <div class="preview-cell" [style.flex]="flexOf(g, 1)">
+        <ng-container
+          [ngTemplateOutlet]="groupTpl"
+          [ngTemplateOutletContext]="{ g: g.children[1] }"
+        />
+      </div>
+    </div>
+  }
+</ng-template>

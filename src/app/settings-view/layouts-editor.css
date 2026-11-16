@@ -1,0 +1,84 @@
+/* Layouts page: the tab editor and its preview. */
+.layout-form h3 {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.9rem;
+}
+
+.layout-form .leaf,
+.layout-form .place {
+  margin-top: 0.4rem;
+}
+
+.split-node {
+  margin-top: 0.4rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--h-border, currentColor);
+}
+
+.split-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.layout-preview {
+  display: flex;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.preview-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  min-width: 12rem;
+  border: 1px solid var(--h-border, currentColor);
+  border-radius: 4px;
+}
+
+.preview-space {
+  font-weight: 600;
+}
+
+.preview-groups {
+  flex: 1;
+  min-height: 7rem;
+  display: flex;
+  border: 1px solid var(--h-border, currentColor);
+  border-radius: 4px;
+}
+
+.preview-groups > .preview-group,
+.preview-groups > .preview-split {
+  flex: 1;
+}
+
+.preview-split {
+  display: flex;
+  height: 100%;
+}
+
+.preview-cell {
+  display: flex;
+  min-width: 0;
+}
+
+.preview-cell > * {
+  flex: 1;
+}
+
+.preview-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border: 1px dashed var(--h-border, currentColor);
+}
+
+.preview-tab {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--h-border, currentColor);
+  border-radius: 3px;
+  font-size: 0.8rem;
+}

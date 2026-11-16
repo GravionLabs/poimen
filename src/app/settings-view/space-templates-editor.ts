@@ -29,7 +29,7 @@ import { SettingsTransfer } from "../core/settings-transfer";
 import { SettingsImportPanel } from "./settings-import-panel";
 
 /** Where the layout of the draft started: none, a source, or edited by hand. */
-type LayoutSource = "none" | "default" | "user" | "custom" | `preset:${string}`;
+type LayoutSource = "none" | "default" | "user" | "custom" | `preset:${string}` | `named:${string}`;
 
 interface Editing {
   /** Index in `spaceTemplates`; `null` for a new template. */
@@ -107,6 +107,13 @@ export class SpaceTemplatesEditor {
     );
   });
   protected readonly valid = computed(() => !hasErrors(this.errors()));
+  /** The names of `layouts[]` a template can use. */
+  protected readonly layoutNames = computed(() => this.settings().layouts.map((l) => l.name));
+  /** The layout name of the draft when `layouts[]` has no such layout. */
+  protected readonly unknownLayout = computed(() => {
+    const l = this.editing()?.draft.layout;
+    return typeof l === "string" && !this.layoutNames().includes(l) ? l : null;
+  });
   protected readonly presetNames = computed(() => this.presets().map((p) => p.name));
   protected readonly harness = computed(() =>
     this.harnesses().find((h) => h.id === this.editing()?.draft.agent),
@@ -181,7 +188,9 @@ export class SpaceTemplatesEditor {
   }
 
   private open(index: number | null, draft: SpaceTemplate, asDefault = false): void {
-    this.source.set(draft.layout && typeof draft.layout !== "string" ? "custom" : "none");
+    this.source.set(
+      typeof draft.layout === "string" ? `named:${draft.layout}` : draft.layout ? "custom" : "none",
+    );
     this.presets.set([]);
     this.editing.set({ index, draft, asDefault });
     void this.loadPresets();
@@ -266,6 +275,11 @@ export class SpaceTemplatesEditor {
 
   protected setSource(event: Event): void {
     const source = value(event) as LayoutSource;
+    if (source.startsWith("named:")) {
+      this.source.set(source);
+      this.patch({ layout: source.slice(6) });
+      return;
+    }
     const layout =
       source === "none"
         ? null

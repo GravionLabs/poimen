@@ -96,6 +96,62 @@ describe("EditorTabs", () => {
     tabs = TestBed.inject(EditorTabs);
   });
 
+  describe("openAt (#657)", () => {
+    const right = (of: string, ratio = 0.6) => ({
+      place: { ofPaneId: of, dir: "row" as const, ratio, key: `${of}|row|${ratio}` },
+    });
+
+    it("opens claude left, Terminal right top and Logs right bottom", () => {
+      tabs.openAt("claude", { main: true }, true);
+      tabs.openAt("terminal", right("claude"), true);
+      tabs.openAt(
+        "logs",
+        { place: { ofPaneId: "terminal", dir: "column", ratio: 0.5, key: "terminal|column|0.5" } },
+        true,
+      );
+      const groups = tabs.groups();
+      expect(groups.map((g) => g.tabs.map((t) => t.paneId))).toEqual([
+        ["claude"],
+        ["terminal"],
+        ["logs"],
+      ]);
+      const layout = tabs.layout();
+      expect(layout.kind === "split" && layout.dir).toBe("row");
+      if (layout.kind !== "split") throw new Error("split expected");
+      expect(layout.sizes).toEqual([0.6, 0.4]);
+      const lower = layout.children[1];
+      expect(lower.kind === "split" && lower.dir).toBe("column");
+      expect(tabs.focusedId()).toBe(groups[2].id);
+    });
+
+    it("shares the group of tabs with the same place", () => {
+      tabs.openAt("claude", { main: true }, true);
+      tabs.openAt("a", right("claude"), true);
+      tabs.openAt("b", right("claude"), true);
+      expect(tabs.groups().map((g) => g.tabs.map((t) => t.paneId))).toEqual([
+        ["claude"],
+        ["a", "b"],
+      ]);
+    });
+
+    it("opens a child beside its parent and a top-level tab in the main group", () => {
+      tabs.openAt("claude", { main: true }, true);
+      tabs.openAt("a", right("claude"), true);
+      tabs.openAt("child", { besidePaneId: "a" }, true);
+      tabs.openAt("other", { main: true }, true);
+      expect(tabs.groups().map((g) => g.tabs.map((t) => t.paneId))).toEqual([
+        ["claude", "other"],
+        ["a", "child"],
+      ]);
+    });
+
+    it("falls back to a plain open when the pane of the place is not open", () => {
+      tabs.openAt("a", right("missing"), true);
+      expect(tabs.groups().length).toBe(1);
+      expect(ids()).toEqual(["a"]);
+    });
+  });
+
   it("replaces a tab in place, keeping position, pinned and active state", () => {
     tabs.open("a", true);
     tabs.open("b", true);

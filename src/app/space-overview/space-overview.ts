@@ -15,6 +15,7 @@ import { SpacesStore } from "../core/spaces-store";
 import { PaneActions } from "../core/pane-actions";
 import { TauriBridge } from "../core/tauri";
 import { isGithubUrl } from "../github/pulls";
+import { ProjectLayouts } from "./project-layouts";
 import {
   EMPTY_FORM,
   formOf,
@@ -32,6 +33,7 @@ import { activityText, overviewRows, spaceDirectory, spacePullUrl } from "./over
  */
 @Component({
   selector: "app-space-overview",
+  imports: [ProjectLayouts],
   templateUrl: "./space-overview.html",
   styleUrl: "./space-overview.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -87,6 +89,9 @@ export class SpaceOverview {
   protected readonly status = signal<string | null>(null);
   protected readonly fileExists = signal(false);
 
+  /** What the layout editor found wrong (empty while it is not shown or the tabs are fine). */
+  protected readonly problems = signal<FieldError[]>([]);
+
   constructor() {
     effect(() => {
       const dir = this.directory();
@@ -112,6 +117,11 @@ export class SpaceOverview {
   protected setField(field: keyof ConfigForm, event: Event): void {
     const value = (event.target as HTMLInputElement | HTMLTextAreaElement).value;
     this.form.update((f) => ({ ...f, [field]: value }));
+    this.status.set(null);
+  }
+
+  protected setText(field: "layout" | "presets", text: string): void {
+    this.form.update((f) => ({ ...f, [field]: text }));
     this.status.set(null);
   }
 
@@ -144,6 +154,7 @@ export class SpaceOverview {
     const dir = this.directory();
     if (!dir) return;
     const { patch, errors } = patchOf(this.form());
+    errors.push(...this.problems());
     this.fieldErrors.set(errors);
     this.status.set(null);
     if (errors.length > 0) return;

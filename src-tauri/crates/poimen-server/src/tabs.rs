@@ -5,7 +5,7 @@
 //! Invariant (kept by the server): every leaf is a running terminal and every running terminal is
 //! in exactly one leaf. A `split_id` is never given to another node (the id counter is persisted).
 
-use poimen_protocol::{ErrorCode, Event, Node, Space, SplitDirection, Tab, valid_ratio};
+use poimen_protocol::{ErrorCode, Event, Node, Space, SplitDirection, Tab, TabPlace, valid_ratio};
 
 pub(crate) type Failure = (ErrorCode, String);
 
@@ -102,6 +102,24 @@ impl Layout {
         name: String,
         terminal_id: &str,
     ) -> Result<Vec<Event>, Failure> {
+        self.add_child_tab(space_id, tab_id, name, terminal_id, None)
+    }
+
+    /// [`add_tab`](Self::add_tab) below `parent`, a tab of the same space (an unknown one or one of
+    /// another space is an error, nothing is added).
+    pub(crate) fn add_child_tab(
+        &mut self,
+        space_id: &str,
+        tab_id: String,
+        name: String,
+        terminal_id: &str,
+        parent: Option<&str>,
+    ) -> Result<Vec<Event>, Failure> {
+        if let Some(parent) = parent
+            && self.tab(parent)?.space_id != space_id
+        {
+            return Err(not_found(&format!("tab in space {space_id}:"), parent));
+        }
         let space = self.space_mut(space_id)?;
         space.tabs.push(tab_id.clone());
         if space.active_tab.is_none() {
@@ -113,6 +131,8 @@ impl Layout {
             name,
             root: Node::terminal(terminal_id),
             active_terminal: terminal_id.to_string(),
+            parent: parent.map(str::to_owned),
+            place: None,
         };
         self.tabs.push(tab.clone());
         let mut events = vec![Event::TabCreated { tab }];
@@ -148,6 +168,26 @@ impl Layout {
         }
     }
 
+    /// Stores the app-only placement hint of a tab (`of` must be another tab of the same space,
+    /// else it is not stored); the server has no behaviour of its own for it.
+    pub(crate) fn set_place(&mut self, tab_id: &str, place: TabPlace) -> Vec<Event> {
+        let same_space =
+            |this: &Self, id: &str, space: &str| this.tab(id).is_ok_and(|t| t.space_id == space);
+        let Ok(space) = self.tab(tab_id).map(|t| t.space_id.clone()) else {
+            return Vec::new();
+        };
+        if place.of == tab_id || !same_space(self, &place.of, &space) {
+            return Vec::new();
+        }
+        match self.tab_mut(tab_id) {
+            Ok(tab) => {
+                tab.place = Some(place);
+                vec![Event::TabChanged { tab: tab.clone() }]
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// Takes the tab out of its space; when it was the active tab, the tab that took its place
     /// (else the one before it) becomes active.
     pub(crate) fn remove_tab(&mut self, tab_id: &str) -> Result<(Tab, Vec<Event>), Failure> {
@@ -161,6 +201,15 @@ impl Layout {
             tab_id: tab.tab_id.clone(),
             space_id: tab.space_id.clone(),
         }];
+        // The children of a closed tab stay and become top level.
+        for child in self
+            .tabs
+            .iter_mut()
+            .filter(|t| t.parent.as_deref() == Some(tab_id))
+        {
+            child.parent = None;
+            events.push(Event::TabChanged { tab: child.clone() });
+        }
         if let Ok(space) = self.space_mut(&tab.space_id) {
             if let Some(at) = space.tabs.iter().position(|t| *t == tab.tab_id) {
                 space.tabs.remove(at);
@@ -329,6 +378,20 @@ impl Layout {
             tabs.push(tab);
         }
         self.tabs = tabs;
+        // A parent must be another tab of the same space, else the tab is top level.
+        let known: Vec<(String, String)> = self
+            .tabs
+            .iter()
+            .map(|t| (t.tab_id.clone(), t.space_id.clone()))
+            .collect();
+        for tab in &mut self.tabs {
+            if let Some(parent) = &tab.parent
+                && (*parent == tab.tab_id
+                    || !known.contains(&(parent.clone(), tab.space_id.clone())))
+            {
+                tab.parent = None;
+            }
+        }
         for space in &mut self.spaces {
             let own: Vec<&str> = self
                 .tabs
@@ -796,6 +859,8 @@ mod tests {
                         split("split6", Down, 0.6, leaf("t2"), leaf("t3")),
                     ),
                     active_terminal: "t2".into(),
+                    parent: None,
+                    place: None,
                 },
                 Tab {
                     tab_id: "tab2".into(),
@@ -803,6 +868,8 @@ mod tests {
                     name: "logs".into(),
                     root: leaf("t4"),
                     active_terminal: "t4".into(),
+                    parent: None,
+                    place: None,
                 },
             ],
         )
@@ -884,6 +951,8 @@ mod tests {
             name: "x".into(),
             root: leaf("t8"),
             active_terminal: "t8".into(),
+            parent: None,
+            place: None,
         });
         let all = [
             live("t1", "s1"),

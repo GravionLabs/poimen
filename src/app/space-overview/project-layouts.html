@@ -1,0 +1,95 @@
+<section class="layout-section" aria-labelledby="cfg-layout-title">
+  <h4 id="cfg-layout-title">Layout</h4>
+  <p class="hint">The tabs of a new space in this repository.</p>
+  @switch (layoutMode()) {
+    @case ("editor") {
+      <app-layout-tabs-editor
+        class="cfg-layout-editor"
+        [tabList]="layoutTabs()!"
+        [errors]="layoutIssues()"
+        (tabsChange)="setLayoutTabs($event)"
+      />
+    }
+    @case ("advanced") {
+      <p class="hint cfg-layout-advanced">
+        This layout cannot be shown in the editor; edit the JSON under Advanced.
+      </p>
+    }
+    @default {
+      <p class="hint">No project layout: the layout of your templates applies.</p>
+    }
+  }
+  <div class="field layout-actions">
+    @if (layoutMode() === "none") {
+      <button type="button" class="cfg-layout-add" (click)="addLayout()">Add layout</button>
+    } @else {
+      <button type="button" class="cfg-layout-remove" (click)="removeLayout()">
+        Remove layout
+      </button>
+    }
+    <button type="button" class="cfg-layout-export" (click)="exportLayout(-1)">
+      Export layout…
+    </button>
+    <button type="button" class="cfg-layout-import" (click)="importLayout(-1)">
+      Import layout…
+    </button>
+  </div>
+  @if (layoutError(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+</section>
+<section class="layout-section" aria-labelledby="cfg-presets-title">
+  <h4 id="cfg-presets-title">Presets</h4>
+  <p class="hint">
+    Presets are entries of the command palette for this project; they are not offered as layouts in
+    the settings.
+  </p>
+  @for (preset of presetList() ?? []; track $index; let pi = $index) {
+    <div class="preset" [attr.data-preset]="pi">
+      <div class="field">
+        <label [attr.for]="'cfg-preset-' + pi">Preset name</label>
+        <input
+          type="text"
+          class="cfg-preset-name"
+          autocomplete="off"
+          [id]="'cfg-preset-' + pi"
+          [value]="preset.name"
+          (input)="renamePreset(pi, $event)"
+        />
+        <button type="button" class="cfg-preset-export" (click)="exportLayout(pi)">Export…</button>
+        <button type="button" class="cfg-preset-import" (click)="importLayout(pi)">Import…</button>
+        <button type="button" class="cfg-preset-remove" (click)="removePresetEntry(pi)">
+          Remove preset
+        </button>
+      </div>
+      @if (preset.tabs; as tabs) {
+        <app-layout-tabs-editor
+          [tabList]="tabs"
+          [errors]="presetIssues()[pi]"
+          (tabsChange)="setPresetTabs(pi, $event)"
+        />
+      } @else {
+        <p class="hint">This preset cannot be shown in the editor; edit it under Advanced.</p>
+      }
+    </div>
+  }
+  @if (presetList() === null) {
+    <p class="hint">The presets cannot be shown in the editor; edit them under Advanced.</p>
+  }
+  <div class="field">
+    <button
+      type="button"
+      class="cfg-preset-add"
+      [disabled]="presetList() === null"
+      (click)="addPresetEntry()"
+    >
+      Add preset
+    </button>
+  </div>
+  @if (presetsError(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+</section>
+@if (transferError(); as message) {
+  <p class="error cfg-transfer-error" role="alert">{{ message }}</p>
+}

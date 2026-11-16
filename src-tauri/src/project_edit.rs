@@ -1,5 +1,5 @@
 //! In-place editing of the project file `.poimen/config.json` from the space overview: `read`
-//! returns the text, `save` merges a patch of the known keys (`layout`, `setup`, `teardown`) into
+//! returns the text, `save` merges a patch of the known keys (`layout`, `presets`, `setup`, `teardown`) into
 //! the existing JSON object, so every other key (`commands`, `presets`, `tasks`, unknown keys)
 //! survives. The new content goes through `trust::gate` before anything is written: a changed
 //! file has a new hash, so it is written only with a matching `Trust` answer or when the hash is
@@ -11,8 +11,8 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::layout::parse_layout_value;
-use crate::project::PROJECT_FILE;
+use crate::layout::parse_tabs_value;
+use crate::project::{PROJECT_FILE, entry_name};
 use crate::trust::{self, Decision, Gate, Sources, TrustRequest};
 
 /// The project file as the editor shows it.
@@ -57,6 +57,27 @@ fn error(field: &str, message: impl Into<String>) -> FieldError {
     }
 }
 
+/// A layout of the project file in either shape (`panes[]` or `tabs[]` with nested `children[]`
+/// and `place`); a `place` the loader would drop is an error here, so it is never saved silently.
+fn check_layout(layout: &Value) -> Result<(), String> {
+    let (_, warnings) = parse_tabs_value(layout)?;
+    match warnings.first() {
+        Some(w) => Err(w.clone()),
+        None => Ok(()),
+    }
+}
+
+/// `presets[]`: a list of entries with a unique `name` and a layout in either shape.
+fn check_presets(presets: &Value) -> Result<(), String> {
+    let list = presets.as_array().ok_or("must be a list")?;
+    let mut names = std::collections::HashSet::new();
+    for (i, raw) in list.iter().enumerate() {
+        let name = entry_name(raw, &mut names).map_err(|e| format!("preset {}: {e}", i + 1))?;
+        check_layout(raw).map_err(|e| format!("preset \"{name}\": {e}"))?;
+    }
+    Ok(())
+}
+
 /// Merges `patch` (an object; a key present with `null` or a blank string removes it) into
 /// `existing`. Unknown keys and the order of existing keys are kept.
 pub fn apply_patch(existing: Option<&str>, patch: &Value) -> Result<String, Vec<FieldError>> {
@@ -94,11 +115,23 @@ pub fn apply_patch(existing: Option<&str>, patch: &Value) -> Result<String, Vec<
         Some(Value::Null) => {
             object.remove("layout");
         }
-        Some(layout) => match parse_layout_value(layout) {
-            Ok(_) => {
+        Some(layout) => match check_layout(layout) {
+            Ok(()) => {
                 object.insert("layout".to_owned(), layout.clone());
             }
             Err(message) => errors.push(error("layout", message)),
+        },
+    }
+    match patch.get("presets") {
+        None => {}
+        Some(Value::Null) => {
+            object.remove("presets");
+        }
+        Some(presets) => match check_presets(presets) {
+            Ok(()) => {
+                object.insert("presets".to_owned(), presets.clone());
+            }
+            Err(message) => errors.push(error("presets", message)),
         },
     }
     if !errors.is_empty() {
@@ -191,6 +224,61 @@ mod tests {
         );
         let text = apply_patch(Some(&text), &json!({"layout": null, "teardown": "  "})).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), json!({}));
+    }
+
+    #[test]
+    fn tabs_layouts_and_presets_round_trip_unchanged() {
+        let tabs = json!({"tabs": [{"name": "agent", "command": "claude", "children": [
+            {"name": "t", "place": {"direction": "down", "of": "agent", "ratio": 0.3},
+             "root": {"kind": "split", "direction": "right", "ratio": 0.4, "children": [
+                {"kind": "terminal", "name": "a"}, {"kind": "terminal", "name": "b"}]}}]}]});
+        let presets = json!([{"name": "duo", "tabs": tabs["tabs"]}, {"name": "old", "panes": [{"name": "x"}]}]);
+        let patch = json!({"layout": tabs, "presets": presets});
+        let text = apply_patch(Some(r#"{"x-custom": 1}"#), &patch).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["layout"], tabs);
+        assert_eq!(v["presets"], presets);
+        assert_eq!(v["x-custom"], 1);
+        // A second save of what was read changes nothing.
+        assert_eq!(apply_patch(Some(&text), &patch).unwrap(), text);
+        let text = apply_patch(Some(&text), &json!({"presets": null})).unwrap();
+        assert!(
+            serde_json::from_str::<Value>(&text)
+                .unwrap()
+                .get("presets")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn invalid_presets_and_places_are_reported() {
+        let dup = json!([{"name": "a", "panes": [{"name": "x"}]}, {"name": "a", "panes": [{"name": "x"}]}]);
+        let e = apply_patch(None, &json!({"presets": dup})).unwrap_err();
+        assert_eq!(e[0].field, "presets");
+        assert!(e[0].message.contains("duplicate"));
+        let e = apply_patch(None, &json!({"presets": [{"panes": [{"name": "x"}]}]})).unwrap_err();
+        assert!(e[0].message.contains("name"));
+        let bad_place = json!({"tabs": [{"name": "a", "place": {"direction": "up"}}]});
+        let e = apply_patch(None, &json!({"layout": bad_place})).unwrap_err();
+        assert!(e[0].message.contains("place"));
+    }
+
+    #[test]
+    fn a_changed_layout_command_asks_for_trust_again() {
+        let root = temp("layout-trust");
+        let root_s = root.to_string_lossy().into_owned();
+        let layout =
+            json!({"tabs": [{"name": "a", "children": [{"name": "b", "command": "make"}]}]});
+        let trusted_hash = {
+            let first = json!({"layout": {"tabs": [{"name": "a"}]}});
+            let out = save(&root_s, &first, &BTreeMap::new(), None).unwrap();
+            assert!(out.saved);
+            trust::sha256_hex(&read(&root_s).text)
+        };
+        let trusted = BTreeMap::from([(root_s.clone(), trusted_hash)]);
+        let out = save(&root_s, &json!({"layout": layout}), &trusted, None).unwrap();
+        assert!(!out.saved);
+        assert_eq!(out.trust.unwrap().commands[0].command, "make");
     }
 
     #[test]

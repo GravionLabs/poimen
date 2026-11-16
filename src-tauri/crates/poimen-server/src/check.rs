@@ -291,17 +291,17 @@ mod tests {
         let exe = std::env::current_exe().unwrap();
         claude::install(&claude::default_settings_path(&h), &exe, CHANNEL).unwrap();
         copilot::install(&copilot::default_hook_path(&h, CHANNEL), &exe, CHANNEL).unwrap();
-        let r = run(&env, "0.18.0", 6, Channel::Stable);
+        let r = run(&env, "0.18.0", 7, Channel::Stable);
         assert_eq!(get(&r, "hooks_claude").status, CheckStatus::Ok);
         assert_eq!(get(&r, "hooks_copilot").status, CheckStatus::Ok);
         assert_eq!(get(&r, "git").status, CheckStatus::Ok);
         assert_eq!(get(&r, "gh_auth").status, CheckStatus::Ok);
         assert_eq!(
             get(&r, "server").detail.as_deref(),
-            Some("poimen-server 0.18.0 (protocol 6)")
+            Some("poimen-server 0.18.0 (protocol 7)")
         );
         assert_eq!(r.version, "0.18.0");
-        assert_eq!(r.protocol, 6);
+        assert_eq!(r.protocol, 7);
         assert!(r.ok());
     }
 

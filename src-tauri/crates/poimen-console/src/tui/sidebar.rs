@@ -104,6 +104,9 @@ pub struct Segment {
     pub dim: bool,
 }
 
+/// A tab (none for a terminal in no tab) with its terminals and its nesting level.
+type TabEntry<'a> = (Option<&'a Tab>, Vec<&'a Terminal>, u16);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub kind: RowKind,
@@ -495,27 +498,64 @@ impl Model {
             .collect()
     }
 
-    /// The tabs of a space in order, each with its terminals depth first; terminals of the
-    /// space in no tab (an older server) come last, as tabs of their own.
-    fn tabs_of<'a>(&'a self, space: &'a Space) -> Vec<(Option<&'a Tab>, Vec<&'a Terminal>)> {
+    /// The tabs of a space as a tree (#656): a tab right before its children (`Tab::parent`), each
+    /// with its terminals depth first and its nesting level (0 top level). A tab whose parent is
+    /// not in the space is top level. Terminals of the space in no tab (an older server) come
+    /// last, as tabs of their own.
+    fn tabs_of<'a>(&'a self, space: &'a Space) -> Vec<TabEntry<'a>> {
+        let tabs: Vec<&Tab> = space
+            .tabs
+            .iter()
+            .filter_map(|id| self.tabs.iter().find(|t| &t.tab_id == id))
+            .collect();
+        let listed = |id: &str| tabs.iter().any(|t| t.tab_id == id);
         let mut out = Vec::new();
         let mut placed = HashSet::new();
-        for id in &space.tabs {
-            let Some(tab) = self.tabs.iter().find(|t| &t.tab_id == id) else {
-                continue;
-            };
+        let mut seen = HashSet::new();
+        // Depth first from the top level tabs; a parent cycle is never reached from one.
+        fn visit<'a>(
+            model: &'a Model,
+            tabs: &[&'a Tab],
+            tab: &'a Tab,
+            level: u16,
+            seen: &mut HashSet<&'a str>,
+            placed: &mut HashSet<&'a str>,
+            out: &mut Vec<TabEntry<'a>>,
+        ) {
+            if !seen.insert(tab.tab_id.as_str()) {
+                return;
+            }
             let terms: Vec<&Terminal> = tab
                 .root
                 .terminal_ids()
                 .into_iter()
-                .filter_map(|id| self.terminal(id))
+                .filter_map(|id| model.terminal(id))
                 .collect();
             placed.extend(terms.iter().map(|t| t.id.as_str()));
-            out.push((Some(tab), terms));
+            out.push((Some(tab), terms, level));
+            for child in tabs
+                .iter()
+                .filter(|c| c.parent.as_deref() == Some(tab.tab_id.as_str()))
+            {
+                visit(model, tabs, child, level + 1, seen, placed, out);
+            }
+        }
+        for tab in &tabs {
+            let top = tab
+                .parent
+                .as_deref()
+                .is_none_or(|p| !listed(p) || p == tab.tab_id);
+            if top {
+                visit(self, &tabs, tab, 0, &mut seen, &mut placed, &mut out);
+            }
+        }
+        // A cycle of parents has no top level tab: show what was not reached as top level.
+        for tab in &tabs {
+            visit(self, &tabs, tab, 0, &mut seen, &mut placed, &mut out);
         }
         for t in &self.terminals {
             if t.space_id == space.id && !placed.contains(t.id.as_str()) {
-                out.push((None, vec![t]));
+                out.push((None, vec![t], 0));
             }
         }
         out
@@ -577,13 +617,16 @@ impl Model {
             let tabs = self.tabs_of(space);
             let status = tabs
                 .iter()
-                .flat_map(|(_, ts)| ts.iter().map(|t| terminal_status(t)))
+                .flat_map(|(_, ts, _)| ts.iter().map(|t| terminal_status(t)))
                 .max_by_key(|s| rank(*s))
                 .flatten();
             let subject = Subject {
                 name: &space.name,
                 status,
-                progress: progress_of(status, tabs.iter().flat_map(|(_, ts)| ts.iter().copied())),
+                progress: progress_of(
+                    status,
+                    tabs.iter().flat_map(|(_, ts, _)| ts.iter().copied()),
+                ),
                 kind: None,
                 terminal: None,
                 tab: None,
@@ -596,13 +639,13 @@ impl Model {
                 status,
                 lines: render(&workspace, &subject, home),
             });
-            for (tab, terms) in tabs {
-                let mut depth = base + 1;
+            for (tab, terms, level) in tabs {
+                let mut depth = base + 1 + level;
                 if let (Some(tab), true) = (tab, terms.len() > 1) {
                     rows.push(Row {
                         kind: RowKind::Tab,
                         terminal_id: None,
-                        depth: base + 1,
+                        depth: base + 1 + level,
                         status: None,
                         lines: vec![vec![Segment {
                             kind: SegmentKind::Name,
@@ -611,7 +654,7 @@ impl Model {
                             dim: true,
                         }]],
                     });
-                    depth = base + 2;
+                    depth = base + 2 + level;
                 }
                 for t in terms {
                     let status = terminal_status(t);
@@ -806,6 +849,8 @@ mod tests {
             name: name.into(),
             root,
             active_terminal: active,
+            parent: None,
+            place: None,
         }
     }
 
@@ -909,6 +954,47 @@ mod tests {
         let folded = record_rows(&t, 2);
         assert_eq!(folded.len(), 1);
         assert_eq!(text(&folded[0]), "✗|5 records, 1 error, 4 working");
+    }
+
+    #[test]
+    fn child_tabs_follow_their_parent_indented() {
+        let mut m = model();
+        // `shell` (a) gets a child `logs` (c) with t4; the space lists a, b, c.
+        m.terminals.push(term("t4", "s1", "tail", "/home/u/work"));
+        let mut c = tab("c", "s1", "logs", Node::terminal("t4"));
+        c.parent = Some("a".into());
+        m.tabs.push(c);
+        m.spaces[0].tabs.push("c".into());
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        let shape: Vec<_> = rows
+            .iter()
+            .filter(|r| r.kind != RowKind::Tab)
+            .map(|r| (r.depth, r.terminal_id.clone()))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (0, None),
+                (1, Some("t1".into())),
+                (2, Some("t4".into())),
+                (2, Some("t2".into())),
+                (2, Some("t3".into())),
+                (0, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tab_with_an_unknown_parent_or_a_cycle_is_still_listed() {
+        let mut m = model();
+        m.tabs[0].parent = Some("b".into());
+        m.tabs[1].parent = Some("a".into());
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        assert_eq!(rows.iter().filter(|r| r.terminal_id.is_some()).count(), 3);
+        m.tabs[0].parent = Some("gone".into());
+        m.tabs[1].parent = None;
+        let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+        assert_eq!(rows.iter().filter(|r| r.terminal_id.is_some()).count(), 3);
     }
 
     #[test]

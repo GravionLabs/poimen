@@ -30,8 +30,23 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
 
 - `layout`: the pane layout of a new space, `panes[]` as in the README (`spaces.layout`): `name`,
   optional `command`, and from the second pane on `split.from`, `split.direction` (`right` or
-  `down`), `split.ratio` (0 to 1, default 0.5).
+  `down`), `split.ratio` (0 to 1, default 0.5). Instead of `panes[]` it may hold `tabs[]` (tabs with
+  a `command` or a `root` split tree, nested `children[]` and an app-only `place`, as in a named
+  layout; #611). The commands of every tab are listed for trust like those of `panes[]`.
+  The space overview edits `layout` and `presets[]` with the layout editor of the Layouts page
+  (JSON stays under "Advanced"; one layout can be exported to and imported from a JSON file); a
+  save changes the file hash, so a layout or preset that adds a command asks for trust again.
+  Presets are palette entries of the project and are not offered as layouts in the settings.
   Named layouts, tabs and nested tabs: [ADR 0011](adr/0011-named-layouts-referenced-by-templates.md).
+  `place` (#657) is `{direction, of?, ratio?}`: `direction` `right` or `down`, `of` the name of a
+  tab of the same layout (default the parent tab; the first tab for a top-level tab) and `ratio`
+  the share `of` keeps (default 0.5). The Tauri app opens that tab in an editor group split off the
+  group of `of`; tabs with the same `place` share the group, a tab without `place` opens in the
+  group of its parent and a top-level one in the main group (only in a space whose layout uses
+  `children[]` or `place`). The server stores the hint as `Tab.place` (`of` as a tab id) and does
+  nothing with it. **The TUI (`poimen`) ignores it**: every tab stays a tab of the sidebar. An
+  unknown `of`, a cycle or an invalid direction is a warning and the tab opens without placement.
+  Moving tabs between groups later changes nothing on the server.
 - `setup`: a command that runs once, visibly, in a tab labelled `setup` of a newly created space
   (in the space directory). It does not run when an existing space is focused or when the
   repository is not trusted. If it cannot be started, the space stays and a warning names the
@@ -55,8 +70,10 @@ worktree cleanup and from the palette; `commands[]` and `presets[]` are palette 
   entry `Project: <name>`: `terminal` opens a tab named after it in the directory of the focused
   space and types the command; `agent` sends it as a prompt to the space's agent (a picker when
   there are several).
-- `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`. Each is a palette entry
-  `Preset: <name>` that builds a new tab in the focused space from its panes.
+- `presets[]`: `name` (unique) and `panes[]` exactly as in `layout`, or `tabs[]` (#655: tabs with a
+  `command` or a `root` split tree and `children[]` tabs, as in a named layout). Each is a palette
+  entry `Preset: <name>` that builds new tabs at the end of the focused space, a child tab below
+  its parent; a `tabs[]` preset is built by `poimen-server` (protocol 7).
 
 The entries are read for the focused space and again when the palette opens. While the project
 file is not trusted they show a lock; running one opens the trust dialog (see Trust).

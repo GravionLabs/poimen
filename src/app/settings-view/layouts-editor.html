@@ -1,0 +1,128 @@
+@if (editing(); as e) {
+  <section class="layout-form" aria-label="Edit layout">
+    <label class="field grow">
+      <span>Layout name</span>
+      <input type="text" name="layout-name" [value]="e.draft.name" (input)="setName($event)" />
+    </label>
+    @if (errors()?.name; as m) {
+      <p class="field-error">{{ m }}</p>
+    }
+    @if (refusal(); as m) {
+      <p class="field-error" role="alert">{{ m }}</p>
+    }
+    <app-layout-tabs-editor
+      [tabList]="e.draft.tabs"
+      [errors]="errors()"
+      (tabsChange)="setTabs($event)"
+    />
+
+    <div class="toolbar-row">
+      <span class="spacer"></span>
+      <button type="button" class="btn" (click)="cancel()">Cancel</button>
+      <button type="button" class="btn primary" [disabled]="!valid()" (click)="save()">
+        Save layout
+      </button>
+    </div>
+  </section>
+} @else {
+  <p class="hint">
+    A layout is a set of tabs: each one terminal or a split tree, tabs nested below a parent and an
+    optional place in the editor groups. A template names the layout a new space gets.
+  </p>
+  @if (warnings().length > 0) {
+    <ul class="warnings">
+      @for (w of warnings(); track w) {
+        <li>{{ w }}</li>
+      }
+    </ul>
+  }
+  @if (refusal(); as m) {
+    <p class="field-error" role="alert">{{ m }}</p>
+  }
+  @if (writeError(); as m) {
+    <p class="field-error" role="alert">{{ m }}</p>
+  }
+  <ul class="rows" aria-label="Named layouts">
+    @for (l of layouts(); track l.name; let i = $index) {
+      <li class="row">
+        @if (renaming(); as r) {
+          @if (r.index === i) {
+            <label class="field grow">
+              <span>New name</span>
+              <input
+                type="text"
+                name="rename"
+                [value]="r.name"
+                (input)="renameInput($event)"
+                (keydown.enter)="confirmRename()"
+                (keydown.escape)="cancelRename()"
+              />
+            </label>
+            <span class="actions">
+              <button type="button" class="btn" (click)="cancelRename()">Cancel</button>
+              <button
+                type="button"
+                class="btn primary"
+                [disabled]="renameError() !== null"
+                (click)="confirmRename()"
+              >
+                Rename
+              </button>
+            </span>
+            @if (renameError(); as m) {
+              <p class="field-error">{{ m }}</p>
+            }
+          }
+        }
+        @if (renaming()?.index !== i) {
+          <span class="name">{{ l.name }}</span>
+          <span class="layout">{{ summary(l) }}</span>
+          @if (usedBy(l.name); as users) {
+            @if (users.length > 0) {
+              <span class="hint">used by {{ users.join(", ") }}</span>
+            }
+          }
+          <span class="actions">
+            <button
+              type="button"
+              class="btn"
+              [attr.aria-label]="'Edit ' + l.name"
+              (click)="edit(i)"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              class="btn"
+              [attr.aria-label]="'Duplicate ' + l.name"
+              (click)="duplicate(i)"
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              class="btn"
+              [attr.aria-label]="'Rename ' + l.name"
+              (click)="startRename(i)"
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              class="btn"
+              [attr.aria-label]="'Delete ' + l.name"
+              (click)="remove(i)"
+            >
+              Delete
+            </button>
+          </span>
+        }
+      </li>
+    } @empty {
+      <li class="row"><span class="hint">No named layouts yet.</span></li>
+    }
+  </ul>
+  <div class="toolbar-row">
+    <button type="button" class="btn primary" (click)="add()">New layout</button>
+  </div>
+}

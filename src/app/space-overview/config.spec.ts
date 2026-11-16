@@ -13,7 +13,10 @@ describe("formOf", () => {
   });
 
   it("gives an empty form for no text and an error for broken text", () => {
-    expect(formOf("")).toEqual({ form: { setup: "", teardown: "", layout: "" }, error: null });
+    expect(formOf("")).toEqual({
+      form: { setup: "", teardown: "", layout: "", presets: "" },
+      error: null,
+    });
     expect(formOf("{ x").error).toContain("not valid JSON");
     expect(formOf("[1]").error).toContain("not a JSON object");
   });
@@ -23,13 +26,24 @@ describe("patchOf", () => {
   it("round-trips a form to a patch", () => {
     const { form } = formOf(JSON.stringify({ setup: "s", layout: { panes: [{ name: "x" }] } }));
     expect(patchOf(form)).toEqual({
-      patch: { setup: "s", teardown: "", layout: { panes: [{ name: "x" }] } },
+      patch: { setup: "s", teardown: "", layout: { panes: [{ name: "x" }] }, presets: null },
       errors: [],
     });
   });
 
   it("removes a blank layout and reports one that is not JSON", () => {
-    expect(patchOf({ setup: "", teardown: "", layout: " " }).patch["layout"]).toBeNull();
-    expect(patchOf({ setup: "", teardown: "", layout: "{" }).errors[0].field).toBe("layout");
+    expect(
+      patchOf({ setup: "", teardown: "", layout: " ", presets: "" }).patch["layout"],
+    ).toBeNull();
+    expect(patchOf({ setup: "", teardown: "", layout: "{", presets: "" }).errors[0].field).toBe(
+      "layout",
+    );
+  });
+
+  it("sends presets and reports presets that are not JSON", () => {
+    const presets = [{ name: "duo", panes: [{ name: "a" }] }];
+    const { form } = formOf(JSON.stringify({ presets }));
+    expect(patchOf(form).patch["presets"]).toEqual(presets);
+    expect(patchOf({ ...form, presets: "[" }).errors[0].field).toBe("presets");
   });
 });
