@@ -244,7 +244,7 @@ pre {
 }
 .grip:hover,
 .grip:focus-visible {
-  background: var(--h-primary-color, #3b82f6);
+  background: var(--h-primary-color);
   opacity: 0.5;
   outline: none;
 }
@@ -254,7 +254,7 @@ pre {
   color: var(--h-text-muted-color);
 }
 .event.tone-info {
-  border-left-color: var(--h-primary-color, #3b82f6);
+  border-left-color: var(--h-primary-color);
 }
 .event.tone-success {
   border-left-color: var(--status-done);
@@ -297,6 +297,6 @@ pre {
   padding: 0.25rem 0.5rem;
   margin-top: 0.25rem;
   font-weight: 600;
-  border-top: 1px solid var(--term-ansi-8, currentColor);
+  border-top: 1px solid var(--h-content-border-color);
   opacity: 0.8;
 }

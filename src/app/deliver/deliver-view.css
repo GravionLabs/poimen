@@ -61,7 +61,7 @@ h3 {
   border-color: var(--status-error);
 }
 .card.tone-info {
-  border-color: var(--h-primary-color, #3b82f6);
+  border-color: var(--h-primary-color);
 }
 .badge {
   font-size: 11px;
@@ -82,7 +82,7 @@ h3 {
 }
 .card.cursor,
 .line.cursor {
-  outline: 1px solid var(--h-primary-color, #3b82f6);
+  outline: 1px solid var(--h-primary-color);
   outline-offset: 2px;
 }
 .toggle {
@@ -137,7 +137,7 @@ h3 {
   border-left-color: var(--status-error);
 }
 .line.tone-info {
-  border-left-color: var(--h-primary-color, #3b82f6);
+  border-left-color: var(--h-primary-color);
 }
 .line-head {
   display: flex;
@@ -173,7 +173,7 @@ h3 {
   color: var(--status-error);
 }
 .event.tone-info .icon {
-  color: var(--h-primary-color, #3b82f6);
+  color: var(--h-primary-color);
 }
 .links {
   margin: 8px 0 0;
@@ -199,7 +199,7 @@ h3 {
   color: var(--status-error);
 }
 .tone-info .state {
-  color: var(--h-primary-color, #3b82f6);
+  color: var(--h-primary-color);
 }
 .bar {
   height: 8px;
@@ -210,7 +210,7 @@ h3 {
 }
 .fill {
   height: 100%;
-  background: var(--h-primary-color, #3b82f6);
+  background: var(--h-primary-color);
 }
 .tone-success .fill {
   background: var(--status-done);
@@ -292,7 +292,7 @@ footer {
   color: var(--h-text-muted-color);
 }
 .state-in-progress {
-  color: var(--h-primary-color, #3b82f6);
+  color: var(--h-primary-color);
 }
 .state-needs-you {
   color: var(--status-blocked);
