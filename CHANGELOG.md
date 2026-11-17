@@ -5,11 +5,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.23.0] — 2026-11-17
+
+### Bug Fixes
+- **mcp**: Only apps that show confirmations are asked, ids are unguessable (#615)
+
+
+### Features
+- **mcp**: Start and prompt agents with confirmation outside the own space (#615) (#841)
+- **mcp**: Start and prompt agents with confirmation outside the own space (#615)
+
+
 ## [0.22.0] — 2026-11-16
 
 ### Bug Fixes
 - **settings**: Never rewrite layouts the loader cannot read, explain a remote tab save (#610)
 - **console**: The TUI tests no longer take the controller they check (#832) (#838)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.22.0 [skip ci]
 
 
 ### Features
