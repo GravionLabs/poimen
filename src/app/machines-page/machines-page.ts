@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
+import { ContextMenu } from "../ui/context-menu/context-menu";
+import { plainGroups } from "../ui/context-menu/menu-model";
 import { Machines, checkPassed, type MachineCheck, type MachineStatus } from "../core/machines";
 
 /** Label of a check id of `machine.check`; an unknown id is shown as it is. */
@@ -14,7 +16,7 @@ export function checkLabel(id: string): string {
  */
 @Component({
   selector: "app-machines-page",
-  imports: [HxButton],
+  imports: [ContextMenu, HxButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-label="Machines">
@@ -67,24 +69,12 @@ export function checkLabel(id: string): string {
         </ul>
       }
       @if (menu(); as m) {
-        <div
-          class="backdrop"
-          (pointerdown)="closeMenu()"
-          (contextmenu)="$event.preventDefault(); closeMenu()"
-        ></div>
-        <div class="menu" role="menu" [style.left.px]="m.x" [style.top.px]="m.y">
-          <button
-            type="button"
-            hx-button
-            size="small"
-            variant="text"
-            severity="secondary"
-            role="menuitem"
-            (click)="checkMachine()"
-          >
-            Check machine
-          </button>
-        </div>
+        <app-context-menu
+          [at]="m"
+          [groups]="menuGroups"
+          (picked)="checkMachine()"
+          (closed)="closeMenu()"
+        />
       }
     </section>
   `,
@@ -131,27 +121,12 @@ export function checkLabel(id: string): string {
     .fix {
       user-select: all;
     }
-    .backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 50;
-    }
-    .menu {
-      position: fixed;
-      z-index: 51;
-      display: flex;
-      flex-direction: column;
-      min-width: 140px;
-      padding: 4px;
-      background: var(--h-surface-overlay, var(--term-bg));
-      border: 1px solid var(--h-border-color, currentColor);
-      border-radius: 6px;
-    }
   `,
 })
 export class MachinesPage {
   protected readonly machines = inject(Machines);
   protected readonly menu = signal<{ name: string; x: number; y: number } | null>(null);
+  protected readonly menuGroups = plainGroups([{ id: "check", label: "Check machine" }]);
   protected readonly label = checkLabel;
   protected readonly passed = checkPassed;
 

@@ -17,6 +17,9 @@ import {
   signal,
 } from "@angular/core";
 
+import { ContextMenu } from "../../context-menu/context-menu";
+import type { MenuGroup } from "../../context-menu/menu-model";
+
 /** One tab of the bar. Generic on purpose: no herdr knowledge (candidate for helix-ui, ADR 0001). */
 export interface TabBarItem {
   id: string;
@@ -39,7 +42,8 @@ export interface TabBarMenuItem {
   action: string;
   label: string;
   shortcut?: string;
-  disabled?: boolean;
+  /** `true`, or the reason it cannot be used (shown as the tooltip). */
+  disabled?: boolean | string;
   /** Whether the entry is offered for the tab with this id; absent means for every tab. */
   appliesTo?: (tabId: string) => boolean;
 }
@@ -71,7 +75,7 @@ export function arrowTarget(key: string, index: number, count: number): number |
 /** Tabs side by side in one row with close buttons and drag-to-reorder; projects trailing actions. */
 @Component({
   selector: "app-tab-bar",
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, ContextMenu],
   templateUrl: "./tab-bar.html",
   styleUrl: "./tab-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -102,7 +106,7 @@ export class TabBar implements OnChanges {
   /** Whether the tabs are wider than the strip: scroll buttons and the all-tabs button show. */
   protected readonly overflowing = signal(false);
   /** Whether the all-tabs menu is open, with its anchor. */
-  protected readonly allAt = signal<{ right: number; y: number } | null>(null);
+  protected readonly allAt = signal<{ x: number; y: number } | null>(null);
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -187,11 +191,30 @@ export class TabBar implements OnChanges {
 
   protected openAll(event: MouseEvent): void {
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    this.allAt.set({ right: window.innerWidth - rect.right, y: rect.bottom });
+    this.allAt.set({ x: rect.right, y: rect.bottom });
   }
 
   protected closeAll(): void {
     this.allAt.set(null);
+  }
+
+  /** The all-tabs menu: one entry per tab, the active one bold, marks for attention and unread. */
+  protected allGroups(): MenuGroup[] {
+    return [
+      {
+        id: "tabs",
+        items: this.tabs.map((tab) => ({
+          id: tab.id,
+          label: `${tab.group ? tab.group + " / " : ""}${tab.label}`,
+          active: tab.id === this.activeId,
+          mark: tab.attention
+            ? ("attention" as const)
+            : tab.unread
+              ? ("unread" as const)
+              : undefined,
+        })),
+      },
+    ];
   }
 
   protected chooseTab(id: string): void {
@@ -276,10 +299,25 @@ export class TabBar implements OnChanges {
     this.menuAt.set(null);
   }
 
-  protected choose(item: TabBarMenuItem): void {
+  /** The entries of the context menu of the tab `id`. */
+  protected tabMenuGroups(id: string): MenuGroup[] {
+    return [
+      {
+        id: "tab",
+        items: this.menuItems(id).map((item) => ({
+          id: item.action,
+          label: item.label,
+          shortcut: item.shortcut,
+          disabled: item.disabled,
+        })),
+      },
+    ];
+  }
+
+  protected chooseMenu(action: string): void {
     const at = this.menuAt();
     this.closeMenu();
-    if (at && !item.disabled) this.menuAction.emit({ id: at.id, action: item.action });
+    if (at) this.menuAction.emit({ id: at.id, action });
   }
 
   protected middleClick(event: MouseEvent, id: string): void {

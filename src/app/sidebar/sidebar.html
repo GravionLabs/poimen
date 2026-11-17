@@ -589,104 +589,20 @@
 }
 <app-machines-section (selected)="selected.emit($event)" />
 @if (sortMenuAt(); as at) {
-  <button
-    type="button"
-    class="menu-backdrop"
-    tabindex="-1"
-    aria-label="Close menu"
-    (click)="sortMenuAt.set(null)"
-    (contextmenu)="$event.preventDefault(); sortMenuAt.set(null)"
-  ></button>
-  <div
-    #sortMenu
-    class="menu sort-menu"
-    role="menu"
-    tabindex="-1"
-    [style.left.px]="at.x"
-    [style.top.px]="at.y"
-    (keydown)="onMenuKey($event, sortMenu)"
-  >
-    <button
-      type="button"
-      role="menuitemradio"
-      class="menu-item"
-      [attr.aria-checked]="sort() === 'manual'"
-      (click)="chooseSort('manual')"
-    >
-      {{ sort() === "manual" ? "✓ " : "" }}Manual
-    </button>
-    <button
-      type="button"
-      role="menuitemradio"
-      class="menu-item"
-      [attr.aria-checked]="sort() === 'name'"
-      (click)="chooseSort('name')"
-    >
-      {{ sort() === "name" ? "✓ " : "" }}By name
-    </button>
-    <button
-      type="button"
-      role="menuitemradio"
-      class="menu-item"
-      [attr.aria-checked]="sort() === 'attention'"
-      (click)="chooseSort('attention')"
-    >
-      {{ sort() === "attention" ? "✓ " : "" }}By attention
-    </button>
-    <button
-      type="button"
-      role="menuitemradio"
-      class="menu-item"
-      [attr.aria-checked]="sort() === 'recent'"
-      (click)="chooseSort('recent')"
-    >
-      {{ sort() === "recent" ? "✓ " : "" }}Most recent
-    </button>
-    <div class="menu-separator" role="separator"></div>
-    <button type="button" role="menuitem" class="menu-item" (click)="chooseSort('now')">
-      Sort alphabetically now
-    </button>
-  </div>
+  <app-context-menu
+    cssClass="sort-menu"
+    label="Sort spaces"
+    [at]="at"
+    [groups]="sortGroups()"
+    (picked)="chooseSort($event.id)"
+    (closed)="sortMenuAt.set(null)"
+  />
 }
 @if (menuAt(); as at) {
-  <button
-    type="button"
-    class="menu-backdrop"
-    tabindex="-1"
-    aria-label="Close menu"
-    (click)="closeMenu()"
-    (contextmenu)="$event.preventDefault(); closeMenu()"
-  ></button>
-  <div
-    #menu
-    class="menu"
-    role="menu"
-    tabindex="-1"
-    [style.left.px]="at.x"
-    [style.top.px]="at.y"
-    (keydown)="onMenuKey($event, menu)"
-  >
-    @for (group of menuItems(at.kind, at.id); track group.id; let first = $first) {
-      @if (!first) {
-        <div class="menu-separator" role="separator"></div>
-      }
-      <div role="group" [attr.aria-label]="group.label ?? 'Actions'">
-        @if (group.label) {
-          <div class="menu-heading" aria-hidden="true">{{ group.label }}</div>
-        }
-        @for (item of group.items; track item.action) {
-          <button
-            type="button"
-            role="menuitem"
-            class="menu-item"
-            [disabled]="!!item.disabled"
-            [attr.title]="item.disabled ?? null"
-            (click)="choose(item.action)"
-          >
-            {{ item.label }}
-          </button>
-        }
-      </div>
-    }
-  </div>
+  <app-context-menu
+    [at]="at"
+    [groups]="menuGroups(at.kind, at.id)"
+    (picked)="choose($event.id)"
+    (closed)="closeMenu()"
+  />
 }
