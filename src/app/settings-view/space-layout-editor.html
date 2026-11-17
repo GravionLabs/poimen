@@ -26,6 +26,8 @@
             <label class="field">
               <span>Name</span>
               <input
+                hx-input
+                size="small"
                 type="text"
                 aria-labelledby="layout-col-name"
                 [value]="pane.name"
@@ -36,6 +38,8 @@
             <label class="field grow">
               <span>Command</span>
               <input
+                hx-input
+                size="small"
                 type="text"
                 placeholder="shell"
                 aria-labelledby="layout-col-command"
@@ -65,6 +69,8 @@
               <label class="field ratio">
                 <span>Keeps</span>
                 <input
+                  hx-input
+                  size="small"
                   type="number"
                   aria-labelledby="layout-col-keeps"
                   step="0.05"
@@ -79,8 +85,11 @@
             }
             <span class="actions">
               <button
+                hx-button
+                size="small"
+                variant="text"
+                severity="secondary"
                 type="button"
-                class="icon-btn"
                 [attr.aria-label]="'Move pane ' + pane.name + ' up'"
                 title="Move up"
                 [disabled]="first"
@@ -89,8 +98,11 @@
                 ↑
               </button>
               <button
+                hx-button
+                size="small"
+                variant="text"
+                severity="secondary"
                 type="button"
-                class="icon-btn"
                 [attr.aria-label]="'Move pane ' + pane.name + ' down'"
                 title="Move down"
                 [disabled]="last"
@@ -99,8 +111,11 @@
                 ↓
               </button>
               <button
+                hx-button
+                size="small"
+                variant="text"
+                severity="danger"
                 type="button"
-                class="icon-btn"
                 [attr.aria-label]="'Remove pane ' + pane.name"
                 title="Remove"
                 [disabled]="first && last"

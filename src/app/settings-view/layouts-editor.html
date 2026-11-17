@@ -2,7 +2,14 @@
   <section class="layout-form" aria-label="Edit layout">
     <label class="field grow">
       <span>Layout name</span>
-      <input type="text" name="layout-name" [value]="e.draft.name" (input)="setName($event)" />
+      <input
+        hx-input
+        size="small"
+        type="text"
+        name="layout-name"
+        [value]="e.draft.name"
+        (input)="setName($event)"
+      />
     </label>
     @if (errors()?.name; as m) {
       <p class="field-error">{{ m }}</p>
@@ -18,8 +25,17 @@
 
     <div class="toolbar-row">
       <span class="spacer"></span>
-      <button type="button" class="btn" (click)="cancel()">Cancel</button>
-      <button type="button" class="btn primary" [disabled]="!valid()" (click)="save()">
+      <button
+        hx-button
+        size="small"
+        variant="outlined"
+        severity="secondary"
+        type="button"
+        (click)="cancel()"
+      >
+        Cancel
+      </button>
+      <button hx-button size="small" type="button" [disabled]="!valid()" (click)="save()">
         Save layout
       </button>
     </div>
@@ -50,6 +66,8 @@
             <label class="field grow">
               <span>New name</span>
               <input
+                hx-input
+                size="small"
                 type="text"
                 name="rename"
                 [value]="r.name"
@@ -59,10 +77,20 @@
               />
             </label>
             <span class="actions">
-              <button type="button" class="btn" (click)="cancelRename()">Cancel</button>
               <button
+                hx-button
+                size="small"
+                variant="outlined"
+                severity="secondary"
                 type="button"
-                class="btn primary"
+                (click)="cancelRename()"
+              >
+                Cancel
+              </button>
+              <button
+                hx-button
+                size="small"
+                type="button"
                 [disabled]="renameError() !== null"
                 (click)="confirmRename()"
               >
@@ -84,36 +112,51 @@
           }
           <span class="actions">
             <button
+              hx-button
+              size="small"
+              variant="outlined"
+              severity="secondary"
               type="button"
-              class="btn"
               [attr.aria-label]="'Edit ' + l.name"
               (click)="edit(i)"
             >
               Edit
             </button>
             <button
+              hx-button
+              size="small"
+              variant="text"
+              severity="secondary"
               type="button"
-              class="btn"
               [attr.aria-label]="'Duplicate ' + l.name"
               (click)="duplicate(i)"
+              title="Duplicate"
             >
-              Duplicate
+              ⧉
             </button>
             <button
+              hx-button
+              size="small"
+              variant="text"
+              severity="secondary"
               type="button"
-              class="btn"
               [attr.aria-label]="'Rename ' + l.name"
               (click)="startRename(i)"
+              title="Rename"
             >
-              Rename
+              ✎
             </button>
             <button
+              hx-button
+              size="small"
+              variant="text"
+              severity="danger"
               type="button"
-              class="btn"
               [attr.aria-label]="'Delete ' + l.name"
               (click)="remove(i)"
+              title="Delete"
             >
-              Delete
+              ×
             </button>
           </span>
         }
@@ -123,6 +166,6 @@
     }
   </ul>
   <div class="toolbar-row">
-    <button type="button" class="btn primary" (click)="add()">New layout</button>
+    <button hx-button size="small" type="button" (click)="add()">New layout</button>
   </div>
 }

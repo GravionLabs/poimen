@@ -1,3 +1,4 @@
+import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
 import { ChangeDetectionStrategy, Component, Input, computed, inject } from "@angular/core";
 import {
   SettingsTransfer,
@@ -15,6 +16,7 @@ import {
  */
 @Component({
   selector: "app-settings-import-panel",
+  imports: [HxButton, HxSelectButton],
   templateUrl: "./settings-import-panel.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

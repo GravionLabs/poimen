@@ -145,12 +145,25 @@ h3 {
   text-transform: uppercase;
 }
 
-.harnesses li,
-.agent-actions li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 8px;
+.grid {
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+.grid th,
+.grid td {
+  padding: 4px 16px 4px 0;
+  text-align: left;
+  vertical-align: baseline;
+  font-weight: normal;
+}
+
+.grid thead th {
+  font-weight: 600;
+}
+
+.grid .source {
+  opacity: 0.7;
 }
 
 .hint {
@@ -161,28 +174,6 @@ h3 {
 
 .radios {
   display: inline-flex;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.choice {
-  padding: 5px 12px;
-  border: 0;
-  background: none;
-  color: var(--h-text-muted-color);
-  cursor: pointer;
-  font: inherit;
-}
-
-/*
- * Hover and selected states tint the text color over the content background. The derived surface
- * ramp runs from light to dark in both modes, so its steps would be light under light
- * text in a dark scheme (#139). settings-contrast.spec.ts checks the selected label.
- */
-.choice.on {
-  background: color-mix(in srgb, var(--h-text-color) 18%, transparent);
-  color: var(--h-text-color);
 }
 
 .list {
@@ -314,41 +305,6 @@ h3 {
   flex: none;
 }
 
-.icon-btn,
-.btn {
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.icon-btn {
-  width: var(--control-height);
-  height: var(--control-height);
-  padding: 0;
-  line-height: 1;
-}
-
-.btn {
-  padding: 4px 10px;
-}
-
-.icon-btn:hover:not(:disabled),
-.btn:hover:not(:disabled),
-.icon-btn:focus-visible,
-.btn:focus-visible {
-  background: color-mix(in srgb, currentColor 12%, transparent);
-  outline: none;
-}
-
-.icon-btn:disabled,
-.btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .toolbar-row {
   display: flex;
   align-items: center;
@@ -464,12 +420,6 @@ h3 {
 
 .spacer {
   flex: 1;
-}
-
-.btn.primary:not(:disabled) {
-  border-color: var(--h-primary-color);
-  color: var(--h-primary-color);
-  font-weight: 600;
 }
 
 .fields {
@@ -596,10 +546,6 @@ h3 {
 
 .integrations .error {
   margin: 4px 0 0;
-}
-
-.icon-btn.danger {
-  color: var(--app-danger-text, var(--status-blocked));
 }
 
 .actions .group {

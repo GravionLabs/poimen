@@ -294,10 +294,10 @@ describe("SettingsView", () => {
   it("switches to a pair that keeps the current scheme, and back", () => {
     const { host, store } = setup("dracula");
     const radio = (text: string) =>
-      [...host.querySelectorAll<HTMLElement>('[role="radio"]')].find((b) =>
+      [...host.querySelectorAll<HTMLElement>("hx-select-button button[aria-pressed]")].find((b) =>
         b.textContent?.includes(text),
       )!;
-    radio("pair").click();
+    radio("Light/dark pair").click();
     expect(tauri.calls("set_color_schema")).toEqual([
       { schema: { light: "poimen-light", dark: "dracula" } },
     ]);
@@ -306,13 +306,13 @@ describe("SettingsView", () => {
       theme: "dark",
       colorSchema: { light: "one-light", dark: "dracula" },
     });
-    radio("Single").click();
+    radio("Single scheme").click();
     expect(tauri.calls("set_color_schema")[1]).toEqual({ schema: "dracula" });
   });
 
   it("saves the appearance", () => {
     const { host } = setup(undefined, undefined, "appearance");
-    [...host.querySelectorAll<HTMLElement>('[role="radio"]')]
+    [...host.querySelectorAll<HTMLElement>("hx-select-button button[aria-pressed]")]
       .find((b) => b.textContent?.includes("Light"))!
       .click();
     expect(tauri.calls("set_theme")).toEqual([{ theme: "light" }]);
@@ -453,11 +453,11 @@ describe("SettingsView agents section", () => {
     fixture.detectChanges();
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
-    const rows = [...host.querySelectorAll(".harnesses li")].map((li) => li.textContent);
+    const rows = [...host.querySelectorAll(".harnesses tbody tr")].map((li) => li.textContent);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toContain("claude");
     expect(rows[0]).toContain("available");
-    expect(rows[0]).toContain("Models: opus");
+    expect(rows[0]).toContain("opus");
     expect(rows[1]).toContain("not found");
   });
 });
@@ -499,7 +499,7 @@ describe("SettingsView agent actions", () => {
     fixture.detectChanges();
     await new Promise((resolve) => setTimeout(resolve));
     fixture.detectChanges();
-    const rows = [...host.querySelectorAll(".agent-actions li")].map((li) => li.textContent);
+    const rows = [...host.querySelectorAll(".agent-actions tbody tr")].map((li) => li.textContent);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toContain("Plan");
     expect(rows[0]).toContain("default");
@@ -861,8 +861,8 @@ describe("SettingsView categories", () => {
 
   it("lists the supported agent kinds and what each gives on the Agents page", () => {
     const { host } = setup(undefined, undefined, "agents");
-    const rows = [...host.querySelectorAll("ul[aria-label='Supported agents'] li")].map((li) =>
-      li.textContent!.replace(/\s+/g, " ").trim(),
+    const rows = [...host.querySelectorAll("table[aria-label='Supported agents'] tbody tr")].map(
+      (li) => li.textContent!.replace(/\s+/g, " ").trim(),
     );
     expect(rows).toEqual([
       "Claude Codestatus, transcript",
