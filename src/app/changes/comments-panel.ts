@@ -166,7 +166,7 @@ import { LineComments } from "./line-comments";
       max-height: 40%;
       overflow: auto;
       padding: 6px 12px;
-      border-top: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-top: 1px solid var(--h-content-border-color);
     }
     header {
       display: flex;
@@ -210,7 +210,7 @@ import { LineComments } from "./line-comments";
       font: inherit;
       color: inherit;
       background: transparent;
-      border: 1px solid var(--h-border-color, var(--h-surface-300));
+      border: 1px solid var(--h-content-border-color);
       height: var(--control-height);
       padding: 1px 8px;
     }
@@ -224,7 +224,7 @@ import { LineComments } from "./line-comments";
     }
     .problem {
       margin: 4px 0;
-      color: var(--h-danger-color, #d33);
+      color: var(--status-error);
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

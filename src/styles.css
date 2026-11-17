@@ -120,7 +120,7 @@
   --status-blocked: var(--h-orange-500);
   --status-done: var(--h-green-500);
   --status-unknown: var(--h-surface-300);
-  --status-error: var(--h-danger-color, #d14);
+  --status-error: var(--term-ansi-1);
   /* State text on the tinted active sidebar row (see sidebar.css): AA >= 4.5 on that tint. */
   --status-working-on-active: var(--h-blue-800);
   --status-blocked-on-active: var(--h-orange-800);

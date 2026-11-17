@@ -260,7 +260,7 @@
 }
 
 .space-edit-error {
-  color: var(--h-danger-color, #e5484d);
+  color: var(--status-error);
   font-size: 11px;
 }
 

@@ -110,13 +110,13 @@ export function checkLabel(id: string): string {
       font-weight: 600;
     }
     [data-status="ok"] .status {
-      color: var(--h-success, currentColor);
+      color: var(--status-done);
     }
     [data-status="warning"] .status {
-      color: var(--h-warning, currentColor);
+      color: var(--status-blocked);
     }
     [data-status="missing"] .status {
-      color: var(--h-danger, currentColor);
+      color: var(--status-error);
     }
     .fix {
       user-select: all;

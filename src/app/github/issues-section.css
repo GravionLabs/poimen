@@ -30,7 +30,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 .problem {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 .mono {
   font-family: monospace;
@@ -91,7 +91,7 @@ h3 {
   background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
 }
 .row.cursor {
-  outline: 1px solid var(--h-accent-color, currentColor);
+  outline: 1px solid var(--h-primary-color);
   outline-offset: -1px;
 }
 .row {

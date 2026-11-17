@@ -50,7 +50,7 @@ import { findingLocation, Findings, type IndexedFinding } from "./findings";
       max-height: 30%;
       overflow: auto;
       padding: 6px 12px;
-      border-top: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-top: 1px solid var(--h-content-border-color);
     }
     .count,
     .where {
