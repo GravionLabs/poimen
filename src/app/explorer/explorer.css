@@ -7,8 +7,15 @@
   overflow-y: auto;
 }
 
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 8px 10px 6px 14px;
+}
+
 .brand {
-  padding: 14px 14px 8px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }

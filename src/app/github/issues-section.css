@@ -13,6 +13,9 @@ h2 {
   margin: 0;
 }
 h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   margin: 16px 0 6px;
 }
@@ -41,7 +44,7 @@ h3 {
 .row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   min-height: 34px;
   border-bottom: 1px solid var(--h-content-border-color);
@@ -60,8 +63,17 @@ h3 {
   display: inline-flex;
   gap: 4px;
 }
-.open {
-  margin-left: auto;
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row > button,
+.row > .pr,
+.row > .nr {
+  flex: none;
 }
 .row:hover,
 .row:focus-within {
