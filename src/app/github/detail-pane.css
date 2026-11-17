@@ -104,6 +104,11 @@ h3 {
   text-align: left;
   text-decoration: underline;
 }
+.link:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: none;
+}
 .markdown {
   overflow-wrap: anywhere;
 }

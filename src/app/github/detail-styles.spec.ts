@@ -25,3 +25,32 @@ describe("detail panes share the badge and icon button styles", () => {
     for (const name of SHARED) expect(css).toContain(`.${name}`);
   });
 });
+
+describe("icon buttons and badge buttons have states", () => {
+  const css = readFileSync("src/app/github/github-badges.css", "utf8");
+
+  it("icon buttons are visible by default and hidden only inside list rows", () => {
+    expect(css).toMatch(/\.icon-btn \{\s*opacity: 0\.7;/);
+    expect(css).toMatch(/:is\(\.row, \.item, tbody tr\) \.icon-btn \{\s*opacity: 0;/);
+    expect(css).toMatch(/:focus-within, \.cursor\) \.icon-btn \{\s*opacity: 1;/);
+  });
+
+  it("icon buttons and links have a disabled style", () => {
+    expect(css).toMatch(/\.icon-btn:disabled,\s*\.link:disabled \{/);
+    const pane = readFileSync("src/app/github/detail-pane.css", "utf8");
+    expect(pane).toContain(".link:disabled");
+  });
+
+  it("the run badge has pointer, hover and focus styles and inherits the font", () => {
+    expect(css).toMatch(/button\.badge \{[^}]*font: inherit;[^}]*cursor: pointer;/);
+    expect(css).toContain("button.badge:hover");
+    expect(css).toContain("button.badge:focus-visible");
+  });
+});
+
+describe("milestone Close button", () => {
+  it("is rendered once, whether or not the milestone is ready to close", () => {
+    const html = readFileSync("src/app/github/milestones-section.html", "utf8");
+    expect(html.match(/data-testid="milestone-close"/g)).toHaveLength(1);
+  });
+});
