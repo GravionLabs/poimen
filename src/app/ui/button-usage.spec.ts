@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 const ROW_FILES = [
   "src/app/sidebar/sidebar.html",
   "src/app/ui/helix-candidates/tab-bar/tab-bar.html",
+  "src/app/ui/context-menu/context-menu.ts",
   "src/app/command-palette/command-palette.html",
   "src/app/jump-palette/jump-palette.html",
 ];
@@ -19,10 +20,9 @@ const LEGACY: Record<string, number> = {
   "src/app/activity-bar/activity-bar.html": 2,
   "src/app/agent-picker/agent-picker.html": 3,
   "src/app/app.html": 1,
-  "src/app/explorer/explorer.html": 9,
+  "src/app/explorer/explorer.html": 1,
   "src/app/notifications/notifications.html": 1,
-  "src/app/sidebar/machines-section/machines-section.ts": 4,
-  "src/app/tab-layout/tab-layout.html": 4,
+  "src/app/sidebar/machines-section/machines-section.ts": 2,
   "src/app/terminal-view/terminal-view.html": 5,
   "src/app/toolbar/toolbar.html": 2,
 };

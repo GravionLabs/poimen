@@ -132,7 +132,9 @@ describe("machineNote", () => {
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
     );
     fixture.detectChanges();
-    expect(el.querySelectorAll<HTMLButtonElement>(".menu-item")[1].disabled).toBe(true);
+    expect(
+      el.querySelectorAll<HTMLButtonElement>(".menu-item")[1].getAttribute("aria-disabled"),
+    ).toBe("true");
   });
 
   it("summarizes a check", () => {

@@ -8,6 +8,8 @@ import {
 } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { rowName, type Terminal, type WorkspaceNode } from "../../core/snapshot";
+import { ContextMenu } from "../../ui/context-menu/context-menu";
+import { plainGroups, type MenuGroup } from "../../ui/context-menu/menu-model";
 import { SpacesStore } from "../../core/spaces-store";
 import { checkPassed, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
 
@@ -57,7 +59,7 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
 /** The machines of the settings below the spaces of this Mac: state, spaces, terminals (#280). */
 @Component({
   selector: "app-machines-section",
-  imports: [HxButton],
+  imports: [ContextMenu, HxButton],
   template: `
     @for (g of groups(); track g.machine.name) {
       <section class="machine" [class.offline]="!g.usable" [attr.aria-label]="g.machine.name">
@@ -102,28 +104,12 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
       </section>
     }
     @if (menuAt(); as at) {
-      <button
-        type="button"
-        class="menu-backdrop"
-        tabindex="-1"
-        aria-label="Close menu"
-        (click)="closeMenu()"
-        (contextmenu)="$event.preventDefault(); closeMenu()"
-      ></button>
-      <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
-        <button type="button" role="menuitem" class="menu-item" (click)="reconnect(at.name)">
-          Reconnect
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          class="menu-item"
-          [disabled]="!usableMenu()"
-          (click)="runCheck(at.name)"
-        >
-          Check
-        </button>
-      </div>
+      <app-context-menu
+        [at]="at"
+        [groups]="menuGroups()"
+        (picked)="choose(at.name, $event.id)"
+        (closed)="closeMenu()"
+      />
     }
   `,
   styles: `
@@ -206,36 +192,6 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
     .status-blocked {
       background: var(--h-danger-color, #f85149);
     }
-
-    .menu-backdrop {
-      position: fixed;
-      inset: 0;
-      border: 0;
-      background: transparent;
-      cursor: default;
-    }
-
-    .menu {
-      position: fixed;
-      z-index: 10;
-      min-width: 140px;
-      padding: 4px;
-      border: 1px solid var(--h-content-border-color);
-      border-radius: 6px;
-      background: var(--h-content-background);
-    }
-
-    .menu-item {
-      display: block;
-      width: 100%;
-      padding: 4px 8px;
-      border: 0;
-      background: transparent;
-      color: inherit;
-      font: inherit;
-      text-align: left;
-      cursor: pointer;
-    }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -259,11 +215,24 @@ export class MachinesSection {
   );
   protected readonly menuAt = signal<{ name: string; x: number; y: number } | null>(null);
 
-  protected readonly usableMenu = computed(() => {
+  protected readonly menuGroups = computed<MenuGroup[]>(() => {
     const at = this.menuAt();
     const m = at && this.machines.machines().find((x) => x.name === at.name);
-    return !!m && machineUsable(m);
+    const usable = !!m && machineUsable(m);
+    return plainGroups([
+      { id: "reconnect", label: "Reconnect" },
+      {
+        id: "check",
+        label: "Check",
+        disabled: usable ? false : "The machine is not connected",
+      },
+    ]);
   });
+
+  protected choose(name: string, id: string): void {
+    if (id === "reconnect") this.reconnect(name);
+    else if (id === "check") this.runCheck(name);
+  }
 
   protected pick(terminal: Terminal, usable: boolean): void {
     if (usable) this.selected.emit(terminal);

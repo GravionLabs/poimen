@@ -14,6 +14,8 @@ import {
 } from "@angular/core";
 import { olderHost, treeTerminals, type Terminal, type TabTree } from "../core/snapshot";
 import { type Mode } from "../core/backend";
+import { ContextMenu } from "../ui/context-menu/context-menu";
+import { plainGroups, type MenuGroup } from "../ui/context-menu/menu-model";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { TerminalView } from "../terminal-view/terminal-view";
 
@@ -49,7 +51,7 @@ export function focusDelta(
  */
 @Component({
   selector: "app-tab-layout",
-  imports: [NgTemplateOutlet, SplitPane, TerminalView],
+  imports: [ContextMenu, NgTemplateOutlet, SplitPane, TerminalView],
   templateUrl: "./tab-layout.html",
   styleUrl: "./tab-layout.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -136,7 +138,19 @@ export class TabLayout implements OnChanges, OnDestroy {
     this.menu.set({ terminalId, x: event.clientX, y: event.clientY });
   }
 
-  protected choose(action: PaneMenuAction): void {
+  protected menuGroups(terminalId: string): MenuGroup[] {
+    return plainGroups([
+      { id: "split-right", label: "Split right" },
+      { id: "split-down", label: "Split down" },
+      ...(this.onOlderHost(terminalId)
+        ? [{ id: "restart", label: "Restart terminal on the new host..." }]
+        : []),
+      { id: "close", label: "Close pane" },
+    ]);
+  }
+
+  protected choose(picked: string): void {
+    const action = picked as PaneMenuAction;
     const open = this.menu();
     this.menu.set(null);
     if (open) this.paneAction.emit({ terminalId: open.terminalId, action });

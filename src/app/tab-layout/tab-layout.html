@@ -43,19 +43,10 @@
 <ng-container [ngTemplateOutlet]="nodeTpl" [ngTemplateOutletContext]="{ $implicit: root }" />
 
 @if (menu(); as m) {
-  <div
-    class="backdrop"
-    (pointerdown)="closeMenu()"
-    (contextmenu)="$event.preventDefault(); closeMenu()"
-  ></div>
-  <div class="menu" role="menu" [style.left.px]="m.x" [style.top.px]="m.y">
-    <button type="button" role="menuitem" (click)="choose('split-right')">Split right</button>
-    <button type="button" role="menuitem" (click)="choose('split-down')">Split down</button>
-    @if (onOlderHost(m.terminalId)) {
-      <button type="button" role="menuitem" (click)="choose('restart')">
-        Restart terminal on the new host...
-      </button>
-    }
-    <button type="button" role="menuitem" (click)="choose('close')">Close pane</button>
-  </div>
+  <app-context-menu
+    [at]="m"
+    [groups]="menuGroups(m.terminalId)"
+    (picked)="choose($event.id)"
+    (closed)="closeMenu()"
+  />
 }
