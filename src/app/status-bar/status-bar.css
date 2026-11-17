@@ -183,3 +183,13 @@ button.item.update-button:hover {
 button.item.update-button.failed {
   color: #f85149;
 }
+
+/* text-overflow does not apply to the text of a flex container, so text-only items are blocks (#854). */
+span.item.notice,
+span.item.server-notice,
+span.item.version,
+span.item.channel,
+span.item.update {
+  display: block;
+  line-height: 22px;
+}
