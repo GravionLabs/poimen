@@ -26,6 +26,7 @@ import {
   type LinkedIssue,
   type PrAction,
 } from "../pulls";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /**
  * The detail pane of the selected pull request: description, checks, reviews and linked issues.
@@ -36,7 +37,7 @@ import {
   selector: "app-pull-detail",
   templateUrl: "./pull-detail.html",
   styleUrl: "./pull-detail.css",
-  imports: [ChipPicker],
+  imports: [HxButton, ChipPicker],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PullDetailPane {

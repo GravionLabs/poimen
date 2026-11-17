@@ -84,6 +84,10 @@
 <div class="tools" role="toolbar" aria-label="Flow view">
   <button
     type="button"
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
     class="icon-button"
     aria-label="Zoom out"
     title="Zoom out"
@@ -91,12 +95,26 @@
   >
     <app-icon name="zoomOut" />
   </button>
-  <button type="button" class="icon-button" aria-label="Zoom in" title="Zoom in" (click)="zoomIn()">
+  <button
+    type="button"
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
+    class="icon-button"
+    aria-label="Zoom in"
+    title="Zoom in"
+    (click)="zoomIn()"
+  >
     <app-icon name="zoomIn" />
   </button>
   <span class="divider" aria-hidden="true"></span>
   <button
     type="button"
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
     class="icon-button"
     aria-label="Fit to view"
     title="Fit to view"
@@ -106,6 +124,10 @@
   </button>
   <button
     type="button"
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
     class="icon-button direction"
     [attr.aria-label]="direction() === 'LR' ? 'Layout top to bottom' : 'Layout left to right'"
     [attr.title]="direction() === 'LR' ? 'Layout top to bottom' : 'Layout left to right'"

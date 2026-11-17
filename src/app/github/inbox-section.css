@@ -32,10 +32,6 @@ h3 {
   width: 100%;
   min-height: 34px;
   text-align: left;
-  background: none;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
 }
 .title {
   flex: 1;

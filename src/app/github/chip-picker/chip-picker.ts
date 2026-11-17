@@ -6,6 +6,7 @@ import {
   Output,
   signal,
 } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /**
  * Chips for a set of names (reviewers, labels, assignees) with a field that adds one from the
@@ -14,6 +15,7 @@ import {
  */
 @Component({
   selector: "app-chip-picker",
+  imports: [HxButton],
   templateUrl: "./chip-picker.html",
   styleUrl: "./chip-picker.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -45,6 +47,25 @@ export class ChipPicker {
     if (this.disabled || this.selected.includes(name) || !this.options.includes(name)) return;
     this.add.emit(name);
     this.query.set("");
+  }
+
+  /** Arrow keys move through the options (the field is the first stop, Escape clears). */
+  protected move(event: KeyboardEvent, from: "field" | HTMLElement): void {
+    const root = (event.currentTarget as HTMLElement).closest(".picker");
+    const items = [...(root?.querySelectorAll<HTMLElement>("[data-testid=chip-option]") ?? [])];
+    const input = root?.querySelector<HTMLElement>("[data-testid=chip-input]");
+    const index = from === "field" ? -1 : items.indexOf(from);
+    let next: HTMLElement | null | undefined;
+    if (event.key === "ArrowDown") next = items[index + 1];
+    else if (event.key === "ArrowUp") next = index <= 0 ? input : items[index - 1];
+    else if (event.key === "Escape" && this.query()) {
+      this.query.set("");
+      input?.focus();
+      event.preventDefault();
+      return;
+    } else return;
+    event.preventDefault();
+    next?.focus();
   }
 
   protected takeFirst(): void {

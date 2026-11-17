@@ -64,10 +64,6 @@ th {
   gap: 8px;
   margin: 12px 0;
 }
-.toolbar .active {
-  font-weight: bold;
-  text-decoration: underline;
-}
 .count {
   margin-left: auto;
   font-size: 12px;
@@ -115,13 +111,9 @@ tbody:focus-visible {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
-  background: none;
-  border: 0;
+  width: 100%;
   border-left: 2px solid transparent;
-  color: inherit;
   text-align: left;
-  cursor: pointer;
 }
 .nav-item.active {
   font-weight: 600;

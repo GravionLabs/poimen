@@ -15,6 +15,7 @@ import {
 import { renderMarkdown } from "../markdown";
 import { GithubPulls, errorText, isGithubUrl } from "../pulls";
 import { IssueTasks } from "../issue-task";
+import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
 
 /**
  * The detail pane of the selected issue: description, labels, assignees, milestone, sub-issues
@@ -25,10 +26,14 @@ import { IssueTasks } from "../issue-task";
   selector: "app-issue-detail",
   templateUrl: "./issue-detail.html",
   styleUrl: "./issue-detail.css",
-  imports: [ChipPicker],
+  imports: [HxButton, HxSelectButton, ChipPicker],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IssueDetailPane {
+  protected readonly viewModes = [
+    { label: "Edit", value: "edit" },
+    { label: "Preview", value: "preview" },
+  ];
   protected readonly issues = inject(GithubIssues);
   private readonly pulls = inject(GithubPulls);
   private readonly ui = inject(UiState);

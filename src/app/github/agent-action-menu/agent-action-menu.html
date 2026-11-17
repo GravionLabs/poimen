@@ -12,6 +12,10 @@
       <li role="none">
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
           role="menuitem"
           data-testid="menu-start-task"
           (click)="startTask(issue)"
@@ -24,6 +28,10 @@
       <li role="none">
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
           role="menuitem"
           data-testid="menu-action"
           [disabled]="!o.enabled"

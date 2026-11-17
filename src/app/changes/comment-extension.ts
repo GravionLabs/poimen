@@ -296,10 +296,22 @@ export function commentExtension(handlers: CommentHandlers): Extension {
         font: "inherit",
         color: "inherit",
         background: "transparent",
-        border: "1px solid var(--term-ansi-8)",
-        padding: "1px 8px",
+        border: "1px solid var(--h-content-border-color, var(--term-ansi-8))",
+        borderRadius: "var(--h-border-radius, 4px)",
+        minHeight: "var(--control-height)",
+        padding: "0 10px",
         cursor: "pointer",
       },
+      ".cm-comment-actions button:focus-visible": {
+        outline: "2px solid var(--app-action-text)",
+        outlineOffset: "1px",
+      },
+      ".cm-comment-actions button.cm-comment-save, .cm-comment-actions button.cm-finding-send": {
+        background: "var(--app-action)",
+        borderColor: "var(--app-action)",
+        color: "var(--h-primary-contrast-color)",
+      },
+      ".cm-comment-actions button:disabled": { opacity: "0.6", cursor: "default" },
     }),
   ];
 }

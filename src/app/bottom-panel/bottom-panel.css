@@ -56,25 +56,16 @@
   gap: 2px;
 }
 
-.tab,
-.action {
-  background: none;
-  border: 0;
+.tab {
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
   color: var(--h-text-muted-color);
-  cursor: pointer;
-  font: inherit;
-  padding: 3px 8px;
-  border-radius: 3px;
 }
 
 .tab.on {
   color: var(--h-text-color);
-  background: color-mix(in srgb, currentColor 12%, transparent);
-}
-
-.tab:hover,
-.action:hover {
-  color: inherit;
+  font-weight: 600;
+  border-bottom-color: var(--status-working);
 }
 
 .picker {
@@ -293,13 +284,6 @@ pre {
   text-overflow: ellipsis;
 }
 
-.fold-toggle {
-  all: unset;
-  cursor: pointer;
-}
-.fold-toggle:focus-visible {
-  outline: 1px solid var(--h-focus-color, currentColor);
-}
 .event.fold-task {
   opacity: 0.8;
 }

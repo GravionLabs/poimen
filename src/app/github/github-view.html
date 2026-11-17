@@ -1,7 +1,15 @@
 <div class="page">
   <header>
     <h1>GitHub</h1>
-    <button type="button" (click)="refresh()" [disabled]="loading">
+    <button
+      type="button"
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
+      (click)="refresh()"
+      [disabled]="loading"
+    >
       {{ loading ? "Refreshing..." : "Refresh" }}
     </button>
   </header>
@@ -30,6 +38,10 @@
         @for (p of pages(); track p.id) {
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="nav-item"
             [attr.data-page]="p.id"
             [attr.aria-current]="ui.githubPage() === p.id ? 'page' : null"
@@ -61,16 +73,16 @@
             }
           } @else {
             <div class="toolbar" role="group" aria-label="Filters">
-              @for (s of scopes; track s.id) {
-                <button
-                  type="button"
-                  [class.active]="pulls.scope() === s.id"
-                  [attr.aria-pressed]="pulls.scope() === s.id"
-                  (click)="pulls.scope.set(s.id)"
-                >
-                  {{ s.label }}
-                </button>
-              }
+              <hx-select-button
+                aria-label="Scope"
+                size="small"
+                [options]="scopes"
+                optionLabel="label"
+                optionValue="id"
+                [allowEmpty]="false"
+                [value]="pulls.scope()"
+                (valueChange)="pulls.scope.set($any($event))"
+              />
               <input
                 type="search"
                 aria-label="Filter by title or number"
@@ -152,6 +164,10 @@
                             @if (runs.badge(row.repo, row.number); as run) {
                               <button
                                 type="button"
+                                hx-button
+                                variant="text"
+                                severity="secondary"
+                                size="small"
                                 class="badge badge-{{
                                   run.state === 'running' ? 'primary' : 'warning'
                                 }}"
@@ -200,6 +216,10 @@
                             @if (pulls.worktreeFor(row)) {
                               <button
                                 type="button"
+                                hx-button
+                                variant="outlined"
+                                severity="secondary"
+                                size="small"
                                 data-testid="open-space"
                                 (click)="pulls.openSpace(row)"
                               >
@@ -208,6 +228,10 @@
                             } @else {
                               <button
                                 type="button"
+                                hx-button
+                                variant="outlined"
+                                severity="secondary"
+                                size="small"
                                 data-testid="check-out"
                                 (click)="pulls.checkout(row)"
                               >
@@ -216,6 +240,10 @@
                             }
                             <button
                               type="button"
+                              hx-button
+                              variant="text"
+                              severity="secondary"
+                              size="small"
                               class="icon-btn"
                               title="Agent actions"
                               data-testid="row-menu"
@@ -227,6 +255,10 @@
                             </button>
                             <button
                               type="button"
+                              hx-button
+                              variant="text"
+                              severity="secondary"
+                              size="small"
                               class="icon-btn"
                               title="Open in browser"
                               [attr.aria-label]="'Open #' + row.number + ' in browser'"

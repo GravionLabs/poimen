@@ -10,6 +10,8 @@ import {
   untracked,
   viewChild,
 } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
+import { Icon } from "../ui/icon/icon";
 import { FlowView } from "./flow-view";
 import { EditorTabs, tabPaneId } from "../core/editor-tabs";
 import { paneDir, transcriptEmptyText, type Terminal } from "../core/snapshot";
@@ -63,7 +65,7 @@ export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
 /** Bottom panel below the editor area: a tab strip, the subagent dropdown and the Output tab. */
 @Component({
   selector: "app-bottom-panel",
-  imports: [FlowView],
+  imports: [FlowView, HxButton, Icon],
   templateUrl: "./bottom-panel.html",
   styleUrl: "./bottom-panel.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
