@@ -56,6 +56,10 @@ pub struct MachineConfig {
     pub ssh: String,
     /// Where repositories live on the machine (`{owner}`, `{repo}`).
     pub repos_dir: String,
+    /// Where the server is on the machine when its non-interactive `PATH` lacks it (set by the
+    /// install of #865, e.g. `$HOME/.local/bin/poimen-server`); `None` calls it by name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_path: Option<String>,
 }
 
 /// The machines of `machines[]`; an invalid entry is a warning and is left out, the rest loads.
@@ -93,15 +97,33 @@ fn parse_entry(entry: &Value) -> Result<MachineConfig, String> {
     check_target(&ssh)?;
     let repos_dir = text("reposDir")?.unwrap_or_else(|| DEFAULT_REPOS_DIR.to_owned());
     check_repos_dir(&repos_dir)?;
+    let server_path = match text("serverPath")? {
+        Some(path) => {
+            check_server_path(&path)?;
+            Some(path)
+        }
+        None => None,
+    };
     Ok(MachineConfig {
         name,
         ssh,
         repos_dir,
+        server_path,
     })
 }
 
+/// A server path is one shell word of plain path characters (`$HOME` and `~` allowed): it is
+/// passed to the remote shell as the command.
+fn check_server_path(path: &str) -> Result<(), String> {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "/._-$~".contains(c);
+    if path.starts_with('-') || !path.chars().all(plain) {
+        return Err(format!("serverPath {path:?} must be a plain path"));
+    }
+    Ok(())
+}
+
 /// A target is one ssh argument: no option (`-...`), no whitespace or control characters.
-fn check_target(ssh: &str) -> Result<(), String> {
+pub(crate) fn check_target(ssh: &str) -> Result<(), String> {
     if ssh.starts_with('-') {
         return Err(format!("ssh {ssh:?} must be a host, not an option"));
     }
@@ -181,6 +203,7 @@ pub fn validate(name: &str, ssh: &str, repos_dir: &str) -> Result<MachineConfig,
         name: name.to_owned(),
         ssh: ssh.to_owned(),
         repos_dir: repos.to_owned(),
+        server_path: None,
     })
 }
 
@@ -211,12 +234,15 @@ fn write_machines(text: &str, list: Vec<Value>) -> Result<String, String> {
     poimen_core::settings::set_key_text(text, "machines", &value)
 }
 
-fn entry_value(m: &MachineConfig) -> Value {
+fn entry_value(m: &MachineConfig, server_path: Option<&Value>) -> Value {
     let mut o = serde_json::Map::new();
     o.insert("name".into(), m.name.clone().into());
     o.insert("ssh".into(), m.ssh.clone().into());
     if m.repos_dir != DEFAULT_REPOS_DIR {
         o.insert("reposDir".into(), m.repos_dir.clone().into());
+    }
+    if let Some(path) = server_path {
+        o.insert("serverPath".into(), path.clone());
     }
     Value::Object(o)
 }
@@ -251,8 +277,9 @@ pub fn save_machine(
             return Err("name taken".into());
         }
         match at {
-            Some(i) => list[i] = entry_value(&machine),
-            None => list.push(entry_value(&machine)),
+            // An edit keeps the `serverPath` an install recorded.
+            Some(i) => list[i] = entry_value(&machine, list[i].get("serverPath")),
+            None => list.push(entry_value(&machine, None)),
         }
         write_machines(text, list)
     });
@@ -261,6 +288,24 @@ pub fn save_machine(
         (Err(e), None) => Err(vec![FieldError::general(e)]),
         (Ok(()), None) => Ok(()),
     }
+}
+
+/// Records where the server of `name` is (`serverPath`), after an install that put it where the
+/// non-interactive `PATH` of ssh does not look. Only that entry changes; the settings watcher
+/// restarts the machine's connection with the new command.
+pub fn set_server_path(home: &std::path::Path, name: &str, path: &str) -> Result<(), String> {
+    check_server_path(path)?;
+    poimen_core::settings::save_with(home, |text| {
+        let mut list = raw_machines(text)?;
+        let Some(entry) = list.iter_mut().find(|e| entry_name(e) == Some(name)) else {
+            return Err(format!("machine {name:?} is not in config.json"));
+        };
+        let Some(obj) = entry.as_object_mut() else {
+            return Err(format!("machine {name:?} is not an object"));
+        };
+        obj.insert("serverPath".into(), path.into());
+        write_machines(text, list)
+    })
 }
 
 /// Removes the machine named `name` from `machines[]`; an unknown name changes nothing. Only the
@@ -789,6 +834,10 @@ impl Machines {
         lock(&self.machines).iter().map(Machine::status).collect()
     }
 
+    pub fn config(&self, name: &str) -> Result<MachineConfig, String> {
+        self.with(name, |m| m.config().clone())
+    }
+
     pub fn reconnect(&self, name: &str) -> Result<(), String> {
         self.with(name, Machine::reconnect)
     }
@@ -905,14 +954,20 @@ impl RemoteStreams {
 /// `ssh -T -o BatchMode=yes ... <target> poimen-server stdio`: one ssh process per connection.
 pub struct SshConnector {
     target: String,
+    /// The server's command on the machine: its name, or the `serverPath` of the machine.
+    server: String,
     /// The ssh program; `None` resolves `ssh` on the login shell's `PATH` at every connect.
     program: Option<PathBuf>,
 }
 
 impl SshConnector {
-    pub fn new(target: &str) -> Self {
+    pub fn new(config: &MachineConfig) -> Self {
         Self {
-            target: target.to_owned(),
+            target: config.ssh.clone(),
+            server: config
+                .server_path
+                .clone()
+                .unwrap_or_else(|| wire::CHANNEL.named("poimen-server")),
             program: None,
         }
     }
@@ -920,8 +975,7 @@ impl SshConnector {
 
 /// The arguments of ssh for `target`: no terminal, never a prompt, bounded connect, a dead link
 /// noticed within 45 s, and the server of this build's channel in stdio mode.
-pub fn ssh_args(target: &str) -> Vec<String> {
-    let server = wire::CHANNEL.named("poimen-server");
+pub fn ssh_args(target: &str, server: &str) -> Vec<String> {
     [
         "-T",
         "-o",
@@ -934,7 +988,7 @@ pub fn ssh_args(target: &str) -> Vec<String> {
         "ServerAliveCountMax=3",
         "--",
         target,
-        &server,
+        server,
         "stdio",
     ]
     .iter()
@@ -952,7 +1006,7 @@ impl Connector for SshConnector {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ssh is not on the PATH"))?,
         };
         let mut child = gui_path::command(&program)
-            .args(ssh_args(&self.target))
+            .args(ssh_args(&self.target, &self.server))
             .env("PATH", gui_path::child_path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1116,6 +1170,33 @@ mod tests {
     }
 
     #[test]
+    fn a_server_path_is_recorded_kept_by_an_edit_and_used_as_the_ssh_command() {
+        let home = home_with(
+            "{\"machines\": [{\"name\": \"box\", \"ssh\": \"box\"}]}",
+            "serverpath",
+        );
+        set_server_path(&home, "box", "$HOME/.local/bin/poimen-server").unwrap();
+        assert!(set_server_path(&home, "box", "a b; rm").is_err());
+        assert!(set_server_path(&home, "nope", "/x/y").is_err());
+        save_machine(&home, Some("box"), "box", "other", "").unwrap();
+        let value: Value = serde_json::from_str(&config_of(&home)).unwrap();
+        assert_eq!(
+            value["machines"][0]["serverPath"],
+            "$HOME/.local/bin/poimen-server"
+        );
+        let (machines, warnings) = parsed(value["machines"].clone());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let args = ssh_args("other", machines[0].server_path.as_deref().unwrap());
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["$HOME/.local/bin/poimen-server", "stdio"]
+        );
+        let (_, warnings) = parsed(json!([{"name": "x", "ssh": "x", "serverPath": "-x"}]));
+        assert!(warnings[0].contains("serverPath"), "{warnings:?}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn save_creates_the_file_and_reports_fields() {
         let home = std::env::temp_dir().join(format!("poimen-machines-new-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
@@ -1144,6 +1225,7 @@ mod tests {
             name: name.into(),
             ssh: format!("{name}.lan"),
             repos_dir: DEFAULT_REPOS_DIR.into(),
+            server_path: None,
         }
     }
 
@@ -1160,12 +1242,14 @@ mod tests {
                 MachineConfig {
                     name: "box".into(),
                     ssh: "box".into(),
-                    repos_dir: "~/Source/{owner}/{repo}".into()
+                    repos_dir: "~/Source/{owner}/{repo}".into(),
+                    server_path: None,
                 },
                 MachineConfig {
                     name: "gpu".into(),
                     ssh: "me@gpu.lan".into(),
-                    repos_dir: "~/code/{owner}-{repo}".into()
+                    repos_dir: "~/code/{owner}-{repo}".into(),
+                    server_path: None,
                 },
             ]
         );
@@ -1214,7 +1298,7 @@ mod tests {
 
     #[test]
     fn ssh_runs_in_batch_mode_without_a_terminal_and_the_target_after_the_options() {
-        let args = ssh_args("box");
+        let args = ssh_args("box", &wire::CHANNEL.named("poimen-server"));
         assert_eq!(&args[..3], ["-T", "-o", "BatchMode=yes"]);
         let target = args.iter().position(|a| a == "box").unwrap();
         assert_eq!(args[target - 1], "--");

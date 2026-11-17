@@ -18,15 +18,18 @@ import {
   machineGuidance,
   machineTag,
   machineWarnings,
+  serverInstallOffer,
   type MachineCheck,
   type MachineFieldError,
   type MachineStatus,
   type SshHost,
 } from "../core/machines";
+import { ServerInstall } from "../core/server-install";
 import { SettingsStore } from "../core/settings";
 import { SpacesStore } from "../core/spaces-store";
 import { UiState } from "../core/ui-state";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
+import { ServerInstallDialog } from "./server-install-dialog";
 
 /** The form to add a machine or edit `original`; the errors are the validation of `machines.rs`. */
 @Component({
@@ -180,7 +183,7 @@ export function checkLabel(id: string): string {
  */
 @Component({
   selector: "app-machines-page",
-  imports: [ContextMenu, DialogShell, HxButton, HxTag, MachineForm],
+  imports: [ContextMenu, DialogShell, HxButton, HxTag, MachineForm, ServerInstallDialog],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-label="Machines">
@@ -252,6 +255,20 @@ export function checkLabel(id: string): string {
                 >
                   Reconnect
                 </button>
+                @if (offer(m); as o) {
+                  <button
+                    type="button"
+                    hx-button
+                    size="small"
+                    class="install"
+                    [attr.aria-label]="
+                      (o === 'update' ? 'Update server on ' : 'Install server on ') + m.name
+                    "
+                    (click)="serverInstall.open(m)"
+                  >
+                    {{ o === "update" ? "Update server…" : "Install server…" }}
+                  </button>
+                }
                 <button
                   type="button"
                   hx-button
@@ -321,6 +338,7 @@ export function checkLabel(id: string): string {
           }
         </ul>
       }
+      <app-server-install-dialog />
       @if (machines.form(); as f) {
         <app-machine-form [original]="f.original" />
       }
@@ -465,6 +483,8 @@ export class MachinesPage {
     if (!error) this.removing.set(null);
   }
 
+  protected readonly serverInstall = inject(ServerInstall);
+  protected readonly offer = serverInstallOffer;
   protected readonly tag = machineTag;
   protected readonly guidance = machineGuidance;
   protected readonly icon = checkIcon;
