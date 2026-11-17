@@ -5,10 +5,62 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.24.0] — 2026-11-17
+
+### Bug Fixes
+- **dialogs**: Padding is not the backdrop; checkbox labels in a row
+- **ui**: A pick the parent ignores leaves the menu closable (#851)
+- **ui**: Rows and headers are vertically centered (#852) (#878)
+- **ui**: Rows and headers are vertically centered (#852)
+- **ui**: Keep section title spacing in the split sidebar (#852)
+- **github**: Status bar text items truncate with an ellipsis (#854)
+- **ui**: Undefined color tokens drop borders and error colors (#856) (#882)
+- **ui**: Use defined color tokens for borders, errors and tones (#856)
+- **ui**: Drop hex fallbacks of helix tokens, border of the panel footer (#856)
+- **github**: The pull request detail shows unstyled close, link and run badge buttons (#857) (#883)
+- **github**: Icon buttons outside list rows are invisible until hover (#858) (#884)
+- **ui**: Agent status colors differ between views (#859) (#885)
+- **machines**: Only the new server first on the PATH counts, clear a stale serverPath (#865)
+- **updater**: A second Dock icon on macOS after an update (#866) (#891)
+
+
+### Documentation
+- **adr**: Install poimen-server on a machine from the app after a confirmation (#864) (#889)
+
+
+### Features
+- **ui**: Button, tag and field rules on helix-ui (#844) (#867)
+- **settings**: The Server page shows hooks and MCP per agent with clear actions (#845) (#871)
+- **settings**: Layout editors align their fields in columns (#846) (#872)
+- **settings**: The remaining settings pages use the shared controls (#847) (#873)
+- **dialogs**: One dialog shell with focus, primary and danger buttons (#848) (#874)
+- **dialogs**: One dialog shell with focus, primary and danger buttons
+- **shell**: Actions and information are distinguishable in sidebar, status bar, notifications and space overview (#849) (#875)
+- **views**: Button hierarchy in the GitHub, Runs and Changes views and the bottom panel (#850) (#876)
+- **ui**: Loading states, reasons for disabled actions and one close icon (#853) (#879)
+- **github**: Milestone rows and the pulls table work in a narrow window (#854) (#880)
+- **github**: Milestone rows and the pulls table work in a narrow window (#854)
+- **settings**: One page for layouts instead of "New space layout" and "Layouts" (#855) (#881)
+- **machines**: Add, edit and remove a machine on the Machines page (#861) (#886)
+- **machines**: Visible Check and Reconnect and a guided check after adding (#862) (#887)
+- **machines**: Pick a host from the SSH config (#863) (#888)
+- **machines**: Install or update poimen-server on a machine after a confirmation (#865) (#890)
+- **machines**: Install or update poimen-server on a machine after a confirmation (#865)
+
+
+### Refactoring
+- **ui**: One context menu instead of five (#851) (#877)
+- **ui**: One context menu instead of five (#851)
+
+
 ## [0.23.0] — 2026-11-17
 
 ### Bug Fixes
 - **mcp**: Only apps that show confirmations are asked, ids are unguessable (#615)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.23.0 [skip ci]
 
 
 ### Features
