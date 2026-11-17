@@ -4,6 +4,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { buildTree, qualifySnapshot, type Snapshot } from "../../core/snapshot";
+import { EditorTabs } from "../../core/editor-tabs";
 import { SpacesStore } from "../../core/spaces-store";
 import { Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
 import { MachinesSection, checkNote, machineNote } from "./machines-section";
@@ -141,5 +142,29 @@ describe("machineNote", () => {
     expect(checkNote(undefined)).toBeNull();
     expect(checkNote({ error: "boom" })).toBe("Check failed: boom");
     expect(checkNote({ version: "1", protocol: 1, checks: [] })).toBe("Check passed");
+  });
+});
+
+describe("MachinesSection without a machine", () => {
+  it("shows the Machines heading with + until the user hides it", () => {
+    localStorage.clear();
+    const openForm = vi.fn();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: Machines, useValue: { machines: signal([]), checks: signal({}), openForm } },
+        { provide: SpacesStore, useValue: { remoteTree: () => [] } },
+        { provide: EditorTabs, useValue: { openSettings: vi.fn() } },
+      ],
+    });
+    const fixture = TestBed.createComponent(MachinesSection);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector("h2")!.textContent).toBe("Machines");
+    el.querySelector<HTMLButtonElement>("[aria-label='Add machine']")!.click();
+    expect(openForm).toHaveBeenCalled();
+    el.querySelector<HTMLButtonElement>("[aria-label='Hide Machines']")!.click();
+    fixture.detectChanges();
+    expect(el.querySelector("h2")).toBeNull();
   });
 });
