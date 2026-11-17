@@ -24,6 +24,10 @@ h2 {
   font-size: 14px;
   margin: 20px 0 8px;
 }
+h2.page-title {
+  font-size: 16px;
+  margin: 0;
+}
 .path,
 .hint {
   font-size: 12px;
@@ -145,4 +149,50 @@ tr.group th {
 td.actions {
   white-space: nowrap;
   text-align: right;
+}
+td.c-title {
+  max-width: 0;
+  width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Narrow window: the navigation shrinks to icons with counts and the pulls table drops its low-priority columns. */
+@media (max-width: 1100px) {
+  .c-author,
+  .c-review {
+    display: none;
+  }
+}
+@media (max-width: 820px) {
+  .c-checks,
+  .c-size,
+  .c-age {
+    display: none;
+  }
+  .layout {
+    gap: 12px;
+  }
+  .side {
+    width: 56px;
+  }
+  .side select,
+  .show-empty {
+    display: none;
+  }
+  .nav-item {
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding-inline: 4px;
+  }
+  .nav-item::before {
+    content: attr(data-icon);
+    font-size: 16px;
+    line-height: 1.2;
+  }
+  .nav-label {
+    display: none;
+  }
 }

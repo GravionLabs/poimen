@@ -683,6 +683,15 @@ describe("GithubView sub-pages", () => {
   const press = (b: HTMLElement, key: string) =>
     b.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 
+  it("gives each nav button an icon and a title for the narrow layout", async () => {
+    const fixture = await render();
+    const el: HTMLElement = fixture.nativeElement;
+    for (const b of navAll(el)) {
+      expect(b.dataset["icon"]).toBeTruthy();
+      expect(b.getAttribute("title")).toBe(b.querySelector(".nav-label")!.textContent);
+    }
+  });
+
   it("shows a count per page and marks the active one with aria-current", async () => {
     const fixture = await render();
     const el: HTMLElement = fixture.nativeElement;
