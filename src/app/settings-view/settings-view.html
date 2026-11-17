@@ -363,31 +363,105 @@
           }
           @case ("server") {
             <section aria-label="Server">
+              <h3>Server</h3>
+              <dl class="server-info" aria-label="poimen-server">
+                <dt>Version</dt>
+                <dd class="server-version">{{ serverInfo()?.version ?? "unknown" }}</dd>
+                <dt>State</dt>
+                <dd class="server-state">{{ serverState()?.state ?? "unknown" }}</dd>
+                <dt>Socket</dt>
+                <dd>
+                  <code class="server-socket">{{ socketPath() || "unknown" }}</code>
+                </dd>
+              </dl>
+              <button
+                hx-button
+                type="button"
+                size="small"
+                variant="outlined"
+                severity="secondary"
+                class="restart-server"
+                (click)="serverRestart.askRestart()"
+              >
+                Restart server…
+              </button>
               <h3 [class.hit]="hit('Agent hooks')">Agent hooks and MCP</h3>
-              <ul class="harnesses">
-                @for (h of hooks.statuses(); track h.agent) {
-                  <li>
-                    <strong>{{ agentName(h.agent) }}</strong>
-                    <span>{{ h.state }}</span>
-                    @if (h.mcp) {
-                      <span class="mcp">MCP {{ h.mcp }}</span>
-                    }
-                    @if (h.state !== "installed" || h.mcp === "missing") {
-                      <button
-                        type="button"
-                        [class.hit]="hit('Install hooks')"
-                        [disabled]="hooks.busy()"
-                        (click)="hooks.installAgent(h.agent)"
-                      >
-                        Install hooks
-                      </button>
-                    }
-                  </li>
-                }
-              </ul>
-              @if (hooks.error()) {
-                <p class="hint" role="alert">{{ hooks.error() }}</p>
-              }
+              <table class="integrations" aria-label="Agent hooks and MCP">
+                <thead>
+                  <tr>
+                    <th scope="col">Agent</th>
+                    <th scope="col">CLI</th>
+                    <th scope="col">Hooks</th>
+                    <th scope="col">MCP</th>
+                    <th scope="col">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (h of hooks.statuses(); track h.agent) {
+                    <tr [attr.data-agent]="h.agent">
+                      <th scope="row">{{ agentName(h.agent) }}</th>
+                      @if (hooks.cli().has(h.agent)) {
+                        <td>
+                          <hx-tag severity="success">✓ found</hx-tag>
+                        </td>
+                        <td>
+                          @if (stateTag(h.state); as tag) {
+                            <hx-tag [severity]="tag.severity"
+                              >{{ tag.icon }} {{ tag.label }}</hx-tag
+                            >
+                          }
+                        </td>
+                        <td>
+                          @if (stateTag(h.mcp); as tag) {
+                            <hx-tag [severity]="tag.severity"
+                              >{{ tag.icon }} {{ tag.label }}</hx-tag
+                            >
+                          } @else {
+                            <span class="hint">none</span>
+                          }
+                        </td>
+                        <td>
+                          @if (hooks.installing() === h.agent) {
+                            <span class="progress" role="status">Installing…</span>
+                          } @else if (installAction(h); as label) {
+                            <button
+                              hx-button
+                              type="button"
+                              size="small"
+                              variant="outlined"
+                              severity="secondary"
+                              [class.hit]="hit('Install hooks')"
+                              [disabled]="hooks.busy()"
+                              (click)="hooks.installAgent(h.agent)"
+                            >
+                              {{ label }}
+                            </button>
+                          }
+                          @if (hooks.errors()[h.agent]; as err) {
+                            <p class="error" role="alert">{{ err }}</p>
+                          }
+                        </td>
+                      } @else {
+                        <td><hx-tag severity="secondary">? CLI not found</hx-tag></td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                      }
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              <button
+                hx-button
+                type="button"
+                size="small"
+                variant="text"
+                class="refresh-hooks"
+                [disabled]="hooks.busy()"
+                (click)="hooks.refresh()"
+              >
+                Refresh
+              </button>
             </section>
           }
           @case ("agents") {

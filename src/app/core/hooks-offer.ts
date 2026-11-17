@@ -28,6 +28,38 @@ export function missingMcp(statuses: readonly HookStatus[]): string[] {
 
 export { agentName };
 
+/** A state as shown in the Server settings table: text, tone and a glyph (never color alone). */
+export interface StateTag {
+  label: string;
+  severity: "success" | "warn" | "secondary";
+  icon: string;
+}
+
+const TAGS: Record<string, StateTag> = {
+  installed: { label: "installed", severity: "success", icon: "✓" },
+  partial: { label: "partial", severity: "warn", icon: "!" },
+  missing: { label: "missing", severity: "warn", icon: "!" },
+  unknown: { label: "unknown", severity: "secondary", icon: "?" },
+};
+
+/** The tag of a hook or MCP state; `null` when the agent has none (no MCP config). */
+export function stateTag(state: string | null | undefined): StateTag | null {
+  return state ? (TAGS[state] ?? TAGS["unknown"]) : null;
+}
+
+/**
+ * What the one action of an agent's row does, from what is missing: `null` when there is
+ * nothing to do or it cannot be told (`unknown`). `hooks_install` installs hooks and MCP entry.
+ */
+export function installAction(status: HookStatus): string | null {
+  if (status.state === "partial") return "Repair";
+  if (status.state === "missing") {
+    return status.mcp === "missing" ? "Install hooks and MCP" : "Install hooks";
+  }
+  if (status.state === "installed" && status.mcp === "missing") return "Add MCP server";
+  return null;
+}
+
 /**
  * Offers to install the agent hooks and the `poimen mcp` server (`poimen-server integration
  * install`, one consent for both) once the poimen backend runs and an agent lacks them. "Not now" is remembered in the UI state; nothing
@@ -43,6 +75,9 @@ export class HooksOffer {
   private readonly _statuses = signal<HookStatus[]>([]);
   private readonly _busy = signal(false);
   private readonly _error = signal<string | null>(null);
+  private readonly _cli = signal<ReadonlySet<string>>(new Set());
+  private readonly _installing = signal<string | null>(null);
+  private readonly _errors = signal<Readonly<Record<string, string>>>({});
   private checked = false;
 
   /** Agents offered; empty when there is nothing to offer. */
@@ -52,6 +87,12 @@ export class HooksOffer {
   readonly visible = computed(() => this._missing().length > 0);
   readonly busy = this._busy.asReadonly();
   readonly error = this._error.asReadonly();
+  /** Agents whose CLI `get_harnesses` reports available (read with the states). */
+  readonly cli = this._cli.asReadonly();
+  /** The agent being installed right now (the Server page); `null` when none. */
+  readonly installing = this._installing.asReadonly();
+  /** The last install error per agent (the Server page). */
+  readonly errors = this._errors.asReadonly();
 
   constructor() {
     effect(() => {
@@ -78,6 +119,7 @@ export class HooksOffer {
       this._statuses.set(statuses);
       // Only a CLI that is installed is offered (#769): its harness is reported available.
       const installed = await this.availableAgents();
+      this._cli.set(installed);
       const offerable = statuses.filter((s) => installed.has(s.agent));
       const gone = missingHooks(offerable);
       const seen = this.ui.hooksSeen();
@@ -118,10 +160,17 @@ export class HooksOffer {
 
   /** Installs the hooks of one agent (the Server settings page). */
   async installAgent(agent: string): Promise<void> {
-    await this.installAgents([agent]);
+    if (this._busy()) return;
+    this._installing.set(agent);
+    this._errors.update((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== agent)));
+    try {
+      await this.installAgents([agent], false);
+    } finally {
+      this._installing.set(null);
+    }
   }
 
-  private async installAgents(agents: string[]): Promise<void> {
+  private async installAgents(agents: string[], offer = true): Promise<void> {
     this._busy.set(true);
     this._error.set(null);
     try {
@@ -131,7 +180,8 @@ export class HooksOffer {
       this._missing.update((m) => m.filter((a) => !agents.includes(a)));
       await this.refresh();
     } catch (err) {
-      this._error.set(String(err));
+      if (offer) this._error.set(String(err));
+      else this._errors.update((e) => ({ ...e, [agents[0]]: String(err) }));
     } finally {
       this._busy.set(false);
     }

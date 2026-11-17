@@ -14,6 +14,7 @@ import {
 } from "../core/settings";
 import { tauri } from "../core/tauri.mock";
 import { HooksOffer } from "../core/hooks-offer";
+import { ServerRestart } from "../core/server-restart";
 import { TauriBridge } from "../core/tauri";
 import { UiState, UI_STORAGE, UI_STATE_KEY, type UiStorage } from "../core/ui-state";
 import {
@@ -710,30 +711,152 @@ describe("SettingsView categories", () => {
     expect(saved.settingsCollapsed).toEqual(["workspace"]);
   });
 
-  it("shows the hooks state per agent on the Server page with an install button", async () => {
-    const { fixture, host } = setup(undefined, undefined, "server");
-    tauri.answer("hooks_status", () => [
-      { agent: "claude", state: "missing" },
-      { agent: "copilot", state: "installed" },
-      { agent: "gemini", state: "missing" },
-    ]);
-    await TestBed.inject(HooksOffer).refresh();
-    fixture.detectChanges();
-    const rows = [...host.querySelectorAll("ul.harnesses li")].map((li) =>
-      li.textContent!.replace(/\s+/g, " ").trim(),
-    );
-    expect(rows).toEqual([
-      "Claude Codemissing Install hooks",
-      "GitHub Copilot CLIinstalled",
-      "Gemini CLImissing Install hooks",
-    ]);
-    const buttons = [...host.querySelectorAll("button")].filter(
-      (b) => b.textContent!.trim() === "Install hooks",
-    );
-    expect(buttons).toHaveLength(2);
-    buttons[0].click();
-    await fixture.whenStable();
-    expect(tauri.calls("hooks_install")).toEqual([{ agent: "claude" }]);
+  describe("Server page", () => {
+    const harnesses = (available: string[]) =>
+      ["claude", "copilot", "gemini"].map((id) => ({
+        id,
+        command: [id],
+        models: [],
+        available: available.includes(id),
+      }));
+
+    async function server(
+      statuses: unknown[],
+      available = ["claude", "copilot", "gemini"],
+    ): Promise<{ fixture: ReturnType<typeof setup>["fixture"]; host: HTMLElement }> {
+      const { fixture, host } = setup(undefined, undefined, "server");
+      tauri.answer("hooks_status", () => statuses);
+      tauri.answer("get_harnesses", () => harnesses(available));
+      await TestBed.inject(HooksOffer).refresh();
+      fixture.detectChanges();
+      return { fixture, host };
+    }
+
+    const row = (host: HTMLElement, agent: string) =>
+      host.querySelector(`tr[data-agent='${agent}']`)!;
+    const cells = (host: HTMLElement, agent: string) =>
+      [...row(host, agent).querySelectorAll("td")].map((td) =>
+        td.textContent!.replace(/\s+/g, " ").trim(),
+      );
+    const action = (host: HTMLElement, agent: string) => row(host, agent).querySelector("button");
+
+    it("shows a table with the states as tags and the action that names what it does", async () => {
+      const { host } = await server([
+        { agent: "claude", state: "missing", mcp: "missing" },
+        { agent: "copilot", state: "installed", mcp: "installed" },
+        { agent: "gemini", state: "partial", mcp: null },
+      ]);
+      expect(
+        [...host.querySelectorAll("table.integrations th[scope='col']")].map((t) =>
+          t.textContent!.trim(),
+        ),
+      ).toEqual(["Agent", "CLI", "Hooks", "MCP", "Action"]);
+      expect(cells(host, "claude")).toEqual([
+        "✓ found",
+        "! missing",
+        "! missing",
+        "Install hooks and MCP",
+      ]);
+      expect(cells(host, "copilot")).toEqual(["✓ found", "✓ installed", "✓ installed", ""]);
+      expect(action(host, "copilot")).toBeNull();
+      expect(cells(host, "gemini")).toEqual(["✓ found", "! partial", "none", "Repair"]);
+    });
+
+    it("names the action after what is missing", async () => {
+      const { host } = await server([
+        { agent: "claude", state: "missing", mcp: null },
+        { agent: "copilot", state: "installed", mcp: "missing" },
+        { agent: "gemini", state: "unknown", mcp: "unknown" },
+      ]);
+      expect(action(host, "claude")!.textContent!.trim()).toBe("Install hooks");
+      expect(action(host, "copilot")!.textContent!.trim()).toBe("Add MCP server");
+      expect(action(host, "gemini")).toBeNull();
+      expect(cells(host, "gemini")).toEqual(["✓ found", "? unknown", "? unknown", ""]);
+      expect(action(host, "claude")!.classList).toContain("hx-button");
+    });
+
+    it("says CLI not found and offers no action for an agent without its CLI", async () => {
+      const { host } = await server(
+        [
+          { agent: "claude", state: "missing", mcp: "missing" },
+          { agent: "copilot", state: "installed", mcp: "installed" },
+          { agent: "gemini", state: "missing", mcp: null },
+        ],
+        ["copilot", "gemini"],
+      );
+      expect(cells(host, "claude")).toEqual(["? CLI not found", "", "", ""]);
+      expect(action(host, "claude")).toBeNull();
+      expect(action(host, "gemini")).not.toBeNull();
+    });
+
+    it("installs one agent and shows its progress, then reads the states again", async () => {
+      const { fixture, host } = await server([
+        { agent: "claude", state: "missing", mcp: "missing" },
+      ]);
+      let finish!: () => void;
+      tauri.answer(
+        "hooks_install",
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      action(host, "claude")!.click();
+      fixture.detectChanges();
+      expect(tauri.calls("hooks_install")).toEqual([{ agent: "claude" }]);
+      expect(row(host, "claude").textContent).toContain("Installing…");
+      expect(action(host, "claude")).toBeNull();
+      tauri.answer("hooks_status", () => [
+        { agent: "claude", state: "installed", mcp: "installed" },
+      ]);
+      finish();
+      await vi.waitFor(() => expect(TestBed.inject(HooksOffer).installing()).toBeNull());
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(cells(host, "claude")).toEqual(["✓ found", "✓ installed", "✓ installed", ""]);
+    });
+
+    it("shows an install error in the row of its agent as an alert", async () => {
+      const { fixture, host } = await server([
+        { agent: "claude", state: "missing", mcp: null },
+        { agent: "copilot", state: "missing", mcp: null },
+      ]);
+      tauri.answer("hooks_install", () => Promise.reject("no write access"));
+      action(host, "claude")!.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const alert = row(host, "claude").querySelector("[role='alert']")!;
+      expect(alert.textContent).toContain("no write access");
+      expect(alert.classList).toContain("error");
+      expect(row(host, "copilot").querySelector("[role='alert']")).toBeNull();
+      expect(action(host, "claude")).not.toBeNull();
+    });
+
+    it("reads the states again on Refresh", async () => {
+      const { fixture, host } = await server([{ agent: "claude", state: "missing", mcp: null }]);
+      tauri.answer("hooks_status", () => [{ agent: "claude", state: "installed", mcp: null }]);
+      (host.querySelector("button.refresh-hooks") as HTMLButtonElement).click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(cells(host, "claude")[1]).toBe("✓ installed");
+    });
+
+    it("shows the server version, state and socket and opens the restart confirmation", async () => {
+      const { fixture, host } = setup(undefined, undefined, "server");
+      tauri.answer("server_socket_path", () => "/run/user/1/poimen.sock");
+      tauri.answer("hooks_status", () => []);
+      item(host, "p:appearance").click();
+      fixture.detectChanges();
+      item(host, "p:server").click();
+      fixture.detectChanges();
+      await vi.waitFor(() => {
+        fixture.detectChanges();
+        expect(host.querySelector(".server-socket")!.textContent).toBe("/run/user/1/poimen.sock");
+      });
+      expect(host.querySelector(".server-state")!.textContent).toBeDefined();
+      (host.querySelector("button.restart-server") as HTMLButtonElement).click();
+      expect(TestBed.inject(ServerRestart).action()).toBe("restart");
+    });
   });
 
   it("lists the supported agent kinds and what each gives on the Agents page", () => {

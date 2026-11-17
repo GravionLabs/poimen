@@ -561,3 +561,39 @@ h3 {
   gap: 8px;
   margin-top: 8px;
 }
+
+.server-info {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+}
+
+.server-info dt {
+  color: var(--app-muted, inherit);
+}
+
+.server-info dd {
+  margin: 0;
+}
+
+.integrations {
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+.integrations th,
+.integrations td {
+  padding: 4px 12px 4px 0;
+  text-align: left;
+  vertical-align: top;
+  font-weight: normal;
+}
+
+.integrations thead th {
+  font-weight: 600;
+}
+
+.integrations .error {
+  margin: 4px 0 0;
+}

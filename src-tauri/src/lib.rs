@@ -1676,6 +1676,14 @@ async fn hooks_install(agent: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?
 }
 
+/// The socket of the poimen-server this build talks to (the Server settings page).
+#[tauri::command]
+fn server_socket_path() -> String {
+    poimen_client::protocol::socket_path()
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// The running poimen build's version (Tauri app version).
 #[tauri::command]
 fn app_version(app: AppHandle) -> String {
@@ -2743,6 +2751,7 @@ pub fn run() {
             list_child_dirs,
             app_version,
             app_channel,
+            server_socket_path,
             updater::update_check,
             updater::update_install,
             get_settings,

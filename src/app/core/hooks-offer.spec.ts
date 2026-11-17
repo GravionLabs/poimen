@@ -4,7 +4,14 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpacesStore, type BackendStatus } from "./spaces-store";
-import { HooksOffer, missingHooks, missingMcp, type HookStatus } from "./hooks-offer";
+import {
+  HooksOffer,
+  installAction,
+  missingHooks,
+  missingMcp,
+  stateTag,
+  type HookStatus,
+} from "./hooks-offer";
 import { TauriBridge } from "./tauri";
 import { UI_STATE_KEY, UI_STORAGE, parseLayout } from "./ui-state";
 
@@ -223,5 +230,28 @@ describe("HooksOffer", () => {
     expect(offer.visible()).toBe(true);
     expect(offer.error()).toBe("settings.json is not valid JSON");
     expect(offer.busy()).toBe(false);
+  });
+});
+
+describe("installAction and stateTag", () => {
+  it("names the action after what is missing", () => {
+    const a = (state: HookStatus["state"], mcp?: HookStatus["mcp"]) =>
+      installAction({ agent: "claude", state, mcp });
+    expect(a("missing", "missing")).toBe("Install hooks and MCP");
+    expect(a("missing", null)).toBe("Install hooks");
+    expect(a("missing", "installed")).toBe("Install hooks");
+    expect(a("partial", "installed")).toBe("Repair");
+    expect(a("installed", "missing")).toBe("Add MCP server");
+    expect(a("installed", "installed")).toBeNull();
+    expect(a("installed", null)).toBeNull();
+    expect(a("unknown", "unknown")).toBeNull();
+  });
+
+  it("gives each state a tone and a glyph", () => {
+    expect(stateTag("installed")).toMatchObject({ severity: "success", icon: "✓" });
+    expect(stateTag("partial")).toMatchObject({ severity: "warn" });
+    expect(stateTag("missing")).toMatchObject({ severity: "warn" });
+    expect(stateTag("unknown")).toMatchObject({ severity: "secondary" });
+    expect(stateTag(null)).toBeNull();
   });
 });
