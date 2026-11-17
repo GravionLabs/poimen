@@ -1,25 +1,13 @@
 @if (restart.action(); as action) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="restart.cancel()"
-  ></button>
-  <div
-    class="dialog"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Stop poimen-server"
-    (keydown.escape)="restart.cancel()"
+  <app-dialog-shell
+    [heading]="
+      action === 'restart' ? 'Restart poimen-server?' : 'Quit poimen and stop poimen-server?'
+    "
+    label="Stop poimen-server"
+    [alert]="true"
+    [cancelDefault]="true"
+    (cancelled)="restart.cancel()"
   >
-    <h2>
-      @if (action === "restart") {
-        Restart poimen-server?
-      } @else {
-        Quit poimen and stop poimen-server?
-      }
-    </h2>
     @if (restart.terminals().length > 0) {
       <p class="hint">
         {{ restart.terminals().length }}
@@ -51,13 +39,28 @@
     @if (restart.error(); as error) {
       <p class="error" role="alert">{{ error }}</p>
     }
-    <div class="buttons">
-      <button type="button" class="cancel" [disabled]="restart.busy()" (click)="restart.cancel()">
+    <div class="dialog-buttons">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="cancel"
+        [disabled]="restart.busy()"
+        (click)="restart.cancel()"
+      >
         Cancel
       </button>
-      <button type="button" class="confirm" [disabled]="restart.busy()" (click)="restart.confirm()">
+      <button
+        type="button"
+        hx-button
+        severity="danger"
+        class="confirm"
+        [disabled]="restart.busy()"
+        (click)="restart.confirm()"
+      >
         {{ action === "restart" ? "Restart server" : "Quit and stop server" }}
       </button>
     </div>
-  </div>
+  </app-dialog-shell>
 }

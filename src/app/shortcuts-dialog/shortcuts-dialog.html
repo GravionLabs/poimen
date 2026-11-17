@@ -1,6 +1,5 @@
-<dialog #dialog class="shortcuts" aria-labelledby="shortcuts-title" (close)="overview.close()">
-  <div class="body">
-    <h2 id="shortcuts-title">Keyboard shortcuts</h2>
+@if (overview.isOpen()) {
+  <app-dialog-shell heading="Keyboard shortcuts" width="520px" (cancelled)="overview.close()">
     <p class="hint">The command palette ({{ overview.paletteKeys() }}) lists all commands.</p>
     @for (section of overview.sections(); track section.title) {
       <section>
@@ -19,6 +18,5 @@
         </ul>
       </section>
     }
-    <button type="button" class="close" (click)="overview.close()">Close</button>
-  </div>
-</dialog>
+  </app-dialog-shell>
+}

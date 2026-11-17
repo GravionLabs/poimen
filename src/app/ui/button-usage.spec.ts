@@ -17,7 +17,6 @@ const ROW_FILES = [
 
 const LEGACY: Record<string, number> = {
   "src/app/activity-bar/activity-bar.html": 2,
-  "src/app/agent-confirm-dialog/agent-confirm-dialog.html": 3,
   "src/app/agent-picker/agent-picker.html": 3,
   "src/app/app.html": 1,
   "src/app/bottom-panel/bottom-panel.html": 5,
@@ -27,7 +26,6 @@ const LEGACY: Record<string, number> = {
   "src/app/changes/findings-panel.ts": 1,
   "src/app/deliver/deliver-view.html": 23,
   "src/app/explorer/explorer.html": 9,
-  "src/app/github/agent-action-dialog/agent-action-dialog.html": 3,
   "src/app/github/agent-action-menu/agent-action-menu.html": 2,
   "src/app/github/chip-picker/chip-picker.html": 2,
   "src/app/github/github-view.html": 8,
@@ -37,28 +35,18 @@ const LEGACY: Record<string, number> = {
   "src/app/github/issues-section.html": 7,
   "src/app/github/milestones-section.html": 8,
   "src/app/github/pull-detail/pull-detail.html": 12,
-  "src/app/hooks-dialog/hooks-dialog.html": 1,
   "src/app/notifications/notifications.html": 2,
-  "src/app/pane-dialog/pane-dialog.html": 14,
-  "src/app/result-dialog/result-dialog.html": 3,
-  "src/app/server-dialog/server-dialog.html": 3,
-  "src/app/shortcuts-dialog/shortcuts-dialog.html": 1,
   "src/app/sidebar/machines-section/machines-section.ts": 5,
-  "src/app/space-dialog/space-dialog.html": 11,
   "src/app/space-overview/project-layouts.html": 8,
   "src/app/space-overview/space-overview.html": 14,
   "src/app/status-bar/status-bar.html": 14,
   "src/app/tab-layout/tab-layout.html": 4,
-  "src/app/task-dialog/task-dialog.html": 3,
   "src/app/terminal-view/terminal-view.html": 5,
   "src/app/toolbar/toolbar.html": 2,
-  "src/app/trust-dialog/trust-dialog.html": 4,
 };
 
 /** Reference surfaces (#844): only buttons that are not actions stay plain. */
-const REFERENCE_MAX: Record<string, number> = {
-  "src/app/hooks-dialog/hooks-dialog.html": 1, // the backdrop that dismisses
-};
+const REFERENCE_MAX: Record<string, number> = {};
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

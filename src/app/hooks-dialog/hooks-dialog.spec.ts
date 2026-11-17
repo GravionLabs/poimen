@@ -6,6 +6,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { HooksOffer } from "../core/hooks-offer";
 import { HooksDialog } from "./hooks-dialog";
+import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 
 function setup(missing: string[], error: string | null = null) {
   const offer = {
@@ -27,7 +28,7 @@ function setup(missing: string[], error: string | null = null) {
   });
   const fixture = TestBed.createComponent(HooksDialog);
   fixture.detectChanges();
-  return { offer, root: fixture.nativeElement as HTMLElement };
+  return { offer, fixture, root: fixture.nativeElement as HTMLElement };
 }
 
 describe("HooksDialog", () => {
@@ -38,7 +39,7 @@ describe("HooksDialog", () => {
   });
 
   it("renders nothing without an offer", () => {
-    expect(setup([]).root.querySelector("[role=dialog]")).toBeNull();
+    expect(setup([]).root.querySelector("dialog")).toBeNull();
   });
 
   it("names the agents and wires both buttons", () => {
@@ -65,5 +66,19 @@ describe("HooksDialog", () => {
 
   it("shows an install error", () => {
     expect(setup(["claude"], "boom").root.querySelector(".error")?.textContent).toContain("boom");
+  });
+
+  it("takes the focus, the primary button is focused so Enter installs, Escape dismisses and the focus goes back", async () => {
+    const opener = focusOpener();
+    const { offer, fixture, root } = setup(["claude"]);
+    await fixture.whenStable();
+    expectFocusInside(root);
+    // Enter activates the focused primary button without a click first.
+    expect(document.activeElement?.classList.contains("confirm")).toBe(true);
+    press("Escape");
+    expect(offer.dismiss).toHaveBeenCalledTimes(1);
+    offer.visible.set(false);
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(opener);
   });
 });

@@ -1,21 +1,12 @@
 @let d = actions.dialog();
 @if (d) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="actions.cancelDialog()"
-  ></button>
-  <div
-    class="dialog"
-    role="dialog"
-    aria-modal="true"
-    [attr.aria-label]="d.action.label"
+  <app-dialog-shell
+    [heading]="d.action.label + ' ' + targetsText()"
+    [label]="d.action.label"
     data-testid="agent-action-dialog"
-    (keydown)="onKey($event)"
+    (cancelled)="actions.cancelDialog()"
+    (confirmed)="d.harness && actions.confirmDialog()"
   >
-    <h2>{{ d.action.label }} {{ targetsText() }}</h2>
     @if (hasReviewExtras(d.action)) {
       <label>
         Mode
@@ -62,10 +53,19 @@
         }
       </select>
     </label>
-    <div class="buttons">
-      <button type="button" (click)="actions.cancelDialog()">Cancel</button>
+    <div class="dialog-buttons">
       <button
         type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        (click)="actions.cancelDialog()"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        hx-button
         class="primary"
         data-testid="dialog-start"
         [disabled]="!d.harness"
@@ -74,5 +74,5 @@
         Start
       </button>
     </div>
-  </div>
+  </app-dialog-shell>
 }

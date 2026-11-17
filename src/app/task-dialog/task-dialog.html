@@ -1,92 +1,95 @@
 @if (picker.isOpen()) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="picker.cancel()"
-  ></button>
-  <div
-    class="dialog"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Pick an issue"
-    (keydown)="onKey($event)"
-  >
-    <div class="head">
-      <input
-        class="field"
-        type="text"
-        placeholder="Filter by text or number"
-        aria-label="Filter issues"
-        [value]="picker.query()"
-        (input)="input($event)"
-      />
-      @if (picker.machines().length > 0) {
-        <select
-          class="mode"
-          aria-label="Machine"
-          title="Where the task runs"
-          (change)="machine($event)"
-        >
-          <option value="" [selected]="picker.machine() === null">This Mac</option>
-          @for (name of picker.machines(); track name) {
-            <option [value]="name" [selected]="picker.machine() === name">{{ name }}</option>
-          }
-        </select>
+  <app-dialog-shell heading="Pick an issue" width="640px" (cancelled)="picker.cancel()">
+    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -->
+    <div class="picker" (keydown)="onKey($event)">
+      <div class="head">
+        <input
+          class="field"
+          type="text"
+          placeholder="Filter by text or number"
+          aria-label="Filter issues"
+          [value]="picker.query()"
+          (input)="input($event)"
+        />
+        @if (picker.machines().length > 0) {
+          <select
+            class="mode"
+            aria-label="Machine"
+            title="Where the task runs"
+            (change)="machine($event)"
+          >
+            <option value="" [selected]="picker.machine() === null">This Mac</option>
+            @for (name of picker.machines(); track name) {
+              <option [value]="name" [selected]="picker.machine() === name">{{ name }}</option>
+            }
+          </select>
+        }
+        @if (picker.modes().length > 0) {
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
+            class="mode"
+            title="Switch mode (Tab)"
+            (click)="picker.toggleMode()"
+          >
+            {{ picker.modeName() }}
+          </button>
+        }
+      </div>
+      <div class="levels" role="group" aria-label="Level">
+        @for (level of levels; track level) {
+          <button
+            type="button"
+            hx-button
+            size="small"
+            severity="secondary"
+            [variant]="picker.level() === level ? 'outlined' : 'text'"
+            class="level"
+            [class.on]="picker.level() === level"
+            [attr.aria-pressed]="picker.level() === level"
+            (click)="picker.setLevel(level)"
+          >
+            {{ level }}
+          </button>
+        }
+      </div>
+      @if (picker.error(); as error) {
+        <p class="error" role="alert">{{ errorText(error) }} You can still type an issue number.</p>
       }
-      @if (picker.modes().length > 0) {
-        <button type="button" class="mode" title="Switch mode (Tab)" (click)="picker.toggleMode()">
-          {{ picker.modeName() }}
-        </button>
+      @if (picker.loading()) {
+        <p class="hint">Loading issues...</p>
       }
+      <ul class="issues" role="listbox" aria-label="Open issues">
+        @for (issue of picker.visible(); track issue.number; let i = $index) {
+          <li
+            class="issue"
+            role="option"
+            [class.active]="i === picker.index()"
+            [attr.aria-selected]="i === picker.index()"
+            tabindex="-1"
+            (click)="picker.confirm(issue)"
+            (keydown.enter)="$event.stopPropagation(); picker.confirm(issue)"
+          >
+            <span class="nr">#{{ issue.number }}</span>
+            @if (issue.level; as level) {
+              <span class="tag">{{ level }}</span>
+            }
+            <span class="title">{{ issue.title }}</span>
+            @for (m of markers(issue); track m) {
+              <span class="marker">{{ m }}</span>
+            }
+          </li>
+        }
+      </ul>
+      @if (picker.typedNumber(); as n) {
+        <p class="hint typed">Enter picks issue #{{ n }}.</p>
+      } @else if (!picker.loading() && !picker.error() && picker.visible().length === 0) {
+        <p class="hint">No matching open issue.</p>
+      }
+      <p class="hint keys">Up/Down move, Enter picks, Tab switches the mode, Esc cancels.</p>
     </div>
-    <div class="levels" role="group" aria-label="Level">
-      @for (level of levels; track level) {
-        <button
-          type="button"
-          class="level"
-          [class.on]="picker.level() === level"
-          [attr.aria-pressed]="picker.level() === level"
-          (click)="picker.setLevel(level)"
-        >
-          {{ level }}
-        </button>
-      }
-    </div>
-    @if (picker.error(); as error) {
-      <p class="error" role="alert">{{ errorText(error) }} You can still type an issue number.</p>
-    }
-    @if (picker.loading()) {
-      <p class="hint">Loading issues...</p>
-    }
-    <ul class="issues" role="listbox" aria-label="Open issues">
-      @for (issue of picker.visible(); track issue.number; let i = $index) {
-        <li
-          class="issue"
-          role="option"
-          [class.active]="i === picker.index()"
-          [attr.aria-selected]="i === picker.index()"
-          tabindex="-1"
-          (click)="picker.confirm(issue)"
-          (keydown.enter)="$event.stopPropagation(); picker.confirm(issue)"
-        >
-          <span class="nr">#{{ issue.number }}</span>
-          @if (issue.level; as level) {
-            <span class="tag">{{ level }}</span>
-          }
-          <span class="title">{{ issue.title }}</span>
-          @for (m of markers(issue); track m) {
-            <span class="marker">{{ m }}</span>
-          }
-        </li>
-      }
-    </ul>
-    @if (picker.typedNumber(); as n) {
-      <p class="hint typed">Enter picks issue #{{ n }}.</p>
-    } @else if (!picker.loading() && !picker.error() && picker.visible().length === 0) {
-      <p class="hint">No matching open issue.</p>
-    }
-    <p class="hint keys">Up/Down move, Enter picks, Tab switches the mode, Esc cancels.</p>
-  </div>
+  </app-dialog-shell>
 }
