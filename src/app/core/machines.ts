@@ -114,6 +114,71 @@ export function parseMachineCheck(raw: unknown): MachineCheck | null {
 export const checkPassed = (check: MachineCheck): boolean =>
   check.checks.every((c) => c.status !== "missing");
 
+/** A machine state as a tag: text, tone and a glyph (never color alone). */
+export interface MachineTag {
+  label: string;
+  severity: "success" | "warn" | "danger" | "secondary";
+  icon: string;
+}
+
+/** The state tag of a machine: connecting, connected with the version, offline, incompatible. */
+export function machineTag(m: MachineStatus): MachineTag {
+  switch (m.state) {
+    case "connecting":
+      return { label: "connecting…", severity: "secondary", icon: "…" };
+    case "connected":
+      return {
+        label: m.serverVersion ? `connected, server ${m.serverVersion}` : "connected",
+        severity: "success",
+        icon: "✓",
+      };
+    case "offline":
+      return {
+        label: m.error ? `offline: ${m.error}` : "offline",
+        severity: "danger",
+        icon: "✕",
+      };
+    case "incompatible":
+      return {
+        label: `incompatible: server ${m.serverVersion} (protocol ${m.serverProtocol}), app ${m.appVersion} (protocol ${m.appProtocol})`,
+        severity: "warn",
+        icon: "!",
+      };
+  }
+}
+
+/**
+ * What to do about a machine that is not connected, from its state: unreachable, unknown host
+ * key, server missing or server incompatible. `null` for a machine that is connected or
+ * connecting. The text is advice; poimen runs nothing.
+ */
+export function machineGuidance(m: MachineStatus): string | null {
+  if (m.state === "incompatible") {
+    const older = m.serverProtocol < m.appProtocol;
+    return older
+      ? `The server on ${m.name} is older than this app. Update poimen-server on the machine to the same version, then press Reconnect.`
+      : `The server on ${m.name} is newer than this app. Update poimen, then press Reconnect.`;
+  }
+  if (m.state !== "offline") return null;
+  const e = m.error.toLowerCase();
+  if (e.includes("host key verification failed") || e.includes("host key"))
+    return `The host key of ${m.ssh} is not known or has changed. Run "ssh ${m.ssh}" once in a terminal, check the fingerprint and accept it, then press Reconnect.`;
+  if (
+    e.includes("command not found") ||
+    e.includes("not found") ||
+    e.includes("no such file") ||
+    e.includes("poimen-server")
+  )
+    return `ssh works, but poimen-server is not installed on ${m.name} or not on its PATH. Install it on the machine, then press Reconnect.`;
+  if (e.includes("permission denied"))
+    return `ssh refused the login to ${m.ssh}. poimen needs a key or the agent, no password prompt; check "ssh ${m.ssh}" in a terminal, then press Reconnect.`;
+  return `${m.name} cannot be reached. Check that "ssh ${m.ssh}" works without a prompt (network, VPN, host name), then press Reconnect.`;
+}
+
+/** The glyph of a check status. */
+export const checkIcon = (status: CheckStatus): string =>
+  status === "ok" ? "✓" : status === "warning" ? "!" : "✕";
+
 /** A validation error of `machine_save`, for the field it names (`null`: the whole write). */
 export interface MachineFieldError {
   field: "name" | "ssh" | "reposDir" | null;
@@ -159,6 +224,9 @@ export class Machines {
   /** The form of the Machines page: `original` is the machine being edited, `null` for a new one. */
   private readonly _form = signal<{ original: string | null } | null>(null);
   readonly form = this._form.asReadonly();
+  private readonly _running = signal<ReadonlySet<string>>(new Set());
+  /** Names of the machines whose check is running now. */
+  readonly running = this._running.asReadonly();
   /** Machines checked in this session: the first connect checks, a reconnect does not. */
   private readonly checked = new Set<string>();
 
@@ -214,6 +282,10 @@ export class Machines {
     } catch (e) {
       return parseFieldErrors(e);
     }
+    // A new (or changed) machine is checked once when it connects, even when its name was
+    // checked before.
+    this.checked.delete(values.name);
+    if (original) this.checked.delete(original);
     await this.refresh();
     return [];
   }
@@ -240,6 +312,8 @@ export class Machines {
    */
   async check(name: string): Promise<void> {
     this.checked.add(name);
+    if (this._running().has(name)) return;
+    this._running.update((r) => new Set(r).add(name));
     try {
       const check = parseMachineCheck(await this.bridge.invoke<unknown>("machine_check", { name }));
       this._checks.update((c) => ({
@@ -248,6 +322,12 @@ export class Machines {
       }));
     } catch (e) {
       this._checks.update((c) => ({ ...c, [name]: { error: String(e) } }));
+    } finally {
+      this._running.update((r) => {
+        const next = new Set(r);
+        next.delete(name);
+        return next;
+      });
     }
   }
 

@@ -94,6 +94,10 @@ describe("MachinesPage", () => {
     el.querySelector<HTMLButtonElement>(".copy")!.click();
     expect(writeText).toHaveBeenCalledWith("brew install gh");
     expect(tauri.invoke.mock.calls.length).toBe(calls);
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(el.querySelector(".copy")!.textContent).toContain("Copied");
+    });
   });
 
   it("shows the error when the check could not run", async () => {
@@ -195,6 +199,40 @@ describe("MachinesPage", () => {
     fixture.detectChanges();
     const alerts = [...(fixture.nativeElement as HTMLElement).querySelectorAll(".warning")];
     expect(alerts.map((a) => a.textContent)).toEqual(["machines[1]: ssh is missing; ignored"]);
+  });
+
+  it("shows the state tag, Check and Reconnect on each row", async () => {
+    const { fixture, el } = await setup();
+    expect(el.querySelector(".state")!.textContent).toContain("connected, server 1");
+    el.querySelector<HTMLButtonElement>(".check")!.click();
+    await vi.waitFor(() =>
+      expect(tauri.invoke).toHaveBeenCalledWith("machine_check", { name: "box" }),
+    );
+    el.querySelector<HTMLButtonElement>(".reconnect")!.click();
+    expect(tauri.invoke).toHaveBeenCalledWith("reconnect_machine", { name: "box" });
+    await fixture.whenStable();
+  });
+
+  it("shows what to do for an unknown host key and disables Check while offline", async () => {
+    const { el } = await setup([
+      { ...box, state: "offline", error: "Host key verification failed." },
+    ]);
+    expect(el.querySelector(".state")!.textContent).toContain("Host key verification failed");
+    expect(el.querySelector(".guidance")!.textContent).toContain("accept it");
+    expect(el.querySelector<HTMLButtonElement>(".check")!.disabled).toBe(true);
+  });
+
+  it("shows an icon per check status and runs a check again after it", async () => {
+    const { fixture, el } = await setup();
+    const machines = TestBed.inject(Machines);
+    await machines.check("box");
+    fixture.detectChanges();
+    const icons = [...el.querySelectorAll(".check-row .status")].map((s) => s.textContent!.trim());
+    expect(icons).toEqual(["✓ ok", "✕ missing", "! warning"]);
+    expect(machines.running().size).toBe(0);
+    const before = tauri.invoke.mock.calls.filter((c) => c[0] === "machine_check").length;
+    await machines.check("box");
+    expect(tauri.invoke.mock.calls.filter((c) => c[0] === "machine_check").length).toBe(before + 1);
   });
 
   it("labels a check id", () => {

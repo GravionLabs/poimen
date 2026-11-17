@@ -7,13 +7,16 @@ import {
   inject,
   signal,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
+import { HxButton, HxTag } from "@gravionlabs/helix-ui";
 import { ContextMenu } from "../ui/context-menu/context-menu";
 import { plainGroups } from "../ui/context-menu/menu-model";
 import {
   DEFAULT_REPOS_DIR,
   Machines,
+  checkIcon,
   checkPassed,
+  machineGuidance,
+  machineTag,
   machineWarnings,
   type MachineCheck,
   type MachineFieldError,
@@ -148,13 +151,13 @@ export function checkLabel(id: string): string {
  */
 @Component({
   selector: "app-machines-page",
-  imports: [ContextMenu, DialogShell, HxButton, MachineForm],
+  imports: [ContextMenu, DialogShell, HxButton, HxTag, MachineForm],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-label="Machines">
       <p class="hint">
-        Remote machines over SSH. Right-click a machine to check its prerequisites; the commands
-        listed for a missing item are for you to run on the machine.
+        Remote machines over SSH. Check lists the prerequisites of a connected machine; the commands
+        listed for a missing item are for you to run on the machine, poimen never runs them.
       </p>
       <div class="toolbar">
         <button type="button" hx-button size="small" class="add" (click)="machines.openForm()">
@@ -189,8 +192,37 @@ export function checkLabel(id: string): string {
           @for (m of machines.machines(); track m.name) {
             <li class="row-item machine" (contextmenu)="openMenu($event, m)">
               <span class="name">{{ m.name }}</span>
-              <span class="state">{{ stateText(m) }}</span>
+              <hx-tag class="state" [severity]="tag(m).severity"
+                >{{ tag(m).icon }} {{ tag(m).label }}</hx-tag
+              >
               <span class="actions">
+                <button
+                  type="button"
+                  hx-button
+                  size="small"
+                  variant="outlined"
+                  severity="secondary"
+                  class="check"
+                  [attr.aria-label]="'Check ' + m.name"
+                  [disabled]="m.state !== 'connected' || machines.running().has(m.name)"
+                  [attr.title]="m.state === 'connected' ? null : 'Connect the machine first'"
+                  (click)="machines.check(m.name)"
+                >
+                  {{ machines.running().has(m.name) ? "Checking…" : "Check" }}
+                </button>
+                <button
+                  type="button"
+                  hx-button
+                  size="small"
+                  variant="outlined"
+                  severity="secondary"
+                  class="reconnect"
+                  [attr.aria-label]="'Reconnect ' + m.name"
+                  [disabled]="m.state === 'connecting'"
+                  (click)="machines.reconnect(m.name)"
+                >
+                  Reconnect
+                </button>
                 <button
                   type="button"
                   hx-button
@@ -216,6 +248,12 @@ export function checkLabel(id: string): string {
                   Remove
                 </button>
               </span>
+              @if (guidance(m); as g) {
+                <p class="guidance" role="status">{{ g }}</p>
+              }
+              @if (machines.running().has(m.name)) {
+                <p class="progress" role="status">Checking {{ m.name }}…</p>
+              }
               @if (resultOf(m.name); as r) {
                 @if (isError(r)) {
                   <p class="error" role="alert">Check failed: {{ r.error }}</p>
@@ -224,13 +262,15 @@ export function checkLabel(id: string): string {
                   <ul class="checks" aria-label="Checks of {{ m.name }}">
                     @for (c of r.checks; track c.id) {
                       <li class="check-row" [attr.data-status]="c.status">
-                        <span class="status">{{ c.status }}</span>
+                        <span class="status" [attr.aria-label]="c.status"
+                          ><span aria-hidden="true">{{ icon(c.status) }}</span> {{ c.status }}</span
+                        >
                         <span class="id">{{ label(c.id) }}</span>
                         @if (c.detail) {
                           <span class="detail">{{ c.detail }}</span>
                         }
                         @if (c.fix) {
-                          <code class="fix">{{ c.fix }}</code>
+                          <pre class="fix"><code>{{ c.fix }}</code></pre>
                           <button
                             type="button"
                             hx-button
@@ -238,9 +278,9 @@ export function checkLabel(id: string): string {
                             variant="text"
                             severity="secondary"
                             class="copy"
-                            (click)="copy(c.fix)"
+                            (click)="copy(m.name + c.id, c.fix)"
                           >
-                            Copy
+                            {{ copied() === m.name + c.id ? "Copied" : "Copy" }}
                           </button>
                         }
                       </li>
@@ -358,6 +398,17 @@ export function checkLabel(id: string): string {
     }
     .fix {
       user-select: all;
+      flex-basis: 100%;
+      margin: 0;
+      padding: 4px 8px;
+      overflow-x: auto;
+      border: 1px solid var(--h-content-border-color);
+      border-radius: 4px;
+    }
+    .guidance,
+    .progress {
+      flex-basis: 100%;
+      margin: 0;
     }
   `,
 })
@@ -385,9 +436,11 @@ export class MachinesPage {
     if (!error) this.removing.set(null);
   }
 
-  protected stateText(m: MachineStatus): string {
-    return m.state === "offline" ? `offline: ${m.error}` : m.state;
-  }
+  protected readonly tag = machineTag;
+  protected readonly guidance = machineGuidance;
+  protected readonly icon = checkIcon;
+  /** The key of the fix whose Copy was pressed last, shown as "Copied" for a moment. */
+  protected readonly copied = signal<string | null>(null);
 
   protected resultOf(name: string): MachineCheck | { error: string } | undefined {
     return this.machines.checks()[name];
@@ -412,7 +465,10 @@ export class MachinesPage {
     if (open) void this.machines.check(open.name);
   }
 
-  protected copy(text: string): void {
-    void navigator.clipboard?.writeText(text);
+  protected copy(key: string, text: string): void {
+    void Promise.resolve(navigator.clipboard?.writeText(text)).then(() => {
+      this.copied.set(key);
+      setTimeout(() => this.copied.update((c) => (c === key ? null : c)), 2000);
+    });
   }
 }
