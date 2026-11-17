@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { SERVER_RESTART_NOTE, errorTitle, type UpdateState } from "../core/updater";
 import type { BarSummary } from "../deliver/deliver-status";
 import type { ConnectionState } from "../core/spaces-store";
@@ -48,6 +49,7 @@ export function modeTitle(blocked: string | null): string {
 /** Bottom bar: server connection, waiting agents (click jumps to the next) and the active tab. */
 @Component({
   selector: "app-status-bar",
+  imports: [HxButton],
   templateUrl: "./status-bar.html",
   styleUrl: "./status-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -2,7 +2,13 @@
   <div class="brand">Spaces</div>
   <button
     type="button"
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
+    iconOnly
     class="layout-toggle"
+    [attr.aria-pressed]="layout() === 'split'"
     [attr.aria-label]="'Show ' + otherLayout() + ' layout'"
     [title]="'Show ' + otherLayout() + ' layout'"
     (click)="toggleLayout()"
@@ -39,10 +45,16 @@
   </button>
   <button
     type="button"
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
+    iconOnly
     class="layout-toggle sort-toggle"
     aria-label="Sort spaces"
     title="Sort spaces"
     aria-haspopup="menu"
+    [attr.aria-pressed]="sortMenuAt() !== null"
     (click)="openSortMenu($event)"
   >
     <svg
@@ -61,6 +73,11 @@
   </button>
   <button
     type="button"
+    hx-button
+    variant="outlined"
+    severity="secondary"
+    size="small"
+    iconOnly
     class="add"
     aria-label="New space"
     title="New space from a directory"
@@ -72,7 +89,16 @@
 @if (store.disconnected(); as message) {
   <hx-message class="connection" severity="warn" size="small">
     {{ message }}
-    <button type="button" class="retry" (click)="store.ensureBackend()">Retry</button>
+    <button
+      type="button"
+      hx-button
+      variant="text"
+      size="small"
+      class="retry"
+      (click)="store.ensureBackend()"
+    >
+      Retry
+    </button>
   </hx-message>
 }
 @if (writeError(); as reason) {
@@ -147,7 +173,20 @@
                       >{{ seg.text }}</span
                     >
                     @if (isPinned(d.workspace.space_id)) {
-                      <span class="pin-mark" title="Pinned" aria-label="Pinned">📌</span>
+                      <svg
+                        class="pin-mark"
+                        viewBox="0 0 16 16"
+                        width="11"
+                        height="11"
+                        fill="currentColor"
+                        role="img"
+                        aria-label="Pinned"
+                      >
+                        <title>Pinned</title>
+                        <path
+                          d="M9.5 1.5l5 5-1.4 1.4-.9-.4-2.3 2.3.3 3-1.1 1.1-3-3-4.2 4.2-1-1 4.2-4.2-3-3 1.1-1.1 3 .3 2.3-2.3-.4-.9z"
+                        />
+                      </svg>
                     }
                   }
                 }
@@ -196,6 +235,10 @@
           @case ("consent") {
             <button
               type="button"
+              hx-button
+              variant="outlined"
+              severity="secondary"
+              size="small"
               class="rebuild"
               [attr.aria-label]="'Rebuild space ' + d.workspace.label"
               [title]="'Rebuild the layout: ' + mark.reasons.join('; ')"
@@ -453,6 +496,11 @@
             <h2 id="split-agents" class="section-title">Agents</h2>
             <button
               type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
+              iconOnly
               class="layout-toggle agents-toggle"
               [attr.aria-pressed]="agentsMode() === 'priority'"
               [attr.aria-label]="

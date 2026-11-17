@@ -37,8 +37,7 @@ td {
   height: 8px;
   border-radius: 50%;
   margin-right: 6px;
-  background: currentColor;
-  opacity: 0.6;
+  /* The dot color comes from the global status classes (#849). */
 }
 .empty {
   opacity: 0.7;
@@ -56,6 +55,12 @@ td {
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+.field:has(textarea) {
+  align-items: flex-start;
+}
+.field:has(textarea) label {
+  padding-top: 6px;
 }
 .field label,
 .field .label {

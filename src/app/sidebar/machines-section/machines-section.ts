@@ -6,6 +6,7 @@ import {
   output,
   signal,
 } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { rowName, type Terminal, type WorkspaceNode } from "../../core/snapshot";
 import { SpacesStore } from "../../core/spaces-store";
 import { checkPassed, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
@@ -56,6 +57,7 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
 /** The machines of the settings below the spaces of this Mac: state, spaces, terminals (#280). */
 @Component({
   selector: "app-machines-section",
+  imports: [HxButton],
   template: `
     @for (g of groups(); track g.machine.name) {
       <section class="machine" [class.offline]="!g.usable" [attr.aria-label]="g.machine.name">
@@ -65,6 +67,10 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
           @if (g.machine.state === "offline" || g.machine.state === "incompatible") {
             <button
               type="button"
+              hx-button
+              variant="outlined"
+              severity="secondary"
+              size="small"
               class="reconnect"
               [attr.aria-label]="'Reconnect ' + g.machine.name"
               (click)="reconnect(g.machine.name)"
@@ -199,16 +205,6 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
     .state-incompatible,
     .status-blocked {
       background: var(--h-danger-color, #f85149);
-    }
-
-    .reconnect {
-      padding: 0 6px;
-      border: 1px solid var(--h-content-border-color);
-      border-radius: 4px;
-      background: transparent;
-      color: inherit;
-      font: inherit;
-      cursor: pointer;
     }
 
     .menu-backdrop {
