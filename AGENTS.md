@@ -84,6 +84,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - Shells in a terminal panel at the bottom of the app by default, agents in editor tabs; the placement (`editor`/`panel`) is a server-owned tab field, splits stay (proposed, [ADR 0010](docs/adr/0010-terminal-panel-for-shells-in-the-app.md)).
 - Named layouts: `layouts[]` in the user config with the shape of ADR 0006 (tabs with split trees, nested tabs, app-only `place`), templates refer to them by name, old keys keep working, presets stay project palette entries (proposed, [ADR 0011](docs/adr/0011-named-layouts-referenced-by-templates.md)).
 - MCP server for agent sessions: `poimen mcp` (console binary, stdio) over `poimen-client` with read tools and the write tools `start_agent`/`prompt_agent`; writes act freely in the caller's own space, any other space needs a confirmation in the app, deliver runs come from `poimen_core::agent_events` and are never written (proposed, [ADR 0012](docs/adr/0012-mcp-server-for-agent-sessions.md)).
+- Install `poimen-server` on a machine from the app after a confirmation: the release archive of the app's own version over the ssh connection into `~/.local/bin`, checksum and `--version` verified, nothing runs before the confirmation, hooks a separate step; amends ADR 0008 (proposed, [ADR 0013](docs/adr/0013-install-poimen-server-on-a-machine-from-the-app.md)).
 
 ## Verification
 
