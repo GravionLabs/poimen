@@ -50,11 +50,7 @@ h3 {
   gap: 8px;
   min-height: 34px;
   padding: 0 6px;
-  background: none;
-  border: 0;
-  color: inherit;
   text-align: left;
-  cursor: pointer;
 }
 .pick[aria-pressed="true"] {
   background: var(--h-content-hover-background);
@@ -94,7 +90,4 @@ progress {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-}
-.icon-btn.text {
-  font-size: 12px;
 }

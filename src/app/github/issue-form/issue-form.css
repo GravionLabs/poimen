@@ -21,11 +21,7 @@ textarea {
   box-sizing: border-box;
   font-family: monospace;
 }
-.tabs,
 .buttons {
   display: flex;
   gap: 4px;
-}
-.tabs [aria-pressed="true"] {
-  font-weight: 600;
 }

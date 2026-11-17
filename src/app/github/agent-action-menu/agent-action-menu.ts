@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
 import { AgentActions, type ActionTarget } from "../agent-actions";
 import { IssueTasks } from "../issue-task";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /**
  * The popup of the agent actions of a row (the `⋯` button or the context menu). Shift+click on an
@@ -9,6 +10,7 @@ import { IssueTasks } from "../issue-task";
 @Component({
   selector: "app-agent-action-menu",
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [HxButton],
   templateUrl: "./agent-action-menu.html",
   styleUrl: "./agent-action-menu.css",
 })

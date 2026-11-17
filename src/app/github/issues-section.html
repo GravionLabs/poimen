@@ -101,7 +101,17 @@
           <option value="completed">Close as completed</option>
           <option value="not_planned">Close as not planned</option>
         </select>
-        <button type="button" data-testid="bulk-clear" (click)="issues.clearMarked()">Clear</button>
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          data-testid="bulk-clear"
+          (click)="issues.clearMarked()"
+        >
+          Clear
+        </button>
       </div>
     }
     @for (e of issues.errors(); track e.repo) {
@@ -114,6 +124,10 @@
         {{ tree.repo }}
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
           class="icon-btn"
           title="New issue"
           data-testid="new-issue"
@@ -157,6 +171,11 @@
             @if (row.node.children.length) {
               <button
                 type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
+                [attr.title]="(row.collapsed ? 'Expand #' : 'Collapse #') + i.number"
                 class="twisty"
                 data-testid="twisty"
                 [attr.aria-expanded]="!row.collapsed"
@@ -176,6 +195,10 @@
             @if (runs.badge(tree.repo, i.number); as run) {
               <button
                 type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
                 class="badge badge-{{ run.state === 'running' ? 'primary' : 'warning' }}"
                 data-testid="run-badge"
                 title="Show the agent"
@@ -204,6 +227,10 @@
               <span class="pr" data-testid="pr">
                 <button
                   type="button"
+                  hx-button
+                  variant="text"
+                  severity="secondary"
+                  size="small"
                   class="link"
                   [disabled]="!isGithubUrl(pr.url)"
                   [attr.aria-label]="'Open pull request #' + pr.number + ' in browser'"
@@ -226,6 +253,10 @@
             }
             <button
               type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
               class="icon-btn"
               title="Agent actions"
               data-testid="row-menu"
@@ -237,6 +268,10 @@
             </button>
             <button
               type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
               class="icon-btn open"
               title="Open in browser"
               [disabled]="!isGithubUrl(i.url)"

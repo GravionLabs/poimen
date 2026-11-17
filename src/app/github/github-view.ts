@@ -30,11 +30,14 @@ import {
   reviewBadge,
   type PullRow,
 } from "./pulls";
+import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
 
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
   selector: "app-github-view",
   imports: [
+    HxButton,
+    HxSelectButton,
     AgentActionMenu,
     InboxSection,
     MilestonesSection,

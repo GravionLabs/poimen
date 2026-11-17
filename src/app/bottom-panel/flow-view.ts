@@ -14,6 +14,7 @@ import {
   FZoomDirective,
   provideFFlow,
 } from "@foblex/flow";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { flowAgentName } from "../core/snapshot";
 import { SpacesStore } from "../core/spaces-store";
 import { UiState } from "../core/ui-state";
@@ -31,7 +32,7 @@ const FIT_PADDING = 24;
  */
 @Component({
   selector: "app-flow-view",
-  imports: [FFlowModule, FlowNodeTokens, Icon],
+  imports: [FFlowModule, FlowNodeTokens, Icon, HxButton],
   providers: [provideFFlow()],
   templateUrl: "./flow-view.html",
   styleUrl: "./flow-view.css",

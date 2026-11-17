@@ -6,6 +6,10 @@
         <h2>{{ row.title }}</h2>
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
           class="icon-btn"
           title="Close"
           aria-label="Close detail"
@@ -20,6 +24,10 @@
         @if (runs.badge(row.repo, row.number); as run) {
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="badge badge-{{ run.state === 'running' ? 'primary' : 'warning' }}"
             data-testid="detail-run-badge"
             title="Show the agent"
@@ -33,6 +41,10 @@
         >
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
           class="icon-btn"
           title="Open in browser"
           [attr.aria-label]="'Open #' + row.number + ' in browser'"
@@ -47,6 +59,10 @@
         @for (o of offered(); track o.action.id) {
           <button
             type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
             data-testid="agent-action"
             [disabled]="!o.enabled"
             [attr.title]="o.reason ?? 'Shift+click: choose harness and model'"
@@ -61,6 +77,10 @@
           @for (a of pulls.actions(); track a) {
             <button
               type="button"
+              hx-button
+              variant="outlined"
+              [severity]="a === 'close' ? 'danger' : 'secondary'"
+              size="small"
               [attr.data-testid]="'pr-' + a"
               [disabled]="pulls.actionBusy()"
               (click)="choose(a)"
@@ -88,12 +108,26 @@
             }
             <button
               type="submit"
+              hx-button
+              variant="filled"
+              [severity]="c === 'close' || c === 'request_changes' ? 'danger' : 'primary'"
+              size="small"
               data-testid="pr-submit"
               [disabled]="pulls.actionBusy() || (c !== 'close' && !text().trim())"
             >
               {{ c === "close" ? "Confirm close" : "Send " + labels[c].toLowerCase() }}
             </button>
-            <button type="button" data-testid="pr-cancel" (click)="cancel()">Cancel</button>
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
+              data-testid="pr-cancel"
+              (click)="cancel()"
+            >
+              Cancel
+            </button>
           </form>
         }
       }
@@ -103,6 +137,9 @@
             @if (canMerge(d)) {
               <button
                 type="button"
+                hx-button
+                variant="filled"
+                size="small"
                 data-testid="pr-merge"
                 [disabled]="pulls.actionBusy() || d.mergeBlock !== null"
                 [attr.title]="d.mergeBlock"
@@ -117,6 +154,10 @@
             @if (canRerun(d)) {
               <button
                 type="button"
+                hx-button
+                variant="outlined"
+                severity="secondary"
+                size="small"
                 data-testid="pr-rerun"
                 [disabled]="pulls.actionBusy()"
                 (click)="pulls.rerun()"
@@ -155,10 +196,25 @@
                 />
                 Delete branch
               </label>
-              <button type="submit" data-testid="merge-submit" [disabled]="pulls.actionBusy()">
+              <button
+                type="submit"
+                hx-button
+                variant="filled"
+                size="small"
+                data-testid="merge-submit"
+                [disabled]="pulls.actionBusy()"
+              >
                 Confirm merge
               </button>
-              <button type="button" data-testid="merge-cancel" (click)="pulls.mergeDraft.set(null)">
+              <button
+                type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
+                data-testid="merge-cancel"
+                (click)="pulls.mergeDraft.set(null)"
+              >
                 Cancel
               </button>
             </form>
@@ -217,12 +273,18 @@
               <li class="check-{{ c.state }}">
                 <span class="state">{{ c.state }}</span>
                 @if (c.url && isGithubUrl(c.url)) {
-                  <a
-                    href="#"
+                  <button
+                    type="button"
+                    hx-button
+                    variant="text"
+                    severity="secondary"
+                    size="small"
                     class="link"
-                    (click)="$event.preventDefault(); pulls.openUrl(c.url)"
-                    >{{ c.name }}</a
+                    data-testid="check-link"
+                    (click)="pulls.openUrl(c.url)"
                   >
+                    {{ c.name }}
+                  </button>
                 } @else {
                   <span>{{ c.name }}</span>
                 }
@@ -259,6 +321,10 @@
               <li>
                 <button
                   type="button"
+                  hx-button
+                  variant="text"
+                  severity="secondary"
+                  size="small"
                   class="link"
                   data-testid="detail-issue"
                   (click)="openIssue(i)"

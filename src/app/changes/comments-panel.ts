@@ -6,6 +6,7 @@ import {
   inject,
   signal,
 } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { rowName } from "../core/snapshot";
 import type { LineComment } from "../core/ui-state";
 import { commentLocation } from "./comment-prompt";
@@ -17,6 +18,7 @@ import { LineComments } from "./line-comments";
  */
 @Component({
   selector: "app-comments-panel",
+  imports: [HxButton],
   template: `
     <header>
       <strong>Comments</strong>
@@ -41,6 +43,8 @@ import { LineComments } from "./line-comments";
       }
       <button
         type="button"
+        hx-button
+        size="small"
         class="send"
         [disabled]="comments.blocked() !== null"
         [title]="comments.blocked() ?? 'Send the pending comments to the agent as one prompt'"
@@ -60,7 +64,17 @@ import { LineComments } from "./line-comments";
     <ul class="pending" aria-label="Pending comments">
       @for (c of comments.pending(); track c.id) {
         <li>
-          <button type="button" class="where" (click)="open.emit(c)">{{ where(c) }}</button>
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
+            class="where"
+            (click)="open.emit(c)"
+          >
+            {{ where(c) }}
+          </button>
           @if (editing() === c.id) {
             <textarea
               rows="3"
@@ -70,14 +84,52 @@ import { LineComments } from "./line-comments";
               (keydown.escape)="editing.set(null)"
             ></textarea>
             <span class="actions">
-              <button type="button" class="save" (click)="save(c, field.value)">Save</button>
-              <button type="button" class="cancel" (click)="editing.set(null)">Cancel</button>
+              <button
+                type="button"
+                hx-button
+                size="small"
+                class="save"
+                (click)="save(c, field.value)"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
+                class="cancel"
+                (click)="editing.set(null)"
+              >
+                Cancel
+              </button>
             </span>
           } @else {
             <span class="text">{{ c.text }}</span>
             <span class="actions">
-              <button type="button" class="edit" (click)="editing.set(c.id)">Edit</button>
-              <button type="button" class="remove" (click)="comments.remove(c.id)">Remove</button>
+              <button
+                type="button"
+                hx-button
+                variant="outlined"
+                severity="secondary"
+                size="small"
+                class="edit"
+                (click)="editing.set(c.id)"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                hx-button
+                variant="text"
+                severity="danger"
+                size="small"
+                class="remove"
+                (click)="comments.remove(c.id)"
+              >
+                Remove
+              </button>
             </span>
           }
         </li>
@@ -94,7 +146,17 @@ import { LineComments } from "./line-comments";
             </li>
           }
         </ul>
-        <button type="button" class="clear" (click)="comments.clearSent()">Clear sent</button>
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          class="clear"
+          (click)="comments.clearSent()"
+        >
+          Clear sent
+        </button>
       </details>
     }
   `,
@@ -144,23 +206,17 @@ import { LineComments } from "./line-comments";
       color: inherit;
       background: transparent;
     }
-    button,
     select {
       font: inherit;
       color: inherit;
       background: transparent;
       border: 1px solid var(--h-border-color, var(--h-surface-300));
+      height: var(--control-height);
       padding: 1px 8px;
-      cursor: pointer;
     }
-    button:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-    .where {
-      border: none;
-      padding: 0;
-      text-align: left;
+    button.where {
+      font-family: var(--font-mono);
+      color: var(--h-text-muted-color);
     }
     .actions {
       display: inline-flex;

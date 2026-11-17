@@ -16,6 +16,11 @@
   --badge-tone: var(--h-text-muted-color);
   border-radius: 4px;
 }
+button.badge {
+  min-height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
 .badge-success {
   --badge-tone: var(--term-ansi-2);
 }
@@ -69,18 +74,10 @@ progress {
   accent-color: var(--h-primary-color);
 }
 .icon-btn {
-  background: none;
-  border: 0;
-  padding: 2px 6px;
-  color: var(--h-text-muted-color);
-  cursor: pointer;
   opacity: 0;
 }
 :hover > .icon-btn,
 :hover > * > .icon-btn,
 .icon-btn:focus-visible {
   opacity: 1;
-}
-.icon-btn:hover:not(:disabled) {
-  color: var(--h-text-color);
 }

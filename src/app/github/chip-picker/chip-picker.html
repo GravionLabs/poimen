@@ -6,6 +6,11 @@
         <span>{{ s }}</span>
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          [attr.title]="'Remove ' + s"
           [attr.aria-label]="'Remove ' + s"
           data-testid="chip-remove"
           [disabled]="disabled"
@@ -28,12 +33,22 @@
       [value]="query()"
       (input)="query.set($any($event.target).value)"
       (keydown.enter)="$event.preventDefault(); takeFirst()"
+      (keydown)="move($event, 'field')"
     />
     @if (query().trim()) {
       <ul class="options" [attr.aria-label]="label + ' options'">
         @for (o of matches(); track o) {
           <li>
-            <button type="button" data-testid="chip-option" (click)="pick(o)">
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
+              data-testid="chip-option"
+              (click)="pick(o)"
+              (keydown)="move($event, $any($event.currentTarget))"
+            >
               {{ o }}
             </button>
           </li>

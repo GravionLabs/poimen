@@ -49,11 +49,6 @@ h3 {
 .twisty {
   display: inline-block;
   width: 16px;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  color: inherit;
 }
 .nr {
   color: var(--h-text-muted-color);

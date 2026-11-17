@@ -86,16 +86,11 @@ h3 {
   outline-offset: 2px;
 }
 .toggle {
-  all: unset;
-  cursor: pointer;
   display: inline-flex;
   align-items: baseline;
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
-}
-.toggle:focus-visible {
-  outline: 1px solid var(--h-primary-color, #3b82f6);
 }
 .chevron {
   width: 10px;
@@ -247,15 +242,6 @@ ul {
   padding-left: 18px;
   font-size: 13px;
 }
-.link {
-  all: unset;
-  cursor: pointer;
-  color: var(--h-link-color, var(--h-primary-color, #3b82f6));
-}
-.link:hover,
-.link:focus-visible {
-  text-decoration: underline;
-}
 footer {
   display: flex;
   justify-content: space-between;
@@ -280,12 +266,6 @@ footer {
 }
 .card.offline {
   opacity: 0.6;
-}
-/* The primary action of a running group: Focus terminal. */
-.actions .primary {
-  border-color: var(--h-primary-color, #3b82f6);
-  color: var(--h-primary-color, #3b82f6);
-  font-weight: 600;
 }
 .repo {
   margin: 8px 0 16px;

@@ -5,12 +5,6 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-.chip {
-  font-size: 11px;
-  padding: 1px 8px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 10px;
-}
 dl.facts {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -44,10 +38,5 @@ dl.facts dd {
   font-family: monospace;
 }
 .body-edit .tabs {
-  display: flex;
-  gap: 4px;
   margin-bottom: 6px;
-}
-.body-edit .tabs [aria-pressed="true"] {
-  font-weight: 600;
 }

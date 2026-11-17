@@ -15,6 +15,10 @@
       {{ r.repo }}
       <button
         type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
         class="icon-btn"
         title="New milestone"
         data-testid="milestone-new"
@@ -37,6 +41,10 @@
         >
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="pick"
             [attr.aria-pressed]="milestones.isSelected(r.repo, m.title)"
             [attr.aria-label]="'Filter issues by milestone ' + m.title"
@@ -61,6 +69,10 @@
           </button>
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="icon-btn"
             title="Open in browser"
             [disabled]="!isGithubUrl(m.url)"
@@ -72,7 +84,12 @@
           @if (readyToClose(m)) {
             <button
               type="button"
-              class="icon-btn text"
+              hx-button
+              variant="text"
+              severity="danger"
+              size="small"
+              [attr.title]="'Close milestone ' + m.title"
+              class="icon-btn"
               data-testid="milestone-close"
               [attr.aria-label]="'Close milestone ' + m.title"
               (click)="milestones.openClose(r.root, r.repo, m)"
@@ -82,6 +99,10 @@
           }
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="icon-btn"
             title="Edit or close"
             data-testid="milestone-edit"
@@ -93,7 +114,12 @@
           @if (!readyToClose(m)) {
             <button
               type="button"
-              class="icon-btn text"
+              hx-button
+              variant="text"
+              severity="danger"
+              size="small"
+              [attr.title]="'Close milestone ' + m.title"
+              class="icon-btn"
               data-testid="milestone-close"
               [attr.aria-label]="'Close milestone ' + m.title"
               (click)="milestones.openClose(r.root, r.repo, m)"
@@ -143,8 +169,25 @@
         </label>
       }
       <div class="actions">
-        <button type="button" (click)="milestones.cancel()">Cancel</button>
-        <button type="submit" data-testid="milestone-submit" [disabled]="milestones.busy()">
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          (click)="milestones.cancel()"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          hx-button
+          variant="filled"
+          [severity]="c.kind === 'close' ? 'danger' : 'primary'"
+          size="small"
+          data-testid="milestone-submit"
+          [disabled]="milestones.busy()"
+        >
           {{ c.kind === "close" ? "Close milestone" : c.kind === "create" ? "Create" : "Save" }}
         </button>
       </div>

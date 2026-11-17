@@ -352,7 +352,7 @@ describe("issue detail editing", () => {
     fixture.detectChanges();
     type(el, "[data-testid=body-input]", "New **text** <script>x</script>");
     fixture.detectChanges();
-    q(el, "[data-testid=body-mode-preview]")!.click();
+    q(el, ".tabs button[aria-pressed=false]")!.click();
     fixture.detectChanges();
     const preview = q(el, "[data-testid=body-preview]")!;
     expect(preview.innerHTML).toContain("<strong>text</strong>");
