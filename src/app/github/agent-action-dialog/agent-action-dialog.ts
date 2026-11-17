@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
 import { AgentActions, hasReviewExtras } from "../agent-actions";
+import { DialogShell } from "../../ui/dialog-shell/dialog-shell";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /**
  * Harness and model of an agent action, opened by Shift+click on the action. Prefilled with the
@@ -7,9 +9,9 @@ import { AgentActions, hasReviewExtras } from "../agent-actions";
  */
 @Component({
   selector: "app-agent-action-dialog",
+  imports: [DialogShell, HxButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./agent-action-dialog.html",
-  styleUrl: "./agent-action-dialog.css",
 })
 export class AgentActionDialog {
   protected readonly actions = inject(AgentActions);
@@ -45,12 +47,5 @@ export class AgentActionDialog {
 
   protected model(event: Event): void {
     this.actions.setDialog({ model: (event.target as HTMLSelectElement).value });
-  }
-
-  protected onKey(event: KeyboardEvent): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      this.actions.cancelDialog();
-    }
   }
 }

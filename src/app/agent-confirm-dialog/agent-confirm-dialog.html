@@ -1,25 +1,17 @@
 @if (confirm.current(); as request) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Decline"
-    (click)="confirm.answer(false)"
-  ></button>
-  <div
-    class="dialog"
-    role="alertdialog"
-    aria-modal="true"
-    aria-label="An agent asks to write into another space"
-    (keydown.escape)="confirm.answer(false)"
+  <app-dialog-shell
+    label="An agent asks to write into another space"
+    [alert]="true"
+    [cancelDefault]="true"
+    (cancelled)="confirm.answer(false)"
   >
-    <h2>
+    <ng-container dialogHeading>
       <strong>{{ request.callerName }}</strong>
       {{
         request.action === "start_agent" ? "wants to start an agent" : "wants to prompt an agent"
       }}
       in <strong>{{ request.spaceName }}</strong>
-    </h2>
+    </ng-container>
     <p class="hint">
       {{ request.action === "start_agent" ? "It runs:" : "It types:" }}
     </p>
@@ -34,9 +26,20 @@
     @if (confirm.error(); as error) {
       <p class="error" role="alert">{{ error }}</p>
     }
-    <div class="buttons">
-      <button type="button" class="decline" (click)="confirm.answer(false)">Decline</button>
-      <button type="button" class="allow" (click)="confirm.answer(true)">Allow once</button>
+    <div class="dialog-buttons">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="decline"
+        (click)="confirm.answer(false)"
+      >
+        Decline
+      </button>
+      <button type="button" hx-button class="allow" (click)="confirm.answer(true)">
+        Allow once
+      </button>
     </div>
-  </div>
+  </app-dialog-shell>
 }

@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from "@angular/core";
 import { SpaceActions } from "../core/space-actions";
+import { DialogShell } from "../ui/dialog-shell/dialog-shell";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /**
  * Asks whether to trust the project file of a repository before its commands run. Lists every
@@ -7,6 +9,7 @@ import { SpaceActions } from "../core/space-actions";
  */
 @Component({
   selector: "app-trust-dialog",
+  imports: [DialogShell, HxButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./trust-dialog.html",
   styleUrl: "./trust-dialog.css",

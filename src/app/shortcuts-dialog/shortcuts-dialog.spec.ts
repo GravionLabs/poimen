@@ -7,6 +7,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Keymap } from "../core/keymap";
 import { DEFAULT_SHORTCUTS, formatShortcut, type Shortcuts } from "../core/shortcuts";
 import { ShortcutsOverview } from "../core/shortcuts-overview";
+import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 import { ShortcutsDialog } from "./shortcuts-dialog";
 
 beforeAll(() => {
@@ -15,15 +16,6 @@ beforeAll(() => {
   } catch {
     // already initialized by the shared setup
   }
-  // jsdom has no modal dialog support: model open/close.
-  const proto = HTMLDialogElement.prototype;
-  proto.showModal = function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  };
-  proto.close = function (this: HTMLDialogElement) {
-    this.removeAttribute("open");
-    this.dispatchEvent(new Event("close"));
-  };
 });
 
 describe("ShortcutsDialog", () => {
@@ -66,49 +58,52 @@ describe("ShortcutsDialog", () => {
     };
   };
 
-  it("is a labelled dialog that stays closed until opened", async () => {
-    const { dialog } = await mount();
-    expect(dialog.hasAttribute("open")).toBe(false);
-    expect(dialog.getAttribute("aria-labelledby")).toBe("shortcuts-title");
-    expect(dialog.querySelector("#shortcuts-title")?.textContent).toBe("Keyboard shortcuts");
+  it("renders no dialog until opened", async () => {
+    const { root } = await mount();
+    expect(root.querySelector("dialog")).toBeNull();
   });
 
-  it("opens modally, lists groups with the palette first, and closes via the button", async () => {
-    const { fixture, root, dialog, overview } = await mount();
+  it("opens modally, lists groups with the palette first, and closes via the icon button", async () => {
+    const { fixture, root, overview } = await mount();
+    const opener = focusOpener();
     overview.open();
     fixture.detectChanges();
     await fixture.whenStable();
+    const dialog = root.querySelector("dialog")!;
     expect(dialog.hasAttribute("open")).toBe(true);
+    expect(dialog.getAttribute("aria-label")).toBe("Keyboard shortcuts");
+    expectFocusInside(root);
     const headings = [...root.querySelectorAll("h3")].map((h) => h.textContent);
     expect(headings).toEqual(["General", "Tabs and panes", "View", "Agents"]);
     expect(root.querySelector("li")?.textContent).toContain("Command Palette");
     expect(root.querySelector("kbd")?.textContent).toBe("Ctrl+Shift+P");
     expect(root.querySelector(".hint")?.textContent).toContain("Ctrl+Shift+P");
 
-    root.querySelector<HTMLButtonElement>("button.close")!.click();
+    root.querySelector<HTMLButtonElement>("button.dialog-close")!.click();
     fixture.detectChanges();
     await fixture.whenStable();
     expect(overview.isOpen()).toBe(false);
-    expect(dialog.hasAttribute("open")).toBe(false);
+    expect(root.querySelector("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 
   it("closes on a backdrop click but not on a click inside", async () => {
-    const { fixture, root, dialog, overview } = await mount();
+    const { fixture, root, overview } = await mount();
     overview.open();
     fixture.detectChanges();
     await fixture.whenStable();
     root.querySelector<HTMLElement>("h2")!.click();
     expect(overview.isOpen()).toBe(true);
-    dialog.click();
+    root.querySelector("dialog")!.click();
     expect(overview.isOpen()).toBe(false);
   });
 
-  it("syncs the state when the dialog closes itself (Escape)", async () => {
-    const { fixture, dialog, overview } = await mount();
+  it("closes on Escape without a click first", async () => {
+    const { fixture, overview } = await mount();
     overview.open();
     fixture.detectChanges();
     await fixture.whenStable();
-    dialog.dispatchEvent(new Event("close"));
+    press("Escape");
     expect(overview.isOpen()).toBe(false);
   });
 

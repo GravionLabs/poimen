@@ -6,6 +6,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE, UiState } from "../core/ui-state";
+import { expectFocusInside, press } from "../ui/dialog-shell/dialog-contract";
 import { AgentActionDialog } from "./agent-action-dialog/agent-action-dialog";
 import { AgentActionMenu } from "./agent-action-menu/agent-action-menu";
 import { AgentActions } from "./agent-actions";
@@ -220,6 +221,26 @@ describe("agent actions in the pull request views", () => {
     await fixture.whenStable();
     expect(tauri.calls("agent_action_plan")[0]).toMatchObject({ harness: "claude", model: "opus" });
     expect(tauri.calls("agent_start")).toHaveLength(1);
+  });
+
+  it("the dialog takes the focus, Escape cancels and Start is the one primary button", async () => {
+    const { fixture, el } = await openDetail();
+    const dialogFixture = TestBed.createComponent(AgentActionDialog);
+    q(el, "[data-testid=agent-action]")!.dispatchEvent(
+      new MouseEvent("click", { shiftKey: true, bubbles: true }),
+    );
+    await fixture.whenStable();
+    dialogFixture.detectChanges();
+    await dialogFixture.whenStable();
+    const d = dialogFixture.nativeElement as HTMLElement;
+    expectFocusInside(d);
+    const buttons = [...d.querySelectorAll<HTMLButtonElement>(".dialog-buttons button")];
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual(["Cancel", "Start"]);
+    expect(buttons[1].getAttribute("variant")).toBeNull();
+    press("Escape");
+    dialogFixture.detectChanges();
+    expect(d.querySelector("dialog")).toBeNull();
+    expect(tauri.calls("agent_start")).toHaveLength(0);
   });
 });
 

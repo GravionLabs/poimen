@@ -6,6 +6,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Machines } from "../core/machines";
 import { tauri } from "../core/tauri.mock";
 import { TaskDialog } from "./task-dialog";
+import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 import { TaskPicker, filterIssues, markers, type PickIssue, type TaskChoice } from "./task-picker";
 
 vi.mock("@tauri-apps/api/core", async () => ({
@@ -99,7 +100,7 @@ async function setup(
   await vi.waitFor(() => expect(picker.loading()).toBe(false));
   await settle();
   const key = async (k: string, target?: Element) => {
-    (target ?? root.querySelector(".dialog")!).dispatchEvent(
+    (target ?? root.querySelector(".picker")!).dispatchEvent(
       new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }),
     );
     await settle();
@@ -259,5 +260,24 @@ describe("TaskDialog machine selector", () => {
     expect(picker.machine()).toBeNull();
     picker.confirm();
     expect((await opened)?.machine).toBeUndefined();
+  });
+
+  it("takes the focus in the filter field, Escape cancels and the focus goes back", async () => {
+    const opener = focusOpener();
+    const { root, opened, result, settle } = await setup();
+    expectFocusInside(root);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Filter issues");
+    press("Escape");
+    await opened;
+    expect(result()).toBeNull();
+    await settle();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("Enter picks without a click first", async () => {
+    const { opened, result } = await setup();
+    press("Enter");
+    await opened;
+    expect(result()?.number).toBeTypeOf("number");
   });
 });

@@ -239,3 +239,43 @@ button.hx-button.hx-button-icon-only {
     opacity: 0.35;
   }
 }
+
+/* Content of the dialogs (app-dialog-shell): the rules the dialogs share. */
+dialog.dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+dialog.dialog label + label {
+  margin-top: 8px;
+}
+
+dialog.dialog .field,
+dialog.dialog select,
+dialog.dialog input[type="text"] {
+  height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+dialog.dialog .hint {
+  margin: 8px 0 0;
+  opacity: 0.7;
+}
+
+dialog.dialog .error {
+  margin: 8px 0 0;
+  color: var(--app-danger-text);
+}
+
+dialog.dialog .dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}

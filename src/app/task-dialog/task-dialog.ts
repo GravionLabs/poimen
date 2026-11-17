@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, ElementRef, effect, inject } from "@angular/core";
 import { LEVEL_FILTERS, TaskPicker, errorText, markers } from "./task-picker";
+import { DialogShell } from "../ui/dialog-shell/dialog-shell";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /**
  * Picks an open issue and a task mode. Only returns the choice (see `TaskPicker`); keys: Up/Down
@@ -7,6 +9,7 @@ import { LEVEL_FILTERS, TaskPicker, errorText, markers } from "./task-picker";
  */
 @Component({
   selector: "app-task-dialog",
+  imports: [DialogShell, HxButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./task-dialog.html",
   styleUrl: "./task-dialog.css",
@@ -19,12 +22,6 @@ export class TaskDialog {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   constructor() {
-    effect(() => {
-      if (!this.picker.isOpen()) return;
-      queueMicrotask(() =>
-        this.host.nativeElement.querySelector<HTMLInputElement>("input")?.focus(),
-      );
-    });
     effect(() => {
       this.picker.index();
       queueMicrotask(() =>

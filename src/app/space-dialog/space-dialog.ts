@@ -1,9 +1,13 @@
 import { ChangeDetectionStrategy, Component, inject, output, signal } from "@angular/core";
 import { SpaceActions, dirName } from "../core/space-actions";
+import { DialogShell } from "../ui/dialog-shell/dialog-shell";
+import { Icon } from "../ui/icon/icon";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /** The question for a new space: a directory (typed with completion or picked) and a label. */
 @Component({
   selector: "app-space-dialog",
+  imports: [DialogShell, HxButton, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./space-dialog.html",
   styleUrl: "./space-dialog.css",

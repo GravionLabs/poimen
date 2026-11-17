@@ -7,6 +7,7 @@ import { SpacesStore } from "../core/spaces-store";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { SpaceDialog } from "./space-dialog";
+import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 
 const bridge = { invoke: vi.fn(), pickDirectory: vi.fn() };
 const snapshot = {
@@ -217,7 +218,7 @@ describe("SpaceDialog", () => {
     const closed = vi.fn();
     void actions.requestClose("w1");
     await settle();
-    const dialog = root.querySelector("[role=dialog]")!;
+    const dialog = root.querySelector("dialog")!;
     expect(dialog.textContent).toContain("Close space One?");
     expect(dialog.textContent).toContain("1 pane, 1 agent among them");
     expect(bridge.invoke).not.toHaveBeenCalled();
@@ -226,7 +227,7 @@ describe("SpaceDialog", () => {
     await settle();
     expect(bridge.invoke).toHaveBeenCalledWith("space_close", { spaceId: "w1", focus: "w2" });
     expect(closed).toHaveBeenCalledWith(["w1:p1"]);
-    expect(root.querySelector("[role=dialog]")).toBeNull();
+    expect(root.querySelector("dialog")).toBeNull();
   });
 
   it("closes an empty space without a dialog", async () => {
@@ -234,7 +235,7 @@ describe("SpaceDialog", () => {
     bridge.invoke.mockResolvedValue(undefined);
     await actions.requestClose("w2");
     await settle();
-    expect(root.querySelector("[role=dialog]")).toBeNull();
+    expect(root.querySelector("dialog")).toBeNull();
     expect(bridge.invoke).toHaveBeenCalledWith("space_close", { spaceId: "w2", focus: "w1" });
   });
 
@@ -244,5 +245,46 @@ describe("SpaceDialog", () => {
     await actions.requestClose("w2");
     await settle();
     expect(root.querySelector("[role=alert]")?.textContent).toContain("herdr: cannot close");
+  });
+
+  it("new space: the directory field takes the focus, Escape cancels, the focus goes back", async () => {
+    const opener = focusOpener();
+    const { actions, root, settle } = await setup();
+    actions.ask();
+    await settle();
+    expectFocusInside(root);
+    expect(document.activeElement?.getAttribute("name")).toBe("path");
+    press("Escape");
+    await settle();
+    expect(actions.open()).toBe(false);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("rename: the name field takes the focus and Escape cancels", async () => {
+    const { actions, root, settle } = await setup();
+    actions.askRename("w1");
+    await settle();
+    expectFocusInside(root);
+    expect(document.activeElement?.getAttribute("name")).toBe("name");
+    press("Escape");
+    await settle();
+    expect(actions.renaming()).toBeNull();
+  });
+
+  it("close space: Cancel is the default, Enter does not close, the confirm is the danger button", async () => {
+    const opener = focusOpener();
+    const { actions, root, settle } = await setup();
+    bridge.invoke.mockResolvedValue(undefined);
+    void actions.requestClose("w1");
+    await settle();
+    expectFocusInside(root);
+    expect(document.activeElement?.textContent).toContain("Cancel");
+    expect(root.querySelector(".confirm")?.getAttribute("severity")).toBe("danger");
+    press("Enter");
+    expect(bridge.invoke).not.toHaveBeenCalled();
+    press("Escape");
+    await settle();
+    expect(actions.closing()).toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 });
