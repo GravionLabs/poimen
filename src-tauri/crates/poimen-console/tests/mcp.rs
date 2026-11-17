@@ -125,7 +125,14 @@ fn initialize_and_tools_list() {
         .collect();
     assert_eq!(
         names,
-        ["list_spaces", "list_terminals", "whoami", "list_runs"]
+        [
+            "list_spaces",
+            "list_terminals",
+            "whoami",
+            "list_runs",
+            "start_agent",
+            "prompt_agent"
+        ]
     );
     assert_eq!(replies[2]["error"]["code"], -32601);
 }

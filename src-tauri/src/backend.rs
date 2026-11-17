@@ -264,6 +264,11 @@ pub trait Backend: Send + Sync {
     ) -> Result<(), String>;
     fn agent_rename(&self, target: &str, name: Option<&str>) -> Result<(), String>;
     fn agent_prompt(&self, target: &str, text: &str) -> PromptOutcome;
+    /// The user's answer to an agent's request to write into another space
+    /// (`agent.confirm_requested`, #615). Only the poimen backend has such requests.
+    fn agent_confirm_answer(&self, _id: &str, _approve: bool) -> Result<(), String> {
+        Err("this backend has no confirmations".into())
+    }
     /// The agent session of a terminal whose transcript poimen can read.
     fn agent_session(&self, terminal_id: &str) -> Result<Option<AgentSession>, String>;
     /// The updates the agent transcript of a terminal gained since the last call of `follower`,

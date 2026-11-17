@@ -709,6 +709,12 @@ impl Backend for PoimenBackend {
         self.rename_terminal(target, name)
     }
 
+    fn agent_confirm_answer(&self, id: &str, approve: bool) -> Result<(), String> {
+        self.client
+            .answer_agent_confirm(id, approve)
+            .map_err(|e| e.to_string())
+    }
+
     fn agent_prompt(&self, target: &str, text: &str) -> PromptOutcome {
         let failed = |message: &str| PromptOutcome::Failed {
             message: message.into(),
@@ -859,10 +865,14 @@ impl Backend for PoimenBackend {
         loop {
             match self
                 .client
-                .subscribe_as(Some(poimen_client::protocol::ClientInfo {
-                    kind: poimen_client::protocol::ClientKind::App,
-                    pid: std::process::id(),
-                })) {
+                .subscribe_with(poimen_client::protocol::EventsSubscribe {
+                    client: Some(poimen_client::protocol::ClientInfo {
+                        kind: poimen_client::protocol::ClientKind::App,
+                        pid: std::process::id(),
+                    }),
+                    confirms: true,
+                    ..Default::default()
+                }) {
                 Ok(events) => {
                     if connected != Some(true) {
                         emit(&synthetic("poimen.connected", Value::Null));

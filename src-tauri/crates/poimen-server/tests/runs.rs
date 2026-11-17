@@ -64,6 +64,7 @@ impl Env {
             .subscribe_with(EventsSubscribe {
                 client: None,
                 run_events: runs,
+                confirms: false,
             })
             .unwrap();
         let (tx, rx) = mpsc::channel();

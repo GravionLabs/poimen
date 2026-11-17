@@ -359,6 +359,20 @@ async fn agent_prompt(
     .await
 }
 
+/// The user's answer to an agent that asks to write into another space (#615); the server holds
+/// the agent's call until it arrives.
+#[tauri::command]
+async fn agent_confirm_answer(
+    backend: State<'_, Shared>,
+    id: String,
+    approve: bool,
+) -> Result<(), String> {
+    on_backend(backend.inner(), move |b| {
+        b.agent_confirm_answer(&id, approve)
+    })
+    .await
+}
+
 /// Renames a pane; an empty label clears it.
 #[tauri::command]
 async fn pane_rename(
@@ -2699,6 +2713,7 @@ pub fn run() {
             agent_start,
             agent_rename,
             agent_prompt,
+            agent_confirm_answer,
             pane_rename,
             space_rename,
             terminal_create,
