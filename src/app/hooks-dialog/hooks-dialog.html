@@ -36,10 +36,24 @@
       <p class="error" role="alert">{{ error }}</p>
     }
     <div class="buttons">
-      <button type="button" class="cancel" [disabled]="offer.busy()" (click)="offer.dismiss()">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="cancel"
+        [disabled]="offer.busy()"
+        (click)="offer.dismiss()"
+      >
         Not now
       </button>
-      <button type="button" class="confirm" [disabled]="offer.busy()" (click)="offer.install()">
+      <button
+        type="button"
+        hx-button
+        class="confirm"
+        [disabled]="offer.busy()"
+        (click)="offer.install()"
+      >
         Install hooks
       </button>
     </div>

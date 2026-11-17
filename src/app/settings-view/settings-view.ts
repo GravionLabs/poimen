@@ -15,6 +15,7 @@ import {
   type Appearance,
   type ColorScheme,
 } from "../core/color-scheme";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import {
   defaultTerminalFontFamily,
@@ -155,6 +156,7 @@ export function withRoot(
 @Component({
   selector: "app-settings-view",
   imports: [
+    HxButton,
     MachinesPage,
     LayoutsEditor,
     SpaceLayoutEditor,

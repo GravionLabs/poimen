@@ -246,7 +246,16 @@
                         (change)="setSoundFile(kind.id, $event)"
                       />
                     </label>
-                    <button type="button" class="choice" (click)="testSound(kind.id)">Test</button>
+                    <button
+                      type="button"
+                      hx-button
+                      variant="outlined"
+                      severity="secondary"
+                      class="test"
+                      (click)="testSound(kind.id)"
+                    >
+                      Test
+                    </button>
                   </div>
                 }
                 @if (soundProblem(); as problem) {

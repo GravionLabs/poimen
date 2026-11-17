@@ -60,6 +60,12 @@ Guidance for humans and coding agents working in this repository. Generated text
 - **The backend owns state** (`poimen-server`). poimen never stores pane state of its own; snapshots from the backend are authoritative and events only invalidate them.
 - **Non-destructive.** Closing a view or the app releases controllers and never ends a terminal. Taking over a controller requires an explicit user action.
 - **Tests stay read-only.** Live tests (`#[ignore]`) may list and observe, never control, send input or create panes in the user's session.
+- **Buttons, tags and fields (#844).** Actions are `button[hx-button]` (helix-ui, `HxButton` in the component's `imports`), information is not a button.
+  - One filled **primary** per surface: the action the surface exists for (Save, Install). Everything else is `variant="outlined" severity="secondary"`; low-weight actions (Cancel in a row, Reset, a link-like step) are `variant="text"`. **Danger** (`severity="danger"`) only for an action that destroys or cannot be undone (Delete, Remove, Stop server), filled when it is the one action of a confirmation, else outlined or text.
+  - Small is the default in dense rows (`size="small"`, `min-height` is `--control-height` in `src/styles.css`). Icon-only buttons have `aria-label` and a `title` (tooltip).
+  - A status, count or label that does nothing is an `hx-tag` (or plain text): no border, no pointer cursor, no hover. If it can be clicked it is a button (`variant="text"`), which has the hover and `:focus-visible` state.
+  - Inputs and selects in a row use `height: var(--control-height)` so `align-items: center` lines them up with the buttons.
+  - Colors come from the tokens only. `src/styles.css` maps helix's button tokens onto the derived chrome (`--app-action*`, `--app-danger-text` from `deriveTokens`); `src/app/ui/button-contrast.spec.ts` checks every variant and state in every bundled scheme. `src/app/ui/button-usage.spec.ts` fails on a new `<button>` without `hx-button`; tree rows, the tab bar and palette items are allow-listed, other files have a legacy count that only goes down (lower it when you convert). Reference surfaces: settings Appearance and the hooks dialog.
 - **Protocol drift.** The server protocol is versioned (`PROTOCOL_VERSION`). Keep all wire shapes in the `poimen-protocol` crate, each with a parsing test.
 
 ## Decisions
