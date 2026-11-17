@@ -168,6 +168,8 @@ export interface LayoutState {
   hooksSeen?: string[];
   /** The first-start defaults (`spaces.layout`, default space template) were written once. */
   defaultsSeeded?: boolean;
+  /** The sidebar's empty "Machines" heading (#861) is hidden by the user. */
+  machinesHidden?: boolean;
 }
 
 /** Columns of the Events tab whose width the user can change, in px. */
@@ -285,6 +287,7 @@ export function parseLayout(raw: string | null): LayoutState {
       hooksOfferDismissed,
       hooksSeen,
       defaultsSeeded,
+      machinesHidden,
     } = data as Record<string, unknown>;
     const runGroups = parseKeys(expandedRunGroups);
     if (runGroups) state.expandedRunGroups = runGroups;
@@ -329,6 +332,7 @@ export function parseLayout(raw: string | null): LayoutState {
     if (githubShowEmpty === true) state.githubShowEmpty = true;
     if (hooksOfferDismissed === true) state.hooksOfferDismissed = true;
     if (defaultsSeeded === true) state.defaultsSeeded = true;
+    if (machinesHidden === true) state.machinesHidden = true;
     if (Array.isArray(hooksSeen)) {
       const seen = hooksSeen.filter((d): d is string => typeof d === "string" && d !== "");
       if (seen.length) state.hooksSeen = [...new Set(seen)];
@@ -491,6 +495,7 @@ export class UiState {
 
   /** The first-start defaults were written; they are not written again (even when deleted later). */
   readonly defaultsSeeded = signal(this.initial.defaultsSeeded === true);
+  readonly machinesHidden = signal(this.initial.machinesHidden === true);
   /** Terminal font size offset in points from the View > Zoom items; not persisted. */
   readonly zoom = signal(0);
 
@@ -581,6 +586,11 @@ export class UiState {
 
   dismissHooksOffer(): void {
     this.hooksOfferDismissed.set(true);
+    this.save();
+  }
+
+  setMachinesHidden(hidden: boolean): void {
+    this.machinesHidden.set(hidden);
     this.save();
   }
 
@@ -846,6 +856,7 @@ export class UiState {
       hooksOfferDismissed: this.hooksOfferDismissed() ? true : undefined,
       hooksSeen: this.hooksSeen().length ? [...this.hooksSeen()] : undefined,
       defaultsSeeded: this.defaultsSeeded() ? true : undefined,
+      machinesHidden: this.machinesHidden() ? true : undefined,
     };
     try {
       this.storage?.setItem(UI_STATE_KEY, JSON.stringify(state));

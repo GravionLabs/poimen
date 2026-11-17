@@ -1299,6 +1299,31 @@ fn list_machines(machines: State<'_, SharedMachines>) -> Vec<machines::MachineSt
     machines.list()
 }
 
+/// Adds a machine or, with `original`, edits the one of that name (#861). Field errors come back
+/// as `{field, message}` for the form; the settings watcher connects the machine.
+#[tauri::command]
+fn machine_save(
+    original: Option<String>,
+    name: String,
+    ssh: String,
+    repos_dir: String,
+) -> Result<(), Vec<machines::FieldError>> {
+    let home = home_dir().ok_or_else(|| {
+        vec![machines::FieldError {
+            field: None,
+            message: "the home directory is not known (HOME or USERPROFILE)".into(),
+        }]
+    })?;
+    machines::save_machine(&home, original.as_deref(), &name, &ssh, &repos_dir)
+}
+
+/// Removes a machine from the settings; its remote terminals keep running (#861).
+#[tauri::command]
+fn machine_remove(name: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    machines::remove_machine(&home, &name)
+}
+
 /// Tries to connect an offline or incompatible machine at once.
 #[tauri::command]
 fn reconnect_machine(machines: State<'_, SharedMachines>, name: String) -> Result<(), String> {
@@ -2695,6 +2720,8 @@ pub fn run() {
             quit_and_stop_server,
             list_machines,
             reconnect_machine,
+            machine_save,
+            machine_remove,
             machine_snapshot,
             machine_repo_ensure,
             machine_worktree_create,

@@ -114,6 +114,39 @@ export function parseMachineCheck(raw: unknown): MachineCheck | null {
 export const checkPassed = (check: MachineCheck): boolean =>
   check.checks.every((c) => c.status !== "missing");
 
+/** A validation error of `machine_save`, for the field it names (`null`: the whole write). */
+export interface MachineFieldError {
+  field: "name" | "ssh" | "reposDir" | null;
+  message: string;
+}
+
+/** The default `reposDir` of a machine without one (`machines.rs`, `DEFAULT_REPOS_DIR`). */
+export const DEFAULT_REPOS_DIR = "~/Source/{owner}/{repo}";
+
+/** The field errors of a failed `machine_save`; anything else is one error for the whole form. */
+export function parseFieldErrors(raw: unknown): MachineFieldError[] {
+  if (Array.isArray(raw)) {
+    const errors = raw.flatMap((e): MachineFieldError[] => {
+      if (!e || typeof e !== "object") return [];
+      const o = e as Record<string, unknown>;
+      if (typeof o["message"] !== "string") return [];
+      const f = o["field"];
+      return [
+        {
+          field: f === "name" || f === "ssh" || f === "reposDir" ? f : null,
+          message: o["message"],
+        },
+      ];
+    });
+    if (errors.length) return errors;
+  }
+  return [{ field: null, message: String(raw) }];
+}
+
+/** The machines of `machines[]` that the settings could not load: warnings of the config. */
+export const machineWarnings = (warnings: readonly string[]): string[] =>
+  warnings.filter((w) => w.startsWith("machines"));
+
 /** The configured machines and their connection state (#279). */
 @Injectable({ providedIn: "root" })
 export class Machines {
@@ -123,6 +156,9 @@ export class Machines {
   private readonly _checks = signal<Readonly<Record<string, MachineCheck | { error: string }>>>({});
   /** The last check per machine name: the result, or the error when it could not run. */
   readonly checks = this._checks.asReadonly();
+  /** The form of the Machines page: `original` is the machine being edited, `null` for a new one. */
+  private readonly _form = signal<{ original: string | null } | null>(null);
+  readonly form = this._form.asReadonly();
   /** Machines checked in this session: the first connect checks, a reconnect does not. */
   private readonly checked = new Set<string>();
 
@@ -149,6 +185,48 @@ export class Machines {
     } catch {
       // keep the last list
     }
+  }
+
+  /** Opens the add form (or the edit form of `original`); the page shows it. */
+  openForm(original: string | null = null): void {
+    this._form.set({ original });
+  }
+
+  closeForm(): void {
+    this._form.set(null);
+  }
+
+  /**
+   * Adds a machine or edits `original` in `config.json`; the settings watcher connects it. Resolves
+   * with the errors per field, or an empty list when it was saved.
+   */
+  async save(
+    original: string | null,
+    values: { name: string; ssh: string; reposDir: string },
+  ): Promise<MachineFieldError[]> {
+    try {
+      await this.bridge.invoke("machine_save", {
+        original,
+        name: values.name,
+        ssh: values.ssh,
+        reposDir: values.reposDir,
+      });
+    } catch (e) {
+      return parseFieldErrors(e);
+    }
+    await this.refresh();
+    return [];
+  }
+
+  /** Removes a machine from `config.json`; no terminal on the machine is ended. */
+  async remove(name: string): Promise<string | null> {
+    try {
+      await this.bridge.invoke("machine_remove", { name });
+    } catch (e) {
+      return String(e);
+    }
+    await this.refresh();
+    return null;
   }
 
   /** Asks an offline or incompatible machine to connect at once. */

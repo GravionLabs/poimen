@@ -14,6 +14,8 @@ export interface PoimenCommand {
   id:
     | ShortcutAction
     | "openSettings"
+    | "addMachine"
+    | "openMachines"
     | "openGithub"
     | "githubInbox"
     | "githubPulls"
@@ -80,6 +82,8 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "showShortcuts", title: "Keyboard Shortcuts" },
   { id: "find", title: "Terminal: Find" },
   { id: "openSettings", title: "Open Settings" },
+  { id: "addMachine", title: "Machines: Add…" },
+  { id: "openMachines", title: "Machines: Open settings" },
   { id: "openGithub", title: "Open GitHub" },
   { id: "githubInbox", title: "GitHub: Inbox" },
   { id: "githubPulls", title: "GitHub: Pull requests" },
@@ -161,6 +165,8 @@ export class CommandPalette {
       title: c.title,
       shortcut:
         c.id === "openSettings" ||
+        c.id === "addMachine" ||
+        c.id === "openMachines" ||
         c.id === "openGithub" ||
         c.id === "githubInbox" ||
         c.id === "githubPulls" ||

@@ -484,6 +484,15 @@ export class App {
       this.openSettings();
       return;
     }
+    if (id === "addMachine") {
+      this.machines.openForm();
+      this.editor.openSettings("machines");
+      return;
+    }
+    if (id === "openMachines") {
+      this.editor.openSettings("machines");
+      return;
+    }
     if (id === "openGithub") {
       this.editor.openGithub();
       return;

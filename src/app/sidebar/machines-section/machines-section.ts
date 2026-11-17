@@ -11,6 +11,8 @@ import { rowName, type Terminal, type WorkspaceNode } from "../../core/snapshot"
 import { ContextMenu } from "../../ui/context-menu/context-menu";
 import { plainGroups, type MenuGroup } from "../../ui/context-menu/menu-model";
 import { SpacesStore } from "../../core/spaces-store";
+import { UiState } from "../../core/ui-state";
+import { EditorTabs } from "../../core/editor-tabs";
 import { checkPassed, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
 
 /** One line for the last check of a machine: its result, the error, or what is missing. */
@@ -61,6 +63,37 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
   selector: "app-machines-section",
   imports: [ContextMenu, HxButton],
   template: `
+    @if (machines.machines().length === 0 && !ui.machinesHidden()) {
+      <section class="machine empty" aria-label="Machines">
+        <div class="machine-head">
+          <h2 class="machine-name">Machines</h2>
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
+            aria-label="Add machine"
+            title="Add machine"
+            (click)="add()"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
+            aria-label="Hide Machines"
+            title="Hide Machines"
+            (click)="ui.setMachinesHidden(true)"
+          >
+            Hide
+          </button>
+        </div>
+      </section>
+    }
     @for (g of groups(); track g.machine.name) {
       <section class="machine" [class.offline]="!g.usable" [attr.aria-label]="g.machine.name">
         <div class="machine-head" (contextmenu)="openMenu($event, g.machine.name)">
@@ -200,7 +233,9 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
 })
 export class MachinesSection {
   private readonly store = inject(SpacesStore);
-  private readonly machines = inject(Machines);
+  protected readonly machines = inject(Machines);
+  protected readonly ui = inject(UiState);
+  private readonly editor = inject(EditorTabs);
   /** A terminal of a machine was picked. */
   readonly selected = output<Terminal>();
 
@@ -244,6 +279,12 @@ export class MachinesSection {
   protected openMenu(event: MouseEvent, name: string): void {
     event.preventDefault();
     this.menuAt.set({ name, x: event.clientX, y: event.clientY });
+  }
+
+  /** The `+` of the empty heading: the add form on the Machines page. */
+  protected add(): void {
+    this.machines.openForm();
+    this.editor.openSettings("machines");
   }
 
   protected closeMenu(): void {

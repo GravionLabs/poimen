@@ -130,6 +130,154 @@ fn check_repos_dir(dir: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A validation error of the machine form, shown under the field it names (`name`, `ssh`,
+/// `reposDir`); `field` is `None` for an error of the whole write (config.json unreadable).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FieldError {
+    pub field: Option<&'static str>,
+    pub message: String,
+}
+
+impl FieldError {
+    fn of(field: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            field: Some(field),
+            message: message.into(),
+        }
+    }
+    fn general(message: impl Into<String>) -> Self {
+        Self {
+            field: None,
+            message: message.into(),
+        }
+    }
+}
+
+/// Validates the form of a machine with the rules of [`parse`] and returns the entry to store.
+/// `reposDir` empty means the default and is not written.
+pub fn validate(name: &str, ssh: &str, repos_dir: &str) -> Result<MachineConfig, Vec<FieldError>> {
+    let mut errors = Vec::new();
+    let (name, ssh, repos) = (name.trim(), ssh.trim(), repos_dir.trim());
+    if name.is_empty() {
+        errors.push(FieldError::of("name", "name is missing"));
+    }
+    if ssh.is_empty() {
+        errors.push(FieldError::of("ssh", "ssh is missing"));
+    } else if let Err(e) = check_target(ssh) {
+        errors.push(FieldError::of("ssh", e));
+    }
+    let repos = if repos.is_empty() {
+        DEFAULT_REPOS_DIR
+    } else {
+        repos
+    };
+    if let Err(e) = check_repos_dir(repos) {
+        errors.push(FieldError::of("reposDir", e));
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(MachineConfig {
+        name: name.to_owned(),
+        ssh: ssh.to_owned(),
+        repos_dir: repos.to_owned(),
+    })
+}
+
+/// The raw entries of `machines[]` of the config `text` (invalid ones included, so a write keeps
+/// what it cannot read). No key is an empty list; a value that is not a list is an error.
+fn raw_machines(text: &str) -> Result<Vec<Value>, String> {
+    use poimen_core::settings::{find_value, root_open};
+    let Some((start, _)) = find_value(text, root_open(text)?, "machines") else {
+        return Ok(Vec::new());
+    };
+    let value = serde_json::Deserializer::from_str(&text[start..])
+        .into_iter::<Value>()
+        .next()
+        .and_then(Result::ok)
+        .ok_or("machines in config.json is not valid JSON; it was not changed")?;
+    match value {
+        Value::Array(list) => Ok(list),
+        _ => Err("machines in config.json is not a list; it was not changed".into()),
+    }
+}
+
+fn entry_name(entry: &Value) -> Option<&str> {
+    entry.get("name")?.as_str().map(str::trim)
+}
+
+fn write_machines(text: &str, list: Vec<Value>) -> Result<String, String> {
+    let value = serde_json::to_string(&list).map_err(|e| e.to_string())?;
+    poimen_core::settings::set_key_text(text, "machines", &value)
+}
+
+fn entry_value(m: &MachineConfig) -> Value {
+    let mut o = serde_json::Map::new();
+    o.insert("name".into(), m.name.clone().into());
+    o.insert("ssh".into(), m.ssh.clone().into());
+    if m.repos_dir != DEFAULT_REPOS_DIR {
+        o.insert("reposDir".into(), m.repos_dir.clone().into());
+    }
+    Value::Object(o)
+}
+
+/// Adds a machine (`original` `None`) or replaces the one named `original`, in place, through
+/// `save_with`: only `machines` changes, comments and other keys stay, other entries (also invalid
+/// ones) stay as they are. The name must stay unique. The settings watcher connects the machine.
+pub fn save_machine(
+    home: &std::path::Path,
+    original: Option<&str>,
+    name: &str,
+    ssh: &str,
+    repos_dir: &str,
+) -> Result<(), Vec<FieldError>> {
+    let machine = validate(name, ssh, repos_dir)?;
+    let taken = std::cell::RefCell::new(None::<FieldError>);
+    let result = poimen_core::settings::save_with(home, |text| {
+        let mut list = raw_machines(text)?;
+        let at = original.and_then(|o| list.iter().position(|e| entry_name(e) == Some(o)));
+        if let (Some(o), None) = (original, at) {
+            return Err(format!("machine {o:?} is not in config.json"));
+        }
+        let clash = list
+            .iter()
+            .enumerate()
+            .any(|(i, e)| Some(i) != at && entry_name(e) == Some(machine.name.as_str()));
+        if clash {
+            *taken.borrow_mut() = Some(FieldError::of(
+                "name",
+                format!("the name {:?} is already used", machine.name),
+            ));
+            return Err("name taken".into());
+        }
+        match at {
+            Some(i) => list[i] = entry_value(&machine),
+            None => list.push(entry_value(&machine)),
+        }
+        write_machines(text, list)
+    });
+    match (result, taken.into_inner()) {
+        (_, Some(e)) => Err(vec![e]),
+        (Err(e), None) => Err(vec![FieldError::general(e)]),
+        (Ok(()), None) => Ok(()),
+    }
+}
+
+/// Removes the machine named `name` from `machines[]`; an unknown name changes nothing. Only the
+/// configuration changes: the supervisor of that machine ends its connection when the settings
+/// watcher syncs, no terminal on the machine is ended.
+pub fn remove_machine(home: &std::path::Path, name: &str) -> Result<(), String> {
+    poimen_core::settings::save_with(home, |text| {
+        let mut list = raw_machines(text)?;
+        let before = list.len();
+        list.retain(|e| entry_name(e) != Some(name));
+        if list.len() == before {
+            return Ok(text.to_owned());
+        }
+        write_machines(text, list)
+    })
+}
+
 /// The connection state of a machine (`state` of [`MachineStatus`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
@@ -868,6 +1016,72 @@ mod tests {
     use serde_json::json;
     use std::collections::VecDeque;
     use std::sync::atomic::AtomicU32;
+
+    fn home_with(config: &str, tag: &str) -> PathBuf {
+        let home =
+            std::env::temp_dir().join(format!("poimen-machines-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let path = poimen_core::settings::config_path(&home);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, config).unwrap();
+        home
+    }
+
+    fn config_of(home: &std::path::Path) -> String {
+        std::fs::read_to_string(poimen_core::settings::config_path(home)).unwrap()
+    }
+
+    #[test]
+    fn add_edit_remove_keep_comments_and_other_entries() {
+        let home = home_with(
+            "{\n  // my theme\n  \"theme\": \"dark\",\n  \"machines\": [{\"name\": \"bad\", \"ssh\": \"-x\"}]\n}",
+            "crud",
+        );
+        save_machine(&home, None, " box ", "me@box", "").unwrap();
+        save_machine(&home, None, "dev", "dev", "/srv/{owner}/{repo}").unwrap();
+        let text = config_of(&home);
+        assert!(text.contains("// my theme"), "{text}");
+        let value: Value = serde_json::from_str(&text.replace("// my theme", "")).unwrap();
+        assert_eq!(value["theme"], "dark");
+        let list = value["machines"].as_array().unwrap();
+        assert_eq!(list.len(), 3, "the invalid entry stays: {text}");
+        assert_eq!(list[1], json!({"name": "box", "ssh": "me@box"}));
+        assert_eq!(list[2]["reposDir"], "/srv/{owner}/{repo}");
+
+        save_machine(&home, Some("box"), "box2", "other", "").unwrap();
+        let value: Value =
+            serde_json::from_str(&config_of(&home).replace("// my theme", "")).unwrap();
+        assert_eq!(
+            value["machines"][1],
+            json!({"name": "box2", "ssh": "other"})
+        );
+
+        remove_machine(&home, "box2").unwrap();
+        remove_machine(&home, "unknown").unwrap();
+        let text = config_of(&home);
+        assert!(text.contains("// my theme"));
+        assert!(!text.contains("box2") && text.contains("\"dev\""));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn save_creates_the_file_and_reports_fields() {
+        let home = std::env::temp_dir().join(format!("poimen-machines-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        save_machine(&home, None, "box", "box", "").unwrap();
+        assert!(config_of(&home).contains("\"machines\""));
+        let errors = save_machine(&home, None, "", "-o", "~/{org}").unwrap_err();
+        let fields: Vec<_> = errors.iter().map(|e| e.field).collect();
+        assert_eq!(fields, [Some("name"), Some("ssh"), Some("reposDir")]);
+        let before = config_of(&home);
+        let errors = save_machine(&home, None, "box", "x", "").unwrap_err();
+        assert_eq!(errors[0].field, Some("name"));
+        assert!(errors[0].message.contains("already used"));
+        let errors = save_machine(&home, Some("gone"), "n", "x", "").unwrap_err();
+        assert_eq!(errors[0].field, None);
+        assert_eq!(config_of(&home), before);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     fn parsed(value: Value) -> (Vec<MachineConfig>, Vec<String>) {
         let mut warnings = Vec::new();
