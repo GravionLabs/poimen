@@ -278,6 +278,26 @@ pub fn remove_machine(home: &std::path::Path, name: &str) -> Result<(), String> 
     })
 }
 
+/// A concrete `Host` of `~/.ssh/config` offered by the add form (#863); `configured` when a
+/// machine already uses it as its name or SSH target. Only the name leaves the Rust side.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SshHost {
+    pub host: String,
+    pub configured: bool,
+}
+
+/// The hosts of `<home>/.ssh/config` (`Include` resolved, patterns left out) marked against the
+/// configured machines. A missing or unreadable file is an empty list.
+pub fn ssh_hosts(home: &std::path::Path, configured: &[MachineConfig]) -> Vec<SshHost> {
+    poimen_core::ssh_config::hosts(home)
+        .into_iter()
+        .map(|host| SshHost {
+            configured: configured.iter().any(|m| m.ssh == host || m.name == host),
+            host,
+        })
+        .collect()
+}
+
 /// The connection state of a machine (`state` of [`MachineStatus`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(
@@ -1016,6 +1036,37 @@ mod tests {
     use serde_json::json;
     use std::collections::VecDeque;
     use std::sync::atomic::AtomicU32;
+
+    #[test]
+    fn ssh_hosts_marks_configured_and_keeps_only_names() {
+        let home = std::env::temp_dir().join(format!("poimen-sshhosts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        std::fs::write(
+            home.join(".ssh/config"),
+            "Host box other *\n  HostName 1.2.3.4\n  IdentityFile ~/.ssh/key\n",
+        )
+        .unwrap();
+        let configured = vec![validate("mine", "box", "").unwrap()];
+        let hosts = ssh_hosts(&home, &configured);
+        assert_eq!(
+            hosts,
+            vec![
+                SshHost {
+                    host: "box".into(),
+                    configured: true
+                },
+                SshHost {
+                    host: "other".into(),
+                    configured: false
+                },
+            ]
+        );
+        let json = serde_json::to_string(&hosts).unwrap();
+        assert!(!json.contains("1.2.3.4") && !json.contains("key"));
+        assert!(ssh_hosts(&home.join("none"), &configured).is_empty());
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     fn home_with(config: &str, tag: &str) -> PathBuf {
         let home =

@@ -212,6 +212,12 @@ export function parseFieldErrors(raw: unknown): MachineFieldError[] {
 export const machineWarnings = (warnings: readonly string[]): string[] =>
   warnings.filter((w) => w.startsWith("machines"));
 
+/** A concrete `Host` of `~/.ssh/config`; `configured` when a machine already uses it (#863). */
+export interface SshHost {
+  host: string;
+  configured: boolean;
+}
+
 /** The configured machines and their connection state (#279). */
 @Injectable({ providedIn: "root" })
 export class Machines {
@@ -252,6 +258,21 @@ export class Machines {
         if (m.state === "connected" && !this.checked.has(m.name)) void this.check(m.name);
     } catch {
       // keep the last list
+    }
+  }
+
+  /** The hosts of `~/.ssh/config` for the add form; none on any failure (free input stays). */
+  async sshHosts(): Promise<SshHost[]> {
+    try {
+      const raw = await this.bridge.invoke<unknown>("ssh_config_hosts");
+      if (!Array.isArray(raw)) return [];
+      return raw.flatMap((r): SshHost[] =>
+        r && typeof r === "object" && typeof (r as SshHost).host === "string"
+          ? [{ host: (r as SshHost).host, configured: (r as SshHost).configured === true }]
+          : [],
+      );
+    } catch {
+      return [];
     }
   }
 

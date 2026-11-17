@@ -20,6 +20,7 @@ pub mod schemes;
 pub mod settings;
 pub mod snapshot;
 pub mod space_layout;
+pub mod ssh_config;
 pub mod task_start;
 pub mod tasks;
 pub mod templates;

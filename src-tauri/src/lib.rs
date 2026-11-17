@@ -1317,6 +1317,17 @@ fn machine_save(
     machines::save_machine(&home, original.as_deref(), &name, &ssh, &repos_dir)
 }
 
+/// The concrete hosts of `~/.ssh/config` for the add form (#863): names only, configured ones
+/// marked; no SSH config is an empty list.
+#[tauri::command]
+fn ssh_config_hosts(machines: State<'_, SharedMachines>) -> Vec<machines::SshHost> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
+    };
+    let configured: Vec<_> = machines.list().into_iter().map(|m| m.config).collect();
+    machines::ssh_hosts(&home, &configured)
+}
+
 /// Removes a machine from the settings; its remote terminals keep running (#861).
 #[tauri::command]
 fn machine_remove(name: String) -> Result<(), String> {
@@ -2722,6 +2733,7 @@ pub fn run() {
             reconnect_machine,
             machine_save,
             machine_remove,
+            ssh_config_hosts,
             machine_snapshot,
             machine_repo_ensure,
             machine_worktree_create,
