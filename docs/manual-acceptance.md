@@ -137,8 +137,9 @@ test.
   confirmed; the confirmation names the running terminals that end. After it the bundled server
   runs and the notice is gone. The hooks report status again. Copies of other server versions are
   removed once they stop. The palette entry **Quit poimen and stop server** asks the same
-  confirmation, stops the server and quits.
-- **Source:** #46, `docs/updater.md`.
+  confirmation, stops the server and quits. With poimen pinned in the Dock, the Dock shows one
+  poimen icon after the update (the pinned one, marked as running), never a second one.
+- **Source:** #46, #866, `docs/updater.md`.
 
 ### M-9 App Translocation of a moved app
 
