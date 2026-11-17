@@ -41,34 +41,36 @@ const FOCUSABLE = `${FIELDS}, button:not([disabled]):not([tabindex="-1"]), a[hre
       [attr.aria-label]="label ?? heading"
       [style.width]="'min(' + width + ', 92vw)'"
     >
-      <div class="head">
-        @if (heading) {
-          <h2>{{ heading }}</h2>
-        } @else {
-          <h2><ng-content select="[dialogHeading]" /></h2>
-        }
-        <button
-          type="button"
-          hx-button
-          variant="text"
-          severity="secondary"
-          size="small"
-          class="dialog-close"
-          aria-label="Close"
-          title="Close"
-          (click)="cancelled.emit()"
-        >
-          <app-icon name="close" />
-        </button>
+      <div class="inner">
+        <div class="head">
+          @if (heading) {
+            <h2>{{ heading }}</h2>
+          } @else {
+            <h2><ng-content select="[dialogHeading]" /></h2>
+          }
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
+            class="dialog-close"
+            aria-label="Close"
+            title="Close"
+            (click)="cancelled.emit()"
+          >
+            <app-icon name="close" />
+          </button>
+        </div>
+        <div class="body"><ng-content /></div>
       </div>
-      <div class="body"><ng-content /></div>
     </dialog>
   `,
   styles: `
     .dialog {
       max-height: 80vh;
       margin: 20vh auto auto;
-      padding: 16px;
+      padding: 0;
       border: 1px solid var(--h-content-border-color);
       border-radius: 8px;
       background: var(--h-content-background);
@@ -80,6 +82,10 @@ const FOCUSABLE = `${FIELDS}, button:not([disabled]):not([tabindex="-1"]), a[hre
 
     .dialog::backdrop {
       background: rgb(0 0 0 / 35%);
+    }
+
+    .inner {
+      padding: 16px;
     }
 
     .head {

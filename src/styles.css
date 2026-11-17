@@ -247,6 +247,11 @@ dialog.dialog label {
   gap: 4px;
 }
 
+dialog.dialog label:has(> input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+}
+
 dialog.dialog label + label {
   margin-top: 8px;
 }
