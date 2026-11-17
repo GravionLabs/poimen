@@ -6,6 +6,94 @@
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
   --app-ground: var(--h-surface-50);
+  /* One height for buttons, inputs and selects in a row (AGENTS.md "Buttons, tags and fields"). */
+  --control-height: 28px;
+  /*
+   * helix-ui's secondary and danger buttons miss AA on the derived chrome, so the ones the app uses
+   * read the text color (secondary) or a deep red (danger). button-contrast.spec.ts checks every
+   * state in every bundled scheme.
+   */
+  --h-button-outlined-secondary-color: var(--h-text-color);
+  --h-button-outlined-secondary-border-color: var(--h-content-border-color);
+  --h-button-text-secondary-color: var(--h-text-color);
+  --h-button-primary-background: var(--app-action);
+  --h-button-primary-border-color: var(--app-action);
+  --h-button-primary-hover-background: var(--app-action-hover);
+  --h-button-primary-hover-border-color: var(--app-action-hover);
+  --h-button-primary-active-background: var(--app-action-active);
+  --h-button-primary-active-border-color: var(--app-action-active);
+  --h-button-outlined-primary-color: var(--app-action-text);
+  --h-button-text-primary-color: var(--app-action-text);
+  --h-button-outlined-primary-hover-background: color-mix(
+    in srgb,
+    var(--h-button-outlined-primary-color) 6%,
+    transparent
+  );
+  --h-button-outlined-primary-active-background: color-mix(
+    in srgb,
+    var(--h-button-outlined-primary-color) 12%,
+    transparent
+  );
+  --h-button-outlined-danger-hover-background: color-mix(
+    in srgb,
+    var(--h-button-outlined-danger-color) 6%,
+    transparent
+  );
+  --h-button-outlined-danger-active-background: color-mix(
+    in srgb,
+    var(--h-button-outlined-danger-color) 12%,
+    transparent
+  );
+  --h-button-outlined-secondary-hover-background: color-mix(
+    in srgb,
+    var(--h-button-outlined-secondary-color) 6%,
+    transparent
+  );
+  --h-button-outlined-secondary-active-background: color-mix(
+    in srgb,
+    var(--h-button-outlined-secondary-color) 12%,
+    transparent
+  );
+  --h-button-text-primary-hover-background: color-mix(
+    in srgb,
+    var(--h-button-text-primary-color) 6%,
+    transparent
+  );
+  --h-button-text-primary-active-background: color-mix(
+    in srgb,
+    var(--h-button-text-primary-color) 12%,
+    transparent
+  );
+  --h-button-text-danger-hover-background: color-mix(
+    in srgb,
+    var(--h-button-text-danger-color) 6%,
+    transparent
+  );
+  --h-button-text-danger-active-background: color-mix(
+    in srgb,
+    var(--h-button-text-danger-color) 12%,
+    transparent
+  );
+  --h-button-text-secondary-hover-background: color-mix(
+    in srgb,
+    var(--h-button-text-secondary-color) 6%,
+    transparent
+  );
+  --h-button-text-secondary-active-background: color-mix(
+    in srgb,
+    var(--h-button-text-secondary-color) 12%,
+    transparent
+  );
+  --h-button-primary-focus-ring-color: var(--app-action-text);
+  --h-button-danger-focus-ring-color: var(--app-danger-text);
+  --h-button-danger-background: var(--h-red-700);
+  --h-button-danger-border-color: var(--h-red-700);
+  --h-button-danger-hover-background: var(--h-red-800);
+  --h-button-danger-hover-border-color: var(--h-red-800);
+  --h-button-danger-active-background: var(--h-red-900);
+  --h-button-danger-active-border-color: var(--h-red-900);
+  --h-button-outlined-danger-color: var(--app-danger-text);
+  --h-button-text-danger-color: var(--app-danger-text);
   --term-bg: #fbfbf9;
   --term-fg: #26272a;
   --term-ansi-0: #26272a;
@@ -42,6 +130,14 @@
 
 :root.app-dark {
   --app-ground: var(--h-surface-950);
+  --h-button-danger-background: var(--h-red-400);
+  --h-button-danger-border-color: var(--h-red-400);
+  --h-button-danger-hover-background: var(--h-red-300);
+  --h-button-danger-hover-border-color: var(--h-red-300);
+  --h-button-danger-active-background: var(--h-red-200);
+  --h-button-danger-active-border-color: var(--h-red-200);
+  --h-button-outlined-danger-color: var(--app-danger-text);
+  --h-button-text-danger-color: var(--app-danger-text);
   --term-bg: #111214;
   --term-fg: #e4e4e0;
   --term-ansi-0: #2a2c31;
@@ -85,6 +181,24 @@ body {
   color: var(--h-text-color);
   font: var(--font-size-ui, 13px) / 1.4 var(--font-ui);
   overflow: hidden;
+}
+
+/* Buttons (helix-ui `button[hx-button]`), tags and fields: one control height, small buttons in dense rows */
+
+button.hx-button {
+  min-height: var(--control-height);
+  padding-block: 0;
+  font-size: 12px;
+}
+
+button.hx-button.hx-button-icon-only {
+  width: var(--control-height);
+}
+
+/* Information is not interactive: no border, no pointer. A clickable badge is a button. */
+.hx-tag {
+  border: 0;
+  cursor: default;
 }
 
 /* Status dots (sidebar rows and card headers) */

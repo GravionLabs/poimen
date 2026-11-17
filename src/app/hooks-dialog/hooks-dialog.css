@@ -73,21 +73,6 @@ label + label {
   margin-top: 12px;
 }
 
-button {
-  padding: 4px 12px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .agents {
   margin: 10px 0 0;
   padding-left: 20px;
