@@ -4,7 +4,7 @@
 
 .update-button.failed,
 .update-details h3.failed {
-  color: #f85149;
+  color: var(--status-error);
 }
 
 .update-details {
@@ -84,25 +84,25 @@
 }
 
 .connected .dot {
-  background: #3fb950;
+  background: var(--status-done);
 }
 
 .reconnecting .dot {
-  background: #d29922;
+  background: var(--status-blocked);
 }
 
 .unreachable .dot {
-  background: #f85149;
+  background: var(--status-error);
 }
 
 .version.warn {
-  color: #d29922;
+  color: var(--status-blocked);
   font-weight: 600;
 }
 
 /* The release-candidate badge: this is the side-by-side "Poimen RC" app. */
 .channel {
-  color: #d29922;
+  color: var(--status-blocked);
   font-weight: 700;
 }
 
@@ -136,12 +136,12 @@ button.item:disabled {
 }
 
 button.item.any {
-  color: #d29922;
+  color: var(--status-blocked);
   font-weight: 600;
 }
 
 button.item.deliver.warn {
-  color: #d29922;
+  color: var(--status-blocked);
   font-weight: 600;
 }
 
@@ -181,7 +181,7 @@ button.item.update-button:hover {
 }
 
 button.item.update-button.failed {
-  color: #f85149;
+  color: var(--status-error);
 }
 
 /* text-overflow does not apply to the text of a flex container, so text-only items are blocks (#854). */

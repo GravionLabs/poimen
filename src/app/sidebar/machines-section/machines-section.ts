@@ -183,13 +183,16 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
     }
 
     .state-connecting,
-    .status-working {
+    .status-blocked {
       background: var(--status-blocked);
     }
 
+    .status-working {
+      background: var(--status-working);
+    }
+
     .state-offline,
-    .state-incompatible,
-    .status-blocked {
+    .state-incompatible {
       background: var(--status-error);
     }
   `,
