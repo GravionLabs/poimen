@@ -27,7 +27,7 @@
   position: absolute;
   inset: 4px 0 auto;
   height: 1px;
-  background: var(--h-border-color);
+  background: var(--h-content-border-color);
 }
 
 .resizer:hover::after,
@@ -73,7 +73,7 @@
   font: inherit;
   color: inherit;
   background: transparent;
-  border: 1px solid var(--h-border-color);
+  border: 1px solid var(--h-content-border-color);
   border-radius: 3px;
   padding: 2px 4px;
 }
@@ -106,7 +106,7 @@ pre {
 .msg {
   margin: 6px 0;
   padding-left: 8px;
-  border-left: 2px solid var(--h-border-color);
+  border-left: 2px solid var(--h-content-border-color);
 }
 
 .msg.prompt {
@@ -160,7 +160,7 @@ pre {
 }
 
 .tool.error .tool-name {
-  color: var(--status-blocked, #d14);
+  color: var(--status-blocked);
 }
 
 .io {
@@ -206,7 +206,7 @@ pre {
 .event > .issue,
 .event > .step,
 .event > .result {
-  border-left: 1px solid var(--h-border-color, color-mix(in srgb, currentColor 22%, transparent));
+  border-left: 1px solid var(--h-content-border-color);
 }
 .event > .pr {
   color: var(--h-primary-color);
@@ -222,14 +222,14 @@ pre {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--h-surface-color, canvas);
+  background: var(--h-content-background);
   font-weight: 600;
-  border-bottom: 1px solid var(--h-border-color, color-mix(in srgb, currentColor 22%, transparent));
+  border-bottom: 1px solid var(--h-content-border-color);
 }
 .event.head > .col {
   position: relative;
   overflow: visible;
-  border-left: 1px solid var(--h-border-color, color-mix(in srgb, currentColor 22%, transparent));
+  border-left: 1px solid var(--h-content-border-color);
 }
 .grip {
   position: absolute;
@@ -244,7 +244,7 @@ pre {
 }
 .grip:hover,
 .grip:focus-visible {
-  background: var(--h-primary-color, #3b82f6);
+  background: var(--h-primary-color);
   opacity: 0.5;
   outline: none;
 }
@@ -254,25 +254,25 @@ pre {
   color: var(--h-text-muted-color);
 }
 .event.tone-info {
-  border-left-color: var(--h-primary-color, #3b82f6);
+  border-left-color: var(--h-primary-color);
 }
 .event.tone-success {
-  border-left-color: var(--h-success-color, #2da44e);
+  border-left-color: var(--status-done);
 }
 .event.tone-warning {
-  border-left-color: var(--h-warning-color, #d9a400);
+  border-left-color: var(--status-blocked);
 }
 .event.tone-danger {
-  border-left-color: var(--h-danger-color, #d33);
+  border-left-color: var(--status-error);
 }
 .event.tone-success .icon {
-  color: var(--h-success-color, #2da44e);
+  color: var(--status-done);
 }
 .event.tone-warning .icon {
-  color: var(--h-warning-color, #d9a400);
+  color: var(--status-blocked);
 }
 .event.tone-danger .icon {
-  color: var(--h-danger-color, #d33);
+  color: var(--status-error);
 }
 .event.attention {
   font-weight: 600;
@@ -297,6 +297,6 @@ pre {
   padding: 0.25rem 0.5rem;
   margin-top: 0.25rem;
   font-weight: 600;
-  border-top: 1px solid var(--term-ansi-8, currentColor);
+  border-top: 1px solid var(--h-content-border-color);
   opacity: 0.8;
 }

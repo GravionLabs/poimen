@@ -12,7 +12,7 @@
   --ff-flow-font-family: var(--font-ui);
   --ff-flow-font-size: 12px;
   --ff-node-color: var(--h-text-color);
-  --ff-node-background-color: var(--h-surface-color, Canvas);
+  --ff-node-background-color: var(--h-content-background);
   --ff-node-shadow: none;
   --ff-node-shadow-selected: none;
   --ff-marker-color: var(--h-text-muted-color);
@@ -20,8 +20,8 @@
   --ff-node-width: auto;
   --ff-node-min-height: 0;
   --ff-node-padding: 0;
-  --ff-node-border-color: var(--h-border-color);
-  --ff-node-border-color-selected: var(--h-border-color);
+  --ff-node-border-color: var(--h-content-border-color);
+  --ff-node-border-color-selected: var(--h-content-border-color);
   --ff-node-border-radius: 6px;
   --ff-connection-color: var(--h-text-muted-color);
   --ff-connection-width: 1.5px;
@@ -39,7 +39,7 @@
   --ff-connector-disabled-border-color: var(--h-text-muted-color);
   --ff-background-dot-color: color-mix(in srgb, currentColor 18%, transparent);
   --ff-minimap-background-color: color-mix(in srgb, currentColor 6%, transparent);
-  --ff-minimap-border-color: var(--h-border-color);
+  --ff-minimap-border-color: var(--h-content-border-color);
   --ff-minimap-node-color: var(--h-text-muted-color);
   --ff-minimap-view-color: color-mix(in srgb, var(--h-primary-color) 25%, transparent);
 }
@@ -67,8 +67,8 @@
   align-items: center;
   gap: 2px;
   padding: 3px;
-  background: var(--h-surface-color, Canvas);
-  border: 1px solid var(--h-border-color);
+  background: var(--h-content-background);
+  border: 1px solid var(--h-content-border-color);
   border-radius: 8px;
 }
 
@@ -87,7 +87,7 @@
   width: 1px;
   height: 16px;
   margin: 0 2px;
-  background: var(--h-border-color);
+  background: var(--h-content-border-color);
 }
 
 .node {
@@ -98,8 +98,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--h-surface-color, Canvas);
-  border: 1px solid var(--h-border-color);
+  background: var(--h-content-background);
+  border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -132,7 +132,7 @@
 }
 
 .node.failed {
-  border-color: var(--status-blocked, #d14);
+  border-color: var(--status-blocked);
 }
 
 .row {
@@ -149,7 +149,7 @@
 }
 
 .status[data-status="failed"] {
-  color: var(--status-blocked, #d14);
+  color: var(--status-blocked);
 }
 
 .title {

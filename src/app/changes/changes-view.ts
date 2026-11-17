@@ -266,7 +266,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       flex-wrap: wrap;
       gap: 12px;
       padding: 8px 12px;
-      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-bottom: 1px solid var(--h-content-border-color);
     }
     .label,
     .count {
@@ -300,7 +300,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       width: 280px;
       min-width: 160px;
       overflow: auto;
-      border-right: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-right: 1px solid var(--h-content-border-color);
     }
     .file {
       display: flex;
@@ -361,7 +361,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       align-items: center;
       gap: 8px;
       padding: 6px 12px;
-      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-bottom: 1px solid var(--h-content-border-color);
     }
     .message {
       flex: 1;
@@ -369,7 +369,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       font: inherit;
       color: inherit;
       background: transparent;
-      border: 1px solid var(--h-border-color, var(--h-surface-300));
+      border: 1px solid var(--h-content-border-color);
       padding: 2px 6px;
       resize: vertical;
     }
@@ -380,19 +380,19 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       overflow: auto;
       white-space: pre-wrap;
       font-family: var(--font-mono);
-      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-bottom: 1px solid var(--h-content-border-color);
     }
     .result.failed {
-      color: var(--h-danger-color, #d33);
+      color: var(--status-error);
     }
     .findings-note {
       margin: 0;
       padding: 4px 12px;
       color: var(--term-ansi-3);
-      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-bottom: 1px solid var(--h-content-border-color);
     }
     .findings-note.invalid {
-      color: var(--h-danger-color, #d33);
+      color: var(--status-error);
     }
     .note,
     .empty,
@@ -403,7 +403,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       color: var(--h-text-muted-color);
     }
     .problem {
-      color: var(--h-danger-color, #d33);
+      color: var(--status-error);
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

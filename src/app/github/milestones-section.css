@@ -24,7 +24,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 .problem {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 .list {
   list-style: none;

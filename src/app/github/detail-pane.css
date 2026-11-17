@@ -75,7 +75,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 .problem {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 .list {
   list-style: none;
@@ -95,10 +95,10 @@ h3 {
   min-width: 70px;
 }
 .check-passing .state {
-  color: var(--h-success-color, inherit);
+  color: var(--status-done);
 }
 .check-failing .state {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 .link {
   text-align: left;

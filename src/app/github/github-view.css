@@ -35,7 +35,7 @@ h2.page-title {
   font-weight: normal;
 }
 .problem {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 table {
   width: 100%;
@@ -78,13 +78,13 @@ th {
   white-space: nowrap;
 }
 .add {
-  color: var(--h-success-color);
+  color: var(--status-done);
 }
 .del {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 tr.cursor {
-  outline: 1px solid var(--h-accent-color, currentColor);
+  outline: 1px solid var(--h-primary-color);
   outline-offset: -1px;
 }
 tr.selected {
@@ -121,7 +121,7 @@ tbody:focus-visible {
 }
 .nav-item.active {
   font-weight: 600;
-  border-left-color: var(--h-accent-color, currentColor);
+  border-left-color: var(--h-primary-color);
   background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
 }
 .nav-count {

@@ -91,7 +91,7 @@ td {
 .error {
   flex-basis: 100%;
   margin: 0;
-  color: var(--hx-color-danger, #d33);
+  color: var(--status-error);
 }
 .hint {
   opacity: 0.7;

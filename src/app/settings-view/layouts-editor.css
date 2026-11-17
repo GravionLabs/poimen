@@ -12,7 +12,7 @@
 .split-node {
   margin-top: 0.4rem;
   padding-left: 0.75rem;
-  border-left: 2px solid var(--h-border, currentColor);
+  border-left: 2px solid var(--h-content-border-color);
 }
 
 .split-children {
@@ -32,7 +32,7 @@
   margin: 0;
   padding: 0.5rem;
   min-width: 12rem;
-  border: 1px solid var(--h-border, currentColor);
+  border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
 }
 
@@ -44,7 +44,7 @@
   flex: 1;
   min-height: 7rem;
   display: flex;
-  border: 1px solid var(--h-border, currentColor);
+  border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
 }
 
@@ -73,12 +73,12 @@
   align-content: flex-start;
   gap: 0.25rem;
   padding: 0.35rem;
-  border: 1px dashed var(--h-border, currentColor);
+  border: 1px dashed var(--h-content-border-color);
 }
 
 .preview-tab {
   padding: 0.1rem 0.5rem;
-  border: 1px solid var(--h-border, currentColor);
+  border: 1px solid var(--h-content-border-color);
   border-radius: 3px;
   font-size: 0.8rem;
 }

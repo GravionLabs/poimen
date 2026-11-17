@@ -7,6 +7,6 @@
   overflow-wrap: anywhere;
   border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
-  font-family: var(--term-font, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
 }

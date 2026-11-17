@@ -179,18 +179,18 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
 
     .state-connected,
     .status-done {
-      background: var(--h-success-color, #3fb950);
+      background: var(--status-done);
     }
 
     .state-connecting,
     .status-working {
-      background: var(--h-warn-color, #d29922);
+      background: var(--status-blocked);
     }
 
     .state-offline,
     .state-incompatible,
     .status-blocked {
-      background: var(--h-danger-color, #f85149);
+      background: var(--status-error);
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
