@@ -66,6 +66,8 @@
 }
 
 .item {
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 5px;
