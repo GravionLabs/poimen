@@ -65,11 +65,11 @@
 }
 
 .status-blocked {
-  color: #e5a50a;
+  color: var(--status-blocked);
 }
 
 .status-done {
-  color: #2ea043;
+  color: var(--status-done);
 }
 
 .status-error {
