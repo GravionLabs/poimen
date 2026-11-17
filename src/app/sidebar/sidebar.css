@@ -15,9 +15,6 @@
   padding: 8px 10px 6px 14px;
 }
 
-.layout-toggle {
-}
-
 .layout-toggle[aria-pressed="true"] {
   background: color-mix(in srgb, var(--h-primary-color) 22%, transparent);
   color: var(--h-text-color);
@@ -453,7 +450,8 @@
 
 .section-title {
   flex: none;
-  margin: 0;
+  margin: 8px 0 4px;
+  padding: 0 14px;
   color: var(--h-text-muted-color);
   font-size: 11px;
   font-weight: 600;
@@ -523,7 +521,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 4px;
-  padding: 4px 10px 2px 14px;
+  padding: 0 10px 0 0;
 }
 
 .agents-scroll {
