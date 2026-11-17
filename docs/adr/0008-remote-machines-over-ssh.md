@@ -4,6 +4,7 @@
 - Date: 2026-11-09
 - Issues: #277, Feature #11 (reworked to "Remote spaces with tasks"); #37 closed as not planned; #38 replaced by the sidebar PBI
 - Builds on: [ADR 0003](0003-own-terminal-backend-without-herdr.md), [ADR 0006](0006-poimen-console-with-herdr-scope.md)
+- Amended by: [ADR 0013](0013-install-poimen-server-on-a-machine-from-the-app.md) (installing the server from the app)
 
 ## Context
 
