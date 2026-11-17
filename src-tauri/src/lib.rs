@@ -1361,13 +1361,13 @@ async fn machine_install_run(
         let installed = server_install::run(&server_install::Ssh, &prepared, &|step| {
             let _ = app.emit("machine:install_step", step);
         })?;
-        match installed.server_path {
-            // The settings watcher restarts the machine with the new command.
-            Some(path) => {
-                let home = home_dir().ok_or("the home directory is not known")?;
-                machines::set_server_path(&home, &name, &path)
-            }
-            None => machines.reconnect(&name),
+        // The settings watcher restarts the machine when its entry changes; else reconnect.
+        let changed = machines.config(&name)?.server_path != installed.server_path;
+        if changed {
+            let home = home_dir().ok_or("the home directory is not known")?;
+            machines::set_server_path(&home, &name, installed.server_path.as_deref())
+        } else {
+            machines.reconnect(&name)
         }
     })
     .await

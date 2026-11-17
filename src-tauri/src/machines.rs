@@ -293,8 +293,14 @@ pub fn save_machine(
 /// Records where the server of `name` is (`serverPath`), after an install that put it where the
 /// non-interactive `PATH` of ssh does not look. Only that entry changes; the settings watcher
 /// restarts the machine's connection with the new command.
-pub fn set_server_path(home: &std::path::Path, name: &str, path: &str) -> Result<(), String> {
-    check_server_path(path)?;
+pub fn set_server_path(
+    home: &std::path::Path,
+    name: &str,
+    path: Option<&str>,
+) -> Result<(), String> {
+    if let Some(path) = path {
+        check_server_path(path)?;
+    }
     poimen_core::settings::save_with(home, |text| {
         let mut list = raw_machines(text)?;
         let Some(entry) = list.iter_mut().find(|e| entry_name(e) == Some(name)) else {
@@ -303,7 +309,10 @@ pub fn set_server_path(home: &std::path::Path, name: &str, path: &str) -> Result
         let Some(obj) = entry.as_object_mut() else {
             return Err(format!("machine {name:?} is not an object"));
         };
-        obj.insert("serverPath".into(), path.into());
+        match path {
+            Some(path) => obj.insert("serverPath".into(), path.into()),
+            None => obj.remove("serverPath"),
+        };
         write_machines(text, list)
     })
 }
@@ -1175,9 +1184,9 @@ mod tests {
             "{\"machines\": [{\"name\": \"box\", \"ssh\": \"box\"}]}",
             "serverpath",
         );
-        set_server_path(&home, "box", "$HOME/.local/bin/poimen-server").unwrap();
-        assert!(set_server_path(&home, "box", "a b; rm").is_err());
-        assert!(set_server_path(&home, "nope", "/x/y").is_err());
+        set_server_path(&home, "box", Some("$HOME/.local/bin/poimen-server")).unwrap();
+        assert!(set_server_path(&home, "box", Some("a b; rm")).is_err());
+        assert!(set_server_path(&home, "nope", Some("/x/y")).is_err());
         save_machine(&home, Some("box"), "box", "other", "").unwrap();
         let value: Value = serde_json::from_str(&config_of(&home)).unwrap();
         assert_eq!(

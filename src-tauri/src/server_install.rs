@@ -262,8 +262,8 @@ fn steps(server: &str, host: &str) -> Vec<PlanStep> {
         },
         PlanStep {
             id: "path",
-            label: "Look for the server on the PATH of a non-interactive ssh",
-            command: format!("command -v {server}"),
+            label: "Check that a non-interactive ssh finds the new server first",
+            command: format!("p=$(command -v {server}) && [ \"$p\" = {DIR}/{server} ]"),
         },
     ]
 }
@@ -389,9 +389,9 @@ pub fn run(
         // `path` is a question, not a requirement: a missing binary on the PATH is an answer.
         if step.id == "path" {
             event(step.id, "ok", &text);
-            let found = ok && text.trim().ends_with(&plan.server);
+            // Only the new binary first on the PATH counts; another one ahead of it is not it.
             return Ok(Installed {
-                server_path: (!found).then(|| format!("$HOME/.local/bin/{}", plan.server)),
+                server_path: (!ok).then(|| format!("$HOME/.local/bin/{}", plan.server)),
             });
         }
         let verified = if ok && step.id == "verify" {
@@ -410,9 +410,7 @@ pub fn run(
                     .collect::<Vec<_>>()
                     .join("\n");
                 event(step.id, "failed", &output);
-                if step.id != "move" {
-                    cleanup();
-                }
+                cleanup();
                 return Err(format!("{} failed: {output}", step.label));
             }
         }
