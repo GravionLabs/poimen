@@ -157,6 +157,43 @@ describe("MachinesPage", () => {
     expect(el.querySelector("form")).toBeNull();
   });
 
+  it("suggests the hosts of the SSH config, fills name and target and keeps free input", async () => {
+    const { fixture, el } = await setup([]);
+    tauri.answer("ssh_config_hosts", () => [
+      { host: "box", configured: false },
+      { host: "old", configured: true },
+    ]);
+    el.querySelector<HTMLButtonElement>(".add")!.click();
+    fixture.detectChanges();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(el.querySelector(".suggestion")).not.toBeNull();
+    });
+    const buttons = [...el.querySelectorAll<HTMLButtonElement>(".suggestion")];
+    expect(buttons.map((b) => b.disabled)).toEqual([false, true]);
+    buttons[0]!.click();
+    fixture.detectChanges();
+    const field = (n: string) => el.querySelector<HTMLInputElement>(`input[name=${n}]`)!;
+    expect(field("ssh").value).toBe("box");
+    expect(field("name").value).toBe("box");
+    field("ssh").value = "me@elsewhere";
+    field("ssh").dispatchEvent(new Event("input"));
+    expect(field("ssh").value).toBe("me@elsewhere");
+  });
+
+  it("shows no suggestions when the SSH config cannot be read", async () => {
+    const { fixture, el } = await setup([]);
+    tauri.answer("ssh_config_hosts", () => {
+      throw new Error("x");
+    });
+    el.querySelector<HTMLButtonElement>(".add")!.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(el.querySelector(".suggestion")).toBeNull();
+    expect(el.querySelector("input[name=ssh]")).not.toBeNull();
+  });
+
   it("edits a machine with its values and removes it after a confirmation", async () => {
     const { fixture, el } = await setup([
       { ...box, reposDir: "/srv/{owner}/{repo}", state: "connected", serverVersion: "1" },

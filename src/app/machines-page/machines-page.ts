@@ -21,6 +21,7 @@ import {
   type MachineCheck,
   type MachineFieldError,
   type MachineStatus,
+  type SshHost,
 } from "../core/machines";
 import { SettingsStore } from "../core/settings";
 import { SpacesStore } from "../core/spaces-store";
@@ -62,6 +63,25 @@ import { DialogShell } from "../ui/dialog-shell/dialog-shell";
           />
         </label>
         <p class="hint">One host as in ~/.ssh/config; no options. No password is stored.</p>
+        @if (suggestions().length) {
+          <div class="suggestions" role="group" aria-label="Hosts of your SSH config">
+            @for (h of suggestions(); track h.host) {
+              <button
+                type="button"
+                hx-button
+                size="small"
+                variant="outlined"
+                severity="secondary"
+                class="suggestion"
+                [disabled]="h.configured"
+                [attr.title]="h.configured ? 'Already configured' : null"
+                (click)="pick(h)"
+              >
+                {{ h.host }}{{ h.configured ? " (configured)" : "" }}
+              </button>
+            }
+          </div>
+        }
         @if (fieldError("ssh"); as e) {
           <p class="error" role="alert">{{ e }}</p>
         }
@@ -107,8 +127,17 @@ export class MachineForm implements OnInit {
   protected readonly reposDir = signal("");
   protected readonly errors = signal<MachineFieldError[]>([]);
   protected readonly busy = signal(false);
+  /** Hosts of `~/.ssh/config`, offered when adding a machine; the input stays free. */
+  protected readonly suggestions = signal<SshHost[]>([]);
+
+  /** Fills the SSH target and, when still empty, the name. */
+  protected pick(h: SshHost): void {
+    this.ssh.set(h.host);
+    if (!this.name().trim()) this.name.set(h.host);
+  }
 
   ngOnInit(): void {
+    if (!this.original) void this.machines.sshHosts().then((h) => this.suggestions.set(h));
     const m = this.machines.machines().find((x) => x.name === this.original);
     if (!m) return;
     this.name.set(m.name);
