@@ -95,7 +95,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
         size="small"
         class="refresh"
         aria-label="Refresh"
-        title="Refresh"
+        [attr.title]="changes.loading() ? 'Already refreshing' : 'Refresh'"
         [disabled]="changes.loading()"
         (click)="changes.refresh()"
       >
@@ -131,7 +131,11 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
           severity="secondary"
           size="small"
           class="push"
-          title="Push the current branch (never forced; not main, release/* or a detached HEAD)"
+          [attr.title]="
+            changes.busy()
+              ? 'Another git action is running'
+              : 'Push the current branch (never forced; not main, release/* or a detached HEAD)'
+          "
           [disabled]="changes.busy()"
           (click)="changes.push()"
         >
@@ -158,6 +162,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
 
     @if (changes.error(); as error) {
       <p class="problem" role="alert">{{ error }}</p>
+    } @else if (changes.loading() && !changes.list()) {
+      <p class="empty" role="status" data-testid="changes-loading">Loading changes…</p>
     } @else if (changes.list() && !changes.files().length) {
       <p class="empty">No changes against {{ changes.list()?.base }}.</p>
     } @else if (changes.list()) {

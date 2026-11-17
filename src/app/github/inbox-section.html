@@ -18,7 +18,7 @@
               (click)="open(e)"
             >
               <span class="mono">{{ e.repo }}#{{ e.number }}</span>
-              <span class="title">{{ e.title }}</span>
+              <span class="title" [title]="e.title">{{ e.title }}</span>
               <span class="reason">{{ e.reason }}</span>
             </button>
           </li>

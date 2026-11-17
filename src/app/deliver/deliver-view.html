@@ -23,6 +23,7 @@
           class="link"
           data-testid="overview-refresh"
           [disabled]="overview.loading()"
+          [attr.title]="overview.loading() ? 'Already refreshing' : 'Refresh the milestones'"
           (click)="overview.load()"
         >
           {{ overview.loading() ? "Refreshing…" : "Refresh" }}

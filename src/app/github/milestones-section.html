@@ -10,6 +10,9 @@
       {{ e.repo }}: {{ errorText(e.error) }}
     </p>
   }
+  @if (milestones.loading() && !milestones.repos().length) {
+    <p class="hint" role="status" data-testid="milestones-loading">Loading milestones…</p>
+  }
   @for (r of milestones.repos(); track r.root) {
     <h3 class="mono">
       {{ r.repo }}
@@ -28,6 +31,11 @@
         +
       </button>
     </h3>
+    @if (milestones.compose(); as c) {
+      @if (c.kind === "create" && c.root === r.root) {
+        <ng-container *ngTemplateOutlet="composeForm; context: { $implicit: c }" />
+      }
+    }
     @if (r.milestones.length === 0) {
       <p class="hint" data-testid="milestones-empty">No open milestones.</p>
     }
@@ -128,10 +136,17 @@
             </button>
           }
         </li>
+        @if (milestones.compose(); as c) {
+          @if (c.kind !== "create" && c.root === r.root && c.number === m.number) {
+            <li class="compose-row">
+              <ng-container *ngTemplateOutlet="composeForm; context: { $implicit: c }" />
+            </li>
+          }
+        }
       }
     </ul>
   }
-  @if (milestones.compose(); as c) {
+  <ng-template #composeForm let-c>
     <form
       class="compose"
       data-testid="milestone-compose"
@@ -192,5 +207,5 @@
         </button>
       </div>
     </form>
-  }
+  </ng-template>
 </section>

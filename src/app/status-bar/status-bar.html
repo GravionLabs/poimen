@@ -13,7 +13,7 @@
         title="Close"
         (click)="closeDetails()"
       >
-        ×
+        <app-icon name="close" />
       </button>
       @if ($any(update()).step; as step) {
         <h3 class="failed">{{ errTitle(step) }}</h3>

@@ -19,6 +19,7 @@ import {
 
 import { ContextMenu } from "../../context-menu/context-menu";
 import type { MenuGroup } from "../../context-menu/menu-model";
+import { Icon } from "../../icon/icon";
 
 /** One tab of the bar. Generic on purpose: no herdr knowledge (candidate for helix-ui, ADR 0001). */
 export interface TabBarItem {
@@ -75,7 +76,7 @@ export function arrowTarget(key: string, index: number, count: number): number |
 /** Tabs side by side in one row with close buttons and drag-to-reorder; projects trailing actions. */
 @Component({
   selector: "app-tab-bar",
-  imports: [NgTemplateOutlet, ContextMenu],
+  imports: [NgTemplateOutlet, ContextMenu, Icon],
   templateUrl: "./tab-bar.html",
   styleUrl: "./tab-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

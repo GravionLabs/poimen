@@ -39,6 +39,11 @@ function type(el: HTMLElement, text: string) {
 }
 
 describe("chip picker", () => {
+  it("does not point list at a datalist", () => {
+    const { el } = make([], ["a", "b"]);
+    expect(el.querySelector("[data-testid=chip-input]")!.hasAttribute("list")).toBe(false);
+  });
+
   it("shows chips and emits remove", () => {
     const { el, removed } = make(["a", "b"], ["a", "b", "c"]);
     expect(

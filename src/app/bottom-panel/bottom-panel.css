@@ -209,6 +209,9 @@ pre {
   border-left: 1px solid var(--h-border-color, color-mix(in srgb, currentColor 22%, transparent));
 }
 .event > .pr {
+  color: var(--h-primary-color);
+  text-decoration: underline;
+  cursor: pointer;
   min-width: 0;
   padding: 0 0.3em;
   overflow: hidden;
