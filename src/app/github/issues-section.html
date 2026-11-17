@@ -11,6 +11,9 @@
   @if (issues.error(); as err) {
     <p class="problem" role="alert">Could not read the issues: {{ err }}</p>
   }
+  @if (issues.loading() && !issues.result()) {
+    <p class="hint" role="status" data-testid="issues-loading">Loading issues…</p>
+  }
   @if (issues.result()) {
     <div class="toolbar" role="group" aria-label="Issue filters">
       <select aria-label="State" [value]="issues.state()" (change)="setState(value($event))">
@@ -191,7 +194,7 @@
               levelBadge(row.node.level).label
             }}</span>
             <span class="nr">#{{ i.number }}</span>
-            <span class="title">{{ i.title }}</span>
+            <span class="title" [title]="i.title">{{ i.title }}</span>
             @if (runs.badge(tree.repo, i.number); as run) {
               <button
                 type="button"

@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from "@angular/common";
 import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angular/core";
 import { GithubMilestones, dueText, progressPercent, readyToClose } from "./milestones";
 import { errorText, isGithubUrl } from "./pulls";
@@ -6,7 +7,7 @@ import { HxButton } from "@gravionlabs/helix-ui";
 /** The "Milestones" section of the GitHub tab: open milestones with progress; selecting filters the issues. */
 @Component({
   selector: "app-github-milestones",
-  imports: [HxButton],
+  imports: [HxButton, NgTemplateOutlet],
   templateUrl: "./milestones-section.html",
   styleUrl: "./milestones-section.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

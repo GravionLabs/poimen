@@ -204,6 +204,17 @@ export class BottomPanel {
     this.following.set(true);
   }
 
+  /** The link text after its target: `PR #12`, `issue #3`, else the host. */
+  protected linkLabel(url: string): string {
+    const m = /\/(pull|issues)\/(\d+)/.exec(url);
+    if (m) return m[1] === "pull" ? `PR #${m[2]}` : `issue #${m[2]}`;
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  }
+
   protected openPr(event: Event, url: string): void {
     event.preventDefault();
     void this.deliver.openUrl(url);

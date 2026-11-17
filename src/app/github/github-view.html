@@ -159,7 +159,7 @@
                             />
                           </td>
                           <td>#{{ row.number }}</td>
-                          <td>
+                          <td [title]="row.title">
                             {{ row.title }}
                             @if (runs.badge(row.repo, row.number); as run) {
                               <button

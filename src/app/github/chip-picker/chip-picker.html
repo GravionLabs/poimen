@@ -26,7 +26,6 @@
   @if (!disabled && free().length > 0) {
     <input
       type="text"
-      [attr.list]="'chip-options-' + label"
       [attr.aria-label]="'Add ' + label"
       placeholder="Add..."
       data-testid="chip-input"

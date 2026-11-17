@@ -222,6 +222,16 @@ describe("MilestonesSection", () => {
       ]);
     });
 
+    it("opens the edit form in the row of its milestone", async () => {
+      const fixture = await render();
+      const el: HTMLElement = fixture.nativeElement;
+      await click(fixture, el, "li[data-title=Backlog] [data-testid=milestone-edit]");
+      const form = el.querySelector("[data-testid=milestone-compose]")!;
+      expect(form.closest("li")!.previousElementSibling!.getAttribute("data-title")).toBe(
+        "Backlog",
+      );
+    });
+
     it("offers Close first on a milestone without open issues and keeps the form on failure", async () => {
       const fixture = await render();
       const el: HTMLElement = fixture.nativeElement;
