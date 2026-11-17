@@ -1,4 +1,5 @@
 @import "../detail-pane.css";
+@import "../github-badges.css";
 
 .compose {
   display: flex;
