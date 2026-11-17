@@ -156,23 +156,39 @@ export function machineGuidance(m: MachineStatus): string | null {
   if (m.state === "incompatible") {
     const older = m.serverProtocol < m.appProtocol;
     return older
-      ? `The server on ${m.name} is older than this app. Update poimen-server on the machine to the same version, then press Reconnect.`
+      ? `The server on ${m.name} is older than this app. Update the server with Update server…, or install the same version by hand, then press Reconnect.`
       : `The server on ${m.name} is newer than this app. Update poimen, then press Reconnect.`;
   }
   if (m.state !== "offline") return null;
   const e = m.error.toLowerCase();
   if (e.includes("host key verification failed") || e.includes("host key"))
     return `The host key of ${m.ssh} is not known or has changed. Run "ssh ${m.ssh}" once in a terminal, check the fingerprint and accept it, then press Reconnect.`;
-  if (
+  if (serverMissing(m))
+    return `ssh works, but poimen-server is not installed on ${m.name} or not on its PATH. Use Install server…, or install it on the machine by hand, then press Reconnect.`;
+  if (e.includes("permission denied"))
+    return `ssh refused the login to ${m.ssh}. poimen needs a key or the agent, no password prompt; check "ssh ${m.ssh}" in a terminal, then press Reconnect.`;
+  return `${m.name} cannot be reached. Check that "ssh ${m.ssh}" works without a prompt (network, VPN, host name), then press Reconnect.`;
+}
+
+/** The ssh error of an offline machine says the server binary is not there (not on its PATH). */
+function serverMissing(m: MachineStatus): boolean {
+  if (m.state !== "offline") return false;
+  const e = m.error.toLowerCase();
+  return (
     e.includes("command not found") ||
     e.includes("not found") ||
     e.includes("no such file") ||
     e.includes("poimen-server")
-  )
-    return `ssh works, but poimen-server is not installed on ${m.name} or not on its PATH. Install it on the machine, then press Reconnect.`;
-  if (e.includes("permission denied"))
-    return `ssh refused the login to ${m.ssh}. poimen needs a key or the agent, no password prompt; check "ssh ${m.ssh}" in a terminal, then press Reconnect.`;
-  return `${m.name} cannot be reached. Check that "ssh ${m.ssh}" works without a prompt (network, VPN, host name), then press Reconnect.`;
+  );
+}
+
+/**
+ * Whether the check of a machine offers "Install server…" (server missing) or "Update server…"
+ * (incompatible, #865); `null` for any other state. The dialog runs nothing before its confirmation.
+ */
+export function serverInstallOffer(m: MachineStatus): "install" | "update" | null {
+  if (m.state === "incompatible") return "update";
+  return serverMissing(m) ? "install" : null;
 }
 
 /** The glyph of a check status. */
@@ -320,6 +336,11 @@ export class Machines {
     }
     await this.refresh();
     return null;
+  }
+
+  /** After an install: the next connect of `name` runs the check again. */
+  forgetCheck(name: string): void {
+    this.checked.delete(name);
   }
 
   /** Asks an offline or incompatible machine to connect at once. */
