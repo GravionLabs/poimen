@@ -19,18 +19,6 @@
   letter-spacing: 0.04em;
 }
 
-.mark {
-  all: unset;
-  cursor: pointer;
-  font-size: 12px;
-  opacity: 0.8;
-}
-
-.mark:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
 .empty {
   padding: 0 14px;
   opacity: 0.7;

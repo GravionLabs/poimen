@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, output } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { NotificationCenter, type NotificationEntry } from "../core/notification-center";
 
 /** Local time of day of a notification. */
@@ -8,6 +9,7 @@ export function notificationTime(time: number): string {
 
 /** Sidebar view: recent agent status changes of all spaces, newest first. */
 @Component({
+  imports: [HxButton],
   selector: "app-notifications",
   templateUrl: "./notifications.html",
   styleUrl: "./notifications.css",

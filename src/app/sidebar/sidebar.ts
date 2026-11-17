@@ -14,7 +14,7 @@ import {
   output,
   signal,
 } from "@angular/core";
-import { HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
+import { HxButton, HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import {
   filterSpaces,
@@ -490,6 +490,7 @@ export class SpaceEditFocus {
   selector: "app-sidebar",
   imports: [
     SpaceEditFocus,
+    HxButton,
     HxMessage,
     HxTree,
     HxTreeNodeTemplate,

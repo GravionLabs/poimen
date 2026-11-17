@@ -2,19 +2,52 @@
   <header class="head">
     <h2>Space: {{ n.workspace.label }}</h2>
     <div class="space-actions" role="group" aria-label="Space actions">
-      <button type="button" class="act-new" (click)="newPane()">New pane</button>
       <button
         type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        size="small"
+        class="act-new"
+        (click)="newPane()"
+      >
+        New pane
+      </button>
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        size="small"
         class="act-explorer"
         [disabled]="!directory()"
+        [attr.title]="directory() ? null : 'This space has no directory'"
         (click)="explorerRequested.emit(directory()!)"
       >
         Open in explorer
       </button>
-      <button type="button" class="act-pr" [disabled]="!pullUrl()" (click)="openPull()">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        size="small"
+        class="act-pr"
+        [disabled]="!pullUrl()"
+        [attr.title]="pullUrl() ? null : 'This space has no pull request'"
+        (click)="openPull()"
+      >
         Open PR
       </button>
-      <button type="button" class="act-delete" (click)="deleteRequested.emit(n.workspace.space_id)">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="danger"
+        size="small"
+        class="act-delete"
+        (click)="deleteRequested.emit(n.workspace.space_id)"
+      >
         Delete space
       </button>
     </div>
@@ -42,18 +75,74 @@
             </td>
             <td class="activity">{{ activity(row.activityAt) }}</td>
             <td class="actions">
-              <button type="button" class="act-focus" (click)="focus(row.paneId)">Focus</button>
+              <button
+                type="button"
+                hx-button
+                variant="outlined"
+                severity="secondary"
+                size="small"
+                class="act-focus"
+                (click)="focus(row.paneId)"
+              >
+                Focus
+              </button>
               @if (row.kind === "agent") {
-                <button type="button" class="act-restart" (click)="restart(row.paneId)">
+                <button
+                  type="button"
+                  hx-button
+                  variant="outlined"
+                  severity="secondary"
+                  size="small"
+                  class="act-restart"
+                  (click)="restart(row.paneId)"
+                >
                   Restart
                 </button>
-                <button type="button" class="act-flow" (click)="flow(row.paneId)">Flow</button>
-                <button type="button" class="act-output" (click)="outputRequested.emit(row.paneId)">
+                <button
+                  type="button"
+                  hx-button
+                  variant="outlined"
+                  severity="secondary"
+                  size="small"
+                  class="act-flow"
+                  (click)="flow(row.paneId)"
+                >
+                  Flow
+                </button>
+                <button
+                  type="button"
+                  hx-button
+                  variant="outlined"
+                  severity="secondary"
+                  size="small"
+                  class="act-output"
+                  (click)="outputRequested.emit(row.paneId)"
+                >
                   Output
                 </button>
               }
-              <button type="button" class="act-rename" (click)="rename(row.paneId)">Rename</button>
-              <button type="button" class="act-close" (click)="close(row.paneId)">Close</button>
+              <button
+                type="button"
+                hx-button
+                variant="outlined"
+                severity="secondary"
+                size="small"
+                class="act-rename"
+                (click)="rename(row.paneId)"
+              >
+                Rename
+              </button>
+              <button
+                type="button"
+                hx-button
+                variant="outlined"
+                severity="secondary"
+                size="small"
+                class="act-close"
+                (click)="close(row.paneId)"
+              >
+                Close
+              </button>
             </td>
           </tr>
         }
@@ -65,6 +154,8 @@
     <div class="field">
       <label for="cfg-name">Name</label>
       <input
+        hx-input
+        size="small"
         id="cfg-name"
         class="cfg-name"
         type="text"
@@ -72,7 +163,17 @@
         [value]="name() ?? n.workspace.label"
         (input)="setName($event)"
       />
-      <button type="button" class="cfg-rename" (click)="renameSpace()">Rename</button>
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        size="small"
+        class="cfg-rename"
+        (click)="renameSpace()"
+      >
+        Rename
+      </button>
       @if (nameError(); as message) {
         <p class="error" role="alert">{{ message }}</p>
       }
@@ -95,6 +196,8 @@
       <div class="field">
         <label for="cfg-setup">Setup command</label>
         <input
+          hx-input
+          size="small"
           id="cfg-setup"
           class="cfg-setup"
           type="text"
@@ -109,6 +212,8 @@
       <div class="field">
         <label for="cfg-teardown">Teardown command</label>
         <input
+          hx-input
+          size="small"
           id="cfg-teardown"
           class="cfg-teardown"
           type="text"
@@ -136,6 +241,7 @@
         <div class="field">
           <label for="cfg-layout">Layout (JSON)</label>
           <textarea
+            hx-input
             id="cfg-layout"
             class="cfg-layout"
             rows="8"
@@ -147,6 +253,7 @@
         <div class="field">
           <label for="cfg-presets">Presets (JSON)</label>
           <textarea
+            hx-input
             id="cfg-presets"
             class="cfg-presets"
             rows="8"
@@ -166,12 +273,31 @@
               </li>
             }
           </ul>
-          <button type="button" class="cfg-trust" (click)="save(true)">Trust and save</button>
-          <button type="button" class="cfg-trust-cancel" (click)="cancelTrust()">Cancel</button>
+          <button type="button" hx-button size="small" class="cfg-trust" (click)="save(true)">
+            Trust and save
+          </button>
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
+            class="cfg-trust-cancel"
+            (click)="cancelTrust()"
+          >
+            Cancel
+          </button>
         </div>
       }
       <div class="field">
-        <button type="button" class="cfg-save" [disabled]="!!fileError()" (click)="save()">
+        <button
+          type="button"
+          hx-button
+          size="small"
+          class="cfg-save"
+          [disabled]="!!fileError()"
+          (click)="save()"
+        >
           Save
         </button>
         @if (status(); as message) {

@@ -9,6 +9,7 @@ import {
   inject,
   signal,
 } from "@angular/core";
+import { HxButton, HxInput } from "@gravionlabs/helix-ui";
 import type { LayoutTab } from "../core/named-layouts";
 import { hasLayoutErrors, layoutErrors, uniqueName } from "../core/named-layouts-edit";
 import { TauriBridge } from "../core/tauri";
@@ -52,7 +53,7 @@ function parsed(source: string): unknown {
  */
 @Component({
   selector: "app-project-layouts",
-  imports: [LayoutTabsEditor],
+  imports: [LayoutTabsEditor, HxButton, HxInput],
   templateUrl: "./project-layouts.html",
   styleUrl: "./space-overview.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

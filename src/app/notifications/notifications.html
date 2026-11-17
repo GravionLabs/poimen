@@ -2,6 +2,9 @@
   <div class="brand">Notifications</div>
   <button
     type="button"
+    hx-button
+    variant="text"
+    size="small"
     class="mark"
     [disabled]="center.unread() === 0"
     (click)="center.markAllRead()"
