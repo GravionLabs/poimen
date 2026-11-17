@@ -21,6 +21,17 @@ Copies of other versions are removed only when neither a server nor a host runs 
 
 A host is not replaced by an update, so a terminal keeps the host version it started with; a fix to the host applies to terminals started after the update. The host version of a running terminal is the `version` of its `hello` message (host protocol in `docs/protocol.md`); the version of an installed host is `poimen-pty-host --version`, and a host running from a copy shows its version in the directory name of its path (`ps`, Task Manager).
 
+## Restart
+
+After the install poimen restarts itself. Windows and Linux use Tauri's restart. On macOS Tauri's
+restart runs `open -n` while the old process still runs, which gives a second Dock icon, so poimen
+starts a detached helper (`/bin/sh`, no inherited stdio) that waits until the old process has ended
+and then runs `open <bundle>` without `-n`: the two instances never run at once and the Dock shows
+one icon. If the helper cannot be started the app stays open and the status bar says that the update
+is installed and poimen has to be restarted by hand. An executable outside an `.app` bundle
+(`tauri dev`) uses Tauri's restart. Check on macOS: after an update the Dock shows one poimen icon,
+marked as running.
+
 ## Errors
 
 The header names the failed step and shows the error text (select it to copy):
