@@ -251,8 +251,8 @@ export class ContextMenu implements OnChanges, OnDestroy {
   }
 
   protected pick(id: string, disabled: boolean, event: MouseEvent): void {
-    if (disabled || this.done) return;
-    this.done = true;
+    // The parent closes the menu; a pick it ignores must not leave a menu that cannot be closed.
+    if (disabled) return;
     this.picked.emit({ id, shiftKey: event.shiftKey });
   }
 
