@@ -20,21 +20,36 @@
         <span class="agent">{{ d.agent }}{{ d.model ? " · " + d.model : "" }}</span>
         <span class="layout">{{ layoutText(d) }}</span>
         <span class="actions">
-          <button type="button" class="btn" aria-label="Edit default" (click)="editDefault()">
+          <button
+            hx-button
+            size="small"
+            variant="outlined"
+            severity="secondary"
+            type="button"
+            aria-label="Edit default"
+            (click)="editDefault()"
+          >
             Edit
           </button>
           <button
+            hx-button
+            size="small"
+            variant="text"
+            severity="secondary"
             type="button"
-            class="btn"
             aria-label="Export default"
             [disabled]="transfer.busy()"
             (click)="exportTemplate(d.name)"
+            title="Export"
           >
-            Export…
+            ⤓
           </button>
           <button
+            hx-button
+            size="small"
+            variant="text"
+            severity="danger"
             type="button"
-            class="icon-btn"
             aria-label="Remove default"
             title="Remove"
             (click)="removeDefault()"
@@ -47,7 +62,16 @@
         <span class="agent"></span>
         <span class="layout"></span>
         <span class="actions">
-          <button type="button" class="btn" (click)="addDefault()">Add default</button>
+          <button
+            hx-button
+            size="small"
+            variant="outlined"
+            severity="secondary"
+            type="button"
+            (click)="addDefault()"
+          >
+            Add default
+          </button>
         </span>
       }
     </li>
@@ -59,25 +83,35 @@
         <span class="layout">{{ layoutText(item.t) }}</span>
         <span class="actions">
           <button
+            hx-button
+            size="small"
+            variant="outlined"
+            severity="secondary"
             type="button"
-            class="btn"
             [attr.aria-label]="'Edit ' + item.t.name"
             (click)="edit(item.i)"
           >
             Edit
           </button>
           <button
+            hx-button
+            size="small"
+            variant="text"
+            severity="secondary"
             type="button"
-            class="btn"
             [attr.aria-label]="'Export ' + item.t.name"
             [disabled]="transfer.busy()"
             (click)="exportTemplate(item.t.name)"
+            title="Export"
           >
-            Export…
+            ⤓
           </button>
           <button
+            hx-button
+            size="small"
+            variant="text"
+            severity="danger"
             type="button"
-            class="icon-btn"
             [attr.aria-label]="'Remove ' + item.t.name"
             title="Remove"
             (click)="remove(item.i)"
@@ -95,7 +129,15 @@
     the default for every other directory.
   </p>
   <div class="actions">
-    <button type="button" class="btn" [disabled]="transfer.busy()" (click)="importTemplate()">
+    <button
+      hx-button
+      size="small"
+      variant="outlined"
+      severity="secondary"
+      type="button"
+      [disabled]="transfer.busy()"
+      (click)="importTemplate()"
+    >
       Import template…
     </button>
   </div>
@@ -116,6 +158,8 @@
         <label class="field grow">
           <span>Name</span>
           <input
+            hx-input
+            size="small"
             type="text"
             name="name"
             autocomplete="off"
@@ -136,6 +180,8 @@
           <label class="field grow">
             <span>Directory</span>
             <input
+              hx-input
+              size="small"
               type="text"
               name="dir"
               placeholder="~/src/app"
@@ -145,7 +191,17 @@
               (input)="setDir($event)"
             />
           </label>
-          <button type="button" class="btn browse" (click)="browse()">Browse…</button>
+          <button
+            hx-button
+            size="small"
+            variant="outlined"
+            severity="secondary"
+            type="button"
+            class="browse"
+            (click)="browse()"
+          >
+            Browse…
+          </button>
         </div>
         @if (errors().dir; as m) {
           <p class="field-error">{{ m }}</p>
@@ -168,6 +224,8 @@
               <label class="field">
                 <span>Owner</span>
                 <input
+                  hx-input
+                  size="small"
                   type="text"
                   name="owner"
                   autocomplete="off"
@@ -179,6 +237,8 @@
               <label class="field">
                 <span>Organization</span>
                 <input
+                  hx-input
+                  size="small"
                   type="text"
                   name="organization"
                   autocomplete="off"
@@ -189,6 +249,8 @@
               <label class="field">
                 <span>Project</span>
                 <input
+                  hx-input
+                  size="small"
                   type="text"
                   name="project"
                   autocomplete="off"
@@ -263,41 +325,70 @@
         </label>
       </div>
       @if (inlineLayout(e.draft.layout); as layout) {
-        <ol class="rows panes" aria-label="Panes of the template">
-          @for (pane of layout.panes; track $index; let i = $index) {
-            <li class="pane-row">
-              <div class="pane-fields">
-                <label class="field">
-                  <span>Pane name</span>
-                  <input type="text" [value]="pane.name" (input)="setPaneName(i, $event)" />
-                </label>
-                <label class="field grow">
-                  <span>Pane command</span>
-                  <input
-                    type="text"
-                    placeholder="shell"
-                    [value]="pane.command ?? ''"
-                    (input)="setPaneCommand(i, $event)"
-                  />
-                </label>
-                <span class="actions">
-                  <button
-                    type="button"
-                    class="icon-btn"
-                    [attr.aria-label]="'Remove pane ' + pane.name"
-                    title="Remove"
-                    [disabled]="layout.panes.length === 1"
-                    (click)="removePane(i)"
-                  >
-                    ×
-                  </button>
-                </span>
-              </div>
-            </li>
-          }
-        </ol>
+        <div class="pane-grid simple">
+          <div class="pane-head" aria-hidden="true">
+            <span id="tpl-col-name">Name</span>
+            <span id="tpl-col-command">Command</span>
+            <span></span>
+          </div>
+          <ol class="rows panes" aria-label="Panes of the template">
+            @for (pane of layout.panes; track $index; let i = $index) {
+              <li class="pane-row">
+                <div class="pane-fields">
+                  <label class="field">
+                    <span>Pane name</span>
+                    <input
+                      hx-input
+                      size="small"
+                      type="text"
+                      aria-labelledby="tpl-col-name"
+                      [value]="pane.name"
+                      (input)="setPaneName(i, $event)"
+                    />
+                  </label>
+                  <label class="field grow">
+                    <span>Pane command</span>
+                    <input
+                      hx-input
+                      size="small"
+                      type="text"
+                      placeholder="shell"
+                      aria-labelledby="tpl-col-command"
+                      [value]="pane.command ?? ''"
+                      (input)="setPaneCommand(i, $event)"
+                    />
+                  </label>
+                  <span class="actions">
+                    <button
+                      hx-button
+                      size="small"
+                      variant="text"
+                      severity="danger"
+                      type="button"
+                      [attr.aria-label]="'Remove pane ' + pane.name"
+                      title="Remove"
+                      [disabled]="layout.panes.length === 1"
+                      (click)="removePane(i)"
+                    >
+                      ×
+                    </button>
+                  </span>
+                </div>
+              </li>
+            }
+          </ol>
+        </div>
         <div class="toolbar-row">
-          <button type="button" class="btn" (click)="addPane()">Add pane</button>
+          <button
+            hx-button
+            size="small"
+            variant="outlined"
+            severity="secondary"
+            type="button"
+            (click)="addPane()"
+          >
+            Add pane
+          </button>
         </div>
         @if (errors().layout; as m) {
           <p class="field-error">{{ m }}</p>
@@ -305,13 +396,31 @@
       }
       <div class="toolbar-row">
         <span class="spacer"></span>
-        <button type="button" class="btn" (click)="cancel()">Cancel</button>
-        <button type="submit" class="btn primary" [disabled]="!valid()">Save</button>
+        <button
+          hx-button
+          size="small"
+          variant="outlined"
+          severity="secondary"
+          type="button"
+          (click)="cancel()"
+        >
+          Cancel
+        </button>
+        <button hx-button size="small" type="submit" [disabled]="!valid()">Save</button>
       </div>
     </form>
   } @else {
     <div class="toolbar-row">
-      <button type="button" class="btn" (click)="add()">Add template</button>
+      <button
+        hx-button
+        size="small"
+        variant="outlined"
+        severity="secondary"
+        type="button"
+        (click)="add()"
+      >
+        Add template
+      </button>
     </div>
   }
 </section>

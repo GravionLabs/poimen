@@ -8,9 +8,17 @@
       <ul class="list" [attr.aria-label]="s.label">
         @for (e of s.entries; track e.kind + e.repo + e.number) {
           <li class="item">
-            <button type="button" class="pick" (click)="open(e)">
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
+              class="pick"
+              (click)="open(e)"
+            >
               <span class="mono">{{ e.repo }}#{{ e.number }}</span>
-              <span class="title">{{ e.title }}</span>
+              <span class="title" [title]="e.title">{{ e.title }}</span>
               <span class="reason">{{ e.reason }}</span>
             </button>
           </li>

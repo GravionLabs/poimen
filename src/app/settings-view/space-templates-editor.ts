@@ -1,3 +1,4 @@
+import { HxButton, HxInput } from "@gravionlabs/helix-ui";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -60,7 +61,7 @@ function value(event: Event): string {
  */
 @Component({
   selector: "app-space-templates-editor",
-  imports: [SettingsImportPanel],
+  imports: [SettingsImportPanel, HxButton, HxInput],
   templateUrl: "./space-templates-editor.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

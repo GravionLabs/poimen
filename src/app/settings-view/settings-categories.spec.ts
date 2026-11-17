@@ -14,7 +14,7 @@ describe("settings categories", () => {
     );
     expect(tree).toEqual({
       "Appearance & Behavior": ["Appearance"],
-      Workspace: ["Explorer", "Templates", "Layouts", "New space layout", "Trusted projects"],
+      Workspace: ["Explorer", "Templates", "Layouts", "Trusted projects"],
       Backend: ["Server", "Machines", "Agents"],
       General: ["Export & import"],
     });
@@ -24,10 +24,12 @@ describe("settings categories", () => {
     expect(findPage("server")?.group.title).toBe("Backend");
     // The page of the former herdr backend keeps its stored selection.
     expect(findPage("herdr")?.page.id).toBe("server");
+    // The page "New space layout" is the layout default of the Layouts page (#855).
+    expect(findPage("space-layout")?.page.id).toBe("layouts");
     expect(findPage("nope")).toBeNull();
     expect(findPage(null)).toBeNull();
     expect(findPage(DEFAULT_SETTINGS_PAGE)?.page.title).toBe("Appearance");
-    expect(allPages()).toHaveLength(10);
+    expect(allPages()).toHaveLength(9);
   });
 
   it("resolves the retired color-scheme page to appearance", () => {

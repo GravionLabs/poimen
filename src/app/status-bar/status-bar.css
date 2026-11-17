@@ -4,7 +4,7 @@
 
 .update-button.failed,
 .update-details h3.failed {
-  color: #f85149;
+  color: var(--status-error);
 }
 
 .update-details {
@@ -19,18 +19,12 @@
   font-size: 12px;
   color: var(--h-text-color);
   background: var(--h-content-background);
-  border: 1px solid var(--h-border-color);
+  border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
 }
 
 .update-details .close-details {
   float: right;
-  font: inherit;
-  line-height: 1;
-  color: inherit;
-  background: none;
-  border: none;
-  cursor: pointer;
 }
 
 .update-details h3 {
@@ -52,8 +46,7 @@
 }
 
 .update-details .install {
-  font: inherit;
-  cursor: pointer;
+  margin-top: 4px;
 }
 
 .bar {
@@ -64,7 +57,7 @@
   height: 22px;
   padding: 0 10px;
   font-size: 11px;
-  border-top: 1px solid var(--h-border-color);
+  border-top: 1px solid var(--h-content-border-color);
   color: var(--h-text-muted-color);
 }
 
@@ -73,6 +66,8 @@
 }
 
 .item {
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -89,71 +84,65 @@
 }
 
 .connected .dot {
-  background: #3fb950;
+  background: var(--status-done);
 }
 
 .reconnecting .dot {
-  background: #d29922;
+  background: var(--status-blocked);
 }
 
 .unreachable .dot {
-  background: #f85149;
+  background: var(--status-error);
 }
 
 .version.warn {
-  color: #d29922;
+  color: var(--status-blocked);
   font-weight: 600;
 }
 
 /* The release-candidate badge: this is the side-by-side "Poimen RC" app. */
 .channel {
-  color: #d29922;
+  color: var(--status-blocked);
   font-weight: 700;
 }
 
+/*
+ * Actions are buttons (hx-button, text variant) with hover, focus ring and pointer; information is a
+ * plain span (.item) without any of them (#849). The bar is 22px high, so the buttons are 18px.
+ */
 button.item {
+  height: 18px;
+  min-height: 18px;
+  padding: 0 5px;
   font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
-  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 3px;
   cursor: pointer;
+}
+
+button.item:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+button.item:focus-visible {
+  outline: 2px solid var(--h-primary-color);
+  outline-offset: -1px;
 }
 
 button.item:disabled {
   cursor: default;
+  opacity: 0.5;
 }
 
 button.item.any {
-  color: #d29922;
+  color: var(--status-blocked);
   font-weight: 600;
 }
 
 button.item.deliver.warn {
-  color: #d29922;
+  color: var(--status-blocked);
   font-weight: 600;
-}
-
-button.item.mode-button,
-button.item.panel-button {
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 3px;
-}
-
-button.item.panel-button:hover,
-button.item.mode-button:hover:not(:disabled) {
-  background: color-mix(in srgb, currentColor 14%, transparent);
-}
-
-button.item.panel-button:focus-visible,
-button.item.mode-button:focus-visible {
-  outline: 1px solid var(--h-primary-color);
-  outline-offset: -1px;
-}
-
-button.item.mode-button:disabled {
-  opacity: 0.5;
 }
 
 .icon {
@@ -168,19 +157,7 @@ button.item.mode-button:disabled {
 }
 
 button.item.help-button {
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 3px;
   font-weight: 600;
-}
-
-button.item.help-button:hover {
-  background: color-mix(in srgb, currentColor 14%, transparent);
-}
-
-button.item.help-button:focus-visible {
-  outline: 1px solid var(--h-primary-color);
-  outline-offset: -1px;
 }
 
 /* Neighboring items are separated by a thin bar; the spacer and the update popover are no items, so
@@ -191,7 +168,7 @@ button.item.help-button:focus-visible {
   width: 1px;
   height: 12px;
   margin-right: 3px;
-  background: var(--h-border-color);
+  background: var(--h-content-border-color);
 }
 
 /* The update control is a link in the accent color (the helix link token). */
@@ -204,10 +181,15 @@ button.item.update-button:hover {
 }
 
 button.item.update-button.failed {
-  color: #f85149;
+  color: var(--status-error);
 }
 
-button.item.update-button:focus-visible {
-  outline: 1px solid var(--h-primary-color);
-  outline-offset: -1px;
+/* text-overflow does not apply to the text of a flex container, so text-only items are blocks (#854). */
+span.item.notice,
+span.item.server-notice,
+span.item.version,
+span.item.channel,
+span.item.update {
+  display: block;
+  line-height: 22px;
 }

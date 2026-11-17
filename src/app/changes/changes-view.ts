@@ -11,6 +11,7 @@ import {
   signal,
   untracked,
 } from "@angular/core";
+import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
 import { UiState } from "../core/ui-state";
 import {
   CHANGES_SCOPES,
@@ -47,7 +48,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
  */
 @Component({
   selector: "app-changes-view",
-  imports: [DiffEditor, CommentsPanel, FindingsPanel],
+  imports: [DiffEditor, CommentsPanel, FindingsPanel, HxButton, HxSelectButton],
   providers: [Changes, LineComments, Findings],
   template: `
     <header>
@@ -55,19 +56,17 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
         <span class="label">Base</span>
         <code class="ref">{{ changes.list()?.base ?? "…" }}</code>
       </div>
-      <div class="group" role="group" aria-label="Scope">
-        @for (scope of scopes; track scope) {
-          <button
-            type="button"
-            class="toggle"
-            [class.on]="changes.scope() === scope"
-            [attr.aria-pressed]="changes.scope() === scope"
-            (click)="changes.setScope(scope)"
-          >
-            {{ scopeLabel[scope] }}
-          </button>
-        }
-      </div>
+      <hx-select-button
+        class="scope"
+        aria-label="Scope"
+        size="small"
+        [options]="scopeOptions"
+        optionLabel="label"
+        optionValue="value"
+        [allowEmpty]="false"
+        [value]="changes.scope()"
+        (valueChange)="changes.setScope($any($event))"
+      />
       <span class="totals">
         <span class="add">+{{ changes.totals().additions }}</span>
         <span class="del">−{{ changes.totals().deletions }}</span>
@@ -76,33 +75,27 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
         >
       </span>
       <span class="spacer"></span>
-      <div class="group" role="group" aria-label="Diff layout">
-        <button
-          type="button"
-          class="toggle"
-          [class.on]="layout() === 'inline'"
-          [attr.aria-pressed]="layout() === 'inline'"
-          (click)="setLayout('inline')"
-        >
-          Inline
-        </button>
-        <button
-          type="button"
-          class="toggle"
-          [class.on]="layout() === 'split'"
-          [attr.aria-pressed]="layout() === 'split'"
-          [disabled]="narrow()"
-          [title]="narrow() ? 'The tab is too narrow for side by side' : ''"
-          (click)="setLayout('split')"
-        >
-          Side by side
-        </button>
-      </div>
+      <hx-select-button
+        class="layout"
+        aria-label="Diff layout"
+        size="small"
+        [options]="layoutOptions()"
+        optionLabel="label"
+        optionValue="value"
+        optionDisabled="disabled"
+        [allowEmpty]="false"
+        [value]="layout()"
+        (valueChange)="setLayout($any($event))"
+      />
       <button
         type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        size="small"
         class="refresh"
         aria-label="Refresh"
-        title="Refresh"
+        [attr.title]="changes.loading() ? 'Already refreshing' : 'Refresh'"
         [disabled]="changes.loading()"
         (click)="changes.refresh()"
       >
@@ -122,6 +115,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
         ></textarea>
         <button
           type="button"
+          hx-button
+          size="small"
           class="commit"
           [disabled]="!changes.canCommit()"
           [title]="commitHint()"
@@ -131,8 +126,16 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
         </button>
         <button
           type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
           class="push"
-          title="Push the current branch (never forced; not main, release/* or a detached HEAD)"
+          [attr.title]="
+            changes.busy()
+              ? 'Another git action is running'
+              : 'Push the current branch (never forced; not main, release/* or a detached HEAD)'
+          "
           [disabled]="changes.busy()"
           (click)="changes.push()"
         >
@@ -159,6 +162,8 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
 
     @if (changes.error(); as error) {
       <p class="problem" role="alert">{{ error }}</p>
+    } @else if (changes.loading() && !changes.list()) {
+      <p class="empty" role="status" data-testid="changes-loading">Loading changes…</p>
     } @else if (changes.list() && !changes.files().length) {
       <p class="empty">No changes against {{ changes.list()?.base }}.</p>
     } @else if (changes.list()) {
@@ -261,7 +266,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       flex-wrap: wrap;
       gap: 12px;
       padding: 8px 12px;
-      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-bottom: 1px solid var(--h-content-border-color);
     }
     .label,
     .count {
@@ -272,28 +277,6 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .spacer {
       flex: 1;
-    }
-    .group {
-      display: inline-flex;
-    }
-    button {
-      font: inherit;
-      color: inherit;
-      background: transparent;
-      border: 1px solid var(--h-border-color, var(--h-surface-300));
-      padding: 2px 10px;
-      cursor: pointer;
-    }
-    button:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-    .group button:not(:first-child) {
-      margin-left: -1px;
-    }
-    .toggle.on {
-      background: var(--h-surface-200);
-      font-weight: 600;
     }
     .add {
       color: var(--term-ansi-2);
@@ -317,7 +300,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       width: 280px;
       min-width: 160px;
       overflow: auto;
-      border-right: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-right: 1px solid var(--h-content-border-color);
     }
     .file {
       display: flex;
@@ -327,7 +310,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       cursor: pointer;
     }
     .file.selected {
-      background: var(--h-surface-200);
+      background: var(--h-content-hover-background);
     }
     .status {
       width: 14px;
@@ -375,10 +358,10 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .git {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 8px;
       padding: 6px 12px;
-      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-bottom: 1px solid var(--h-content-border-color);
     }
     .message {
       flex: 1;
@@ -386,7 +369,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       font: inherit;
       color: inherit;
       background: transparent;
-      border: 1px solid var(--h-border-color, var(--h-surface-300));
+      border: 1px solid var(--h-content-border-color);
       padding: 2px 6px;
       resize: vertical;
     }
@@ -397,19 +380,19 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       overflow: auto;
       white-space: pre-wrap;
       font-family: var(--font-mono);
-      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-bottom: 1px solid var(--h-content-border-color);
     }
     .result.failed {
-      color: var(--h-danger-color, #d33);
+      color: var(--status-error);
     }
     .findings-note {
       margin: 0;
       padding: 4px 12px;
       color: var(--term-ansi-3);
-      border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-bottom: 1px solid var(--h-content-border-color);
     }
     .findings-note.invalid {
-      color: var(--h-danger-color, #d33);
+      color: var(--status-error);
     }
     .note,
     .empty,
@@ -420,7 +403,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       color: var(--h-text-muted-color);
     }
     .problem {
-      color: var(--h-danger-color, #d33);
+      color: var(--status-error);
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -467,8 +450,10 @@ export class ChangesView {
     }));
   });
 
-  protected readonly scopes = CHANGES_SCOPES;
-  protected readonly scopeLabel = SCOPE_LABEL;
+  protected readonly scopeOptions = CHANGES_SCOPES.map((value) => ({
+    value,
+    label: SCOPE_LABEL[value],
+  }));
   protected readonly statusLetter = statusLetter;
 
   /** Width of the tab; unknown (no resize observer) counts as wide. */
@@ -478,6 +463,10 @@ export class ChangesView {
     effectiveLayout(this.chosen(), this.width()),
   );
   protected readonly narrow = computed(() => this.layout() !== this.chosen());
+  protected readonly layoutOptions = computed(() => [
+    { value: "inline", label: "Inline", disabled: false },
+    { value: "split", label: "Side by side", disabled: this.narrow() },
+  ]);
 
   constructor() {
     // Opening the tab (it is created when it gets focus) reads the changes.

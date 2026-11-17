@@ -24,7 +24,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 .problem {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 .list {
   list-style: none;
@@ -50,11 +50,39 @@ h3 {
   gap: 8px;
   min-height: 34px;
   padding: 0 6px;
-  background: none;
-  border: 0;
-  color: inherit;
   text-align: left;
-  cursor: pointer;
+}
+/* Narrow: drop the due date and the counts, then the badge, so a row never overflows. */
+@media (max-width: 1100px) {
+  .pick {
+    grid-template-columns: minmax(6rem, 1fr) 6rem 6rem 3rem;
+  }
+  .pick > :nth-child(3),
+  .pick > :nth-child(4) {
+    display: none;
+  }
+}
+@media (max-width: 820px) {
+  .pick {
+    grid-template-columns: minmax(0, 1fr) 3rem;
+  }
+  .pick > :nth-child(2),
+  .pick > :nth-child(3),
+  .pick > :nth-child(4) {
+    display: none;
+  }
+  .pick progress {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .pick .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+.item {
+  min-width: 0;
 }
 .pick[aria-pressed="true"] {
   background: var(--h-content-hover-background);
@@ -94,7 +122,4 @@ progress {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
-}
-.icon-btn.text {
-  font-size: 12px;
 }

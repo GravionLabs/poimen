@@ -54,7 +54,9 @@
       @if (notice(); as text) {
         <div class="notice" role="status">
           <span>{{ text }}</span>
-          <button type="button" aria-label="Dismiss" (click)="dismissNotice()">x</button>
+          <button type="button" aria-label="Dismiss" (click)="dismissNotice()">
+            <app-icon name="close" />
+          </button>
         </div>
       }
       @if (editor.openIds().size) {

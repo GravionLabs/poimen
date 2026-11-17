@@ -14,7 +14,7 @@ import {
   output,
   signal,
 } from "@angular/core";
-import { HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
+import { HxButton, HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import {
   filterSpaces,
@@ -27,6 +27,8 @@ import {
   type Space,
   dropAllowed,
 } from "../core/snapshot";
+import { ContextMenu } from "../ui/context-menu/context-menu";
+import type { MenuGroup } from "../ui/context-menu/menu-model";
 import { Attention, canMarkUnread, workspaceUnread } from "../core/attention";
 import { SpacesStore } from "../core/spaces-store";
 import {
@@ -435,32 +437,7 @@ export function sidebarMenuItems(
   ];
 }
 
-/**
- * The index of the menu item a key moves to among `labels` (focusable items only, so separators
- * and headings never count), or `null` when the key does nothing. `current` is -1 when no item has
- * focus; arrows wrap; a single character jumps to the next label that starts with it.
- */
-export function menuTarget(labels: readonly string[], current: number, key: string): number | null {
-  const n = labels.length;
-  if (n === 0) return null;
-  switch (key) {
-    case "ArrowDown":
-      return current < 0 ? 0 : (current + 1) % n;
-    case "ArrowUp":
-      return current < 0 ? n - 1 : (current - 1 + n) % n;
-    case "Home":
-      return 0;
-    case "End":
-      return n - 1;
-  }
-  if (key.length !== 1 || key === " ") return null;
-  const c = key.toLowerCase();
-  for (let i = 1; i <= n; i++) {
-    const idx = (Math.max(current, -1) + i) % n;
-    if (labels[idx].toLowerCase().startsWith(c)) return idx;
-  }
-  return null;
-}
+export { menuTarget } from "../ui/context-menu/menu-model";
 
 export const DOUBLE_CLICK_MS = 400;
 
@@ -489,7 +466,9 @@ export class SpaceEditFocus {
 @Component({
   selector: "app-sidebar",
   imports: [
+    ContextMenu,
     SpaceEditFocus,
+    HxButton,
     HxMessage,
     HxTree,
     HxTreeNodeTemplate,
@@ -560,32 +539,21 @@ export class Sidebar {
     this.menuAt.set({ kind, id, x: event.clientX, y: event.clientY });
   }
 
-  /** Arrow keys, Home/End and type-ahead move focus over the entries; separators and headings are no buttons. */
-  protected onMenuKey(event: KeyboardEvent, menu: HTMLElement): void {
-    if (event.key === "Escape") {
-      this.closeMenu();
-      return;
-    }
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const items = [
-      ...menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemradio"]'),
-    ];
-    const current = items.findIndex((e) => e === document.activeElement);
-    const to = menuTarget(
-      items.map((e) => e.textContent?.trim() ?? ""),
-      current,
-      event.key,
-    );
-    if (to === null) return;
-    event.preventDefault();
-    items[to].focus();
+  /** The entries of the open menu as the shared menu shows them. */
+  protected menuGroups(kind: SidebarMenuAction["kind"], id: string): MenuGroup[] {
+    return this.menuItems(kind, id).map((g) => ({
+      id: g.id,
+      label: g.label,
+      items: g.items.map((i) => ({ id: i.action, label: i.label, disabled: i.disabled })),
+    }));
   }
 
   protected closeMenu(): void {
     this.menuAt.set(null);
   }
 
-  protected choose(action: SidebarMenuAction["action"]): void {
+  protected choose(picked: string): void {
+    const action = picked as SidebarMenuAction["action"];
     const at = this.menuAt();
     // A disabled entry (offline machine) does nothing, and never reaches another backend.
     if (at && this.machines.blockedReason(at.id)) return;
@@ -872,7 +840,29 @@ export class Sidebar {
     this.sortMenuAt.set({ x: box.left, y: box.bottom + 2 });
   }
 
-  protected chooseSort(choice: "manual" | "name" | "attention" | "recent" | "now"): void {
+  protected readonly sortGroups = computed<MenuGroup[]>(() => {
+    const mode = this.sort();
+    const radio = (id: "manual" | "name" | "attention" | "recent", label: string) => ({
+      id,
+      label,
+      checked: mode === id,
+    });
+    return [
+      {
+        id: "modes",
+        items: [
+          radio("manual", "Manual"),
+          radio("name", "By name"),
+          radio("attention", "By attention"),
+          radio("recent", "Most recent"),
+        ],
+      },
+      { id: "now", items: [{ id: "now", label: "Sort alphabetically now" }] },
+    ];
+  });
+
+  protected chooseSort(picked: string): void {
+    const choice = picked as "manual" | "name" | "attention" | "recent" | "now";
     this.sortMenuAt.set(null);
     if (choice === "now") this.spaceActions.sortNow();
     else void this.settings.setSidebarSort(choice);

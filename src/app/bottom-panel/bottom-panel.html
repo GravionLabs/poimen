@@ -18,6 +18,10 @@
     @for (tab of tabs; track tab[0]) {
       <button
         type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
         role="tab"
         class="tab"
         [attr.aria-selected]="ui.panelTab() === tab[0]"
@@ -64,6 +68,10 @@
   @if (ui.panelTab() === "flow" && subagents.supported() && subagents.paneId(); as paneId) {
     <button
       type="button"
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
       class="action"
       title="Open the flow of this pane as an editor tab"
       (click)="editor.openFlow(paneId)"
@@ -72,16 +80,30 @@
     </button>
   }
   @if ((ui.panelTab() === "output" || ui.panelTab() === "events") && !following()) {
-    <button type="button" class="action" (click)="resume()">Resume auto-scroll</button>
+    <button
+      type="button"
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
+      class="action"
+      (click)="resume()"
+    >
+      Resume auto-scroll
+    </button>
   }
   <button
     type="button"
-    class="action"
+    hx-button
+    variant="text"
+    severity="secondary"
+    size="small"
+    class="action hide"
     aria-label="Hide panel"
     title="Hide panel"
     (click)="ui.togglePanel()"
   >
-    x
+    <app-icon name="close" />
   </button>
 </header>
 @if (ui.panelTab() === "output") {
@@ -235,6 +257,10 @@
             <span class="issue">
               <button
                 type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
                 class="fold-toggle"
                 [attr.aria-expanded]="openFolds().has(item.key)"
                 (click)="toggleFold(item.key)"
@@ -270,13 +296,13 @@
           >
             <span class="icon" aria-hidden="true">{{ toneStyle(row.tone).icon }}</span>
             <span class="time">{{ eventTime(row.ts) }}</span>
-            <span class="issue">{{ row.task ?? "" }}</span>
-            <span class="step">{{ row.step ?? row.type }}</span>
-            <span class="result">{{ row.outcome ?? "" }}</span>
+            <span class="issue" [title]="row.task ?? ''">{{ row.task ?? "" }}</span>
+            <span class="step" [title]="row.step ?? row.type">{{ row.step ?? row.type }}</span>
+            <span class="result" [title]="row.outcome ?? ''">{{ row.outcome ?? "" }}</span>
             @if (row.link; as url) {
-              <a class="pr" title="Open pull request" [href]="url" (click)="openPr($event, url)"
-                >link</a
-              >
+              <a class="pr" [title]="'Open ' + url" [href]="url" (click)="openPr($event, url)">{{
+                linkLabel(url)
+              }}</a>
             }
           </div>
         }

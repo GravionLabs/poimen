@@ -6,6 +6,7 @@ import {
   Output,
   inject,
 } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { findingLocation, Findings, type IndexedFinding } from "./findings";
 
 /**
@@ -14,6 +15,7 @@ import { findingLocation, Findings, type IndexedFinding } from "./findings";
  */
 @Component({
   selector: "app-findings-panel",
+  imports: [HxButton],
   template: `
     <header>
       <strong>Other findings</strong>
@@ -30,6 +32,8 @@ import { findingLocation, Findings, type IndexedFinding } from "./findings";
           </span>
           <button
             type="button"
+            hx-button
+            size="small"
             class="send"
             [disabled]="findings.added().has(item.id)"
             (click)="sendFinding.emit(item)"
@@ -46,7 +50,7 @@ import { findingLocation, Findings, type IndexedFinding } from "./findings";
       max-height: 30%;
       overflow: auto;
       padding: 6px 12px;
-      border-top: 1px solid var(--h-border-color, var(--h-surface-300));
+      border-top: 1px solid var(--h-content-border-color);
     }
     .count,
     .where {
@@ -81,18 +85,6 @@ import { findingLocation, Findings, type IndexedFinding } from "./findings";
     }
     .sev-note .sev {
       color: var(--term-ansi-3);
-    }
-    button {
-      font: inherit;
-      color: inherit;
-      background: transparent;
-      border: 1px solid var(--h-border-color, var(--h-surface-300));
-      padding: 1px 8px;
-      cursor: pointer;
-    }
-    button:disabled {
-      opacity: 0.6;
-      cursor: default;
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,

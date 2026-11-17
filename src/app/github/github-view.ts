@@ -30,11 +30,14 @@ import {
   reviewBadge,
   type PullRow,
 } from "./pulls";
+import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
 
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
   selector: "app-github-view",
   imports: [
+    HxButton,
+    HxSelectButton,
     AgentActionMenu,
     InboxSection,
     MilestonesSection,
@@ -55,28 +58,36 @@ export class GithubView {
   protected readonly runs = inject(AgentRuns);
   protected readonly ui = inject(UiState);
   /** The sub-pages of the navigation, the Inbox in front. */
-  protected readonly pages = computed<{ id: GithubPage; label: string; count: number | null }[]>(
-    () => [
-      {
-        id: "inbox",
-        label: "Inbox",
-        count: this.pulls.result()
-          ? inboxCount(deriveInbox(this.pulls.result(), this.issues.result()))
-          : null,
-      },
-      {
-        id: "pulls",
-        label: "Pull requests",
-        count: this.pulls.result() ? this.pulls.visible().length : null,
-      },
-      { id: "issues", label: "Issues", count: this.issues.result() ? this.issues.count() : null },
-      {
-        id: "milestones",
-        label: "Milestones",
-        count: this.milestones.result() ? this.milestones.count() : null,
-      },
-    ],
-  );
+  protected readonly pages = computed<
+    { id: GithubPage; label: string; icon: string; count: number | null }[]
+  >(() => [
+    {
+      id: "inbox",
+      label: "Inbox",
+      icon: "✉",
+      count: this.pulls.result()
+        ? inboxCount(deriveInbox(this.pulls.result(), this.issues.result()))
+        : null,
+    },
+    {
+      id: "pulls",
+      label: "Pull requests",
+      icon: "⇄",
+      count: this.pulls.result() ? this.pulls.visible().length : null,
+    },
+    {
+      id: "issues",
+      label: "Issues",
+      icon: "○",
+      count: this.issues.result() ? this.issues.count() : null,
+    },
+    {
+      id: "milestones",
+      label: "Milestones",
+      icon: "⚑",
+      count: this.milestones.result() ? this.milestones.count() : null,
+    },
+  ]);
   /** `All repositories` plus every repository any of the three lists knows. */
   protected readonly repoNames = computed(() =>
     [

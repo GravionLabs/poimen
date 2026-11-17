@@ -22,23 +22,17 @@
         (input)="issues.patchForm({ title: value($event) })"
       />
     </label>
-    <div class="tabs" role="group" aria-label="Description view">
-      <button
-        type="button"
-        [attr.aria-pressed]="!f.previewing"
-        (click)="issues.patchForm({ previewing: false })"
-      >
-        Write
-      </button>
-      <button
-        type="button"
-        data-testid="form-preview"
-        [attr.aria-pressed]="f.previewing"
-        (click)="issues.patchForm({ previewing: true })"
-      >
-        Preview
-      </button>
-    </div>
+    <hx-select-button
+      class="tabs"
+      aria-label="Description view"
+      size="small"
+      [options]="viewModes"
+      optionLabel="label"
+      optionValue="value"
+      [allowEmpty]="false"
+      [value]="f.previewing ? 'preview' : 'write'"
+      (valueChange)="issues.patchForm({ previewing: $event === 'preview' })"
+    />
     @if (f.previewing) {
       <div class="markdown" data-testid="form-preview-body" [innerHTML]="preview()"></div>
     } @else {
@@ -65,10 +59,27 @@
       (remove)="issues.patchForm({ milestone: null })"
     />
     <div class="buttons">
-      <button type="submit" data-testid="form-create" [disabled]="!ready() || issues.busy()">
+      <button
+        type="submit"
+        hx-button
+        variant="filled"
+        size="small"
+        data-testid="form-create"
+        [disabled]="!ready() || issues.busy()"
+      >
         Create
       </button>
-      <button type="button" data-testid="form-cancel" (click)="issues.closeForm()">Cancel</button>
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
+        data-testid="form-cancel"
+        (click)="issues.closeForm()"
+      >
+        Cancel
+      </button>
     </div>
   </form>
 }

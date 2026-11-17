@@ -1,140 +1,160 @@
 @if (actions.open()) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="cancel()"
-  ></button>
-  <form
-    class="dialog"
-    role="dialog"
-    aria-modal="true"
-    aria-label="New space"
-    (submit)="$event.preventDefault(); submit()"
-    (keydown.escape)="cancel()"
-  >
-    <h2>New space</h2>
-    <label>
-      Directory
-      <span class="path-row">
-        <input
-          class="field path"
-          name="path"
-          type="text"
-          list="space-dialog-dirs"
-          placeholder="/path/to/directory"
-          autocomplete="off"
-          [value]="path()"
-          (input)="typePath($event)"
-        />
-        <button type="button" class="browse" (click)="browse()">Browse...</button>
-      </span>
-    </label>
-    <datalist id="space-dialog-dirs">
-      @for (dir of actions.dirs(); track dir) {
-        <option [value]="dir"></option>
-      }
-    </datalist>
-    <label>
-      Label
-      <input
-        class="field"
-        name="label"
-        type="text"
-        placeholder="Name of the directory"
-        [value]="label()"
-        (input)="typeLabel($event)"
-      />
-    </label>
-    @if (path().trim()) {
-      <p class="hint template" data-testid="template-hint">
-        @if (actions.template(); as t) {
-          @if (t.default) {
-            Template: {{ t.name }} (default) · {{ agent(t.agent) }}
-          } @else {
-            Template: {{ t.name }} · {{ agent(t.agent) }}
-          }
-        } @else {
-          No template
+  <app-dialog-shell heading="New space" (cancelled)="cancel()">
+    <form (submit)="$event.preventDefault(); submit()">
+      <label>
+        Directory
+        <span class="path-row">
+          <input
+            class="field path"
+            name="path"
+            type="text"
+            list="space-dialog-dirs"
+            placeholder="/path/to/directory"
+            autocomplete="off"
+            [value]="path()"
+            (input)="typePath($event)"
+          />
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            class="browse"
+            (click)="browse()"
+          >
+            Browse...
+          </button>
+        </span>
+      </label>
+      <datalist id="space-dialog-dirs">
+        @for (dir of actions.dirs(); track dir) {
+          <option [value]="dir"></option>
         }
-      </p>
-    }
-    <p class="hint">An existing space for the directory is focused instead.</p>
-    @if (actions.error(); as message) {
-      <p class="error" role="alert">{{ message }}</p>
-    }
-    <div class="buttons">
-      <button type="button" class="cancel" (click)="cancel()">Cancel</button>
-      <button type="submit" class="confirm" [disabled]="actions.busy() || !path().trim()">
-        Create
-      </button>
-    </div>
-  </form>
+      </datalist>
+      <label>
+        Label
+        <input
+          class="field"
+          name="label"
+          type="text"
+          placeholder="Name of the directory"
+          [value]="label()"
+          (input)="typeLabel($event)"
+        />
+      </label>
+      @if (path().trim()) {
+        <p class="hint template" data-testid="template-hint">
+          @if (actions.template(); as t) {
+            @if (t.default) {
+              Template: {{ t.name }} (default) · {{ agent(t.agent) }}
+            } @else {
+              Template: {{ t.name }} · {{ agent(t.agent) }}
+            }
+          } @else {
+            No template
+          }
+        </p>
+      }
+      <p class="hint">An existing space for the directory is focused instead.</p>
+      @if (actions.error(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+      <div class="dialog-buttons">
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          class="cancel"
+          (click)="cancel()"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          hx-button
+          class="confirm"
+          [disabled]="actions.busy() || !path().trim()"
+        >
+          Create
+        </button>
+      </div>
+    </form>
+  </app-dialog-shell>
 }
 @if (actions.closing(); as c) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="actions.cancelClose()"
-  ></button>
-  <div
-    class="dialog"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Close space"
-    (keydown.escape)="actions.cancelClose()"
+  <app-dialog-shell
+    [heading]="'Close space ' + c.label + '?'"
+    label="Close space"
+    [alert]="true"
+    [cancelDefault]="true"
+    (cancelled)="actions.cancelClose()"
   >
-    <h2>Close space {{ c.label }}?</h2>
     <p class="hint">{{ c.warning }}</p>
-    <div class="buttons">
-      <button type="button" class="cancel" (click)="actions.cancelClose()">Cancel</button>
-      <button type="button" class="confirm" (click)="confirmClose()">Close space</button>
+    <div class="dialog-buttons">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="cancel"
+        (click)="actions.cancelClose()"
+      >
+        Cancel
+      </button>
+      <button type="button" hx-button severity="danger" class="confirm" (click)="confirmClose()">
+        Close space
+      </button>
     </div>
-  </div>
+  </app-dialog-shell>
 }
 @if (actions.renaming(); as r) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="actions.cancelRename()"
-  ></button>
-  <form
-    class="dialog"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Rename space"
-    (submit)="$event.preventDefault(); rename($any($event.target))"
-    (keydown.escape)="actions.cancelRename()"
-  >
-    <h2>Rename space</h2>
-    <label>
-      Name
-      <input
-        class="field"
-        name="name"
-        type="text"
-        autocomplete="off"
-        [value]="r.current"
-        (input)="actions.clearRenameError()"
-      />
-    </label>
-    @if (actions.renameError(); as message) {
-      <p class="error" role="alert">{{ message }}</p>
-    }
-    <div class="buttons">
-      <button type="button" class="cancel" (click)="actions.cancelRename()">Cancel</button>
-      <button type="submit" class="confirm">Rename</button>
-    </div>
-  </form>
+  <app-dialog-shell heading="Rename space" (cancelled)="actions.cancelRename()">
+    <form (submit)="$event.preventDefault(); rename($any($event.target))">
+      <label>
+        Name
+        <input
+          class="field"
+          name="name"
+          type="text"
+          autocomplete="off"
+          [value]="r.current"
+          (input)="actions.clearRenameError()"
+        />
+      </label>
+      @if (actions.renameError(); as message) {
+        <p class="error" role="alert">{{ message }}</p>
+      }
+      <div class="dialog-buttons">
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          class="cancel"
+          (click)="actions.cancelRename()"
+        >
+          Cancel
+        </button>
+        <button type="submit" hx-button class="confirm">Rename</button>
+      </div>
+    </form>
+  </app-dialog-shell>
 }
 @if (actions.closeError(); as message) {
   <p class="error close-error" role="alert">
     {{ message }}
-    <button type="button" aria-label="Dismiss" (click)="actions.dismissCloseError()">x</button>
+    <button
+      type="button"
+      hx-button
+      variant="text"
+      severity="secondary"
+      size="small"
+      aria-label="Dismiss"
+      title="Dismiss"
+      (click)="actions.dismissCloseError()"
+    >
+      <app-icon name="close" />
+    </button>
   </p>
 }

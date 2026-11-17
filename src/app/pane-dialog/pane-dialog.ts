@@ -11,10 +11,14 @@ import { HOOK_AGENT_KINDS, startableKinds, statusNote } from "../core/backend";
 import { TauriBridge } from "../core/tauri";
 import { parseHarnesses, type HarnessInfo } from "../core/settings";
 import { PaneActions, type PaneClosed } from "../core/pane-actions";
+import { DialogShell } from "../ui/dialog-shell/dialog-shell";
+import { Icon } from "../ui/icon/icon";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /** The question for a new terminal (directory) or a pane close (confirmation), and action errors. */
 @Component({
   selector: "app-pane-dialog",
+  imports: [DialogShell, HxButton, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: "./pane-dialog.html",
   styleUrl: "./pane-dialog.css",

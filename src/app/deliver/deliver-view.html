@@ -17,9 +17,13 @@
         Milestones
         <button
           type="button"
+          hx-button
+          variant="text"
+          size="small"
           class="link"
           data-testid="overview-refresh"
           [disabled]="overview.loading()"
+          [attr.title]="overview.loading() ? 'Already refreshing' : 'Refresh the milestones'"
           (click)="overview.load()"
         >
           {{ overview.loading() ? "Refreshing…" : "Refresh" }}
@@ -48,6 +52,10 @@
               <div class="card-head">
                 <button
                   type="button"
+                  hx-button
+                  variant="text"
+                  severity="secondary"
+                  size="small"
                   class="toggle"
                   data-testid="milestone-toggle"
                   [attr.aria-expanded]="rowOpen"
@@ -105,7 +113,14 @@
                 @if (run.status.links.length > 0) {
                   <p class="links" data-testid="milestone-links">
                     @for (l of run.status.links; track l.url) {
-                      <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                      <button
+                        type="button"
+                        hx-button
+                        variant="text"
+                        size="small"
+                        class="link"
+                        (click)="deliver.openUrl(l.url)"
+                      >
                         {{ linkLabel(l) }}
                       </button>
                     }
@@ -114,6 +129,8 @@
                 @if (paneOfRun(run); as pane) {
                   <button
                     type="button"
+                    hx-button
+                    size="small"
                     data-testid="milestone-focus"
                     (click)="paneChosen.emit(pane)"
                   >
@@ -182,7 +199,14 @@
             <span class="group-name">{{ title(item.run.status, item.group.root) }}</span>
             <span>{{ outcomeText(item.attention) }}</span>
             @for (l of item.attention.links; track l.url) {
-              <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+              <button
+                type="button"
+                hx-button
+                variant="text"
+                size="small"
+                class="link"
+                (click)="deliver.openUrl(l.url)"
+              >
                 {{ linkLabel(l) }}
               </button>
             }
@@ -224,6 +248,10 @@
     <div class="card-head">
       <button
         type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
         class="toggle"
         data-testid="group-toggle"
         [attr.data-row]="g.key"
@@ -255,7 +283,14 @@
       @for (t of run.status.tasks.slice(0, 1); track t.task) {
         <div class="current" data-testid="current">
           @if (t.subject.url; as url) {
-            <button type="button" class="link" (click)="deliver.openUrl(url)">
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              size="small"
+              class="link"
+              (click)="deliver.openUrl(url)"
+            >
               {{ overview.titleOf(t, g.root, g.machine) }}
             </button>
           } @else {
@@ -294,6 +329,8 @@
           @if (paneOf(g); as pane) {
             <button
               type="button"
+              hx-button
+              size="small"
               class="primary"
               data-testid="focus"
               (click)="paneChosen.emit(pane)"
@@ -303,12 +340,22 @@
           }
         }
         @if (g.subject?.url; as url) {
-          <button type="button" data-testid="open-subject" (click)="deliver.openUrl(url)">
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
+            data-testid="open-subject"
+            (click)="deliver.openUrl(url)"
+          >
             Open {{ subjectLabel(g) }}
           </button>
         }
         @if (canStart(g)) {
-          <button type="button" data-testid="start" (click)="startLoop(g)">Start loop</button>
+          <button type="button" hx-button size="small" data-testid="start" (click)="startLoop(g)">
+            Start loop
+          </button>
         }
       </span>
     </footer>
@@ -327,6 +374,10 @@
             <div class="line-head">
               <button
                 type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
                 class="toggle"
                 data-testid="line-toggle"
                 [attr.data-row]="r.key"
@@ -338,7 +389,14 @@
                 <span class="outcome" data-testid="outcome">{{ tl.outcome }}</span>
               </button>
               @for (l of tl.prs; track l.url) {
-                <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                <button
+                  type="button"
+                  hx-button
+                  variant="text"
+                  size="small"
+                  class="link"
+                  (click)="deliver.openUrl(l.url)"
+                >
                   {{ linkLabel(l) }}
                 </button>
               }
@@ -378,7 +436,14 @@
                       @for (t of left; track t.task.task) {
                         <li data-testid="left-task">
                           @if (t.task.subject.url; as url) {
-                            <button type="button" class="link" (click)="deliver.openUrl(url)">
+                            <button
+                              type="button"
+                              hx-button
+                              variant="text"
+                              size="small"
+                              class="link"
+                              (click)="deliver.openUrl(url)"
+                            >
                               {{ overview.titleOf(t.task, g.root, g.machine) }}
                             </button>
                           } @else {
@@ -387,7 +452,14 @@
                           @if (t.waiting) {
                             <span class="hint" data-testid="waiting">waiting for merge</span>
                             @if (t.pr; as pr) {
-                              <button type="button" class="link" (click)="deliver.openUrl(pr.url)">
+                              <button
+                                type="button"
+                                hx-button
+                                variant="text"
+                                size="small"
+                                class="link"
+                                (click)="deliver.openUrl(pr.url)"
+                              >
                                 {{ linkLabel(pr) }}
                               </button>
                             }
@@ -409,7 +481,14 @@
                       <li>
                         {{ outcomeText(a) }}
                         @for (l of a.links; track l.url) {
-                          <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                          <button
+                            type="button"
+                            hx-button
+                            variant="text"
+                            size="small"
+                            class="link"
+                            (click)="deliver.openUrl(l.url)"
+                          >
                             {{ linkLabel(l) }}
                           </button>
                         }
@@ -424,7 +503,14 @@
                     @for (t of folds.done; track t.task) {
                       <li>
                         @if (t.subject.url; as url) {
-                          <button type="button" class="link" (click)="deliver.openUrl(url)">
+                          <button
+                            type="button"
+                            hx-button
+                            variant="text"
+                            size="small"
+                            class="link"
+                            (click)="deliver.openUrl(url)"
+                          >
                             {{ overview.titleOf(t, g.root, g.machine) }}
                           </button>
                         } @else {
@@ -434,7 +520,14 @@
                           >{{ t.outcome }}{{ outcomeText(t) ? ": " + outcomeText(t) : "" }}</span
                         >
                         @for (l of t.links; track l.url) {
-                          <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                          <button
+                            type="button"
+                            hx-button
+                            variant="text"
+                            size="small"
+                            class="link"
+                            (click)="deliver.openUrl(l.url)"
+                          >
                             {{ linkLabel(l) }}
                           </button>
                         }
@@ -448,7 +541,14 @@
                         @for (t of f.tasks; track t.task) {
                           <li>
                             @if (t.subject.url; as url) {
-                              <button type="button" class="link" (click)="deliver.openUrl(url)">
+                              <button
+                                type="button"
+                                hx-button
+                                variant="text"
+                                size="small"
+                                class="link"
+                                (click)="deliver.openUrl(url)"
+                              >
                                 {{ overview.titleOf(t, g.root, g.machine) }}
                               </button>
                             } @else {
@@ -464,7 +564,14 @@
                   <p class="links" data-testid="links">
                     Links
                     @for (l of r.status.links; track l.url) {
-                      <button type="button" class="link" (click)="deliver.openUrl(l.url)">
+                      <button
+                        type="button"
+                        hx-button
+                        variant="text"
+                        size="small"
+                        class="link"
+                        (click)="deliver.openUrl(l.url)"
+                      >
                         {{ linkLabel(l) }}
                       </button>
                     }
@@ -488,7 +595,14 @@
                           <span class="hint">{{ e.outcome }}</span>
                         }
                         @if (e.link; as url) {
-                          <button type="button" class="link" (click)="deliver.openUrl(url)">
+                          <button
+                            type="button"
+                            hx-button
+                            variant="text"
+                            size="small"
+                            class="link"
+                            (click)="deliver.openUrl(url)"
+                          >
                             {{ prLabel(url) }}
                           </button>
                         }
@@ -513,6 +627,9 @@
     }}</span>
     <button
       type="button"
+      hx-button
+      variant="text"
+      size="small"
       class="link"
       data-testid="issue-link"
       (click)="overview.openIssue(repo, e.issue.number)"
@@ -523,12 +640,27 @@
       <span class="hint" data-testid="issue-blockers">blocked by {{ blockers(e) }}</span>
     }
     @if (e.pr; as pr) {
-      <button type="button" class="link" (click)="deliver.openUrl(pr.url)">
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        size="small"
+        class="link"
+        (click)="deliver.openUrl(pr.url)"
+      >
         PR #{{ pr.number }}
       </button>
     }
     @if (e.state === "in-progress" && issuePane(row, e); as pane) {
-      <button type="button" class="link" data-testid="issue-run" (click)="paneChosen.emit(pane)">
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        size="small"
+        class="link"
+        data-testid="issue-run"
+        (click)="paneChosen.emit(pane)"
+      >
         Show run
       </button>
     }

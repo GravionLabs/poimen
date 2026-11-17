@@ -5,6 +5,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NamedLayout } from "../core/named-layouts";
 import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
+import type { PaneSpec } from "../core/space-layout";
 import type { SpaceTemplate } from "../core/space-templates";
 import { tauri } from "../core/tauri.mock";
 import { LayoutTabsEditor } from "./layout-tabs-editor";
@@ -58,7 +59,16 @@ beforeAll(() => {
 
 afterEach(() => TestBed.resetTestingModule());
 
-async function setup(layouts: NamedLayout[] = [REVIEW, OTHER], templates: SpaceTemplate[] = []) {
+const PANES: PaneSpec[] = [
+  { name: "agent", command: "claude", split: null },
+  { name: "shell", command: null, split: { from: "agent", direction: "right", ratio: 0.6 } },
+];
+
+async function setup(
+  layouts: NamedLayout[] = [REVIEW, OTHER],
+  templates: SpaceTemplate[] = [],
+  spacesLayout: PaneSpec[] | null = null,
+) {
   tauri.reset();
   tauri.answer("set_layouts", () => null);
   TestBed.resetTestingModule();
@@ -79,7 +89,12 @@ async function setup(layouts: NamedLayout[] = [REVIEW, OTHER], templates: SpaceT
     },
   });
   const store = TestBed.inject(SettingsStore);
-  store["_settings"].set({ ...DEFAULT_SETTINGS, layouts, spaceTemplates: templates });
+  store["_settings"].set({
+    ...DEFAULT_SETTINGS,
+    layouts,
+    spaceTemplates: templates,
+    spacesLayout: spacesLayout ? { panes: spacesLayout } : null,
+  });
   const fixture = TestBed.createComponent(LayoutsEditor);
   fixture.detectChanges();
   const host = fixture.nativeElement as HTMLElement;
@@ -160,7 +175,7 @@ describe("LayoutsEditor", () => {
     fixture.detectChanges();
     type(input("Command in agent"), "codex");
     // The shape select turns a tab into a split tree, whose leaves can be split again.
-    const shape = host.querySelector<HTMLSelectElement>('[aria-label="Shape of tests"]')!;
+    const shape = host.querySelectorAll<HTMLSelectElement>('[aria-labelledby="tabs-col-shape"]')[1];
     shape.value = "split";
     shape.dispatchEvent(new Event("change"));
     fixture.detectChanges();
@@ -310,5 +325,44 @@ describe("LayoutsEditor", () => {
     await settle();
     expect(host.querySelector(".pane-row")).not.toBeNull();
     expect(fixture.debugElement.injector.get(SettingsStore).writeError()).toContain("nope");
+  });
+
+  it("lists spaces.layout as the layout default, marked as the one new spaces get", async () => {
+    const { host } = await setup([REVIEW], [], PANES);
+    const rows = [...host.querySelectorAll(".row")];
+    expect(rows[0].textContent).toContain("default");
+    expect(rows[0].textContent).toContain("new spaces get this layout");
+    expect(rows[0].textContent).toContain("agent");
+    expect(rows[1].textContent).toContain("review");
+  });
+
+  it("does not write the virtual default when another layout changes", async () => {
+    const { button, settle } = await setup([REVIEW], [], PANES);
+    button("Duplicate review").click();
+    await settle();
+    const [call] = tauri.calls("set_layouts") as { layouts: { name: string }[] }[];
+    expect(call.layouts.map((l) => l.name)).toEqual(["review", "review copy"]);
+  });
+
+  it("writes a named layout default when the default is edited", async () => {
+    const { button, fixture, settle, type, input } = await setup([], [], PANES);
+    button("Edit default").click();
+    await settle();
+    type(input("Command in agent"), "codex");
+    button("Save layout").click();
+    await settle();
+    fixture.detectChanges();
+    const [call] = tauri.calls("set_layouts") as { layouts: { name: string; tabs: unknown[] }[] }[];
+    expect(call.layouts).toHaveLength(1);
+    expect(call.layouts[0].name).toBe("default");
+    expect(call.layouts[0].tabs).toHaveLength(1);
+  });
+
+  it("refuses to delete the default that comes from spaces.layout", async () => {
+    const { host, button, settle } = await setup([], [], PANES);
+    button("Delete default").click();
+    await settle();
+    expect(tauri.calls("set_layouts")).toEqual([]);
+    expect(host.textContent).toContain("spaces.layout");
   });
 });

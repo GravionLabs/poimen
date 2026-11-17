@@ -6,6 +6,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { AgentConfirm, type ConfirmRequest } from "../core/agent-confirm";
 import { AgentConfirmDialog } from "./agent-confirm-dialog";
+import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 
 function setup(request: ConfirmRequest | null) {
   const confirm = {
@@ -25,7 +26,7 @@ function setup(request: ConfirmRequest | null) {
   });
   const fixture = TestBed.createComponent(AgentConfirmDialog);
   fixture.detectChanges();
-  return { confirm, root: fixture.nativeElement as HTMLElement };
+  return { confirm, fixture, root: fixture.nativeElement as HTMLElement };
 }
 
 const request: ConfirmRequest = {
@@ -62,11 +63,26 @@ describe("AgentConfirmDialog", () => {
   it("declines on the backdrop and on Escape", () => {
     const { root, confirm } = setup({ ...request, action: "start_agent", text: "claude" });
     expect(root.querySelector("h2")?.textContent).toContain("start an agent");
-    root.querySelector<HTMLButtonElement>(".backdrop")!.click();
+    root.querySelector<HTMLElement>("dialog")!.click();
     expect(confirm.answer).toHaveBeenLastCalledWith(false);
     root
-      .querySelector<HTMLElement>(".dialog")!
-      .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      .querySelector<HTMLElement>("dialog")!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(confirm.answer).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes the focus on Decline, Escape declines, Enter does not allow, the focus goes back", async () => {
+    const opener = focusOpener();
+    const { confirm, fixture, root } = setup(request);
+    await fixture.whenStable();
+    expectFocusInside(root);
+    expect(document.activeElement?.textContent).toContain("Decline");
+    press("Enter", { key: "Enter" });
+    expect(confirm.answer).not.toHaveBeenCalledWith(true);
+    press("Escape");
+    expect(confirm.answer).toHaveBeenLastCalledWith(false);
+    confirm.current.set(null);
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(opener);
   });
 });

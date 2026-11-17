@@ -1,6 +1,10 @@
-import { ChangeDetectionStrategy, Component, HostListener, computed, inject } from "@angular/core";
+import { ChangeDetectionStrategy, Component, computed, inject } from "@angular/core";
 import { AgentActions, type ActionTarget } from "../agent-actions";
 import { IssueTasks } from "../issue-task";
+import { ContextMenu } from "../../ui/context-menu/context-menu";
+import type { MenuGroup, MenuPick } from "../../ui/context-menu/menu-model";
+
+const START_TASK = "start-task";
 
 /**
  * The popup of the agent actions of a row (the `⋯` button or the context menu). Shift+click on an
@@ -9,8 +13,8 @@ import { IssueTasks } from "../issue-task";
 @Component({
   selector: "app-agent-action-menu",
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [ContextMenu],
   templateUrl: "./agent-action-menu.html",
-  styleUrl: "./agent-action-menu.css",
 })
 export class AgentActionMenu {
   protected readonly actions = inject(AgentActions);
@@ -25,21 +29,46 @@ export class AgentActionMenu {
     return m ? this.actions.offered(m.targets) : [];
   });
 
-  protected startTask(issue: ActionTarget): void {
-    this.actions.closeMenu();
-    void this.issueTasks.start(issue.root, issue.number);
-  }
+  protected readonly groups = computed<MenuGroup[]>(() => {
+    const issue = this.openIssue();
+    return [
+      {
+        id: "actions",
+        items: [
+          ...(issue
+            ? [
+                {
+                  id: START_TASK,
+                  label: this.issueTasks.label(issue.root, issue.number),
+                  testId: "menu-start-task",
+                },
+              ]
+            : []),
+          ...this.offered().map((o) => ({
+            id: o.action.id,
+            label: o.action.label,
+            disabled: o.enabled ? false : (o.reason ?? true),
+            testId: "menu-action",
+          })),
+        ],
+      },
+    ];
+  });
 
-  @HostListener("document:keydown.escape")
-  protected onEscape(): void {
-    this.actions.closeMenu();
-  }
-
-  @HostListener("document:click", ["$event"])
-  protected onDocumentClick(event: MouseEvent): void {
-    // The `⋯` button opens in its own click handler; that click must not close it again.
-    if (event.target instanceof HTMLElement && event.target.closest("[data-action-menu-button]"))
+  protected choose(pick: MenuPick): void {
+    const m = this.actions.menu();
+    if (!m) return;
+    if (pick.id === START_TASK) {
+      const issue = this.openIssue();
+      this.actions.closeMenu();
+      if (issue) void this.issueTasks.start(issue.root, issue.number);
       return;
+    }
+    const o = this.offered().find((x) => x.action.id === pick.id);
+    if (o) this.actions.request(o.action, m.targets, pick.shiftKey);
+  }
+
+  protected close(): void {
     this.actions.closeMenu();
   }
 }

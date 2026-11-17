@@ -10,6 +10,8 @@ import {
   untracked,
   viewChild,
 } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
+import { Icon } from "../ui/icon/icon";
 import { FlowView } from "./flow-view";
 import { EditorTabs, tabPaneId } from "../core/editor-tabs";
 import { paneDir, transcriptEmptyText, type Terminal } from "../core/snapshot";
@@ -63,7 +65,7 @@ export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
 /** Bottom panel below the editor area: a tab strip, the subagent dropdown and the Output tab. */
 @Component({
   selector: "app-bottom-panel",
-  imports: [FlowView],
+  imports: [FlowView, HxButton, Icon],
   templateUrl: "./bottom-panel.html",
   styleUrl: "./bottom-panel.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -200,6 +202,17 @@ export class BottomPanel {
     }
     this.pickedRun.set(pickRunOf(this.spaceRuns(), value));
     this.following.set(true);
+  }
+
+  /** The link text after its target: `PR #12`, `issue #3`, else the host. */
+  protected linkLabel(url: string): string {
+    const m = /\/(pull|issues)\/(\d+)/.exec(url);
+    if (m) return m[1] === "pull" ? `PR #${m[2]}` : `issue #${m[2]}`;
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
   }
 
   protected openPr(event: Event, url: string): void {

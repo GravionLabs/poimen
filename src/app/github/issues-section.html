@@ -11,6 +11,9 @@
   @if (issues.error(); as err) {
     <p class="problem" role="alert">Could not read the issues: {{ err }}</p>
   }
+  @if (issues.loading() && !issues.result()) {
+    <p class="hint" role="status" data-testid="issues-loading">Loading issues…</p>
+  }
   @if (issues.result()) {
     <div class="toolbar" role="group" aria-label="Issue filters">
       <select aria-label="State" [value]="issues.state()" (change)="setState(value($event))">
@@ -101,7 +104,17 @@
           <option value="completed">Close as completed</option>
           <option value="not_planned">Close as not planned</option>
         </select>
-        <button type="button" data-testid="bulk-clear" (click)="issues.clearMarked()">Clear</button>
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          data-testid="bulk-clear"
+          (click)="issues.clearMarked()"
+        >
+          Clear
+        </button>
       </div>
     }
     @for (e of issues.errors(); track e.repo) {
@@ -114,6 +127,10 @@
         {{ tree.repo }}
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
           class="icon-btn"
           title="New issue"
           data-testid="new-issue"
@@ -157,6 +174,11 @@
             @if (row.node.children.length) {
               <button
                 type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
+                [attr.title]="(row.collapsed ? 'Expand #' : 'Collapse #') + i.number"
                 class="twisty"
                 data-testid="twisty"
                 [attr.aria-expanded]="!row.collapsed"
@@ -172,10 +194,14 @@
               levelBadge(row.node.level).label
             }}</span>
             <span class="nr">#{{ i.number }}</span>
-            <span class="title">{{ i.title }}</span>
+            <span class="title" [title]="i.title">{{ i.title }}</span>
             @if (runs.badge(tree.repo, i.number); as run) {
               <button
                 type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
                 class="badge badge-{{ run.state === 'running' ? 'primary' : 'warning' }}"
                 data-testid="run-badge"
                 title="Show the agent"
@@ -204,6 +230,10 @@
               <span class="pr" data-testid="pr">
                 <button
                   type="button"
+                  hx-button
+                  variant="text"
+                  severity="secondary"
+                  size="small"
                   class="link"
                   [disabled]="!isGithubUrl(pr.url)"
                   [attr.aria-label]="'Open pull request #' + pr.number + ' in browser'"
@@ -226,6 +256,10 @@
             }
             <button
               type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
               class="icon-btn"
               title="Agent actions"
               data-testid="row-menu"
@@ -237,6 +271,10 @@
             </button>
             <button
               type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
               class="icon-btn open"
               title="Open in browser"
               [disabled]="!isGithubUrl(i.url)"

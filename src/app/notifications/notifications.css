@@ -11,24 +11,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 14px 8px;
+  gap: 4px;
+  padding: 8px 10px 6px 14px;
 }
 
 .brand {
   font-weight: 600;
   letter-spacing: 0.04em;
-}
-
-.mark {
-  all: unset;
-  cursor: pointer;
-  font-size: 12px;
-  opacity: 0.8;
-}
-
-.mark:disabled {
-  cursor: default;
-  opacity: 0.4;
 }
 
 .empty {
@@ -76,15 +65,15 @@
 }
 
 .status-blocked {
-  color: #e5a50a;
+  color: var(--status-blocked);
 }
 
 .status-done {
-  color: #2ea043;
+  color: var(--status-done);
 }
 
 .status-error {
-  color: var(--status-error, #d14);
+  color: var(--status-error);
 }
 
 .text {

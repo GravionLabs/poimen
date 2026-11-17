@@ -7,6 +7,7 @@ import { SpacesStore } from "../core/spaces-store";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { TrustDialog } from "./trust-dialog";
+import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 
 const bridge = { invoke: vi.fn(), pickDirectory: vi.fn() };
 const store = { refresh: vi.fn(async () => undefined), snapshot: () => ({}) };
@@ -57,7 +58,7 @@ async function setup() {
     await settle();
   };
   const createCalls = () => bridge.invoke.mock.calls.filter(([c]) => c === "create_space");
-  return { actions, root, click, createCalls };
+  return { actions, root, click, createCalls, settle };
 }
 
 describe("TrustDialog", () => {
@@ -89,21 +90,21 @@ describe("TrustDialog", () => {
       decision: { kind: "trust", hash: "h1" },
       command: null,
     });
-    expect(root.querySelector("[role=dialog]")).toBeNull();
+    expect(root.querySelector("dialog")).toBeNull();
   });
 
   it("Run without project commands sends the without answer", async () => {
     const { root, click, createCalls } = await setup();
     await click(".without");
     expect(createCalls()[1][1].decision).toEqual({ kind: "without" });
-    expect(root.querySelector("[role=dialog]")).toBeNull();
+    expect(root.querySelector("dialog")).toBeNull();
   });
 
   it("Cancel creates nothing and closes the dialog", async () => {
     const { root, click, createCalls } = await setup();
     await click(".cancel");
     expect(createCalls()).toHaveLength(1);
-    expect(root.querySelector("[role=dialog]")).toBeNull();
+    expect(root.querySelector("dialog")).toBeNull();
   });
 
   it("asks again when the file changed before the answer", async () => {
@@ -116,6 +117,29 @@ describe("TrustDialog", () => {
     );
     await click(".confirm");
     expect(createCalls()).toHaveLength(2);
-    expect(root.querySelector("[role=dialog]")).not.toBeNull();
+    expect(root.querySelector("dialog")).not.toBeNull();
+  });
+
+  it("Cancel has the focus, Enter does not trust, Escape cancels and the focus goes back", async () => {
+    const opener = focusOpener();
+    const { root, createCalls, actions, settle } = await setup();
+    expectFocusInside(root);
+    expect(document.activeElement?.textContent).toContain("Cancel");
+    press("Enter");
+    expect(createCalls()).toHaveLength(1);
+    press("Escape");
+    await vi.waitFor(() => expect(actions.trust()).toBeNull());
+    await settle();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("Trust and run is the one primary button, on the right", async () => {
+    const { root } = await setup();
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>(".dialog-buttons button")];
+    expect(
+      buttons.map((b) => ["cancel", "without", "confirm"].find((c) => b.classList.contains(c))),
+    ).toEqual(["cancel", "without", "confirm"]);
+    expect(buttons[2].getAttribute("variant")).toBeNull();
+    expect(buttons[0].getAttribute("variant")).toBe("text");
   });
 });

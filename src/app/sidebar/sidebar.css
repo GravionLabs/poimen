@@ -11,40 +11,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-right: 10px;
+  gap: 4px;
+  padding: 8px 10px 6px 14px;
 }
 
-.add {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.layout-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-right: 6px;
-  padding: 0;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
+.layout-toggle[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--h-primary-color) 22%, transparent);
+  color: var(--h-text-color);
 }
 
 .brand {
   flex: 1;
-  padding: 14px 14px 8px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -62,7 +39,7 @@
  * Row metrics (all rows share them, so height depends only on the line count):
  *   line 1 (name, workspace title): 16px; line 2: 14px; vertical padding of every row: 2px
  *   gap between rows and groups: 0 (the padding is the only spacing); indent per level: 0.75rem
- * The terminal/agent badge is 16px tall (14px line + 1px borders), exactly the name line.
+ * The terminal/agent badge is 16px tall (14px line + 1px padding), exactly the name line.
  */
 .spaces {
   padding: 0 4px;
@@ -203,8 +180,9 @@
   min-width: 20px;
   height: 16px;
   padding: 0 2px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
+  border: 0;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--h-text-muted-color) 16%, transparent);
   color: var(--h-text-muted-color);
   font:
     600 10px/14px ui-monospace,
@@ -214,7 +192,6 @@
 }
 
 .icon.agent {
-  border-color: var(--h-highlight-background);
   background: var(--h-highlight-background);
   color: var(--h-highlight-color);
 }
@@ -283,7 +260,7 @@
 }
 
 .space-edit-error {
-  color: var(--h-danger-color, #e5484d);
+  color: var(--status-error);
   font-size: 11px;
 }
 
@@ -372,15 +349,6 @@
   font-size: 0.85em;
 }
 
-.rebuild {
-  padding: 0 6px;
-  border: 1px solid currentColor;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
 .rebuild-label,
 .rebuild-hint {
   font-style: italic;
@@ -416,57 +384,6 @@
 .gear:focus-visible,
 .close:focus-visible {
   outline: 1px solid currentcolor;
-}
-
-.menu-backdrop {
-  all: unset;
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-}
-
-.menu {
-  position: fixed;
-  z-index: 51;
-  min-width: 160px;
-  padding: 4px;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 6px;
-  background: var(--h-content-background);
-  color: var(--h-text-color);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
-}
-
-.menu-item {
-  all: unset;
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.menu-separator {
-  height: 1px;
-  margin: 4px 0;
-  background: var(--h-content-border-color);
-}
-
-.menu-heading {
-  padding: 4px 10px 2px;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.6;
-  cursor: default;
-  user-select: none;
-}
-
-.menu-item:hover,
-.menu-item:focus-visible {
-  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
 /* Emphasis from `sidebar.rows`; a value after another one on the line sits close to its "·". */
@@ -549,12 +466,6 @@
 
 .retry {
   margin-left: 6px;
-  font: inherit;
-  color: inherit;
-  text-decoration: underline;
-  background: none;
-  border: 0;
-  cursor: pointer;
 }
 
 /* Blocked and not viewed yet: a ring around the row. */
@@ -600,7 +511,7 @@
 .pin-mark {
   flex: 0 0 auto;
   margin-left: 4px;
-  font-size: 0.8em;
+  color: var(--h-text-muted-color);
 }
 
 /* Agents section header with its order toggle, and the priority sections (#722). */
@@ -609,7 +520,8 @@
   flex: none;
   align-items: center;
   justify-content: space-between;
-  padding-right: 8px;
+  gap: 4px;
+  padding: 0 10px 0 0;
 }
 
 .agents-scroll {

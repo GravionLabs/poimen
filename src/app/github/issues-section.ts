@@ -14,12 +14,13 @@ import {
 } from "./issues";
 import { IssueFormPane } from "./issue-form/issue-form";
 import { checkBadges, checksText, errorText, isGithubUrl } from "./pulls";
+import { HxButton } from "@gravionlabs/helix-ui";
 
 /** The "Issues" section of the GitHub tab: the issue tree per repository with linked pull requests. */
 @Component({
   selector: "app-github-issues",
   templateUrl: "./issues-section.html",
-  imports: [IssueFormPane],
+  imports: [HxButton, IssueFormPane],
   styleUrl: "./issues-section.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

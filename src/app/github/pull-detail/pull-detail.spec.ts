@@ -194,13 +194,13 @@ describe("pull request detail pane", () => {
     expect(body.innerHTML).not.toContain("<script");
     expect(q(el, "[data-testid=detail-checks]")!.textContent).toContain("frontend");
     expect(q(el, "[data-testid=detail-checks]")!.textContent).toContain("rust");
-    expect(q(el, "[data-testid=detail-checks] a")!.textContent).toBe("frontend");
+    expect(q(el, "[data-testid=detail-checks] button")!.textContent!.trim()).toBe("frontend");
     expect(q(el, "[data-testid=detail-reviews]")!.textContent).toContain("octocat");
     expect(q(el, "[data-testid=detail-reviews]")!.textContent).toContain("changes requested");
     expect(q(el, "[data-testid=detail-issue]")!.textContent).toContain("o/n#7 The issue");
     expect(q(el, "[data-testid=actions]")!.children).toHaveLength(0);
     expect(q(el, "[data-testid=pr-actions]")).not.toBeNull();
-    q(el, "[data-testid=detail-checks] a")!.click();
+    q(el, "[data-testid=detail-checks] button")!.click();
     expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/o/n/actions/runs/1");
   });
 

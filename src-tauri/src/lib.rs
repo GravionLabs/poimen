@@ -27,6 +27,7 @@ mod project_edit;
 mod remote_runs;
 mod remote_transcripts;
 mod schemes;
+mod server_install;
 mod settings;
 mod settings_transfer;
 mod spaces;
@@ -1299,6 +1300,107 @@ fn list_machines(machines: State<'_, SharedMachines>) -> Vec<machines::MachineSt
     machines.list()
 }
 
+/// Adds a machine or, with `original`, edits the one of that name (#861). Field errors come back
+/// as `{field, message}` for the form; the settings watcher connects the machine.
+#[tauri::command]
+fn machine_save(
+    original: Option<String>,
+    name: String,
+    ssh: String,
+    repos_dir: String,
+) -> Result<(), Vec<machines::FieldError>> {
+    let home = home_dir().ok_or_else(|| {
+        vec![machines::FieldError {
+            field: None,
+            message: "the home directory is not known (HOME or USERPROFILE)".into(),
+        }]
+    })?;
+    machines::save_machine(&home, original.as_deref(), &name, &ssh, &repos_dir)
+}
+
+/// Plans the install or update of `poimen-server` on a machine (ADR 0013, #865): reads the
+/// machine (`uname -sm`, `command -v`) and downloads and verifies the archive here. Nothing is
+/// written on the machine; the plan is kept until `machine_install_run` or the next plan.
+#[tauri::command]
+async fn machine_install_plan(
+    machines: State<'_, SharedMachines>,
+    pending: State<'_, std::sync::Arc<server_install::Pending>>,
+    name: String,
+) -> Result<server_install::Plan, String> {
+    let config = machines.config(&name)?;
+    let pending = pending.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = server_install::prepare(
+            &server_install::Ssh,
+            &server_install::Curl,
+            &config,
+            poimen_server::BUNDLED_VERSION,
+        )?;
+        let plan = prepared.plan.clone();
+        pending.put(prepared);
+        Ok(plan)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs the plan of `machine_install_plan` after the user confirmed it; progress is the event
+/// `machine:install_step`. On success the machine connects again (its check runs then).
+#[tauri::command]
+async fn machine_install_run(
+    app: tauri::AppHandle,
+    machines: State<'_, SharedMachines>,
+    pending: State<'_, std::sync::Arc<server_install::Pending>>,
+    name: String,
+) -> Result<(), String> {
+    let prepared = pending
+        .take(&name)
+        .ok_or("the install was not planned (or was started already)")?;
+    let machines = machines.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let installed = server_install::run(&server_install::Ssh, &prepared, &|step| {
+            let _ = app.emit("machine:install_step", step);
+        })?;
+        // The settings watcher restarts the machine when its entry changes; else reconnect.
+        let changed = machines.config(&name)?.server_path != installed.server_path;
+        if changed {
+            let home = home_dir().ok_or("the home directory is not known")?;
+            machines::set_server_path(&home, &name, installed.server_path.as_deref())
+        } else {
+            machines.reconnect(&name)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Drops the plan of `machine_install_plan` (the dialog was cancelled).
+#[tauri::command]
+fn machine_install_cancel(
+    pending: State<'_, std::sync::Arc<server_install::Pending>>,
+    name: String,
+) {
+    let _ = pending.take(&name);
+}
+
+/// The concrete hosts of `~/.ssh/config` for the add form (#863): names only, configured ones
+/// marked; no SSH config is an empty list.
+#[tauri::command]
+fn ssh_config_hosts(machines: State<'_, SharedMachines>) -> Vec<machines::SshHost> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
+    };
+    let configured: Vec<_> = machines.list().into_iter().map(|m| m.config).collect();
+    machines::ssh_hosts(&home, &configured)
+}
+
+/// Removes a machine from the settings; its remote terminals keep running (#861).
+#[tauri::command]
+fn machine_remove(name: String) -> Result<(), String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    machines::remove_machine(&home, &name)
+}
+
 /// Tries to connect an offline or incompatible machine at once.
 #[tauri::command]
 fn reconnect_machine(machines: State<'_, SharedMachines>, name: String) -> Result<(), String> {
@@ -1543,7 +1645,7 @@ fn sync_machines(
         let handle = handle.clone();
         machines::Machine::start(
             config.clone(),
-            std::sync::Arc::new(machines::SshConnector::new(&config.ssh)),
+            std::sync::Arc::new(machines::SshConnector::new(config)),
             {
                 let handle = handle.clone();
                 move |status| {
@@ -1674,6 +1776,14 @@ async fn hooks_install(agent: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || hooks::install(&hooks::SystemExec, &agent))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// The socket of the poimen-server this build talks to (the Server settings page).
+#[tauri::command]
+fn server_socket_path() -> String {
+    poimen_client::protocol::socket_path()
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// The running poimen build's version (Tauri app version).
@@ -2628,6 +2738,7 @@ pub fn run() {
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
         .manage(SharedMachines::default())
+        .manage(std::sync::Arc::new(server_install::Pending::default()))
         .manage(std::sync::Arc::new(machines::RemoteStreams::default()))
         .manage(std::sync::Arc::new(remote_runs::RemoteRuns::default()))
         .setup(move |app| {
@@ -2687,6 +2798,9 @@ pub fn run() {
             quit_and_stop_server,
             list_machines,
             reconnect_machine,
+            machine_save,
+            machine_remove,
+            ssh_config_hosts,
             machine_snapshot,
             machine_repo_ensure,
             machine_worktree_create,
@@ -2694,6 +2808,9 @@ pub fn run() {
             machine_task_tab,
             machine_task_cleanup,
             machine_check,
+            machine_install_plan,
+            machine_install_run,
+            machine_install_cancel,
             set_terminal_colors,
             hooks_status,
             hooks_install,
@@ -2743,6 +2860,7 @@ pub fn run() {
             list_child_dirs,
             app_version,
             app_channel,
+            server_socket_path,
             updater::update_check,
             updater::update_install,
             get_settings,

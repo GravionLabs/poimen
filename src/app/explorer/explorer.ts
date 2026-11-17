@@ -20,6 +20,8 @@ import { SettingsStore } from "../core/settings";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
+import { ContextMenu } from "../ui/context-menu/context-menu";
+import { plainGroups, type MenuEntry, type MenuGroup } from "../ui/context-menu/menu-model";
 import { GitSync } from "./git-sync";
 
 /** A directory as the backend lists it (`list_child_dirs`). */
@@ -97,7 +99,7 @@ export function spaceDirs(
 /** Directory tree of the configured roots, directories only, loaded when a folder expands. */
 @Component({
   selector: "app-explorer",
-  imports: [HxTree, HxTreeNodeTemplate],
+  imports: [ContextMenu, HxTree, HxTreeNodeTemplate],
   templateUrl: "./explorer.html",
   styleUrl: "./explorer.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -161,6 +163,45 @@ export class Explorer {
 
   /** The directory of the open menu is a repository: it offers to start a task. */
   protected readonly menuRepo = signal<boolean | null>(null);
+
+  /** The entries of the open menu; the repository ones follow once `repo_info` answered. */
+  protected readonly menuGroups = computed<MenuGroup[]>(() => {
+    const repo = this.menuRepo();
+    const items: MenuEntry[] = [
+      { id: "create-space", label: "Create space here" },
+      { id: "open-terminal", label: "Open terminal here" },
+    ];
+    if (repo === true) {
+      items.push(
+        { id: "show-changes", label: "Show changes" },
+        { id: "start-task", label: "Start task from issue…" },
+        { id: "fetch", label: "Fetch" },
+        { id: "pull", label: "Pull" },
+      );
+    } else if (repo === false) {
+      items.push({ id: "fetch-all", label: "Fetch all" });
+    }
+    return plainGroups(items);
+  });
+
+  protected choose(path: string, id: string): void {
+    switch (id) {
+      case "create-space":
+        return this.createSpace(path);
+      case "open-terminal":
+        return this.openTerminal(path);
+      case "show-changes":
+        return this.showChanges(path);
+      case "start-task":
+        return this.startTask(path);
+      case "fetch":
+        return this.fetchRepo(path);
+      case "pull":
+        return this.pullRepo(path);
+      case "fetch-all":
+        return this.fetchAll(path);
+    }
+  }
 
   protected select(path: string): void {
     this.selection.select(path);

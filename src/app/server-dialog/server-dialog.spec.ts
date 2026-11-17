@@ -6,6 +6,7 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { ServerRestart, type ServerAction } from "../core/server-restart";
 import { ServerDialog } from "./server-dialog";
+import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 
 function setup(action: ServerAction | null, terminals: string[] = ["build", "t2"], kept = 0) {
   const restart = {
@@ -28,7 +29,7 @@ function setup(action: ServerAction | null, terminals: string[] = ["build", "t2"
   });
   const fixture = TestBed.createComponent(ServerDialog);
   fixture.detectChanges();
-  return { restart, root: fixture.nativeElement as HTMLElement };
+  return { restart, fixture, root: fixture.nativeElement as HTMLElement };
 }
 
 describe("ServerDialog", () => {
@@ -39,7 +40,7 @@ describe("ServerDialog", () => {
   });
 
   it("renders nothing without a confirmation to ask", () => {
-    expect(setup(null).root.querySelector("[role=dialog]")).toBeNull();
+    expect(setup(null).root.querySelector("dialog")).toBeNull();
   });
 
   it("names the terminals that end and wires both buttons for a restart", () => {
@@ -79,5 +80,25 @@ describe("ServerDialog", () => {
     const { root } = setup("restart", ["old"], 1);
     expect(root.textContent).toContain("1 terminal ends");
     expect(root.textContent).toContain("1 terminal keeps running");
+  });
+
+  it("takes the focus on Cancel, Escape cancels, Enter does not confirm, the focus goes back", async () => {
+    const opener = focusOpener();
+    const { restart, fixture, root } = setup("quit");
+    await fixture.whenStable();
+    expectFocusInside(root);
+    expect(document.activeElement?.textContent).toContain("Cancel");
+    press("Enter");
+    expect(restart.confirm).not.toHaveBeenCalled();
+    press("Escape");
+    expect(restart.cancel).toHaveBeenCalledTimes(1);
+    restart.action.set(null);
+    fixture.detectChanges();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("marks the confirmation as destructive: the danger button is the primary one", () => {
+    const { root } = setup("restart");
+    expect(root.querySelector(".confirm")?.getAttribute("severity")).toBe("danger");
   });
 });

@@ -85,11 +85,6 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
           "Preview",
         ],
       },
-      {
-        id: "space-layout",
-        title: "New space layout",
-        labels: ["Panes of a new space", "Name", "Command", "Split from", "Direction", "Keeps"],
-      },
       { id: "trusted-projects", title: "Trusted projects", labels: ["Revoke"] },
     ],
   },
@@ -136,6 +131,8 @@ const RETIRED_PAGES: ReadonlyMap<string, string> = new Map([
   ["notifications", "appearance"],
   // The page was named after herdr, the former backend (#174).
   ["herdr", "server"],
+  // "New space layout" is the layout `default` of the Layouts page (#855).
+  ["space-layout", "layouts"],
 ]);
 
 export function allPages(groups: readonly SettingsGroup[] = SETTINGS_GROUPS): SettingsPage[] {

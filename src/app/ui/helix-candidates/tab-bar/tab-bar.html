@@ -67,7 +67,7 @@
         (click)="$event.stopPropagation(); closed.emit(tab.id)"
         (dblclick)="$event.stopPropagation()"
       >
-        ✕
+        <app-icon name="close" />
       </button>
     </div>
   }
@@ -96,58 +96,21 @@
   </button>
 }
 @if (allAt(); as at) {
-  <button
-    type="button"
-    class="menu-backdrop"
-    tabindex="-1"
-    aria-label="Close menu"
-    (click)="closeAll()"
-  ></button>
-  <div class="menu all-menu" role="menu" [style.right.px]="at.right" [style.top.px]="at.y">
-    @for (tab of tabs; track tab.id) {
-      <button
-        type="button"
-        role="menuitem"
-        class="menu-item"
-        [class.active]="tab.id === activeId"
-        [class.attention]="tab.attention"
-        (click)="chooseTab(tab.id)"
-        (keydown.escape)="closeAll()"
-      >
-        <span class="label">{{ tab.group ? tab.group + " / " : "" }}{{ tab.label }}</span>
-        @if (tab.attention) {
-          <span class="mark attention-mark" role="img" aria-label="Needs attention"></span>
-        } @else if (tab.unread) {
-          <span class="mark unread" role="img" aria-label="Unread"></span>
-        }
-      </button>
-    }
-  </div>
+  <app-context-menu
+    cssClass="all-menu"
+    label="All tabs"
+    [at]="at"
+    [alignRight]="true"
+    [groups]="allGroups()"
+    (picked)="chooseTab($event.id)"
+    (closed)="closeAll()"
+  />
 }
 @if (menuAt(); as at) {
-  <button
-    type="button"
-    class="menu-backdrop"
-    tabindex="-1"
-    aria-label="Close menu"
-    (click)="closeMenu()"
-    (contextmenu)="$event.preventDefault(); closeMenu()"
-  ></button>
-  <div class="menu" role="menu" [style.left.px]="at.x" [style.top.px]="at.y">
-    @for (item of menuItems(at.id); track item.action) {
-      <button
-        type="button"
-        role="menuitem"
-        class="menu-item"
-        [disabled]="item.disabled"
-        (click)="choose(item)"
-        (keydown.escape)="closeMenu()"
-      >
-        <span>{{ item.label }}</span>
-        @if (item.shortcut) {
-          <span class="shortcut">{{ item.shortcut }}</span>
-        }
-      </button>
-    }
-  </div>
+  <app-context-menu
+    [at]="at"
+    [groups]="tabMenuGroups(at.id)"
+    (picked)="chooseMenu($event.id)"
+    (closed)="closeMenu()"
+  />
 }

@@ -32,6 +32,7 @@ import { TerminalSession, TerminalStreamService } from "../core/terminal-stream"
 import { PromptBar } from "../prompt-bar/prompt-bar";
 import { isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
 import { matchLabel, searchDecorations, TerminalSearch, type Searchable } from "./search";
+import { Icon } from "../ui/icon/icon";
 
 const RESIZE_DEBOUNCE_MS = 150;
 /**
@@ -89,7 +90,7 @@ function ansiColors(
  */
 @Component({
   selector: "app-terminal-view",
-  imports: [HxButton, PromptBar],
+  imports: [HxButton, PromptBar, Icon],
   templateUrl: "./terminal-view.html",
   styleUrl: "./terminal-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

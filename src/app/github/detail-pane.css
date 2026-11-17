@@ -46,6 +46,12 @@ h3 {
   font-size: 13px;
   margin: 16px 0 6px;
 }
+h2,
+h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .meta {
   display: flex;
   align-items: center;
@@ -69,7 +75,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 .problem {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 .list {
   list-style: none;
@@ -78,7 +84,7 @@ h3 {
 }
 .list li {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   padding: 3px 0;
 }
@@ -89,20 +95,19 @@ h3 {
   min-width: 70px;
 }
 .check-passing .state {
-  color: var(--h-success-color, inherit);
+  color: var(--status-done);
 }
 .check-failing .state {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 .link {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--h-accent-color, inherit);
-  cursor: pointer;
   text-align: left;
-  font: inherit;
   text-decoration: underline;
+}
+.link:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 .markdown {
   overflow-wrap: anywhere;

@@ -1,19 +1,12 @@
 @if (actions.trust(); as pending) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="answer('cancel')"
-  ></button>
-  <div
-    class="dialog trust"
-    role="dialog"
-    aria-modal="true"
-    aria-label="Trust project"
-    (keydown.escape)="answer('cancel')"
+  <app-dialog-shell
+    heading="Trust this project?"
+    label="Trust project"
+    width="640px"
+    [alert]="true"
+    [cancelDefault]="true"
+    (cancelled)="answer('cancel')"
   >
-    <h2>Trust this project?</h2>
     <p class="hint">
       <code>{{ pending.request.root }}</code> wants to run these commands. Only trust a repository
       you know. The trust ends when the file changes.
@@ -26,12 +19,30 @@
         </li>
       }
     </ul>
-    <div class="buttons">
-      <button type="button" class="cancel" (click)="answer('cancel')">Cancel</button>
-      <button type="button" class="without" (click)="answer('without')">
+    <div class="dialog-buttons">
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        class="cancel"
+        (click)="answer('cancel')"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        class="without"
+        (click)="answer('without')"
+      >
         Run without project commands
       </button>
-      <button type="button" class="confirm" (click)="answer('trust')">Trust and run</button>
+      <button type="button" hx-button class="confirm" (click)="answer('trust')">
+        Trust and run
+      </button>
     </div>
-  </div>
+  </app-dialog-shell>
 }

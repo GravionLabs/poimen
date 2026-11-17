@@ -15,6 +15,7 @@ import {
   type Appearance,
   type ColorScheme,
 } from "../core/color-scheme";
+import { HxButton, HxCheckbox, HxInput, HxSelectButton, HxTag } from "@gravionlabs/helix-ui";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import {
   defaultTerminalFontFamily,
@@ -30,7 +31,9 @@ import {
 } from "../core/settings";
 import { Sounds } from "../core/sounds";
 import { HOOK_AGENT_KINDS, agentSupport } from "../core/backend";
-import { HooksOffer, agentName } from "../core/hooks-offer";
+import { HooksOffer, agentName, installAction, stateTag } from "../core/hooks-offer";
+import { ServerRestart } from "../core/server-restart";
+import { SpacesStore } from "../core/spaces-store";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
 import { UserSchemes } from "../core/user-schemes";
@@ -52,7 +55,6 @@ import {
 } from "../core/ui-font";
 import { MachinesPage } from "../machines-page/machines-page";
 import { LayoutsEditor } from "./layouts-editor";
-import { SpaceLayoutEditor } from "./space-layout-editor";
 import { SpaceTemplatesEditor } from "./space-templates-editor";
 import { SettingsImportPanel } from "./settings-import-panel";
 import { SettingsTransfer } from "../core/settings-transfer";
@@ -155,11 +157,15 @@ export function withRoot(
 @Component({
   selector: "app-settings-view",
   imports: [
+    HxButton,
+    HxSelectButton,
+    HxTag,
     MachinesPage,
     LayoutsEditor,
-    SpaceLayoutEditor,
     SpaceTemplatesEditor,
     SettingsImportPanel,
+    HxInput,
+    HxCheckbox,
   ],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
@@ -172,6 +178,13 @@ export class SettingsView {
   private readonly bridge = inject(TauriBridge);
   private readonly ui = inject(UiState);
   protected readonly hooks = inject(HooksOffer);
+  protected readonly serverRestart = inject(ServerRestart);
+  private readonly spacesStore = inject(SpacesStore);
+  protected readonly stateTag = stateTag;
+  protected readonly installAction = installAction;
+  protected readonly serverInfo = this.spacesStore.info;
+  protected readonly serverState = this.spacesStore.backend;
+  protected readonly socketPath = signal("");
   private readonly sounds = inject(Sounds);
   protected readonly transfer = inject(SettingsTransfer);
   protected readonly agentName = agentName;
@@ -309,7 +322,15 @@ export class SettingsView {
 
   constructor() {
     effect(() => {
-      if (this.current().page.id === "server") untracked(() => void this.hooks.refresh());
+      if (this.current().page.id === "server") {
+        untracked(() => {
+          void this.hooks.refresh();
+          this.bridge
+            .invoke<string>("server_socket_path")
+            .then((path) => this.socketPath.set(path ?? ""))
+            .catch(() => this.socketPath.set(""));
+        });
+      }
     });
     // The harnesses come from config.json, so they are read again when the settings change.
     effect(() => {
@@ -462,6 +483,11 @@ export class SettingsView {
         input.value = String(this.settings()[which === "terminal" ? "fontSize" : "uiFontSize"]);
     });
   }
+
+  protected readonly modeChoices: readonly { value: SchemeMode; label: string }[] = [
+    { value: "single", label: "Single scheme" },
+    { value: "pair", label: "Light/dark pair" },
+  ];
 
   protected setMode(mode: SchemeMode): void {
     const schema = this.settings().colorSchema;

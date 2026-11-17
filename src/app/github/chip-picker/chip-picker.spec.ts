@@ -39,6 +39,11 @@ function type(el: HTMLElement, text: string) {
 }
 
 describe("chip picker", () => {
+  it("does not point list at a datalist", () => {
+    const { el } = make([], ["a", "b"]);
+    expect(el.querySelector("[data-testid=chip-input]")!.hasAttribute("list")).toBe(false);
+  });
+
   it("shows chips and emits remove", () => {
     const { el, removed } = make(["a", "b"], ["a", "b", "c"]);
     expect(
@@ -81,5 +86,22 @@ describe("chip picker", () => {
     const { el } = make([], ["a"], true);
     expect(el.querySelector("[data-testid=chip-input]")).toBeNull();
     expect(el.textContent).toContain("None");
+  });
+
+  it("moves through the options with the arrow keys and back to the field", () => {
+    const { fixture, el } = make([], ["bug", "build", "docs"]);
+    type(el, "bu");
+    fixture.detectChanges();
+    const input = el.querySelector<HTMLElement>("[data-testid=chip-input]")!;
+    const key = (target: HTMLElement, name: string) =>
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+    const options = [...el.querySelectorAll<HTMLElement>("[data-testid=chip-option]")];
+    key(input, "ArrowDown");
+    expect(document.activeElement).toBe(options[0]);
+    key(options[0], "ArrowDown");
+    expect(document.activeElement).toBe(options[1]);
+    key(options[1], "ArrowUp");
+    key(options[0], "ArrowUp");
+    expect(document.activeElement).toBe(input);
   });
 });

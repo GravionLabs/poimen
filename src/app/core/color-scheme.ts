@@ -250,6 +250,8 @@ const PRIMARY_SHARE: Record<number, number> = {
 /** The share of the sidebar's active-row tint (`sidebar.css`): primary over the content background. */
 const ACTIVE_TINT = 0.28;
 const AA = 4.5;
+/** AA plus room for the hover and active tints under outlined and text buttons. */
+const ACTION_TEXT = 6.5;
 
 /** Background of the tinted active sidebar row. */
 export function activeRowTint(tokens: Record<string, string>): string {
@@ -293,6 +295,17 @@ export function deriveTokens(scheme: ColorScheme): Record<string, string> {
     contrast(scheme.background, primary) >= contrast(scheme.foreground, primary)
       ? scheme.background
       : scheme.foreground;
+  // Buttons (#844): the filled primary button and primary text keep AA in every state, whatever the accent.
+  const label = t["--h-primary-contrast-color"];
+  t["--app-action"] = ensureContrast(primary, [label], AA);
+  t["--app-action-hover"] = ensureContrast(t["--h-primary-hover-color"], [label], AA);
+  t["--app-action-active"] = ensureContrast(t["--h-primary-active-color"], [label], AA);
+  t["--app-action-text"] = ensureContrast(primary, [t["--h-content-background"]], ACTION_TEXT);
+  t["--app-danger-text"] = ensureContrast(
+    scheme.ansi[1],
+    [t["--h-content-background"]],
+    ACTION_TEXT,
+  );
   const tint = activeRowTint(t);
   const grounds = [t["--h-content-background"], t["--app-ground"], tint];
   t["--h-text-color"] = ensureContrast(scheme.foreground, grounds, AA);

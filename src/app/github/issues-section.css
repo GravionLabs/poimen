@@ -13,6 +13,9 @@ h2 {
   margin: 0;
 }
 h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   margin: 16px 0 6px;
 }
@@ -27,7 +30,7 @@ h3 {
   color: var(--h-text-muted-color);
 }
 .problem {
-  color: var(--h-danger-color);
+  color: var(--status-error);
 }
 .mono {
   font-family: monospace;
@@ -41,7 +44,7 @@ h3 {
 .row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   min-height: 34px;
   border-bottom: 1px solid var(--h-content-border-color);
@@ -49,11 +52,6 @@ h3 {
 .twisty {
   display: inline-block;
   width: 16px;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  color: inherit;
 }
 .nr {
   color: var(--h-text-muted-color);
@@ -65,8 +63,17 @@ h3 {
   display: inline-flex;
   gap: 4px;
 }
-.open {
-  margin-left: auto;
+.title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row > button,
+.row > .pr,
+.row > .nr {
+  flex: none;
 }
 .row:hover,
 .row:focus-within {
@@ -84,7 +91,7 @@ h3 {
   background: var(--h-content-hover-background, rgba(127, 127, 127, 0.15));
 }
 .row.cursor {
-  outline: 1px solid var(--h-accent-color, currentColor);
+  outline: 1px solid var(--h-primary-color);
   outline-offset: -1px;
 }
 .row {

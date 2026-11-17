@@ -7,11 +7,15 @@ import { SpacesStore } from "../core/spaces-store";
 import { PaneActions } from "../core/pane-actions";
 import { TauriBridge } from "../core/tauri";
 import { PaneDialog } from "./pane-dialog";
+import { expectFocusInside, focusOpener, press } from "../ui/dialog-shell/dialog-contract";
 
-async function setup(harnesses: unknown[] = []) {
+async function setup(
+  harnesses: unknown[] = [],
+  ask: (a: PaneActions) => void = (a) => a.askStartAgent("p1"),
+) {
   const store = {
     pane: () => undefined,
-    snapshot: () => ({ tabs: [] }),
+    snapshot: () => ({ tabs: [], spaces: [], terminals: [] }),
     refresh: vi.fn(async () => undefined),
   };
   const bridge = {
@@ -35,7 +39,7 @@ async function setup(harnesses: unknown[] = []) {
   });
   const actions = TestBed.inject(PaneActions);
   const fixture = TestBed.createComponent(PaneDialog);
-  actions.askStartAgent("p1");
+  ask(actions);
   fixture.detectChanges();
   await fixture.whenStable();
   fixture.detectChanges();
@@ -43,7 +47,7 @@ async function setup(harnesses: unknown[] = []) {
   const options = [...root.querySelectorAll<HTMLOptionElement>('select[name="kind"] option')].map(
     (o) => o.value,
   );
-  return { options, bridge, root };
+  return { options, bridge, root, actions, fixture };
 }
 
 describe("PaneDialog start agent (#410)", () => {
@@ -74,5 +78,22 @@ describe("PaneDialog start agent (#410)", () => {
         args: ["--no-auto-commits", "--yes"],
       }),
     );
+  });
+
+  it("start agent: the first field has the focus, Escape cancels and the focus goes back", async () => {
+    const opener = focusOpener();
+    const { root, actions, fixture } = await setup();
+    expectFocusInside(root);
+    expect(document.activeElement?.getAttribute("name")).toBe("kind");
+    press("Escape");
+    fixture.detectChanges();
+    expect(actions.dialog()).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("new terminal: the directory field has the focus", async () => {
+    const { root } = await setup([], (a) => a.askNew("w1"));
+    expectFocusInside(root);
+    expect(document.activeElement?.localName).toBe("input");
   });
 });

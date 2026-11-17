@@ -29,7 +29,7 @@
 .search {
   box-sizing: border-box;
   width: 100%;
-  height: 26px;
+  height: var(--control-height);
   padding: 2px 8px;
   border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
@@ -145,12 +145,25 @@ h3 {
   text-transform: uppercase;
 }
 
-.harnesses li,
-.agent-actions li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 8px;
+.grid {
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+.grid th,
+.grid td {
+  padding: 4px 16px 4px 0;
+  text-align: left;
+  vertical-align: baseline;
+  font-weight: normal;
+}
+
+.grid thead th {
+  font-weight: 600;
+}
+
+.grid .source {
+  opacity: 0.7;
 }
 
 .hint {
@@ -161,28 +174,6 @@ h3 {
 
 .radios {
   display: inline-flex;
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.choice {
-  padding: 5px 12px;
-  border: 0;
-  background: none;
-  color: var(--h-text-muted-color);
-  cursor: pointer;
-  font: inherit;
-}
-
-/*
- * Hover and selected states tint the text color over the content background. The derived surface
- * ramp runs from light to dark in both modes, so its steps would be light under light
- * text in a dark scheme (#139). settings-contrast.spec.ts checks the selected label.
- */
-.choice.on {
-  background: color-mix(in srgb, var(--h-text-color) 18%, transparent);
-  color: var(--h-text-color);
 }
 
 .list {
@@ -314,41 +305,6 @@ h3 {
   flex: none;
 }
 
-.icon-btn,
-.btn {
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.icon-btn {
-  width: 24px;
-  height: 22px;
-  padding: 0;
-  line-height: 1;
-}
-
-.btn {
-  padding: 4px 10px;
-}
-
-.icon-btn:hover:not(:disabled),
-.btn:hover:not(:disabled),
-.icon-btn:focus-visible,
-.btn:focus-visible {
-  background: color-mix(in srgb, currentColor 12%, transparent);
-  outline: none;
-}
-
-.icon-btn:disabled,
-.btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .toolbar-row {
   display: flex;
   align-items: center;
@@ -408,7 +364,7 @@ h3 {
 .field input,
 .field select {
   box-sizing: border-box;
-  height: 26px;
+  height: var(--control-height);
   padding: 2px 6px;
   border: 1px solid var(--h-content-border-color);
   border-radius: 4px;
@@ -448,7 +404,7 @@ h3 {
 
 .root-note {
   align-self: center;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--h-text-muted-color);
 }
 
@@ -464,12 +420,6 @@ h3 {
 
 .spacer {
   flex: 1;
-}
-
-.btn.primary:not(:disabled) {
-  border-color: var(--h-primary-color);
-  color: var(--h-primary-color);
-  font-weight: 600;
 }
 
 .fields {
@@ -503,7 +453,7 @@ h3 {
 }
 
 .fields.sound-row .check {
-  height: 26px;
+  height: var(--control-height);
   margin: 0;
 }
 
@@ -511,9 +461,8 @@ h3 {
   min-width: 0;
 }
 
-.fields.sound-row .choice {
+.fields.sound-row .test {
   width: 100%;
-  height: 26px;
 }
 
 @media (max-width: 520px) {
@@ -561,4 +510,233 @@ h3 {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+}
+
+.server-info {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0 0 8px;
+}
+
+.server-info dt {
+  color: var(--h-text-muted-color);
+}
+
+.server-info dd {
+  margin: 0;
+}
+
+.integrations {
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+.integrations th,
+.integrations td {
+  padding: 4px 12px 4px 0;
+  text-align: left;
+  vertical-align: top;
+  font-weight: normal;
+}
+
+.integrations thead th {
+  font-weight: 600;
+}
+
+.integrations .error {
+  margin: 4px 0 0;
+}
+
+.actions .group {
+  display: flex;
+  gap: 2px;
+}
+
+.actions .group + .group {
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid var(--h-content-border-color);
+}
+
+.actions .group.apart {
+  margin-left: 12px;
+}
+
+/* One grid for the pane rows: a single header row, the same column the same width in every row. */
+.pane-grid {
+  --cols: minmax(7rem, 1fr) minmax(10rem, 2fr) minmax(7rem, 1fr) 6rem 5rem auto;
+  display: grid;
+  grid-template-columns: var(--cols);
+  column-gap: 8px;
+}
+
+.pane-grid.simple {
+  --cols: minmax(7rem, 1fr) minmax(10rem, 2fr) auto;
+}
+
+.pane-grid > *,
+.pane-grid .rows,
+.pane-grid .pane-row,
+.pane-grid .pane-fields {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+}
+
+.pane-grid .rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pane-grid .pane-fields {
+  column-gap: 8px;
+}
+
+.pane-grid .pane-row > .field-error {
+  grid-column: 1 / -1;
+}
+
+.pane-head {
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+}
+
+.pane-grid .pane-row {
+  padding-block: 4px;
+}
+
+.pane-grid .field {
+  min-width: 0;
+}
+
+.pane-grid .field input[type="text"],
+.pane-grid .field.ratio input,
+.pane-grid .field select {
+  width: 100%;
+}
+
+.pane-grid .field > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.pane-grid .root-note {
+  grid-column: span 3;
+}
+
+.pane-grid.simple .field > span {
+  /* kept hidden: the header names the column */
+  position: absolute;
+}
+
+.pane-grid .pane-fields .actions {
+  margin-left: 0;
+  align-items: center;
+  justify-self: end;
+}
+
+@media (max-width: 720px) {
+  .pane-grid,
+  .pane-grid > *,
+  .pane-grid .rows,
+  .pane-grid .pane-row,
+  .pane-grid .pane-fields {
+    display: block;
+  }
+
+  .pane-head {
+    display: none;
+  }
+
+  .pane-grid .pane-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .pane-grid .field > span {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+  }
+
+  .pane-grid .field input[type="text"] {
+    width: 110px;
+  }
+
+  .pane-grid .field.grow input {
+    width: 100%;
+  }
+
+  .pane-grid .field.ratio input {
+    width: 64px;
+  }
+
+  .pane-grid .field select {
+    width: auto;
+  }
+
+  .pane-grid .pane-fields .actions {
+    margin-left: auto;
+  }
+}
+
+/* Nested rows of the tab editor (leaves, splits, place) are not part of the header grid. */
+.pane-grid .pane-fields.leaf,
+.pane-grid .pane-fields.place,
+.pane-grid .split-node .pane-fields {
+  display: flex;
+  grid-column: auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pane-grid .split-node,
+.pane-grid .split-children {
+  grid-column: 1 / -1;
+}
+
+.pane-grid .pane-fields.leaf .field > span,
+.pane-grid .pane-fields.place .field > span,
+.pane-grid .split-node .pane-fields .field > span {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+}
+
+.pane-grid .pane-fields.leaf .field,
+.pane-grid .pane-fields.place .field,
+.pane-grid .split-node .pane-fields .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.pane-grid .pane-fields.leaf .field.grow {
+  flex: 1;
+}
+
+.pane-grid .pane-fields.leaf .field input[type="text"],
+.pane-grid .pane-fields.place .field select,
+.pane-grid .split-node .pane-fields .field select {
+  width: auto;
+}
+
+.pane-grid .pane-fields.leaf .field.grow input {
+  width: 100%;
+}
+
+.pane-grid .pane-fields.leaf .actions {
+  margin-left: auto;
 }

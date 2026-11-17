@@ -1,159 +1,212 @@
 @if (actions.dialog(); as d) {
-  <button
-    type="button"
-    class="backdrop"
-    tabindex="-1"
-    aria-label="Cancel"
-    (click)="cancel()"
-  ></button>
   @if (d.kind === "new") {
-    <form
-      class="dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-label="New terminal"
-      (submit)="$event.preventDefault(); create(d.cwd)"
-      (keydown.escape)="cancel()"
-    >
-      <h2>New terminal</h2>
-      <label>
-        Directory
-        <input
-          class="cwd"
-          type="text"
-          list="pane-dialog-dirs"
-          placeholder="Default directory of the workspace"
-          [value]="cwd(d.cwd)"
-          (input)="type($event)"
-        />
-      </label>
-      <datalist id="pane-dialog-dirs">
-        @for (dir of d.dirs; track dir) {
-          <option [value]="dir"></option>
-        }
-      </datalist>
-      <div class="buttons">
-        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
-        <button type="submit" class="confirm">Create</button>
-      </div>
-    </form>
+    <app-dialog-shell heading="New terminal" label="New terminal" (cancelled)="cancel()">
+      <form (submit)="$event.preventDefault(); create(d.cwd)">
+        <label>
+          Directory
+          <input
+            class="field"
+            type="text"
+            list="pane-dialog-dirs"
+            placeholder="Default directory of the workspace"
+            [value]="cwd(d.cwd)"
+            (input)="type($event)"
+          />
+        </label>
+        <datalist id="pane-dialog-dirs">
+          @for (dir of d.dirs; track dir) {
+            <option [value]="dir"></option>
+          }
+        </datalist>
+        <div class="dialog-buttons">
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            class="cancel"
+            (click)="cancel()"
+          >
+            Cancel
+          </button>
+          <button type="submit" hx-button class="confirm">Create</button>
+        </div>
+      </form>
+    </app-dialog-shell>
   } @else if (d.kind === "restart") {
-    <div
-      class="dialog"
-      role="alertdialog"
-      aria-modal="true"
-      aria-label="Restart terminal"
-      (keydown.escape)="cancel()"
+    <app-dialog-shell
+      heading="Restart terminal"
+      label="Restart terminal"
+      [alert]="true"
+      [cancelDefault]="true"
+      (cancelled)="cancel()"
     >
-      <h2>Restart terminal</h2>
       <p>
         Restart <strong>{{ d.name }}</strong> on poimen-pty-host {{ d.bundled }} (it runs on
         {{ d.have }})? The process in it ends; a new terminal with the same directory and command
         takes its place.
       </p>
-      <div class="buttons">
-        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
-        <button type="button" class="confirm danger" (click)="restart()">Restart terminal</button>
+      <div class="dialog-buttons">
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          class="cancel"
+          (click)="cancel()"
+        >
+          Cancel
+        </button>
+        <button type="button" hx-button severity="danger" class="confirm" (click)="restart()">
+          Restart terminal
+        </button>
       </div>
-    </div>
+    </app-dialog-shell>
   } @else if (d.kind === "agent") {
-    <form
-      class="dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Start agent"
-      (submit)="$event.preventDefault(); startAgent($any($event.target))"
-      (keydown.escape)="cancel()"
+    <app-dialog-shell
+      heading="Start agent in {{ d.name }}"
+      label="Start agent"
+      (cancelled)="cancel()"
     >
-      <h2>Start agent in {{ d.name }}</h2>
-      <label>
-        Agent
-        <select class="cwd" name="kind">
-          @for (kind of kinds(); track kind) {
-            <option [value]="kind">{{ kind }}{{ note(kind) }}</option>
-          }
-        </select>
-      </label>
-      <label>
-        Name
-        <input class="cwd" name="name" type="text" placeholder="Defaults to the agent" />
-      </label>
-      <label>
-        Arguments
-        <input class="cwd" name="args" type="text" placeholder="Optional, separated by spaces" />
-      </label>
-      <p class="hint">The pane has to be at its shell prompt.</p>
-      <div class="buttons">
-        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
-        <button type="submit" class="confirm">Start</button>
-      </div>
-    </form>
+      <form (submit)="$event.preventDefault(); startAgent($any($event.target))">
+        <label>
+          Agent
+          <select class="field" name="kind">
+            @for (kind of kinds(); track kind) {
+              <option [value]="kind">{{ kind }}{{ note(kind) }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          Name
+          <input class="field" name="name" type="text" placeholder="Defaults to the agent" />
+        </label>
+        <label>
+          Arguments
+          <input
+            class="field"
+            name="args"
+            type="text"
+            placeholder="Optional, separated by spaces"
+          />
+        </label>
+        <p class="hint">The pane has to be at its shell prompt.</p>
+        <div class="dialog-buttons">
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            class="cancel"
+            (click)="cancel()"
+          >
+            Cancel
+          </button>
+          <button type="submit" hx-button class="confirm">Start</button>
+        </div>
+      </form>
+    </app-dialog-shell>
   } @else if (d.kind === "rename") {
-    <form
-      class="dialog"
-      role="dialog"
-      aria-modal="true"
-      [attr.aria-label]="d.agent ? 'Rename agent' : 'Rename pane'"
-      (submit)="$event.preventDefault(); rename($any($event.target))"
-      (keydown.escape)="cancel()"
+    <app-dialog-shell
+      [heading]="d.agent ? 'Rename agent' : 'Rename pane'"
+      [label]="d.agent ? 'Rename agent' : 'Rename pane'"
+      (cancelled)="cancel()"
     >
-      <h2>{{ d.agent ? "Rename agent" : "Rename pane" }}</h2>
-      <label>
-        Name
-        <input
-          class="cwd"
-          name="name"
-          type="text"
-          placeholder="Empty clears the name"
-          [value]="d.current"
-        />
-      </label>
-      <div class="buttons">
-        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
-        <button type="submit" class="confirm">Rename</button>
-      </div>
-    </form>
+      <form (submit)="$event.preventDefault(); rename($any($event.target))">
+        <label>
+          Name
+          <input
+            class="field"
+            name="name"
+            type="text"
+            placeholder="Empty clears the name"
+            [value]="d.current"
+          />
+        </label>
+        <div class="dialog-buttons">
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            class="cancel"
+            (click)="cancel()"
+          >
+            Cancel
+          </button>
+          <button type="submit" hx-button class="confirm">Rename</button>
+        </div>
+      </form>
+    </app-dialog-shell>
   } @else if (d.kind === "save-layout") {
-    <form
-      class="dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Save tab as layout"
-      (submit)="$event.preventDefault(); saveLayout($any($event.target))"
-      (keydown.escape)="cancel()"
+    <app-dialog-shell
+      heading="Save tab as layout"
+      label="Save tab as layout"
+      (cancelled)="cancel()"
     >
-      <h2>Save tab as layout</h2>
-      <label>
-        Name
-        <input class="cwd" name="name" type="text" [value]="d.current" />
-      </label>
-      <div class="buttons">
-        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
-        <button type="submit" class="confirm">Save</button>
-      </div>
-    </form>
+      <form (submit)="$event.preventDefault(); saveLayout($any($event.target))">
+        <label>
+          Name
+          <input class="field" name="name" type="text" [value]="d.current" />
+        </label>
+        <div class="dialog-buttons">
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            class="cancel"
+            (click)="cancel()"
+          >
+            Cancel
+          </button>
+          <button type="submit" hx-button class="confirm">Save</button>
+        </div>
+      </form>
+    </app-dialog-shell>
   } @else {
-    <div
-      class="dialog"
-      role="alertdialog"
-      aria-modal="true"
-      aria-label="Close pane"
-      (keydown.escape)="cancel()"
+    <app-dialog-shell
+      heading="Close pane"
+      label="Close pane"
+      [alert]="true"
+      [cancelDefault]="true"
+      (cancelled)="cancel()"
     >
-      <h2>Close pane</h2>
       <p>
         Close <strong>{{ d.name }}</strong>? {{ d.warning }}
       </p>
-      <div class="buttons">
-        <button type="button" class="cancel" (click)="cancel()">Cancel</button>
-        <button type="button" class="confirm danger" (click)="close()">Close pane</button>
+      <div class="dialog-buttons">
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          class="cancel"
+          (click)="cancel()"
+        >
+          Cancel
+        </button>
+        <button type="button" hx-button severity="danger" class="confirm" (click)="close()">
+          Close pane
+        </button>
       </div>
-    </div>
+    </app-dialog-shell>
   }
 }
 @if (actions.error(); as message) {
   <div class="error" role="alert">
     <span>{{ message }}</span>
-    <button type="button" aria-label="Dismiss" (click)="actions.dismissError()">x</button>
+    <button
+      type="button"
+      hx-button
+      variant="text"
+      severity="secondary"
+      size="small"
+      aria-label="Dismiss"
+      title="Dismiss"
+      (click)="actions.dismissError()"
+    >
+      <app-icon name="close" />
+    </button>
   </div>
 }

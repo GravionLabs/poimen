@@ -21,16 +21,50 @@
   }
   <div class="field layout-actions">
     @if (layoutMode() === "none") {
-      <button type="button" class="cfg-layout-add" (click)="addLayout()">Add layout</button>
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        size="small"
+        class="cfg-layout-add"
+        (click)="addLayout()"
+      >
+        Add layout
+      </button>
     } @else {
-      <button type="button" class="cfg-layout-remove" (click)="removeLayout()">
+      <button
+        type="button"
+        hx-button
+        variant="outlined"
+        severity="secondary"
+        size="small"
+        class="cfg-layout-remove"
+        (click)="removeLayout()"
+      >
         Remove layout
       </button>
     }
-    <button type="button" class="cfg-layout-export" (click)="exportLayout(-1)">
+    <button
+      type="button"
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
+      class="cfg-layout-export"
+      (click)="exportLayout(-1)"
+    >
       Export layout…
     </button>
-    <button type="button" class="cfg-layout-import" (click)="importLayout(-1)">
+    <button
+      type="button"
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
+      class="cfg-layout-import"
+      (click)="importLayout(-1)"
+    >
       Import layout…
     </button>
   </div>
@@ -49,6 +83,8 @@
       <div class="field">
         <label [attr.for]="'cfg-preset-' + pi">Preset name</label>
         <input
+          hx-input
+          size="small"
           type="text"
           class="cfg-preset-name"
           autocomplete="off"
@@ -56,9 +92,37 @@
           [value]="preset.name"
           (input)="renamePreset(pi, $event)"
         />
-        <button type="button" class="cfg-preset-export" (click)="exportLayout(pi)">Export…</button>
-        <button type="button" class="cfg-preset-import" (click)="importLayout(pi)">Import…</button>
-        <button type="button" class="cfg-preset-remove" (click)="removePresetEntry(pi)">
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
+          class="cfg-preset-export"
+          (click)="exportLayout(pi)"
+        >
+          Export…
+        </button>
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
+          class="cfg-preset-import"
+          (click)="importLayout(pi)"
+        >
+          Import…
+        </button>
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
+          class="cfg-preset-remove"
+          (click)="removePresetEntry(pi)"
+        >
           Remove preset
         </button>
       </div>
@@ -79,6 +143,10 @@
   <div class="field">
     <button
       type="button"
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
       class="cfg-preset-add"
       [disabled]="presetList() === null"
       (click)="addPresetEntry()"

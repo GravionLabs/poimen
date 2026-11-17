@@ -10,11 +10,18 @@
       {{ e.repo }}: {{ errorText(e.error) }}
     </p>
   }
+  @if (milestones.loading() && !milestones.repos().length) {
+    <p class="hint" role="status" data-testid="milestones-loading">Loading milestones…</p>
+  }
   @for (r of milestones.repos(); track r.root) {
     <h3 class="mono">
       {{ r.repo }}
       <button
         type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
         class="icon-btn"
         title="New milestone"
         data-testid="milestone-new"
@@ -24,6 +31,11 @@
         +
       </button>
     </h3>
+    @if (milestones.compose(); as c) {
+      @if (c.kind === "create" && c.root === r.root) {
+        <ng-container *ngTemplateOutlet="composeForm; context: { $implicit: c }" />
+      }
+    }
     @if (r.milestones.length === 0) {
       <p class="hint" data-testid="milestones-empty">No open milestones.</p>
     }
@@ -37,6 +49,10 @@
         >
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="pick"
             [attr.aria-pressed]="milestones.isSelected(r.repo, m.title)"
             [attr.aria-label]="'Filter issues by milestone ' + m.title"
@@ -61,6 +77,10 @@
           </button>
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="icon-btn"
             title="Open in browser"
             [disabled]="!isGithubUrl(m.url)"
@@ -69,19 +89,12 @@
           >
             ↗
           </button>
-          @if (readyToClose(m)) {
-            <button
-              type="button"
-              class="icon-btn text"
-              data-testid="milestone-close"
-              [attr.aria-label]="'Close milestone ' + m.title"
-              (click)="milestones.openClose(r.root, r.repo, m)"
-            >
-              Close
-            </button>
-          }
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="icon-btn"
             title="Edit or close"
             data-testid="milestone-edit"
@@ -90,22 +103,32 @@
           >
             ✎
           </button>
-          @if (!readyToClose(m)) {
-            <button
-              type="button"
-              class="icon-btn text"
-              data-testid="milestone-close"
-              [attr.aria-label]="'Close milestone ' + m.title"
-              (click)="milestones.openClose(r.root, r.repo, m)"
-            >
-              Close
-            </button>
-          }
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            severity="danger"
+            size="small"
+            [attr.title]="'Close milestone ' + m.title"
+            class="icon-btn"
+            data-testid="milestone-close"
+            [attr.aria-label]="'Close milestone ' + m.title"
+            (click)="milestones.openClose(r.root, r.repo, m)"
+          >
+            Close
+          </button>
         </li>
+        @if (milestones.compose(); as c) {
+          @if (c.kind !== "create" && c.root === r.root && c.number === m.number) {
+            <li class="compose-row">
+              <ng-container *ngTemplateOutlet="composeForm; context: { $implicit: c }" />
+            </li>
+          }
+        }
       }
     </ul>
   }
-  @if (milestones.compose(); as c) {
+  <ng-template #composeForm let-c>
     <form
       class="compose"
       data-testid="milestone-compose"
@@ -143,11 +166,28 @@
         </label>
       }
       <div class="actions">
-        <button type="button" (click)="milestones.cancel()">Cancel</button>
-        <button type="submit" data-testid="milestone-submit" [disabled]="milestones.busy()">
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          (click)="milestones.cancel()"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          hx-button
+          variant="filled"
+          [severity]="c.kind === 'close' ? 'danger' : 'primary'"
+          size="small"
+          data-testid="milestone-submit"
+          [disabled]="milestones.busy()"
+        >
           {{ c.kind === "close" ? "Close milestone" : c.kind === "create" ? "Create" : "Save" }}
         </button>
       </div>
     </form>
-  }
+  </ng-template>
 </section>

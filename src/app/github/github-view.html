@@ -1,7 +1,15 @@
 <div class="page">
   <header>
     <h1>GitHub</h1>
-    <button type="button" (click)="refresh()" [disabled]="loading">
+    <button
+      type="button"
+      hx-button
+      variant="outlined"
+      severity="secondary"
+      size="small"
+      (click)="refresh()"
+      [disabled]="loading"
+    >
       {{ loading ? "Refreshing..." : "Refresh" }}
     </button>
   </header>
@@ -30,14 +38,20 @@
         @for (p of pages(); track p.id) {
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="nav-item"
             [attr.data-page]="p.id"
+            [attr.data-icon]="p.icon"
+            [attr.title]="p.label"
             [attr.aria-current]="ui.githubPage() === p.id ? 'page' : null"
             [class.active]="ui.githubPage() === p.id"
             (click)="selectPage(p.id)"
             (keydown)="onNavKey($event, p.id)"
           >
-            {{ p.label }}
+            <span class="nav-label">{{ p.label }}</span>{{ " " }}
             @if (p.count !== null) {
               <span class="nav-count" [attr.data-testid]="'count-' + p.id">{{ p.count }}</span>
             }
@@ -51,6 +65,7 @@
           <app-github-inbox />
         }
         @case ("pulls") {
+          <h2 class="page-title">Pull requests</h2>
           @if (pulls.error(); as err) {
             <p class="problem" role="alert">Could not read the pull requests: {{ err }}</p>
           }
@@ -61,16 +76,16 @@
             }
           } @else {
             <div class="toolbar" role="group" aria-label="Filters">
-              @for (s of scopes; track s.id) {
-                <button
-                  type="button"
-                  [class.active]="pulls.scope() === s.id"
-                  [attr.aria-pressed]="pulls.scope() === s.id"
-                  (click)="pulls.scope.set(s.id)"
-                >
-                  {{ s.label }}
-                </button>
-              }
+              <hx-select-button
+                aria-label="Scope"
+                size="small"
+                [options]="scopes"
+                optionLabel="label"
+                optionValue="id"
+                [allowEmpty]="false"
+                [value]="pulls.scope()"
+                (valueChange)="pulls.scope.set($any($event))"
+              />
               <input
                 type="search"
                 aria-label="Filter by title or number"
@@ -106,12 +121,12 @@
                     <tr>
                       <th></th>
                       <th>#</th>
-                      <th>Title</th>
-                      <th>Author</th>
-                      <th>Checks</th>
-                      <th>Review</th>
-                      <th class="num">Size</th>
-                      <th class="num">Age</th>
+                      <th class="c-title">Title</th>
+                      <th class="c-author">Author</th>
+                      <th class="c-checks">Checks</th>
+                      <th class="c-review">Review</th>
+                      <th class="num c-size">Size</th>
+                      <th class="num c-age">Age</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -147,11 +162,15 @@
                             />
                           </td>
                           <td>#{{ row.number }}</td>
-                          <td>
+                          <td class="c-title" [title]="row.title">
                             {{ row.title }}
                             @if (runs.badge(row.repo, row.number); as run) {
                               <button
                                 type="button"
+                                hx-button
+                                variant="text"
+                                severity="secondary"
+                                size="small"
                                 class="badge badge-{{
                                   run.state === 'running' ? 'primary' : 'warning'
                                 }}"
@@ -166,8 +185,8 @@
                               <span class="badge badge-neutral" data-testid="draft">Draft</span>
                             }
                           </td>
-                          <td>{{ row.author ?? "ghost" }}</td>
-                          <td>
+                          <td class="c-author">{{ row.author ?? "ghost" }}</td>
+                          <td class="c-checks">
                             <span
                               class="checks"
                               [title]="checksText(row.checks)"
@@ -184,22 +203,26 @@
                               }
                             </span>
                           </td>
-                          <td>
+                          <td class="c-review">
                             @if (reviewBadge(row); as review) {
                               <span class="badge badge-{{ review.tone }}" data-testid="review">{{
                                 review.label
                               }}</span>
                             }
                           </td>
-                          <td class="num">
+                          <td class="num c-size">
                             <span class="add">+{{ row.additions }}</span>
                             <span class="del">-{{ row.deletions }}</span>
                           </td>
-                          <td class="num">{{ age(row) }}</td>
+                          <td class="num c-age">{{ age(row) }}</td>
                           <td class="actions">
                             @if (pulls.worktreeFor(row)) {
                               <button
                                 type="button"
+                                hx-button
+                                variant="outlined"
+                                severity="secondary"
+                                size="small"
                                 data-testid="open-space"
                                 (click)="pulls.openSpace(row)"
                               >
@@ -208,6 +231,10 @@
                             } @else {
                               <button
                                 type="button"
+                                hx-button
+                                variant="outlined"
+                                severity="secondary"
+                                size="small"
                                 data-testid="check-out"
                                 (click)="pulls.checkout(row)"
                               >
@@ -216,6 +243,10 @@
                             }
                             <button
                               type="button"
+                              hx-button
+                              variant="text"
+                              severity="secondary"
+                              size="small"
                               class="icon-btn"
                               title="Agent actions"
                               data-testid="row-menu"
@@ -227,6 +258,10 @@
                             </button>
                             <button
                               type="button"
+                              hx-button
+                              variant="text"
+                              severity="secondary"
+                              size="small"
                               class="icon-btn"
                               title="Open in browser"
                               [attr.aria-label]="'Open #' + row.number + ' in browser'"

@@ -1,10 +1,11 @@
 @import "../detail-pane.css";
+@import "../github-badges.css";
 
 .compose {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  align-items: flex-start;
+  align-items: center;
 }
 .compose textarea {
   flex: 1 1 100%;

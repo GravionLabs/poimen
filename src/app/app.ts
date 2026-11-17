@@ -107,6 +107,7 @@ import { ProjectEntries, type ProjectEntry } from "./core/project-entries";
 import { AgentPicker as AgentPickerView } from "./agent-picker/agent-picker";
 import { TaskCleanup } from "./core/task-cleanup";
 import { StatusBar } from "./status-bar/status-bar";
+import { Icon } from "./ui/icon/icon";
 import { SplitPane } from "./ui/helix-candidates/split-pane/split-pane";
 import {
   TabBar,
@@ -122,6 +123,7 @@ const ZOOM_STEP = 1;
   selector: "app-root",
   imports: [
     ActivityBar,
+    Icon,
     Sidebar,
     Explorer,
     Notifications,
@@ -480,6 +482,15 @@ export class App {
   protected run(id: string): void {
     if (id === "openSettings") {
       this.openSettings();
+      return;
+    }
+    if (id === "addMachine") {
+      this.machines.openForm();
+      this.editor.openSettings("machines");
+      return;
+    }
+    if (id === "openMachines") {
+      this.editor.openSettings("machines");
       return;
     }
     if (id === "openGithub") {

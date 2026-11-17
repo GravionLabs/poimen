@@ -16,6 +16,20 @@
   --badge-tone: var(--h-text-muted-color);
   border-radius: 4px;
 }
+button.badge {
+  min-height: 20px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+button.badge:hover {
+  background: color-mix(in srgb, var(--badge-tone, var(--h-text-muted-color)) 28%, transparent);
+}
+button.badge:focus-visible {
+  outline: 2px solid var(--h-primary-color);
+  outline-offset: 1px;
+}
 .badge-success {
   --badge-tone: var(--term-ansi-2);
 }
@@ -68,19 +82,29 @@ progress {
   height: 6px;
   accent-color: var(--h-primary-color);
 }
+/* Icon buttons are always visible (muted); only inside list rows they wait for hover, focus or the cursor. */
 .icon-btn {
-  background: none;
-  border: 0;
-  padding: 2px 6px;
-  color: var(--h-text-muted-color);
-  cursor: pointer;
-  opacity: 0;
+  opacity: 0.7;
 }
-:hover > .icon-btn,
-:hover > * > .icon-btn,
+.icon-btn:hover,
 .icon-btn:focus-visible {
   opacity: 1;
 }
-.icon-btn:hover:not(:disabled) {
-  color: var(--h-text-color);
+.icon-btn:disabled,
+.link:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+:is(.row, .item, tbody tr) .icon-btn {
+  opacity: 0;
+}
+:is(.row, .item, tbody tr):is(:hover, :focus-within, .cursor) .icon-btn {
+  opacity: 1;
+}
+:is(.row, .item, tbody tr) .icon-btn:disabled {
+  opacity: 0;
+}
+:is(.row, .item, tbody tr):is(:hover, :focus-within, .cursor) .icon-btn:disabled {
+  opacity: 0.4;
 }

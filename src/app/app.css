@@ -43,7 +43,7 @@
   padding: 1px 4px;
   border-radius: 3px;
   background: var(--h-primary-color);
-  color: var(--h-primary-contrast-color, #fff);
+  color: var(--h-primary-contrast-color);
 }
 
 .mode.ro {

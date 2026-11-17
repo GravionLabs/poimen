@@ -17,8 +17,25 @@
               (input)="setTitle($any($event.target).value)"
               (keydown.escape)="issues.cancelTitle()"
             />
-            <button type="submit" data-testid="title-save" [disabled]="issues.busy()">Save</button>
-            <button type="button" data-testid="title-cancel" (click)="issues.cancelTitle()">
+            <button
+              type="submit"
+              hx-button
+              variant="filled"
+              size="small"
+              data-testid="title-save"
+              [disabled]="issues.busy()"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
+              data-testid="title-cancel"
+              (click)="issues.cancelTitle()"
+            >
               Cancel
             </button>
           </form>
@@ -28,6 +45,10 @@
             @if (canEdit(d)) {
               <button
                 type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
                 class="icon-btn"
                 title="Edit title"
                 aria-label="Edit title"
@@ -41,13 +62,17 @@
         }
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
           class="icon-btn"
           title="Close"
           aria-label="Close detail"
           data-testid="detail-close"
           (click)="issues.closeDetail()"
         >
-          ×
+          <app-icon name="close" />
         </button>
       </div>
       <div class="meta">
@@ -60,6 +85,10 @@
         @if (runs.badge(h.repo, h.number); as run) {
           <button
             type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
             class="badge badge-{{ run.state === 'running' ? 'primary' : 'warning' }}"
             data-testid="detail-run-badge"
             title="Show the agent"
@@ -70,6 +99,10 @@
         }
         <button
           type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
           class="icon-btn"
           title="Open in browser"
           [attr.aria-label]="'Open #' + h.number + ' in browser'"
@@ -82,13 +115,25 @@
       <!-- Action bar: agent actions and, with viewerCanUpdate, close and reopen. -->
       <div class="actions" role="toolbar" aria-label="Issue actions" data-testid="actions">
         @if (startable(); as issue) {
-          <button type="button" data-testid="start-task" (click)="startTask(issue)">
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
+            data-testid="start-task"
+            (click)="startTask(issue)"
+          >
             {{ issueTasks.label(issue.root, issue.number) }}
           </button>
         }
         @for (o of offered(); track o.action.id) {
           <button
             type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
             data-testid="agent-action"
             [disabled]="!o.enabled"
             [attr.title]="o.reason ?? 'Shift+click: choose harness and model'"
@@ -101,6 +146,10 @@
           @if (canEdit(d)) {
             <button
               type="button"
+              hx-button
+              variant="outlined"
+              severity="secondary"
+              size="small"
               data-testid="add-sub-issue"
               [disabled]="issues.busy()"
               (click)="issues.openForm(h.repo, h.number)"
@@ -109,6 +158,10 @@
             </button>
             <button
               type="button"
+              hx-button
+              variant="outlined"
+              severity="secondary"
+              size="small"
               data-testid="change-parent"
               [disabled]="issues.busy()"
               (click)="issues.parentQuery.set(issues.parentQuery() === null ? '' : null)"
@@ -118,6 +171,10 @@
             @if (d.state === "OPEN") {
               <button
                 type="button"
+                hx-button
+                variant="outlined"
+                severity="danger"
+                size="small"
                 data-testid="issue-close-completed"
                 [disabled]="issues.busy()"
                 (click)="issues.act('completed')"
@@ -126,6 +183,10 @@
               </button>
               <button
                 type="button"
+                hx-button
+                variant="outlined"
+                severity="danger"
+                size="small"
                 data-testid="issue-close-not-planned"
                 [disabled]="issues.busy()"
                 (click)="issues.act('not_planned')"
@@ -135,6 +196,10 @@
             } @else {
               <button
                 type="button"
+                hx-button
+                variant="outlined"
+                severity="secondary"
+                size="small"
                 data-testid="issue-reopen"
                 [disabled]="issues.busy()"
                 (click)="issues.act('reopen')"
@@ -196,6 +261,10 @@
                 <li>
                   <button
                     type="button"
+                    hx-button
+                    variant="text"
+                    severity="secondary"
+                    size="small"
                     class="link"
                     data-testid="parent-option"
                     [disabled]="issues.busy()"
@@ -251,6 +320,10 @@
             <dd>
               <button
                 type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
                 class="link"
                 data-testid="detail-parent"
                 [disabled]="!canOpen(p.repo)"
@@ -266,31 +339,33 @@
         <h3 id="id-desc">
           Description
           @if (canEdit(d) && issues.bodyDraft() === null) {
-            <button type="button" class="link" data-testid="body-edit" (click)="issues.startBody()">
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
+              class="link"
+              data-testid="body-edit"
+              (click)="issues.startBody()"
+            >
               Edit
             </button>
           }
         </h3>
         @if (issues.bodyDraft() !== null) {
           <div class="body-edit" data-testid="body-form">
-            <div class="tabs" role="group" aria-label="Editor mode">
-              <button
-                type="button"
-                data-testid="body-mode-edit"
-                [attr.aria-pressed]="!issues.previewing()"
-                (click)="issues.previewing.set(false)"
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                data-testid="body-mode-preview"
-                [attr.aria-pressed]="issues.previewing()"
-                (click)="issues.previewing.set(true)"
-              >
-                Preview
-              </button>
-            </div>
+            <hx-select-button
+              class="tabs"
+              aria-label="Editor mode"
+              size="small"
+              [options]="viewModes"
+              optionLabel="label"
+              optionValue="value"
+              [allowEmpty]="false"
+              [value]="issues.previewing() ? 'preview' : 'edit'"
+              (valueChange)="issues.previewing.set($event === 'preview')"
+            />
             @if (issues.previewing()) {
               <div class="markdown" data-testid="body-preview" [innerHTML]="preview()"></div>
             } @else {
@@ -305,10 +380,26 @@
             @if (issues.conflict() !== null) {
               <div class="problem" role="alert" data-testid="body-conflict">
                 The description changed on GitHub since you opened it.
-                <button type="button" data-testid="body-overwrite" (click)="issues.saveBody(true)">
+                <button
+                  type="button"
+                  hx-button
+                  variant="outlined"
+                  severity="secondary"
+                  size="small"
+                  data-testid="body-overwrite"
+                  (click)="issues.saveBody(true)"
+                >
                   Overwrite
                 </button>
-                <button type="button" data-testid="body-reload" (click)="issues.reloadBody()">
+                <button
+                  type="button"
+                  hx-button
+                  variant="outlined"
+                  severity="secondary"
+                  size="small"
+                  data-testid="body-reload"
+                  (click)="issues.reloadBody()"
+                >
                   Reload
                 </button>
               </div>
@@ -316,13 +407,24 @@
             <div class="actions">
               <button
                 type="button"
+                hx-button
+                variant="filled"
+                size="small"
                 data-testid="body-save"
                 [disabled]="issues.busy() || issues.conflict() !== null"
                 (click)="issues.saveBody()"
               >
                 Save
               </button>
-              <button type="button" data-testid="body-cancel" (click)="issues.cancelBody()">
+              <button
+                type="button"
+                hx-button
+                variant="text"
+                severity="secondary"
+                size="small"
+                data-testid="body-cancel"
+                (click)="issues.cancelBody()"
+              >
                 Cancel
               </button>
             </div>
@@ -343,6 +445,10 @@
               <li>
                 <button
                   type="button"
+                  hx-button
+                  variant="text"
+                  severity="secondary"
+                  size="small"
                   class="link"
                   data-testid="detail-sub"
                   [disabled]="!canOpen(s.repo)"
@@ -364,7 +470,16 @@
           <ul class="list" data-testid="detail-prs">
             @for (p of d.pullRequests; track p.repo + p.number) {
               <li>
-                <button type="button" class="link" data-testid="detail-pr" (click)="openPull(p)">
+                <button
+                  type="button"
+                  hx-button
+                  variant="text"
+                  severity="secondary"
+                  size="small"
+                  class="link"
+                  data-testid="detail-pr"
+                  (click)="openPull(p)"
+                >
                   #{{ p.number }} {{ p.title }}
                 </button>
                 <span class="hint">{{ stateLabel(p.state) }}</span>
