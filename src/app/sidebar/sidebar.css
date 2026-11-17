@@ -11,11 +11,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-right: 10px;
-}
-
-.layout-toggle {
-  margin-right: 6px;
+  gap: 4px;
+  padding: 8px 10px 6px 14px;
 }
 
 .layout-toggle[aria-pressed="true"] {
@@ -25,7 +22,6 @@
 
 .brand {
   flex: 1;
-  padding: 14px 14px 8px;
   font-weight: 600;
   letter-spacing: 0.04em;
 }
@@ -524,7 +520,8 @@
   flex: none;
   align-items: center;
   justify-content: space-between;
-  padding-right: 8px;
+  gap: 4px;
+  padding: 0 10px 0 0;
 }
 
 .agents-scroll {

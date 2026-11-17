@@ -1,15 +1,15 @@
 <div class="head">
   <div class="brand">Explorer</div>
-  <input
-    type="search"
-    class="filter"
-    placeholder="Filter folders"
-    aria-label="Filter folders"
-    [value]="query()"
-    (input)="setQuery($event)"
-    (keydown)="filterKey($event)"
-  />
 </div>
+<input
+  type="search"
+  class="filter"
+  placeholder="Filter folders"
+  aria-label="Filter folders"
+  [value]="query()"
+  (input)="setQuery($event)"
+  (keydown)="filterKey($event)"
+/>
 <hx-tree
   class="dirs"
   ariaLabel="Directories"

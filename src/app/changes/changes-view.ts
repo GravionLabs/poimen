@@ -352,7 +352,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .git {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 8px;
       padding: 6px 12px;
       border-bottom: 1px solid var(--h-border-color, var(--h-surface-300));
