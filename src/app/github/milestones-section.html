@@ -89,22 +89,6 @@
           >
             ↗
           </button>
-          @if (readyToClose(m)) {
-            <button
-              type="button"
-              hx-button
-              variant="text"
-              severity="danger"
-              size="small"
-              [attr.title]="'Close milestone ' + m.title"
-              class="icon-btn"
-              data-testid="milestone-close"
-              [attr.aria-label]="'Close milestone ' + m.title"
-              (click)="milestones.openClose(r.root, r.repo, m)"
-            >
-              Close
-            </button>
-          }
           <button
             type="button"
             hx-button
@@ -119,22 +103,20 @@
           >
             ✎
           </button>
-          @if (!readyToClose(m)) {
-            <button
-              type="button"
-              hx-button
-              variant="text"
-              severity="danger"
-              size="small"
-              [attr.title]="'Close milestone ' + m.title"
-              class="icon-btn"
-              data-testid="milestone-close"
-              [attr.aria-label]="'Close milestone ' + m.title"
-              (click)="milestones.openClose(r.root, r.repo, m)"
-            >
-              Close
-            </button>
-          }
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            severity="danger"
+            size="small"
+            [attr.title]="'Close milestone ' + m.title"
+            class="icon-btn"
+            data-testid="milestone-close"
+            [attr.aria-label]="'Close milestone ' + m.title"
+            (click)="milestones.openClose(r.root, r.repo, m)"
+          >
+            Close
+          </button>
         </li>
         @if (milestones.compose(); as c) {
           @if (c.kind !== "create" && c.root === r.root && c.number === m.number) {
