@@ -104,6 +104,9 @@
         }
         @if (renaming()?.index !== i) {
           <span class="name">{{ l.name }}</span>
+          @if (l.name === defaultName) {
+            <span class="hint">new spaces get this layout unless a template names another</span>
+          }
           <span class="layout">{{ summary(l) }}</span>
           @if (usedBy(l.name); as users) {
             @if (users.length > 0) {

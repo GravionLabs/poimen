@@ -15,7 +15,7 @@ import {
   type NodePath,
   type TabPath,
 } from "./named-layouts";
-import type { SplitDirection } from "./space-layout";
+import type { PaneSpec, SplitDirection } from "./space-layout";
 import type { SpaceTemplate } from "./space-templates";
 
 export type { LayoutNode, LayoutTab, NamedLayout, NodePath, TabPath };
@@ -424,4 +424,40 @@ export function layoutFromTab(snapshot: Snapshot, tabId: string, name: string): 
   };
   const top = build(tabId);
   return top ? { name, tabs: [top] } : null;
+}
+
+/** The name `spaces.layout` has among the named layouts (`space_layout::inputs` reads it as this). */
+export const DEFAULT_LAYOUT = "default";
+
+/**
+ * `spaces.layout` (`panes[]`) as the named layout `default`: one tab, the first pane the root leaf,
+ * every later pane splitting the leaf named by `split.from` (like `Layout::to_tabs`).
+ */
+export function layoutFromPanes(panes: readonly PaneSpec[]): NamedLayout {
+  const leaf = (p: PaneSpec): LayoutNode => ({
+    kind: "terminal",
+    name: p.name,
+    command: p.command,
+    cwd: null,
+  });
+  const replace = (n: LayoutNode, p: PaneSpec): LayoutNode | null => {
+    const s = p.split;
+    if (!s) return null;
+    if (n.kind === "terminal") {
+      return n.name === s.from
+        ? { kind: "split", direction: s.direction, ratio: s.ratio, children: [n, leaf(p)] }
+        : null;
+    }
+    const a = replace(n.children[0], p);
+    if (a) return { ...n, children: [a, n.children[1]] };
+    const b = replace(n.children[1], p);
+    return b ? { ...n, children: [n.children[0], b] } : null;
+  };
+  let root: LayoutNode =
+    panes.length > 0 ? leaf(panes[0]) : { kind: "terminal", name: null, command: null, cwd: null };
+  for (const p of panes.slice(1)) root = replace(root, p) ?? root;
+  return {
+    name: DEFAULT_LAYOUT,
+    tabs: [{ name: panes[0]?.name || "main", root, children: [], place: null }],
+  };
 }

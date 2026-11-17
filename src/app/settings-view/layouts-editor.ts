@@ -5,19 +5,26 @@ import {
   duplicateLayout,
   emptyLayout,
   flatTabs,
+  DEFAULT_LAYOUT,
   hasLayoutErrors,
+  layoutFromPanes,
   layoutErrors,
   uniqueName,
   usedMessage,
   type LayoutTab,
   type NamedLayout,
 } from "../core/named-layouts-edit";
+import type { PaneSpec } from "../core/space-layout";
 import { LayoutTabsEditor } from "./layout-tabs-editor";
 
 interface Editing {
   /** Index in `layouts`; `null` for a new layout. */
   index: number | null;
   draft: NamedLayout;
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function value(event: Event): string {
@@ -40,13 +47,31 @@ export class LayoutsEditor {
   private readonly store = inject(SettingsStore);
 
   protected readonly writeError = this.store.writeError;
-  protected readonly layouts = computed(() => this.store.settings().layouts);
+  private readonly fallback = signal<PaneSpec[]>([]);
+  /** `layouts[]` as written; the page's `layouts` adds `spaces.layout` as `default`. */
+  private readonly stored = computed(() => this.store.settings().layouts);
+  /**
+   * The layouts the page lists. When `layouts[]` has no `default`, `spaces.layout` (else the
+   * built-in default) shows as that layout; it is written to `layouts[]` on its first save.
+   */
+  protected readonly layouts = computed<NamedLayout[]>(() => {
+    const list = this.stored();
+    if (list.some((l) => l.name === DEFAULT_LAYOUT)) return list;
+    const panes = this.store.settings().spacesLayout?.panes ?? this.fallback();
+    return panes.length > 0 ? [layoutFromPanes(panes), ...list] : list;
+  });
+  /** Whether the entry `default` comes from `spaces.layout` and is not in `layouts[]` yet. */
+  protected readonly defaultIsVirtual = computed(
+    () => this.layouts().length > this.stored().length,
+  );
   protected readonly templates = computed(() => this.store.settings().spaceTemplates);
   protected readonly warnings = computed(() =>
     this.store.settings().warnings.filter((w) => w.startsWith("layouts")),
   );
   protected readonly editing = signal<Editing | null>(null);
   protected readonly renaming = signal<{ index: number; name: string } | null>(null);
+  /** The layout new spaces get without a template layout. */
+  protected readonly defaultName = DEFAULT_LAYOUT;
   /** Why the last delete or rename was refused. */
   protected readonly refusal = signal<string | null>(null);
 
@@ -62,6 +87,10 @@ export class LayoutsEditor {
     const e = this.errors();
     return e !== null && !hasLayoutErrors(e);
   });
+
+  constructor() {
+    void this.store.defaultSpacesLayout().then((l) => this.fallback.set(l?.panes ?? []));
+  }
 
   /** The tabs of the layout in words for the list: `agent · tests`. */
   protected summary(l: NamedLayout): string {
@@ -111,7 +140,7 @@ export class LayoutsEditor {
       list[e.index] = draft;
     }
     this.refusal.set(null);
-    if (await this.store.setLayouts(list)) this.editing.set(null);
+    if (await this.persist(list)) this.editing.set(null);
   }
 
   protected async duplicate(index: number): Promise<void> {
@@ -121,19 +150,32 @@ export class LayoutsEditor {
       `${source.name} copy`,
       this.layouts().map((l) => l.name),
     );
-    await this.store.setLayouts([...this.layouts(), duplicateLayout(source, name)]);
+    await this.persist([...this.layouts(), duplicateLayout(source, name)]);
   }
 
   /** Deletes the layout unless a template refers to it; the refusal names the templates. */
   protected async remove(index: number): Promise<void> {
     const name = this.layouts()[index].name;
+    if (this.isVirtual(index)) {
+      this.refusal.set(`"${name}" is the layout of spaces.layout; edit it to change it.`);
+      return;
+    }
     const refused = usedMessage(name, this.templates(), "delete");
     this.refusal.set(refused);
     if (refused) return;
-    await this.store.setLayouts(this.layouts().filter((_, i) => i !== index));
+    await this.persist(this.layouts().filter((_, i) => i !== index));
+  }
+
+  /** The entry `default` that comes from `spaces.layout` and is not stored yet. */
+  protected isVirtual(index: number): boolean {
+    return this.defaultIsVirtual() && this.layouts()[index]?.name === DEFAULT_LAYOUT;
   }
 
   protected startRename(index: number): void {
+    if (this.isVirtual(index)) {
+      this.refusal.set(`"${DEFAULT_LAYOUT}" is the layout of spaces.layout; it keeps its name.`);
+      return;
+    }
     this.refusal.set(null);
     this.renaming.set({ index, name: this.layouts()[index].name });
   }
@@ -169,7 +211,17 @@ export class LayoutsEditor {
     this.refusal.set(refused);
     if (refused) return;
     const list = this.layouts().map((l, i) => (i === r.index ? { ...l, name } : l));
-    if (await this.store.setLayouts(list)) this.renaming.set(null);
+    if (await this.persist(list)) this.renaming.set(null);
+  }
+
+  /**
+   * Writes `layouts[]`. The virtual `default` is kept out unless it was edited or renamed
+   * away: until then `spaces.layout` stays the source (read only, ADR 0011).
+   */
+  private persist(list: NamedLayout[]): Promise<boolean> {
+    const virtual = this.defaultIsVirtual() ? this.layouts()[0] : null;
+    const out = virtual ? list.filter((l) => l !== virtual && !sameJson(l, virtual)) : list;
+    return this.store.setLayouts(out);
   }
 
   private change(edit: (d: NamedLayout) => NamedLayout): void {
