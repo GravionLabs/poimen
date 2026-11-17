@@ -9,6 +9,7 @@ import {
   emptyLayout,
   hasLayoutErrors,
   indentTab,
+  layoutFromPanes,
   layoutErrors,
   layoutFromTab,
   layoutUsers,
@@ -381,6 +382,33 @@ describe("previews", () => {
             { kind: "group", tabs: ["a1"] },
             { kind: "group", tabs: ["b"] },
           ],
+        },
+      ],
+    });
+  });
+});
+
+describe("layoutFromPanes", () => {
+  it("turns spaces.layout panes into one tab with the split tree of Layout::to_tabs", () => {
+    const l = layoutFromPanes([
+      { name: "agent", command: "claude", split: null },
+      { name: "tests", command: null, split: { from: "agent", direction: "right", ratio: 0.6 } },
+      { name: "shell", command: "zsh", split: { from: "tests", direction: "down", ratio: 0.5 } },
+    ]);
+    expect(l.name).toBe("default");
+    expect(l.tabs).toHaveLength(1);
+    expect(l.tabs[0].name).toBe("agent");
+    expect(l.tabs[0].root).toEqual({
+      kind: "split",
+      direction: "right",
+      ratio: 0.6,
+      children: [
+        leaf("agent", "claude"),
+        {
+          kind: "split",
+          direction: "down",
+          ratio: 0.5,
+          children: [leaf("tests"), leaf("shell", "zsh")],
         },
       ],
     });
