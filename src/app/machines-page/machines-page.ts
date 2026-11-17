@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { Machines, checkPassed, type MachineCheck, type MachineStatus } from "../core/machines";
 
 /** Label of a check id of `machine.check`; an unknown id is shown as it is. */
@@ -13,6 +14,7 @@ export function checkLabel(id: string): string {
  */
 @Component({
   selector: "app-machines-page",
+  imports: [HxButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-label="Machines">
@@ -43,7 +45,17 @@ export function checkLabel(id: string): string {
                         }
                         @if (c.fix) {
                           <code class="fix">{{ c.fix }}</code>
-                          <button type="button" class="copy" (click)="copy(c.fix)">Copy</button>
+                          <button
+                            type="button"
+                            hx-button
+                            size="small"
+                            variant="text"
+                            severity="secondary"
+                            class="copy"
+                            (click)="copy(c.fix)"
+                          >
+                            Copy
+                          </button>
                         }
                       </li>
                     }
@@ -61,7 +73,17 @@ export function checkLabel(id: string): string {
           (contextmenu)="$event.preventDefault(); closeMenu()"
         ></div>
         <div class="menu" role="menu" [style.left.px]="m.x" [style.top.px]="m.y">
-          <button type="button" role="menuitem" (click)="checkMachine()">Check machine</button>
+          <button
+            type="button"
+            hx-button
+            size="small"
+            variant="text"
+            severity="secondary"
+            role="menuitem"
+            (click)="checkMachine()"
+          >
+            Check machine
+          </button>
         </div>
       }
     </section>
@@ -124,18 +146,6 @@ export function checkLabel(id: string): string {
       background: var(--h-surface-overlay, var(--term-bg));
       border: 1px solid var(--h-border-color, currentColor);
       border-radius: 6px;
-    }
-    .menu button {
-      text-align: left;
-      padding: 4px 8px;
-      background: none;
-      border: 0;
-      color: inherit;
-      font: inherit;
-      cursor: pointer;
-    }
-    .menu button:hover {
-      background: color-mix(in srgb, currentColor 12%, transparent);
     }
   `,
 })

@@ -1,6 +1,8 @@
 <div class="shell">
   <nav class="nav" aria-label="Settings categories">
     <input
+      hx-input
+      size="small"
       #search
       type="search"
       class="search"
@@ -69,21 +71,18 @@
         @switch (current().page.id) {
           @case ("appearance") {
             <section aria-label="Appearance">
-              <div class="radios" role="radiogroup" aria-label="Appearance">
-                @for (choice of themeChoices; track choice.value) {
-                  <button
-                    type="button"
-                    role="radio"
-                    class="choice"
-                    [attr.aria-checked]="settings().theme === choice.value"
-                    [class.on]="settings().theme === choice.value"
-                    [class.hit]="hit(choice.label)"
-                    (click)="setTheme(choice.value)"
-                  >
-                    {{ choice.label }}
-                  </button>
-                }
-              </div>
+              <hx-select-button
+                class="radios"
+                aria-label="Appearance"
+                size="small"
+                [options]="themeChoices"
+                optionLabel="label"
+                optionValue="value"
+                [allowEmpty]="false"
+                [value]="settings().theme"
+                [class.hit]="hit('Appearance')"
+                (valueChange)="setTheme($any($event))"
+              />
               @if (appearanceFixed()) {
                 <p class="hint">
                   The color scheme fixes light or dark; use a light/dark pair to follow the
@@ -92,30 +91,18 @@
               }
               <section aria-label="Color scheme">
                 <h2>Color scheme</h2>
-                <div class="radios" role="radiogroup" aria-label="Scheme mode">
-                  <button
-                    type="button"
-                    role="radio"
-                    class="choice"
-                    [attr.aria-checked]="mode() === 'single'"
-                    [class.on]="mode() === 'single'"
-                    [class.hit]="hit('Single scheme')"
-                    (click)="setMode('single')"
-                  >
-                    Single scheme
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    class="choice"
-                    [attr.aria-checked]="mode() === 'pair'"
-                    [class.on]="mode() === 'pair'"
-                    [class.hit]="hit('Light/dark pair')"
-                    (click)="setMode('pair')"
-                  >
-                    Light/dark pair
-                  </button>
-                </div>
+                <hx-select-button
+                  class="radios"
+                  aria-label="Scheme mode"
+                  size="small"
+                  [options]="modeChoices"
+                  optionLabel="label"
+                  optionValue="value"
+                  [allowEmpty]="false"
+                  [value]="mode()"
+                  [class.hit]="hit('Single scheme') || hit('Light/dark pair')"
+                  (valueChange)="setMode($any($event))"
+                />
                 <p class="hint">
                   Hover or focus a scheme to preview it; click or press Enter to save it.
                 </p>
@@ -168,6 +155,8 @@
                   <label class="field grow" [class.hit]="hit('Terminal font family')">
                     Terminal font family
                     <input
+                      hx-input
+                      size="small"
                       type="text"
                       list="mono-fonts"
                       [placeholder]="defaultTerminalFont"
@@ -178,6 +167,8 @@
                   <label class="field ratio" [class.hit]="hit('Terminal font size')">
                     Terminal font size
                     <input
+                      hx-input
+                      size="small"
                       type="number"
                       [attr.min]="terminalSizeRange[0]"
                       [attr.max]="terminalSizeRange[1]"
@@ -191,6 +182,8 @@
                   <label class="field grow" [class.hit]="hit('UI font family')">
                     UI font family
                     <input
+                      hx-input
+                      size="small"
                       type="text"
                       list="ui-fonts"
                       placeholder="Default"
@@ -201,6 +194,8 @@
                   <label class="field ratio" [class.hit]="hit('UI font size')">
                     UI font size
                     <input
+                      hx-input
+                      size="small"
                       type="number"
                       [attr.min]="uiSizeRange[0]"
                       [attr.max]="uiSizeRange[1]"
@@ -230,6 +225,7 @@
                   <div class="fields sound-row">
                     <label class="check" [class.hit]="hit(kind.label)">
                       <input
+                        hx-checkbox
                         type="checkbox"
                         role="switch"
                         [checked]="soundOn(kind.id)"
@@ -240,6 +236,8 @@
                     <label class="field grow" [class.hit]="hit(kind.label)">
                       {{ kind.label }} file
                       <input
+                        hx-input
+                        size="small"
                         type="text"
                         placeholder="Built-in tone"
                         [value]="soundFile(kind.id)"
@@ -279,8 +277,11 @@
                     <span class="path" [title]="root">{{ root }}</span>
                     <span class="actions">
                       <button
+                        hx-button
+                        size="small"
+                        variant="text"
+                        severity="secondary"
                         type="button"
-                        class="icon-btn"
                         [attr.aria-label]="'Move ' + root + ' up'"
                         title="Move up"
                         [disabled]="first"
@@ -289,8 +290,11 @@
                         ↑
                       </button>
                       <button
+                        hx-button
+                        size="small"
+                        variant="text"
+                        severity="secondary"
                         type="button"
-                        class="icon-btn"
                         [attr.aria-label]="'Move ' + root + ' down'"
                         title="Move down"
                         [disabled]="last"
@@ -299,8 +303,11 @@
                         ↓
                       </button>
                       <button
+                        hx-button
+                        size="small"
+                        variant="text"
+                        severity="danger"
                         type="button"
-                        class="icon-btn"
                         [attr.aria-label]="'Remove ' + root"
                         title="Remove"
                         [disabled]="first && last"
@@ -314,8 +321,11 @@
               </ul>
               <div class="toolbar-row">
                 <button
+                  hx-button
+                  size="small"
+                  variant="outlined"
+                  severity="secondary"
                   type="button"
-                  class="btn"
                   [class.hit]="hit('Add folder')"
                   (click)="addRoot()"
                 >
@@ -323,6 +333,7 @@
                 </button>
                 <label class="check" [class.hit]="hit('Show hidden folders')">
                   <input
+                    hx-checkbox
                     type="checkbox"
                     [checked]="settings().explorerShowHidden"
                     (change)="setShowHidden($event)"
@@ -347,8 +358,11 @@
                       <span class="path" [title]="root">{{ root }}</span>
                       <span class="actions">
                         <button
+                          hx-button
+                          size="small"
+                          variant="outlined"
+                          severity="danger"
                           type="button"
-                          class="btn"
                           [class.hit]="hit('Revoke')"
                           (click)="revokeProject(root)"
                         >
@@ -466,21 +480,38 @@
           }
           @case ("agents") {
             <section aria-label="Agents">
-              <ul class="harnesses" [class.hit]="hit('Harnesses')">
-                @for (h of harnesses(); track h.id) {
-                  <li>
-                    <strong>{{ h.id }}</strong>
-                    <code>{{ h.command.join(" ") }}</code>
-                    <span>{{ h.available ? "available" : "not found" }}</span>
-                    @if (h.models.length) {
-                      <span [class.hit]="hit('Models')">Models: {{ h.models.join(", ") }}</span>
-                    }
-                  </li>
-                }
-              </ul>
+              <table class="grid harnesses" aria-label="Harnesses" [class.hit]="hit('Harnesses')">
+                <thead>
+                  <tr>
+                    <th scope="col">Harness</th>
+                    <th scope="col">Command</th>
+                    <th scope="col">Availability</th>
+                    <th scope="col" [class.hit]="hit('Models')">Models</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (h of harnesses(); track h.id) {
+                    <tr>
+                      <td>
+                        <strong>{{ h.id }}</strong>
+                      </td>
+                      <td>
+                        <code>{{ h.command.join(" ") }}</code>
+                      </td>
+                      <td>
+                        <hx-tag [severity]="h.available ? 'success' : 'warn'">{{
+                          h.available ? "available" : "not found"
+                        }}</hx-tag>
+                      </td>
+                      <td>{{ h.models.join(", ") }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
               <p class="hint">Edit the <code>harnesses</code> key in config.json to change them.</p>
               <label class="check" [class.hit]="hit('Claude Code: classic renderer')">
                 <input
+                  hx-checkbox
                   type="checkbox"
                   role="switch"
                   [checked]="settings().claudeClassicRenderer"
@@ -494,28 +525,56 @@
                 <code>/tui default</code> is the alternative.
               </p>
               <h3>Supported agents</h3>
-              <ul class="agent-kinds" aria-label="Supported agents">
-                @for (k of agentKinds; track k) {
-                  <li>
-                    <strong>{{ agentName(k) }}</strong>
-                    <span>{{ agentSupport(k) }}</span>
-                  </li>
-                }
-              </ul>
+              <table class="grid agent-kinds" aria-label="Supported agents">
+                <thead>
+                  <tr>
+                    <th scope="col">Agent</th>
+                    <th scope="col">Support</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (k of agentKinds; track k) {
+                    <tr>
+                      <td>
+                        <strong>{{ agentName(k) }}</strong>
+                      </td>
+                      <td>{{ agentSupport(k) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
               <p class="hint">
                 Other harnesses can be started and prompted, but show no status (no hooks).
               </p>
               <h3>Agent actions</h3>
-              <ul class="agent-actions" [class.hit]="hit('Agent actions')">
-                @for (a of agentActions(); track a.id) {
-                  <li>
-                    <strong>{{ a.label }}</strong>
-                    <span>{{ a.on }}</span>
-                    <code>{{ a.prompt }}</code>
-                    <span class="source">{{ a.source }}</span>
-                  </li>
-                }
-              </ul>
+              <table
+                class="grid agent-actions"
+                aria-label="Agent actions"
+                [class.hit]="hit('Agent actions')"
+              >
+                <thead>
+                  <tr>
+                    <th scope="col">Action</th>
+                    <th scope="col">On</th>
+                    <th scope="col">Prompt</th>
+                    <th scope="col">Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (a of agentActions(); track a.id) {
+                    <tr>
+                      <td>
+                        <strong>{{ a.label }}</strong>
+                      </td>
+                      <td>{{ a.on }}</td>
+                      <td>
+                        <code>{{ a.prompt }}</code>
+                      </td>
+                      <td class="source">{{ a.source }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
               <p class="hint">
                 Edit <code>github.agentActions</code> in config.json (or in
                 <code>.poimen/config.json</code> per repository) to change them.
@@ -544,8 +603,11 @@
               </p>
               <div class="actions">
                 <button
+                  hx-button
+                  size="small"
+                  variant="outlined"
+                  severity="secondary"
                   type="button"
-                  class="btn"
                   [class.hit]="hit('Export settings')"
                   [disabled]="transfer.busy()"
                   (click)="exportSettings()"
@@ -553,8 +615,11 @@
                   Export settings…
                 </button>
                 <button
+                  hx-button
+                  size="small"
+                  variant="outlined"
+                  severity="secondary"
                   type="button"
-                  class="btn"
                   [class.hit]="hit('Import settings')"
                   [disabled]="transfer.busy()"
                   (click)="importSettings()"

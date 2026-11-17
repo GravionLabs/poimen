@@ -17,6 +17,8 @@
             <label class="field">
               <span>Tab name</span>
               <input
+                hx-input
+                size="small"
                 type="text"
                 aria-labelledby="tabs-col-name"
                 [attr.data-tab]="ti"
@@ -41,16 +43,22 @@
             <span class="actions">
               <span class="group"
                 ><button
+                  hx-button
+                  size="small"
+                  variant="text"
+                  severity="secondary"
                   type="button"
-                  class="icon-btn"
                   [attr.aria-label]="'Move ' + item.tab.name + ' up'"
                   title="Move up"
                   (click)="moveTab(item.path, -1)"
                 >
                   ↑</button
                 ><button
+                  hx-button
+                  size="small"
+                  variant="text"
+                  severity="secondary"
                   type="button"
-                  class="icon-btn"
                   [attr.aria-label]="'Move ' + item.tab.name + ' down'"
                   title="Move down"
                   (click)="moveTab(item.path, 1)"
@@ -60,8 +68,11 @@
               </span>
               <span class="group"
                 ><button
+                  hx-button
+                  size="small"
+                  variant="text"
+                  severity="secondary"
                   type="button"
-                  class="icon-btn"
                   [attr.aria-label]="'Indent ' + item.tab.name"
                   title="Indent: make it a child of the tab above"
                   [disabled]="!canIndent(item.path)"
@@ -69,8 +80,11 @@
                 >
                   →</button
                 ><button
+                  hx-button
+                  size="small"
+                  variant="text"
+                  severity="secondary"
                   type="button"
-                  class="icon-btn"
                   [attr.aria-label]="'Outdent ' + item.tab.name"
                   title="Outdent: make it a sibling of its parent"
                   [disabled]="!canOutdent(item.path)"
@@ -78,8 +92,11 @@
                 >
                   ←</button
                 ><button
+                  hx-button
+                  size="small"
+                  variant="text"
+                  severity="secondary"
                   type="button"
-                  class="icon-btn"
                   [attr.aria-label]="'Add child tab to ' + item.tab.name"
                   title="Add child tab"
                   (click)="addTab(item.path)"
@@ -89,8 +106,11 @@
               </span>
               <span class="group apart"
                 ><button
+                  hx-button
+                  size="small"
+                  variant="text"
+                  severity="danger"
                   type="button"
-                  class="icon-btn danger"
                   [attr.aria-label]="'Delete ' + item.tab.name"
                   title="Delete the tab with its children"
                   [disabled]="flat().length === 1"
@@ -109,6 +129,7 @@
             <label class="field">
               <span>Place</span>
               <input
+                hx-checkbox
                 type="checkbox"
                 [attr.aria-label]="'Place ' + item.tab.name + ' in its own editor group'"
                 [checked]="item.tab.place !== null"
@@ -141,6 +162,8 @@
               <label class="field ratio">
                 <span>Ratio</span>
                 <input
+                  hx-input
+                  size="small"
                   type="number"
                   step="0.05"
                   [min]="ratioMin"
@@ -163,7 +186,16 @@
     <p class="field-error">{{ m }}</p>
   }
   <div class="toolbar-row">
-    <button type="button" class="btn" (click)="addTab(null)">Add tab</button>
+    <button
+      hx-button
+      size="small"
+      variant="outlined"
+      severity="secondary"
+      type="button"
+      (click)="addTab(null)"
+    >
+      Add tab
+    </button>
   </div>
 
   <h3>Preview</h3>
@@ -191,6 +223,8 @@
         <label class="field">
           <span>Terminal name</span>
           <input
+            hx-input
+            size="small"
             type="text"
             [attr.aria-label]="'Terminal name in ' + flat()[ti].tab.name"
             [value]="node.name ?? ''"
@@ -201,6 +235,8 @@
       <label class="field grow">
         <span>Command</span>
         <input
+          hx-input
+          size="small"
           type="text"
           placeholder="shell"
           [attr.aria-label]="'Command in ' + flat()[ti].tab.name"
@@ -211,6 +247,8 @@
       <label class="field">
         <span>Directory</span>
         <input
+          hx-input
+          size="small"
           type="text"
           [attr.aria-label]="'Directory in ' + flat()[ti].tab.name"
           [value]="node.cwd ?? ''"
@@ -220,8 +258,11 @@
       @if (flat()[ti].tab.root.kind === "split") {
         <span class="actions">
           <button
+            hx-button
+            size="small"
+            variant="text"
+            severity="secondary"
             type="button"
-            class="icon-btn"
             aria-label="Split right"
             title="Split right"
             (click)="splitLeaf(tab, at, 'right')"
@@ -229,8 +270,11 @@
             ⇥
           </button>
           <button
+            hx-button
+            size="small"
+            variant="text"
+            severity="secondary"
             type="button"
-            class="icon-btn"
             aria-label="Split down"
             title="Split down"
             (click)="splitLeaf(tab, at, 'down')"
@@ -238,8 +282,11 @@
             ⤓
           </button>
           <button
+            hx-button
+            size="small"
+            variant="text"
+            severity="danger"
             type="button"
-            class="icon-btn"
             aria-label="Remove terminal"
             title="Remove terminal"
             (click)="removeLeaf(tab, at)"
@@ -265,6 +312,8 @@
         <label class="field ratio">
           <span>Ratio</span>
           <input
+            hx-input
+            size="small"
             type="number"
             step="0.05"
             [min]="ratioMin"

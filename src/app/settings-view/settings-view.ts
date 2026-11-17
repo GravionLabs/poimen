@@ -15,7 +15,7 @@ import {
   type Appearance,
   type ColorScheme,
 } from "../core/color-scheme";
-import { HxButton, HxTag } from "@gravionlabs/helix-ui";
+import { HxButton, HxCheckbox, HxInput, HxSelectButton, HxTag } from "@gravionlabs/helix-ui";
 import { ColorSchemeService } from "../core/color-scheme-service";
 import {
   defaultTerminalFontFamily,
@@ -159,12 +159,15 @@ export function withRoot(
   selector: "app-settings-view",
   imports: [
     HxButton,
+    HxSelectButton,
     HxTag,
     MachinesPage,
     LayoutsEditor,
     SpaceLayoutEditor,
     SpaceTemplatesEditor,
     SettingsImportPanel,
+    HxInput,
+    HxCheckbox,
   ],
   templateUrl: "./settings-view.html",
   styleUrl: "./settings-view.css",
@@ -482,6 +485,11 @@ export class SettingsView {
         input.value = String(this.settings()[which === "terminal" ? "fontSize" : "uiFontSize"]);
     });
   }
+
+  protected readonly modeChoices: readonly { value: SchemeMode; label: string }[] = [
+    { value: "single", label: "Single scheme" },
+    { value: "pair", label: "Light/dark pair" },
+  ];
 
   protected setMode(mode: SchemeMode): void {
     const schema = this.settings().colorSchema;

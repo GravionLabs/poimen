@@ -38,17 +38,10 @@ const LEGACY: Record<string, number> = {
   "src/app/github/milestones-section.html": 8,
   "src/app/github/pull-detail/pull-detail.html": 12,
   "src/app/hooks-dialog/hooks-dialog.html": 1,
-  "src/app/machines-page/machines-page.ts": 2,
   "src/app/notifications/notifications.html": 2,
   "src/app/pane-dialog/pane-dialog.html": 14,
   "src/app/result-dialog/result-dialog.html": 3,
   "src/app/server-dialog/server-dialog.html": 3,
-  "src/app/settings-view/layout-tabs-editor.html": 10,
-  "src/app/settings-view/layouts-editor.html": 9,
-  "src/app/settings-view/settings-import-panel.html": 3,
-  "src/app/settings-view/settings-view.html": 11,
-  "src/app/settings-view/space-layout-editor.html": 3,
-  "src/app/settings-view/space-templates-editor.html": 14,
   "src/app/shortcuts-dialog/shortcuts-dialog.html": 1,
   "src/app/sidebar/machines-section/machines-section.ts": 5,
   "src/app/space-dialog/space-dialog.html": 11,
@@ -65,7 +58,6 @@ const LEGACY: Record<string, number> = {
 /** Reference surfaces (#844): only buttons that are not actions stay plain. */
 const REFERENCE_MAX: Record<string, number> = {
   "src/app/hooks-dialog/hooks-dialog.html": 1, // the backdrop that dismisses
-  "src/app/settings-view/settings-view.html": 11, // radio choices, icon buttons of other pages
 };
 
 function sources(dir: string): string[] {
