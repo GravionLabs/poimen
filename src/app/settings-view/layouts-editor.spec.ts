@@ -160,7 +160,7 @@ describe("LayoutsEditor", () => {
     fixture.detectChanges();
     type(input("Command in agent"), "codex");
     // The shape select turns a tab into a split tree, whose leaves can be split again.
-    const shape = host.querySelector<HTMLSelectElement>('[aria-label="Shape of tests"]')!;
+    const shape = host.querySelectorAll<HTMLSelectElement>('[aria-labelledby="tabs-col-shape"]')[1];
     shape.value = "split";
     shape.dispatchEvent(new Event("change"));
     fixture.detectChanges();

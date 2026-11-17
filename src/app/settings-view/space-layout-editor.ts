@@ -7,6 +7,7 @@ import {
   signal,
   untracked,
 } from "@angular/core";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { SettingsStore } from "../core/settings";
 import {
   MAX_RATIO,
@@ -29,6 +30,7 @@ import {
  */
 @Component({
   selector: "app-space-layout-editor",
+  imports: [HxButton],
   templateUrl: "./space-layout-editor.html",
   styleUrl: "./settings-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

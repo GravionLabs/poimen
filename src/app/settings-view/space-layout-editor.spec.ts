@@ -63,6 +63,19 @@ async function setup(spacesLayout: SpaceLayout | null = null) {
 describe("SpaceLayoutEditor", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => undefined));
 
+  it("aligns the rows in one grid with a single header and named fields", async () => {
+    const { host } = await setup();
+    expect(host.querySelectorAll(".pane-head")).toHaveLength(1);
+    const heads = [...host.querySelectorAll(".pane-head span[id]")].map((e) => e.textContent);
+    expect(heads).toEqual(["Name", "Command", "Split from", "Direction", "Keeps"]);
+    const root = host.querySelectorAll(".pane-row")[0];
+    expect(root.querySelector(".root-note")?.textContent).toContain("root pane");
+    const second = host.querySelectorAll(".pane-row")[1];
+    for (const el of second.querySelectorAll("input, select")) {
+      expect(el.getAttribute("aria-labelledby")).toMatch(/^layout-col-/);
+    }
+  });
+
   it("shows the built-in default marked as default", async () => {
     const { host, button } = await setup();
     expect(host.querySelector(".badge")?.textContent).toContain("Default");
@@ -70,7 +83,7 @@ describe("SpaceLayoutEditor", () => {
     expect(host.querySelector(".root-note")).not.toBeNull();
     expect(button("Save").disabled).toBe(true);
     expect(button("Reset to default").disabled).toBe(true);
-    expect(host.querySelector(".hint")?.textContent).toContain(".agents/herdr-layout.json");
+    expect(host.querySelector(".hint")?.textContent).toContain(".poimen/config.json");
   });
 
   it("shows the configured layout", async () => {

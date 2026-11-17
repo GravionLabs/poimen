@@ -47,7 +47,7 @@ const LEGACY: Record<string, number> = {
   "src/app/settings-view/layouts-editor.html": 9,
   "src/app/settings-view/settings-import-panel.html": 3,
   "src/app/settings-view/settings-view.html": 11,
-  "src/app/settings-view/space-layout-editor.html": 7,
+  "src/app/settings-view/space-layout-editor.html": 3,
   "src/app/settings-view/space-templates-editor.html": 14,
   "src/app/shortcuts-dialog/shortcuts-dialog.html": 1,
   "src/app/sidebar/machines-section/machines-section.ts": 5,

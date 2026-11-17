@@ -1,151 +1,164 @@
 <div class="layout-form">
   <h3>Tabs</h3>
-  <ol class="rows panes" aria-label="Tabs of the layout">
-    @for (item of flat(); track item.path.join("."); let ti = $index) {
-      <li
-        class="pane-row"
-        [class.invalid]="errs()?.tab?.[ti]"
-        [style.margin-left.rem]="item.depth * 1.5"
-      >
-        <div class="pane-fields">
-          <label class="field">
-            <span>Tab name</span>
-            <input
-              type="text"
-              [attr.data-tab]="ti"
-              [value]="item.tab.name"
-              (input)="setTabName(item.path, $event)"
-            />
-          </label>
-          <label class="field">
-            <span>Shape</span>
-            <select
-              [attr.aria-label]="'Shape of ' + item.tab.name"
-              (change)="setShape(item.path, value($event))"
-            >
-              <option value="terminal" [selected]="item.tab.root.kind === 'terminal'">
-                Terminal
-              </option>
-              <option value="split" [selected]="item.tab.root.kind === 'split'">Split tree</option>
-            </select>
-          </label>
-          <span class="actions">
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Move ' + item.tab.name + ' up'"
-              title="Move up"
-              (click)="moveTab(item.path, -1)"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Move ' + item.tab.name + ' down'"
-              title="Move down"
-              (click)="moveTab(item.path, 1)"
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Indent ' + item.tab.name"
-              title="Indent: make it a child of the tab above"
-              [disabled]="!canIndent(item.path)"
-              (click)="indent(item.path)"
-            >
-              →
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Outdent ' + item.tab.name"
-              title="Outdent: make it a sibling of its parent"
-              [disabled]="!canOutdent(item.path)"
-              (click)="outdent(item.path)"
-            >
-              ←
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Add child tab to ' + item.tab.name"
-              title="Add child tab"
-              (click)="addTab(item.path)"
-            >
-              +
-            </button>
-            <button
-              type="button"
-              class="icon-btn"
-              [attr.aria-label]="'Delete ' + item.tab.name"
-              title="Delete the tab with its children"
-              [disabled]="flat().length === 1"
-              (click)="removeTab(item.path)"
-            >
-              ×
-            </button>
-          </span>
-        </div>
-        <ng-container
-          [ngTemplateOutlet]="nodeTpl"
-          [ngTemplateOutletContext]="{ node: item.tab.root, tab: item.path, at: [], ti: ti }"
-        />
-        <div class="pane-fields place">
-          <label class="field">
-            <span>Place</span>
-            <input
-              type="checkbox"
-              [attr.aria-label]="'Place ' + item.tab.name + ' in its own editor group'"
-              [checked]="item.tab.place !== null"
-              (change)="setPlaced(item.path, $any($event.target).checked)"
-            />
-          </label>
-          @if (item.tab.place; as p) {
+  <div class="pane-grid simple">
+    <div class="pane-head" aria-hidden="true">
+      <span id="tabs-col-name">Tab name</span>
+      <span id="tabs-col-shape">Shape</span>
+      <span></span>
+    </div>
+    <ol class="rows panes" aria-label="Tabs of the layout">
+      @for (item of flat(); track item.path.join("."); let ti = $index) {
+        <li
+          class="pane-row"
+          [class.invalid]="errs()?.tab?.[ti]"
+          [style.margin-left.rem]="item.depth * 1.5"
+        >
+          <div class="pane-fields">
             <label class="field">
-              <span>Direction</span>
-              <select
-                [attr.aria-label]="'Place direction of ' + item.tab.name"
-                (change)="setPlace(item.path, { direction: $any(value($event)) })"
-              >
-                <option value="right" [selected]="p.direction === 'right'">right</option>
-                <option value="down" [selected]="p.direction === 'down'">down</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>Of</span>
-              <select
-                [attr.aria-label]="'Place of for ' + item.tab.name"
-                (change)="setPlace(item.path, { of: value($event) || null })"
-              >
-                <option value="" [selected]="p.of === null">parent tab</option>
-                @for (n of placeTargets(ti); track n) {
-                  <option [value]="n" [selected]="p.of === n">{{ n }}</option>
-                }
-              </select>
-            </label>
-            <label class="field ratio">
-              <span>Ratio</span>
+              <span>Tab name</span>
               <input
-                type="number"
-                step="0.05"
-                [min]="ratioMin"
-                [max]="ratioMax"
-                [attr.aria-label]="'Place ratio of ' + item.tab.name"
-                [value]="p.ratio"
-                (input)="setPlace(item.path, { ratio: ratioOf($event) })"
+                type="text"
+                aria-labelledby="tabs-col-name"
+                [attr.data-tab]="ti"
+                [value]="item.tab.name"
+                (input)="setTabName(item.path, $event)"
               />
             </label>
+            <label class="field">
+              <span>Shape</span>
+              <select
+                aria-labelledby="tabs-col-shape"
+                (change)="setShape(item.path, value($event))"
+              >
+                <option value="terminal" [selected]="item.tab.root.kind === 'terminal'">
+                  Terminal
+                </option>
+                <option value="split" [selected]="item.tab.root.kind === 'split'">
+                  Split tree
+                </option>
+              </select>
+            </label>
+            <span class="actions">
+              <span class="group"
+                ><button
+                  type="button"
+                  class="icon-btn"
+                  [attr.aria-label]="'Move ' + item.tab.name + ' up'"
+                  title="Move up"
+                  (click)="moveTab(item.path, -1)"
+                >
+                  ↑</button
+                ><button
+                  type="button"
+                  class="icon-btn"
+                  [attr.aria-label]="'Move ' + item.tab.name + ' down'"
+                  title="Move down"
+                  (click)="moveTab(item.path, 1)"
+                >
+                  ↓
+                </button>
+              </span>
+              <span class="group"
+                ><button
+                  type="button"
+                  class="icon-btn"
+                  [attr.aria-label]="'Indent ' + item.tab.name"
+                  title="Indent: make it a child of the tab above"
+                  [disabled]="!canIndent(item.path)"
+                  (click)="indent(item.path)"
+                >
+                  →</button
+                ><button
+                  type="button"
+                  class="icon-btn"
+                  [attr.aria-label]="'Outdent ' + item.tab.name"
+                  title="Outdent: make it a sibling of its parent"
+                  [disabled]="!canOutdent(item.path)"
+                  (click)="outdent(item.path)"
+                >
+                  ←</button
+                ><button
+                  type="button"
+                  class="icon-btn"
+                  [attr.aria-label]="'Add child tab to ' + item.tab.name"
+                  title="Add child tab"
+                  (click)="addTab(item.path)"
+                >
+                  +
+                </button>
+              </span>
+              <span class="group apart"
+                ><button
+                  type="button"
+                  class="icon-btn danger"
+                  [attr.aria-label]="'Delete ' + item.tab.name"
+                  title="Delete the tab with its children"
+                  [disabled]="flat().length === 1"
+                  (click)="removeTab(item.path)"
+                >
+                  ×
+                </button>
+              </span>
+            </span>
+          </div>
+          <ng-container
+            [ngTemplateOutlet]="nodeTpl"
+            [ngTemplateOutletContext]="{ node: item.tab.root, tab: item.path, at: [], ti: ti }"
+          />
+          <div class="pane-fields place">
+            <label class="field">
+              <span>Place</span>
+              <input
+                type="checkbox"
+                [attr.aria-label]="'Place ' + item.tab.name + ' in its own editor group'"
+                [checked]="item.tab.place !== null"
+                (change)="setPlaced(item.path, $any($event.target).checked)"
+              />
+            </label>
+            @if (item.tab.place; as p) {
+              <label class="field">
+                <span>Direction</span>
+                <select
+                  [attr.aria-label]="'Place direction of ' + item.tab.name"
+                  (change)="setPlace(item.path, { direction: $any(value($event)) })"
+                >
+                  <option value="right" [selected]="p.direction === 'right'">right</option>
+                  <option value="down" [selected]="p.direction === 'down'">down</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Of</span>
+                <select
+                  [attr.aria-label]="'Place of for ' + item.tab.name"
+                  (change)="setPlace(item.path, { of: value($event) || null })"
+                >
+                  <option value="" [selected]="p.of === null">parent tab</option>
+                  @for (n of placeTargets(ti); track n) {
+                    <option [value]="n" [selected]="p.of === n">{{ n }}</option>
+                  }
+                </select>
+              </label>
+              <label class="field ratio">
+                <span>Ratio</span>
+                <input
+                  type="number"
+                  step="0.05"
+                  [min]="ratioMin"
+                  [max]="ratioMax"
+                  [attr.aria-label]="'Place ratio of ' + item.tab.name"
+                  [value]="p.ratio"
+                  (input)="setPlace(item.path, { ratio: ratioOf($event) })"
+                />
+              </label>
+            }
+          </div>
+          @if (errs()?.tab?.[ti]; as m) {
+            <p class="field-error">{{ m }}</p>
           }
-        </div>
-        @if (errs()?.tab?.[ti]; as m) {
-          <p class="field-error">{{ m }}</p>
-        }
-      </li>
-    }
-  </ol>
+        </li>
+      }
+    </ol>
+  </div>
   @if (errs()?.tabs; as m) {
     <p class="field-error">{{ m }}</p>
   }
