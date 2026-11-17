@@ -325,8 +325,8 @@ h3 {
 }
 
 .icon-btn {
-  width: 24px;
-  height: 22px;
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
   line-height: 1;
 }
@@ -448,7 +448,7 @@ h3 {
 
 .root-note {
   align-self: center;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--h-text-muted-color);
 }
 
@@ -596,4 +596,201 @@ h3 {
 
 .integrations .error {
   margin: 4px 0 0;
+}
+
+.icon-btn.danger {
+  color: var(--app-danger-text, var(--status-blocked));
+}
+
+.actions .group {
+  display: flex;
+  gap: 2px;
+}
+
+.actions .group + .group {
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid var(--h-content-border-color);
+}
+
+.actions .group.apart {
+  margin-left: 12px;
+}
+
+/* One grid for the pane rows: a single header row, the same column the same width in every row. */
+.pane-grid {
+  --cols: minmax(7rem, 1fr) minmax(10rem, 2fr) minmax(7rem, 1fr) 6rem 5rem auto;
+  display: grid;
+  grid-template-columns: var(--cols);
+  column-gap: 8px;
+}
+
+.pane-grid.simple {
+  --cols: minmax(7rem, 1fr) minmax(10rem, 2fr) auto;
+}
+
+.pane-grid > *,
+.pane-grid .rows,
+.pane-grid .pane-row,
+.pane-grid .pane-fields {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+}
+
+.pane-grid .rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pane-grid .pane-fields {
+  column-gap: 8px;
+}
+
+.pane-grid .pane-row > .field-error {
+  grid-column: 1 / -1;
+}
+
+.pane-head {
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--h-text-muted-color);
+}
+
+.pane-grid .pane-row {
+  padding-block: 4px;
+}
+
+.pane-grid .field {
+  min-width: 0;
+}
+
+.pane-grid .field input[type="text"],
+.pane-grid .field.ratio input,
+.pane-grid .field select {
+  width: 100%;
+}
+
+.pane-grid .field > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.pane-grid .root-note {
+  grid-column: span 3;
+}
+
+.pane-grid.simple .field > span {
+  /* kept hidden: the header names the column */
+  position: absolute;
+}
+
+.pane-grid .pane-fields .actions {
+  margin-left: 0;
+  align-items: center;
+  justify-self: end;
+}
+
+@media (max-width: 720px) {
+  .pane-grid,
+  .pane-grid > *,
+  .pane-grid .rows,
+  .pane-grid .pane-row,
+  .pane-grid .pane-fields {
+    display: block;
+  }
+
+  .pane-head {
+    display: none;
+  }
+
+  .pane-grid .pane-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .pane-grid .field > span {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+  }
+
+  .pane-grid .field input[type="text"] {
+    width: 110px;
+  }
+
+  .pane-grid .field.grow input {
+    width: 100%;
+  }
+
+  .pane-grid .field.ratio input {
+    width: 64px;
+  }
+
+  .pane-grid .field select {
+    width: auto;
+  }
+
+  .pane-grid .pane-fields .actions {
+    margin-left: auto;
+  }
+}
+
+/* Nested rows of the tab editor (leaves, splits, place) are not part of the header grid. */
+.pane-grid .pane-fields.leaf,
+.pane-grid .pane-fields.place,
+.pane-grid .split-node .pane-fields {
+  display: flex;
+  grid-column: auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pane-grid .split-node,
+.pane-grid .split-children {
+  grid-column: 1 / -1;
+}
+
+.pane-grid .pane-fields.leaf .field > span,
+.pane-grid .pane-fields.place .field > span,
+.pane-grid .split-node .pane-fields .field > span {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+}
+
+.pane-grid .pane-fields.leaf .field,
+.pane-grid .pane-fields.place .field,
+.pane-grid .split-node .pane-fields .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.pane-grid .pane-fields.leaf .field.grow {
+  flex: 1;
+}
+
+.pane-grid .pane-fields.leaf .field input[type="text"],
+.pane-grid .pane-fields.place .field select,
+.pane-grid .split-node .pane-fields .field select {
+  width: auto;
+}
+
+.pane-grid .pane-fields.leaf .field.grow input {
+  width: 100%;
+}
+
+.pane-grid .pane-fields.leaf .actions {
+  margin-left: auto;
 }
