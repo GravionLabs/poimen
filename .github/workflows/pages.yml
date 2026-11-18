@@ -22,6 +22,6 @@ permissions:
 
 jobs:
   pages:
-    uses: GravionLabs/ci/.github/workflows/vitepress-pages.yml@v1
+    uses: GravionLabs/ci/.github/workflows/vitepress-pages.yml@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
     with:
       site-path: site
