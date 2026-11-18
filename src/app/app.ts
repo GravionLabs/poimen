@@ -330,7 +330,11 @@ export class App {
       const panes = new Map<string, string>();
       for (const pane of this.store.panes().values()) {
         const session = flowSession(pane);
-        if (session) panes.set(pane.terminal_id, session);
+        // A machine that is not connected is not followed: its watch ends with the connection
+        // and starts again (from the beginning) when the machine is back.
+        if (session && !this.machines.blockedReason(pane.terminal_id)) {
+          panes.set(pane.terminal_id, session);
+        }
       }
       void this.tokenTotals.follow(panes);
     });
