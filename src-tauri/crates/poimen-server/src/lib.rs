@@ -562,7 +562,15 @@ impl Shared {
         for signal in signals {
             entry.apply_signal(signal, now_millis());
         }
-        let agent_changed = entry.info.agent != before;
+        // `reported_at` alone moves with a repeated report: no event, a write at most every 10 s.
+        let strip = |a: &Option<AgentInfo>| {
+            a.clone().map(|mut i| {
+                i.reported_at = None;
+                i
+            })
+        };
+        let agent_changed = strip(&entry.info.agent) != strip(&before);
+        let time_moved = !agent_changed && entry.info.agent != before;
         let records_changed = entry.sync_records();
         if agent_changed {
             self.publish(agent_event(terminal_id, entry.info.agent.as_ref()));
@@ -570,7 +578,12 @@ impl Shared {
         if records_changed {
             self.publish(records_event(entry));
         }
-        if agent_changed || records_changed {
+        let due = time_moved
+            && entry
+                .agent_persisted
+                .is_none_or(|at| at.elapsed() >= REPORT_PERSIST_EVERY);
+        if agent_changed || records_changed || due {
+            entry.agent_persisted = Some(Instant::now());
             self.persist(&inner);
         }
     }
