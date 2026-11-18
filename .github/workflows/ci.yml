@@ -31,7 +31,7 @@ jobs:
       frontend: ${{ steps.diff.outputs.frontend }}
       rust: ${{ steps.diff.outputs.rust }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - id: diff
@@ -59,9 +59,9 @@ jobs:
     name: frontend (check, lint, format, test, build)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -83,10 +83,10 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # cargo fmt --check covers the whole workspace (the app crate too); clippy -D warnings and test (--locked) run
       # for the server crates only, with the toolchain of rust-toolchain.toml.
-      - uses: GravionLabs/ci/rust/ci@v1
+      - uses: GravionLabs/ci/rust/ci@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
         with:
           working-directory: src-tauri
           packages: "poimen-protocol poimen-client poimen-server poimen-core poimen-console poimen-pty-host"
@@ -104,17 +104,17 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # The Tauri macros read the built frontend (frontendDist in tauri.conf.json).
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       # fmt is checked in `rust-server`.
-      - uses: GravionLabs/ci/rust/ci@v1
+      - uses: GravionLabs/ci/rust/ci@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
         with:
           working-directory: src-tauri
           packages: "poimen-app"
@@ -133,17 +133,17 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
       CARGO_PROFILE_TEST_DEBUG: 0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # The Tauri macros read the built frontend (frontendDist in tauri.conf.json).
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       # fmt is platform-independent and checked in `rust-server`.
-      - uses: GravionLabs/ci/rust/ci@v1
+      - uses: GravionLabs/ci/rust/ci@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
         with:
           working-directory: src-tauri
           packages: "poimen-protocol poimen-client poimen-server poimen-core poimen-console poimen-pty-host"
