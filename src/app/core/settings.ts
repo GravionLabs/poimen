@@ -103,6 +103,10 @@ export interface HarnessInfo {
   command: string[];
   models: string[];
   defaultModel: string | null;
+  /** Text typed at the agent's prompt to end its session. */
+  exitInput: string | null;
+  /** Argv template appended to the command to resume a session (`{session}`); empty: none. */
+  resumeArgs: string[];
   /** The program was found on the `PATH` of a child. */
   available: boolean;
 }
@@ -122,6 +126,8 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
         command: strings(r["command"]),
         models: strings(r["models"]),
         defaultModel: typeof r["defaultModel"] === "string" ? r["defaultModel"] : null,
+        exitInput: typeof r["exitInput"] === "string" ? r["exitInput"] : null,
+        resumeArgs: strings(r["resumeArgs"]),
         available: r["available"] === true,
       },
     ];
