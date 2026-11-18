@@ -200,6 +200,9 @@ export interface Terminal {
   /** Latest notification text of the agent (poimen backend only), with its time in epoch ms. */
   agent_message?: string;
   agent_message_at?: number;
+  /** Poimen backend: last accepted agent report and last status change, epoch ms (#897). */
+  agent_reported_at?: number;
+  agent_status_since?: number;
   /** Progress 0 to 100, why the agent is blocked (`permission`, `question`, `auth`) and the program's own title (OSC 7501, #682). */
   agent_progress?: number;
   agent_kind?: string;

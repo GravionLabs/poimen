@@ -638,6 +638,13 @@ pub struct AgentInfo {
     /// The program's own title (OSC 7501 `title`, #682), plain text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// When the last accepted `terminal.report_agent` came in, milliseconds since the epoch,
+    /// also when the status did not change (#897).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_at: Option<u64>,
+    /// When `status` last changed, milliseconds since the epoch (#897).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_since: Option<u64>,
 }
 
 /// A child record of a terminal: what a program reported with OSC 7501 and an `id` (a
@@ -1627,6 +1634,21 @@ pub enum Event {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn agent_info_times_are_additive() {
+        let old: AgentInfo = serde_json::from_value(json!({"status":"idle"})).unwrap();
+        assert_eq!((old.reported_at, old.status_since), (None, None));
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            json!({"status":"idle"})
+        );
+        let v = json!({"status":"working","reported_at":1700000005000u64,"status_since":1700000000000u64});
+        let info: AgentInfo = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(info.reported_at, Some(1_700_000_005_000));
+        assert_eq!(info.status_since, Some(1_700_000_000_000));
+        assert_eq!(serde_json::to_value(&info).unwrap(), v);
+    }
+
+    #[test]
     fn env_of_the_create_requests_is_optional_and_round_trips() {
         let old: TerminalCreate = serde_json::from_str(r#"{"space_id":"s1"}"#).unwrap();
         assert!(old.env.is_empty());
@@ -1867,6 +1889,8 @@ mod tests {
             json!({"status":"blocked"})
         );
         let info = AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Error,
             agent: None,
             session_id: None,

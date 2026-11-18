@@ -66,6 +66,34 @@ impl Serialize for SoundSetting {
     }
 }
 
+/// The `usage` setting: which provider limits the status bar asks for (#784).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Usage {
+    /// `usage.claude`: ask the Claude usage endpoint (default true); false reads no token and
+    /// sends no request.
+    pub claude: bool,
+}
+
+impl Default for Usage {
+    fn default() -> Self {
+        Self { claude: true }
+    }
+}
+
+fn resolve_usage(value: &Value, warnings: &mut Vec<String>) -> Usage {
+    let mut usage = Usage::default();
+    let Some(object) = value.as_object() else {
+        warnings.push("usage must be an object".into());
+        return usage;
+    };
+    match object.get("claude") {
+        None => {}
+        Some(Value::Bool(b)) => usage.claude = *b,
+        Some(other) => warnings.push(format!("usage.claude {other} must be true or false")),
+    }
+    usage
+}
+
 /// The `sounds` setting: what plays when an agent is blocked or done (#724).
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Sounds {
@@ -205,6 +233,8 @@ pub struct Settings {
     pub machines: Vec<crate::machines::MachineConfig>,
     /// What plays when an agent is blocked or done (`sounds`).
     pub sounds: Sounds,
+    /// Which provider limits the status bar asks for (`usage`).
+    pub usage: Usage,
     /// `agents.claude.classicRenderer`: new poimen terminals set
     /// `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` (default false).
     pub claude_classic_renderer: bool,
@@ -393,6 +423,7 @@ impl Default for Settings {
             agent_actions: Vec::new(),
             machines: Vec::new(),
             sounds: Sounds::default(),
+            usage: Usage::default(),
             claude_classic_renderer: false,
             home: None,
             warnings: Vec::new(),
@@ -684,6 +715,9 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
     }
     if let Some(value) = root.get("sounds") {
         s.sounds = resolve_sounds(value, &mut s.warnings);
+    }
+    if let Some(value) = root.get("usage") {
+        s.usage = resolve_usage(value, &mut s.warnings);
     }
     if let Some(value) = root.get("agents") {
         resolve_agents(value, &mut s);
@@ -1675,6 +1709,16 @@ mod tests {
         // System notifications were removed (#676); an old config keeps working silently.
         let s = rows(r#"{"notifications":{"blocked":false,"done":"no"}}"#);
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+    }
+
+    #[test]
+    fn usage_claude_is_on_by_default_and_can_be_turned_off() {
+        assert!(rows("{}").usage.claude);
+        assert!(!rows(r#"{"usage":{"claude":false}}"#).usage.claude);
+        let s = rows(r#"{"usage":{"claude":"no"}}"#);
+        assert!(s.usage.claude);
+        assert_eq!(s.warnings.len(), 1);
+        assert_eq!(rows(r#"{"usage":3}"#).warnings.len(), 1);
     }
 
     #[test]

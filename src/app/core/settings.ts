@@ -284,9 +284,21 @@ export interface Settings {
   machines: Machine[];
   /** `sounds`: what plays when an agent is blocked or done and not viewed. */
   sounds: SoundSettings;
+  /** `usage`: which provider limits the status bar asks for (#784). */
+  usage: UsageSettings;
   /** The home directory `~` stands for; `null` until the backend knows it. */
   home: string | null;
   warnings: string[];
+}
+
+/** `usage.claude` (default true): off reads no token and sends no request. */
+export interface UsageSettings {
+  claude: boolean;
+}
+
+function parseUsage(v: unknown): UsageSettings {
+  const r = v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  return { claude: r["claude"] !== false };
 }
 
 /** `blocked` or `done`: the agent transitions that can play a sound (#724). */
@@ -373,6 +385,7 @@ export const DEFAULT_SETTINGS: Settings = {
   tasks: DEFAULT_TASKS,
   machines: [],
   sounds: { blocked: false, done: false },
+  usage: { claude: true },
   home: null,
   warnings: [],
 };
@@ -486,6 +499,7 @@ export function parseSettings(raw: unknown): Settings {
       ? r["machines"].map(parseMachine).filter((m) => m !== null)
       : [],
     sounds: parseSounds(r["sounds"]),
+    usage: parseUsage(r["usage"]),
     home: typeof r["home"] === "string" ? r["home"] : null,
     warnings: Array.isArray(r["warnings"])
       ? r["warnings"].filter((w): w is string => typeof w === "string")

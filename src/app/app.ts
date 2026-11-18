@@ -37,6 +37,7 @@ import { Attention, canMarkUnread } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
+import { TokenTotalsService } from "./core/token-totals";
 import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
 import { SpacesStore } from "./core/spaces-store";
@@ -64,6 +65,7 @@ import {
 } from "./core/editor-tabs";
 import { SettingsView } from "./settings-view/settings-view";
 import { GithubView } from "./github/github-view";
+import { ClaudeLimits } from "./core/claude-limits";
 import { Deliver } from "./deliver/deliver";
 import { DeliverView } from "./deliver/deliver-view";
 import { Keymap } from "./core/keymap";
@@ -189,6 +191,7 @@ export class App {
   protected readonly agentActions = inject(AgentActions);
   protected readonly pulls = inject(GithubPulls);
   protected readonly deliver = inject(Deliver);
+  protected readonly claudeLimits = inject(ClaudeLimits);
   private readonly spaceRebuild = inject(SpaceRebuild);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
@@ -216,6 +219,7 @@ export class App {
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
+  private readonly tokenTotals = inject(TokenTotalsService);
   private readonly sounds = inject(Sounds);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
@@ -323,6 +327,19 @@ export class App {
     });
     // Every view shows the hook status combined with the runs a pane started (#540).
     effect(() => this.store.setStatusOf(this.deliver.paneStatus()));
+    // Token totals of every agent pane with a transcript (#895).
+    effect(() => {
+      const panes = new Map<string, string>();
+      for (const pane of this.store.panes().values()) {
+        const session = flowSession(pane);
+        // A machine that is not connected is not followed: its watch ends with the connection
+        // and starts again (from the beginning) when the machine is back.
+        if (session && !this.machines.blockedReason(pane.terminal_id)) {
+          panes.set(pane.terminal_id, session);
+        }
+      }
+      void this.tokenTotals.follow(panes);
+    });
     // Instantiated for its effect: the dock badge follows `Attention.count`.
     inject(DockBadge);
     const title = inject(Title);
@@ -349,6 +366,8 @@ export class App {
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     // The deliver loops of the repositories of the open spaces (status files, watched, no polling).
     destroyRef.onDestroy(this.deliver.start());
+    // The Claude limits (#784): at start, every 5 minutes and on focus, only while the app runs.
+    destroyRef.onDestroy(this.claudeLimits.start());
     // Spaces back from a server restart without terminals get their layout again.
     destroyRef.onDestroy(this.spaceRebuild.start());
     // Questions of agents that want to write into another space (#615).

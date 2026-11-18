@@ -9,7 +9,6 @@ on:
     branches: [main, "release/**"]
     types: [opened, edited, synchronize, reopened, labeled, unlabeled, ready_for_review]
 
-# pull-requests: write is for the retarget job of GravionLabs/ci; a caller that grants less fails at startup.
 permissions: {}
 
 jobs:
@@ -17,5 +16,5 @@ jobs:
     permissions:
       contents: read
       issues: read
-      pull-requests: write
-    uses: GravionLabs/ci/.github/workflows/pr-checks.yml@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
+      pull-requests: read
+    uses: GravionLabs/ci/.github/workflows/pr-checks.yml@205d8430859ce47e7ee10f3b080f41a10e606beb # v1.16.0
