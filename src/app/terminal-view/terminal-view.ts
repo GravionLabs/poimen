@@ -88,6 +88,9 @@ function ansiColors(
  * The live terminal of the active tab. It exists only while its tab is visible: hiding the tab
  * destroys it, which closes the stream and disposes xterm; the terminal keeps running.
  */
+/** Limits of the inline image addon (`pixelLimit` per image, `storageLimit` in MB). */
+export const IMAGE_OPTIONS = { pixelLimit: 16_777_216, storageLimit: 32 };
+
 @Component({
   selector: "app-terminal-view",
   imports: [HxButton, PromptBar, Icon],
@@ -270,6 +273,12 @@ export class TerminalView implements OnDestroy, Searchable {
       new WebLinksAddon(taskLinkHandler(open, (link) => this.startTask(link))),
     );
     term.open(this.body().nativeElement);
+    // Inline images (sixel and iTerm); live only, the server snapshot carries none. Limits keep a
+    // flood of images from growing the webview: 16 Mpixel per image, 32 MB of stored images.
+    // Loaded lazily so it stays out of the initial bundle; images only arrive after the stream.
+    void import("@xterm/addon-image").then(({ ImageAddon }) => {
+      if (this.term === term) term.loadAddon(new ImageAddon(IMAGE_OPTIONS));
+    });
     try {
       term.loadAddon(new WebglAddon());
     } catch {
