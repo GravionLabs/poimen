@@ -26,6 +26,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - **adr**: Install poimen-server on a machine from the app after a confirmation (#864) (#889)
+- Update CHANGELOG.md for v0.24.0 [skip ci]
 
 
 ### Features
