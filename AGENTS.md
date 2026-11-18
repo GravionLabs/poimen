@@ -59,7 +59,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 ## Rules
 
 - **The backend owns state** (`poimen-server`). poimen never stores pane state of its own; snapshots from the backend are authoritative and events only invalidate them.
-- **Non-destructive.** Closing a view or the app releases controllers and never ends a terminal. Taking over a controller requires an explicit user action.
+- **Non-destructive.** Closing a view or the app releases controllers and never ends a terminal. Taking over a controller requires an explicit user action. One exception, off by default: the server may stop an idle agent process (status `done` for the set time, harness with `exitInput` and `resumeArgs`, known session id) and resume its session on the first controller attach; the terminal itself is never ended ([ADR 0014](docs/adr/0014-hibernate-idle-agents.md)).
 - **Tests stay read-only.** Live tests (`#[ignore]`) may list and observe, never control, send input or create panes in the user's session.
 - **Buttons, tags and fields (#844).** Actions are `button[hx-button]` (helix-ui, `HxButton` in the component's `imports`), information is not a button.
   - One filled **primary** per surface: the action the surface exists for (Save, Install). Everything else is `variant="outlined" severity="secondary"`; low-weight actions (Cancel in a row, Reset, a link-like step) are `variant="text"`. **Danger** (`severity="danger"`) only for an action that destroys or cannot be undone (Delete, Remove, Stop server), filled when it is the one action of a confirmation, else outlined or text.
@@ -85,6 +85,7 @@ Guidance for humans and coding agents working in this repository. Generated text
 - Named layouts: `layouts[]` in the user config with the shape of ADR 0006 (tabs with split trees, nested tabs, app-only `place`), templates refer to them by name, old keys keep working, presets stay project palette entries (proposed, [ADR 0011](docs/adr/0011-named-layouts-referenced-by-templates.md)).
 - MCP server for agent sessions: `poimen mcp` (console binary, stdio) over `poimen-client` with read tools and the write tools `start_agent`/`prompt_agent`; writes act freely in the caller's own space, any other space needs a confirmation in the app, deliver runs come from `poimen_core::agent_events` and are never written (proposed, [ADR 0012](docs/adr/0012-mcp-server-for-agent-sessions.md)).
 - Install `poimen-server` on a machine from the app after a confirmation: the release archive of the app's own version over the ssh connection into `~/.local/bin`, checksum and `--version` verified, nothing runs before the confirmation, hooks a separate step; amends ADR 0008 (proposed, [ADR 0013](docs/adr/0013-install-poimen-server-on-a-machine-from-the-app.md)).
+- Hibernate idle agents: the server stops the agent process of a `done` terminal after a set idle time and resumes the session on the first controller attach, off by default, an exception to the non-destructive rule (proposed, [ADR 0014](docs/adr/0014-hibernate-idle-agents.md)).
 
 ## Verification
 
