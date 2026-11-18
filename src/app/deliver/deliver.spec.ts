@@ -6,8 +6,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotificationCenter } from "../core/notification-center";
 import { tauri } from "../core/tauri.mock";
 import { UI_STORAGE } from "../core/ui-state";
+import { signal } from "@angular/core";
+import { TokenTotalsService, type TokenSample } from "../core/token-totals";
 import { Deliver } from "./deliver";
-import type { DeliverRead } from "./deliver-status";
+import type { DeliverCard, DeliverRead } from "./deliver-status";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("../core/tauri.mock")).tauri.invoke,
@@ -93,5 +95,114 @@ describe("Deliver run alerts (#806)", () => {
     deliver.apply("/r", run([]));
     expect(deliver.reveal("/r")).toBe(true);
     expect(deliver.revealed()).not.toBeNull();
+  });
+});
+
+describe("Deliver tokens per run (#896)", () => {
+  const at = (iso: string) => Date.parse(iso);
+  const sample = (iso: string, input: number): TokenSample => ({
+    at: at(iso),
+    input,
+    output: 0,
+    cache_read: 0,
+    cache_creation: 0,
+  });
+  const samples = signal<ReadonlyMap<string, readonly TokenSample[]>>(new Map());
+
+  function read(overrides: Record<string, unknown>): DeliverRead {
+    const base = JSON.parse(readFileSync("src/app/deliver/fixtures/events-session.json", "utf8"));
+    const events = [
+      { seq: 1, ts: "2026-11-08T10:00:00.000Z", type: "run.started", tone: "neutral" },
+    ];
+    return {
+      kind: "events",
+      runs: [{ ...base, events, ...overrides }],
+    } as unknown as DeliverRead;
+  }
+
+  function deliver(): Deliver {
+    TestBed.overrideProvider(TokenTotalsService, { useValue: { samples } });
+    return TestBed.inject(Deliver);
+  }
+
+  const stream = [
+    sample("2026-11-08T09:59:59.000Z", 1000),
+    sample("2026-11-08T10:00:00.000Z", 1),
+    sample("2026-11-08T10:30:00.000Z", 20),
+    sample("2026-11-08T11:00:00.000Z", 300),
+    sample("2026-11-08T11:00:01.000Z", 5000),
+  ];
+
+  it("sums the samples between the start and the last event of a finished run", () => {
+    samples.set(new Map([["t9", stream]]));
+    const d = deliver();
+    d.apply(
+      "/r",
+      read({
+        status: "finished",
+        outcome: "succeeded",
+        updated: "2026-11-08T11:00:00.000Z",
+        host: { "poimen.terminal": "t9" },
+      }),
+    );
+    expect(d.tokensOf()(d.cards()[0]!)?.input).toBe(321);
+  });
+
+  it("a running run counts up to now", () => {
+    samples.set(new Map([["t9", stream]]));
+    const d = deliver();
+    d.apply(
+      "/r",
+      read({
+        status: "running",
+        updated: "2026-11-08T11:30:00.000Z",
+        host: { "poimen.terminal": "t9" },
+      }),
+    );
+    d.now.set(at("2026-11-08T11:31:00.000Z"));
+    // The sample after 11:00 counts (up to now), the one before the start does not.
+    expect(d.tokensOf()(d.cards()[0]!)?.input).toBe(5321);
+  });
+
+  it("a run without the terminal link shows none, even with an agent pane around", () => {
+    samples.set(new Map([["t9", stream]]));
+    const d = deliver();
+    d.apply("/r", read({ status: "finished", outcome: "succeeded", host: {} }));
+    expect(d.tokensOf()(d.cards()[0]!)).toBeNull();
+  });
+
+  it("shows none when no sample lies in the window", () => {
+    samples.set(new Map([["t9", [sample("2026-11-07T00:00:00.000Z", 9)]]]));
+    const d = deliver();
+    d.apply(
+      "/r",
+      read({
+        status: "finished",
+        outcome: "succeeded",
+        updated: "2026-11-08T11:00:00.000Z",
+        host: { "poimen.terminal": "t9" },
+      }),
+    );
+    expect(d.tokensOf()(d.cards()[0]!)).toBeNull();
+  });
+
+  it("a remote run reads the samples of its machine's terminal, last ones kept offline", () => {
+    samples.set(new Map([["box::t9", stream]]));
+    const d = deliver();
+    d.apply(
+      "/r",
+      read({
+        status: "finished",
+        outcome: "succeeded",
+        updated: "2026-11-08T11:00:00.000Z",
+        host: { "poimen.terminal": "t9" },
+      }),
+      "box",
+    );
+    // `cards` only lists a machine that is configured; the card of the read is what counts here.
+    const card = (d as unknown as { received(): DeliverCard[] }).received()[0]!;
+    expect(d.tokensOf()(card)?.input).toBe(321);
+    // The machine goes offline: its samples stay in the service, so the total stays.
+    expect(d.tokensOf()(card)?.input).toBe(321);
   });
 });

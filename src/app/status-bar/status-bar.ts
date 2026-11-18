@@ -11,6 +11,7 @@ import {
   type BackendInfo,
   type Mode,
 } from "../core/backend";
+import type { LimitsItem } from "../core/claude-limits";
 import { Icon } from "../ui/icon/icon";
 
 /** Tooltip of the RC badge. */
@@ -104,6 +105,8 @@ export class StatusBar {
 
   /** Compact summary of the running deliver loops; `null` hides the item. */
   readonly deliver = input<BarSummary | null>(null);
+  /** The Claude limits item (#784); `null` hides it. */
+  readonly limits = input<LimitsItem | null>(null);
   /** The deliver item was clicked. */
   readonly showDeliver = output<void>();
 

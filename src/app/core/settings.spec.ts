@@ -177,6 +177,7 @@ describe("parseSettings", () => {
       tasks: DEFAULT_SETTINGS.tasks,
       machines: [],
       sounds: { blocked: false, done: false },
+      usage: { claude: true },
       home: "/Users/x",
       warnings: ["w"],
     });
@@ -359,6 +360,14 @@ describe("notifications", () => {
     const s = parseSettings({ notifyOnBlocked: true, notifyOnDone: true });
     expect(s).not.toHaveProperty("notifyOnBlocked");
     expect(s).not.toHaveProperty("notifyOnDone");
+  });
+});
+
+describe("usage", () => {
+  it("defaults to on and reads usage.claude", () => {
+    expect(parseSettings({}).usage).toEqual({ claude: true });
+    expect(parseSettings({ usage: { claude: false } }).usage).toEqual({ claude: false });
+    expect(parseSettings({ usage: { claude: "no" } }).usage).toEqual({ claude: true });
   });
 });
 

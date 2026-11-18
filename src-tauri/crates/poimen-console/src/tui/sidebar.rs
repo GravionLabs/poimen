@@ -830,6 +830,8 @@ mod tests {
 
     fn agent(status: AgentStatus) -> Option<AgentInfo> {
         Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status,
             agent: Some("claude".into()),
             session_id: None,
@@ -1239,6 +1241,8 @@ mod tests {
         let mut m = model();
         let info = |status, progress, kind: Option<&str>| {
             Some(AgentInfo {
+                reported_at: None,
+                status_since: None,
                 status,
                 agent: Some("codex".into()),
                 session_id: None,
@@ -1285,6 +1289,8 @@ mod tests {
     fn reported_text_is_plain_text() {
         let mut t = term("t9", "s1", "x", "/w");
         t.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Blocked,
             agent: None,
             session_id: None,

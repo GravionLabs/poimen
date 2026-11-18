@@ -109,7 +109,7 @@ struct Agent {
 /// `session.usage_record` data: model and token counts (`usage.inputTokens`, `outputTokens`,
 /// `cacheReadTokens`, `cacheWriteTokens`). `None` when no count is present or one is not a
 /// non-negative integer.
-fn parse_usage_record(data: &Value) -> Option<(Option<String>, Usage)> {
+pub fn parse_usage_record(data: &Value) -> Option<(Option<String>, Usage)> {
     let usage = data.get("usage")?.as_object()?;
     let mut known = false;
     let mut count = |key: &str| -> Option<u64> {
@@ -147,6 +147,48 @@ pub struct Tracker {
     /// One sample per `session.usage_record` of the main session.
     usage: Vec<UsageSample>,
     sent_usage: usize,
+}
+
+/// The usage record of one `events.jsonl` line of the main session: its event id and counts.
+/// `None` for any other line (or a malformed one).
+pub fn parse_usage_line(line: &str) -> Option<(String, Usage)> {
+    if !line.contains("\"session.usage_record\"") {
+        return None;
+    }
+    let event: Value = serde_json::from_str(line).ok()?;
+    if event.get("type").and_then(Value::as_str) != Some("session.usage_record")
+        || event.get("agentId").is_some()
+    {
+        return None;
+    }
+    let (_, usage) = parse_usage_record(event.get("data")?)?;
+    Some((event.get("id").and_then(Value::as_str)?.to_owned(), usage))
+}
+
+/// [`parse_usage_line`] with the event's timestamp.
+pub fn parse_usage_stamped(line: &str) -> Option<(String, Usage, Option<String>)> {
+    let (id, usage) = parse_usage_line(line)?;
+    let at = serde_json::from_str::<Value>(line)
+        .ok()?
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Some((id, usage, at))
+}
+
+/// Watches the usage of the session in `session_dir`.
+pub fn watch_usage(
+    session_dir: &Path,
+    emit: impl Fn(transcripts::Totals, Vec<transcripts::Sample>) + Send + 'static,
+) -> Result<WatchHandle, String> {
+    let dir = session_dir.canonicalize().map_err(|e| e.to_string())?;
+    let file = dir.join(EVENTS);
+    transcripts::watch_usage(
+        transcripts::UsageReader::copilot(&dir),
+        &dir,
+        move |p| p == file,
+        emit,
+    )
 }
 
 /// Event lines worth parsing: subagent events and the main session's messages and tool calls.

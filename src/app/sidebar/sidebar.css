@@ -600,3 +600,12 @@
   text-transform: none;
   cursor: pointer;
 }
+
+.space-tokens {
+  flex: none;
+  align-self: flex-start;
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--h-text-muted-color);
+}
