@@ -18,9 +18,12 @@ struct Env {
     client: Client,
     terminal: String,
     sweep: Box<dyn Fn(u64, u64) + Send + Sync>,
+    down: Receiver<()>,
 }
 
-fn serve(config: &Config) -> (Client, Box<dyn Fn(u64, u64) + Send + Sync>) {
+type Sweep = Box<dyn Fn(u64, u64) + Send + Sync>;
+
+fn serve(config: &Config) -> (Client, Sweep, Receiver<()>) {
     let deadline = Instant::now() + Duration::from_secs(10);
     let server = loop {
         match Server::bind(config.clone()) {
@@ -30,8 +33,12 @@ fn serve(config: &Config) -> (Client, Box<dyn Fn(u64, u64) + Send + Sync>) {
         thread::sleep(Duration::from_millis(20));
     };
     let sweep = Box::new(server.silent_sweep());
+    let (tx, rx) = mpsc::channel();
+    server.on_shutdown(move || {
+        let _ = tx.send(());
+    });
     thread::spawn(move || server.serve());
-    (Client::new(&config.socket), sweep)
+    (Client::new(&config.socket), sweep, rx)
 }
 
 impl Env {
@@ -46,7 +53,7 @@ impl Env {
             home: None,
             pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         };
-        let (client, sweep) = serve(&config);
+        let (client, sweep, down) = serve(&config);
         let work = dir.join("work").canonicalize().unwrap();
         let space = client
             .create_space("api", &work.display().to_string())
@@ -65,6 +72,7 @@ impl Env {
             client,
             terminal,
             sweep,
+            down,
         }
     }
 
@@ -183,7 +191,9 @@ fn the_mark_is_in_the_server_file_and_survives_a_restart() {
     let reported = env.agent().reported_at.unwrap();
     // A restart before the time is up: the stored report time still counts.
     env.client.shutdown_keeping_terminals().unwrap();
-    let (client, sweep) = serve(&env.config);
+    // Wait until the first server let go of the socket and the lock.
+    env.down.recv_timeout(Duration::from_secs(10)).unwrap();
+    let (client, sweep, second) = serve(&env.config);
     assert_eq!(agent_of(&client).silent_since, None);
     sweep(reported + 10 * MIN, 10);
     let marked = agent_of(&client);
@@ -195,6 +205,7 @@ fn the_mark_is_in_the_server_file_and_survives_a_restart() {
     );
     // And after another restart the mark is still there.
     client.shutdown_keeping_terminals().unwrap();
-    let (client, _) = serve(&env.config);
+    second.recv_timeout(Duration::from_secs(10)).unwrap();
+    let (client, _, _) = serve(&env.config);
     assert_eq!(agent_of(&client).silent_since, marked.silent_since);
 }
