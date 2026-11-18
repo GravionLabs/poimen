@@ -825,6 +825,7 @@ mod tests {
             host_version: None,
             host_bundled_version: None,
             records: Vec::new(),
+            hibernated: None,
         }
     }
 

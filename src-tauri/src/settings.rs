@@ -499,6 +499,11 @@ fn resolve_agents(value: &Value, s: &mut Settings) {
         s.warnings.push("agents must be an object".into());
         return;
     };
+    if let Err(e) =
+        poimen_core::settings::hibernate_after_minutes(&serde_json::json!({ "agents": value }))
+    {
+        s.warnings.push(e);
+    }
     let Some(claude) = agents.get("claude") else {
         return;
     };
