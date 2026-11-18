@@ -313,6 +313,8 @@ mod tests {
             endpoint: PathBuf::from(format!("/run/u/poimen/hosts/{id}")),
             seq: 812,
             agent: Some(AgentInfo {
+                reported_at: Some(1_700_000_005_000),
+                status_since: Some(1_700_000_000_000),
                 status: poimen_protocol::AgentStatus::Blocked,
                 agent: Some("claude".into()),
                 session_id: Some("abc".into()),
@@ -356,6 +358,8 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("\"agent_seq\": 17"), "{text}");
+        assert!(text.contains("\"reported_at\": 1700000005000"), "{text}");
+        assert!(text.contains("\"status_since\": 1700000000000"), "{text}");
     }
 
     #[test]
