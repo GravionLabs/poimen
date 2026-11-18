@@ -7,6 +7,7 @@ import { TauriBridge, type Unlisten } from "../core/tauri";
 import { NotificationCenter, type RunAlert } from "../core/notification-center";
 import { EditorTabs } from "../core/editor-tabs";
 import { UiState } from "../core/ui-state";
+import { TokenTotalsService, windowTotals, type TokenTotals } from "../core/token-totals";
 import { isGithubUrl } from "../github/pulls";
 import {
   barSummary,
@@ -15,10 +16,12 @@ import {
   groupRuns,
   isAlert,
   outcomeText,
+  runState,
   type DeliverCard,
   type DeliverRead,
   type DeliverStatus,
   type Subject,
+  startedAt,
   withMachines,
 } from "./deliver-status";
 import { effectiveStatus, runsByTerminal } from "./pane-status";
@@ -83,6 +86,7 @@ export class Deliver {
   private readonly ui = inject(UiState);
   private readonly editor = inject(EditorTabs);
   private readonly center = inject(NotificationCenter);
+  private readonly tokenTotals = inject(TokenTotalsService);
   /** Attentions already seen (notified or part of the first read), by machine, root, run and id. */
   private readonly seenAlerts = new Set<string>();
   /** Repositories whose first read is in; it only sets the baseline. */
@@ -121,6 +125,29 @@ export class Deliver {
     return (terminalId: string, hook: AgentStatus): AgentStatus => {
       const runs = byTerminal.get(terminalId);
       return runs ? effectiveStatus(hook, runs, now) : hook;
+    };
+  });
+
+  /**
+   * The tokens of a run (#896): the usage samples of the terminal in `host["poimen.terminal"]`
+   * between the run's start and its last event (`now` while it runs). No link, no total: the
+   * `paneOf` fallback does not count. A remote run reads its machine's samples (qualified id).
+   */
+  readonly tokensOf = computed(() => {
+    const samples = this.tokenTotals.samples();
+    const now = this.now();
+    return (card: DeliverCard): TokenTotals | null => {
+      if (card.state.kind !== "ok") return null;
+      const { status } = card.state;
+      // `cardsOf` qualified the id of a remote run already.
+      const id = status.host["poimen.terminal"];
+      const mine = id ? samples.get(id) : undefined;
+      if (!mine) return null;
+      const from = Date.parse(startedAt(status) ?? status.updated);
+      const live = status.status === "running" && runState(status, now) === "running";
+      const to = live ? now : Date.parse(status.updated);
+      if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+      return windowTotals(mine, from, to);
     };
   });
 

@@ -15,6 +15,7 @@ import { HxButton } from "@gravionlabs/helix-ui";
 import { UiState } from "../core/ui-state";
 import { eventTime, toneStyle } from "../bottom-panel/run-events";
 import { errorText, type GhError } from "../github/pulls";
+import { compactTotal, totalsTip } from "../core/token-totals";
 import { Deliver } from "./deliver";
 import { OVERVIEW_REFRESH_MS, Overview } from "./overview";
 import {
@@ -174,6 +175,12 @@ export class DeliverView {
 
   protected running(group: RunGroup): GroupRun | undefined {
     return runningRun(group, this.deliver.now());
+  }
+
+  /** `1.2M tokens` of a run (#896), with the four counts as the tooltip; null without a total. */
+  protected tokens(run: GroupRun): { text: string; tip: string } | null {
+    const t = this.deliver.tokensOf()(run.card);
+    return t ? { text: `${compactTotal(t)} tokens`, tip: totalsTip(t) } : null;
   }
 
   protected line(group: RunGroup, index: number): TimelineLine {

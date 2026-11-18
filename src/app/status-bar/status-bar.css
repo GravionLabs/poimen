@@ -193,3 +193,8 @@ span.item.update {
   display: block;
   line-height: 22px;
 }
+
+.limits.warn {
+  color: var(--status-blocked);
+  font-weight: 600;
+}
