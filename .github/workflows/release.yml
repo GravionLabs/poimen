@@ -19,7 +19,7 @@
 #   updater artifacts or latest.json and never updates itself; stable installs do not update to it either
 #   (docs/updater.md). Pull requests never build installers.
 #
-# The installers use the building block of GravionLabs/ci that tauri-app.yml is made of (tauri/installers@v1), not
+# The installers use the building block of GravionLabs/ci that tauri-app.yml is made of (tauri/installers, pinned to the commit of a release), not
 # the reusable workflow itself: tauri-app.yml determines the version, drafts and publishes the release and writes the
 # changelog on its own (this workflow keeps the manifest commit, git-cliff notes and issue closing of gh-release)
 # and assumes a Cargo workspace at the repository root (poimen's crate is src-tauri/).
@@ -64,14 +64,14 @@ jobs:
       issues: write # close-issues
       pull-requests: read # close-issues reads the release PR
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # required by GitVersion
           token: ${{ secrets.GH_PAT }} # pushes the version commit past the main ruleset
 
       - name: Determine version
         id: version
-        uses: GravionLabs/ci/versioning/determine-version@v1
+        uses: GravionLabs/ci/versioning/determine-version@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
         with:
           gitversion-config-file: GitVersion.yml
 
@@ -96,7 +96,7 @@ jobs:
       # Commits CHANGELOG.md to main, then tags that commit (create-version-tag runs inside gh-release; a tag created
       # before it would leave git-cliff's --unreleased notes empty), creates the release and closes the issues.
       - name: Create GitHub Release
-        uses: GravionLabs/ci/versioning/gh-release@v1
+        uses: GravionLabs/ci/versioning/gh-release@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
         with:
           version: ${{ steps.version.outputs.semver }}
           changelog-file: CHANGELOG.md
@@ -133,13 +133,13 @@ jobs:
     permissions:
       contents: write # tag, GitHub pre-release (rc only)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # required by GitVersion
 
       - name: Determine version
         id: version
-        uses: GravionLabs/ci/versioning/determine-version@v1
+        uses: GravionLabs/ci/versioning/determine-version@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
         with:
           gitversion-config-file: GitVersion.yml
 
@@ -156,7 +156,7 @@ jobs:
       # update-changelog nothing is committed; the git-cliff notes only list the unreleased changes.
       - name: Create GitHub pre-release
         if: ${{ steps.version.outputs.channel == 'rc' }}
-        uses: GravionLabs/ci/versioning/gh-release@v1
+        uses: GravionLabs/ci/versioning/gh-release@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
         with:
           version: ${{ steps.version.outputs.semver }}
           changelog-file: CHANGELOG.md
@@ -204,7 +204,7 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc, suffix-args: "--bundles nsis" }
     steps:
       # The tag carries the manifests with the released version.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The tag of a stable release or an rc; a beta has no tag and builds the commit of the dispatch.
           ref: ${{ (needs.release.outputs.version || needs.prerelease.outputs.release-id) && format('v{0}', needs.release.outputs.version || needs.prerelease.outputs.version) || github.sha }}
@@ -279,7 +279,7 @@ jobs:
             } >> "$GITHUB_ENV"
           done
 
-      - uses: GravionLabs/ci/tauri/installers@v1
+      - uses: GravionLabs/ci/tauri/installers@511932d4b5d0d7c77149bb705cfc2b6bae5f2df1 # v1.15.0
         # tauri-action signs the app and its externalBin sidecars (hardened runtime) and notarizes when the step above
         # exported the Apple variables.
         with:
@@ -311,7 +311,7 @@ jobs:
       # A beta has no release: the installers are workflow artifacts.
       - name: Upload the beta installers
         if: ${{ needs.prerelease.outputs.channel == 'beta' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: installers-${{ matrix.target }}
           path: |
@@ -342,7 +342,7 @@ jobs:
           - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ (needs.release.outputs.version || needs.prerelease.outputs.release-id) && format('v{0}', needs.release.outputs.version || needs.prerelease.outputs.version) || github.sha }}
 
@@ -381,7 +381,7 @@ jobs:
 
       - name: Upload the beta archive
         if: ${{ !(needs.release.outputs.release-id || needs.prerelease.outputs.release-id) }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: server-${{ matrix.target }}
           path: dist/*.tar.gz
@@ -410,7 +410,7 @@ jobs:
           - { os: macos-latest, target: aarch64-apple-darwin }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ (needs.release.outputs.version || needs.prerelease.outputs.release-id) && format('v{0}', needs.release.outputs.version || needs.prerelease.outputs.version) || github.sha }}
 
@@ -457,7 +457,7 @@ jobs:
 
       - name: Upload the beta archive
         if: ${{ !(needs.release.outputs.release-id || needs.prerelease.outputs.release-id) }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-${{ matrix.target }}
           path: dist/*
@@ -480,7 +480,7 @@ jobs:
     env:
       TAG: v${{ needs.release.outputs.version || needs.prerelease.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ env.TAG }}
           persist-credentials: false
