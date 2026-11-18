@@ -61,6 +61,9 @@ struct StartLock(std::sync::Arc<Mutex<()>>);
 /// each visible flow tab), each with at most one watch.
 #[derive(Default)]
 struct SubagentWatch(Mutex<Watches<FollowHandle>>);
+/// The usage-only follows of `tokens_watch` (#895), one per agent terminal.
+#[derive(Default)]
+struct TokenWatch(Mutex<Watches<FollowHandle>>);
 
 /// A running transcript follow of either kind (a local file watch, or the poll of a machine's
 /// server); dropping it stops it.
@@ -2403,6 +2406,96 @@ async fn subagents_watch(
     Ok(watches.store(&key, generation, Some(handle)))
 }
 
+/// Follows the token usage of the agent in `terminal_id` (every local agent pane, one file watch
+/// each, no polling; a pane of a machine through `agent.transcript`, #698). Totals arrive as
+/// `tokens` events `{ terminal_id, totals }`. `false` when the pane has no transcript; an offline
+/// machine is an error: no total. Read-only.
+#[tauri::command]
+async fn tokens_watch(
+    app: AppHandle,
+    backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
+    watch: State<'_, TokenWatch>,
+    terminal_id: String,
+) -> Result<bool, String> {
+    let key = terminal_id.clone();
+    let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
+    let emit_for = {
+        let (app, id) = (app.clone(), terminal_id.clone());
+        move |totals: transcripts::Totals| {
+            let _ = app.emit("tokens", json!({ "terminal_id": id, "totals": totals }));
+        }
+    };
+    if machines::split_id(&terminal_id).0.is_some() {
+        let routed = machines.route_connected(backend.inner(), &terminal_id)?;
+        let follower = format!("tokens:{terminal_id}");
+        let sum = std::sync::Mutex::new(transcripts::UsageSum::default());
+        let poller_key = follower.clone();
+        let started = tauri::async_runtime::spawn_blocking(move || {
+            remote_transcripts::start(
+                routed.backend,
+                &routed.id,
+                &poller_key,
+                remote_transcripts::INTERVAL,
+                move |_, value| {
+                    if let Ok(mut sum) = sum.lock()
+                        && sum.apply_json(&value)
+                    {
+                        emit_for(sum.totals());
+                    }
+                },
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let handle = match started {
+            remote_transcripts::Started::Following(poller) => {
+                Some(Box::new(poller) as FollowHandle)
+            }
+            remote_transcripts::Started::NotYet => None,
+        };
+        let following = handle.is_some();
+        let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+        return Ok(watches.store(&key, generation, handle) && following);
+    }
+    let session = on_routed(backend.inner(), machines.inner(), &terminal_id, |b, id| {
+        b.agent_session(id)
+    })
+    .await?;
+    let handle = session.and_then(|s| {
+        let home = home_dir()?;
+        match s.agent {
+            agent_session::TranscriptAgent::Claude => {
+                let dir = transcripts::locate_project_dir(
+                    &transcripts::projects_root(&home),
+                    &s.cwd,
+                    &s.session,
+                )?;
+                transcripts::watch_claude_usage(&dir, &s.session, emit_for)
+                    .ok()
+                    .map(|h| Box::new(h) as FollowHandle)
+            }
+            agent_session::TranscriptAgent::Copilot => {
+                let dir = copilot::locate_session_dir(&copilot::sessions_root(&home), &s.session)?;
+                copilot::watch_usage(&dir, emit_for)
+                    .ok()
+                    .map(|h| Box::new(h) as FollowHandle)
+            }
+        }
+    });
+    let following = handle.is_some();
+    let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+    Ok(watches.store(&key, generation, handle) && following)
+}
+
+/// Stops the usage follow of `terminal_id`.
+#[tauri::command]
+fn tokens_unwatch(watch: State<'_, TokenWatch>, terminal_id: String) {
+    if let Ok(mut watches) = watch.0.lock() {
+        watches.remove(&terminal_id);
+    }
+}
+
 /// Stops the subagent watch of `key` and forgets the key.
 #[tauri::command]
 fn subagents_unwatch(watch: State<'_, SubagentWatch>, key: String) {
@@ -2749,6 +2842,7 @@ pub fn run() {
                 }),
         )))
         .manage(SubagentWatch::default())
+        .manage(TokenWatch::default())
         .manage(DeliverWatch::default())
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
@@ -2933,6 +3027,8 @@ pub fn run() {
             repo_info,
             subagents_watch,
             subagents_unwatch,
+            tokens_watch,
+            tokens_unwatch,
             deliver_watch,
             open_terminal,
             terminal_input,
