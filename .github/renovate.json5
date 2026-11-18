@@ -3,7 +3,12 @@
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   // github>GravionLabs/ci: 7 days minimum release age (security fixes exempt), actions pinned to commit SHAs.
-  extends: ["config:recommended", ":semanticCommits", ":dependencyDashboard", "github>GravionLabs/ci"],
+  extends: [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard",
+    "github>GravionLabs/ci",
+  ],
   baseBranchPatterns: ["release/next"],
   // `chore(deps): ...` keeps dependency updates out of the release notes.
   // Issue titles start with their level (AGENTS.md): the dashboard is a PBI.
