@@ -1,7 +1,7 @@
 {
   "name": "poimen",
   "private": true,
-  "version": "0.24.1",
+  "version": "0.24.2",
   "description": "Desktop GUI to coordinate AI coding agent sessions",
   "license": "MIT",
   "packageManager": "pnpm@12.21.0",
