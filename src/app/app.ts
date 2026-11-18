@@ -37,6 +37,7 @@ import { Attention, canMarkUnread } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
+import { TokenTotalsService } from "./core/token-totals";
 import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
 import { SpacesStore } from "./core/spaces-store";
@@ -216,6 +217,7 @@ export class App {
   private readonly remoteSpaces = inject(RemoteSpaces);
   private readonly agentRuns = inject(AgentRuns);
   private readonly center = inject(NotificationCenter);
+  private readonly tokenTotals = inject(TokenTotalsService);
   private readonly sounds = inject(Sounds);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
@@ -323,6 +325,15 @@ export class App {
     });
     // Every view shows the hook status combined with the runs a pane started (#540).
     effect(() => this.store.setStatusOf(this.deliver.paneStatus()));
+    // Token totals of every agent pane with a transcript (#895).
+    effect(() => {
+      const panes = new Map<string, string>();
+      for (const pane of this.store.panes().values()) {
+        const session = flowSession(pane);
+        if (session) panes.set(pane.terminal_id, session);
+      }
+      void this.tokenTotals.follow(panes);
+    });
     // Instantiated for its effect: the dock badge follows `Attention.count`.
     inject(DockBadge);
     const title = inject(Title);
