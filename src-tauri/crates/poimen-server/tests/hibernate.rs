@@ -259,3 +259,27 @@ fn a_report_other_than_gone_ends_the_hibernation() {
     report(&env, &id, "working");
     wait_until("cleared", || env.terminal(&id).hibernated.is_none());
 }
+
+#[test]
+fn hibernated_survives_a_server_restart() {
+    let env = Env::new("restart", Some(ON));
+    let id = env.done_agent();
+    (env.sweep)(now_ms() + 31 * MINUTE_MS);
+    wait_until("gone", || env.terminal(&id).agent.is_none());
+    let before = env.terminal(&id).hibernated.expect("hibernated");
+    env.client.shutdown_keeping_terminals().unwrap();
+    thread::sleep(Duration::from_millis(500));
+
+    let config = Config {
+        socket: env.dir.join("run2").join("server.sock"),
+        state_file: env.dir.join("state").join("server.json"),
+        scrollback: 1000,
+        home: Some(env.dir.join("home")),
+        pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
+    };
+    let server = Server::bind(config.clone()).unwrap();
+    thread::spawn(move || server.serve());
+    let terminals = Client::new(&config.socket).list_terminals(None).unwrap();
+    let t = terminals.iter().find(|t| t.id == id).expect("adopted");
+    assert_eq!(t.hibernated.as_ref(), Some(&before));
+}
