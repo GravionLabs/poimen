@@ -5,6 +5,18 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.24.2] — 2026-11-18
+
+### Bug Fixes
+- **deps**: Renovate opens its pull requests against the default branch (#911)
+
+
+## [0.24.1] — 2026-11-18
+
+### Documentation
+- Update CHANGELOG.md for v0.24.1 [skip ci]
+
+
 ## [0.24.0] — 2026-11-17
 
 ### Bug Fixes
