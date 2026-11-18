@@ -10,6 +10,11 @@ export interface TokenTotals {
   cache_creation: number;
 }
 
+/** The usage of one message with its time (`poimen_core::transcripts::Sample`), `at` in ms. */
+export interface TokenSample extends TokenTotals {
+  at: number;
+}
+
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 const count = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
@@ -30,10 +35,36 @@ export function parseTotals(raw: unknown): TokenTotals | null {
 }
 
 /** Reads a `tokens` event payload `{ terminal_id, totals }`; anything else is `null`. */
-export function parseTokensEvent(raw: unknown): { id: string; totals: TokenTotals } | null {
+export function parseTokensEvent(
+  raw: unknown,
+): { id: string; totals: TokenTotals; samples: TokenSample[] } | null {
   if (!isObject(raw) || typeof raw["terminal_id"] !== "string") return null;
   const totals = parseTotals(raw["totals"]);
-  return totals ? { id: raw["terminal_id"], totals } : null;
+  return totals ? { id: raw["terminal_id"], totals, samples: parseSamples(raw["samples"]) } : null;
+}
+
+/** The samples of a `tokens` event; one that is malformed or has no readable time is skipped. */
+export function parseSamples(raw: unknown): TokenSample[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TokenSample[] = [];
+  for (const item of raw) {
+    const totals = parseTotals(item);
+    const at = isObject(item) && typeof item["at"] === "string" ? Date.parse(item["at"]) : NaN;
+    if (totals && Number.isFinite(at)) out.push({ ...totals, at });
+  }
+  return out;
+}
+
+/**
+ * What the samples within `[from, to]` (both included) add up to (#896); `null` without a sample
+ * in the window, so a run the session did nothing for shows no total.
+ */
+export function windowTotals(
+  samples: readonly TokenSample[],
+  from: number,
+  to: number,
+): TokenTotals | null {
+  return sumTotals(samples.filter((s) => s.at >= from && s.at <= to));
 }
 
 /** Sum of the totals of several panes; `null` when none has any (a space of plain shells). */
@@ -77,6 +108,12 @@ export class TokenTotalsService {
   private readonly bridge = inject(TauriBridge);
   private readonly _totals = signal<ReadonlyMap<string, TokenTotals>>(new Map());
   readonly totals = this._totals.asReadonly();
+  private readonly _samples = signal<ReadonlyMap<string, readonly TokenSample[]>>(new Map());
+  /**
+   * The timestamped usage per terminal (#896), for the window of a deliver run. Kept when a watch
+   * fails (an offline machine keeps its last samples), dropped when the pane leaves.
+   */
+  readonly samples = this._samples.asReadonly();
   /** Terminal id to the session it is followed for. */
   private readonly followed = new Map<string, string>();
   private listening: Promise<() => void> | null = null;
@@ -92,13 +129,17 @@ export class TokenTotalsService {
   async follow(panes: ReadonlyMap<string, string>): Promise<void> {
     this.listening ??= this.bridge.listen<unknown>("tokens", (raw) => {
       const event = parseTokensEvent(raw);
-      if (event && this.followed.has(event.id)) this.set(event.id, event.totals);
+      if (event && this.followed.has(event.id)) {
+        this.set(event.id, event.totals);
+        this.setSamples(event.id, event.samples);
+      }
     });
     for (const [id, session] of [...this.followed]) {
       if (panes.get(id) === session) continue;
       this.followed.delete(id);
       this.stopWatch(id);
       this.set(id, undefined);
+      this.setSamples(id, undefined);
     }
     const starts: Promise<void>[] = [];
     for (const [id, session] of panes) {
@@ -127,6 +168,16 @@ export class TokenTotalsService {
 
   private stopWatch(id: string): void {
     void this.bridge.invoke("tokens_unwatch", { terminalId: id }).catch(() => undefined);
+  }
+
+  private setSamples(id: string, samples: readonly TokenSample[] | undefined): void {
+    this._samples.update((map) => {
+      if (samples === undefined && !map.has(id)) return map;
+      const next = new Map(map);
+      if (samples) next.set(id, samples);
+      else next.delete(id);
+      return next;
+    });
   }
 
   private set(id: string, totals: TokenTotals | undefined): void {

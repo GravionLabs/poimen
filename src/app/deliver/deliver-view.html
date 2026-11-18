@@ -319,7 +319,12 @@
           }
         </div>
       }
-      <p class="hint" data-testid="age">last event {{ age(run.status) }}</p>
+      <p class="hint" data-testid="age">
+        last event {{ age(run.status) }}
+        @if (tokens(run); as tk) {
+          · <span data-testid="run-tokens" [attr.title]="tk.tip">{{ tk.text }}</span>
+        }
+      </p>
     }
 
     <footer>
@@ -387,6 +392,9 @@
                 <span class="chevron" aria-hidden="true">{{ lineOpen ? "▾" : "▸" }}</span>
                 <span class="mono" data-testid="span">{{ tl.span }}</span>
                 <span class="outcome" data-testid="outcome">{{ tl.outcome }}</span>
+                @if (tokens(r); as tk) {
+                  <span class="hint" data-testid="tokens" [attr.title]="tk.tip">{{ tk.text }}</span>
+                }
               </button>
               @for (l of tl.prs; track l.url) {
                 <button

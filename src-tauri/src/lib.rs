@@ -2422,8 +2422,11 @@ async fn tokens_watch(
     let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
     let emit_for = {
         let (app, id) = (app.clone(), terminal_id.clone());
-        move |totals: transcripts::Totals| {
-            let _ = app.emit("tokens", json!({ "terminal_id": id, "totals": totals }));
+        move |totals: transcripts::Totals, samples: Vec<transcripts::Sample>| {
+            let _ = app.emit(
+                "tokens",
+                json!({ "terminal_id": id, "totals": totals, "samples": samples }),
+            );
         }
     };
     if machines::split_id(&terminal_id).0.is_some() {
@@ -2441,7 +2444,7 @@ async fn tokens_watch(
                     if let Ok(mut sum) = sum.lock()
                         && sum.apply_json(&value)
                     {
-                        emit_for(sum.totals());
+                        emit_for(sum.totals(), sum.samples());
                     }
                 },
             )

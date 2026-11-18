@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TauriBridge } from "./tauri";
 import {
   TokenTotalsService,
+  windowTotals,
   compactTotal,
   parseTokensEvent,
   sumTotals,
@@ -35,6 +36,7 @@ describe("token totals", () => {
     expect(parseTokensEvent({ terminal_id: "t1", totals: t(1, 2, 3, 4) })).toEqual({
       id: "t1",
       totals: t(1, 2, 3, 4),
+      samples: [],
     });
     expect(parseTokensEvent({ terminal_id: "t1", totals: { input: 1 } })).toBeNull();
     expect(parseTokensEvent({ terminal_id: "t1", totals: t(-1) })).toBeNull();
@@ -87,5 +89,30 @@ describe("token totals", () => {
     fail = false;
     await service.follow(new Map([["m::t1", "s1"]]));
     expect(invoke.mock.calls.filter(([c]) => c === "tokens_watch")).toHaveLength(2);
+  });
+
+  it("keeps timestamped samples per pane, also when a later watch fails, and drops them with the pane", async () => {
+    const { service, emit } = setup(() => true);
+    await service.follow(new Map([["t1", "s1"]]));
+    emit({
+      terminal_id: "t1",
+      totals: t(5),
+      samples: [
+        { at: "2026-11-08T10:00:00.000Z", ...t(5) },
+        { at: "bad", ...t(1) },
+      ],
+    });
+    expect(service.samples().get("t1")).toEqual([
+      { at: Date.parse("2026-11-08T10:00:00.000Z"), ...t(5) },
+    ]);
+    await service.follow(new Map());
+    expect(service.samples().size).toBe(0);
+  });
+
+  it("windowTotals includes both ends and is null for an empty window", () => {
+    const s = (at: number, input: number) => ({ at, ...t(input) });
+    const list = [s(1, 1), s(2, 10), s(3, 100), s(4, 1000)];
+    expect(windowTotals(list, 2, 3)?.input).toBe(110);
+    expect(windowTotals(list, 5, 9)).toBeNull();
   });
 });
