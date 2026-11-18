@@ -141,6 +141,9 @@ struct TerminalEntry {
     stream: Arc<TermStream>,
     /// `seq` of the last accepted agent report; older or equal reports are dropped.
     agent_seq: Option<u64>,
+    /// When the terminal list was last written for an agent report (#897), for the 10 s limit on
+    /// reports that change nothing but `reported_at`.
+    agent_persisted: Option<Instant>,
     /// The status the program itself reports with OSC 7501 (#681); while it is set it is the
     /// terminal's `agent` and hook reports do not change it.
     osc: Option<AgentInfo>,
@@ -268,6 +271,11 @@ impl TerminalEntry {
                         .title
                         .as_deref()
                         .and_then(poimen_protocol::clean_message),
+                    reported_at: Some(now_ms),
+                    status_since: match before.as_ref() {
+                        Some(b) if b.status == status => b.status_since.or(Some(now_ms)),
+                        _ => Some(now_ms),
+                    },
                 };
                 self.osc = Some(next.clone());
                 self.info.agent = Some(next);
@@ -554,7 +562,15 @@ impl Shared {
         for signal in signals {
             entry.apply_signal(signal, now_millis());
         }
-        let agent_changed = entry.info.agent != before;
+        // `reported_at` alone moves with a repeated report: no event, a write at most every 10 s.
+        let strip = |a: &Option<AgentInfo>| {
+            a.clone().map(|mut i| {
+                i.reported_at = None;
+                i
+            })
+        };
+        let agent_changed = strip(&entry.info.agent) != strip(&before);
+        let time_moved = !agent_changed && entry.info.agent != before;
         let records_changed = entry.sync_records();
         if agent_changed {
             self.publish(agent_event(terminal_id, entry.info.agent.as_ref()));
@@ -562,7 +578,12 @@ impl Shared {
         if records_changed {
             self.publish(records_event(entry));
         }
-        if agent_changed || records_changed {
+        let due = time_moved
+            && entry
+                .agent_persisted
+                .is_none_or(|at| at.elapsed() >= REPORT_PERSIST_EVERY);
+        if agent_changed || records_changed || due {
+            entry.agent_persisted = Some(Instant::now());
             self.persist(&inner);
         }
     }
@@ -1898,6 +1919,7 @@ fn spawn_terminal(
         host: Some(spawned),
         stream,
         agent_seq: None,
+        agent_persisted: None,
         osc: None,
         hook_agent: None,
         records: records::Records::default(),
@@ -2057,6 +2079,7 @@ fn adopted(
         host: Some(handle),
         stream,
         agent_seq: t.agent_seq,
+        agent_persisted: None,
         osc: t.osc.then(|| t.agent.clone()).flatten(),
         hook_agent: t.hook_agent.clone(),
         records,
@@ -2185,6 +2208,10 @@ fn terminal_rename(shared: &Shared, p: TerminalRename) -> ApiResult {
 
 /// Applies an agent report unless it is stale (`seq` not above the last accepted one). The event
 /// is published only when the agent state actually changed.
+/// The least time between two writes of the terminal list for reports that change nothing but
+/// `reported_at` (#897).
+const REPORT_PERSIST_EVERY: Duration = Duration::from_secs(10);
+
 fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     let mut inner = lock(&shared.inner);
     let entry = terminal_mut(&mut inner, &p.terminal_id)?;
@@ -2210,6 +2237,17 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         }
         .map_or((None, None), |a| (a.message.clone(), a.message_at)),
     };
+    let now_ms = now_millis();
+    let previous = if entry.osc.is_some() {
+        entry.hook_agent.as_ref()
+    } else {
+        entry.info.agent.as_ref()
+    };
+    // The time the status last changed stays while the same status is reported again.
+    let status_since = match previous {
+        Some(a) if a.status == p.status => a.status_since.or(Some(now_ms)),
+        _ => Some(now_ms),
+    };
     let next = (p.status != AgentStatus::Gone).then(|| AgentInfo {
         status: p.status,
         agent: p.agent.clone(),
@@ -2219,11 +2257,24 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         progress: None,
         kind: None,
         title: None,
+        reported_at: Some(now_ms),
+        status_since,
     });
+    // Everything but `reported_at` decides whether something changed.
+    let same_but_time = |a: &Option<AgentInfo>, b: &Option<AgentInfo>| {
+        let strip = |x: &Option<AgentInfo>| {
+            x.clone().map(|mut i| {
+                i.reported_at = None;
+                i
+            })
+        };
+        strip(a) == strip(b)
+    };
+    let unchanged = same_but_time(&previous.cloned(), &next);
     if entry.osc.is_some() {
         // The program reports its own status (OSC 7501): the hook's is kept for when that ends.
         entry.hook_agent = next;
-    } else if entry.info.agent != next {
+    } else if !unchanged {
         entry.info.agent = next;
         shared.publish(Event::AgentStatusChanged {
             terminal_id: p.terminal_id,
@@ -2236,7 +2287,18 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
             kind: None,
             title: None,
         });
+    } else {
+        // Only `reported_at` moves: no event, and the list is written at most every 10 s.
+        entry.info.agent = next;
+        let now = Instant::now();
+        if entry
+            .agent_persisted
+            .is_some_and(|at| now.duration_since(at) < REPORT_PERSIST_EVERY)
+        {
+            return Ok(json!({ "accepted": true }));
+        }
     }
+    entry.agent_persisted = Some(Instant::now());
     // The status and its `seq` go into the terminal list, so a stale report stays dropped and
     // the status comes back after a restart.
     shared.persist(&inner);
