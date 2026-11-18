@@ -758,12 +758,54 @@ pub struct Totals {
 #[derive(Debug, Default)]
 pub struct UsageSum {
     seen: HashMap<String, Usage>,
+    /// Timestamp (as written in the file) per message id, for the windows of #896.
+    stamps: HashMap<String, String>,
+}
+
+/// The usage of one message with its timestamp: what a run window (#896) sums.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Sample {
+    pub at: String,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
 }
 
 impl UsageSum {
     /// Records `usage` of message `id`; `true` when the totals changed.
     pub fn add(&mut self, id: &str, usage: Usage) -> bool {
         self.seen.insert(id.to_owned(), usage) != Some(usage)
+    }
+
+    /// [`add`](Self::add) that remembers the message's timestamp; a changed timestamp counts as a
+    /// change too, since the samples differ.
+    pub fn add_at(&mut self, id: &str, usage: Usage, at: Option<&str>) -> bool {
+        let mut changed = self.add(id, usage);
+        if let Some(at) = at
+            && self.stamps.get(id).map(String::as_str) != Some(at)
+        {
+            self.stamps.insert(id.to_owned(), at.to_owned());
+            changed = true;
+        }
+        changed
+    }
+
+    /// The messages that have a timestamp, in no particular order.
+    pub fn samples(&self) -> Vec<Sample> {
+        self.stamps
+            .iter()
+            .filter_map(|(id, at)| {
+                let u = self.seen.get(id)?;
+                Some(Sample {
+                    at: at.clone(),
+                    input: u.input,
+                    output: u.output,
+                    cache_read: u.cache_read,
+                    cache_creation: u.cache_creation,
+                })
+            })
+            .collect()
     }
 
     /// Folds the usage an update carries (the main samples and the entries of subagents, as a
@@ -773,13 +815,13 @@ impl UsageSum {
         match update {
             Update::Main { usage, .. } => {
                 for sample in usage {
-                    changed |= self.add(&sample.id, sample.usage);
+                    changed |= self.add_at(&sample.id, sample.usage, sample.timestamp.as_deref());
                 }
             }
             Update::Entries { entries, .. } => {
                 for entry in entries {
                     if let (Some(id), Some(usage)) = (&entry.message_id, entry.usage) {
-                        changed |= self.add(id, usage);
+                        changed |= self.add_at(id, usage, entry.timestamp.as_deref());
                     }
                 }
             }
@@ -813,7 +855,8 @@ impl UsageSum {
                         sample.get("id").and_then(Value::as_str),
                         sample.get("usage").and_then(usage_of),
                     ) {
-                        changed |= self.add(id, u);
+                        changed |=
+                            self.add_at(id, u, sample.get("timestamp").and_then(Value::as_str));
                     }
                 }
             }
@@ -828,7 +871,8 @@ impl UsageSum {
                         entry.get("message_id").and_then(Value::as_str),
                         entry.get("usage").and_then(usage_of),
                     ) {
-                        changed |= self.add(id, u);
+                        changed |=
+                            self.add_at(id, u, entry.get("timestamp").and_then(Value::as_str));
                     }
                 }
             }
@@ -883,6 +927,11 @@ impl UsageReader {
         }
     }
 
+    /// The timestamped samples read so far.
+    pub fn samples(&self) -> Vec<Sample> {
+        self.sum.samples()
+    }
+
     /// Reads what the files gained; the new totals when they changed.
     pub fn refresh(&mut self) -> Option<Totals> {
         let mut changed = false;
@@ -916,11 +965,12 @@ impl UsageReader {
 
     fn line(&mut self, line: &str) -> bool {
         if self.copilot {
-            return copilot::parse_usage_line(line)
-                .is_some_and(|(id, usage)| self.sum.add(&id, usage));
+            return copilot::parse_usage_stamped(line)
+                .is_some_and(|(id, usage, at)| self.sum.add_at(&id, usage, at.as_deref()));
         }
         line.contains("\"usage\"")
-            && parse_usage_sample(line).is_some_and(|s| self.sum.add(&s.id, s.usage))
+            && parse_usage_sample(line)
+                .is_some_and(|s| self.sum.add_at(&s.id, s.usage, s.timestamp.as_deref()))
     }
 }
 
@@ -930,13 +980,19 @@ pub fn watch_usage(
     mut reader: UsageReader,
     watch_root: &Path,
     relevant: impl Fn(&Path) -> bool + Send + 'static,
-    emit: impl Fn(Totals) + Send + 'static,
+    emit: impl Fn(Totals, Vec<Sample>) + Send + 'static,
 ) -> Result<WatchHandle, String> {
     watch_dir(
         &watch_root.canonicalize().map_err(|e| e.to_string())?,
         relevant,
-        move || reader.refresh().into_iter().collect(),
-        emit,
+        move || {
+            reader
+                .refresh()
+                .map(|t| (t, reader.samples()))
+                .into_iter()
+                .collect()
+        },
+        move |(t, samples)| emit(t, samples),
     )
 }
 
@@ -944,7 +1000,7 @@ pub fn watch_usage(
 pub fn watch_claude_usage(
     project_dir: &Path,
     session: &str,
-    emit: impl Fn(Totals) + Send + 'static,
+    emit: impl Fn(Totals, Vec<Sample>) + Send + 'static,
 ) -> Result<WatchHandle, String> {
     let dir = project_dir.canonicalize().map_err(|e| e.to_string())?;
     let reader = UsageReader::claude(&dir, session).ok_or("not a valid session id")?;
@@ -1600,6 +1656,44 @@ mod tests {
         assert_eq!(reader.refresh(), None);
         append(&main, &format!("{}\n", msg("m4", 2, 3)));
         assert_eq!(reader.refresh().unwrap().input, 1103);
+    }
+
+    #[test]
+    fn usage_samples_carry_the_timestamp_of_each_message_once() {
+        let dir = temp_dir("samples");
+        let main = dir.join("s1.jsonl");
+        let stamped = |id: &str, input: u64, at: &str| {
+            msg(id, input, 1).replacen(
+                "{\"type\"",
+                &format!("{{\"timestamp\":\"{at}\",\"type\""),
+                1,
+            )
+        };
+        // m1 twice (the later line wins), m2 once, m3 has no timestamp.
+        append(
+            &main,
+            &format!(
+                "{}\n{}\n{}\n{}\n",
+                stamped("m1", 1, "2026-11-02T04:00:01.000Z"),
+                stamped("m1", 2, "2026-11-02T04:00:01.000Z"),
+                stamped("m2", 100, "2026-11-02T04:00:09.000Z"),
+                msg("m3", 5000, 1)
+            ),
+        );
+        let mut reader = UsageReader::claude(&dir, "s1").unwrap();
+        reader.refresh().unwrap();
+        let mut samples = reader.samples();
+        samples.sort_by(|a, b| a.at.cmp(&b.at));
+        assert_eq!(
+            samples
+                .iter()
+                .map(|s| (s.at.as_str(), s.input))
+                .collect::<Vec<_>>(),
+            [
+                ("2026-11-02T04:00:01.000Z", 2),
+                ("2026-11-02T04:00:09.000Z", 100)
+            ]
+        );
     }
 
     #[test]

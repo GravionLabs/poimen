@@ -165,10 +165,21 @@ pub fn parse_usage_line(line: &str) -> Option<(String, Usage)> {
     Some((event.get("id").and_then(Value::as_str)?.to_owned(), usage))
 }
 
+/// [`parse_usage_line`] with the event's timestamp.
+pub fn parse_usage_stamped(line: &str) -> Option<(String, Usage, Option<String>)> {
+    let (id, usage) = parse_usage_line(line)?;
+    let at = serde_json::from_str::<Value>(line)
+        .ok()?
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Some((id, usage, at))
+}
+
 /// Watches the usage of the session in `session_dir`.
 pub fn watch_usage(
     session_dir: &Path,
-    emit: impl Fn(transcripts::Totals) + Send + 'static,
+    emit: impl Fn(transcripts::Totals, Vec<transcripts::Sample>) + Send + 'static,
 ) -> Result<WatchHandle, String> {
     let dir = session_dir.canonicalize().map_err(|e| e.to_string())?;
     let file = dir.join(EVENTS);
