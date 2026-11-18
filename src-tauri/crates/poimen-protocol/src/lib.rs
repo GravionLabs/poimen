@@ -645,6 +645,11 @@ pub struct AgentInfo {
     /// When `status` last changed, milliseconds since the epoch (#897).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_since: Option<u64>,
+    /// When the server marked the agent silent, milliseconds since the epoch: `working` without a
+    /// report for `agents.silentAfter` minutes (#898). Set only by the server's sweeper, cleared
+    /// by the next report; never present for another status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub silent_since: Option<u64>,
 }
 
 /// A child record of a terminal: what a program reported with OSC 7501 and an `id` (a
@@ -1622,6 +1627,9 @@ pub enum Event {
         kind: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
+        /// Set while the server marks the agent silent (#898).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        silent_since: Option<u64>,
     },
     /// The child records of a terminal changed (#684); `records` is the whole list.
     #[serde(rename = "terminal.records_changed")]
@@ -1875,8 +1883,33 @@ mod tests {
                 progress: None,
                 kind: None,
                 title: None,
+                silent_since: None,
             }
         );
+    }
+
+    #[test]
+    fn silent_since_is_additive() {
+        let old: AgentInfo = serde_json::from_value(json!({"status":"working"})).unwrap();
+        assert_eq!(old.silent_since, None);
+        let info: AgentInfo =
+            serde_json::from_value(json!({"status":"working","silent_since":1700000000000u64}))
+                .unwrap();
+        assert_eq!(info.silent_since, Some(1_700_000_000_000));
+        assert_eq!(
+            serde_json::to_value(&info).unwrap()["silent_since"],
+            1_700_000_000_000u64
+        );
+        let event: Event = serde_json::from_value(json!({"event":"agent.status_changed",
+            "data":{"terminal_id":"t1","status":"working","silent_since":5}}))
+        .unwrap();
+        assert!(matches!(
+            event,
+            Event::AgentStatusChanged {
+                silent_since: Some(5),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1891,6 +1924,7 @@ mod tests {
         let info = AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Error,
             agent: None,
             session_id: None,

@@ -238,6 +238,9 @@ pub struct Settings {
     /// `agents.claude.classicRenderer`: new poimen terminals set
     /// `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` (default false).
     pub claude_classic_renderer: bool,
+    /// `agents.silentAfter`: minutes of `working` without an agent report before the server marks
+    /// the agent silent; `0` is off (default 10, #898).
+    pub silent_after: u64,
     /// The home directory `~` stands for; set by `load` so the frontend can compare spellings.
     pub home: Option<String>,
     pub warnings: Vec<String>,
@@ -425,6 +428,7 @@ impl Default for Settings {
             sounds: Sounds::default(),
             usage: Usage::default(),
             claude_classic_renderer: false,
+            silent_after: poimen_core::settings::DEFAULT_SILENT_AFTER_MIN,
             home: None,
             warnings: Vec::new(),
         }
@@ -499,6 +503,7 @@ fn resolve_agents(value: &Value, s: &mut Settings) {
         s.warnings.push("agents must be an object".into());
         return;
     };
+    s.silent_after = poimen_core::settings::resolve_silent_after(value, &mut s.warnings);
     let Some(claude) = agents.get("claude") else {
         return;
     };
@@ -1383,6 +1388,16 @@ mod tests {
         assert_eq!(s.space_templates[0].name, "one");
         assert_eq!(s.warnings.len(), 1, "{:?}", s.warnings);
         assert!(s.warnings[0].contains("default template"));
+    }
+
+    #[test]
+    fn silent_after_defaults_to_ten_and_warns_when_invalid() {
+        assert_eq!(resolve(None, none).silent_after, 10);
+        assert_eq!(rows(r#"{"agents":{"silentAfter":0}}"#).silent_after, 0);
+        let s = rows(r#"{"agents":{"silentAfter":5}}"#);
+        assert_eq!((s.silent_after, s.warnings.len()), (5, 0));
+        let bad = rows(r#"{"agents":{"silentAfter":"soon"}}"#);
+        assert_eq!((bad.silent_after, bad.warnings.len()), (10, 1));
     }
 
     #[test]

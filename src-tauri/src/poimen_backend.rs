@@ -1184,6 +1184,7 @@ mod tests {
         agent.agent = Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Working,
             agent: Some("claude".into()),
             session_id: Some("abc-1".into()),
@@ -1214,6 +1215,7 @@ mod tests {
         blocked.agent = Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Blocked,
             agent: Some("claude".into()),
             session_id: None,
@@ -1486,6 +1488,7 @@ mod tests {
         working.agent = Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Working,
             agent: Some("claude".into()),
             session_id: None,
@@ -1499,6 +1502,7 @@ mod tests {
         blocked.agent = Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Blocked,
             agent: None,
             session_id: None,
@@ -1540,6 +1544,7 @@ mod tests {
                 progress: None,
                 kind: None,
                 title: None,
+                silent_since: None,
             })
         };
         let event = changed(AgentStatus::Blocked);
@@ -1563,6 +1568,7 @@ mod tests {
             progress: Some(40),
             kind: Some("auth".into()),
             title: Some("build".into()),
+            silent_since: None,
         });
         assert_eq!(
             event.data,
@@ -1573,6 +1579,7 @@ mod tests {
         t.agent = Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Error,
             agent: None,
             session_id: None,
@@ -1604,6 +1611,7 @@ mod tests {
             progress: None,
             kind: None,
             title: None,
+            silent_since: None,
         });
         assert_eq!(
             event.data,
@@ -1614,6 +1622,7 @@ mod tests {
         t.agent = Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Blocked,
             agent: None,
             session_id: None,
@@ -2465,6 +2474,7 @@ mod tests {
         with.agent = Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Idle,
             agent: Some("copilot".into()),
             session_id: Some("s-9".into()),
