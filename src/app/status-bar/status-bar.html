@@ -55,6 +55,11 @@
       {{ run.text }}
     </button>
   }
+  @if (limits(); as l) {
+    <span class="item limits" [class.warn]="l.warning" [title]="l.title" data-testid="limits">{{
+      l.text
+    }}</span>
+  }
   <button
     type="button"
     hx-button
