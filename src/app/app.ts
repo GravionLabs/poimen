@@ -65,6 +65,7 @@ import {
 } from "./core/editor-tabs";
 import { SettingsView } from "./settings-view/settings-view";
 import { GithubView } from "./github/github-view";
+import { ClaudeLimits } from "./core/claude-limits";
 import { Deliver } from "./deliver/deliver";
 import { DeliverView } from "./deliver/deliver-view";
 import { Keymap } from "./core/keymap";
@@ -190,6 +191,7 @@ export class App {
   protected readonly agentActions = inject(AgentActions);
   protected readonly pulls = inject(GithubPulls);
   protected readonly deliver = inject(Deliver);
+  protected readonly claudeLimits = inject(ClaudeLimits);
   private readonly spaceRebuild = inject(SpaceRebuild);
 
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
@@ -364,6 +366,8 @@ export class App {
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     // The deliver loops of the repositories of the open spaces (status files, watched, no polling).
     destroyRef.onDestroy(this.deliver.start());
+    // The Claude limits (#784): at start, every 5 minutes and on focus, only while the app runs.
+    destroyRef.onDestroy(this.claudeLimits.start());
     // Spaces back from a server restart without terminals get their layout again.
     destroyRef.onDestroy(this.spaceRebuild.start());
     // Questions of agents that want to write into another space (#615).

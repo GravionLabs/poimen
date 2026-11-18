@@ -2123,6 +2123,21 @@ fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
     settings::save_sound(&home, &kind, &value)
 }
 
+/// The Claude limit windows for the status bar (#784). With `usage.claude` off nothing is read
+/// and nothing is sent; any failure is an error text (without the token) the frontend shows once.
+#[tauri::command]
+async fn usage_claude() -> Result<Vec<poimen_core::usage::Window>, String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    if !settings::load(&home).usage.claude {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        poimen_core::usage::claude_windows(&poimen_core::usage::System { home })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The bytes of the audio file configured for `sounds.<kind>` (#724). The path comes from the
 /// settings, never from the caller; a regular file up to 1 MiB.
 #[tauri::command]
@@ -2990,6 +3005,7 @@ pub fn run() {
             set_claude_classic_renderer,
             set_sound,
             sound_file,
+            usage_claude,
             set_spaces_layout,
             set_layouts,
             set_space_templates,
