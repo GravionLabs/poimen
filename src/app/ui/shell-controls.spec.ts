@@ -11,11 +11,11 @@ const tags = (html: string, re: RegExp): string[] => html.match(re) ?? [];
 describe("status bar", () => {
   const html = read("src/app/status-bar/status-bar.html");
 
-  it("every entry of the bar is an hx-status-item; only the update details use buttons", () => {
-    const details = html.slice(0, html.indexOf("<hx-status-bar>"));
+  it("every entry of the bar is an hx-status-item; only the update popover uses buttons", () => {
     const bar = html.slice(html.indexOf("<hx-status-bar>"));
-    expect(tags(bar, /<button\b[^>]*>/g)).toEqual([]);
-    for (const tag of tags(details, /<button\b[^>]*>/g)) expect(tag).toContain("hx-button");
+    const buttons = tags(bar, /<button\b[^>]*>/g);
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const tag of buttons) expect(tag).toContain("hx-button");
     expect(tags(bar, /<hx-status-item\b/g).length).toBeGreaterThan(10);
   });
 

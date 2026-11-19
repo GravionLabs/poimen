@@ -1,14 +1,22 @@
 import { Injector } from "@angular/core";
 import { describe, expect, it, vi } from "vitest";
+import { HX_UPDATE_BACKEND } from "@gravionlabs/helix-desktop/tauri";
 import { TauriBridge } from "./tauri";
-import { errorTitle, Updater, type UpdateInfo } from "./updater";
+import { errorTitle, poimenUpdateBackend, Updater, type UpdateInfo } from "./updater";
 
 const INFO: UpdateInfo = { version: "0.9.0", currentVersion: "0.8.0", notes: "Notes", date: null };
 
 function setup(answers: Record<string, () => unknown>) {
   const invoke = vi.fn(async (command: string) => answers[command]?.());
   const injector = Injector.create({
-    providers: [{ provide: TauriBridge, useValue: { invoke } }, Updater],
+    providers: [
+      { provide: TauriBridge, useValue: { invoke } },
+      {
+        provide: HX_UPDATE_BACKEND,
+        useValue: poimenUpdateBackend({ invoke } as unknown as TauriBridge),
+      },
+      Updater,
+    ],
   });
   return { updater: injector.get(Updater), invoke };
 }
@@ -75,5 +83,19 @@ describe("Updater", () => {
     const { updater, invoke } = setup({});
     await updater.install();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("backend: relaunch is a no-op because update_install restarts", async () => {
+    const calls: string[] = [];
+    const invoke = async (command: string) => {
+      calls.push(command);
+      return null;
+    };
+    const backend = poimenUpdateBackend({ invoke } as unknown as TauriBridge);
+    await backend.relaunch();
+    expect(calls).toEqual([]);
+    await backend.check();
+    await backend.install();
+    expect(calls).toEqual(["update_check", "update_install"]);
   });
 });

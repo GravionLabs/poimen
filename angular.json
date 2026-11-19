@@ -18,6 +18,7 @@
           "options": {
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
+            "externalDependencies": ["@tauri-apps/plugin-updater", "@tauri-apps/plugin-process"],
             "styles": [
               "node_modules/@xterm/xterm/css/xterm.css",
               "node_modules/@gravionlabs/helix-ui/tokens.css",

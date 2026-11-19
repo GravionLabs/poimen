@@ -1,40 +1,3 @@
-@if (detailsOpen() && (update().kind === "available" || update().kind === "error")) {
-  <section class="update-details" aria-label="Update">
-    <button
-      type="button"
-      hx-button
-      variant="text"
-      severity="secondary"
-      size="small"
-      iconOnly
-      class="close-details"
-      aria-label="Close"
-      title="Close"
-      (click)="closeDetails()"
-    >
-      <app-icon name="close" />
-    </button>
-    @if ($any(update()).step; as step) {
-      <h3 class="failed">{{ errTitle(step) }}</h3>
-      <pre class="message">{{ $any(update()).message }}</pre>
-    }
-    @if ($any(update()).info; as info) {
-      <h3>poimen {{ info.version }}</h3>
-      @if (info.notes) {
-        <pre class="message">{{ info.notes }}</pre>
-      }
-      <p class="restart-note" data-testid="restart-note">{{ restartNote }}</p>
-      <button type="button" hx-button size="small" class="install" (click)="installUpdate.emit()">
-        Install and restart
-      </button>
-    }
-    @if ($any(update()).step === "check") {
-      <button type="button" hx-button size="small" class="install" (click)="checkUpdate.emit()">
-        Try again
-      </button>
-    }
-  </section>
-}
 <hx-status-bar>
   <hx-status-item
     slot="start"
@@ -217,9 +180,42 @@
             kind="button"
             tone="accent"
             class="update-button available"
-            (click)="detailsOpen.set(!detailsOpen())"
+            [(popoverOpen)]="detailsOpen"
           >
             Update available
+            <div hxStatusPopover class="update-details" aria-label="Update">
+              @if ($any(update()).step; as step) {
+                <h3 class="failed">{{ errTitle(step) }}</h3>
+                <pre class="message">{{ $any(update()).message }}</pre>
+              }
+              @if ($any(update()).info; as info) {
+                <h3>poimen {{ info.version }}</h3>
+                @if (info.notes) {
+                  <pre class="message">{{ info.notes }}</pre>
+                }
+                <p class="restart-note" data-testid="restart-note">{{ restartNote }}</p>
+                <button
+                  type="button"
+                  hx-button
+                  size="small"
+                  class="install"
+                  (click)="installUpdate.emit()"
+                >
+                  Install and restart
+                </button>
+              }
+              @if ($any(update()).step === "check") {
+                <button
+                  type="button"
+                  hx-button
+                  size="small"
+                  class="install"
+                  (click)="checkUpdate.emit()"
+                >
+                  Try again
+                </button>
+              }
+            </div>
           </hx-status-item>
         }
         @case ("installing") {
@@ -233,9 +229,42 @@
             kind="button"
             tone="error"
             class="update-button failed"
-            (click)="detailsOpen.set(!detailsOpen())"
+            [(popoverOpen)]="detailsOpen"
           >
             {{ errTitle($any(update()).step) }}
+            <div hxStatusPopover class="update-details" aria-label="Update">
+              @if ($any(update()).step; as step) {
+                <h3 class="failed">{{ errTitle(step) }}</h3>
+                <pre class="message">{{ $any(update()).message }}</pre>
+              }
+              @if ($any(update()).info; as info) {
+                <h3>poimen {{ info.version }}</h3>
+                @if (info.notes) {
+                  <pre class="message">{{ info.notes }}</pre>
+                }
+                <p class="restart-note" data-testid="restart-note">{{ restartNote }}</p>
+                <button
+                  type="button"
+                  hx-button
+                  size="small"
+                  class="install"
+                  (click)="installUpdate.emit()"
+                >
+                  Install and restart
+                </button>
+              }
+              @if ($any(update()).step === "check") {
+                <button
+                  type="button"
+                  hx-button
+                  size="small"
+                  class="install"
+                  (click)="checkUpdate.emit()"
+                >
+                  Try again
+                </button>
+              }
+            </div>
           </hx-status-item>
         }
         @default {
