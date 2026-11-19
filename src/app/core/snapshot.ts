@@ -207,6 +207,8 @@ export interface Terminal {
   agent_progress?: number;
   agent_kind?: string;
   agent_title?: string;
+  /** The server stopped the idle agent; the next controller attach resumes it (poimen backend, #904). */
+  hibernated?: boolean;
   /** Child records, least recently updated first (poimen backend, #684). */
   records?: ChildRecord[];
   cwd?: string;
@@ -726,6 +728,7 @@ export function flowSession(pane: Terminal | undefined): string | null {
  * message, so plain terminals and agents with an unknown state have no text.
  */
 export function statusText(pane: Terminal): string | undefined {
+  if (pane.hibernated) return "hibernated";
   if (!agentKind(pane)) return undefined;
   const state = stateText(pane.agent_status, {
     kind: pane.agent_kind,

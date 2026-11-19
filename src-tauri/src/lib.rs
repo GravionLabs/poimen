@@ -20,6 +20,7 @@ mod hooks;
 mod layout;
 mod layout_file;
 mod machines;
+mod paste;
 mod poimen_backend;
 mod poimen_server;
 mod project;
@@ -2146,6 +2147,27 @@ fn sound_file(kind: String) -> Result<tauri::ipc::Response, String> {
     settings::read_sound_file(&home, &kind).map(tauri::ipc::Response::new)
 }
 
+/// Writes a pasted image to `<app cache dir>/paste/<unix ms>.<ext>` and returns the path (#906).
+/// The bytes are the raw request body, the type is the `x-mime` header.
+#[tauri::command]
+fn paste_image(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("the image bytes are missing".into());
+    };
+    let mime = request
+        .headers()
+        .get("x-mime")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("the image type is missing")?;
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("paste");
+    let path = paste::write(&dir, bytes, mime, std::time::SystemTime::now())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Writes only `terminal.fontFamily`; the settings watcher emits the change.
 #[tauri::command]
 fn set_terminal_font_family(family: String) -> Result<(), String> {
@@ -3008,6 +3030,7 @@ pub fn run() {
             set_claude_classic_renderer,
             set_sound,
             sound_file,
+            paste_image,
             usage_claude,
             set_spaces_layout,
             set_layouts,

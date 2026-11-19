@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
 import type { BackendEvent } from "./backend";
+import { plainText } from "./snapshot";
 import { NotificationCenter } from "./notification-center";
 import { TauriBridge } from "./tauri";
 
@@ -24,6 +25,8 @@ interface WriteData {
   space_name?: string;
   text?: string;
   confirmed?: boolean;
+  /** `terminal.resume_failed` (#904). */
+  reason?: string;
 }
 
 /** `agent.confirm_requested` as a request; `null` when the event lacks what the dialog shows. */
@@ -93,6 +96,13 @@ export class AgentConfirm {
           data.text ?? "",
           now,
         );
+        return;
+      }
+      case "terminal.resume_failed": {
+        // A hibernated agent could not be resumed (#904): the shell stays at its prompt.
+        const reason = plainText(data?.reason);
+        if (!reason) return;
+        this.center.recordFailure("Hibernated agent", `Resume failed: ${reason}`, now);
         return;
       }
     }

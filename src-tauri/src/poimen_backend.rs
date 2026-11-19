@@ -292,6 +292,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
             .and_then(|a| a.session_id.clone())
             .map(|value| snap::AgentSessionRef { value: Some(value) }),
         agent_status: status_of(terminal),
+        hibernated: terminal.hibernated.is_some(),
         agent_message_at: message.as_ref().and(agent.and_then(|a| a.message_at)),
         agent_message: message,
         agent_reported_at: agent.and_then(|a| a.reported_at),
@@ -336,6 +337,10 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
 
 /// The `agent_status` of the snapshot for a terminal.
 fn status_of(terminal: &Terminal) -> snap::AgentStatus {
+    // A hibernated agent is not running: it never counts as waiting or unread (#904).
+    if terminal.hibernated.is_some() {
+        return snap::AgentStatus::Unknown;
+    }
     terminal
         .agent
         .as_ref()
@@ -1003,6 +1008,7 @@ mod tests {
             host_version: None,
             host_bundled_version: None,
             records: Vec::new(),
+            hibernated: None,
         }
     }
 

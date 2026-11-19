@@ -22,6 +22,11 @@ pub struct Harness {
     pub prompt_args: Vec<String>,
     pub models: Vec<String>,
     pub default_model: Option<String>,
+    /// Text typed at the agent's prompt to end its session (`/exit`); none when unset.
+    pub exit_input: Option<String>,
+    /// Appended to `command` to resume a session; `{session}` is replaced inside an element.
+    /// Empty: the harness cannot resume.
+    pub resume_args: Vec<String>,
 }
 
 /// A harness with whether its program was found on the `PATH` of a child.
@@ -48,6 +53,8 @@ pub fn default_harnesses() -> Vec<Harness> {
             prompt_args: strings(&["{prompt}"]),
             models: strings(&["opus", "sonnet", "haiku"]),
             default_model: None,
+            exit_input: Some("/exit".into()),
+            resume_args: strings(&["--resume", "{session}"]),
         },
         Harness {
             id: "copilot".into(),
@@ -56,6 +63,8 @@ pub fn default_harnesses() -> Vec<Harness> {
             prompt_args: strings(&["-i", "{prompt}"]),
             models: strings(&["auto", "gpt-5.4"]),
             default_model: None,
+            exit_input: Some("/exit".into()),
+            resume_args: strings(&["--resume", "{session}"]),
         },
     ]
 }
@@ -87,6 +96,11 @@ fn parse_one(id: &str, value: &Value) -> Result<Harness, String> {
         Some(Value::String(m)) if !m.trim().is_empty() => Some(m.clone()),
         Some(_) => return Err("defaultModel must be a non-empty string".into()),
     };
+    let exit_input = match obj.get("exitInput") {
+        None => None,
+        Some(Value::String(m)) if !m.trim().is_empty() => Some(m.clone()),
+        Some(_) => return Err("exitInput must be a non-empty string".into()),
+    };
     Ok(Harness {
         id: id.to_owned(),
         command,
@@ -94,6 +108,8 @@ fn parse_one(id: &str, value: &Value) -> Result<Harness, String> {
         prompt_args: optional_list(obj, "promptArgs")?,
         models: optional_list(obj, "models")?,
         default_model,
+        exit_input,
+        resume_args: optional_list(obj, "resumeArgs")?,
     })
 }
 
@@ -140,6 +156,17 @@ pub fn build_argv(h: &Harness, model: Option<&str>, prompt: Option<&str>) -> Vec
     argv
 }
 
+/// The argv to resume `session` in `h`: the command, then the resume arguments with `{session}`
+/// replaced per element (a session with spaces stays one element). `None` without `resumeArgs`.
+pub fn build_resume_argv(h: &Harness, session: &str) -> Option<Vec<String>> {
+    if h.resume_args.is_empty() {
+        return None;
+    }
+    let mut argv = h.command.clone();
+    argv.extend(expand(&h.resume_args, "{session}", session));
+    Some(argv)
+}
+
 fn info_with(harnesses: Vec<Harness>, available: impl Fn(&str) -> bool) -> Vec<HarnessInfo> {
     harnesses
         .into_iter()
@@ -178,6 +205,66 @@ mod tests {
         assert_eq!(d[0].models, ["opus", "sonnet", "haiku"]);
         assert_eq!(d[1].id, "copilot");
         assert_eq!(d[1].prompt_args, ["-i", "{prompt}"]);
+    }
+
+    #[test]
+    fn defaults_end_and_resume_a_session() {
+        for h in default_harnesses() {
+            assert_eq!(h.exit_input.as_deref(), Some("/exit"), "{}", h.id);
+            assert_eq!(h.resume_args, ["--resume", "{session}"], "{}", h.id);
+        }
+    }
+
+    #[test]
+    fn parses_exit_input_and_resume_args() {
+        let (h, w) = resolved(json!({
+            "claude": {"command": ["claude"], "exitInput": "/quit", "resumeArgs": ["-r", "{session}"]},
+            "other": {"command": ["other"]}
+        }));
+        assert!(w.is_empty());
+        assert_eq!(h[0].exit_input.as_deref(), Some("/quit"));
+        assert_eq!(h[0].resume_args, ["-r", "{session}"]);
+        assert_eq!(h[2].exit_input, None);
+        assert!(h[2].resume_args.is_empty());
+        let wire = serde_json::to_value(&h[0]).unwrap();
+        assert_eq!(wire["exitInput"], "/quit");
+        assert_eq!(wire["resumeArgs"], json!(["-r", "{session}"]));
+    }
+
+    #[test]
+    fn invalid_exit_input_and_resume_args_warn() {
+        let (h, w) = resolved(json!({
+            "a": {"command": ["a"], "exitInput": ""},
+            "b": {"command": ["b"], "resumeArgs": "x"}
+        }));
+        assert_eq!(h.len(), 2);
+        assert_eq!(w.len(), 2);
+    }
+
+    #[test]
+    fn resume_argv_expands_per_element() {
+        let h = &default_harnesses()[0];
+        assert_eq!(
+            build_resume_argv(h, "abc-123").unwrap(),
+            ["claude", "--resume", "abc-123"]
+        );
+        let spaced = "my session; $(id) \"q\"";
+        assert_eq!(
+            build_resume_argv(&default_harnesses()[1], spaced).unwrap(),
+            ["copilot", "--resume", spaced]
+        );
+        let mut h = h.clone();
+        h.resume_args = vec!["--resume={session}".into()];
+        assert_eq!(
+            build_resume_argv(&h, "a b").unwrap(),
+            ["claude", "--resume=a b"]
+        );
+    }
+
+    #[test]
+    fn a_harness_without_resume_args_has_no_resume_argv() {
+        let (h, _) = resolved(json!({"other": {"command": ["other"]}}));
+        assert_eq!(build_resume_argv(&h[2], "s"), None);
     }
 
     #[test]

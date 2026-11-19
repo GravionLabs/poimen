@@ -403,6 +403,17 @@ describe("renderRow", () => {
     });
   });
 
+  it("shows a hibernated terminal as hibernated (#904)", () => {
+    const r = row({ pane: { hibernated: true, agent_status: "unknown" } });
+    const [line] = renderRow(
+      "terminal",
+      [[{ token: "state_icon" }, { token: "name" }, { token: "state_text" }]],
+      r,
+      spaceContext(space([r])),
+    );
+    expect(line.find((s) => s.kind === "state")?.text).toBe("hibernated");
+  });
+
   it("renders herdr tokens, tab, emphasis, the status classes data and separators", () => {
     const r = row({ tab: "build", pane: { tokens: { deliver_step: " review ", x: "" } } });
     const [line] = renderRow(

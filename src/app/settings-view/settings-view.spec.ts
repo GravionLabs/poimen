@@ -607,14 +607,38 @@ describe("parseHarnesses", () => {
   it("reads harnesses and skips malformed entries", () => {
     expect(
       parseHarnesses([
-        { id: "a", command: ["a", "x"], models: ["m", 1], defaultModel: "m", available: true },
+        {
+          id: "a",
+          command: ["a", "x"],
+          models: ["m", 1],
+          defaultModel: "m",
+          exitInput: "/exit",
+          resumeArgs: ["--resume", "{session}"],
+          available: true,
+        },
         { command: ["no-id"] },
         null,
         { id: "b" },
       ]),
     ).toEqual([
-      { id: "a", command: ["a", "x"], models: ["m"], defaultModel: "m", available: true },
-      { id: "b", command: [], models: [], defaultModel: null, available: false },
+      {
+        id: "a",
+        command: ["a", "x"],
+        models: ["m"],
+        defaultModel: "m",
+        exitInput: "/exit",
+        resumeArgs: ["--resume", "{session}"],
+        available: true,
+      },
+      {
+        id: "b",
+        command: [],
+        models: [],
+        defaultModel: null,
+        exitInput: null,
+        resumeArgs: [],
+        available: false,
+      },
     ]);
     expect(parseHarnesses("nope")).toEqual([]);
   });

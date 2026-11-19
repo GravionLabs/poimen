@@ -645,6 +645,22 @@ pub fn config_path(home: &Path) -> PathBuf {
     config_dir(home).join("config.json")
 }
 
+/// `agents.hibernateAfter` (ADR 0014, #903): minutes a `done` agent waits before the server
+/// hibernates it. Absent, `null` and `0` are off (`Ok(None)`); anything but a non-negative
+/// whole number is an error with the reason (the setting then counts as off).
+pub fn hibernate_after_minutes(root: &Value) -> Result<Option<u64>, String> {
+    match root.get("agents").and_then(|a| a.get("hibernateAfter")) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => match v.as_u64() {
+            Some(0) => Ok(None),
+            Some(n) => Ok(Some(n)),
+            None => {
+                Err("agents.hibernateAfter must be a whole number of minutes (0 is off)".into())
+            }
+        },
+    }
+}
+
 /// Parses `layouts[]` (ADR 0011): `{name, tabs}` with a unique `name`; invalid entries warn and
 /// are skipped, so the rest loads. `panes[]` is accepted in place of `tabs[]`.
 pub fn parse_layouts(value: &Value, warnings: &mut Vec<String>) -> Vec<crate::layout::NamedLayout> {
@@ -1093,6 +1109,19 @@ mod tests {
             assert_eq!(resolve_silent_after(&v, &mut w), 10, "{bad}");
         }
         assert_eq!(w.len(), 4);
+    }
+
+    #[test]
+    fn hibernate_after_is_minutes_and_off_by_default() {
+        use super::hibernate_after_minutes as h;
+        let v = |t: &str| serde_json::from_str::<serde_json::Value>(t).unwrap();
+        assert_eq!(h(&v("{}")), Ok(None));
+        assert_eq!(h(&v(r#"{"agents":{}}"#)), Ok(None));
+        assert_eq!(h(&v(r#"{"agents":{"hibernateAfter":0}}"#)), Ok(None));
+        assert_eq!(h(&v(r#"{"agents":{"hibernateAfter":30}}"#)), Ok(Some(30)));
+        assert!(h(&v(r#"{"agents":{"hibernateAfter":-1}}"#)).is_err());
+        assert!(h(&v(r#"{"agents":{"hibernateAfter":"5"}}"#)).is_err());
+        assert!(h(&v(r#"{"agents":{"hibernateAfter":1.5}}"#)).is_err());
     }
 
     use super::*;

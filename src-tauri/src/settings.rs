@@ -504,6 +504,11 @@ fn resolve_agents(value: &Value, s: &mut Settings) {
         return;
     };
     s.silent_after = poimen_core::settings::resolve_silent_after(value, &mut s.warnings);
+    if let Err(e) =
+        poimen_core::settings::hibernate_after_minutes(&serde_json::json!({ "agents": value }))
+    {
+        s.warnings.push(e);
+    }
     let Some(claude) = agents.get("claude") else {
         return;
     };
