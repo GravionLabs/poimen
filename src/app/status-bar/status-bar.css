@@ -9,27 +9,16 @@ hx-status-bar {
 }
 
 .update-details {
-  position: fixed;
-  right: 10px;
-  bottom: 28px;
-  z-index: 10;
-  width: min(420px, calc(100vw - 20px));
+  min-width: 260px;
+  max-width: min(420px, calc(100vw - 20px));
   max-height: 60vh;
   overflow: auto;
-  padding: 8px 12px;
   font-size: 12px;
-  color: var(--h-text-color);
-  background: var(--h-content-background);
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 6px;
+  white-space: normal;
 }
 
 .update-details h3.failed {
   color: var(--status-error);
-}
-
-.update-details .close-details {
-  float: right;
 }
 
 .update-details h3 {

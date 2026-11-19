@@ -1,5 +1,15 @@
 import { bootstrapApplication } from "@angular/platform-browser";
+import { provideHxAppInfo } from "@gravionlabs/helix-desktop/tauri";
 import { App } from "./app/app";
 import { appConfig } from "./app/app.config";
+import { readAppInfo } from "./app/core/app-info";
+import { TauriBridge } from "./app/core/tauri";
 
-bootstrapApplication(App, appConfig).catch((err) => console.error(err));
+readAppInfo(new TauriBridge())
+  .then((info) =>
+    bootstrapApplication(App, {
+      ...appConfig,
+      providers: [...appConfig.providers, provideHxAppInfo(info)],
+    }),
+  )
+  .catch((err) => console.error(err));
