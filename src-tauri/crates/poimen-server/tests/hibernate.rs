@@ -36,11 +36,19 @@ fn now_ms() -> u64 {
 impl Env {
     /// A server with a home whose config is `config` (none: no file).
     fn new(name: &str, config: Option<&str>) -> Self {
+        Self::with_resume_timeout(name, config, LONG)
+    }
+
+    /// As [`Env::new`]; `{dir}` in the config is the test directory, `{agent}` the fake agent.
+    fn with_resume_timeout(name: &str, config: Option<&str>, resume: Duration) -> Self {
         let dir = std::env::temp_dir().join(format!("poimen-hib-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("work")).unwrap();
         let home = dir.join("home");
         if let Some(text) = config {
+            let text = text
+                .replace("{dir}", &dir.display().to_string())
+                .replace("{agent}", &dir.join("fake-agent").display().to_string());
             let path = poimen_core::settings::config_path(&home);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, text).unwrap();
@@ -53,6 +61,7 @@ impl Env {
             pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
         };
         let server = Server::bind(config.clone()).unwrap();
+        server.set_resume_timeout(resume);
         let sweep = Box::new(server.hibernate_sweeper());
         thread::spawn(move || server.serve());
         let client = Client::new(&config.socket);
@@ -70,7 +79,8 @@ impl Env {
             )
         };
         let script = format!(
-            "#!/bin/sh\n{}\nwhile IFS= read -r line; do\n  echo \"$line\" >> '{}'\n  if [ \"$line\" = /exit ]; then {}; exit 0; fi\n  {}\n  sleep 0.2\n  {}\ndone\n",
+            "#!/bin/sh\necho started >> '{}'\n{}\nwhile IFS= read -r line; do\n  echo \"$line\" >> '{}'\n  if [ \"$line\" = /exit ]; then {}; exit 0; fi\n  {}\n  sleep 0.2\n  {}\ndone\n",
+            self.dir.join("starts.log").display(),
             report("SessionStart"),
             log.display(),
             report("SessionEnd"),
@@ -82,6 +92,13 @@ impl Env {
         std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
         path.display().to_string()
+    }
+
+    fn starts(&self) -> usize {
+        std::fs::read_to_string(self.dir.join("starts.log"))
+            .unwrap_or_default()
+            .lines()
+            .count()
     }
 
     fn typed(&self) -> String {
@@ -282,4 +299,104 @@ fn hibernated_survives_a_server_restart() {
     let terminals = Client::new(&config.socket).list_terminals(None).unwrap();
     let t = terminals.iter().find(|t| t.id == id).expect("adopted");
     assert_eq!(t.hibernated.as_ref(), Some(&before));
+}
+
+/// Harness `claude` that runs the fake agent again on a resume.
+const RESUMING: &str = r#"{"agents":{"hibernateAfter":30},"harnesses":{"claude":{"command":["{agent}"],"exitInput":"/exit","resumeArgs":["--resume","{session}"]}}}"#;
+
+fn hibernated(env: &Env) -> String {
+    let id = env.done_agent();
+    (env.sweep)(now_ms() + 31 * MINUTE_MS);
+    wait_until("gone", || env.terminal(&id).agent.is_none());
+    assert!(env.terminal(&id).hibernated.is_some());
+    id
+}
+
+#[test]
+fn a_controller_attach_resumes_the_hibernated_agent_once() {
+    let env = Env::new("resume", Some(RESUMING));
+    let id = hibernated(&env);
+    assert_eq!(env.starts(), 1);
+
+    let first = env.client.attach(&id, AttachMode::Control, false).unwrap();
+    // A second controller in a row, while the first resume runs or has run.
+    let second = env.client.attach(&id, AttachMode::Control, true).unwrap();
+    wait_until("resumed", || {
+        env.terminal(&id).hibernated.is_none() && env.terminal(&id).agent.is_some()
+    });
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(env.starts(), 2, "one resume only");
+    drop((first, second));
+    let third = env.client.attach(&id, AttachMode::Control, false).unwrap();
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(env.starts(), 2, "nothing is hibernated any more");
+    drop(third);
+}
+
+#[test]
+fn an_observer_attach_resumes_nothing() {
+    let env = Env::new("observer", Some(RESUMING));
+    let id = hibernated(&env);
+    let observer = env.client.attach(&id, AttachMode::Observe, false).unwrap();
+    thread::sleep(Duration::from_millis(800));
+    assert!(env.terminal(&id).hibernated.is_some());
+    assert_eq!(env.starts(), 1);
+    drop(observer);
+}
+
+#[test]
+fn a_resume_without_a_report_ends_the_hibernation_and_names_the_failure() {
+    // `true` ignores its arguments and reports nothing.
+    let config = r#"{"agents":{"hibernateAfter":30},"harnesses":{"claude":{"command":["true"],"exitInput":"/exit","resumeArgs":["--resume","{session}"]}}}"#;
+    let env = Env::with_resume_timeout("timeout", Some(config), Duration::from_millis(800));
+    let id = hibernated(&env);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stream = env.client.subscribe().unwrap();
+    thread::spawn(move || {
+        for event in stream.flatten() {
+            if tx.send(event).is_err() {
+                break;
+            }
+        }
+    });
+    let _attached = env.client.attach(&id, AttachMode::Control, false).unwrap();
+    wait_until("ended", || env.terminal(&id).hibernated.is_none());
+    let mut failed = None;
+    let deadline = Instant::now() + LONG;
+    while failed.is_none() && Instant::now() < deadline {
+        if let Ok(poimen_client::protocol::Event::TerminalResumeFailed { reason, .. }) =
+            rx.recv_timeout(Duration::from_millis(200))
+        {
+            failed = Some(reason);
+        }
+    }
+    assert!(failed.expect("a failure event").contains("did not report"));
+    // The shell stays.
+    assert_eq!(
+        env.terminal(&id).status,
+        poimen_client::protocol::TerminalStatus::Running
+    );
+}
+
+#[test]
+fn a_second_hibernation_is_resumed_again() {
+    let env = Env::new("twice", Some(RESUMING));
+    let id = hibernated(&env);
+    let first = env.client.attach(&id, AttachMode::Control, false).unwrap();
+    wait_until("resumed", || env.terminal(&id).hibernated.is_none());
+    drop(first);
+    env.client.prompt_agent(&id, "more", LONG).unwrap();
+    wait_until("done again", || {
+        env.terminal(&id)
+            .agent
+            .is_some_and(|a| a.status == AgentStatus::Done)
+    });
+    (env.sweep)(now_ms() + 100 * MINUTE_MS);
+    wait_until("hibernated again", || {
+        env.terminal(&id).hibernated.is_some()
+    });
+    wait_until("gone", || env.terminal(&id).agent.is_none());
+    let _second = env.client.attach(&id, AttachMode::Control, false).unwrap();
+    wait_until("resumed again", || env.terminal(&id).hibernated.is_none());
+    assert_eq!(env.starts(), 3);
 }

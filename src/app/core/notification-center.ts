@@ -114,6 +114,20 @@ export class NotificationCenter {
     this.entries.update((list) => prependCapped(list, [entry]));
   }
 
+  /** Records a failure the server reports, such as a resume of a hibernated agent (#904). */
+  recordFailure(label: string, message: string, now: number): void {
+    const entry: NotificationEntry = {
+      id: this.nextId++,
+      paneId: "",
+      label,
+      status: "error",
+      message,
+      time: now,
+      read: false,
+    };
+    this.entries.update((list) => prependCapped(list, [entry]));
+  }
+
   markRead(id: number): void {
     this.entries.update((list) => list.map((e) => (e.id === id ? { ...e, read: true } : e)));
   }
