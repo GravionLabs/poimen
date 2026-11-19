@@ -297,6 +297,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
         agent_message: message,
         agent_reported_at: agent.and_then(|a| a.reported_at),
         agent_status_since: agent.and_then(|a| a.status_since),
+        agent_silent_since: agent.and_then(|a| a.silent_since),
         agent_progress: agent.and_then(|a| a.progress),
         agent_kind: agent.and_then(|a| a.kind.clone()),
         agent_title: agent.and_then(|a| a.title.clone()),

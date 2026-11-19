@@ -10,7 +10,7 @@ export interface NotificationEntry {
   paneId: string;
   /** Tab title of the pane when the change happened. */
   label: string;
-  status: StatusChange["status"];
+  status: StatusChange["status"] | "silent";
   message: string;
   /** Epoch milliseconds. */
   time: number;
@@ -34,6 +34,18 @@ export interface RunAlert {
 export function notificationMessage(label: string, status: StatusChange["status"]): string {
   if (status === "error") return `${label} failed`;
   return status === "blocked" ? `${label} is waiting for you` : `${label} is done`;
+}
+
+/** The panes that turned silent (#899) between two snapshots: they had no mark and have one now. */
+export function newlySilent(
+  previous: ReadonlyMap<string, number | undefined>,
+  current: ReadonlyMap<string, number | undefined>,
+): string[] {
+  return [...current]
+    .filter(
+      ([id, since]) => since !== undefined && previous.has(id) && previous.get(id) === undefined,
+    )
+    .map(([id]) => id);
 }
 
 /** Puts `added` (oldest first) in front of `list`, newest first, and keeps at most `max`. */
@@ -126,6 +138,35 @@ export class NotificationCenter {
       read: false,
     };
     this.entries.update((list) => prependCapped(list, [entry]));
+  }
+
+  private silentPrevious: ReadonlyMap<string, number | undefined> = new Map();
+
+  /**
+   * Records one entry per pane that turned silent (#899); no ring, sound or badge. `silentSince` is
+   * `agent_silent_since` of every pane; clearing it and turning silent again is a new transition.
+   */
+  observeSilent(
+    silentSince: ReadonlyMap<string, number | undefined>,
+    label: (paneId: string) => string,
+    now: number,
+  ): void {
+    const ids = newlySilent(this.silentPrevious, silentSince);
+    this.silentPrevious = new Map(silentSince);
+    if (ids.length === 0) return;
+    const added = ids.map((paneId): NotificationEntry => {
+      const name = label(paneId);
+      return {
+        id: this.nextId++,
+        paneId,
+        label: name,
+        status: "silent",
+        message: `${name} has been silent for a while`,
+        time: now,
+        read: false,
+      };
+    });
+    this.entries.update((list) => prependCapped(list, added));
   }
 
   markRead(id: number): void {

@@ -147,6 +147,9 @@ pub struct Terminal {
     /// When the agent status last changed, epoch ms (#897).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_status_since: Option<u64>,
+    /// Since when a working agent reported nothing, epoch ms (#898, #899).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_silent_since: Option<u64>,
     /// 0 to 100, from OSC 7501 `progress` (#682).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_progress: Option<u8>,
@@ -230,6 +233,7 @@ mod tests {
                  "agent_session": {"value": "abc"}, "agent_status": "blocked",
                  "agent_message": "Allow Bash?", "agent_message_at": 1700, "cwd": "/work/api",
                  "agent_reported_at": 1800, "agent_status_since": 1600,
+                 "agent_silent_since": 1900,
                  "label": "review", "tokens": {"deliver_step": "build"},
                  "survives_restart": true, "program": "/bin/zsh", "host_version": "0.15.0",
                  "host_bundled_version": "0.16.0", "focused": false},

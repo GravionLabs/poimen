@@ -37,6 +37,7 @@ import { Attention, canMarkUnread } from "./core/attention";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
+import { silentLabel } from "./core/agent-priority";
 import { TokenTotalsService } from "./core/token-totals";
 import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
@@ -223,6 +224,8 @@ export class App {
   private readonly sounds = inject(Sounds);
   /** Last known state of each open pane, kept when herdr drops the pane. */
   private readonly known = new Map<string, Terminal>();
+  /** The clock of the silent marks on tabs; ticks once a minute. */
+  private readonly clock = signal(Date.now());
   protected readonly groupItems = computed(() => {
     const snap = this.store.all();
     this.store.panes();
@@ -288,6 +291,7 @@ export class App {
             attention: ringing.has(tab.paneId),
             unread: unread.has(tab.paneId),
             note: this.hostNote(pane),
+            mark: silentLabel(pane?.agent_silent_since, this.clock()),
             title: `${withMachine(header.title, pane?.machine)}${tab.pinned ? "" : " (preview)"}`,
           };
         }),
@@ -352,6 +356,11 @@ export class App {
         const observed = this.attention.observe(statuses, viewed);
         this.agentRuns.observe(statuses);
         this.center.record(observed, (id) => this.tabTitle(id), Date.now());
+        this.center.observeSilent(
+          new Map([...panes].map(([id, pane]) => [id, pane.agent_silent_since] as const)),
+          (id) => this.tabTitle(id),
+          Date.now(),
+        );
         // Remote agents count like local ones, but nothing plays for a pane being viewed or for a
         // machine that is not connected.
         this.sounds.notify(soundChanges(observed, viewed, (id) => this.machines.blockedReason(id)));
@@ -362,6 +371,8 @@ export class App {
     });
 
     const destroyRef = inject(DestroyRef);
+    const clockTimer = setInterval(() => this.clock.set(Date.now()), 60_000);
+    destroyRef.onDestroy(() => clearInterval(clockTimer));
     const menu = this.bridge.listen<string>("menu", (id) => this.run(id));
     destroyRef.onDestroy(() => void menu.then((stop) => stop()));
     // The deliver loops of the repositories of the open spaces (status files, watched, no polling).
