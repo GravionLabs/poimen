@@ -487,6 +487,8 @@
                     <th scope="col">Command</th>
                     <th scope="col">Availability</th>
                     <th scope="col" [class.hit]="hit('Models')">Models</th>
+                    <th scope="col">Exit input</th>
+                    <th scope="col">Resume arguments</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -504,6 +506,16 @@
                         }}</hx-tag>
                       </td>
                       <td>{{ h.models.join(", ") }}</td>
+                      <td>
+                        @if (h.exitInput) {
+                          <code>{{ h.exitInput }}</code>
+                        }
+                      </td>
+                      <td>
+                        @if (h.resumeArgs.length) {
+                          <code>{{ h.resumeArgs.join(" ") }}</code>
+                        }
+                      </td>
                     </tr>
                   }
                 </tbody>

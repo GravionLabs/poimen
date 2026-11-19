@@ -270,6 +270,11 @@
           }
         }
       }
+      @if (spaceTokens(d.workspace.space_id); as tokens) {
+        <span class="space-tokens" [title]="spaceTokensTip(d.workspace.space_id)">{{
+          tokens
+        }}</span>
+      }
       @if (unreadOf(d.workspace.space_id); as n) {
         <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
       }

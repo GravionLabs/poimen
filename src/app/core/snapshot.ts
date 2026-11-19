@@ -200,10 +200,15 @@ export interface Terminal {
   /** Latest notification text of the agent (poimen backend only), with its time in epoch ms. */
   agent_message?: string;
   agent_message_at?: number;
+  /** Poimen backend: last accepted agent report and last status change, epoch ms (#897). */
+  agent_reported_at?: number;
+  agent_status_since?: number;
   /** Progress 0 to 100, why the agent is blocked (`permission`, `question`, `auth`) and the program's own title (OSC 7501, #682). */
   agent_progress?: number;
   agent_kind?: string;
   agent_title?: string;
+  /** The server stopped the idle agent; the next controller attach resumes it (poimen backend, #904). */
+  hibernated?: boolean;
   /** Child records, least recently updated first (poimen backend, #684). */
   records?: ChildRecord[];
   cwd?: string;
@@ -723,6 +728,7 @@ export function flowSession(pane: Terminal | undefined): string | null {
  * message, so plain terminals and agents with an unknown state have no text.
  */
 export function statusText(pane: Terminal): string | undefined {
+  if (pane.hibernated) return "hibernated";
   if (!agentKind(pane)) return undefined;
   const state = stateText(pane.agent_status, {
     kind: pane.agent_kind,

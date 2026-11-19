@@ -597,6 +597,22 @@ pub struct Terminal {
     /// from older servers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<ChildRecord>,
+    /// The agent was stopped because it had been `done` for `agents.hibernateAfter` minutes
+    /// (ADR 0014, #903); the shell stays. Absent when the terminal is not hibernated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hibernated: Option<Hibernated>,
+}
+
+/// A hibernated agent: what a resume needs (ADR 0014). Set by the server's sweeper before it
+/// types the harness's exit input, kept when the hook reports the agent `gone`, cleared by a
+/// resume or by any other agent report (the user came back).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hibernated {
+    /// Which agent (the harness id, e.g. `claude`).
+    pub agent: String,
+    pub session_id: String,
+    /// When the server hibernated it, milliseconds since the epoch.
+    pub since: u64,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the
@@ -638,6 +654,13 @@ pub struct AgentInfo {
     /// The program's own title (OSC 7501 `title`, #682), plain text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// When the last accepted `terminal.report_agent` came in, milliseconds since the epoch,
+    /// also when the status did not change (#897).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_at: Option<u64>,
+    /// When `status` last changed, milliseconds since the epoch (#897).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_since: Option<u64>,
 }
 
 /// A child record of a terminal: what a program reported with OSC 7501 and an `id` (a
@@ -1622,10 +1645,35 @@ pub enum Event {
         terminal_id: String,
         records: Vec<ChildRecord>,
     },
+    /// A terminal's agent was hibernated, or the hibernation ended (`hibernated` absent), #903.
+    #[serde(rename = "terminal.hibernated_changed")]
+    TerminalHibernatedChanged {
+        terminal_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hibernated: Option<Hibernated>,
+    },
+    /// Resuming a hibernated agent failed (#904): the hibernation ended and the shell stays.
+    #[serde(rename = "terminal.resume_failed")]
+    TerminalResumeFailed { terminal_id: String, reason: String },
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agent_info_times_are_additive() {
+        let old: AgentInfo = serde_json::from_value(json!({"status":"idle"})).unwrap();
+        assert_eq!((old.reported_at, old.status_since), (None, None));
+        assert_eq!(
+            serde_json::to_value(&old).unwrap(),
+            json!({"status":"idle"})
+        );
+        let v = json!({"status":"working","reported_at":1700000005000u64,"status_since":1700000000000u64});
+        let info: AgentInfo = serde_json::from_value(v.clone()).unwrap();
+        assert_eq!(info.reported_at, Some(1_700_000_005_000));
+        assert_eq!(info.status_since, Some(1_700_000_000_000));
+        assert_eq!(serde_json::to_value(&info).unwrap(), v);
+    }
+
     #[test]
     fn env_of_the_create_requests_is_optional_and_round_trips() {
         let old: TerminalCreate = serde_json::from_str(r#"{"space_id":"s1"}"#).unwrap();
@@ -1867,6 +1915,8 @@ mod tests {
             json!({"status":"blocked"})
         );
         let info = AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Error,
             agent: None,
             session_id: None,
@@ -1923,6 +1973,48 @@ mod tests {
         };
         assert_eq!(records[0].progress, Some(3));
         assert_eq!(records[0].app, None);
+    }
+
+    #[test]
+    fn the_resume_failed_event_round_trips() {
+        let text = r#"{"event":"terminal.resume_failed","data":{"terminal_id":"t1","reason":"no report"}}"#;
+        let event: Event = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            event,
+            Event::TerminalResumeFailed {
+                terminal_id: "t1".into(),
+                reason: "no report".into()
+            }
+        );
+        assert_eq!(serde_json::to_string(&event).unwrap(), text);
+    }
+
+    #[test]
+    fn the_hibernated_event_and_field_round_trip() {
+        let event: Event = serde_json::from_str(
+            r#"{"event":"terminal.hibernated_changed","data":{"terminal_id":"t1","hibernated":{"agent":"claude","session_id":"s1","since":5}}}"#,
+        )
+        .unwrap();
+        let Event::TerminalHibernatedChanged { hibernated, .. } = &event else {
+            panic!("{event:?}");
+        };
+        assert_eq!(hibernated.as_ref().unwrap().session_id, "s1");
+        let cleared: Event = serde_json::from_str(
+            r#"{"event":"terminal.hibernated_changed","data":{"terminal_id":"t1"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            cleared,
+            Event::TerminalHibernatedChanged {
+                hibernated: None,
+                ..
+            }
+        ));
+        let old: Terminal = serde_json::from_str(
+            r#"{"id":"t1","space_id":"s","name":"n","cwd":"/","cols":1,"rows":1,"status":"running"}"#,
+        )
+        .unwrap();
+        assert_eq!(old.hibernated, None);
     }
 
     #[test]

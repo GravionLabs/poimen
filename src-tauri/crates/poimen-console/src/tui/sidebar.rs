@@ -185,6 +185,10 @@ fn rank(status: Option<AgentStatus>) -> u8 {
 }
 
 fn terminal_status(t: &Terminal) -> Option<AgentStatus> {
+    // A hibernated agent is not running: it is neither waiting nor unread (#904).
+    if t.hibernated.is_some() {
+        return None;
+    }
     t.agent
         .as_ref()
         .map(|a| a.status)
@@ -254,6 +258,9 @@ pub fn plain_agent_text(t: &mut Terminal) {
 
 /// `blocked: permission`, `working 40%`: the status word with what OSC 7501 adds.
 fn state_text(s: &Subject<'_>) -> Option<String> {
+    if s.terminal.is_some_and(|t| t.hibernated.is_some()) {
+        return Some("hibernated".to_owned());
+    }
     let mut text = status_name(s.status?)?.to_owned();
     if s.status == Some(AgentStatus::Blocked)
         && let Some(kind) = s.kind
@@ -825,11 +832,14 @@ mod tests {
             host_version: None,
             host_bundled_version: None,
             records: Vec::new(),
+            hibernated: None,
         }
     }
 
     fn agent(status: AgentStatus) -> Option<AgentInfo> {
         Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status,
             agent: Some("claude".into()),
             session_id: None,
@@ -1041,6 +1051,26 @@ mod tests {
     }
 
     #[test]
+    fn a_hibernated_terminal_shows_hibernated_and_is_not_waiting() {
+        let mut m = model();
+        // Its agent was `blocked` when the server hibernated it; it counts for nothing now.
+        let t2 = m.terminals.iter_mut().find(|t| t.id == "t2").unwrap();
+        t2.hibernated = Some(poimen_protocol::Hibernated {
+            agent: "claude".into(),
+            session_id: "s".into(),
+            since: 1,
+        });
+        let rows = m.rows(
+            &SidebarRows::default(),
+            SidebarSort::Manual,
+            Some("/home/u"),
+        );
+        assert_eq!(texts(&rows[3]), ["· claude hibernated"]);
+        assert_eq!(rows[3].status, None);
+        assert_eq!(rows[0].status, None, "the space has no waiting terminal");
+    }
+
+    #[test]
     fn configured_rows_show_tokens_and_notifications() {
         let config = SidebarRows {
             terminal: Some(vec![tokens(&["name", "$cost", "tab"])]),
@@ -1239,6 +1269,8 @@ mod tests {
         let mut m = model();
         let info = |status, progress, kind: Option<&str>| {
             Some(AgentInfo {
+                reported_at: None,
+                status_since: None,
                 status,
                 agent: Some("codex".into()),
                 session_id: None,
@@ -1285,6 +1317,8 @@ mod tests {
     fn reported_text_is_plain_text() {
         let mut t = term("t9", "s1", "x", "/w");
         t.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Blocked,
             agent: None,
             session_id: None,

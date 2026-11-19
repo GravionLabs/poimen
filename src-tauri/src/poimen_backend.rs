@@ -292,8 +292,11 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
             .and_then(|a| a.session_id.clone())
             .map(|value| snap::AgentSessionRef { value: Some(value) }),
         agent_status: status_of(terminal),
+        hibernated: terminal.hibernated.is_some(),
         agent_message_at: message.as_ref().and(agent.and_then(|a| a.message_at)),
         agent_message: message,
+        agent_reported_at: agent.and_then(|a| a.reported_at),
+        agent_status_since: agent.and_then(|a| a.status_since),
         agent_progress: agent.and_then(|a| a.progress),
         agent_kind: agent.and_then(|a| a.kind.clone()),
         agent_title: agent.and_then(|a| a.title.clone()),
@@ -334,6 +337,10 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
 
 /// The `agent_status` of the snapshot for a terminal.
 fn status_of(terminal: &Terminal) -> snap::AgentStatus {
+    // A hibernated agent is not running: it never counts as waiting or unread (#904).
+    if terminal.hibernated.is_some() {
+        return snap::AgentStatus::Unknown;
+    }
     terminal
         .agent
         .as_ref()
@@ -1001,6 +1008,7 @@ mod tests {
             host_version: None,
             host_bundled_version: None,
             records: Vec::new(),
+            hibernated: None,
         }
     }
 
@@ -1180,6 +1188,8 @@ mod tests {
     fn the_snapshot_of_a_split_tab_matches_the_frontend_fixture() {
         let mut agent = terminal("t1", "s1", "agent");
         agent.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Working,
             agent: Some("claude".into()),
             session_id: Some("abc-1".into()),
@@ -1208,6 +1218,8 @@ mod tests {
     fn a_split_tab_shows_its_most_urgent_terminal() {
         let mut blocked = terminal("t2", "s1", "shell");
         blocked.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Blocked,
             agent: Some("claude".into()),
             session_id: None,
@@ -1478,6 +1490,8 @@ mod tests {
     fn hook_reported_status_reaches_panes_tabs_and_the_workspace() {
         let mut working = terminal("t1", "s1", "a");
         working.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Working,
             agent: Some("claude".into()),
             session_id: None,
@@ -1489,6 +1503,8 @@ mod tests {
         });
         let mut blocked = terminal("t2", "s1", "b");
         blocked.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Blocked,
             agent: None,
             session_id: None,
@@ -1561,6 +1577,8 @@ mod tests {
         );
         let mut t = terminal("t1", "s1", "a");
         t.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Error,
             agent: None,
             session_id: None,
@@ -1600,6 +1618,8 @@ mod tests {
         );
         let mut t = terminal("t1", "s1", "a");
         t.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Blocked,
             agent: None,
             session_id: None,
@@ -2449,6 +2469,8 @@ mod tests {
     fn a_pane_carries_the_agent_and_session_only_when_reported() {
         let mut with = terminal("t1", "s1", "zsh");
         with.agent = Some(AgentInfo {
+            reported_at: None,
+            status_since: None,
             status: AgentStatus::Idle,
             agent: Some("copilot".into()),
             session_id: Some("s-9".into()),

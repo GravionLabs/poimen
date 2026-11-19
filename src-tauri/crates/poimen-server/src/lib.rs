@@ -15,6 +15,7 @@ pub mod copilot;
 mod create;
 mod emulator;
 pub mod gemini;
+mod hibernate;
 pub mod hook;
 mod host;
 pub mod integration;
@@ -141,6 +142,9 @@ struct TerminalEntry {
     stream: Arc<TermStream>,
     /// `seq` of the last accepted agent report; older or equal reports are dropped.
     agent_seq: Option<u64>,
+    /// When the terminal list was last written for an agent report (#897), for the 10 s limit on
+    /// reports that change nothing but `reported_at`.
+    agent_persisted: Option<Instant>,
     /// The status the program itself reports with OSC 7501 (#681); while it is set it is the
     /// terminal's `agent` and hook reports do not change it.
     osc: Option<AgentInfo>,
@@ -150,6 +154,9 @@ struct TerminalEntry {
     records: records::Records,
     /// Who set which token and until when; `info.tokens` is the visible name-to-value view.
     tokens: Vec<TokenEntry>,
+    /// A resume of the hibernated agent is under way (#904); not persisted, so a restart may
+    /// resume again, but never two at once.
+    resuming: bool,
 }
 
 struct TokenEntry {
@@ -197,6 +204,7 @@ impl TerminalEntry {
             hook_agent: self.hook_agent.clone(),
             agent_seq: self.agent_seq,
             records: self.records.raw().to_vec(),
+            hibernated: self.info.hibernated.clone(),
             tokens,
         })
     }
@@ -268,6 +276,11 @@ impl TerminalEntry {
                         .title
                         .as_deref()
                         .and_then(poimen_protocol::clean_message),
+                    reported_at: Some(now_ms),
+                    status_since: match before.as_ref() {
+                        Some(b) if b.status == status => b.status_since.or(Some(now_ms)),
+                        _ => Some(now_ms),
+                    },
                 };
                 self.osc = Some(next.clone());
                 self.info.agent = Some(next);
@@ -356,6 +369,9 @@ pub(crate) struct Shared {
     pty_host: PtyHost,
     /// What `repo.ensure` clones with: the real `gh`, or a fake set by tests ([`Server::set_gh`]).
     gh: RwLock<Arc<dyn repos::Gh>>,
+    /// How long a resumed agent has to report before the resume counts as failed, milliseconds
+    /// (#904); tests shorten it with [`Server::set_resume_timeout`].
+    resume_timeout_ms: AtomicU64,
     /// The scheme colors for terminal queries, shared with every terminal's stream.
     colors: Arc<RwLock<Colors>>,
     /// Run once the terminals are ended after `server.shutdown`; the binary exits the process.
@@ -554,7 +570,15 @@ impl Shared {
         for signal in signals {
             entry.apply_signal(signal, now_millis());
         }
-        let agent_changed = entry.info.agent != before;
+        // `reported_at` alone moves with a repeated report: no event, a write at most every 10 s.
+        let strip = |a: &Option<AgentInfo>| {
+            a.clone().map(|mut i| {
+                i.reported_at = None;
+                i
+            })
+        };
+        let agent_changed = strip(&entry.info.agent) != strip(&before);
+        let time_moved = !agent_changed && entry.info.agent != before;
         let records_changed = entry.sync_records();
         if agent_changed {
             self.publish(agent_event(terminal_id, entry.info.agent.as_ref()));
@@ -562,7 +586,12 @@ impl Shared {
         if records_changed {
             self.publish(records_event(entry));
         }
-        if agent_changed || records_changed {
+        let due = time_moved
+            && entry
+                .agent_persisted
+                .is_none_or(|at| at.elapsed() >= REPORT_PERSIST_EVERY);
+        if agent_changed || records_changed || due {
+            entry.agent_persisted = Some(Instant::now());
             self.persist(&inner);
         }
     }
@@ -686,6 +715,7 @@ impl Server {
             home: config.home,
             pty_host: config.pty_host,
             gh: RwLock::new(Arc::new(repos::SystemGh)),
+            resume_timeout_ms: AtomicU64::new(hibernate::RESUME_TIMEOUT.as_millis() as u64),
             colors: Arc::default(),
             on_shutdown: Mutex::new(None),
             stopped: AtomicBool::new(false),
@@ -733,6 +763,22 @@ impl Server {
         *self.shared.gh.write().unwrap_or_else(|e| e.into_inner()) = gh;
     }
 
+    /// How long a resumed agent has to report before the resume counts as failed (default 30 s).
+    pub fn set_resume_timeout(&self, timeout: Duration) {
+        let ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
+        self.shared
+            .resume_timeout_ms
+            .store(ms, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// One pass of the hibernation sweeper at the given time in milliseconds (ADR 0014, #903);
+    /// `serve` runs it on a timer, tests call this with a clock of their own. Take it before
+    /// `serve`, which consumes the server.
+    pub fn hibernate_sweeper(&self) -> impl Fn(u64) + Send + Sync + 'static {
+        let shared = Arc::clone(&self.shared);
+        move |now_ms| shared.hibernate_sweep(now_ms)
+    }
+
     /// Accepts connections forever, one thread each.
     pub fn serve(self) {
         let shared = Arc::clone(&self.shared);
@@ -740,6 +786,13 @@ impl Server {
             loop {
                 thread::sleep(TOKEN_SWEEP);
                 shared.expire_tokens();
+            }
+        });
+        let hibernation = Arc::clone(&self.shared);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(hibernate::SWEEP);
+                hibernation.hibernate_sweep(now_millis());
             }
         });
         let runs = Arc::clone(&self.shared);
@@ -906,7 +959,7 @@ fn detach(request: &Request, attachment: Option<&Attachment>) -> Result<(), (Err
 /// `terminal.attach`: registers the connection with the terminal's stream and starts the writer
 /// thread that owns the socket's write side from now on.
 fn attach(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     request: &Request,
     stream: &Conn,
     attachment: &mut Option<Attachment>,
@@ -939,6 +992,10 @@ fn attach(
     )?;
     let terminal_id = p.terminal_id.clone();
     thread::spawn(move || write_stream(writer_stream, &rx, &link, &terminal_id));
+    // Only a controller wakes a hibernated agent (ADR 0014); an observer triggers nothing.
+    if attached.mode == AttachMode::Control {
+        shared.resume_hibernated(&p.terminal_id);
+    }
     *attachment = Some(Attachment {
         stream: term,
         terminal_id: p.terminal_id,
@@ -1892,16 +1949,19 @@ fn spawn_terminal(
         host_version: Some(spawned.version().to_string()),
         host_bundled_version: Some(host_bundled_version()),
         records: Vec::new(),
+        hibernated: None,
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
         host: Some(spawned),
         stream,
         agent_seq: None,
+        agent_persisted: None,
         osc: None,
         hook_agent: None,
         records: records::Records::default(),
         tokens: Vec::new(),
+        resuming: false,
     });
     shared.publish(Event::TerminalCreated {
         terminal: info.clone(),
@@ -2053,14 +2113,17 @@ fn adopted(
             host_version: Some(handle.version().to_string()),
             host_bundled_version: Some(host_bundled_version()),
             records: view,
+            hibernated: t.hibernated,
         },
         host: Some(handle),
         stream,
         agent_seq: t.agent_seq,
+        agent_persisted: None,
         osc: t.osc.then(|| t.agent.clone()).flatten(),
         hook_agent: t.hook_agent.clone(),
         records,
         tokens,
+        resuming: false,
     }
 }
 
@@ -2185,6 +2248,10 @@ fn terminal_rename(shared: &Shared, p: TerminalRename) -> ApiResult {
 
 /// Applies an agent report unless it is stale (`seq` not above the last accepted one). The event
 /// is published only when the agent state actually changed.
+/// The least time between two writes of the terminal list for reports that change nothing but
+/// `reported_at` (#897).
+const REPORT_PERSIST_EVERY: Duration = Duration::from_secs(10);
+
 fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     let mut inner = lock(&shared.inner);
     let entry = terminal_mut(&mut inner, &p.terminal_id)?;
@@ -2194,6 +2261,16 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     entry.agent_seq = Some(p.seq);
     if entry.info.status == TerminalStatus::Exited {
         return Ok(json!({ "accepted": true }));
+    }
+    // Any report but `gone` means the agent runs again (the user came back): no longer hibernated.
+    let came_back = p.status != AgentStatus::Gone && entry.info.hibernated.take().is_some();
+    if came_back {
+        // The resume (#904) worked or the user came back: the next hibernation may resume again.
+        entry.resuming = false;
+        shared.publish(Event::TerminalHibernatedChanged {
+            terminal_id: p.terminal_id.clone(),
+            hibernated: None,
+        });
     }
     // The latest notification text: a new one replaces it, `working` clears it, else it stays.
     let (message, message_at) = match p
@@ -2210,6 +2287,17 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         }
         .map_or((None, None), |a| (a.message.clone(), a.message_at)),
     };
+    let now_ms = now_millis();
+    let previous = if entry.osc.is_some() {
+        entry.hook_agent.as_ref()
+    } else {
+        entry.info.agent.as_ref()
+    };
+    // The time the status last changed stays while the same status is reported again.
+    let status_since = match previous {
+        Some(a) if a.status == p.status => a.status_since.or(Some(now_ms)),
+        _ => Some(now_ms),
+    };
     let next = (p.status != AgentStatus::Gone).then(|| AgentInfo {
         status: p.status,
         agent: p.agent.clone(),
@@ -2219,11 +2307,24 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         progress: None,
         kind: None,
         title: None,
+        reported_at: Some(now_ms),
+        status_since,
     });
+    // Everything but `reported_at` decides whether something changed.
+    let same_but_time = |a: &Option<AgentInfo>, b: &Option<AgentInfo>| {
+        let strip = |x: &Option<AgentInfo>| {
+            x.clone().map(|mut i| {
+                i.reported_at = None;
+                i
+            })
+        };
+        strip(a) == strip(b)
+    };
+    let unchanged = same_but_time(&previous.cloned(), &next);
     if entry.osc.is_some() {
         // The program reports its own status (OSC 7501): the hook's is kept for when that ends.
         entry.hook_agent = next;
-    } else if entry.info.agent != next {
+    } else if !unchanged {
         entry.info.agent = next;
         shared.publish(Event::AgentStatusChanged {
             terminal_id: p.terminal_id,
@@ -2236,7 +2337,19 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
             kind: None,
             title: None,
         });
+    } else {
+        // Only `reported_at` moves: no event, and the list is written at most every 10 s.
+        entry.info.agent = next;
+        let now = Instant::now();
+        if !came_back
+            && entry
+                .agent_persisted
+                .is_some_and(|at| now.duration_since(at) < REPORT_PERSIST_EVERY)
+        {
+            return Ok(json!({ "accepted": true }));
+        }
     }
+    entry.agent_persisted = Some(Instant::now());
     // The status and its `seq` go into the terminal list, so a stale report stays dropped and
     // the status comes back after a restart.
     shared.persist(&inner);

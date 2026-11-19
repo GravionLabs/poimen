@@ -26,4 +26,5 @@ pub mod tasks;
 pub mod templates;
 pub mod transcripts;
 pub mod trust;
+pub mod usage;
 pub mod worktree;

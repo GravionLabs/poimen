@@ -700,11 +700,11 @@ pub fn watch(
 /// Watches `dir` recursively and calls `refresh` once at the start and again after every change
 /// to a path `relevant` accepts (bursts coalesced); every update goes to `emit`. `dir` must be
 /// canonical, since events carry resolved paths.
-pub(crate) fn watch_dir(
+pub(crate) fn watch_dir<T>(
     dir: &Path,
     relevant: impl Fn(&Path) -> bool + Send + 'static,
-    mut refresh: impl FnMut() -> Vec<Update> + Send + 'static,
-    emit: impl Fn(Update) + Send + 'static,
+    mut refresh: impl FnMut() -> Vec<T> + Send + 'static,
+    emit: impl Fn(T) + Send + 'static,
 ) -> Result<WatchHandle, String> {
     let (tx, rx) = mpsc::channel();
     let notifier = tx.clone();
@@ -742,6 +742,275 @@ pub(crate) fn watch_dir(
         stop: tx,
         _watcher: watcher,
     })
+}
+
+/// Token totals of a session (#895): the sum of every message's usage, each message id once.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Totals {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
+}
+
+/// Sums usage by message id: a message written in several lines (or sent again) counts once, a
+/// later line of it replaces the earlier one.
+#[derive(Debug, Default)]
+pub struct UsageSum {
+    seen: HashMap<String, Usage>,
+    /// Timestamp (as written in the file) per message id, for the windows of #896.
+    stamps: HashMap<String, String>,
+}
+
+/// The usage of one message with its timestamp: what a run window (#896) sums.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Sample {
+    pub at: String,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
+}
+
+impl UsageSum {
+    /// Records `usage` of message `id`; `true` when the totals changed.
+    pub fn add(&mut self, id: &str, usage: Usage) -> bool {
+        self.seen.insert(id.to_owned(), usage) != Some(usage)
+    }
+
+    /// [`add`](Self::add) that remembers the message's timestamp; a changed timestamp counts as a
+    /// change too, since the samples differ.
+    pub fn add_at(&mut self, id: &str, usage: Usage, at: Option<&str>) -> bool {
+        let mut changed = self.add(id, usage);
+        if let Some(at) = at
+            && self.stamps.get(id).map(String::as_str) != Some(at)
+        {
+            self.stamps.insert(id.to_owned(), at.to_owned());
+            changed = true;
+        }
+        changed
+    }
+
+    /// The messages that have a timestamp, in no particular order.
+    pub fn samples(&self) -> Vec<Sample> {
+        self.stamps
+            .iter()
+            .filter_map(|(id, at)| {
+                let u = self.seen.get(id)?;
+                Some(Sample {
+                    at: at.clone(),
+                    input: u.input,
+                    output: u.output,
+                    cache_read: u.cache_read,
+                    cache_creation: u.cache_creation,
+                })
+            })
+            .collect()
+    }
+
+    /// Folds the usage an update carries (the main samples and the entries of subagents, as a
+    /// follower of a remote machine receives them); `true` when the totals changed.
+    pub fn apply(&mut self, update: &Update) -> bool {
+        let mut changed = false;
+        match update {
+            Update::Main { usage, .. } => {
+                for sample in usage {
+                    changed |= self.add_at(&sample.id, sample.usage, sample.timestamp.as_deref());
+                }
+            }
+            Update::Entries { entries, .. } => {
+                for entry in entries {
+                    if let (Some(id), Some(usage)) = (&entry.message_id, entry.usage) {
+                        changed |= self.add_at(id, usage, entry.timestamp.as_deref());
+                    }
+                }
+            }
+            Update::List { .. } => {}
+        }
+        changed
+    }
+
+    /// [`apply`](Self::apply) for an update as JSON (what `agent.transcript` returns); anything
+    /// that is not a usage-carrying update, or a count that is not a number, is skipped.
+    pub fn apply_json(&mut self, update: &Value) -> bool {
+        let usage_of = |v: &Value| -> Option<Usage> {
+            let n = |k: &str| v.get(k).and_then(Value::as_u64);
+            Some(Usage {
+                input: n("input")?,
+                output: n("output")?,
+                cache_read: n("cache_read")?,
+                cache_creation: n("cache_creation")?,
+            })
+        };
+        let mut changed = false;
+        match update.get("kind").and_then(Value::as_str) {
+            Some("main") => {
+                for sample in update
+                    .get("usage")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if let (Some(id), Some(u)) = (
+                        sample.get("id").and_then(Value::as_str),
+                        sample.get("usage").and_then(usage_of),
+                    ) {
+                        changed |=
+                            self.add_at(id, u, sample.get("timestamp").and_then(Value::as_str));
+                    }
+                }
+            }
+            Some("entries") => {
+                for entry in update
+                    .get("entries")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if let (Some(id), Some(u)) = (
+                        entry.get("message_id").and_then(Value::as_str),
+                        entry.get("usage").and_then(usage_of),
+                    ) {
+                        changed |=
+                            self.add_at(id, u, entry.get("timestamp").and_then(Value::as_str));
+                    }
+                }
+            }
+            _ => {}
+        }
+        changed
+    }
+
+    pub fn totals(&self) -> Totals {
+        self.seen.values().fold(Totals::default(), |t, u| Totals {
+            input: t.input.saturating_add(u.input),
+            output: t.output.saturating_add(u.output),
+            cache_read: t.cache_read.saturating_add(u.cache_read),
+            cache_creation: t.cache_creation.saturating_add(u.cache_creation),
+        })
+    }
+}
+
+/// Reads only the usage of a session: the main transcript and the subagent files for Claude,
+/// `events.jsonl` for Copilot. Malformed lines are skipped.
+pub struct UsageReader {
+    main: Tailer,
+    sub_dir: Option<PathBuf>,
+    subagents: BTreeMap<PathBuf, Tailer>,
+    copilot: bool,
+    sum: UsageSum,
+}
+
+impl UsageReader {
+    /// Claude Code: `project_dir` holds `<session>.jsonl` and `<session>/subagents`.
+    pub fn claude(project_dir: &Path, session: &str) -> Option<Self> {
+        if !is_safe_session_id(session) {
+            return None;
+        }
+        Some(Self {
+            main: Tailer::new(project_dir.join(format!("{session}.jsonl"))),
+            sub_dir: Some(project_dir.join(session).join("subagents")),
+            subagents: BTreeMap::new(),
+            copilot: false,
+            sum: UsageSum::default(),
+        })
+    }
+
+    /// Copilot CLI: `session_dir` holds `events.jsonl`.
+    pub fn copilot(session_dir: &Path) -> Self {
+        Self {
+            main: Tailer::new(session_dir.join(copilot::EVENTS)),
+            sub_dir: None,
+            subagents: BTreeMap::new(),
+            copilot: true,
+            sum: UsageSum::default(),
+        }
+    }
+
+    /// The timestamped samples read so far.
+    pub fn samples(&self) -> Vec<Sample> {
+        self.sum.samples()
+    }
+
+    /// Reads what the files gained; the new totals when they changed.
+    pub fn refresh(&mut self) -> Option<Totals> {
+        let mut changed = false;
+        for line in self.main.read_new() {
+            changed |= self.line(&line);
+        }
+        if let Some(dir) = &self.sub_dir
+            && let Ok(entries) = std::fs::read_dir(dir)
+        {
+            for path in entries.flatten().map(|e| e.path()) {
+                let is_agent = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("agent-") && n.ends_with(".jsonl"));
+                if is_agent {
+                    self.subagents
+                        .entry(path.clone())
+                        .or_insert_with(|| Tailer::new(path));
+                }
+            }
+        }
+        let mut lines = Vec::new();
+        for tailer in self.subagents.values_mut() {
+            lines.extend(tailer.read_new());
+        }
+        for line in lines {
+            changed |= self.line(&line);
+        }
+        changed.then(|| self.sum.totals())
+    }
+
+    fn line(&mut self, line: &str) -> bool {
+        if self.copilot {
+            return copilot::parse_usage_stamped(line)
+                .is_some_and(|(id, usage, at)| self.sum.add_at(&id, usage, at.as_deref()));
+        }
+        line.contains("\"usage\"")
+            && parse_usage_sample(line)
+                .is_some_and(|s| self.sum.add_at(&s.id, s.usage, s.timestamp.as_deref()))
+    }
+}
+
+/// Watches the session like [`watch`] but reads only its usage; `emit` gets the totals first
+/// (when the files hold usage) and after every change.
+pub fn watch_usage(
+    mut reader: UsageReader,
+    watch_root: &Path,
+    relevant: impl Fn(&Path) -> bool + Send + 'static,
+    emit: impl Fn(Totals, Vec<Sample>) + Send + 'static,
+) -> Result<WatchHandle, String> {
+    watch_dir(
+        &watch_root.canonicalize().map_err(|e| e.to_string())?,
+        relevant,
+        move || {
+            reader
+                .refresh()
+                .map(|t| (t, reader.samples()))
+                .into_iter()
+                .collect()
+        },
+        move |(t, samples)| emit(t, samples),
+    )
+}
+
+/// Watches the usage of a Claude Code session in `project_dir`.
+pub fn watch_claude_usage(
+    project_dir: &Path,
+    session: &str,
+    emit: impl Fn(Totals, Vec<Sample>) + Send + 'static,
+) -> Result<WatchHandle, String> {
+    let dir = project_dir.canonicalize().map_err(|e| e.to_string())?;
+    let reader = UsageReader::claude(&dir, session).ok_or("not a valid session id")?;
+    let (file, session_dir) = (dir.join(format!("{session}.jsonl")), dir.join(session));
+    watch_usage(
+        reader,
+        &dir,
+        move |p| p == file || p.starts_with(&session_dir),
+        emit,
+    )
 }
 
 /// Why [`open`] found no transcript to follow.
@@ -1348,5 +1617,159 @@ mod tests {
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].usage.output, 50);
         assert_eq!(usage[0].model.as_deref(), Some("claude-opus-4-7"));
+    }
+
+    fn msg(id: &str, input: u64, output: u64) -> String {
+        format!(
+            r#"{{"type":"assistant","uuid":"u-{id}","message":{{"id":"{id}","usage":{{"input_tokens":{input},"output_tokens":{output},"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}}}}"#
+        )
+    }
+
+    #[test]
+    fn claude_totals_sum_main_and_subagent_files_with_duplicates_once() {
+        let dir = temp_dir("totals");
+        let main = dir.join("s1.jsonl");
+        // m1 is written in two lines (the later replaces), a malformed line is skipped.
+        append(
+            &main,
+            &format!(
+                "{}\n{}\nnot json\n{}\n",
+                msg("m1", 1, 1),
+                msg("m1", 1, 7),
+                msg("m2", 100, 20)
+            ),
+        );
+        append(
+            &dir.join("s1").join("subagents").join("agent-a.jsonl"),
+            &format!("{}\n{}\n", msg("m3", 1000, 200), msg("m2", 100, 20)),
+        );
+        let mut reader = UsageReader::claude(&dir, "s1").unwrap();
+        assert_eq!(
+            reader.refresh(),
+            Some(Totals {
+                input: 1101,
+                output: 227,
+                cache_read: 30,
+                cache_creation: 15
+            })
+        );
+        assert_eq!(reader.refresh(), None);
+        append(&main, &format!("{}\n", msg("m4", 2, 3)));
+        assert_eq!(reader.refresh().unwrap().input, 1103);
+    }
+
+    #[test]
+    fn usage_samples_carry_the_timestamp_of_each_message_once() {
+        let dir = temp_dir("samples");
+        let main = dir.join("s1.jsonl");
+        let stamped = |id: &str, input: u64, at: &str| {
+            msg(id, input, 1).replacen(
+                "{\"type\"",
+                &format!("{{\"timestamp\":\"{at}\",\"type\""),
+                1,
+            )
+        };
+        // m1 twice (the later line wins), m2 once, m3 has no timestamp.
+        append(
+            &main,
+            &format!(
+                "{}\n{}\n{}\n{}\n",
+                stamped("m1", 1, "2026-11-02T04:00:01.000Z"),
+                stamped("m1", 2, "2026-11-02T04:00:01.000Z"),
+                stamped("m2", 100, "2026-11-02T04:00:09.000Z"),
+                msg("m3", 5000, 1)
+            ),
+        );
+        let mut reader = UsageReader::claude(&dir, "s1").unwrap();
+        reader.refresh().unwrap();
+        let mut samples = reader.samples();
+        samples.sort_by(|a, b| a.at.cmp(&b.at));
+        assert_eq!(
+            samples
+                .iter()
+                .map(|s| (s.at.as_str(), s.input))
+                .collect::<Vec<_>>(),
+            [
+                ("2026-11-02T04:00:01.000Z", 2),
+                ("2026-11-02T04:00:09.000Z", 100)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_session_without_usage_has_no_totals() {
+        let dir = temp_dir("nousage");
+        append(&dir.join("s1.jsonl"), "{\"type\":\"user\"}\n");
+        assert_eq!(UsageReader::claude(&dir, "s1").unwrap().refresh(), None);
+        assert!(UsageReader::claude(&dir, "../x").is_none());
+    }
+
+    #[test]
+    fn copilot_usage_records_total_once_per_event_id() {
+        let dir = temp_dir("cop");
+        let rec = |id: &str, i: u64| {
+            format!(
+                r#"{{"type":"session.usage_record","data":{{"usage":{{"inputTokens":{i},"outputTokens":2,"cacheReadTokens":3,"cacheWriteTokens":4}}}},"id":"{id}"}}"#
+            )
+        };
+        append(
+            &dir.join(copilot::EVENTS),
+            &format!(
+                "{}\n{}\n{}\n{{oops\n",
+                rec("a", 10),
+                rec("a", 10),
+                rec("b", 5)
+            ),
+        );
+        let totals = UsageReader::copilot(&dir).refresh().unwrap();
+        assert_eq!((totals.input, totals.output), (15, 4));
+        assert_eq!((totals.cache_read, totals.cache_creation), (6, 8));
+    }
+
+    #[test]
+    fn updates_of_a_remote_machine_fold_into_the_same_totals() {
+        let usage = |i| Usage {
+            input: i,
+            output: 1,
+            cache_read: 0,
+            cache_creation: 0,
+        };
+        let sample = |id: &str, i| UsageSample {
+            id: id.into(),
+            timestamp: None,
+            model: None,
+            usage: usage(i),
+        };
+        let mut sum = UsageSum::default();
+        let main = Update::Main {
+            calls: vec![],
+            tools: 0,
+            usage: vec![sample("m1", 4)],
+        };
+        assert!(sum.apply(&main));
+        assert!(!sum.apply(&main));
+        let entry = Entry {
+            uuid: "x".into(),
+            role: "assistant".into(),
+            timestamp: None,
+            blocks: vec![],
+            message_id: Some("m9".into()),
+            model: None,
+            usage: Some(usage(6)),
+        };
+        assert!(sum.apply(&Update::Entries {
+            agent_id: "a".into(),
+            entries: vec![entry]
+        }));
+        assert_eq!(sum.totals().input, 10);
+        let mut json = UsageSum::default();
+        let u = serde_json::json!({"input": 4, "output": 1, "cache_read": 0, "cache_creation": 0});
+        let main = serde_json::json!({"kind": "main", "calls": [], "tools": 0, "usage": [{"id": "m1", "usage": u}]});
+        assert!(json.apply_json(&main));
+        assert!(!json.apply_json(&main));
+        assert!(!json.apply_json(&serde_json::json!({"kind": "list", "agents": []})));
+        let entries = serde_json::json!({"kind": "entries", "agent_id": "a", "entries": [{"message_id": "m9", "usage": {"input": 6, "output": 1, "cache_read": 0, "cache_creation": 0}}, {"message_id": "m8", "usage": null}]});
+        assert!(json.apply_json(&entries));
+        assert_eq!(json.totals().input, 10);
     }
 }

@@ -120,6 +120,7 @@ describe("mode button", () => {
       versionLabel = () => "";
       warning = () => "";
       deliver = () => deliver;
+      limits = () => null;
       showDeliver = { emit: () => deliverClicks++ };
     }
     TestBed.resetTestingModule();

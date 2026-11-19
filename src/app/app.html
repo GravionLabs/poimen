@@ -91,6 +91,7 @@
   [appVersion]="store.appVersion()"
   [channel]="store.appChannel()"
   [deliver]="deliver.summary()"
+  [limits]="claudeLimits.item()"
   (showDeliver)="editor.openDeliver()"
   [update]="updater.state()"
   (checkUpdate)="updater.check()"
