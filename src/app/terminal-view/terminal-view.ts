@@ -24,7 +24,14 @@ import { useUnicode11 } from "./unicode";
 import { TaskStarter } from "../core/task-start";
 import { TauriBridge, type DragDrop, type Unlisten } from "../core/tauri";
 import { SpaceActions } from "../core/space-actions";
-import { dropAction, overRect } from "./drop";
+import {
+  dropAction,
+  imagePasteRefusal,
+  overRect,
+  pastedImageType,
+  quotePaths,
+  savableImage,
+} from "./drop";
 import { agentKind, splitId, type Terminal } from "../core/snapshot";
 import type { Mode, StreamRecord } from "../core/backend";
 import {
@@ -464,7 +471,16 @@ export class TerminalView implements OnDestroy, Searchable {
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopPropagation(); // xterm's own paste listener would send it a second time
-      const text = event.clipboardData?.getData("text/plain");
+      const data = event.clipboardData;
+      const image = data ? pastedImageType(Array.from(data.items ?? [], (i) => i.type)) : null;
+      if (image) {
+        const blob = Array.from(data!.items, (i) => i)
+          .find((i) => i.type === image)
+          ?.getAsFile();
+        if (blob) void this.pasteImage(blob, image);
+        return;
+      }
+      const text = data?.getData("text/plain");
       if (text && this.mode() === "control" && this.session?.open) this.term?.paste(text);
     };
     host.addEventListener("copy", onCopy, true);
@@ -473,6 +489,26 @@ export class TerminalView implements OnDestroy, Searchable {
       host.removeEventListener("copy", onCopy, true);
       host.removeEventListener("paste", onPaste, true);
     };
+  }
+
+  /** A pasted image is saved by the backend and its quoted path typed like a drop (#906). */
+  private async pasteImage(blob: Blob, mime: string): Promise<void> {
+    const notify = (text: string) => this.injector.get(SpaceActions).notify(text);
+    const refusal = imagePasteRefusal({
+      remote: !!this.pane().machine,
+      control: this.mode() === "control" && !!this.session?.open,
+    });
+    if (refusal) return notify(refusal);
+    if (!savableImage(mime))
+      return notify("This image type cannot be pasted (png, jpeg, gif, webp).");
+    try {
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const path = await this.tauri.invokeRaw<string>("paste_image", bytes, { "x-mime": mime });
+      if (this.destroyed || this.mode() !== "control" || !this.session?.open) return;
+      this.term?.paste(quotePaths([path], isWindows()));
+    } catch (e) {
+      notify(`The pasted image was not saved: ${e}`);
+    }
   }
 
   private async start(takeover: boolean): Promise<void> {

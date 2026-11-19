@@ -16,6 +16,11 @@ export class TauriBridge {
     return invoke<T>(command, args);
   }
 
+  /** Invokes a command with a raw byte body; `headers` carry the small arguments. */
+  invokeRaw<T>(command: string, body: Uint8Array, headers: Record<string, string>): Promise<T> {
+    return invoke<T>(command, body, { headers });
+  }
+
   /**
    * A channel for a command to push messages through (`onMessage` runs for each, in order). JSON
    * messages arrive as values; raw bytes as an `ArrayBuffer`.
