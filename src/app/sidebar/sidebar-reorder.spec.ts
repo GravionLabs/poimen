@@ -11,6 +11,7 @@ import { SpaceActions } from "../core/space-actions";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar } from "./sidebar";
+import { inlineSpaceCard } from "./space-card.mock";
 
 const node = (id: string, n: number): SpaceNode => ({
   workspace: { space_id: id, label: `Space ${id}`, number: n, agent_status: "idle" },
@@ -51,6 +52,7 @@ async function setup(
       },
     ],
   });
+  inlineSpaceCard();
   TestBed.overrideComponent(Sidebar, {
     set: {
       templateUrl: undefined,

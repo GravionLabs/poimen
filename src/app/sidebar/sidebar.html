@@ -8,7 +8,7 @@
     size="small"
     iconOnly
     class="layout-toggle"
-    [attr.aria-pressed]="layout() === 'split'"
+    [attr.aria-pressed]="layout() !== 'tree'"
     [attr.aria-label]="'Show ' + otherLayout() + ' layout'"
     [title]="'Show ' + otherLayout() + ' layout'"
     (click)="toggleLayout()"
@@ -26,6 +26,20 @@
       >
         <rect x="2" y="2" width="12" height="5" rx="1" />
         <rect x="2" y="9" width="12" height="5" rx="1" />
+      </svg>
+    } @else if (layout() === "cards") {
+      <svg
+        viewBox="0 0 16 16"
+        width="14"
+        height="14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M2.5 3.5h11M2.5 6h11M2.5 10.5h11M2.5 13h11" />
       </svg>
     } @else {
       <svg
@@ -479,6 +493,26 @@
       />
     </ng-template>
   </hx-tree>
+} @else if (layout() === "cards") {
+  <div class="cards" role="list" aria-label="Spaces">
+    @for (node of nodes(); track node.key) {
+      @defer (on immediate) {
+        <app-space-card
+          role="listitem"
+          [node]="node"
+          [openIds]="openIds()"
+          [activeId]="activeId()"
+          (opened)="spaceOpened.emit($event)"
+          (configure)="configOpened.emit($event)"
+          (act)="menuAction.emit($event)"
+          (menu)="menuAt.set($event)"
+          (picked)="onSelect($event)"
+        />
+      }
+    } @empty {
+      <p class="cards-empty">No matching spaces</p>
+    }
+  </div>
 } @else {
   <app-split-pane
     class="sections"

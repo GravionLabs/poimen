@@ -32,11 +32,11 @@ src-tauri/src/settings_transfer.rs	1195
 src/app/app.ts	1119
 src/app/core/snapshot.spec.ts	1050
 src/app/core/snapshot.ts	1070
-src/app/core/ui-state.ts	867
+src/app/core/ui-state.ts	838
 src/app/deliver/deliver-status.ts	1006
 src/app/deliver/deliver-view.spec.ts	879
 src/app/github/github-view.spec.ts	853
 src/app/github/issues.ts	1019
 src/app/settings-view/settings-view.spec.ts	1142
-src/app/sidebar/sidebar.ts	1007
+src/app/sidebar/sidebar.ts	928
 src/app/terminal-view/terminal-view.spec.ts	1262

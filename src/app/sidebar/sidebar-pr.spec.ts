@@ -13,6 +13,7 @@ import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar } from "./sidebar";
 import { DEFAULT_SIDEBAR_ROWS } from "./spaces";
+import { inlineSpaceCard } from "./space-card.mock";
 
 const pull = (over: Partial<BranchPull> = {}): BranchPull => ({
   number: 123,
@@ -63,6 +64,7 @@ async function setup(pr: BranchPull) {
       { provide: UI_STORAGE, useValue: null },
     ],
   });
+  inlineSpaceCard();
   TestBed.overrideComponent(Sidebar, {
     set: {
       templateUrl: undefined,

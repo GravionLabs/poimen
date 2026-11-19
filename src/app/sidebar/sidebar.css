@@ -616,3 +616,18 @@
   font-variant-numeric: tabular-nums;
   color: var(--h-text-muted-color);
 }
+
+/* The cards layout: one card per space, no horizontal overflow at the minimum width. */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px 8px;
+}
+
+.cards-empty {
+  margin: 4px 6px;
+  color: var(--h-text-muted-color);
+  font-size: 12px;
+}

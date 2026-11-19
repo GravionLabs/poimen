@@ -12,7 +12,7 @@ Everything here is in the application today; the [README](https://github.com/Gra
 - A tree of workspaces (spaces) with their panes, per row agent, status, branch and worktree (`git` is read-only). A filter field searches by name, agent or branch.
 - Create a space (directory with completion, native folder picker, label), a terminal in a space, split a pane right or down, start an agent in a shell pane, rename and close panes. Closing a pane always asks first and warns while an agent works.
 - Close a space from its context menu, the × icon left of the chevron on its row (shown on hover, keyboard focus and for the active space) or the command palette. A space with panes asks first and says how many panes and agents the close ends.
-- `sidebar.layout` switches between the tree and two lists (Spaces and the panes of the selected one); `sidebar.rows` defines what a row shows.
+- `sidebar.layout` switches between the tree, two lists (Spaces and the panes of the selected one) and cards (one collapsible card per space); `sidebar.rows` defines what a row shows.
 - An Explorer view (second item of the activity bar) browses directories.
 
 ## Editor tabs with live terminals
