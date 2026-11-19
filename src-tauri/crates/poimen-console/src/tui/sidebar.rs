@@ -840,6 +840,7 @@ mod tests {
         Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status,
             agent: Some("claude".into()),
             session_id: None,
@@ -1271,6 +1272,7 @@ mod tests {
             Some(AgentInfo {
                 reported_at: None,
                 status_since: None,
+                silent_since: None,
                 status,
                 agent: Some("codex".into()),
                 session_id: None,
@@ -1319,6 +1321,7 @@ mod tests {
         t.agent = Some(AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Blocked,
             agent: None,
             session_id: None,

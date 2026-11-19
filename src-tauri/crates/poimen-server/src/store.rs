@@ -318,6 +318,7 @@ mod tests {
             agent: Some(AgentInfo {
                 reported_at: Some(1_700_000_005_000),
                 status_since: Some(1_700_000_000_000),
+                silent_since: Some(1_700_000_600_000),
                 status: poimen_protocol::AgentStatus::Blocked,
                 agent: Some("claude".into()),
                 session_id: Some("abc".into()),

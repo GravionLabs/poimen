@@ -227,6 +227,7 @@ mod tests {
         let root = AgentInfo {
             reported_at: None,
             status_since: None,
+            silent_since: None,
             status: AgentStatus::Working,
             agent: Some("rootapp".into()),
             session_id: None,

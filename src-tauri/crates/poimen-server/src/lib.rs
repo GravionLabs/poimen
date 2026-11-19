@@ -67,6 +67,9 @@ use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
 /// How often the tokens with a TTL are checked.
 const TOKEN_SWEEP: Duration = Duration::from_millis(500);
 
+/// How often the user config is read again for `agents.silentAfter` (#898).
+const SETTINGS_REREAD: Duration = Duration::from_secs(30);
+
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 use poimen_client::transport::{self, Conn, Entry, Listener};
@@ -281,6 +284,7 @@ impl TerminalEntry {
                         Some(b) if b.status == status => b.status_since.or(Some(now_ms)),
                         _ => Some(now_ms),
                     },
+                    silent_since: None,
                 };
                 self.osc = Some(next.clone());
                 self.info.agent = Some(next);
@@ -366,6 +370,8 @@ pub(crate) struct Shared {
     state_file: PathBuf,
     scrollback: usize,
     home: Option<PathBuf>,
+    /// `agents.silentAfter` in minutes with the time it was read (#898).
+    silent_after: Mutex<Option<(Instant, u64)>>,
     pty_host: PtyHost,
     /// What `repo.ensure` clones with: the real `gh`, or a fake set by tests ([`Server::set_gh`]).
     gh: RwLock<Arc<dyn repos::Gh>>,
@@ -551,6 +557,62 @@ impl Shared {
         }
     }
 
+    /// The `agents.silentAfter` setting in minutes, read from the user config at most every 30 s
+    /// (#898); without a home it is the default.
+    fn silent_after(&self, now: Instant) -> u64 {
+        let mut cached = lock(&self.silent_after);
+        if let Some((at, minutes)) = *cached
+            && now.duration_since(at) < SETTINGS_REREAD
+        {
+            return minutes;
+        }
+        let minutes = match self.home.as_deref() {
+            Some(home) => std::fs::read_to_string(poimen_core::settings::config_path(home))
+                .map_or(poimen_core::settings::DEFAULT_SILENT_AFTER_MIN, |t| {
+                    poimen_core::settings::silent_after_text(&t)
+                }),
+            None => poimen_core::settings::DEFAULT_SILENT_AFTER_MIN,
+        };
+        *cached = Some((now, minutes));
+        minutes
+    }
+
+    /// Marks the agents silent that are `working` and sent no report for `minutes` (`0` is off,
+    /// #898). The mark is set once (one `agent.status_changed`, one write); only a report or
+    /// another status clears it. `now_ms` is a parameter so tests need no waiting.
+    pub(crate) fn mark_silent(&self, now_ms: u64, minutes: u64) {
+        if minutes == 0 {
+            return;
+        }
+        let limit = minutes.saturating_mul(60_000);
+        let mut inner = lock(&self.inner);
+        let mut changed = false;
+        for entry in &mut inner.terminals {
+            if entry.info.status == TerminalStatus::Exited {
+                continue;
+            }
+            let Some(agent) = entry.info.agent.as_mut() else {
+                continue;
+            };
+            let Some(reported) = agent.reported_at else {
+                continue;
+            };
+            if agent.status != AgentStatus::Working
+                || agent.silent_since.is_some()
+                || now_ms.saturating_sub(reported) < limit
+            {
+                continue;
+            }
+            agent.silent_since = Some(now_ms);
+            changed = true;
+            let event = agent_event(&entry.info.id, entry.info.agent.as_ref());
+            self.publish(event);
+        }
+        if changed {
+            self.persist(&inner);
+        }
+    }
+
     /// Marks a terminal exited when its process ends (unless it was closed meanwhile).
     /// The signals of a terminal's output (#681): OSC 7501 reports, new prompts, RIS. The status
     /// event is published once, and only when the visible status changed.
@@ -713,6 +775,7 @@ impl Server {
             state_file: config.state_file,
             scrollback: config.scrollback,
             home: config.home,
+            silent_after: Mutex::new(None),
             pty_host: config.pty_host,
             gh: RwLock::new(Arc::new(repos::SystemGh)),
             resume_timeout_ms: AtomicU64::new(hibernate::RESUME_TIMEOUT.as_millis() as u64),
@@ -748,6 +811,15 @@ impl Server {
 
     pub fn socket(&self) -> &Path {
         &self.shared.socket
+    }
+
+    /// The silent sweep (#898) as a function of `(now_ms, minutes)` (`minutes` is
+    /// `agents.silentAfter`); for tests, which have no clock to wait for and give `serve` the
+    /// server.
+    #[doc(hidden)]
+    pub fn silent_sweep(&self) -> impl Fn(u64, u64) + Send + Sync + 'static {
+        let shared = Arc::clone(&self.shared);
+        move |now_ms, minutes| shared.mark_silent(now_ms, minutes)
     }
 
     /// Sets what runs after a `server.shutdown` ended the terminals and removed the socket; the
@@ -786,6 +858,7 @@ impl Server {
             loop {
                 thread::sleep(TOKEN_SWEEP);
                 shared.expire_tokens();
+                shared.mark_silent(now_millis(), shared.silent_after(Instant::now()));
             }
         });
         let hibernation = Arc::clone(&self.shared);
@@ -2309,6 +2382,7 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         title: None,
         reported_at: Some(now_ms),
         status_since,
+        silent_since: None,
     });
     // Everything but `reported_at` decides whether something changed.
     let same_but_time = |a: &Option<AgentInfo>, b: &Option<AgentInfo>| {
@@ -2336,6 +2410,7 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
             progress: None,
             kind: None,
             title: None,
+            silent_since: None,
         });
     } else {
         // Only `reported_at` moves: no event, and the list is written at most every 10 s.
@@ -2376,6 +2451,7 @@ fn agent_event(terminal_id: &str, agent: Option<&AgentInfo>) -> Event {
         progress: agent.and_then(|a| a.progress),
         kind: agent.and_then(|a| a.kind.clone()),
         title: agent.and_then(|a| a.title.clone()),
+        silent_since: agent.and_then(|a| a.silent_since),
     }
 }
 
