@@ -15,6 +15,7 @@ pub mod copilot;
 mod create;
 mod emulator;
 pub mod gemini;
+mod hibernate;
 pub mod hook;
 mod host;
 pub mod integration;
@@ -200,6 +201,7 @@ impl TerminalEntry {
             hook_agent: self.hook_agent.clone(),
             agent_seq: self.agent_seq,
             records: self.records.raw().to_vec(),
+            hibernated: self.info.hibernated.clone(),
             tokens,
         })
     }
@@ -754,6 +756,14 @@ impl Server {
         *self.shared.gh.write().unwrap_or_else(|e| e.into_inner()) = gh;
     }
 
+    /// One pass of the hibernation sweeper at the given time in milliseconds (ADR 0014, #903);
+    /// `serve` runs it on a timer, tests call this with a clock of their own. Take it before
+    /// `serve`, which consumes the server.
+    pub fn hibernate_sweeper(&self) -> impl Fn(u64) + Send + Sync + 'static {
+        let shared = Arc::clone(&self.shared);
+        move |now_ms| shared.hibernate_sweep(now_ms)
+    }
+
     /// Accepts connections forever, one thread each.
     pub fn serve(self) {
         let shared = Arc::clone(&self.shared);
@@ -761,6 +771,13 @@ impl Server {
             loop {
                 thread::sleep(TOKEN_SWEEP);
                 shared.expire_tokens();
+            }
+        });
+        let hibernation = Arc::clone(&self.shared);
+        thread::spawn(move || {
+            loop {
+                thread::sleep(hibernate::SWEEP);
+                hibernation.hibernate_sweep(now_millis());
             }
         });
         let runs = Arc::clone(&self.shared);
@@ -1913,6 +1930,7 @@ fn spawn_terminal(
         host_version: Some(spawned.version().to_string()),
         host_bundled_version: Some(host_bundled_version()),
         records: Vec::new(),
+        hibernated: None,
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
@@ -2075,6 +2093,7 @@ fn adopted(
             host_version: Some(handle.version().to_string()),
             host_bundled_version: Some(host_bundled_version()),
             records: view,
+            hibernated: t.hibernated,
         },
         host: Some(handle),
         stream,
@@ -2222,6 +2241,14 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     if entry.info.status == TerminalStatus::Exited {
         return Ok(json!({ "accepted": true }));
     }
+    // Any report but `gone` means the agent runs again (the user came back): no longer hibernated.
+    let came_back = p.status != AgentStatus::Gone && entry.info.hibernated.take().is_some();
+    if came_back {
+        shared.publish(Event::TerminalHibernatedChanged {
+            terminal_id: p.terminal_id.clone(),
+            hibernated: None,
+        });
+    }
     // The latest notification text: a new one replaces it, `working` clears it, else it stays.
     let (message, message_at) = match p
         .message
@@ -2291,9 +2318,10 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         // Only `reported_at` moves: no event, and the list is written at most every 10 s.
         entry.info.agent = next;
         let now = Instant::now();
-        if entry
-            .agent_persisted
-            .is_some_and(|at| now.duration_since(at) < REPORT_PERSIST_EVERY)
+        if !came_back
+            && entry
+                .agent_persisted
+                .is_some_and(|at| now.duration_since(at) < REPORT_PERSIST_EVERY)
         {
             return Ok(json!({ "accepted": true }));
         }
