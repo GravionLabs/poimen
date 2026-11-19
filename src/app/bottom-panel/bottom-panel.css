@@ -4,18 +4,15 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* Its own surface below a visible splitter (like VS Code): the gap above holds the sash. */
-  margin-top: 9px;
-  background: var(--h-content-background);
-  border: 1px solid var(--h-content-border-color);
-  border-radius: 6px;
+  /* Inside the framed content slot of the shell: a divider on top, the sash sits on it. */
+  border-top: 1px solid var(--h-content-border-color);
   font-size: 12px;
 }
 
-/* The splitter fills the gap above the panel; its line is always visible, thicker while used. */
+/* The splitter straddles the top divider; its line is always visible, thicker while used. */
 .resizer {
   position: absolute;
-  inset: -10px 0 auto;
+  inset: -5px 0 auto;
   height: 9px;
   z-index: 1;
   cursor: row-resize;
@@ -27,7 +24,7 @@
   position: absolute;
   inset: 4px 0 auto;
   height: 1px;
-  background: var(--h-content-border-color);
+  background: transparent;
 }
 
 .resizer:hover::after,
