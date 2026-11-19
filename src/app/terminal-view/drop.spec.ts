@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { dropAction, overRect, quotePaths, quotePosix, quotePowerShell } from "./drop";
+import {
+  dropAction,
+  imagePasteRefusal,
+  overRect,
+  pastedImageType,
+  quotePaths,
+  quotePosix,
+  quotePowerShell,
+  savableImage,
+} from "./drop";
 
 describe("quoting", () => {
   it("quotes spaces and unicode in single quotes", () => {
@@ -40,5 +49,22 @@ describe("dropAction", () => {
   });
   it("ignores an empty drop", () => {
     expect(dropAction([], ok)).toBeNull();
+  });
+});
+
+describe("image paste helpers (#906)", () => {
+  it("finds the image of a paste without text", () => {
+    expect(pastedImageType(["image/png"])).toBe("image/png");
+    expect(pastedImageType(["text/plain", "image/png"])).toBeNull();
+    expect(pastedImageType(["text/html"])).toBeNull();
+  });
+  it("refuses remote and read-only", () => {
+    expect(imagePasteRefusal({ remote: true, control: true })).toContain("remote");
+    expect(imagePasteRefusal({ remote: false, control: false })).toContain("read-only");
+    expect(imagePasteRefusal({ remote: false, control: true })).toBeNull();
+  });
+  it("saves only the four types", () => {
+    expect(savableImage("image/webp")).toBe(true);
+    expect(savableImage("image/svg+xml")).toBe(false);
   });
 });

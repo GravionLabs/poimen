@@ -49,3 +49,29 @@ export function dropAction(
   }
   return { kind: "type", text: quotePaths(paths, opts.windows) };
 }
+
+/** The image types `paste_image` accepts. */
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/**
+ * The image item of a paste that has no text: a paste with `text/plain` stays a text paste.
+ * `types` are the MIME types of the clipboard items.
+ */
+export function pastedImageType(types: readonly string[]): string | null {
+  if (types.includes("text/plain")) return null;
+  return types.find((t) => t.startsWith("image/")) ?? null;
+}
+
+/** What an image paste does: type the quoted path of the saved file, or refuse. */
+export function imagePasteRefusal(opts: { remote: boolean; control: boolean }): string | null {
+  if (opts.remote) {
+    return "A pasted image is saved on this Mac and does not exist on a remote machine.";
+  }
+  if (!opts.control) return "This terminal is read-only: the pasted image was not typed.";
+  return null;
+}
+
+/** Whether `mime` is an image type poimen saves. */
+export function savableImage(mime: string): boolean {
+  return IMAGE_TYPES.includes(mime);
+}
