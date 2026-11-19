@@ -6,11 +6,13 @@
   (themeChange)="setTheme($event)"
 />
 <div class="work">
-  <app-activity-bar
-    [active]="ui.activeView()"
+  <hx-activity-bar
+    class="rail"
+    label="Views"
+    [items]="activityItems()"
+    [activeId]="ui.activeView()"
     [expanded]="!ui.sidebarCollapsed()"
     (selected)="selectView($event)"
-    (settingsOpened)="openSettings()"
   />
   @if (!ui.sidebarCollapsed()) {
     <div class="side" [style.width.px]="ui.sidebarWidth()">
@@ -254,4 +256,43 @@
       </section>
     }
   }
+</ng-template>
+
+<ng-template #spacesIcon>
+  <svg class="rail-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <rect x="1.5" y="2" width="13" height="12" rx="1.5" />
+    <path d="M6 2v12M6 8h8.5" />
+  </svg>
+</ng-template>
+<ng-template #explorerIcon>
+  <svg class="rail-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M1.5 4a1 1 0 011-1h4L8 5h5.5a1 1 0 011 1v6.5a1 1 0 01-1 1h-11a1 1 0 01-1-1z" />
+  </svg>
+</ng-template>
+<ng-template #notificationsIcon>
+  <svg class="rail-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M3.5 11.5h9l-1.2-1.8V7a3.3 3.3 0 00-6.6 0v2.7zM6.5 13.5a1.5 1.5 0 003 0" />
+  </svg>
+</ng-template>
+<ng-template #githubIcon>
+  <svg class="rail-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <circle cx="4" cy="3.5" r="1.5" />
+    <circle cx="4" cy="12.5" r="1.5" />
+    <circle cx="12" cy="12.5" r="1.5" />
+    <path d="M4 5v6M12 11V6.5a2 2 0 00-2-2H8M9.5 3l-1.5 1.5L9.5 6" />
+  </svg>
+</ng-template>
+<ng-template #deliverIcon>
+  <svg class="rail-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M3 2.5v11l9-5.5z" />
+  </svg>
+</ng-template>
+<ng-template #settingsIcon>
+  <svg class="rail-icon" viewBox="0 0 16 16" aria-hidden="true">
+    <circle cx="8" cy="8" r="2.2" />
+    <path
+      d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"
+    />
+    <circle cx="8" cy="8" r="4.6" />
+  </svg>
 </ng-template>
