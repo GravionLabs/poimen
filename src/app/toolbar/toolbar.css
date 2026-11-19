@@ -1,17 +1,3 @@
-.bar {
-  display: flex;
-  align-items: center;
-  height: 26px;
-  padding: 0 10px;
-  font-size: 11px;
-  border-bottom: 1px solid var(--h-content-border-color);
-  color: var(--h-text-muted-color);
-}
-
-.spacer {
-  flex: 1;
-}
-
 button.item {
   display: flex;
   align-items: center;

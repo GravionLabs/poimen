@@ -1,6 +1,6 @@
-<header class="bar">
-  <span class="spacer"></span>
+<hx-app-toolbar>
   <button
+    slot="end"
     type="button"
     class="item"
     title="Toggle the output panel (subagent transcripts)"
@@ -10,6 +10,7 @@
     Output
   </button>
   <button
+    slot="end"
     type="button"
     class="item theme-button"
     [title]="fixedBy() ? fixed(fixedBy()!) : label(theme())"
@@ -40,4 +41,4 @@
     }
     <span>{{ theme() }}</span>
   </button>
-</header>
+</hx-app-toolbar>

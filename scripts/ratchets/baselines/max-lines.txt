@@ -29,7 +29,7 @@ src-tauri/src/poimen_server.rs	1319
 src-tauri/src/server_install.rs	829
 src-tauri/src/settings.rs	2785
 src-tauri/src/settings_transfer.rs	1195
-src/app/app.ts	1138
+src/app/app.ts	1119
 src/app/core/snapshot.spec.ts	1050
 src/app/core/snapshot.ts	1070
 src/app/core/ui-state.ts	867
