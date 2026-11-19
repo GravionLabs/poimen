@@ -110,6 +110,12 @@ vi.mock("@xterm/addon-search", () => ({
     }
   },
 }));
+vi.mock("@xterm/addon-image", () => ({
+  ImageAddon: class {
+    isImage = true;
+    constructor(public options: { pixelLimit: number; storageLimit: number }) {}
+  },
+}));
 vi.mock("@xterm/addon-webgl", () => ({
   WebglAddon: class {
     onContextLoss = vi.fn();
@@ -977,6 +983,26 @@ describe("TerminalView stream (poimen backend)", () => {
     await send(0, bytes(104, 105));
     expect(fake.calls).toEqual(["reset", "resize 100x30"]);
     expect(fake.writes.at(-1)).toEqual(new Uint8Array([104, 105]));
+  });
+
+  it("loads the image addon with a pixel and storage limit", async () => {
+    await setup("control", pane);
+    await vi.waitFor(() =>
+      expect(fake.addons.some((a) => (a as { isImage?: boolean }).isImage)).toBe(true),
+    );
+    const addon = fake.addons.find((a) => (a as { isImage?: boolean }).isImage) as {
+      options: { pixelLimit: number; storageLimit: number };
+    };
+    expect(addon.options.pixelLimit).toBeGreaterThan(0);
+    expect(addon.options.storageLimit).toBeGreaterThan(0);
+  });
+
+  it("passes a sixel sequence and the text after it to xterm in order", async () => {
+    const { send } = await setup("control", pane);
+    const enc = (text: string) => [...new TextEncoder().encode(text)];
+    await send(0, bytes(...enc('\x1bPq"1;1;4;4#0;2;100;0;0#0~~~~\x1b\\after')));
+    const last = fake.writes.at(-1) as Uint8Array;
+    expect(new TextDecoder().decode(last)).toBe('\x1bPq"1;1;4;4#0;2;100;0;0#0~~~~\x1b\\after');
   });
 
   it("writes raw bytes to xterm without decoding", async () => {
