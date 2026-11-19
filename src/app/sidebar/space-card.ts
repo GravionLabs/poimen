@@ -62,6 +62,7 @@ export class SpaceCard {
   private readonly draggingSignal = signal<string | null>(null);
   private readonly dropMarkSignal = signal<{ id: string; after: boolean } | null>(null);
   private readonly tabDragSignal = signal<{ pane: string } | null>(null);
+  protected readonly stopSignal = signal<string | null>(null);
   private readonly tabMarkSignal = signal<{ pane: string; after: boolean } | null>(null);
 
   /** The workspace node of `spaceNodes`; its children are the rows of the body. */
@@ -75,6 +76,10 @@ export class SpaceCard {
   /** Id of the pane whose tab is active in the editor. */
   @Input() set activeId(value: string | null) {
     this.activeIdSignal.set(value);
+  }
+  /** The key of the one tab stop of the list (roving tabindex, #937). */
+  @Input() set stop(value: string | null) {
+    this.stopSignal.set(value);
   }
   /** Only the header: no further lines and no body, so another layout can reuse the card. */
   @Input() set headerOnly(value: boolean) {

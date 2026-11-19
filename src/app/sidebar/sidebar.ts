@@ -15,6 +15,7 @@ import {
 } from "@angular/core";
 import { HxButton, HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
+import { cardKeyboard } from "./card-keys";
 import {
   filterSpaces,
   olderHost,
@@ -45,10 +46,11 @@ import {
   recordRows,
   recordsSummary,
   renderRow,
+  rowType,
+  filterValues,
   spaceContext,
   type Line,
   type RecordRow,
-  type RowType,
   type SidebarRows,
 } from "./spaces";
 import { SettingsStore, type SidebarAgents, type SidebarLayout } from "../core/settings";
@@ -97,23 +99,6 @@ const LAYOUT_CYCLE: Record<SidebarLayout, SidebarLayout> = {
   split: "cards",
   cards: "tree",
 };
-
-const rowType = (row: PaneRow): RowType => (row.agent ? "agent" : "terminal");
-
-/** Texts of the shown tokens of a space and one of its panes: what the filter matches. */
-export function filterValues(
-  space: SpaceNode,
-  row: PaneRow,
-  rows: SidebarRows,
-  showBase = false,
-): string[] {
-  const ctx = spaceContext(space, showBase);
-  const texts = (lines: Line[]) => lines.flatMap((l) => l.map((s) => s.text));
-  return [
-    ...texts(renderRow(rowType(row), rows[rowType(row)], row, ctx)),
-    ...texts(renderRow("workspace", rows.workspace, space, ctx)),
-  ];
-}
 
 /** Tree keys: the pane id for a pane, a prefixed workspace id for a workspace. */
 const WORKSPACE_PREFIX = "workspace:";
@@ -821,6 +806,20 @@ export class Sidebar {
   protected readonly nodes = computed(() =>
     spaceNodes(this.filtered(), this.rows(), this.showBase()),
   );
+
+  /** Keyboard navigation of the cards layout (#937). */
+  private readonly cardKeys = cardKeyboard({
+    nodes: this.nodes,
+    collapsed: this.ui.collapsedCards,
+    filtering: computed(() => this.query().trim() !== ""),
+    toggle: (id, collapsed) => this.ui.setCardCollapsed(id, collapsed),
+    open: (key) => this.onSelect(key),
+    root: () => this.host.nativeElement,
+    injector: this.injector,
+  });
+  protected readonly cardStop = this.cardKeys.stop;
+  protected readonly onCardKey = this.cardKeys.onKey;
+  protected readonly onCardFocus = this.cardKeys.onFocus;
 
   /** The clock of the elapsed times in the Agents section; ticks once a minute. */
   private readonly now = signal(Date.now());

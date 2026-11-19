@@ -148,7 +148,7 @@ describe("Sidebar in the cards layout (#934)", () => {
   it("renders one card per space and no tree", async () => {
     const s = await setup("cards");
     expect(s.cards()).toHaveLength(2);
-    expect(s.root.querySelector('[role="tree"]')).toBeNull();
+    expect(s.root.querySelector("hx-tree")).toBeNull();
     expect(s.cards()[0].querySelector(".head")?.textContent).toContain("One");
     expect(s.cards()[1].querySelector(".head")?.textContent).toContain("Two");
   });
@@ -360,5 +360,99 @@ describe("Sidebar in the cards layout (#934)", () => {
       expect(s.cards()[0].querySelector(".row input.edit")).toBeNull();
       expect(s.selected).toEqual([]);
     });
+  });
+});
+
+describe("Sidebar cards keyboard and ARIA (#937)", () => {
+  const press = async (
+    s: Awaited<ReturnType<typeof setup>>,
+    el: Element,
+    key: string,
+    init: KeyboardEventInit = {},
+  ) => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...init }));
+    await s.settle();
+  };
+  const nav = (s: Awaited<ReturnType<typeof setup>>, key: string) =>
+    s.root.querySelector<HTMLElement>(`[data-nav="${key}"]`)!;
+
+  it("is a tree of treeitems with level, expanded and selected", async () => {
+    const s = await setup("cards");
+    expect(s.root.querySelector('.cards[role="tree"]')).not.toBeNull();
+    expect(s.root.querySelector('[role="listitem"]')).toBeNull();
+    const head = nav(s, "w1");
+    expect(head.getAttribute("role")).toBe("treeitem");
+    expect(head.getAttribute("aria-level")).toBe("1");
+    expect(head.getAttribute("aria-expanded")).toBe("true");
+    expect(head.hasAttribute("aria-selected")).toBe(true);
+    expect(nav(s, "w1:p1").getAttribute("aria-level")).toBe("2");
+    expect(nav(s, "w1:p2").getAttribute("aria-level")).toBe("3");
+    expect(nav(s, "w1:p1").getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("has one tab stop; the header buttons are tabbable from the focused header", async () => {
+    const s = await setup("cards");
+    const stops = [...s.root.querySelectorAll<HTMLElement>(".cards [tabindex='0']")];
+    expect(stops.map((e) => e.dataset["nav"] ?? e.getAttribute("aria-label"))).toEqual([
+      "w1",
+      "New terminal in One",
+      "Configure space One",
+      "Close space One",
+      "More actions for One",
+    ]);
+    nav(s, "w1:p1").dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await s.settle();
+    const after = [...s.root.querySelectorAll<HTMLElement>(".cards [tabindex='0']")];
+    expect(after.map((e) => e.dataset["nav"])).toEqual(["w1:p1"]);
+  });
+
+  it("moves with the arrow keys over headers and visible rows in display order", async () => {
+    const s = await setup("cards");
+    await press(s, nav(s, "w1"), "ArrowDown");
+    expect(nav(s, "w1:p1").getAttribute("tabindex")).toBe("0");
+    expect(document.activeElement).toBe(nav(s, "w1:p1"));
+    await press(s, nav(s, "w1:p1"), "ArrowDown");
+    await press(s, nav(s, "w1:p2"), "ArrowDown");
+    expect(nav(s, "w2").getAttribute("tabindex")).toBe("0");
+    await press(s, nav(s, "w2"), "End");
+    expect(nav(s, "w2:p1").getAttribute("tabindex")).toBe("0");
+    await press(s, nav(s, "w2:p1"), "Home");
+    expect(nav(s, "w1").getAttribute("tabindex")).toBe("0");
+  });
+
+  it("collapses and expands with Left and Right, Enter toggles a header", async () => {
+    const s = await setup("cards");
+    await press(s, nav(s, "w1"), "ArrowLeft");
+    expect(s.ui.collapsedCards()).toEqual(["w1"]);
+    expect(s.root.querySelector('[data-nav="w1:p1"]')).toBeNull();
+    expect(nav(s, "w1").getAttribute("aria-expanded")).toBe("false");
+    await press(s, nav(s, "w1"), "ArrowRight");
+    expect(s.ui.collapsedCards()).toEqual([]);
+    await press(s, nav(s, "w1"), "Enter");
+    expect(s.ui.collapsedCards()).toEqual(["w1"]);
+    await press(s, nav(s, "w1"), "Enter");
+    await press(s, nav(s, "w1"), "ArrowRight");
+    expect(nav(s, "w1:p1").getAttribute("tabindex")).toBe("0");
+    await press(s, nav(s, "w1:p1"), "ArrowLeft");
+    expect(nav(s, "w1").getAttribute("tabindex")).toBe("0");
+  });
+
+  it("opens a terminal with Enter, once", async () => {
+    const s = await setup("cards");
+    await press(s, nav(s, "w1:p1"), "Enter");
+    expect(s.selected).toEqual(["w1:p1"]);
+  });
+
+  it("leaves keys with a modifier, buttons and fields to the app shortcuts", async () => {
+    const s = await setup("cards");
+    const head = nav(s, "w1");
+    const alt = new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true });
+    head.dispatchEvent(alt);
+    expect(alt.defaultPrevented).toBe(false);
+    const button = s.root.querySelector<HTMLElement>('[aria-label="Close space One"]')!;
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    button.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    expect(s.ui.collapsedCards()).toEqual([]);
   });
 });
