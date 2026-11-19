@@ -141,6 +141,15 @@ pub struct Terminal {
     pub agent_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_message_at: Option<u64>,
+    /// When the server last accepted an agent report, epoch ms, also without a status change (#897).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_reported_at: Option<u64>,
+    /// When the agent status last changed, epoch ms (#897).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_status_since: Option<u64>,
+    /// Since when a working agent reported nothing, epoch ms (#898, #899).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_silent_since: Option<u64>,
     /// 0 to 100, from OSC 7501 `progress` (#682).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_progress: Option<u8>,
@@ -150,6 +159,9 @@ pub struct Terminal {
     /// The program's own title (#682).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_title: Option<String>,
+    /// The server stopped the idle agent and resumes it on the next controller attach (#904).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hibernated: bool,
     /// The child records of the terminal, least recently updated first (#684).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<ChildRecord>,
@@ -220,6 +232,8 @@ mod tests {
                 {"terminal_id": "t1", "tab_id": "tab1", "space_id": "s1", "agent": "claude",
                  "agent_session": {"value": "abc"}, "agent_status": "blocked",
                  "agent_message": "Allow Bash?", "agent_message_at": 1700, "cwd": "/work/api",
+                 "agent_reported_at": 1800, "agent_status_since": 1600,
+                 "agent_silent_since": 1900,
                  "label": "review", "tokens": {"deliver_step": "build"},
                  "survives_restart": true, "program": "/bin/zsh", "host_version": "0.15.0",
                  "host_bundled_version": "0.16.0", "focused": false},

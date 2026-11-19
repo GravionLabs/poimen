@@ -32,6 +32,13 @@ import type { MenuGroup } from "../ui/context-menu/menu-model";
 import { Attention, canMarkUnread, workspaceUnread } from "../core/attention";
 import { SpacesStore } from "../core/spaces-store";
 import {
+  TokenTotalsService,
+  compactTotal,
+  sumTotals,
+  totalsTip,
+  type TokenTotals,
+} from "../core/token-totals";
+import {
   DEFAULT_SIDEBAR_ROWS,
   RECORDS_SHOWN,
   aggregateStatus,
@@ -49,6 +56,7 @@ import { SettingsStore, type SidebarAgents } from "../core/settings";
 import {
   AGENT_SECTIONS,
   formatElapsed,
+  silentLabel,
   orderAgents,
   type AgentSection,
 } from "../core/agent-priority";
@@ -567,6 +575,25 @@ export class Sidebar {
   private readonly attn = inject(Attention);
   private readonly bridge = inject(TauriBridge);
   private readonly spaceRebuild = inject(SpaceRebuild);
+  private readonly tokenTotals = inject(TokenTotalsService);
+
+  /** Total of one pane; none for a machine that is not connected or a pane without transcript. */
+  private totalOf(paneId: string): TokenTotals | undefined {
+    return this.machines.blockedReason(paneId) ? undefined : this.tokenTotals.totals().get(paneId);
+  }
+
+  /** Compact sum of the panes of a space (`1.2M`); empty when none has a total. */
+  protected spaceTokens(workspaceId: string): string {
+    const space = this.store.spaces().find((s) => s.workspace.space_id === workspaceId);
+    const sum = space && sumTotals(space.rows.map((r) => this.totalOf(r.pane.terminal_id)));
+    return sum ? compactTotal(sum) : "";
+  }
+
+  protected spaceTokensTip(workspaceId: string): string {
+    const space = this.store.spaces().find((s) => s.workspace.space_id === workspaceId);
+    const sum = space && sumTotals(space.rows.map((r) => this.totalOf(r.pane.terminal_id)));
+    return sum ? totalsTip(sum) : "";
+  }
 
   /** The rebuild mark of a space that has no terminals; `undefined` for any other. */
   protected rebuildMark(workspaceId: string): RebuildMark | undefined {
@@ -894,6 +921,10 @@ export class Sidebar {
     return timer;
   })();
 
+  protected silentMark(row: PaneRow): string | undefined {
+    return silentLabel(row.pane.agent_silent_since, this.now());
+  }
+
   protected readonly agentsMode = computed(() => this.settings.settings().sidebarAgents);
   protected readonly otherAgentsMode = computed(() =>
     this.agentsMode() === "list" ? "priority" : "list",
@@ -958,7 +989,10 @@ export class Sidebar {
   }
 
   protected rowTitle(row: PaneRow): string {
-    return [row.pane.terminal_id, row.dir, row.branch].filter(Boolean).join(" · ");
+    const totals = this.totalOf(row.pane.terminal_id);
+    return [row.pane.terminal_id, row.dir, row.branch, totals && totalsTip(totals)]
+      .filter(Boolean)
+      .join(" · ");
   }
 
   /** The tooltip of the quiet mark of a terminal on an older PTY host; `null` when it is current. */

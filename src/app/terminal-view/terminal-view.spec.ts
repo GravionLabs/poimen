@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Terminal } from "../core/snapshot";
 import type { StreamRecord } from "../core/backend";
 import { SettingsStore, DEFAULT_SETTINGS, type Settings } from "../core/settings";
+import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { TerminalStreamService } from "../core/terminal-stream";
 
@@ -109,6 +110,12 @@ vi.mock("@xterm/addon-search", () => ({
     }
   },
 }));
+vi.mock("@xterm/addon-image", () => ({
+  ImageAddon: class {
+    isImage = true;
+    constructor(public options: { pixelLimit: number; storageLimit: number }) {}
+  },
+}));
 vi.mock("@xterm/addon-webgl", () => ({
   WebglAddon: class {
     onContextLoss = vi.fn();
@@ -149,6 +156,8 @@ async function setup(wanted: "control" | "observe", target: Terminal = pane) {
   fake.writes = [];
   fake.calls = [];
   const openUrl = vi.fn(async () => undefined);
+  const invokeRaw = vi.fn(async () => "/cache/paste/1.png");
+  const notify = vi.fn();
   const settings = signal<Settings>(DEFAULT_SETTINGS);
   const session = {
     open: true,
@@ -165,7 +174,8 @@ async function setup(wanted: "control" | "observe", target: Terminal = pane) {
     providers: [
       { provide: SettingsStore, useValue: { settings } },
       { provide: TerminalStreamService, useValue: { open } },
-      { provide: TauriBridge, useValue: { openUrl } },
+      { provide: TauriBridge, useValue: { openUrl, invokeRaw } },
+      { provide: SpaceActions, useValue: { notify } },
     ],
   });
   TestBed.overrideComponent(TerminalView, {
@@ -197,7 +207,7 @@ async function setup(wanted: "control" | "observe", target: Terminal = pane) {
     records[n](record);
     await new Promise((resolve) => setTimeout(resolve));
   };
-  return { fixture, settings, session, open, sized, modes, send, body, openUrl };
+  return { fixture, settings, session, open, sized, modes, send, body, openUrl, invokeRaw, notify };
 }
 
 const GHOSTTY = {
@@ -975,6 +985,26 @@ describe("TerminalView stream (poimen backend)", () => {
     expect(fake.writes.at(-1)).toEqual(new Uint8Array([104, 105]));
   });
 
+  it("loads the image addon with a pixel and storage limit", async () => {
+    await setup("control", pane);
+    await vi.waitFor(() =>
+      expect(fake.addons.some((a) => (a as { isImage?: boolean }).isImage)).toBe(true),
+    );
+    const addon = fake.addons.find((a) => (a as { isImage?: boolean }).isImage) as {
+      options: { pixelLimit: number; storageLimit: number };
+    };
+    expect(addon.options.pixelLimit).toBeGreaterThan(0);
+    expect(addon.options.storageLimit).toBeGreaterThan(0);
+  });
+
+  it("passes a sixel sequence and the text after it to xterm in order", async () => {
+    const { send } = await setup("control", pane);
+    const enc = (text: string) => [...new TextEncoder().encode(text)];
+    await send(0, bytes(...enc('\x1bPq"1;1;4;4#0;2;100;0;0#0~~~~\x1b\\after')));
+    const last = fake.writes.at(-1) as Uint8Array;
+    expect(new TextDecoder().decode(last)).toBe('\x1bPq"1;1;4;4#0;2;100;0;0#0~~~~\x1b\\after');
+  });
+
   it("writes raw bytes to xterm without decoding", async () => {
     const { send } = await setup("control", pane);
     await send(0, bytes(27, 91, 72));
@@ -1160,5 +1190,73 @@ describe("TerminalView stream (poimen backend)", () => {
     expect(fixture.nativeElement.textContent).toContain("Take over");
     expect(open).toHaveBeenCalledTimes(2);
     expect(open.mock.calls[1][0]).toMatchObject({ mode: "observe", takeover: false });
+  });
+});
+
+describe("TerminalView image paste (#906)", () => {
+  const frame: StreamRecord = { type: "reset", cols: 80, rows: 24 };
+  const imageEvent = (types: string[]) => {
+    const file = new File([new Uint8Array([1, 2, 3])], "x.png", { type: "image/png" });
+    const event = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        getData: () => "",
+        items: types.map((type) => ({ type, getAsFile: () => file })),
+      },
+    });
+    return event;
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+  it("saves the image and types its quoted path", async () => {
+    const { body, send, invokeRaw } = await setup("control");
+    await send(0, frame);
+    await send(0, attached);
+    body.dispatchEvent(imageEvent(["image/png"]));
+    await flush();
+    expect(invokeRaw).toHaveBeenCalledWith("paste_image", expect.any(Uint8Array), {
+      "x-mime": "image/png",
+    });
+    expect(fake.term!.pasted).toEqual(["'/cache/paste/1.png'"]);
+  });
+
+  it("leaves a paste with text to the text path", async () => {
+    const { body, send, invokeRaw } = await setup("control");
+    await send(0, frame);
+    await send(0, attached);
+    body.dispatchEvent(imageEvent(["text/plain", "image/png"]));
+    await flush();
+    expect(invokeRaw).not.toHaveBeenCalled();
+  });
+
+  it("refuses in a read-only tab without saving", async () => {
+    const { body, invokeRaw, notify } = await setup("observe");
+    body.dispatchEvent(imageEvent(["image/png"]));
+    await flush();
+    expect(invokeRaw).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("read-only"));
+  });
+
+  it("refuses an image type poimen does not save", async () => {
+    const { body, send, invokeRaw, notify } = await setup("control");
+    await send(0, frame);
+    await send(0, attached);
+    body.dispatchEvent(imageEvent(["image/svg+xml"]));
+    await flush();
+    expect(invokeRaw).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalled();
+  });
+
+  it("refuses on a remote pane", async () => {
+    const { body, send, invokeRaw, notify } = await setup("control", {
+      ...pane,
+      machine: "box",
+    });
+    await send(0, frame);
+    await send(0, attached);
+    body.dispatchEvent(imageEvent(["image/png"]));
+    await flush();
+    expect(invokeRaw).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("remote"));
   });
 });

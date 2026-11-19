@@ -225,6 +225,9 @@ mod tests {
         r.apply(own, 1);
         r.apply(report("lone", ReportState::Working), 1);
         let root = AgentInfo {
+            reported_at: None,
+            status_since: None,
+            silent_since: None,
             status: AgentStatus::Working,
             agent: Some("rootapp".into()),
             session_id: None,

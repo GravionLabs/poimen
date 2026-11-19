@@ -84,4 +84,27 @@ describe("NotificationCenter", () => {
       read: false,
     });
   });
+
+  describe("observeSilent (#899)", () => {
+    const silent = (...e: [string, number | undefined][]) => new Map(e);
+
+    it("records one entry per transition, none for the first snapshot or a pane that stays silent", () => {
+      const c = center();
+      c.observeSilent(silent(["p1", 5000]), label, 1);
+      c.observeSilent(silent(["p1", 5000]), label, 2);
+      expect(c.entries()).toEqual([]);
+      c.observeSilent(silent(["p1", undefined]), label, 3);
+      c.observeSilent(silent(["p1", 9000]), label, 4);
+      c.observeSilent(silent(["p1", 9000]), label, 5);
+      expect(c.entries()).toHaveLength(1);
+      expect(c.entries()[0]).toMatchObject({ paneId: "p1", status: "silent", read: false });
+    });
+
+    it("a cleared mark records nothing and a new pane is a baseline", () => {
+      const c = center();
+      c.observeSilent(silent(["p1", 5000]), label, 1);
+      c.observeSilent(silent(["p1", undefined], ["p2", 7000]), label, 2);
+      expect(c.entries()).toEqual([]);
+    });
+  });
 });

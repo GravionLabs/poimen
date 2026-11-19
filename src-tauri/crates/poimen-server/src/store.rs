@@ -62,6 +62,9 @@ pub(crate) struct StoredTerminal {
     /// The child records of OSC 7501 reports with an `id` (#684), as reported.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) records: Vec<poimen_protocol::ChildRecord>,
+    /// The agent was hibernated (ADR 0014, #903); it survives a restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) hibernated: Option<poimen_protocol::Hibernated>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) tokens: Vec<StoredToken>,
 }
@@ -313,6 +316,9 @@ mod tests {
             endpoint: PathBuf::from(format!("/run/u/poimen/hosts/{id}")),
             seq: 812,
             agent: Some(AgentInfo {
+                reported_at: Some(1_700_000_005_000),
+                status_since: Some(1_700_000_000_000),
+                silent_since: Some(1_700_000_600_000),
                 status: poimen_protocol::AgentStatus::Blocked,
                 agent: Some("claude".into()),
                 session_id: Some("abc".into()),
@@ -335,6 +341,11 @@ mod tests {
                 title: None,
             }],
             agent_seq: Some(17),
+            hibernated: Some(poimen_protocol::Hibernated {
+                agent: "claude".into(),
+                session_id: "abc".into(),
+                since: 1_700_000_100_000,
+            }),
             tokens: vec![StoredToken {
                 name: "deliver_step".into(),
                 value: "review".into(),
@@ -356,6 +367,8 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("\"agent_seq\": 17"), "{text}");
+        assert!(text.contains("\"reported_at\": 1700000005000"), "{text}");
+        assert!(text.contains("\"status_since\": 1700000000000"), "{text}");
     }
 
     #[test]

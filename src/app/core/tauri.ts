@@ -1,6 +1,7 @@
 import { Injectable } from "@angular/core";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -13,6 +14,11 @@ export type Unlisten = () => void;
 export class TauriBridge {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     return invoke<T>(command, args);
+  }
+
+  /** Invokes a command with a raw byte body; `headers` carry the small arguments. */
+  invokeRaw<T>(command: string, body: Uint8Array, headers: Record<string, string>): Promise<T> {
+    return invoke<T>(command, body, { headers });
   }
 
   /**
@@ -57,4 +63,19 @@ export class TauriBridge {
   listen<T>(event: string, handler: (payload: T) => void): Promise<Unlisten> {
     return listen<T>(event, (e) => handler(e.payload));
   }
+
+  /**
+   * Calls `handler` for the drag-and-drop events of the webview (files dragged from the OS);
+   * positions are physical pixels. Resolves once the listener is registered.
+   */
+  onDragDrop(handler: (event: DragDrop) => void): Promise<Unlisten> {
+    return getCurrentWebview().onDragDropEvent((e) => handler(e.payload));
+  }
 }
+
+/** A drag-and-drop event of the webview. */
+export type DragDrop =
+  | { type: "enter"; paths: string[]; position: { x: number; y: number } }
+  | { type: "over"; position: { x: number; y: number } }
+  | { type: "drop"; paths: string[]; position: { x: number; y: number } }
+  | { type: "leave" };

@@ -105,6 +105,16 @@ describe("agent confirmations", () => {
       time: 5,
       read: false,
     });
+    confirm.handle(
+      { kind: "terminal.resume_failed", data: { terminal_id: "t1", reason: "no report" } } as never,
+      6,
+    );
+    expect(center.entries()[0]).toMatchObject({
+      label: "Hibernated agent",
+      message: "Resume failed: no report",
+      status: "error",
+      time: 6,
+    });
     expect(writeMessage("lead", "prompt_agent", "web", false)).toBe(
       "lead prompted an agent in web",
     );

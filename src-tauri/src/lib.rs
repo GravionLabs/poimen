@@ -20,6 +20,7 @@ mod hooks;
 mod layout;
 mod layout_file;
 mod machines;
+mod paste;
 mod poimen_backend;
 mod poimen_server;
 mod project;
@@ -61,6 +62,9 @@ struct StartLock(std::sync::Arc<Mutex<()>>);
 /// each visible flow tab), each with at most one watch.
 #[derive(Default)]
 struct SubagentWatch(Mutex<Watches<FollowHandle>>);
+/// The usage-only follows of `tokens_watch` (#895), one per agent terminal.
+#[derive(Default)]
+struct TokenWatch(Mutex<Watches<FollowHandle>>);
 
 /// A running transcript follow of either kind (a local file watch, or the poll of a machine's
 /// server); dropping it stops it.
@@ -2120,12 +2124,48 @@ fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
     settings::save_sound(&home, &kind, &value)
 }
 
+/// The Claude limit windows for the status bar (#784). With `usage.claude` off nothing is read
+/// and nothing is sent; any failure is an error text (without the token) the frontend shows once.
+#[tauri::command]
+async fn usage_claude() -> Result<Vec<poimen_core::usage::Window>, String> {
+    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
+    if !settings::load(&home).usage.claude {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        poimen_core::usage::claude_windows(&poimen_core::usage::System { home })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// The bytes of the audio file configured for `sounds.<kind>` (#724). The path comes from the
 /// settings, never from the caller; a regular file up to 1 MiB.
 #[tauri::command]
 fn sound_file(kind: String) -> Result<tauri::ipc::Response, String> {
     let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
     settings::read_sound_file(&home, &kind).map(tauri::ipc::Response::new)
+}
+
+/// Writes a pasted image to `<app cache dir>/paste/<unix ms>.<ext>` and returns the path (#906).
+/// The bytes are the raw request body, the type is the `x-mime` header.
+#[tauri::command]
+fn paste_image(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("the image bytes are missing".into());
+    };
+    let mime = request
+        .headers()
+        .get("x-mime")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("the image type is missing")?;
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("paste");
+    let path = paste::write(&dir, bytes, mime, std::time::SystemTime::now())?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Writes only `terminal.fontFamily`; the settings watcher emits the change.
@@ -2386,6 +2426,99 @@ async fn subagents_watch(
     let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
     // A stale handle is dropped here, which stops its watcher; so is one whose key was unwatched.
     Ok(watches.store(&key, generation, Some(handle)))
+}
+
+/// Follows the token usage of the agent in `terminal_id` (every local agent pane, one file watch
+/// each, no polling; a pane of a machine through `agent.transcript`, #698). Totals arrive as
+/// `tokens` events `{ terminal_id, totals }`. `false` when the pane has no transcript; an offline
+/// machine is an error: no total. Read-only.
+#[tauri::command]
+async fn tokens_watch(
+    app: AppHandle,
+    backend: State<'_, Shared>,
+    machines: State<'_, SharedMachines>,
+    watch: State<'_, TokenWatch>,
+    terminal_id: String,
+) -> Result<bool, String> {
+    let key = terminal_id.clone();
+    let generation = watch.0.lock().map_err(|e| e.to_string())?.begin(&key);
+    let emit_for = {
+        let (app, id) = (app.clone(), terminal_id.clone());
+        move |totals: transcripts::Totals, samples: Vec<transcripts::Sample>| {
+            let _ = app.emit(
+                "tokens",
+                json!({ "terminal_id": id, "totals": totals, "samples": samples }),
+            );
+        }
+    };
+    if machines::split_id(&terminal_id).0.is_some() {
+        let routed = machines.route_connected(backend.inner(), &terminal_id)?;
+        let follower = format!("tokens:{terminal_id}");
+        let sum = std::sync::Mutex::new(transcripts::UsageSum::default());
+        let poller_key = follower.clone();
+        let started = tauri::async_runtime::spawn_blocking(move || {
+            remote_transcripts::start(
+                routed.backend,
+                &routed.id,
+                &poller_key,
+                remote_transcripts::INTERVAL,
+                move |_, value| {
+                    if let Ok(mut sum) = sum.lock()
+                        && sum.apply_json(&value)
+                    {
+                        emit_for(sum.totals(), sum.samples());
+                    }
+                },
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        let handle = match started {
+            remote_transcripts::Started::Following(poller) => {
+                Some(Box::new(poller) as FollowHandle)
+            }
+            remote_transcripts::Started::NotYet => None,
+        };
+        let following = handle.is_some();
+        let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+        return Ok(watches.store(&key, generation, handle) && following);
+    }
+    let session = on_routed(backend.inner(), machines.inner(), &terminal_id, |b, id| {
+        b.agent_session(id)
+    })
+    .await?;
+    let handle = session.and_then(|s| {
+        let home = home_dir()?;
+        match s.agent {
+            agent_session::TranscriptAgent::Claude => {
+                let dir = transcripts::locate_project_dir(
+                    &transcripts::projects_root(&home),
+                    &s.cwd,
+                    &s.session,
+                )?;
+                transcripts::watch_claude_usage(&dir, &s.session, emit_for)
+                    .ok()
+                    .map(|h| Box::new(h) as FollowHandle)
+            }
+            agent_session::TranscriptAgent::Copilot => {
+                let dir = copilot::locate_session_dir(&copilot::sessions_root(&home), &s.session)?;
+                copilot::watch_usage(&dir, emit_for)
+                    .ok()
+                    .map(|h| Box::new(h) as FollowHandle)
+            }
+        }
+    });
+    let following = handle.is_some();
+    let mut watches = watch.0.lock().map_err(|e| e.to_string())?;
+    Ok(watches.store(&key, generation, handle) && following)
+}
+
+/// Stops the usage follow of `terminal_id`.
+#[tauri::command]
+fn tokens_unwatch(watch: State<'_, TokenWatch>, terminal_id: String) {
+    if let Ok(mut watches) = watch.0.lock() {
+        watches.remove(&terminal_id);
+    }
 }
 
 /// Stops the subagent watch of `key` and forgets the key.
@@ -2734,6 +2867,7 @@ pub fn run() {
                 }),
         )))
         .manage(SubagentWatch::default())
+        .manage(TokenWatch::default())
         .manage(DeliverWatch::default())
         .manage(StartLock::default())
         .manage(terminal_colors::TerminalColors::default())
@@ -2896,6 +3030,8 @@ pub fn run() {
             set_claude_classic_renderer,
             set_sound,
             sound_file,
+            paste_image,
+            usage_claude,
             set_spaces_layout,
             set_layouts,
             set_space_templates,
@@ -2917,6 +3053,8 @@ pub fn run() {
             repo_info,
             subagents_watch,
             subagents_unwatch,
+            tokens_watch,
+            tokens_unwatch,
             deliver_watch,
             open_terminal,
             terminal_input,

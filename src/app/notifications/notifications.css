@@ -72,6 +72,10 @@
   color: var(--status-done);
 }
 
+.status-silent {
+  color: var(--status-blocked);
+}
+
 .status-error {
   color: var(--status-error);
 }

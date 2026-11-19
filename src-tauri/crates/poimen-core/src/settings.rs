@@ -231,6 +231,34 @@ pub fn resolve_group_worktrees(sidebar: &Value, warnings: &mut Vec<String>) -> b
     }
 }
 
+/// Default of `agents.silentAfter` in minutes (#898).
+pub const DEFAULT_SILENT_AFTER_MIN: u64 = 10;
+
+/// `agents.silentAfter` of the `agents` object, in minutes: a whole number, `0` is off. Absent is
+/// the default; anything else warns and is the default.
+pub fn resolve_silent_after(agents: &Value, warnings: &mut Vec<String>) -> u64 {
+    match agents.get("silentAfter") {
+        None => DEFAULT_SILENT_AFTER_MIN,
+        Some(v) => v.as_u64().unwrap_or_else(|| {
+            warnings.push(format!(
+                "agents.silentAfter {v} must be a whole number of minutes (0 is off); using {DEFAULT_SILENT_AFTER_MIN}"
+            ));
+            DEFAULT_SILENT_AFTER_MIN
+        }),
+    }
+}
+
+/// `agents.silentAfter` in minutes from the config `text`; an unreadable text is the default.
+pub fn silent_after_text(text: &str) -> u64 {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|root| root.get("agents").cloned())
+        .filter(Value::is_object)
+        .map_or(DEFAULT_SILENT_AFTER_MIN, |a| {
+            resolve_silent_after(&a, &mut Vec::new())
+        })
+}
+
 /// Index after a `"..."` string that starts at `i`.
 pub fn skip_string(b: &[u8], mut i: usize) -> usize {
     i += 1;
@@ -615,6 +643,22 @@ pub fn config_dir_for(home: &Path, channel: poimen_protocol::Channel) -> PathBuf
 /// `config.json` in [`config_dir`].
 pub fn config_path(home: &Path) -> PathBuf {
     config_dir(home).join("config.json")
+}
+
+/// `agents.hibernateAfter` (ADR 0014, #903): minutes a `done` agent waits before the server
+/// hibernates it. Absent, `null` and `0` are off (`Ok(None)`); anything but a non-negative
+/// whole number is an error with the reason (the setting then counts as off).
+pub fn hibernate_after_minutes(root: &Value) -> Result<Option<u64>, String> {
+    match root.get("agents").and_then(|a| a.get("hibernateAfter")) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => match v.as_u64() {
+            Some(0) => Ok(None),
+            Some(n) => Ok(Some(n)),
+            None => {
+                Err("agents.hibernateAfter must be a whole number of minutes (0 is off)".into())
+            }
+        },
+    }
 }
 
 /// Parses `layouts[]` (ADR 0011): `{name, tabs}` with a unique `name`; invalid entries warn and
@@ -1053,6 +1097,33 @@ pub fn parse_tasks(value: &Value, fallback: &str, warnings: &mut Vec<String>) ->
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn silent_after_defaults_parses_and_warns() {
+        assert_eq!(silent_after_text("{}"), 10);
+        assert_eq!(silent_after_text("not json"), 10);
+        assert_eq!(silent_after_text(r#"{"agents":{"silentAfter":3}}"#), 3);
+        assert_eq!(silent_after_text(r#"{"agents":{"silentAfter":0}}"#), 0);
+        let mut w = Vec::new();
+        for bad in [r#""x""#, "-1", "1.5", "true"] {
+            let v: Value = serde_json::from_str(&format!(r#"{{"silentAfter":{bad}}}"#)).unwrap();
+            assert_eq!(resolve_silent_after(&v, &mut w), 10, "{bad}");
+        }
+        assert_eq!(w.len(), 4);
+    }
+
+    #[test]
+    fn hibernate_after_is_minutes_and_off_by_default() {
+        use super::hibernate_after_minutes as h;
+        let v = |t: &str| serde_json::from_str::<serde_json::Value>(t).unwrap();
+        assert_eq!(h(&v("{}")), Ok(None));
+        assert_eq!(h(&v(r#"{"agents":{}}"#)), Ok(None));
+        assert_eq!(h(&v(r#"{"agents":{"hibernateAfter":0}}"#)), Ok(None));
+        assert_eq!(h(&v(r#"{"agents":{"hibernateAfter":30}}"#)), Ok(Some(30)));
+        assert!(h(&v(r#"{"agents":{"hibernateAfter":-1}}"#)).is_err());
+        assert!(h(&v(r#"{"agents":{"hibernateAfter":"5"}}"#)).is_err());
+        assert!(h(&v(r#"{"agents":{"hibernateAfter":1.5}}"#)).is_err());
+    }
+
     use super::*;
 
     #[test]

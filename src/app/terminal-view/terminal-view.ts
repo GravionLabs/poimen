@@ -22,10 +22,24 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { useUnicode11 } from "./unicode";
 import { TaskStarter } from "../core/task-start";
-import { TauriBridge } from "../core/tauri";
+import { TauriBridge, type DragDrop, type Unlisten } from "../core/tauri";
+import { SpaceActions } from "../core/space-actions";
+import {
+  dropAction,
+  imagePasteRefusal,
+  overRect,
+  pastedImageType,
+  quotePaths,
+  savableImage,
+} from "./drop";
 import { agentKind, splitId, type Terminal } from "../core/snapshot";
 import type { Mode, StreamRecord } from "../core/backend";
-import { SettingsStore, defaultTerminalFontFamily, windowsPtyOption } from "../core/settings";
+import {
+  SettingsStore,
+  defaultTerminalFontFamily,
+  isWindows,
+  windowsPtyOption,
+} from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
@@ -88,6 +102,9 @@ function ansiColors(
  * The live terminal of the active tab. It exists only while its tab is visible: hiding the tab
  * destroys it, which closes the stream and disposes xterm; the terminal keeps running.
  */
+/** Limits of the inline image addon (`pixelLimit` per image, `storageLimit` in MB). */
+export const IMAGE_OPTIONS = { pixelLimit: 16_777_216, storageLimit: 32 };
+
 @Component({
   selector: "app-terminal-view",
   imports: [HxButton, PromptBar, Icon],
@@ -96,6 +113,7 @@ function ansiColors(
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     "[class.controlling]": "mode() === 'control'",
+    "[class.drop-target]": "dropHover()",
     "(focusin)": "onSearchFocus()",
     "(focusout)": "onSearchBlur($event)",
   },
@@ -124,6 +142,9 @@ export class TerminalView implements OnDestroy, Searchable {
   private readonly ui = inject(UiState);
   private readonly tauri = inject(TauriBridge);
   private readonly injector = inject(Injector);
+  /** Files are being dragged over this view. */
+  protected readonly dropHover = signal(false);
+  private unlistenDrop?: Unlisten;
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
   private term?: XTerm;
@@ -221,6 +242,7 @@ export class TerminalView implements OnDestroy, Searchable {
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.unlistenDrop?.();
     this.search.gone(this);
     this.searchResults?.dispose();
     this.themeObserver?.disconnect();
@@ -270,6 +292,12 @@ export class TerminalView implements OnDestroy, Searchable {
       new WebLinksAddon(taskLinkHandler(open, (link) => this.startTask(link))),
     );
     term.open(this.body().nativeElement);
+    // Inline images (sixel and iTerm); live only, the server snapshot carries none. Limits keep a
+    // flood of images from growing the webview: 16 Mpixel per image, 32 MB of stored images.
+    // Loaded lazily so it stays out of the initial bundle; images only arrive after the stream.
+    void import("@xterm/addon-image").then(({ ImageAddon }) => {
+      if (this.term === term) term.loadAddon(new ImageAddon(IMAGE_OPTIONS));
+    });
     try {
       term.loadAddon(new WebglAddon());
     } catch {
@@ -293,8 +321,46 @@ export class TerminalView implements OnDestroy, Searchable {
     this.term = term;
     this.fit = fit;
     this.detachClipboard = this.attachClipboard(this.body().nativeElement);
+    void this.listenForDrops();
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(this.body().nativeElement);
+  }
+
+  /** Files dropped on this view type their quoted paths as a paste (#905). */
+  private async listenForDrops(): Promise<void> {
+    try {
+      const unlisten = await this.tauri.onDragDrop((event) => this.onDragDrop(event));
+      if (this.destroyed) unlisten();
+      else this.unlistenDrop = unlisten;
+    } catch {
+      // No drag-and-drop outside the app (tests, browser).
+    }
+  }
+
+  private onDragDrop(event: DragDrop): void {
+    if (event.type === "leave") {
+      this.dropHover.set(false);
+      return;
+    }
+    const over = overRect(
+      event.position,
+      this.host.nativeElement.getBoundingClientRect(),
+      window.devicePixelRatio || 1,
+    );
+    if (event.type !== "drop") {
+      this.dropHover.set(over);
+      return;
+    }
+    this.dropHover.set(false);
+    if (!over) return;
+    const action = dropAction(event.paths, {
+      remote: !!this.pane().machine,
+      control: this.mode() === "control" && !!this.session?.open,
+      windows: isWindows(),
+    });
+    if (!action) return;
+    if (action.kind === "refuse") this.injector.get(SpaceActions).notify(action.notice);
+    else this.term?.paste(action.text);
   }
 
   /** Shows the search bar (a second call selects the query) and moves the focus into it. */
@@ -414,7 +480,16 @@ export class TerminalView implements OnDestroy, Searchable {
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopPropagation(); // xterm's own paste listener would send it a second time
-      const text = event.clipboardData?.getData("text/plain");
+      const data = event.clipboardData;
+      const image = data ? pastedImageType(Array.from(data.items ?? [], (i) => i.type)) : null;
+      if (image) {
+        const blob = Array.from(data!.items, (i) => i)
+          .find((i) => i.type === image)
+          ?.getAsFile();
+        if (blob) void this.pasteImage(blob, image);
+        return;
+      }
+      const text = data?.getData("text/plain");
       if (text && this.mode() === "control" && this.session?.open) this.term?.paste(text);
     };
     host.addEventListener("copy", onCopy, true);
@@ -423,6 +498,26 @@ export class TerminalView implements OnDestroy, Searchable {
       host.removeEventListener("copy", onCopy, true);
       host.removeEventListener("paste", onPaste, true);
     };
+  }
+
+  /** A pasted image is saved by the backend and its quoted path typed like a drop (#906). */
+  private async pasteImage(blob: Blob, mime: string): Promise<void> {
+    const notify = (text: string) => this.injector.get(SpaceActions).notify(text);
+    const refusal = imagePasteRefusal({
+      remote: !!this.pane().machine,
+      control: this.mode() === "control" && !!this.session?.open,
+    });
+    if (refusal) return notify(refusal);
+    if (!savableImage(mime))
+      return notify("This image type cannot be pasted (png, jpeg, gif, webp).");
+    try {
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const path = await this.tauri.invokeRaw<string>("paste_image", bytes, { "x-mime": mime });
+      if (this.destroyed || this.mode() !== "control" || !this.session?.open) return;
+      this.term?.paste(quotePaths([path], isWindows()));
+    } catch (e) {
+      notify(`The pasted image was not saved: ${e}`);
+    }
   }
 
   private async start(takeover: boolean): Promise<void> {

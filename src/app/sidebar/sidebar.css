@@ -562,6 +562,13 @@
   font-size: 12px;
 }
 
+.silent {
+  flex: none;
+  align-self: flex-start;
+  color: var(--status-blocked);
+  font-size: 11px;
+}
+
 .since {
   flex: none;
   align-self: flex-start;
@@ -599,4 +606,13 @@
   letter-spacing: inherit;
   text-transform: none;
   cursor: pointer;
+}
+
+.space-tokens {
+  flex: none;
+  align-self: flex-start;
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--h-text-muted-color);
 }
