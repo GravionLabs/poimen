@@ -1,16 +1,17 @@
-.update-button.available {
-  font-weight: 600;
+/* The host adds no box: the shell lays out hx-status-bar, which carries the bar's own look. */
+:host {
+  display: contents;
 }
 
-.update-button.failed,
-.update-details h3.failed {
-  color: var(--status-error);
+hx-status-bar {
+  /* The shell sets the top border to 0 for `.hx-app-shell > .hx-status-bar`; the wrapper hides it. */
+  border-block-start: 0;
 }
 
 .update-details {
-  position: absolute;
+  position: fixed;
   right: 10px;
-  bottom: 24px;
+  bottom: 28px;
   z-index: 10;
   width: min(420px, calc(100vw - 20px));
   max-height: 60vh;
@@ -21,6 +22,10 @@
   background: var(--h-content-background);
   border: 1px solid var(--h-content-border-color);
   border-radius: 6px;
+}
+
+.update-details h3.failed {
+  color: var(--status-error);
 }
 
 .update-details .close-details {
@@ -49,31 +54,18 @@
   margin-top: 4px;
 }
 
-.bar {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 22px;
-  padding: 0 10px;
-  font-size: 11px;
-  border-top: 1px solid var(--h-content-border-color);
-  color: var(--h-text-muted-color);
+.available {
+  font-weight: 600;
 }
 
-.spacer {
-  flex: 1;
+.waiting.hx-status-warn,
+.deliver.hx-status-warn,
+.limits.hx-status-warn {
+  font-weight: 600;
 }
 
-.item {
-  min-width: 0;
-  max-width: 100%;
-  display: flex;
-  align-items: center;
+.conn {
   gap: 5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .dot {
@@ -95,56 +87,6 @@
   background: var(--status-error);
 }
 
-.version.warn {
-  color: var(--status-blocked);
-  font-weight: 600;
-}
-
-/* The release-candidate badge: this is the side-by-side "Poimen RC" app. */
-.channel {
-  color: var(--status-blocked);
-  font-weight: 700;
-}
-
-/*
- * Actions are buttons (hx-button, text variant) with hover, focus ring and pointer; information is a
- * plain span (.item) without any of them (#849). The bar is 22px high, so the buttons are 18px.
- */
-button.item {
-  height: 18px;
-  min-height: 18px;
-  padding: 0 5px;
-  font: inherit;
-  font-size: 11px;
-  line-height: 1;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-button.item:hover:not(:disabled) {
-  background: color-mix(in srgb, currentColor 14%, transparent);
-}
-
-button.item:focus-visible {
-  outline: 2px solid var(--h-primary-color);
-  outline-offset: -1px;
-}
-
-button.item:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-button.item.any {
-  color: var(--status-blocked);
-  font-weight: 600;
-}
-
-button.item.deliver.warn {
-  color: var(--status-blocked);
-  font-weight: 600;
-}
-
 .icon {
   width: 11px;
   height: 11px;
@@ -154,47 +96,9 @@ button.item.deliver.warn {
   stroke-width: 1.4;
   stroke-linejoin: round;
   stroke-linecap: round;
+  margin-inline-end: 4px;
 }
 
-button.item.help-button {
-  font-weight: 600;
-}
-
-/* Neighboring items are separated by a thin bar; the spacer and the update popover are no items, so
-   nothing leads a group and an absent item leaves no double separator. */
-.item + .item::before {
-  content: "";
-  flex: none;
-  width: 1px;
-  height: 12px;
-  margin-right: 3px;
-  background: var(--h-content-border-color);
-}
-
-/* The update control is a link in the accent color (the helix link token). */
-button.item.update-button {
-  color: var(--h-button-link-color, var(--h-primary-color));
-}
-
-button.item.update-button:hover {
-  text-decoration: underline;
-}
-
-button.item.update-button.failed {
-  color: var(--status-error);
-}
-
-/* text-overflow does not apply to the text of a flex container, so text-only items are blocks (#854). */
-span.item.notice,
-span.item.server-notice,
-span.item.version,
-span.item.channel,
-span.item.update {
-  display: block;
-  line-height: 22px;
-}
-
-.limits.warn {
-  color: var(--status-blocked);
+.help-button {
   font-weight: 600;
 }

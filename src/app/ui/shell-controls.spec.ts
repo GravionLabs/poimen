@@ -10,27 +10,19 @@ const tags = (html: string, re: RegExp): string[] => html.match(re) ?? [];
 
 describe("status bar", () => {
   const html = read("src/app/status-bar/status-bar.html");
-  const css = read("src/app/status-bar/status-bar.css");
 
-  it("every clickable item is an hx-button, every information item a span", () => {
-    const buttons = tags(html, /<button\b[^>]*>/g);
-    expect(buttons.length).toBeGreaterThan(5);
-    for (const tag of buttons) expect(tag).toContain("hx-button");
-    for (const tag of tags(html, /<span\b[^>]*class="item[^>]*>/g)) {
-      expect(tag).not.toContain("(click)");
-    }
+  it("every entry of the bar is an hx-status-item; only the update details use buttons", () => {
+    const details = html.slice(0, html.indexOf("<hx-status-bar>"));
+    const bar = html.slice(html.indexOf("<hx-status-bar>"));
+    expect(tags(bar, /<button\b[^>]*>/g)).toEqual([]);
+    for (const tag of tags(details, /<button\b[^>]*>/g)) expect(tag).toContain("hx-button");
+    expect(tags(bar, /<hx-status-item\b/g).length).toBeGreaterThan(10);
   });
 
-  it("clickable items have hover, focus and pointer; information items none; disabled looks disabled", () => {
-    expect(css).toMatch(/button\.item:hover:not\(:disabled\)/);
-    expect(css).toMatch(/button\.item:focus-visible/);
-    expect(css).toMatch(/button\.item \{[^}]*cursor: pointer/);
-    expect(css).toMatch(/button\.item:disabled \{[^}]*opacity: 0\.5/);
-    expect(css).not.toMatch(/(^|\n)\.item:hover/);
-  });
-
-  it("the waiting item is disabled at zero", () => {
-    expect(html).toMatch(/class="item waiting"[\s\S]*?\[disabled\]="waiting\(\) === 0"/);
+  it("clickable items are button items; the waiting item is disabled at zero", () => {
+    expect(html).toMatch(
+      /kind="button"[^>]*\n?[\s\S]*?class="waiting"[\s\S]*?\[disabled\]="waiting\(\) === 0"/,
+    );
   });
 });
 

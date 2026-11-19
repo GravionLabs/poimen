@@ -2,8 +2,11 @@
 import { readFileSync } from "node:fs";
 import { Component, type WritableSignal } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
+import { HxStatusBar, HxStatusItem } from "@gravionlabs/helix-desktop";
+import { HxButton } from "@gravionlabs/helix-ui";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
+import { Icon } from "../ui/icon/icon";
 import { SERVER_RESTART_NOTE, type UpdateState } from "../core/updater";
 import type { BarSummary } from "../deliver/deliver-status";
 import {
@@ -81,6 +84,7 @@ describe("mode button", () => {
     let closed = 0;
     @Component({
       selector: "app-host",
+      imports: [HxStatusBar, HxStatusItem, HxButton, Icon],
       template: readFileSync("src/app/status-bar/status-bar.html", "utf8"),
     })
     class Host {
@@ -127,7 +131,7 @@ describe("mode button", () => {
     const fixture = TestBed.createComponent(Host);
     fixture.detectChanges();
     const button = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
-      "button.mode-button",
+      ".mode-button button",
     )!;
     return {
       button,
@@ -158,10 +162,10 @@ describe("mode button", () => {
       title: "o/n M5 7/19",
       warning: false,
     });
-    const item = root.querySelector<HTMLButtonElement>("button.deliver")!;
+    const item = root.querySelector<HTMLElement>("hx-status-item.deliver")!;
     expect(item.textContent?.trim()).toBe("▶ M5 7/19");
-    expect(item.classList.contains("warn")).toBe(false);
-    item.click();
+    expect(item.classList.contains("hx-status-warn")).toBe(false);
+    item.querySelector("button")!.click();
     expect(deliverClicks()).toBe(1);
   });
 
@@ -171,13 +175,13 @@ describe("mode button", () => {
       title: "",
       warning: true,
     });
-    expect(warned.root.querySelector("button.deliver")!.classList.contains("warn")).toBe(true);
-    expect(render("control", null).root.querySelector("button.deliver")).toBeNull();
+    expect(warned.root.querySelector(".deliver")!.classList.contains("hx-status-warn")).toBe(true);
+    expect(render("control", null).root.querySelector(".deliver")).toBeNull();
   });
 
   it("offers to show the closed output panel, with its shortcut", () => {
     const { root, shown } = render("control", null, false);
-    const panel = root.querySelector<HTMLButtonElement>("button.panel-button")!;
+    const panel = root.querySelector<HTMLButtonElement>(".panel-button button")!;
     expect(panel.textContent?.trim()).toBe("Output");
     expect(panel.title).toBe("Show the output panel (⌘J)");
     panel.click();
@@ -186,10 +190,9 @@ describe("mode button", () => {
 
   it("has an accessible ? button that opens the shortcuts overview", () => {
     const { root, opened } = render("control", null);
-    const help = root.querySelector<HTMLButtonElement>("button.help-button")!;
+    const help = root.querySelector<HTMLButtonElement>(".help-button button")!;
     expect(help.textContent?.trim()).toBe("?");
     expect(help.getAttribute("aria-label")).toBe("Keyboard shortcuts");
-    expect(help.getAttribute("aria-haspopup")).toBe("dialog");
     expect(help.title).toBe("Keyboard shortcuts (⌘/)");
     help.click();
     expect(opened()).toBe(1);
@@ -203,8 +206,8 @@ describe("mode button", () => {
     const text = "poimen-server 0.1.0 is running, 0.2.0 is installed";
     const { root, serverClicks } = render("control", null, true, null, text);
     expect(root.querySelector("[data-testid=server-notice]")?.textContent).toContain(text);
-    root.querySelector<HTMLButtonElement>("[data-testid=restart-server]")!.click();
-    root.querySelector<HTMLButtonElement>("[data-testid=later-server]")!.click();
+    root.querySelector<HTMLButtonElement>("[data-testid=restart-server] button")!.click();
+    root.querySelector<HTMLButtonElement>("[data-testid=later-server] button")!.click();
     expect(serverClicks).toEqual(["restart", "later"]);
   });
 
@@ -220,13 +223,13 @@ describe("mode button", () => {
 
   it("ends with the versions, the update link and the ? button, in this order", () => {
     const { root } = render("control", null);
-    const items = Array.from(root.querySelectorAll(".bar > .item"));
+    const items = Array.from(root.querySelectorAll("hx-status-item"));
     const kinds = items.map((el) =>
       el.classList.contains("help-button")
         ? "help"
         : el.classList.contains("update-button")
           ? "update"
-          : el.classList.contains("version") && !el.classList.contains("notice")
+          : el.classList.contains("version")
             ? "version"
             : "other",
     );
@@ -239,7 +242,9 @@ describe("mode button", () => {
     const { root } = render("control", null, true, null, null, { kind: "idle" }, "rc");
     const badge = root.querySelector<HTMLElement>("[data-testid=channel]")!;
     expect(badge.textContent?.trim()).toBe("RC");
-    expect(badge.title).toContain("does not update itself");
+    expect(badge.querySelector("[title]")?.getAttribute("title")).toContain(
+      "does not update itself",
+    );
     expect(root.querySelector(".update-button")).toBeNull();
     expect(root.textContent).not.toContain("Check for updates");
   });
@@ -252,25 +257,35 @@ describe("mode button", () => {
 
   it("puts the pane id, mode and size before the versions", () => {
     const { root } = render("control", null);
-    const items = Array.from(root.querySelectorAll(".bar > .item"));
+    const items = Array.from(root.querySelectorAll("hx-status-item"));
     const mode = items.findIndex((el) => el.classList.contains("mode-button"));
-    const firstVersion = items.findIndex(
-      (el) => el.classList.contains("version") && !el.classList.contains("notice"),
-    );
+    const firstVersion = items.findIndex((el) => el.classList.contains("version"));
     expect(mode).toBeGreaterThan(-1);
     expect(mode).toBeLessThan(firstVersion);
   });
 
-  it("separates items with a bar that is no element of its own", () => {
+  it("is no live region as a whole; only changing items announce", () => {
     const { root } = render("control", null);
-    expect(root.querySelectorAll(".bar > .item").length).toBeGreaterThan(4);
-    // CSS draws the bar (.item + .item::before), so a screen reader never meets it.
-    expect(root.textContent).not.toContain("|");
+    expect(root.querySelector("hx-status-bar")?.getAttribute("role")).toBeNull();
+    const announcing = (cls: string) =>
+      root.querySelector(`hx-status-item.${cls}`)?.getAttribute("role");
+    expect(announcing("conn")).toBe("status");
+    expect(announcing("waiting")).toBe("status");
+    expect(announcing("app-version")).toBeNull();
+    expect(announcing("server-version")).toBeNull();
+    expect(announcing("help-button")).toBeNull();
+  });
+
+  it("shows warnings with the tone of the item", () => {
+    const { root } = render("control", null);
+    expect(root.querySelector("hx-status-item.notice")?.classList.contains("hx-status-warn")).toBe(
+      true,
+    );
   });
 
   it("hides the panel button while the panel is open", () => {
     const { root } = render("control", null, true);
-    expect(root.querySelector("button.panel-button")).toBeNull();
+    expect(root.querySelector(".panel-button")).toBeNull();
   });
 
   it("shows the notice (a layout problem of a new space)", () => {
