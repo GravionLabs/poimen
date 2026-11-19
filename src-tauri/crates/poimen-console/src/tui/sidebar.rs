@@ -271,7 +271,38 @@ fn state_text(s: &Subject<'_>) -> Option<String> {
     if let Some(progress) = s.progress {
         text.push_str(&format!(" {progress}%"));
     }
+    // The server decided the agent is silent (#898); the client only formats (#900).
+    if let Some(since) = s
+        .terminal
+        .and_then(|t| t.agent.as_ref()?.silent_since)
+        .filter(|_| s.status == Some(AgentStatus::Working))
+    {
+        text.push(' ');
+        text.push_str(&silent_label(since, now_ms()));
+    }
     Some(text)
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// `silent 12m`: time as the app's `formatElapsed` (`now` under a minute, `5m`, `2h`, `3d`).
+fn silent_label(since_ms: u64, now_ms: u64) -> String {
+    const MINUTE: u64 = 60_000;
+    let ms = now_ms.saturating_sub(since_ms);
+    let elapsed = if ms < MINUTE {
+        "now".to_owned()
+    } else if ms < 60 * MINUTE {
+        format!("{}m", ms / MINUTE)
+    } else if ms < 24 * 60 * MINUTE {
+        format!("{}h", ms / (60 * MINUTE))
+    } else {
+        format!("{}d", ms / (24 * 60 * MINUTE))
+    };
+    format!("silent {elapsed}")
 }
 
 /// The rows of the child records of a terminal: one per record in id order (a parent before its
@@ -1263,6 +1294,47 @@ mod tests {
         assert!(texts(&rows[1])[0].contains("work"), "{:?}", texts(&rows[1]));
         // Terminal rows keep their tab order below the second space; step walks them as shown.
         assert_eq!(step(&rows, Some("t3"), 1, None).as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn silent_label_formats_the_elapsed_time() {
+        assert_eq!(silent_label(1_000, 30_000), "silent now");
+        assert_eq!(silent_label(0, 12 * 60_000 + 5), "silent 12m");
+        assert_eq!(silent_label(0, 3 * 3_600_000), "silent 3h");
+        assert_eq!(silent_label(0, 2 * 86_400_000), "silent 2d");
+        assert_eq!(silent_label(10, 5), "silent now");
+    }
+
+    #[test]
+    fn a_silent_working_agent_shows_the_mark_after_its_status() {
+        let mut m = model();
+        let info = |status, silent_since| {
+            Some(AgentInfo {
+                reported_at: None,
+                status_since: None,
+                silent_since,
+                status,
+                agent: Some("codex".into()),
+                session_id: None,
+                message: None,
+                message_at: None,
+                progress: None,
+                kind: None,
+                title: None,
+            })
+        };
+        let line = |m: &Model| {
+            let rows = m.rows(&SidebarRows::default(), SidebarSort::Manual, None);
+            rows.iter()
+                .find(|r| r.terminal_id.as_deref() == Some("t2"))
+                .map(|r| texts(r)[0].clone())
+                .unwrap()
+        };
+        m.terminals[1].agent = info(AgentStatus::Working, Some(now_ms() - 5 * 60_000));
+        let text = line(&m);
+        assert!(text.contains("working silent 5m"), "{text}");
+        m.terminals[1].agent = info(AgentStatus::Working, None);
+        assert!(!line(&m).contains("silent"));
     }
 
     #[test]
