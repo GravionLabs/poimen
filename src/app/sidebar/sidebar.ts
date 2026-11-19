@@ -20,11 +20,9 @@ import {
   filterSpaces,
   olderHost,
   olderHostNote,
-  type AgentStatus,
   type Terminal,
   type PaneRow,
   type SpaceNode,
-  type Space,
   dropAllowed,
 } from "../core/snapshot";
 import { ContextMenu } from "../ui/context-menu/context-menu";
@@ -46,10 +44,8 @@ import {
   recordRows,
   recordsSummary,
   renderRow,
-  rowType,
   filterValues,
   spaceContext,
-  type Line,
   type RecordRow,
   type SidebarRows,
 } from "./spaces";
@@ -69,29 +65,12 @@ import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { Machines } from "../core/machines";
 import { sidebarMenuItems, type SidebarMenuAction } from "./sidebar-menu";
 import { SpaceCard } from "./space-card";
+import { WORKSPACE_PREFIX, nestTabs, spaceNodes, type SpaceData } from "./space-nodes";
+
+export { nestTabs, spaceNodes, type SpaceData };
 import { SpaceEditFocus } from "./space-edit-focus";
 import { MachinesSection } from "./machines-section/machines-section";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
-
-/** What a tree node carries back to the template. */
-export type SpaceData =
-  | {
-      kind: "workspace";
-      workspace: Space;
-      status: AgentStatus;
-      lines: Line[];
-      /** Split layout only: the workspace whose terminals are listed. */
-      selected?: boolean;
-      /** A linked worktree listed below the space of its repository: indented. */
-      member?: boolean;
-    }
-  | {
-      kind: "pane";
-      row: PaneRow;
-      lines: Line[];
-      /** Agents section: time since the last status change (`5m`, `2h`, `3d`). */
-      since?: string;
-    };
 
 /** The layout the toggle in the header switches to next. */
 const LAYOUT_CYCLE: Record<SidebarLayout, SidebarLayout> = {
@@ -99,86 +78,6 @@ const LAYOUT_CYCLE: Record<SidebarLayout, SidebarLayout> = {
   split: "cards",
   cards: "tree",
 };
-
-/** Tree keys: the pane id for a pane, a prefixed workspace id for a workspace. */
-const WORKSPACE_PREFIX = "workspace:";
-
-/** Tree nodes of the (filtered) spaces; a workspace starts expanded (helix only applies it once). */
-export function spaceNodes(
-  spaces: SpaceNode[],
-  rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
-  showBase = false,
-): HxTreeNode<SpaceData>[] {
-  return spaces.map((space) => {
-    const ctx = spaceContext(space, showBase);
-    const status = aggregateStatus(space);
-    return {
-      key: WORKSPACE_PREFIX + space.workspace.space_id,
-      label: space.workspace.label,
-      expanded: true,
-      data: {
-        kind: "workspace",
-        workspace: space.workspace,
-        status,
-        lines: renderRow("workspace", rows.workspace, space, ctx),
-        member: !!space.parent,
-      },
-      children: nestTabs(space.rows, (row) => ({
-        key: row.pane.terminal_id,
-        label: row.name,
-        leaf: true,
-        data: {
-          kind: "pane",
-          row,
-          lines: renderRow(rowType(row), rows[rowType(row)], row, ctx),
-        },
-      })),
-    };
-  });
-}
-
-/**
- * Nodes of pane rows nested by tab (#656): the rows of a tab with `parent` become children of the
- * first row of that parent tab, in tab order; the other rows of a tab stay siblings of its first
- * row. A tab whose parent has no row here (or a parent cycle) is top level. A node with children
- * is expandable and starts expanded.
- */
-export function nestTabs(
-  rows: readonly PaneRow[],
-  make: (row: PaneRow) => HxTreeNode<SpaceData>,
-): HxTreeNode<SpaceData>[] {
-  const entries = rows.map((row) => ({ row, node: make(row) }));
-  const firstOf = new Map<string, HxTreeNode<SpaceData>>();
-  const parentOf = new Map<string, string | undefined>();
-  for (const { row, node } of entries) {
-    if (!row.tabId) continue;
-    if (!firstOf.has(row.tabId)) firstOf.set(row.tabId, node);
-    parentOf.set(row.tabId, row.tabParent);
-  }
-  const containerOf = (tab: string | undefined): HxTreeNode<SpaceData> | undefined => {
-    const parent = tab ? parentOf.get(tab) : undefined;
-    if (!tab || !parent || !firstOf.has(parent)) return undefined;
-    // Only a chain that comes back to this tab is a cycle; one that joins another is fine.
-    const seen = new Set<string>();
-    for (let up: string | undefined = parent; up && !seen.has(up); up = parentOf.get(up)) {
-      if (up === tab) return undefined;
-      seen.add(up);
-    }
-    return firstOf.get(parent);
-  };
-  const top: HxTreeNode<SpaceData>[] = [];
-  for (const { row, node } of entries) {
-    const container = containerOf(row.tabId);
-    if (!container) {
-      top.push(node);
-      continue;
-    }
-    container.children = [...(container.children ?? []), node];
-    container.leaf = false;
-    container.expanded = true;
-  }
-  return top;
-}
 
 /** The two lists of the `split` layout. */
 export interface SplitSections {
@@ -803,6 +702,20 @@ export class Sidebar {
     );
   });
 
+  /** The cards of the spaces of each machine (`cards` layout, #938); not filtered, not reordered. */
+  protected readonly remoteNodes = computed(
+    () =>
+      new Map(
+        this.layout() !== "cards"
+          ? []
+          : this.machines
+              .machines()
+              .map((m) => [
+                m.name,
+                spaceNodes(this.store.remoteSpaces(m.name), this.rows(), this.showBase()),
+              ]),
+      ),
+  );
   protected readonly nodes = computed(() =>
     spaceNodes(this.filtered(), this.rows(), this.showBase()),
   );

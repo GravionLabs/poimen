@@ -3,6 +3,7 @@ import {
   applyStatus,
   buildSpaces,
   buildTree,
+  type SpaceNode,
   NO_AGENT_RANK,
   orderSpaces,
   spaceAttentionRanks,
@@ -27,6 +28,7 @@ import { UiState } from "./ui-state";
 import { Attention } from "./attention";
 import { agentSection, orderAgents, type AgentSection } from "./agent-priority";
 import { SortSettle } from "./sort-settle";
+import { keptCardIds } from "./card-marks";
 import { RemoteSpaces } from "./remote-spaces";
 
 /** Delay that collapses a burst of backend events into one re-read. */
@@ -333,6 +335,32 @@ export class SpacesStore {
   remoteTree(machine: string) {
     return this.remoteTrees().get(machine) ?? [];
   }
+  /** The spaces of one machine as sidebar rows (cards, #938): `remoteTree` with pane rows. */
+  remoteSpaces(machine: string): SpaceNode[] {
+    return this.remoteSpaceMap().get(machine) ?? [];
+  }
+  private readonly remoteSpaceMap = computed(() => {
+    const snapshot = this.remote?.snapshot();
+    const spaces = new Map<string, SpaceNode[]>();
+    if (!snapshot) return spaces;
+    const sort = this.sidebarSort() === "recent" ? "name" : this.sidebarSort();
+    const nodes = buildSpaces(
+      snapshot,
+      new Map(),
+      new Map(),
+      [],
+      {},
+      sort,
+      false,
+      [],
+      this.sortKeys(),
+    );
+    for (const node of nodes) {
+      const name = node.workspace.machine!;
+      spaces.set(name, [...(spaces.get(name) ?? []), node]);
+    }
+    return spaces;
+  });
   private readonly remoteTrees = computed(() => {
     const snapshot = this.remote?.snapshot();
     if (!snapshot) return new Map<string, ReturnType<typeof buildTree>>();
@@ -449,7 +477,8 @@ export class SpacesStore {
         const ids = snapshot.spaces.map((s) => s.space_id);
         this.ui?.pruneSpaceOrder(ids);
         this.ui?.prunePinnedSpaces(ids);
-        this.ui?.pruneCollapsedCards(ids);
+        const remote = this.remote?.snapshot()?.spaces.map((s) => s.space_id) ?? [];
+        this.ui?.pruneCollapsedCards(keptCardIds([...ids, ...remote], this.ui.collapsedCards()));
         this.ui?.pruneRecentSpaces(ids);
       }
       if (snapshot.spaces.length) {

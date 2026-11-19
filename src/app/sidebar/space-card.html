@@ -193,6 +193,8 @@
   [class.collapsed]="collapsed()"
   [class.closing]="closing()"
   [class.attention]="ringing()"
+  [class.offline]="reason() !== null"
+  [attr.aria-disabled]="reason() !== null ? 'true' : null"
   [attr.aria-busy]="closing() || null"
   [attr.aria-label]="label()"
   (dragover)="spaceDragOver.emit({ event: $event, id: id() })"
@@ -233,8 +235,8 @@
       [attr.data-nav]="id()"
       [attr.tabindex]="stopSignal() === id() ? 0 : -1"
       [attr.aria-expanded]="full() ? !collapsed() : null"
-      (click)="opened.emit(id())"
-      (keydown.space)="onSpace($event, () => opened.emit(id()))"
+      (click)="open()"
+      (keydown.space)="onSpace($event, () => open())"
     >
       @if (!firstHasDot()) {
         <span class="dot status-{{ data().status }}"></span>
@@ -296,9 +298,9 @@
         size="small"
         iconOnly
         [attr.tabindex]="stopSignal() === id() ? 0 : -1"
-        [disabled]="closing()"
+        [disabled]="closing() || reason() !== null"
         [attr.aria-label]="'New terminal in ' + label()"
-        [title]="'New terminal in ' + label()"
+        [title]="reason() ?? 'New terminal in ' + label()"
         (click)="newTerminal($event)"
       >
         <svg
@@ -314,34 +316,36 @@
           <path d="M8 3v10M3 8h10" />
         </svg>
       </button>
-      <button
-        type="button"
-        hx-button
-        variant="text"
-        severity="secondary"
-        size="small"
-        iconOnly
-        [attr.tabindex]="stopSignal() === id() ? 0 : -1"
-        [attr.aria-label]="'Configure space ' + label()"
-        [title]="'Configure space ' + label()"
-        (click)="configureSpace($event)"
-      >
-        <svg
-          viewBox="0 0 16 16"
-          width="12"
-          height="12"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.3"
-          aria-hidden="true"
+      @if (!remote()) {
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          iconOnly
+          [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+          [attr.aria-label]="'Configure space ' + label()"
+          [title]="'Configure space ' + label()"
+          (click)="configureSpace($event)"
         >
-          <circle cx="8" cy="8" r="2.2" />
-          <path
-            d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
-            stroke-linecap="round"
-          />
-        </svg>
-      </button>
+          <svg
+            viewBox="0 0 16 16"
+            width="12"
+            height="12"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.3"
+            aria-hidden="true"
+          >
+            <circle cx="8" cy="8" r="2.2" />
+            <path
+              d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+      }
       <button
         type="button"
         hx-button
@@ -350,9 +354,9 @@
         size="small"
         iconOnly
         [attr.tabindex]="stopSignal() === id() ? 0 : -1"
-        [disabled]="closing()"
+        [disabled]="closing() || reason() !== null"
         [attr.aria-label]="'Close space ' + label()"
-        [title]="'Close space ' + label()"
+        [title]="reason() ?? 'Close space ' + label()"
         (click)="closeSpace($event)"
       >
         <svg
@@ -378,8 +382,9 @@
         class="more"
         [attr.tabindex]="stopSignal() === id() ? 0 : -1"
         aria-haspopup="menu"
+        [disabled]="reason() !== null"
         [attr.aria-label]="'More actions for ' + label()"
-        [title]="'More actions for ' + label()"
+        [title]="reason() ?? 'More actions for ' + label()"
         (click)="askMore($event)"
       >
         <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">

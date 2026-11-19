@@ -38,5 +38,5 @@ src/app/deliver/deliver-view.spec.ts	879
 src/app/github/github-view.spec.ts	853
 src/app/github/issues.ts	1019
 src/app/settings-view/settings-view.spec.ts	1142
-src/app/sidebar/sidebar.ts	915
+src/app/sidebar/sidebar.ts	828
 src/app/terminal-view/terminal-view.spec.ts	1262

@@ -662,7 +662,15 @@
     </ng-template>
   </app-split-pane>
 }
-<app-machines-section (selected)="selected.emit($event)" />
+<app-machines-section
+  [cardsLayout]="layout() === 'cards'"
+  [nodes]="remoteNodes()"
+  [openIds]="openIds()"
+  [activeId]="activeId()"
+  (selected)="selected.emit($event)"
+  (cardMenu)="menuAt.set($event)"
+  (cardAct)="menuAction.emit($event)"
+/>
 @if (sortMenuAt(); as at) {
   <app-context-menu
     cssClass="sort-menu"
