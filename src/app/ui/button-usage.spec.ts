@@ -17,7 +17,6 @@ const ROW_FILES = [
 ];
 
 const LEGACY: Record<string, number> = {
-  "src/app/activity-bar/activity-bar.html": 2,
   "src/app/agent-picker/agent-picker.html": 3,
   "src/app/app.html": 1,
   "src/app/explorer/explorer.html": 1,

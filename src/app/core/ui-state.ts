@@ -108,7 +108,7 @@ export interface LayoutState {
   sidebarCollapsed: boolean;
   /** The editor area (tabs, groups); validated by `EditorTabs`, absent when never stored. */
   editor?: unknown;
-  /** The view shown in the sidebar (an id of `ACTIVITY_VIEWS`). */
+  /** The view shown in the sidebar (an id of `SIDEBAR_VIEW_IDS`). */
   activeView: string;
   /** Paths of the explorer folders that are expanded. */
   expandedDirs: string[];
