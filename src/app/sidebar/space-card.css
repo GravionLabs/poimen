@@ -146,6 +146,83 @@
   font-size: 11px;
 }
 
+.head .closing-label {
+  display: inline;
+  flex: none;
+  padding: 0 4px;
+  font-style: italic;
+}
+
+/* A pane of the space turned blocked while not viewed: the whole card rings, with a light tint. */
+.card.attention {
+  border-color: var(--status-blocked);
+  background: color-mix(in srgb, var(--status-blocked) 10%, var(--h-content-background));
+  box-shadow: 0 0 6px var(--status-blocked);
+}
+
+.card.attention .state-working {
+  color: var(--status-working-on-active);
+}
+
+.card.attention .state-blocked,
+.card.attention .silent {
+  color: var(--status-blocked-on-active);
+}
+
+.card.attention .state-done {
+  color: var(--status-done-on-active);
+}
+
+.card.attention .state-error {
+  color: var(--status-error-on-active);
+}
+
+.edit {
+  min-width: 0;
+  flex: 1 1 4rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentcolor;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.edit-error {
+  color: var(--status-error);
+  font-size: 11px;
+}
+
+.pin-mark {
+  flex: none;
+  color: var(--h-text-muted-color);
+}
+
+.silent {
+  flex: none;
+  align-self: flex-start;
+  color: var(--status-blocked);
+  font-size: 11px;
+}
+
+.head .silent {
+  align-self: center;
+}
+
+/* An empty space after a server restart: its Rebuild action or why it stays empty. */
+.rebuild,
+.rebuild-label,
+.rebuild-hint {
+  flex: none;
+  font-size: 0.85em;
+}
+
+.rebuild-label,
+.rebuild-hint {
+  font-style: italic;
+  opacity: 0.7;
+}
+
 .body {
   display: flex;
   flex-direction: column;

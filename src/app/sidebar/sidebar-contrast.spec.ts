@@ -72,3 +72,37 @@ describe.each([
     expect(contrast(hex(token), tint)).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+// The ringing card of the cards layout (space-card.css `.card.attention`): the blocked color at
+// 10% over the content background, with the text the header and rows draw on it (the `-on-active` state colors, as in the tint of the active row).
+describe.each([
+  ["light", false],
+  ["dark", true],
+])("ringing space card, %s theme", (_name, dk) => {
+  const theme = dk ? new Map([...light, ...dark]) : light;
+  const hex = (n: string) => rgb(resolve(theme, n));
+  const base = hex("--h-content-background");
+  const cssBlock = dk ? css.slice(css.indexOf(":root.app-dark")) : css;
+  const status = (name: string) => {
+    const re = new RegExp(`--status-${name}:\\s*var\\((--[\\w-]+)\\)`);
+    const m = cssBlock.match(re) ?? css.match(re);
+    if (!m) throw new Error(`--status-${name} missing`);
+    return m[1];
+  };
+  const blocked = rgb(resolve(theme, status("blocked")));
+  const tint = base.map((b, i) => blocked[i] * 0.1 + b * 0.9);
+
+  it("tells the ringing card from a plain one by its tint and border", () => {
+    expect(contrast(blocked, base)).toBeGreaterThan(1.15);
+  });
+
+  it.each([
+    ["name and idle state", "--h-text-color", 4.5],
+    ["muted lines", "--h-text-muted-color", 4.5],
+    ["blocked state and silent mark", statusToken("blocked", dk), 4.5],
+    ["working state", statusToken("working", dk), 4.5],
+    ["done state", statusToken("done", dk), 4.5],
+  ])("%s stays legible on the tint", (_label, token, min) => {
+    expect(contrast(hex(token), tint)).toBeGreaterThanOrEqual(min);
+  });
+});
