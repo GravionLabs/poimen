@@ -1,4 +1,4 @@
-<ng-template #segs let-line let-edit="edit" let-label="label">
+<ng-template #segs let-line let-edit="edit" let-label="label" let-nav="nav">
   @for (seg of line; track $index) {
     @switch (seg.kind) {
       @case ("dot") {
@@ -68,6 +68,7 @@
             [class.bold]="seg.bold"
             [class.dim]="seg.dim"
             [title]="seg.tip"
+            [attr.tabindex]="nav && nav === stopSignal() ? 0 : -1"
             [attr.aria-label]="'Open pull request: ' + seg.text"
             (click)="openPull(url, $event)"
           >
@@ -91,8 +92,11 @@
   @let m = marks(d.row);
   <div
     class="row"
-    role="button"
-    tabindex="0"
+    role="treeitem"
+    [attr.aria-level]="2 + depth"
+    [attr.aria-selected]="m.active"
+    [attr.data-nav]="d.row.pane.terminal_id"
+    [attr.tabindex]="stopSignal() === d.row.pane.terminal_id ? 0 : -1"
     [class.open]="m.open"
     [class.active]="m.active"
     [class.attention]="rings(d.row)"
@@ -107,8 +111,7 @@
     [style.padding-left.px]="6 + depth * 12"
     [title]="title(d.row)"
     (click)="picked.emit(d.row.pane.terminal_id)"
-    (keydown.enter)="picked.emit(d.row.pane.terminal_id)"
-    (keydown.space)="$event.preventDefault(); picked.emit(d.row.pane.terminal_id)"
+    (keydown.space)="onSpace($event, () => picked.emit(d.row.pane.terminal_id))"
     (contextmenu)="askMenu($event, 'pane', d.row.pane.terminal_id)"
   >
     <span
@@ -129,6 +132,7 @@
               $implicit: line,
               edit: { kind: 'pane', id: d.row.pane.terminal_id },
               label: d.row.name,
+              nav: d.row.pane.terminal_id,
             }"
           />
         </span>
@@ -143,6 +147,7 @@
               severity="secondary"
               size="small"
               class="records-toggle"
+              [attr.tabindex]="d.row.pane.terminal_id === stopSignal() ? 0 : -1"
               [attr.aria-expanded]="rv.open"
               (click)="toggleRecords(d.row.pane.terminal_id, $event)"
             >
@@ -180,6 +185,7 @@
 </ng-template>
 <section
   class="card"
+  role="none"
   [class.member]="data().member"
   [class.dragging]="dragState() === 'source'"
   [class.drop-before]="dragState() === 'before'"
@@ -194,6 +200,7 @@
 >
   <header
     class="head"
+    role="none"
     [attr.draggable]="canDragSpace() ? 'true' : null"
     (dragstart)="spaceDragStart.emit({ event: $event, id: id() })"
     (dragend)="dragEnded.emit()"
@@ -208,6 +215,8 @@
         size="small"
         iconOnly
         class="fold"
+        tabindex="-1"
+        [attr.data-card]="id()"
         [attr.aria-expanded]="!collapsed()"
         [attr.aria-label]="(collapsed() ? 'Expand ' : 'Collapse ') + label()"
         [title]="(collapsed() ? 'Expand ' : 'Collapse ') + label()"
@@ -218,10 +227,14 @@
     }
     <span
       class="title"
-      role="button"
-      tabindex="0"
+      role="treeitem"
+      aria-level="1"
+      aria-selected="false"
+      [attr.data-nav]="id()"
+      [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+      [attr.aria-expanded]="full() ? !collapsed() : null"
       (click)="opened.emit(id())"
-      (keydown.enter)="opened.emit(id())"
+      (keydown.space)="onSpace($event, () => opened.emit(id()))"
     >
       @if (!firstHasDot()) {
         <span class="dot status-{{ data().status }}"></span>
@@ -232,6 +245,7 @@
           $implicit: data().lines[0] ?? [],
           edit: { kind: 'space', id: id() },
           label: label(),
+          nav: id(),
         }"
       />
     </span>
@@ -245,6 +259,7 @@
             severity="secondary"
             size="small"
             class="rebuild"
+            [attr.tabindex]="stopSignal() === id() ? 0 : -1"
             [attr.aria-label]="'Rebuild space ' + label()"
             [title]="'Rebuild the layout: ' + mark.reasons.join('; ')"
             (click)="rebuild($event)"
@@ -280,6 +295,7 @@
         severity="secondary"
         size="small"
         iconOnly
+        [attr.tabindex]="stopSignal() === id() ? 0 : -1"
         [disabled]="closing()"
         [attr.aria-label]="'New terminal in ' + label()"
         [title]="'New terminal in ' + label()"
@@ -305,6 +321,7 @@
         severity="secondary"
         size="small"
         iconOnly
+        [attr.tabindex]="stopSignal() === id() ? 0 : -1"
         [attr.aria-label]="'Configure space ' + label()"
         [title]="'Configure space ' + label()"
         (click)="configureSpace($event)"
@@ -332,6 +349,7 @@
         severity="secondary"
         size="small"
         iconOnly
+        [attr.tabindex]="stopSignal() === id() ? 0 : -1"
         [disabled]="closing()"
         [attr.aria-label]="'Close space ' + label()"
         [title]="'Close space ' + label()"
@@ -358,6 +376,7 @@
         size="small"
         iconOnly
         class="more"
+        [attr.tabindex]="stopSignal() === id() ? 0 : -1"
         aria-haspopup="menu"
         [attr.aria-label]="'More actions for ' + label()"
         [title]="'More actions for ' + label()"
@@ -381,7 +400,7 @@
           />
         </span>
       }
-      <div class="body" role="group" [attr.aria-label]="label() + ' terminals'">
+      <div class="body" role="none">
         @for (child of rows(); track child.key) {
           <ng-container
             [ngTemplateOutlet]="rowTpl"

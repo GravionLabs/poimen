@@ -494,12 +494,20 @@
     </ng-template>
   </hx-tree>
 } @else if (layout() === "cards") {
-  <div class="cards" role="list" aria-label="Spaces">
+  <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the focusable treeitems inside handle the keys -->
+  <div
+    class="cards"
+    role="tree"
+    aria-label="Spaces"
+    (keydown)="onCardKey($event)"
+    (focusin)="onCardFocus($event)"
+  >
     @for (node of nodes(); track node.key) {
       @defer (on immediate) {
         <app-space-card
-          role="listitem"
+          role="none"
           [node]="node"
+          [stop]="cardStop()"
           [openIds]="openIds()"
           [activeId]="activeId()"
           [filtering]="query().trim() !== ''"
