@@ -16,7 +16,9 @@
     "check": "ngc -p tsconfig.app.json --noEmit && tsc -p tsconfig.spec.json --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "ratchets": "node scripts/ratchets/run.mjs",
+    "ratchets:test": "node --test scripts/ratchets/core.test.mjs"
   },
   "dependencies": {
     "@angular/cdk": "^22.2.7",
