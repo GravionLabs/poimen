@@ -5,13 +5,17 @@ import {
   EventEmitter,
   Input,
   Output,
+  DestroyRef,
   computed,
   inject,
   signal,
 } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
+import { silentLabel } from "../core/agent-priority";
 import { Attention, workspaceUnread } from "../core/attention";
+import { PaneActions } from "../core/pane-actions";
+import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SpacesStore } from "../core/spaces-store";
 import { olderHost, olderHostNote, type PaneRow } from "../core/snapshot";
 import { SpaceActions } from "../core/space-actions";
@@ -19,6 +23,7 @@ import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
 import { isGithubUrl } from "../github/pulls";
 import type { SpaceData } from "./sidebar";
+import { SpaceEditFocus } from "./space-edit-focus";
 import type { SidebarMenuAction } from "./sidebar-menu";
 import { RECORDS_SHOWN, paneMarks, recordRows, recordsSummary } from "./spaces";
 
@@ -37,7 +42,7 @@ export interface CardMenuRequest {
  */
 @Component({
   selector: "app-space-card",
-  imports: [HxButton, NgTemplateOutlet],
+  imports: [HxButton, NgTemplateOutlet, SpaceEditFocus],
   templateUrl: "./space-card.html",
   styleUrl: "./space-card.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -81,6 +86,8 @@ export class SpaceCard {
   private readonly attn = inject(Attention);
   private readonly bridge = inject(TauriBridge);
   private readonly spaceActions = inject(SpaceActions);
+  private readonly paneActions = inject(PaneActions);
+  private readonly spaceRebuild = inject(SpaceRebuild);
 
   /** The fold button, the further lines and the body: everything but the header. */
   protected readonly full = computed(() => !this.headerOnlySignal());
@@ -94,10 +101,49 @@ export class SpaceCard {
   );
   protected readonly closing = computed(() => this.spaceActions.closingIds().has(this.id()));
   protected readonly firstHasDot = computed(() => this.data().lines[0]?.[0]?.kind === "dot");
+  private readonly space = computed(() =>
+    this.store.spaces().find((s) => s.workspace.space_id === this.id()),
+  );
   protected readonly unread = computed(() => {
-    const space = this.store.spaces().find((s) => s.workspace.space_id === this.id());
+    const space = this.space();
     return space ? workspaceUnread(space, this.attn.unread()) : 0;
   });
+  /** A pane of the space turned blocked while not viewed: the whole card rings (rule of `Attention`). */
+  protected readonly ringing = computed(() => {
+    const ringing = this.attn.attention();
+    return !!this.space()?.rows.some((r) => ringing.has(r.pane.terminal_id));
+  });
+  protected readonly pinned = computed(
+    () => this.store.pinnedSpaces?.().includes(this.id()) ?? false,
+  );
+
+  /** The clock of the silent marks; ticks once a minute. */
+  private readonly now = signal(Date.now());
+  protected readonly clock = (() => {
+    const timer = setInterval(() => this.now.set(Date.now()), 60_000);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    return timer;
+  })();
+
+  /** The longest silence among the agents of the space, as on the tree row. */
+  protected readonly silent = computed(() => {
+    const since = (this.space()?.rows ?? [])
+      .map((r) => r.pane.agent_silent_since)
+      .filter((t): t is number => t !== undefined);
+    return since.length ? silentLabel(Math.min(...since), this.now()) : undefined;
+  });
+
+  /** The rebuild mark of a space that has no terminals; none for any other. */
+  protected readonly rebuildMark = computed<RebuildMark | undefined>(() => {
+    const mark = this.spaceRebuild.marks().get(this.id());
+    return mark && this.space()?.rows.length === 0 ? mark : undefined;
+  });
+
+  /** What is renamed in place: the space (the header) or a terminal; `null` when none. */
+  protected readonly editing = signal<{ kind: "space" | "pane"; id: string } | null>(null);
+  protected readonly renameError = computed(() =>
+    this.editing()?.kind === "pane" ? this.paneActions.error() : this.spaceActions.renameError(),
+  );
   protected readonly rows = computed(() => this.nodeSignal()!.children ?? []);
 
   /** Terminals whose folded child records the user opened. */
@@ -121,6 +167,51 @@ export class SpaceCard {
 
   protected isUnread(row: PaneRow): boolean {
     return this.attn.unread().has(row.pane.terminal_id);
+  }
+
+  protected silentMark(row: PaneRow): string | undefined {
+    return silentLabel(row.pane.agent_silent_since, this.now());
+  }
+
+  protected rebuild(event: Event): void {
+    event.stopPropagation();
+    void this.spaceRebuild.rebuild(this.id());
+  }
+
+  protected isEditing(edit: { kind: "space" | "pane"; id: string }): boolean {
+    const now = this.editing();
+    return now?.kind === edit.kind && now.id === edit.id;
+  }
+
+  protected startEdit(edit: { kind: "space" | "pane"; id: string }, event: Event): void {
+    event.stopPropagation();
+    if (this.closing()) return;
+    this.spaceActions.clearRenameError();
+    this.editing.set(edit);
+  }
+
+  protected clearError(): void {
+    this.spaceActions.clearRenameError();
+  }
+
+  /** Enter or blur confirms, Escape cancels; a failed rename keeps editing, the old label stays. */
+  protected async finishEdit(
+    edit: { kind: "space" | "pane"; id: string },
+    input: HTMLInputElement,
+    commit: boolean,
+  ): Promise<void> {
+    if (!this.isEditing(edit)) return;
+    if (!commit) {
+      this.editing.set(null);
+      this.spaceActions.clearRenameError();
+      return;
+    }
+    const ok =
+      edit.kind === "space"
+        ? await this.spaceActions.rename(edit.id, input.value)
+        : await this.paneActions.rename(edit.id, input.value);
+    if (ok) this.editing.set(null);
+    else input.focus();
   }
 
   protected glyph(row: PaneRow): string {

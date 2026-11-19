@@ -326,14 +326,18 @@ export class PaneActions {
     const dialog = this._dialog();
     if (dialog?.kind !== "rename") return false;
     this._dialog.set(null);
-    if (this.blocked(dialog.paneId)) return false;
+    return this.rename(dialog.paneId, name, dialog.agent);
+  }
+
+  /** Renames a pane without the dialog (inline rename); an empty name clears it. */
+  async rename(paneId: string, name: string, agent?: boolean): Promise<boolean> {
+    if (this.blocked(paneId)) return false;
+    const pane = this.store.pane(paneId);
+    const isAgent = agent ?? (!!pane && !!agentKind(pane));
     return this.run(() =>
-      dialog.agent
-        ? this.bridge.invoke("agent_rename", { target: dialog.paneId, name: name.trim() || null })
-        : this.bridge.invoke("pane_rename", {
-            terminalId: dialog.paneId,
-            label: name.trim() || null,
-          }),
+      isAgent
+        ? this.bridge.invoke("agent_rename", { target: paneId, name: name.trim() || null })
+        : this.bridge.invoke("pane_rename", { terminalId: paneId, label: name.trim() || null }),
     );
   }
 

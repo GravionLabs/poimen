@@ -5,6 +5,10 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { SpaceNode, Terminal } from "../core/snapshot";
+import { Attention } from "../core/attention";
+import { PaneActions } from "../core/pane-actions";
+import { SpaceActions } from "../core/space-actions";
+import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SpacesStore } from "../core/spaces-store";
 import { DEFAULT_SETTINGS, SettingsStore, type SidebarLayout } from "../core/settings";
 import { UI_STATE_KEY, UI_STORAGE, UiState } from "../core/ui-state";
@@ -41,13 +45,17 @@ async function setup(layout: SidebarLayout, stored?: string) {
   TestBed.resetTestingModule();
   const setSidebarLayout = vi.fn(async (layout: SidebarLayout) => void layout);
   const settings = signal({ ...DEFAULT_SETTINGS, sidebarLayout: layout });
+  const spaces = signal<SpaceNode[]>([one, two]);
+  const marks = signal<ReadonlyMap<string, RebuildMark>>(new Map());
+  const rebuild = vi.fn(async () => undefined);
   const storage = new Map<string, string>(stored ? [[UI_STATE_KEY, stored]] : []);
   TestBed.configureTestingModule({
     providers: [
       {
         provide: SpacesStore,
         useValue: {
-          spaces: signal([one, two]),
+          spaces,
+          pinnedSpaces: signal<string[]>([]),
           snapshot: signal({ spaces: [one.workspace, two.workspace] }),
           agentSections: signal(new Map()),
           agentChangedAt: signal(new Map()),
@@ -55,6 +63,7 @@ async function setup(layout: SidebarLayout, stored?: string) {
           ensureBackend: vi.fn(),
         },
       },
+      { provide: SpaceRebuild, useValue: { marks, rebuild } },
       {
         provide: SettingsStore,
         useValue: { settings, writeError: signal(null), setSidebarLayout },
@@ -102,6 +111,15 @@ async function setup(layout: SidebarLayout, stored?: string) {
     actions,
     configured,
     storage,
+    spaces,
+    marks,
+    rebuild,
+    store: TestBed.inject(SpacesStore) as unknown as {
+      pinnedSpaces: ReturnType<typeof signal<string[]>>;
+    },
+    attention: TestBed.inject(Attention),
+    spaceActions: TestBed.inject(SpaceActions),
+    paneActions: TestBed.inject(PaneActions),
     ui: TestBed.inject(UiState),
     setSidebarLayout,
     cards: () => [...root.querySelectorAll<HTMLElement>("app-space-card")],
@@ -202,5 +220,145 @@ describe("Sidebar in the cards layout (#934)", () => {
     const s = await setup("tree");
     expect(s.cards()).toHaveLength(0);
     expect(s.root.querySelector('[role="tree"]')).not.toBeNull();
+  });
+
+  describe("states (#935)", () => {
+    const statuses = (blocked: string[]) =>
+      new Map(
+        [...one.rows, ...two.rows].map((r) => [
+          r.pane.terminal_id,
+          blocked.includes(r.pane.terminal_id) ? ("blocked" as const) : ("idle" as const),
+        ]),
+      );
+
+    it("rings the whole card of a pane that turned blocked while not viewed, until viewed", async () => {
+      const s = await setup("cards");
+      s.attention.observe(statuses([]), new Set());
+      s.attention.observe(statuses(["w1:p1"]), new Set());
+      await s.settle();
+      const card = (i: number) => s.cards()[i].querySelector<HTMLElement>(".card")!;
+      expect(card(0).classList.contains("attention")).toBe(true);
+      expect(card(1).classList.contains("attention")).toBe(false);
+      s.attention.observe(statuses(["w1:p1"]), new Set(["w1:p1"]));
+      await s.settle();
+      expect(card(0).classList.contains("attention")).toBe(false);
+    });
+
+    it("shows the unread count and the most urgent status in a collapsed header", async () => {
+      const s = await setup("cards");
+      s.spaces.set([
+        {
+          ...one,
+          rows: [
+            { ...one.rows[0], pane: { ...one.rows[0].pane, agent_status: "blocked" } },
+            one.rows[1],
+          ],
+        },
+        two,
+      ]);
+      s.attention.observe(statuses([]), new Set());
+      s.attention.unread.set(new Set(["w1:p2"]));
+      s.cards()[0].querySelector<HTMLButtonElement>(".fold")!.click();
+      await s.settle();
+      const head = s.cards()[0].querySelector<HTMLElement>(".head")!;
+      expect(s.cards()[0].querySelector(".body")).toBeNull();
+      expect(head.querySelector(".badge")?.getAttribute("aria-label")).toBe("1 unread");
+      expect(head.querySelector(".dot")?.classList.contains("status-blocked")).toBe(true);
+    });
+
+    it("shows the silent mark on the terminal row and the header", async () => {
+      const s = await setup("cards");
+      const silentPane = {
+        ...one.rows[0].pane,
+        agent_silent_since: Date.now() - 5 * 60_000 - 30_000,
+      };
+      s.spaces.set([{ ...one, rows: [{ ...one.rows[0], pane: silentPane }, one.rows[1]] }, two]);
+      await s.settle();
+      const card = s.cards()[0];
+      expect(card.querySelector(".head .silent")?.textContent).toBe("silent 5m");
+      expect(card.querySelector(".row .silent")?.textContent).toBe("silent 5m");
+      expect(s.cards()[1].querySelector(".silent")).toBeNull();
+    });
+
+    it("shows the pin mark in the header of a pinned space only", async () => {
+      const s = await setup("cards");
+      s.store.pinnedSpaces.set(["w2"]);
+      await s.settle();
+      expect(s.cards()[0].querySelector(".head .pin-mark")).toBeNull();
+      expect(s.cards()[1].querySelector(".head .pin-mark")?.getAttribute("aria-label")).toBe(
+        "Pinned",
+      );
+    });
+
+    it("shows the rebuild marks and Closing… in the header of an empty space", async () => {
+      const s = await setup("cards");
+      s.spaces.set([{ ...one, rows: [] }, two]);
+      const head = () => s.cards()[0].querySelector<HTMLElement>(".head")!;
+      const mark = async (m: RebuildMark) => {
+        s.marks.set(new Map([["w1", m]]));
+        await s.settle();
+        return head().textContent;
+      };
+      expect(await mark({ kind: "busy" })).toContain("Rebuilding…");
+      expect(await mark({ kind: "missing", reason: "gone" })).toContain("Directory gone");
+      expect(await mark({ kind: "failed", reason: "no" })).toContain("Not rebuilt");
+      expect(await mark({ kind: "consent", reasons: ["agents start"] })).toContain("Rebuild");
+      head().querySelector<HTMLButtonElement>(".rebuild")!.click();
+      expect(s.rebuild).toHaveBeenCalledWith("w1");
+      // A space with terminals shows no rebuild mark, whatever the mark says.
+      s.marks.set(new Map([["w2", { kind: "busy" }]]));
+      await s.settle();
+      expect(s.cards()[1].querySelector(".head")?.textContent).not.toContain("Rebuilding");
+    });
+
+    it("renames a space inline: Enter saves, Escape cancels", async () => {
+      const s = await setup("cards");
+      const rename = vi.spyOn(s.spaceActions, "rename").mockResolvedValue(true);
+      const edit = async () => {
+        s.cards()[0]
+          .querySelector<HTMLElement>(".head .name")!
+          .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        await s.settle();
+        return s.cards()[0].querySelector<HTMLInputElement>(".head input.edit")!;
+      };
+      let input = await edit();
+      expect(input.value).toBe("One");
+      input.value = "Uno";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await s.settle();
+      expect(rename).toHaveBeenCalledWith("w1", "Uno");
+      expect(s.cards()[0].querySelector("input.edit")).toBeNull();
+
+      input = await edit();
+      input.value = "Zwei";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await s.settle();
+      expect(rename).toHaveBeenCalledTimes(1);
+      expect(s.cards()[0].querySelector("input.edit")).toBeNull();
+      expect(s.cards()[0].querySelector(".head .name")?.textContent).toBe("One");
+    });
+
+    it("renames a terminal inline and keeps editing when the rename fails", async () => {
+      const s = await setup("cards");
+      const rename = vi
+        .spyOn(s.paneActions, "rename")
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(true);
+      s.cards()[0]
+        .querySelector<HTMLElement>(".row .name")!
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await s.settle();
+      const input = s.cards()[0].querySelector<HTMLInputElement>(".row input.edit")!;
+      expect(input.value).toBe("agent-a");
+      input.value = "builder";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await s.settle();
+      expect(s.cards()[0].querySelector(".row input.edit")).not.toBeNull();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await s.settle();
+      expect(rename).toHaveBeenNthCalledWith(1, "w1:p1", "builder");
+      expect(s.cards()[0].querySelector(".row input.edit")).toBeNull();
+      expect(s.selected).toEqual([]);
+    });
   });
 });

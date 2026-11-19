@@ -3,7 +3,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
-  Directive,
   ElementRef,
   Injector,
   afterNextRender,
@@ -68,6 +67,7 @@ import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { Machines } from "../core/machines";
 import { sidebarMenuItems, type SidebarMenuAction } from "./sidebar-menu";
 import { SpaceCard } from "./space-card";
+import { SpaceEditFocus } from "./space-edit-focus";
 import { MachinesSection } from "./machines-section/machines-section";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 
@@ -379,18 +379,6 @@ export function isDoubleClick(
 }
 
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
-/** Focuses and selects the inline rename input once it is in the DOM. */
-@Directive({ selector: "input[appSpaceEditFocus]" })
-export class SpaceEditFocus {
-  constructor() {
-    const el = inject<ElementRef<HTMLInputElement>>(ElementRef).nativeElement;
-    afterNextRender(() => {
-      el.focus();
-      el.select();
-    });
-  }
-}
-
 @Component({
   selector: "app-sidebar",
   imports: [

@@ -1,11 +1,55 @@
-<ng-template #segs let-line let-row="row">
+<ng-template #segs let-line let-edit="edit" let-label="label">
   @for (seg of line; track $index) {
     @switch (seg.kind) {
       @case ("dot") {
         <span class="dot status-{{ seg.status }}"></span>
       }
       @case ("name") {
-        <span class="name" [class.bold]="seg.bold" [class.dim]="seg.dim">{{ seg.text }}</span>
+        @if (edit && isEditing(edit)) {
+          <input
+            #input
+            appSpaceEditFocus
+            class="edit"
+            type="text"
+            [attr.aria-label]="edit.kind === 'space' ? 'Space name' : 'Terminal name'"
+            autocomplete="off"
+            [value]="label"
+            (click)="$event.stopPropagation()"
+            (dblclick)="$event.stopPropagation()"
+            (keydown)="$event.stopPropagation()"
+            (keydown.enter)="finishEdit(edit, input, true)"
+            (keydown.escape)="finishEdit(edit, input, false)"
+            (input)="clearError()"
+            (blur)="finishEdit(edit, input, input.value !== label)"
+          />
+          @if (renameError(); as message) {
+            <span class="edit-error" role="alert">{{ message }}</span>
+          }
+        } @else {
+          <span
+            class="name"
+            [class.bold]="seg.bold"
+            [class.dim]="seg.dim"
+            (dblclick)="edit && startEdit(edit, $event)"
+            >{{ seg.text }}</span
+          >
+          @if (edit?.kind === "space" && pinned()) {
+            <svg
+              class="pin-mark"
+              viewBox="0 0 16 16"
+              width="11"
+              height="11"
+              fill="currentColor"
+              role="img"
+              aria-label="Pinned"
+            >
+              <title>Pinned</title>
+              <path
+                d="M9.5 1.5l5 5-1.4 1.4-.9-.4-2.3 2.3.3 3-1.1 1.1-3-3-4.2 4.2-1-1 4.2-4.2-3-3 1.1-1.1 3 .3 2.3-2.3-.4-.9z"
+              />
+            </svg>
+          }
+        }
       }
       @case ("state") {
         <span class="state state-{{ seg.status }}" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
@@ -71,7 +115,14 @@
     <span class="main">
       @for (line of d.lines; track $index) {
         <span class="line">
-          <ng-container [ngTemplateOutlet]="segs" [ngTemplateOutletContext]="{ $implicit: line }" />
+          <ng-container
+            [ngTemplateOutlet]="segs"
+            [ngTemplateOutletContext]="{
+              $implicit: line,
+              edit: { kind: 'pane', id: d.row.pane.terminal_id },
+              label: d.row.name,
+            }"
+          />
         </span>
       }
       @if (records(d.row); as rv) {
@@ -105,6 +156,9 @@
         </span>
       }
     </span>
+    @if (silentMark(d.row); as silent) {
+      <span class="silent" title="The agent reported nothing for a while">{{ silent }}</span>
+    }
     @if (isUnread(d.row)) {
       <span class="badge dot-badge" role="img" aria-label="Unread"></span>
     }
@@ -120,6 +174,7 @@
   class="card"
   [class.collapsed]="collapsed()"
   [class.closing]="closing()"
+  [class.attention]="ringing()"
   [attr.aria-busy]="closing() || null"
   [attr.aria-label]="label()"
 >
@@ -153,9 +208,47 @@
       }
       <ng-container
         [ngTemplateOutlet]="segs"
-        [ngTemplateOutletContext]="{ $implicit: data().lines[0] ?? [] }"
+        [ngTemplateOutletContext]="{
+          $implicit: data().lines[0] ?? [],
+          edit: { kind: 'space', id: id() },
+          label: label(),
+        }"
       />
     </span>
+    @if (rebuildMark(); as mark) {
+      @switch (mark.kind) {
+        @case ("consent") {
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
+            class="rebuild"
+            [attr.aria-label]="'Rebuild space ' + label()"
+            [title]="'Rebuild the layout: ' + mark.reasons.join('; ')"
+            (click)="rebuild($event)"
+          >
+            Rebuild
+          </button>
+        }
+        @case ("busy") {
+          <span class="rebuild-label" role="status">Rebuilding…</span>
+        }
+        @case ("missing") {
+          <span class="rebuild-hint" [title]="mark.reason">Directory gone</span>
+        }
+        @case ("failed") {
+          <span class="rebuild-hint" [title]="mark.reason">Not rebuilt</span>
+        }
+      }
+    }
+    @if (closing()) {
+      <span class="closing-label" role="status">Closing…</span>
+    }
+    @if (silent(); as silent) {
+      <span class="silent" title="The agent reported nothing for a while">{{ silent }}</span>
+    }
     @if (unread(); as n) {
       <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
     }
@@ -259,13 +352,13 @@
     </span>
   </header>
   @if (full()) {
-    @if (closing()) {
-      <span class="closing-label" role="status">Closing…</span>
-    }
     @if (!collapsed()) {
       @for (line of data().lines.slice(1); track $index) {
         <span class="line further">
-          <ng-container [ngTemplateOutlet]="segs" [ngTemplateOutletContext]="{ $implicit: line }" />
+          <ng-container
+            [ngTemplateOutlet]="segs"
+            [ngTemplateOutletContext]="{ $implicit: line, label: label() }"
+          />
         </span>
       }
       <div class="body" role="group" [attr.aria-label]="label() + ' terminals'">
