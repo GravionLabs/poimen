@@ -377,3 +377,26 @@ fn a_resume_without_a_report_ends_the_hibernation_and_names_the_failure() {
         poimen_client::protocol::TerminalStatus::Running
     );
 }
+
+#[test]
+fn a_second_hibernation_is_resumed_again() {
+    let env = Env::new("twice", Some(RESUMING));
+    let id = hibernated(&env);
+    let first = env.client.attach(&id, AttachMode::Control, false).unwrap();
+    wait_until("resumed", || env.terminal(&id).hibernated.is_none());
+    drop(first);
+    env.client.prompt_agent(&id, "more", LONG).unwrap();
+    wait_until("done again", || {
+        env.terminal(&id)
+            .agent
+            .is_some_and(|a| a.status == AgentStatus::Done)
+    });
+    (env.sweep)(now_ms() + 100 * MINUTE_MS);
+    wait_until("hibernated again", || {
+        env.terminal(&id).hibernated.is_some()
+    });
+    wait_until("gone", || env.terminal(&id).agent.is_none());
+    let _second = env.client.attach(&id, AttachMode::Control, false).unwrap();
+    wait_until("resumed again", || env.terminal(&id).hibernated.is_none());
+    assert_eq!(env.starts(), 3);
+}

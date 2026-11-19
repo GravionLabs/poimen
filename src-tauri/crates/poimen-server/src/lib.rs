@@ -2265,6 +2265,8 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
     // Any report but `gone` means the agent runs again (the user came back): no longer hibernated.
     let came_back = p.status != AgentStatus::Gone && entry.info.hibernated.take().is_some();
     if came_back {
+        // The resume (#904) worked or the user came back: the next hibernation may resume again.
+        entry.resuming = false;
         shared.publish(Event::TerminalHibernatedChanged {
             terminal_id: p.terminal_id.clone(),
             hibernated: None,
