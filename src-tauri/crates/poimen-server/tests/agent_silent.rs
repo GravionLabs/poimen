@@ -193,7 +193,12 @@ fn the_mark_is_in_the_server_file_and_survives_a_restart() {
     env.client.shutdown_keeping_terminals().unwrap();
     // Wait until the first server let go of the socket and the lock.
     env.down.recv_timeout(Duration::from_secs(10)).unwrap();
-    let (client, sweep, second) = serve(&env.config);
+    // (another socket, same state file: Windows keeps the first pipe a while)
+    let config2 = Config {
+        socket: env.dir.join("run2").join("server.sock"),
+        ..env.config.clone()
+    };
+    let (client, sweep, second) = serve(&config2);
     assert_eq!(agent_of(&client).silent_since, None);
     sweep(reported + 10 * MIN, 10);
     let marked = agent_of(&client);
@@ -206,6 +211,10 @@ fn the_mark_is_in_the_server_file_and_survives_a_restart() {
     // And after another restart the mark is still there.
     client.shutdown_keeping_terminals().unwrap();
     second.recv_timeout(Duration::from_secs(10)).unwrap();
-    let (client, _, _) = serve(&env.config);
+    let config3 = Config {
+        socket: env.dir.join("run3").join("server.sock"),
+        ..env.config.clone()
+    };
+    let (client, _, _) = serve(&config3);
     assert_eq!(agent_of(&client).silent_since, marked.silent_since);
 }
