@@ -14,7 +14,7 @@ import {
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { applyUiFont } from "./core/ui-font";
-import { HxActivityBar } from "@gravionlabs/helix-desktop";
+import { HxActivityBar, HxAppShell, type HxSidebarState } from "@gravionlabs/helix-desktop";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import {
   flowSession,
@@ -129,6 +129,7 @@ const ZOOM_STEP = 1;
   selector: "app-root",
   imports: [
     HxActivityBar,
+    HxAppShell,
     Icon,
     Sidebar,
     Explorer,
@@ -237,7 +238,6 @@ export class App {
   }
   protected readonly minWidth = SIDEBAR_MIN_WIDTH;
   protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
-  private drag: { startX: number; startWidth: number } | null = null;
 
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
@@ -980,29 +980,10 @@ export class App {
     this.sizes.update((m) => new Map(m).set(paneId, size));
   }
 
-  protected dragStart(event: PointerEvent): void {
-    const handle = event.target as HTMLElement;
-    handle.setPointerCapture(event.pointerId);
-    handle.classList.add("dragging");
-    this.drag = { startX: event.clientX, startWidth: this.ui.sidebarWidth() };
-  }
-
-  protected dragMove(event: PointerEvent): void {
-    if (!this.drag) return;
-    this.ui.setSidebarWidth(this.drag.startWidth + event.clientX - this.drag.startX);
-  }
-
-  protected dragEnd(event: PointerEvent): void {
-    this.drag = null;
-    (event.target as HTMLElement).classList.remove("dragging");
-  }
-
-  protected resizeKey(event: KeyboardEvent): void {
-    const step = event.shiftKey ? 40 : 10;
-    if (event.key === "ArrowLeft") this.ui.setSidebarWidth(this.ui.sidebarWidth() - step);
-    else if (event.key === "ArrowRight") this.ui.setSidebarWidth(this.ui.sidebarWidth() + step);
-    else return;
-    event.preventDefault();
+  /** The shell resized or collapsed the sidebar: persist it through `UiState`. */
+  protected onSidebarChange(state: HxSidebarState): void {
+    if (state.width !== this.ui.sidebarWidth()) this.ui.setSidebarWidth(state.width);
+    if (state.collapsed !== this.ui.sidebarCollapsed()) this.ui.toggleSidebar();
   }
 
   /** Single click previews, a double click pins; an open pane is only activated. */

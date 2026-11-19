@@ -1,21 +1,29 @@
-<app-toolbar
-  [outputOpen]="ui.panelOpen()"
-  (outputToggle)="ui.togglePanel()"
-  [theme]="theme$()"
-  [fixedBy]="fixedBy()"
-  (themeChange)="setTheme($event)"
-/>
-<div class="work">
+<hx-app-shell
+  [sidebarWidth]="ui.sidebarWidth()"
+  [collapsed]="ui.sidebarCollapsed()"
+  [minWidth]="minWidth"
+  [maxWidth]="maxWidth"
+  [step]="10"
+  (sidebarChange)="onSidebarChange($event)"
+>
+  <app-toolbar
+    slot="toolbar"
+    [outputOpen]="ui.panelOpen()"
+    (outputToggle)="ui.togglePanel()"
+    [theme]="theme$()"
+    [fixedBy]="fixedBy()"
+    (themeChange)="setTheme($event)"
+  />
   <hx-activity-bar
-    class="rail"
+    slot="activity"
     label="Views"
     [items]="activityItems()"
     [activeId]="ui.activeView()"
     [expanded]="!ui.sidebarCollapsed()"
     (selected)="selectView($event)"
   />
-  @if (!ui.sidebarCollapsed()) {
-    <div class="side" [style.width.px]="ui.sidebarWidth()">
+  <div slot="sidebar" class="side">
+    @if (!ui.sidebarCollapsed()) {
       @if (ui.activeView() === "explorer") {
         <app-explorer />
       } @else if (ui.activeView() === "notifications") {
@@ -34,24 +42,9 @@
           (configOpened)="openSpaceConfig($event)"
         />
       }
-    </div>
-    <div
-      class="resizer"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize sidebar"
-      tabindex="0"
-      [attr.aria-valuenow]="ui.sidebarWidth()"
-      [attr.aria-valuemin]="minWidth"
-      [attr.aria-valuemax]="maxWidth"
-      (pointerdown)="dragStart($event)"
-      (pointermove)="dragMove($event)"
-      (pointerup)="dragEnd($event)"
-      (pointercancel)="dragEnd($event)"
-      (keydown)="resizeKey($event)"
-    ></div>
-  }
-  <main class="views" [class.flush]="ui.sidebarCollapsed()">
+    }
+  </div>
+  <div class="views">
     <div class="editor-area">
       @if (notice(); as text) {
         <div class="notice" role="status">
@@ -80,36 +73,37 @@
     @if (ui.panelOpen()) {
       <app-bottom-panel [style.height.px]="ui.panelHeight()" />
     }
-  </main>
-</div>
-<app-status-bar
-  [connection]="store.connection()"
-  [waiting]="store.waiting()"
-  [paneId]="activePaneId()"
-  [mode]="activePaneId() ? editor.mode(activePaneId()!) : null"
-  [blocked]="activePaneId() ? editor.blocked(activePaneId()!) : null"
-  (control)="setControl($event)"
-  [size]="termSize()"
-  [appVersion]="store.appVersion()"
-  [channel]="store.appChannel()"
-  [deliver]="deliver.summary()"
-  [limits]="claudeLimits.item()"
-  (showDeliver)="editor.openDeliver()"
-  [update]="updater.state()"
-  (checkUpdate)="updater.check()"
-  (installUpdate)="updater.install()"
-  [info]="store.info()"
-  [notice]="spaceActions.warning()"
-  [serverNotice]="serverRestart.notice()"
-  (restartServer)="serverRestart.askRestart()"
-  (laterServer)="serverRestart.later()"
-  (jump)="jumpToWaiting()"
-  [panelOpen]="ui.panelOpen()"
-  [panelShortcut]="panelShortcut()"
-  (showPanel)="ui.togglePanel()"
-  [shortcutsShortcut]="shortcutsShortcut()"
-  (showShortcuts)="shortcutsOverview.open()"
-/>
+  </div>
+  <app-status-bar
+    slot="status"
+    [connection]="store.connection()"
+    [waiting]="store.waiting()"
+    [paneId]="activePaneId()"
+    [mode]="activePaneId() ? editor.mode(activePaneId()!) : null"
+    [blocked]="activePaneId() ? editor.blocked(activePaneId()!) : null"
+    (control)="setControl($event)"
+    [size]="termSize()"
+    [appVersion]="store.appVersion()"
+    [channel]="store.appChannel()"
+    [deliver]="deliver.summary()"
+    [limits]="claudeLimits.item()"
+    (showDeliver)="editor.openDeliver()"
+    [update]="updater.state()"
+    (checkUpdate)="updater.check()"
+    (installUpdate)="updater.install()"
+    [info]="store.info()"
+    [notice]="spaceActions.warning()"
+    [serverNotice]="serverRestart.notice()"
+    (restartServer)="serverRestart.askRestart()"
+    (laterServer)="serverRestart.later()"
+    (jump)="jumpToWaiting()"
+    [panelOpen]="ui.panelOpen()"
+    [panelShortcut]="panelShortcut()"
+    (showPanel)="ui.togglePanel()"
+    [shortcutsShortcut]="shortcutsShortcut()"
+    (showShortcuts)="shortcutsOverview.open()"
+  />
+</hx-app-shell>
 
 <app-pane-dialog (created)="open($event, true)" (closed)="onPaneClosed($event)" />
 <app-space-dialog (closed)="onSpaceClosed($event)" />

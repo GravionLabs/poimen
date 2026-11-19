@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { Component } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
+import { HxAppToolbar } from "@gravionlabs/helix-desktop";
 import { beforeAll, describe, expect, it } from "vitest";
 import { nextTheme, type ThemeSetting } from "../core/settings";
 import { fixedLabel, themeLabel } from "./toolbar";
@@ -28,6 +29,7 @@ describe("theme button", () => {
     const emitted: ThemeSetting[] = [];
     @Component({
       selector: "app-host",
+      imports: [HxAppToolbar],
       template: readFileSync("src/app/toolbar/toolbar.html", "utf8"),
     })
     class Host {
@@ -80,6 +82,7 @@ describe("output button", () => {
     let toggled = 0;
     @Component({
       selector: "app-host",
+      imports: [HxAppToolbar],
       template: readFileSync("src/app/toolbar/toolbar.html", "utf8"),
     })
     class Host {
