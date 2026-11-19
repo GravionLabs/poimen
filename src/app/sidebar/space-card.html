@@ -96,6 +96,14 @@
     [class.open]="m.open"
     [class.active]="m.active"
     [class.attention]="rings(d.row)"
+    [class.dragging]="tabDragState(d.row) === 'source'"
+    [class.drop-before]="tabDragState(d.row) === 'before'"
+    [class.drop-after]="tabDragState(d.row) === 'after'"
+    [attr.draggable]="canDragTabs() ? 'true' : null"
+    (dragstart)="tabDragStart.emit({ event: $event, row: d.row })"
+    (dragover)="tabDragOver.emit({ event: $event, row: d.row })"
+    (drop)="tabDrop.emit({ event: $event, row: d.row })"
+    (dragend)="dragEnded.emit()"
     [style.padding-left.px]="6 + depth * 12"
     [title]="title(d.row)"
     (click)="picked.emit(d.row.pane.terminal_id)"
@@ -172,13 +180,25 @@
 </ng-template>
 <section
   class="card"
+  [class.member]="data().member"
+  [class.dragging]="dragState() === 'source'"
+  [class.drop-before]="dragState() === 'before'"
+  [class.drop-after]="dragState() === 'after'"
   [class.collapsed]="collapsed()"
   [class.closing]="closing()"
   [class.attention]="ringing()"
   [attr.aria-busy]="closing() || null"
   [attr.aria-label]="label()"
+  (dragover)="spaceDragOver.emit({ event: $event, id: id() })"
+  (drop)="spaceDrop.emit({ event: $event, id: id() })"
 >
-  <header class="head" (contextmenu)="askMenu($event, 'workspace', id())">
+  <header
+    class="head"
+    [attr.draggable]="canDragSpace() ? 'true' : null"
+    (dragstart)="spaceDragStart.emit({ event: $event, id: id() })"
+    (dragend)="dragEnded.emit()"
+    (contextmenu)="askMenu($event, 'workspace', id())"
+  >
     @if (full()) {
       <button
         type="button"

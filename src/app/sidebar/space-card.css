@@ -348,3 +348,31 @@
   font-size: 11px;
   text-transform: none;
 }
+
+/* A linked worktree follows its main checkout, indented under it. */
+.card.member {
+  margin-left: 0.75rem;
+  border-left: 3px solid var(--h-primary-color, var(--h-text-muted-color));
+}
+
+.card.dragging,
+.row.dragging {
+  opacity: 0.5;
+}
+
+/* Drop marker: a line inside the edge of the target (the card clips its own overflow). */
+.card.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--h-primary-color, currentColor);
+}
+
+.card.drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--h-primary-color, currentColor);
+}
+
+.row.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--h-primary-color, currentColor);
+}
+
+.row.drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--h-primary-color, currentColor);
+}
