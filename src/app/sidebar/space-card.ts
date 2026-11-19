@@ -220,6 +220,13 @@ export class SpaceCard {
   /** Terminals whose folded child records the user opened. */
   private readonly openRecords = signal<ReadonlySet<string>>(new Set());
 
+  /** Space acts on the treeitem itself; on a button inside it the button's own click wins. */
+  protected onSpace(event: Event, act: () => void): void {
+    if (event.target !== event.currentTarget) return;
+    event.preventDefault();
+    act();
+  }
+
   protected toggle(): void {
     this.ui.setCardCollapsed(this.id(), !this.collapsed());
   }

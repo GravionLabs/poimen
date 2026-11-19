@@ -50,7 +50,9 @@ export function cardKeyboard(deps: CardKeyboardDeps) {
     },
     /** The focus moved to a header or row (Tab, a click or a key): it is the cursor. */
     onFocus: (event: FocusEvent): void => {
-      const key = (event.target as HTMLElement | null)?.dataset?.["nav"];
+      const data = (event.target as HTMLElement | null)?.dataset;
+      // The fold button (a mouse click) puts the cursor on its header.
+      const key = data?.["nav"] ?? data?.["card"];
       if (key !== undefined) cursor.set(key);
     },
   };

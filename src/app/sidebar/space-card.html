@@ -111,7 +111,7 @@
     [style.padding-left.px]="6 + depth * 12"
     [title]="title(d.row)"
     (click)="picked.emit(d.row.pane.terminal_id)"
-    (keydown.space)="$event.preventDefault(); picked.emit(d.row.pane.terminal_id)"
+    (keydown.space)="onSpace($event, () => picked.emit(d.row.pane.terminal_id))"
     (contextmenu)="askMenu($event, 'pane', d.row.pane.terminal_id)"
   >
     <span
@@ -216,6 +216,7 @@
         iconOnly
         class="fold"
         tabindex="-1"
+        [attr.data-card]="id()"
         [attr.aria-expanded]="!collapsed()"
         [attr.aria-label]="(collapsed() ? 'Expand ' : 'Collapse ') + label()"
         [title]="(collapsed() ? 'Expand ' : 'Collapse ') + label()"
@@ -228,12 +229,12 @@
       class="title"
       role="treeitem"
       aria-level="1"
+      aria-selected="false"
       [attr.data-nav]="id()"
       [attr.tabindex]="stopSignal() === id() ? 0 : -1"
       [attr.aria-expanded]="full() ? !collapsed() : null"
-      [attr.aria-selected]="stopSignal() === id()"
       (click)="opened.emit(id())"
-      (keydown.space)="$event.preventDefault(); opened.emit(id())"
+      (keydown.space)="onSpace($event, () => opened.emit(id()))"
     >
       @if (!firstHasDot()) {
         <span class="dot status-{{ data().status }}"></span>

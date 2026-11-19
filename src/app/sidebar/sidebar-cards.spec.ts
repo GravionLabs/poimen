@@ -443,6 +443,19 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
     expect(s.selected).toEqual(["w1:p1"]);
   });
 
+  it("keeps Space on a button inside a treeitem, and the stop on a card whose fold was clicked", async () => {
+    const s = await setup("cards");
+    const space = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    s.root.querySelector('[aria-label="Close space One"]')!.dispatchEvent(space);
+    expect(space.defaultPrevented).toBe(false);
+    nav(s, "w2:p1").dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    s.root
+      .querySelectorAll<HTMLElement>(".fold")[1]
+      .dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await s.settle();
+    expect(nav(s, "w2").getAttribute("tabindex")).toBe("0");
+  });
+
   it("leaves keys with a modifier, buttons and fields to the app shortcuts", async () => {
     const s = await setup("cards");
     const head = nav(s, "w1");
