@@ -17,7 +17,7 @@ import { Attention, workspaceUnread } from "../core/attention";
 import { PaneActions } from "../core/pane-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SpacesStore } from "../core/spaces-store";
-import { olderHost, olderHostNote, type PaneRow } from "../core/snapshot";
+import { olderHost, olderHostNote, splitId, type PaneRow } from "../core/snapshot";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { UiState } from "../core/ui-state";
@@ -64,6 +64,7 @@ export class SpaceCard {
   private readonly tabDragSignal = signal<{ pane: string } | null>(null);
   protected readonly stopSignal = signal<string | null>(null);
   private readonly tabMarkSignal = signal<{ pane: string; after: boolean } | null>(null);
+  private readonly blockedSignal = signal<string | null>(null);
 
   /** The workspace node of `spaceNodes`; its children are the rows of the body. */
   @Input({ required: true }) set node(value: HxTreeNode<SpaceData>) {
@@ -80,6 +81,13 @@ export class SpaceCard {
   /** The key of the one tab stop of the list (roving tabindex, #937). */
   @Input() set stop(value: string | null) {
     this.stopSignal.set(value);
+  }
+  /**
+   * Why the actions of the card cannot run (its machine is not connected, `Machines.blockedReason`,
+   * #938): the card is greyed, its actions are disabled with this reason as the tooltip.
+   */
+  @Input() set blocked(value: string | null) {
+    this.blockedSignal.set(value);
   }
   /** Only the header: no further lines and no body, so another layout can reuse the card. */
   @Input() set headerOnly(value: boolean) {
@@ -152,6 +160,9 @@ export class SpaceCard {
       !this.filteringSignal() &&
       this.ui.collapsedCards().includes(this.id()),
   );
+  protected readonly reason = this.blockedSignal.asReadonly();
+  /** A space of a machine: its id is qualified (`<machine>::<id>`). */
+  protected readonly remote = computed(() => splitId(this.id()).machine !== undefined);
   protected readonly canDragSpace = computed(
     () => this.spaceDraggableSignal() && this.editing()?.kind !== "space",
   );
@@ -172,9 +183,12 @@ export class SpaceCard {
   }
   protected readonly closing = computed(() => this.spaceActions.closingIds().has(this.id()));
   protected readonly firstHasDot = computed(() => this.data().lines[0]?.[0]?.kind === "dot");
-  private readonly space = computed(() =>
-    this.store.spaces().find((s) => s.workspace.space_id === this.id()),
-  );
+  private readonly space = computed(() => {
+    const id = this.id();
+    const machine = splitId(id).machine;
+    const spaces = machine === undefined ? this.store.spaces() : this.store.remoteSpaces(machine);
+    return spaces.find((s) => s.workspace.space_id === id);
+  });
   protected readonly unread = computed(() => {
     const space = this.space();
     return space ? workspaceUnread(space, this.attn.unread()) : 0;
@@ -227,6 +241,11 @@ export class SpaceCard {
     act();
   }
 
+  /** The header was clicked: a space of a machine has no overview, so nothing opens for it. */
+  protected open(): void {
+    if (!this.remote()) this.opened.emit(this.id());
+  }
+
   protected toggle(): void {
     this.ui.setCardCollapsed(this.id(), !this.collapsed());
   }
@@ -263,7 +282,7 @@ export class SpaceCard {
 
   protected startEdit(edit: { kind: "space" | "pane"; id: string }, event: Event): void {
     event.stopPropagation();
-    if (this.closing()) return;
+    if (this.closing() || this.blockedSignal()) return;
     this.spaceActions.clearRenameError();
     this.editing.set(edit);
   }
@@ -336,13 +355,14 @@ export class SpaceCard {
     event.preventDefault();
     event.stopPropagation();
     if (kind === "workspace" && this.closing()) return;
+    if (this.blockedSignal()) return;
     this.menu.emit({ kind, id, x: event.clientX, y: event.clientY });
   }
 
   /** The `⋯` button: the menu opens below the button, also for a keyboard click. */
   protected askMore(event: MouseEvent): void {
     event.stopPropagation();
-    if (this.closing()) return;
+    if (this.closing() || this.blockedSignal()) return;
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
     this.menu.emit({ kind: "workspace", id: this.id(), x: box.left, y: box.bottom + 2 });
   }

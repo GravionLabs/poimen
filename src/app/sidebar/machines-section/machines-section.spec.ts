@@ -7,6 +7,7 @@ import { buildTree, qualifySnapshot, type Snapshot } from "../../core/snapshot";
 import { EditorTabs } from "../../core/editor-tabs";
 import { SpacesStore } from "../../core/spaces-store";
 import { Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
+import { inlineSpaceCard } from "../space-card.mock";
 import { MachinesSection, checkNote, machineNote } from "./machines-section";
 
 const box = { name: "box", ssh: "box", reposDir: "~/Source/{owner}/{repo}" };
@@ -36,7 +37,13 @@ function setup(
     providers: [
       {
         provide: Machines,
-        useValue: { machines: signal([status]), checks: signal(checks), reconnect, check },
+        useValue: {
+          machines: signal([status]),
+          checks: signal(checks),
+          reconnect,
+          check,
+          blockedReason: () => null,
+        },
       },
       {
         provide: SpacesStore,
@@ -46,6 +53,7 @@ function setup(
       },
     ],
   });
+  inlineSpaceCard();
   const fixture = TestBed.createComponent(MachinesSection);
   const picked: unknown[] = [];
   fixture.componentInstance.selected.subscribe((t) => picked.push(t));
@@ -157,6 +165,7 @@ describe("MachinesSection without a machine", () => {
         { provide: EditorTabs, useValue: { openSettings: vi.fn() } },
       ],
     });
+    inlineSpaceCard();
     const fixture = TestBed.createComponent(MachinesSection);
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;

@@ -16,6 +16,16 @@
   opacity: 0.6;
 }
 
+/* A space of a machine that is not connected: shown, not usable (#938). */
+.card.offline {
+  opacity: 0.55;
+}
+
+.card.offline .row,
+.card.offline .title {
+  cursor: default;
+}
+
 .head {
   display: flex;
   flex-wrap: wrap;

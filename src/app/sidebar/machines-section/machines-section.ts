@@ -1,18 +1,24 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  EventEmitter,
+  Input,
+  Output,
   computed,
   inject,
   output,
   signal,
 } from "@angular/core";
-import { HxButton } from "@gravionlabs/helix-ui";
-import { rowName, type Terminal, type WorkspaceNode } from "../../core/snapshot";
+import { HxButton, type HxTreeNode } from "@gravionlabs/helix-ui";
+import { qualifyId, rowName, type Terminal, type WorkspaceNode } from "../../core/snapshot";
 import { ContextMenu } from "../../ui/context-menu/context-menu";
 import { plainGroups, type MenuGroup } from "../../ui/context-menu/menu-model";
 import { SpacesStore } from "../../core/spaces-store";
 import { UiState } from "../../core/ui-state";
 import { EditorTabs } from "../../core/editor-tabs";
+import { SpaceCard, type CardMenuRequest } from "../space-card";
+import type { SpaceData } from "../sidebar";
+import type { SidebarMenuAction } from "../sidebar-menu";
 import { checkPassed, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
 
 /** One line for the last check of a machine: its result, the error, or what is missing. */
@@ -61,7 +67,7 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
 /** The machines of the settings below the spaces of this Mac: state, spaces, terminals (#280). */
 @Component({
   selector: "app-machines-section",
-  imports: [ContextMenu, HxButton],
+  imports: [ContextMenu, HxButton, SpaceCard],
   template: `
     @if (machines.machines().length === 0 && !ui.machinesHidden()) {
       <section class="machine empty" aria-label="Machines">
@@ -118,21 +124,37 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
         @if (g.check) {
           <p class="note check" role="status">{{ g.check }}</p>
         }
-        @for (s of g.spaces; track s.node.workspace.space_id) {
-          <div class="space" [attr.aria-disabled]="!g.usable || null">
-            <span class="space-name">{{ s.node.workspace.label }}</span>
-            @for (r of s.rows; track r.terminal.terminal_id) {
-              <button
-                type="button"
-                class="row"
-                [disabled]="!g.usable"
-                (click)="pick(r.terminal, g.usable)"
-              >
-                <span class="dot status-{{ r.terminal.agent_status }}" aria-hidden="true"></span>
-                {{ r.name }}
-              </button>
+        @if (cards()) {
+          @for (node of cardNodes(g.machine.name); track node.key) {
+            @defer (on immediate) {
+              <app-space-card
+                [node]="node"
+                [blocked]="g.blocked"
+                [openIds]="openIds"
+                [activeId]="activeId"
+                (act)="cardAct.emit($event)"
+                (menu)="cardMenu.emit($event)"
+                (picked)="pickId($event)"
+              />
             }
-          </div>
+          }
+        } @else {
+          @for (s of g.spaces; track s.node.workspace.space_id) {
+            <div class="space" [attr.aria-disabled]="!g.usable || null">
+              <span class="space-name">{{ s.node.workspace.label }}</span>
+              @for (r of s.rows; track r.terminal.terminal_id) {
+                <button
+                  type="button"
+                  class="row"
+                  [disabled]="!g.usable"
+                  (click)="pick(r.terminal, g.usable)"
+                >
+                  <span class="dot status-{{ r.terminal.agent_status }}" aria-hidden="true"></span>
+                  {{ r.name }}
+                </button>
+              }
+            </div>
+          }
         }
       </section>
     }
@@ -239,11 +261,45 @@ export class MachinesSection {
   /** A terminal of a machine was picked. */
   readonly selected = output<Terminal>();
 
+  private readonly cardsSignal = signal(false);
+  private readonly nodesSignal = signal<ReadonlyMap<string, HxTreeNode<SpaceData>[]>>(new Map());
+  /** The `cards` layout: each space of a machine is a card (#938). */
+  @Input() set cardsLayout(value: boolean) {
+    this.cardsSignal.set(value);
+  }
+  /** The card nodes of `spaceNodes` per machine name, built by the sidebar from `remoteTree`. */
+  @Input() set nodes(value: ReadonlyMap<string, HxTreeNode<SpaceData>[]>) {
+    this.nodesSignal.set(value);
+  }
+  @Input() openIds: ReadonlySet<string> = new Set();
+  @Input() activeId: string | null = null;
+  /** A card asked for the context menu of the sidebar (same entries as the tree). */
+  @Output() readonly cardMenu = new EventEmitter<CardMenuRequest>();
+  /** An action button of a card (new terminal, close space). */
+  @Output() readonly cardAct = new EventEmitter<SidebarMenuAction>();
+  protected readonly cards = this.cardsSignal.asReadonly();
+
+  protected cardNodes(machine: string): HxTreeNode<SpaceData>[] {
+    return this.nodesSignal().get(machine) ?? [];
+  }
+
+  /** A row of a card: the terminal by its qualified id, only on a connected machine. */
+  protected pickId(id: string): void {
+    for (const g of this.groups()) {
+      const row = this.store
+        .remoteSpaces(g.machine.name)
+        .flatMap((s) => s.rows)
+        .find((r) => r.pane.terminal_id === id);
+      if (row) return this.pick(row.pane, g.usable);
+    }
+  }
+
   protected readonly groups = computed(() =>
     this.machines.machines().map((machine) => ({
       machine,
       note: machineNote(machine),
       usable: machineUsable(machine),
+      blocked: this.machines.blockedReason(qualifyId(machine.name, "")),
       check: checkNote(this.machines.checks()[machine.name]),
       spaces: this.store.remoteTree(machine.name).map((node) => ({
         node,
