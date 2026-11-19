@@ -27,6 +27,9 @@ import { SpaceEditFocus } from "./space-edit-focus";
 import type { SidebarMenuAction } from "./sidebar-menu";
 import { RECORDS_SHOWN, paneMarks, recordRows, recordsSummary } from "./spaces";
 
+/** A card or a tab row in a drag: the dragged one, or where the drop would land. */
+export type CardDragState = "source" | "before" | "after" | null;
+
 /** Where a card asks for a context menu: the kind, the id and the point it opens at. */
 export interface CardMenuRequest {
   kind: SidebarMenuAction["kind"];
@@ -53,6 +56,13 @@ export class SpaceCard {
   private readonly openIdsSignal = signal<ReadonlySet<string>>(new Set());
   private readonly activeIdSignal = signal<string | null>(null);
   private readonly headerOnlySignal = signal(false);
+  private readonly filteringSignal = signal(false);
+  private readonly spaceDraggableSignal = signal(false);
+  private readonly tabDraggableSignal = signal(false);
+  private readonly draggingSignal = signal<string | null>(null);
+  private readonly dropMarkSignal = signal<{ id: string; after: boolean } | null>(null);
+  private readonly tabDragSignal = signal<{ pane: string } | null>(null);
+  private readonly tabMarkSignal = signal<{ pane: string; after: boolean } | null>(null);
 
   /** The workspace node of `spaceNodes`; its children are the rows of the body. */
   @Input({ required: true }) set node(value: HxTreeNode<SpaceData>) {
@@ -70,6 +80,41 @@ export class SpaceCard {
   @Input() set headerOnly(value: boolean) {
     this.headerOnlySignal.set(value);
   }
+
+  /** A filter is active: a card with a match shows its body, whatever its collapsed state. */
+  @Input() set filtering(value: boolean) {
+    this.filteringSignal.set(value);
+  }
+  /** Drag and drop of the header is on (manual sort, no filter, no edit). */
+  @Input() set spaceDraggable(value: boolean) {
+    this.spaceDraggableSignal.set(value);
+  }
+  @Input() set tabDraggable(value: boolean) {
+    this.tabDraggableSignal.set(value);
+  }
+  /** The space being dragged and where the drop would land (the state of `Sidebar`). */
+  @Input() set dragging(value: string | null) {
+    this.draggingSignal.set(value);
+  }
+  @Input() set dropMark(value: { id: string; after: boolean } | null) {
+    this.dropMarkSignal.set(value);
+  }
+  /** The tab row being dragged and where its drop would land. */
+  @Input() set tabDrag(value: { pane: string } | null) {
+    this.tabDragSignal.set(value);
+  }
+  @Input() set tabMark(value: { pane: string; after: boolean } | null) {
+    this.tabMarkSignal.set(value);
+  }
+
+  @Output() readonly spaceDragStart = new EventEmitter<{ event: DragEvent; id: string }>();
+  @Output() readonly spaceDragOver = new EventEmitter<{ event: DragEvent; id: string }>();
+  @Output() readonly spaceDrop = new EventEmitter<{ event: DragEvent; id: string }>();
+  @Output() readonly tabDragStart = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
+  @Output() readonly tabDragOver = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
+  @Output() readonly tabDrop = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
+  /** The drag ended (also a drop outside the list). */
+  @Output() readonly dragEnded = new EventEmitter<void>();
 
   /** The card header was clicked: the app opens the overview of the space. */
   @Output() readonly opened = new EventEmitter<string>();
@@ -97,8 +142,29 @@ export class SpaceCard {
   protected readonly id = computed(() => this.data().workspace.space_id);
   protected readonly label = computed(() => this.data().workspace.label);
   protected readonly collapsed = computed(
-    () => !this.headerOnlySignal() && this.ui.collapsedCards().includes(this.id()),
+    () =>
+      !this.headerOnlySignal() &&
+      !this.filteringSignal() &&
+      this.ui.collapsedCards().includes(this.id()),
   );
+  protected readonly canDragSpace = computed(
+    () => this.spaceDraggableSignal() && this.editing()?.kind !== "space",
+  );
+  protected readonly canDragTabs = computed(() => this.tabDraggableSignal());
+  protected readonly dragState = computed<CardDragState>(() => {
+    if (this.draggingSignal() === this.id()) return "source";
+    const mark = this.dropMarkSignal();
+    if (mark?.id !== this.id()) return null;
+    return mark.after ? "after" : "before";
+  });
+
+  protected tabDragState(row: PaneRow): CardDragState {
+    const id = row.pane.terminal_id;
+    if (this.tabDragSignal()?.pane === id) return "source";
+    const mark = this.tabMarkSignal();
+    if (mark?.pane !== id) return null;
+    return mark.after ? "after" : "before";
+  }
   protected readonly closing = computed(() => this.spaceActions.closingIds().has(this.id()));
   protected readonly firstHasDot = computed(() => this.data().lines[0]?.[0]?.kind === "dot");
   private readonly space = computed(() =>
