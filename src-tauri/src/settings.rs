@@ -197,7 +197,7 @@ pub struct Settings {
     pub shortcuts: BTreeMap<String, String>,
     /// Lines and tokens of the sidebar rows from `sidebar.rows`; types left `None` use the default.
     pub sidebar_rows: SidebarRows,
-    /// `sidebar.layout`: `tree` (default) or `split`.
+    /// `sidebar.layout`: `tree` (default), `split` or `cards`.
     pub sidebar_layout: String,
     /// `sidebar.agents`: `list` (default) or `priority`, the order of the Agents section (#722).
     pub sidebar_agents: String,
@@ -672,11 +672,11 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
         s.sidebar_group_worktrees = resolve_group_worktrees(value, &mut s.warnings);
         match value.get("layout") {
             None => {}
-            Some(Value::String(l)) if matches!(l.as_str(), "tree" | "split") => {
+            Some(Value::String(l)) if matches!(l.as_str(), "tree" | "split" | "cards") => {
                 s.sidebar_layout = l.clone();
             }
             Some(other) => s.warnings.push(format!(
-                "sidebar.layout {other} must be \"tree\" or \"split\"; using tree"
+                "sidebar.layout {other} must be \"tree\", \"split\" or \"cards\"; using tree"
             )),
         }
         match value.get("agents") {
@@ -932,10 +932,10 @@ pub fn set_color_schema_text(text: &str, schema: &serde_json::Value) -> Result<S
     set_key_text(text, "colorSchema", &schema.to_string())
 }
 
-/// Returns `text` with `sidebar.layout` set to `tree` or `split`, touching nothing else. A missing
+/// Returns `text` with `sidebar.layout` set to `tree`, `split` or `cards`, touching nothing else. A missing
 /// `sidebar` object is created; a `sidebar` that is not an object is an error.
 pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, String> {
-    if !matches!(layout, "tree" | "split") {
+    if !matches!(layout, "tree" | "split" | "cards") {
         return Err(format!("invalid sidebar layout {layout:?}"));
     }
     set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
@@ -1944,10 +1944,10 @@ mod tests {
     #[test]
     fn sidebar_layout_parses_and_invalid_warns() {
         assert_eq!(rows("{}").sidebar_layout, "tree");
-        assert_eq!(
-            rows(r#"{"sidebar":{"layout":"split"}}"#).sidebar_layout,
-            "split"
-        );
+        for layout in ["split", "cards"] {
+            let json = format!(r#"{{"sidebar":{{"layout":"{layout}"}}}}"#);
+            assert_eq!(rows(&json).sidebar_layout, layout);
+        }
         let s = rows(r#"{"sidebar":{"layout":"grid"}}"#);
         assert_eq!(s.sidebar_layout, "tree");
         assert!(s.warnings[0].contains("sidebar.layout"));

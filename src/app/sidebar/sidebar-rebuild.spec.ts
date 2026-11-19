@@ -10,6 +10,7 @@ import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar } from "./sidebar";
+import { inlineSpaceCard } from "./space-card.mock";
 
 const space = (id: string, label: string, panes: number): SpaceNode => ({
   workspace: { space_id: id, label, number: 1, agent_status: "unknown", cwd: `/work/${label}` },
@@ -40,6 +41,7 @@ async function setup(marks: Record<string, RebuildMark>, spaces: SpaceNode[]) {
       },
     ],
   });
+  inlineSpaceCard();
   TestBed.overrideComponent(Sidebar, {
     set: {
       templateUrl: undefined,

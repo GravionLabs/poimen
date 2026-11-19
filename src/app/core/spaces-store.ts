@@ -449,6 +449,7 @@ export class SpacesStore {
         const ids = snapshot.spaces.map((s) => s.space_id);
         this.ui?.pruneSpaceOrder(ids);
         this.ui?.prunePinnedSpaces(ids);
+        this.ui?.pruneCollapsedCards(ids);
         this.ui?.pruneRecentSpaces(ids);
       }
       if (snapshot.spaces.length) {

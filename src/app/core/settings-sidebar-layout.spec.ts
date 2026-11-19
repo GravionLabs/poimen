@@ -19,6 +19,7 @@ describe("sidebar layout setting", () => {
 
   it("parses split and falls back to tree", () => {
     expect(parseSettings({ sidebarLayout: "split" }).sidebarLayout).toBe("split");
+    expect(parseSettings({ sidebarLayout: "cards" }).sidebarLayout).toBe("cards");
     expect(parseSettings({ sidebarLayout: "grid" }).sidebarLayout).toBe("tree");
     expect(parseSettings({}).sidebarLayout).toBe("tree");
   });

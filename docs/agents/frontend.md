@@ -12,3 +12,7 @@ Angular app structure, tab layout, terminal search and sidebar order. Read befor
 ## Status bar (#931)
 
 `app-status-bar` renders `hx-status-bar` (helix-desktop) in the `status` slot of the shell; every entry is an `hx-status-item` (`kind="button"` for actions, `tone` for warnings and errors, no CSS classes of poimen for them). The bar is not a live region: only items whose value changes by itself set `[announce]="true"` (connection, run summary, limits, waiting, notices, update progress). An `@if` block projects only with a single root element, so every item has its own `@if`, and the update switch sits in `<ng-container ngProjectAs="[slot=end]">`. A boolean input needs a binding (`[announce]="true"`): the bare attribute is the empty string. The update details stay a `position: fixed` section until the updater PBI moves them into the item popover.
+
+## Sidebar cards layout (#934)
+
+`sidebar.layout: "cards"` renders `app-space-card` (`src/app/sidebar/space-card.*`) per node of `spaceNodes`, the same row model as the tree; the card takes `headerOnly` so another layout can reuse the header. The `⋯` button and a right click ask `Sidebar` for the same context menu as the tree row. Collapsed cards are `UiState.collapsedCards`, pruned in `SpacesStore.refresh`. The component uses decorator inputs because the specs run without the compiler transform, and specs that override the `Sidebar` template call `inlineSpaceCard()` (`space-card.mock.ts`). The TUI ignores `cards`.

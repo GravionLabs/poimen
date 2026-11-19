@@ -1,0 +1,273 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+
+.card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--h-content-border-color, var(--h-text-muted-color));
+  border-radius: 6px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+}
+
+.card.closing {
+  opacity: 0.6;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.title {
+  display: flex;
+  flex: 1 1 5rem;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  margin-left: auto;
+}
+
+.fold .chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentcolor;
+  border-bottom: 1.5px solid currentcolor;
+  transform: rotate(-45deg);
+  transition: transform 120ms;
+}
+
+.fold .chevron.open {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.line {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.line.further {
+  padding: 0 8px 2px 26px;
+}
+
+.name,
+.text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name {
+  min-width: 0;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.text {
+  min-width: 0;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  font-style: italic;
+  line-height: 14px;
+}
+
+.pr-link {
+  max-width: 100%;
+  padding: 0;
+  font-style: normal;
+}
+
+.state {
+  flex: none;
+  font-size: 11px;
+}
+
+.state-idle {
+  color: var(--h-text-muted-color);
+}
+
+.state-working {
+  color: var(--status-working);
+}
+
+.state-blocked {
+  color: var(--status-blocked);
+}
+
+.state-done {
+  color: var(--status-done);
+}
+
+.state-error {
+  color: var(--status-error);
+}
+
+.badge {
+  flex: none;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--status-done);
+  color: var(--h-content-background);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.dot-badge {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.closing-label,
+.empty {
+  display: block;
+  margin: 0;
+  padding: 2px 10px 4px;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: 4px;
+  border-top: 1px solid var(--h-content-border-color, var(--h-text-muted-color));
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--h-highlight-background);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--h-primary-color);
+  outline-offset: -2px;
+}
+
+.row.open .name {
+  font-weight: 700;
+  color: var(--h-text-color);
+}
+
+.row.active {
+  background: color-mix(in srgb, var(--h-primary-color) 28%, transparent);
+  box-shadow: inset 4px 0 0 var(--h-primary-color);
+}
+
+.row.active .name,
+.row.active .text,
+.row.active .icon:not(.agent),
+.row.active .state-idle {
+  color: var(--h-text-color);
+}
+
+.row.active .state-working {
+  color: var(--status-working-on-active);
+}
+
+.row.active .state-blocked {
+  color: var(--status-blocked-on-active);
+}
+
+.row.active .state-done {
+  color: var(--status-done-on-active);
+}
+
+.row.active .state-error {
+  color: var(--status-error-on-active);
+}
+
+.row.attention {
+  box-shadow:
+    inset 0 0 0 1px var(--status-blocked),
+    0 0 6px var(--status-blocked);
+}
+
+.icon {
+  flex: none;
+  box-sizing: border-box;
+  min-width: 20px;
+  height: 16px;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--h-text-muted-color) 16%, transparent);
+  color: var(--h-text-muted-color);
+  font:
+    600 10px/14px ui-monospace,
+    monospace;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.icon.agent {
+  background: var(--h-highlight-background);
+  color: var(--h-highlight-color);
+}
+
+.host-note {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  align-self: center;
+  border: 1px solid var(--h-text-muted-color);
+  border-radius: 50%;
+  opacity: 0.7;
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.records {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.record {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.records-toggle {
+  padding: 0;
+  font-size: 11px;
+  text-transform: none;
+}

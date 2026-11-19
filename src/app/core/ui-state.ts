@@ -1,5 +1,6 @@
 import { Injectable, InjectionToken, inject, signal } from "@angular/core";
 import { AGENT_SECTIONS, type AgentSection } from "./agent-priority";
+import { parseLineComments, type CommentSet } from "./line-comments-state";
 
 export const SIDEBAR_MIN_WIDTH = 180;
 export const SIDEBAR_MAX_WIDTH = 480;
@@ -39,63 +40,7 @@ export const UI_STORAGE = new InjectionToken<UiStorage | null>("UI_STORAGE", {
   },
 });
 
-/** One review comment on a line range of a diff (Changes tab); `quote` is the commented text. */
-export interface LineComment {
-  id: string;
-  path: string;
-  /** `old` is the left side (removed lines), `new` the right side or the inline view. */
-  side: "old" | "new";
-  start: number;
-  end: number;
-  quote: string;
-  text: string;
-}
-
-/** The comments of one worktree: not yet sent, and already sent. */
-export interface CommentSet {
-  pending: LineComment[];
-  sent: LineComment[];
-}
-
-function parseComment(value: unknown): LineComment | null {
-  if (typeof value !== "object" || value === null) return null;
-  const c = value as Record<string, unknown>;
-  if (
-    typeof c["id"] !== "string" ||
-    typeof c["path"] !== "string" ||
-    (c["side"] !== "old" && c["side"] !== "new") ||
-    !Number.isInteger(c["start"]) ||
-    !Number.isInteger(c["end"]) ||
-    (c["start"] as number) < 0 ||
-    (c["end"] as number) < (c["start"] as number) ||
-    typeof c["quote"] !== "string" ||
-    typeof c["text"] !== "string"
-  )
-    return null;
-  return {
-    id: c["id"],
-    path: c["path"],
-    side: c["side"],
-    start: c["start"] as number,
-    end: c["end"] as number,
-    quote: c["quote"],
-    text: c["text"],
-  };
-}
-
-/** Reads stored comments per worktree; malformed entries are dropped, empty worktrees too. */
-export function parseLineComments(value: unknown): Record<string, CommentSet> {
-  const out: Record<string, CommentSet> = {};
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return out;
-  const list = (v: unknown): LineComment[] =>
-    Array.isArray(v) ? v.map(parseComment).filter((c): c is LineComment => c !== null) : [];
-  for (const [dir, set] of Object.entries(value)) {
-    const s = (set ?? {}) as Record<string, unknown>;
-    const entry = { pending: list(s["pending"]), sent: list(s["sent"]) };
-    if (entry.pending.length || entry.sent.length) out[dir] = entry;
-  }
-  return out;
-}
+export { parseLineComments, type CommentSet, type LineComment } from "./line-comments-state";
 
 export type GithubPage = "inbox" | "pulls" | "issues" | "milestones";
 
@@ -130,6 +75,8 @@ export interface LayoutState {
   spaceOrder?: string[];
   /** Pinned spaces (`space_id`s), shown first in the tree in every sort mode. */
   pinnedSpaces?: string[];
+  /** Spaces whose card is collapsed to its header in the `cards` sidebar layout (`space_id`s). */
+  collapsedCards?: string[];
   /** When the user last focused each space (`space_id` to epoch ms), for `sidebar.sort: recent`. */
   recentSpaces?: Record<string, number>;
   /** The user's order of the tabs (`tab_id`s) per `space_id`; tabs not listed follow by number. */
@@ -268,6 +215,7 @@ export function parseLayout(raw: string | null): LayoutState {
       recentCommands,
       spaceOrder,
       pinnedSpaces,
+      collapsedCards,
       recentSpaces,
       tabOrder,
       taskMachine,
@@ -382,6 +330,10 @@ export function parseLayout(raw: string | null): LayoutState {
       const ids = pinnedSpaces.filter((k): k is string => typeof k === "string" && k !== "");
       if (ids.length) state.pinnedSpaces = [...new Set(ids)];
     }
+    if (Array.isArray(collapsedCards)) {
+      const ids = collapsedCards.filter((k): k is string => typeof k === "string" && k !== "");
+      if (ids.length) state.collapsedCards = [...new Set(ids)];
+    }
     if (recentSpaces && typeof recentSpaces === "object" && !Array.isArray(recentSpaces)) {
       const times = Object.entries(recentSpaces).filter(
         (e): e is [string, number] => e[0] !== "" && typeof e[1] === "number" && e[1] >= 0,
@@ -437,6 +389,8 @@ export class UiState {
   /** The user's space order (`space_id`s, persisted). */
   readonly spaceOrder = signal<readonly string[]>(this.initial.spaceOrder ?? []);
   readonly pinnedSpaces = signal<readonly string[]>(this.initial.pinnedSpaces ?? []);
+  /** Collapsed space cards of the `cards` sidebar layout (persisted, pruned for closed spaces). */
+  readonly collapsedCards = signal<readonly string[]>(this.initial.collapsedCards ?? []);
   /** When each space was last focused (epoch ms), newest 200 kept. */
   readonly recentSpaces = signal<Readonly<Record<string, number>>>(this.initial.recentSpaces ?? {});
   /** The user's tab order per space (`tab_id`s, persisted). */
@@ -679,6 +633,22 @@ export class UiState {
     this.save();
   }
 
+  setCardCollapsed(id: string, collapsed: boolean): void {
+    if (this.collapsedCards().includes(id) === collapsed) return;
+    this.collapsedCards.set(
+      collapsed ? [...this.collapsedCards(), id] : this.collapsedCards().filter((c) => c !== id),
+    );
+    this.save();
+  }
+
+  /** Drops the collapsed cards of spaces that no longer exist. */
+  pruneCollapsedCards(existing: readonly string[]): void {
+    const keep = this.collapsedCards().filter((id) => existing.includes(id));
+    if (keep.length === this.collapsedCards().length) return;
+    this.collapsedCards.set(keep);
+    this.save();
+  }
+
   /** Remembers the machine of a task for `dir`; `null` (this Mac) forgets it. */
   setTaskMachine(dir: string, machine: string | null): void {
     const next = { ...this.taskMachine() };
@@ -829,6 +799,7 @@ export class UiState {
       recentCommands: this.recentCommands().length ? [...this.recentCommands()] : undefined,
       spaceOrder: this.spaceOrder().length ? [...this.spaceOrder()] : undefined,
       pinnedSpaces: this.pinnedSpaces().length ? [...this.pinnedSpaces()] : undefined,
+      collapsedCards: this.collapsedCards().length ? [...this.collapsedCards()] : undefined,
       recentSpaces: Object.keys(this.recentSpaces()).length
         ? { ...this.recentSpaces() }
         : undefined,

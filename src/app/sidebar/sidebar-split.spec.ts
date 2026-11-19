@@ -13,6 +13,7 @@ import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.test
 import { Sidebar, splitSections, type AgentView } from "./sidebar";
 import type { AgentSection } from "../core/agent-priority";
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
+import { inlineSpaceCard } from "./space-card.mock";
 
 const mk = (id: string, label: string, panes: [string, string, boolean][]): SpaceNode => ({
   workspace: { space_id: id, label, number: 1, agent_status: "idle" },
@@ -207,6 +208,7 @@ async function setup(layout: SidebarLayout) {
       { provide: UI_STORAGE, useValue: null },
     ],
   });
+  inlineSpaceCard();
   TestBed.overrideComponent(Sidebar, {
     set: {
       templateUrl: undefined,
@@ -280,9 +282,9 @@ describe("Sidebar toggle", () => {
     expect(tree.setSidebarLayout).toHaveBeenCalledWith("split");
 
     const split = await setup("split");
-    expect(split.toggle().getAttribute("aria-label")).toBe("Show tree layout");
+    expect(split.toggle().getAttribute("aria-label")).toBe("Show cards layout");
     split.toggle().click();
-    expect(split.setSidebarLayout).toHaveBeenCalledWith("tree");
+    expect(split.setSidebarLayout).toHaveBeenCalledWith("cards");
   });
 
   it("switches the structure when the setting changes", async () => {
