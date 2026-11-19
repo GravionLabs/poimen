@@ -217,9 +217,12 @@ importers:
       '@foblex/flow':
         specifier: 19.4.0
         version: 19.4.0(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))
+      '@gravionlabs/helix-desktop':
+        specifier: 22.5.0
+        version: 22.5.0(d62c6e1ab6516f608090b933e09f6a54)
       '@gravionlabs/helix-ui':
-        specifier: 22.3.1
-        version: 22.3.1(f575c9f87f718d1e983a74de454f977e)
+        specifier: 22.5.0
+        version: 22.5.0(f575c9f87f718d1e983a74de454f977e)
       '@lezer/highlight':
         specifier: 1.2.5
         version: 1.2.5
@@ -889,8 +892,26 @@ packages:
       '@angular/common': '>=17.3.0'
       '@angular/core': '>=17.3.0'
 
-  '@gravionlabs/helix-ui@22.3.1':
-    resolution: {integrity: sha512-bsgY9GmdE5e1VR6ZBk2ZYb31Mn5ib30ukQ/WNi914yi1wYBsae7MNbptAQYBEQZLQHjtip+0fkI5YgAKbpYnBA==}
+  '@gravionlabs/helix-desktop@22.5.0':
+    resolution: {integrity: sha512-Zt8VtTGITjDLsJ2tdsdKrEeVWNzynseNS3klWVBsMAynEPCGlnKEpA9dhm7b9hzAN8iumPAEonaktcPs2e3ShA==}
+    peerDependencies:
+      '@angular/cdk': '>=22'
+      '@angular/common': '>=22'
+      '@angular/core': '>=22'
+      '@gravionlabs/helix-ui': '>=0.1.0'
+      '@tauri-apps/api': '>=2'
+      '@tauri-apps/plugin-process': '>=2'
+      '@tauri-apps/plugin-updater': '>=2'
+    peerDependenciesMeta:
+      '@tauri-apps/api':
+        optional: true
+      '@tauri-apps/plugin-process':
+        optional: true
+      '@tauri-apps/plugin-updater':
+        optional: true
+
+  '@gravionlabs/helix-ui@22.5.0':
+    resolution: {integrity: sha512-W5N0fAVqoUZ69NdyMKAQbQRjJGGV8hTcApWbKH6Ke7fgi/mIGouAUhAY1k3vwuQrD0LiRzWOcjckw7wiFJ0owA==}
     peerDependencies:
       '@angular/cdk': '>=22'
       '@angular/common': '>=22'
@@ -3878,7 +3899,17 @@ snapshots:
       '@angular/core': 22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2)
       tslib: 2.9.1
 
-  '@gravionlabs/helix-ui@22.3.1(f575c9f87f718d1e983a74de454f977e)':
+  '@gravionlabs/helix-desktop@22.5.0(d62c6e1ab6516f608090b933e09f6a54)':
+    dependencies:
+      '@angular/cdk': 22.2.7(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(@angular/forms@22.2.6(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(@angular/platform-browser@22.2.6(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2)))(rxjs@7.8.2))(@angular/platform-browser@22.2.6(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2)))(rxjs@7.8.2)
+      '@angular/common': 22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2)
+      '@angular/core': 22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2)
+      '@gravionlabs/helix-ui': 22.5.0(f575c9f87f718d1e983a74de454f977e)
+      tslib: 2.9.1
+    optionalDependencies:
+      '@tauri-apps/api': 2.12.4
+
+  '@gravionlabs/helix-ui@22.5.0(f575c9f87f718d1e983a74de454f977e)':
     dependencies:
       '@angular/cdk': 22.2.7(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(@angular/forms@22.2.6(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(@angular/platform-browser@22.2.6(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2)))(rxjs@7.8.2))(@angular/platform-browser@22.2.6(@angular/common@22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2)))(rxjs@7.8.2)
       '@angular/common': 22.2.6(@angular/core@22.2.6(@angular/compiler@22.2.6)(rxjs@7.8.2))(rxjs@7.8.2)

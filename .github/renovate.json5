@@ -40,6 +40,12 @@
       // Angular pins the range of TypeScript it supports: they move together.
       matchPackageNames: ["@angular/**", "@angular-devkit/**", "@schematics/angular", "typescript"],
     },
+    {
+      // helix-desktop has helix-ui as a peer: they move together, and a helix release is not held back for 7 days.
+      groupName: "helix",
+      matchPackageNames: ["@gravionlabs/helix-*"],
+      minimumReleaseAge: null,
+    },
     { groupName: "xterm", matchPackageNames: ["@xterm/**"] },
     { groupName: "codemirror", matchPackageNames: ["@codemirror/**", "@lezer/**"] },
     {
@@ -56,6 +62,7 @@
         "@dagrejs/dagre",
         "@foblex/flow",
         "@gravionlabs/helix-ui",
+        "@gravionlabs/helix-desktop",
         "@xterm/addon-search",
         "@xterm/addon-unicode11",
         "@xterm/headless",
