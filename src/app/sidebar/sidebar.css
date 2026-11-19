@@ -562,6 +562,13 @@
   font-size: 12px;
 }
 
+.silent {
+  flex: none;
+  align-self: flex-start;
+  color: var(--status-blocked);
+  font-size: 11px;
+}
+
 .since {
   flex: none;
   align-self: flex-start;

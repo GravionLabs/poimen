@@ -30,6 +30,11 @@ export function formatElapsed(ms: number): string {
   return `${Math.floor(ms / DAY)}d`;
 }
 
+/** The mark of a silent agent, `silent 12m`; the server decided it is silent, the client only formats. */
+export function silentLabel(silentSince: number | undefined, now: number): string | undefined {
+  return silentSince === undefined ? undefined : `silent ${formatElapsed(now - silentSince)}`;
+}
+
 /**
  * Orders agents by section, then the one whose status changed first, then by name (and id, so the
  * order is total). An agent without a known section counts as idle, one without a time as `now`.

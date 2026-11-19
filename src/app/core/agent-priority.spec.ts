@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { agentSection, formatElapsed, orderAgents, type AgentSection } from "./agent-priority";
+import {
+  agentSection,
+  formatElapsed,
+  orderAgents,
+  silentLabel,
+  type AgentSection,
+} from "./agent-priority";
 
 describe("agentSection", () => {
   it("maps statuses onto the four sections", () => {
@@ -80,5 +86,12 @@ describe("orderAgents", () => {
 
   it("is empty without agents", () => {
     expect(order([], {}, {})).toEqual([]);
+  });
+});
+
+describe("silentLabel (#899)", () => {
+  it("names the elapsed time and is absent when cleared", () => {
+    expect(silentLabel(1_000, 1_000 + 12 * 60_000)).toBe("silent 12m");
+    expect(silentLabel(undefined, 5)).toBeUndefined();
   });
 });

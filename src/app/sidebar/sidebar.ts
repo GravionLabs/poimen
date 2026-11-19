@@ -56,6 +56,7 @@ import { SettingsStore, type SidebarAgents } from "../core/settings";
 import {
   AGENT_SECTIONS,
   formatElapsed,
+  silentLabel,
   orderAgents,
   type AgentSection,
 } from "../core/agent-priority";
@@ -919,6 +920,10 @@ export class Sidebar {
     inject(DestroyRef).onDestroy(() => clearInterval(timer));
     return timer;
   })();
+
+  protected silentMark(row: PaneRow): string | undefined {
+    return silentLabel(row.pane.agent_silent_since, this.now());
+  }
 
   protected readonly agentsMode = computed(() => this.settings.settings().sidebarAgents);
   protected readonly otherAgentsMode = computed(() =>

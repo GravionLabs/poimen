@@ -441,6 +441,9 @@
       @if (d.since; as since) {
         <span class="since" title="Time since the last status change">{{ since }}</span>
       }
+      @if (silentMark(d.row); as silent) {
+        <span class="silent" title="The agent reported nothing for a while">{{ silent }}</span>
+      }
       @if (isUnread(d.row.pane.terminal_id)) {
         <span class="badge dot-badge" role="img" aria-label="Unread"></span>
       }
