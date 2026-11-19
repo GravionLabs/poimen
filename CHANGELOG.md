@@ -5,10 +5,50 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.25.0] — 2026-11-19
+
+### Bug Fixes
+- **ci**: Pr-checks to GravionLabs/ci v1.16.0, the retarget action of v1.15.0 is gone (#920)
+- **sidebar**: Follow a machine's token totals again after it reconnects (#895)
+- **server**: A repeated OSC report moves only reported_at without an event (#897)
+- **server**: A resumed agent's next hibernation can be resumed again (#904)
+
+
+### Documentation
+- ADR 0014 hibernation of idle agents (#901) (#916)
+- **protocol**: Drop a duplicated sentence (#898)
+
+
+### Features
+- **status-bar**: Claude rate limits from the provider's usage endpoint (#784) (#913)
+- **sidebar**: Token totals per agent pane and per space from its transcript (#895) (#914)
+- **sidebar**: Token totals per agent pane and per space from its transcript (#895)
+- **deliver**: Tokens per run in the Runs view (#896) (#921)
+- **server**: Time of the last agent report and of the last status change per terminal (#897) (#915)
+- **server**: Time of the last agent report and of the last status change per terminal
+- **harness**: ResumeArgs and exitInput for claude and copilot (#902) (#917)
+- **server**: Hibernate a done agent after agents.hibernateAfter (#903) (#923)
+- **server**: Hibernate a done agent after agents.hibernateAfter (#903)
+- **server**: Resume a hibernated agent on the first controller attach (#904) (#924)
+- **server**: Resume a hibernated agent on the first controller attach (#904)
+- **terminal-view**: Dropped files type their quoted paths (#905) (#918)
+- **terminal-view**: A pasted image is written to a temp file and its path typed (#906) (#925)
+- **terminal-view**: Inline images through @xterm/addon-image (#907) (#919)
+- **server**: Silent mark after agents.silentAfter minutes of working without a report (#898) (#922)
+- **server**: Silent mark after agents.silentAfter minutes of working without a report (#898)
+- **app**: Silent mark with duration on rows and tab, one notification entry (#899) (#926)
+- **app**: Silent mark with duration on rows and tab, one notification entry (#899)
+- **tui**: Silent mark in the TUI sidebar (#900) (#933)
+
+
 ## [0.24.2] — 2026-11-18
 
 ### Bug Fixes
 - **deps**: Renovate opens its pull requests against the default branch (#911)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.24.2 [skip ci]
 
 
 ## [0.24.1] — 2026-11-18
