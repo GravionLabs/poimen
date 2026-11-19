@@ -22,10 +22,17 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { useUnicode11 } from "./unicode";
 import { TaskStarter } from "../core/task-start";
-import { TauriBridge } from "../core/tauri";
+import { TauriBridge, type DragDrop, type Unlisten } from "../core/tauri";
+import { SpaceActions } from "../core/space-actions";
+import { dropAction, overRect } from "./drop";
 import { agentKind, splitId, type Terminal } from "../core/snapshot";
 import type { Mode, StreamRecord } from "../core/backend";
-import { SettingsStore, defaultTerminalFontFamily, windowsPtyOption } from "../core/settings";
+import {
+  SettingsStore,
+  defaultTerminalFontFamily,
+  isWindows,
+  windowsPtyOption,
+} from "../core/settings";
 import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
@@ -96,6 +103,7 @@ function ansiColors(
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     "[class.controlling]": "mode() === 'control'",
+    "[class.drop-target]": "dropHover()",
     "(focusin)": "onSearchFocus()",
     "(focusout)": "onSearchBlur($event)",
   },
@@ -124,6 +132,9 @@ export class TerminalView implements OnDestroy, Searchable {
   private readonly ui = inject(UiState);
   private readonly tauri = inject(TauriBridge);
   private readonly injector = inject(Injector);
+  /** Files are being dragged over this view. */
+  protected readonly dropHover = signal(false);
+  private unlistenDrop?: Unlisten;
   private readonly body = viewChild.required<ElementRef<HTMLElement>>("body");
 
   private term?: XTerm;
@@ -221,6 +232,7 @@ export class TerminalView implements OnDestroy, Searchable {
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.unlistenDrop?.();
     this.search.gone(this);
     this.searchResults?.dispose();
     this.themeObserver?.disconnect();
@@ -293,8 +305,46 @@ export class TerminalView implements OnDestroy, Searchable {
     this.term = term;
     this.fit = fit;
     this.detachClipboard = this.attachClipboard(this.body().nativeElement);
+    void this.listenForDrops();
     this.resizeObserver = new ResizeObserver(() => this.scheduleResize());
     this.resizeObserver.observe(this.body().nativeElement);
+  }
+
+  /** Files dropped on this view type their quoted paths as a paste (#905). */
+  private async listenForDrops(): Promise<void> {
+    try {
+      const unlisten = await this.tauri.onDragDrop((event) => this.onDragDrop(event));
+      if (this.destroyed) unlisten();
+      else this.unlistenDrop = unlisten;
+    } catch {
+      // No drag-and-drop outside the app (tests, browser).
+    }
+  }
+
+  private onDragDrop(event: DragDrop): void {
+    if (event.type === "leave") {
+      this.dropHover.set(false);
+      return;
+    }
+    const over = overRect(
+      event.position,
+      this.host.nativeElement.getBoundingClientRect(),
+      window.devicePixelRatio || 1,
+    );
+    if (event.type !== "drop") {
+      this.dropHover.set(over);
+      return;
+    }
+    this.dropHover.set(false);
+    if (!over) return;
+    const action = dropAction(event.paths, {
+      remote: !!this.pane().machine,
+      control: this.mode() === "control" && !!this.session?.open,
+      windows: isWindows(),
+    });
+    if (!action) return;
+    if (action.kind === "refuse") this.injector.get(SpaceActions).notify(action.notice);
+    else this.term?.paste(action.text);
   }
 
   /** Shows the search bar (a second call selects the query) and moves the focus into it. */
