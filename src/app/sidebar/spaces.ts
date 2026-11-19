@@ -278,6 +278,7 @@ export function renderRow(
       case "name":
         return name;
       case "state_text":
+        if (pane?.pane.hibernated) return "hibernated";
         return stateLabel(
           status,
           pane

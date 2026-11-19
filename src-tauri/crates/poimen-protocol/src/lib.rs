@@ -1652,6 +1652,9 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hibernated: Option<Hibernated>,
     },
+    /// Resuming a hibernated agent failed (#904): the hibernation ended and the shell stays.
+    #[serde(rename = "terminal.resume_failed")]
+    TerminalResumeFailed { terminal_id: String, reason: String },
 }
 
 #[cfg(test)]
@@ -1970,6 +1973,20 @@ mod tests {
         };
         assert_eq!(records[0].progress, Some(3));
         assert_eq!(records[0].app, None);
+    }
+
+    #[test]
+    fn the_resume_failed_event_round_trips() {
+        let text = r#"{"event":"terminal.resume_failed","data":{"terminal_id":"t1","reason":"no report"}}"#;
+        let event: Event = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            event,
+            Event::TerminalResumeFailed {
+                terminal_id: "t1".into(),
+                reason: "no report".into()
+            }
+        );
+        assert_eq!(serde_json::to_string(&event).unwrap(), text);
     }
 
     #[test]

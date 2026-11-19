@@ -16,6 +16,7 @@ import {
   nextWaiting,
   plainText,
   statusText,
+  needsAttention,
   paneLabel,
   rowName,
   supportsFlow,
@@ -291,6 +292,13 @@ describe("error, progress, kind and title (#682)", () => {
     expect(
       statusText(pane({ agent: "codex", agent_status: "blocked", agent_kind: "question" })),
     ).toBe("waiting: question");
+  });
+
+  it("shows a hibernated agent as hibernated, not as waiting or unread (#904)", () => {
+    const sleeping = pane({ terminal_id: "h", hibernated: true, agent_status: "unknown" });
+    expect(statusText(sleeping)).toBe("hibernated");
+    expect(needsAttention(sleeping.agent_status)).toBe(false);
+    expect(toSnapshot({ terminals: [sleeping] }).terminals[0]!.hibernated).toBe(true);
   });
 });
 

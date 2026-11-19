@@ -154,6 +154,9 @@ struct TerminalEntry {
     records: records::Records,
     /// Who set which token and until when; `info.tokens` is the visible name-to-value view.
     tokens: Vec<TokenEntry>,
+    /// A resume of the hibernated agent is under way (#904); not persisted, so a restart may
+    /// resume again, but never two at once.
+    resuming: bool,
 }
 
 struct TokenEntry {
@@ -366,6 +369,9 @@ pub(crate) struct Shared {
     pty_host: PtyHost,
     /// What `repo.ensure` clones with: the real `gh`, or a fake set by tests ([`Server::set_gh`]).
     gh: RwLock<Arc<dyn repos::Gh>>,
+    /// How long a resumed agent has to report before the resume counts as failed, milliseconds
+    /// (#904); tests shorten it with [`Server::set_resume_timeout`].
+    resume_timeout_ms: AtomicU64,
     /// The scheme colors for terminal queries, shared with every terminal's stream.
     colors: Arc<RwLock<Colors>>,
     /// Run once the terminals are ended after `server.shutdown`; the binary exits the process.
@@ -709,6 +715,7 @@ impl Server {
             home: config.home,
             pty_host: config.pty_host,
             gh: RwLock::new(Arc::new(repos::SystemGh)),
+            resume_timeout_ms: AtomicU64::new(hibernate::RESUME_TIMEOUT.as_millis() as u64),
             colors: Arc::default(),
             on_shutdown: Mutex::new(None),
             stopped: AtomicBool::new(false),
@@ -754,6 +761,14 @@ impl Server {
     /// origin, so they need no network).
     pub fn set_gh(&self, gh: Arc<dyn repos::Gh>) {
         *self.shared.gh.write().unwrap_or_else(|e| e.into_inner()) = gh;
+    }
+
+    /// How long a resumed agent has to report before the resume counts as failed (default 30 s).
+    pub fn set_resume_timeout(&self, timeout: Duration) {
+        let ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
+        self.shared
+            .resume_timeout_ms
+            .store(ms, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// One pass of the hibernation sweeper at the given time in milliseconds (ADR 0014, #903);
@@ -944,7 +959,7 @@ fn detach(request: &Request, attachment: Option<&Attachment>) -> Result<(), (Err
 /// `terminal.attach`: registers the connection with the terminal's stream and starts the writer
 /// thread that owns the socket's write side from now on.
 fn attach(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     request: &Request,
     stream: &Conn,
     attachment: &mut Option<Attachment>,
@@ -977,6 +992,10 @@ fn attach(
     )?;
     let terminal_id = p.terminal_id.clone();
     thread::spawn(move || write_stream(writer_stream, &rx, &link, &terminal_id));
+    // Only a controller wakes a hibernated agent (ADR 0014); an observer triggers nothing.
+    if attached.mode == AttachMode::Control {
+        shared.resume_hibernated(&p.terminal_id);
+    }
     *attachment = Some(Attachment {
         stream: term,
         terminal_id: p.terminal_id,
@@ -1942,6 +1961,7 @@ fn spawn_terminal(
         hook_agent: None,
         records: records::Records::default(),
         tokens: Vec::new(),
+        resuming: false,
     });
     shared.publish(Event::TerminalCreated {
         terminal: info.clone(),
@@ -2103,6 +2123,7 @@ fn adopted(
         hook_agent: t.hook_agent.clone(),
         records,
         tokens,
+        resuming: false,
     }
 }
 
