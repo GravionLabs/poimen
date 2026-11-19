@@ -1,87 +1,93 @@
-<footer class="bar" role="status">
-  @if (detailsOpen() && (update().kind === "available" || update().kind === "error")) {
-    <section class="update-details" aria-label="Update">
-      <button
-        type="button"
-        hx-button
-        variant="text"
-        severity="secondary"
-        size="small"
-        iconOnly
-        class="close-details"
-        aria-label="Close"
-        title="Close"
-        (click)="closeDetails()"
-      >
-        <app-icon name="close" />
-      </button>
-      @if ($any(update()).step; as step) {
-        <h3 class="failed">{{ errTitle(step) }}</h3>
-        <pre class="message">{{ $any(update()).message }}</pre>
-      }
-      @if ($any(update()).info; as info) {
-        <h3>poimen {{ info.version }}</h3>
-        @if (info.notes) {
-          <pre class="message">{{ info.notes }}</pre>
-        }
-        <p class="restart-note" data-testid="restart-note">{{ restartNote }}</p>
-        <button type="button" hx-button size="small" class="install" (click)="installUpdate.emit()">
-          Install and restart
-        </button>
-      }
-      @if ($any(update()).step === "check") {
-        <button type="button" hx-button size="small" class="install" (click)="checkUpdate.emit()">
-          Try again
-        </button>
-      }
-    </section>
-  }
-  <span class="item conn {{ connection().state }}" [title]="label(connection())">
-    <span class="dot"></span>{{ label(connection()) }}
-  </span>
-  @if (deliver(); as run) {
+@if (detailsOpen() && (update().kind === "available" || update().kind === "error")) {
+  <section class="update-details" aria-label="Update">
     <button
       type="button"
       hx-button
       variant="text"
       severity="secondary"
       size="small"
-      class="item deliver"
-      [class.warn]="run.warning"
+      iconOnly
+      class="close-details"
+      aria-label="Close"
+      title="Close"
+      (click)="closeDetails()"
+    >
+      <app-icon name="close" />
+    </button>
+    @if ($any(update()).step; as step) {
+      <h3 class="failed">{{ errTitle(step) }}</h3>
+      <pre class="message">{{ $any(update()).message }}</pre>
+    }
+    @if ($any(update()).info; as info) {
+      <h3>poimen {{ info.version }}</h3>
+      @if (info.notes) {
+        <pre class="message">{{ info.notes }}</pre>
+      }
+      <p class="restart-note" data-testid="restart-note">{{ restartNote }}</p>
+      <button type="button" hx-button size="small" class="install" (click)="installUpdate.emit()">
+        Install and restart
+      </button>
+    }
+    @if ($any(update()).step === "check") {
+      <button type="button" hx-button size="small" class="install" (click)="checkUpdate.emit()">
+        Try again
+      </button>
+    }
+  </section>
+}
+<hx-status-bar>
+  <hx-status-item
+    slot="start"
+    [announce]="true"
+    class="conn {{ connection().state }}"
+    data-testid="connection"
+    [title]="label(connection())"
+  >
+    <span class="dot"></span>{{ label(connection()) }}
+  </hx-status-item>
+  @if (deliver(); as run) {
+    <hx-status-item
+      slot="start"
+      kind="button"
+      [announce]="true"
+      class="deliver"
+      [tone]="run.warning ? 'warn' : 'neutral'"
       [title]="run.title"
       data-testid="deliver"
       (click)="showDeliver.emit()"
     >
       {{ run.text }}
-    </button>
+    </hx-status-item>
   }
   @if (limits(); as l) {
-    <span class="item limits" [class.warn]="l.warning" [title]="l.title" data-testid="limits">{{
-      l.text
-    }}</span>
+    <hx-status-item
+      slot="start"
+      [announce]="true"
+      class="limits"
+      [tone]="l.warning ? 'warn' : 'neutral'"
+      [title]="l.title"
+      data-testid="limits"
+    >
+      {{ l.text }}
+    </hx-status-item>
   }
-  <button
-    type="button"
-    hx-button
-    variant="text"
-    severity="secondary"
-    size="small"
-    class="item waiting"
-    [class.any]="waiting() > 0"
+  <hx-status-item
+    slot="start"
+    kind="button"
+    [announce]="true"
+    class="waiting"
+    [tone]="waiting() > 0 ? 'warn' : 'neutral'"
     [disabled]="waiting() === 0"
     title="Jump to the next waiting agent"
-    (click)="jump.emit()"
+    (click)="waiting() > 0 && jump.emit()"
   >
     {{ waiting() }} waiting
-  </button>
+  </hx-status-item>
   @if (!panelOpen()) {
-    <button
-      type="button"
-      hx-button
-      variant="text"
-      severity="secondary"
-      size="small"
-      class="item panel-button"
+    <hx-status-item
+      slot="start"
+      kind="button"
+      class="panel-button"
       [title]="
         panelShortcut()
           ? 'Show the output panel (' + panelShortcut() + ')'
@@ -93,154 +99,164 @@
         <path d="M2 3h12v10H2zM2 9.5h12" />
       </svg>
       <span>Output</span>
-    </button>
+    </hx-status-item>
   }
   @if (notice(); as text) {
-    <span class="item version warn notice" [title]="text">{{ text }}</span>
+    <hx-status-item slot="start" [announce]="true" tone="warn" class="notice" [title]="text">
+      {{ text }}
+    </hx-status-item>
   }
   @if (serverNotice(); as text) {
-    <span class="item version warn server-notice" data-testid="server-notice" [title]="text">{{
-      text
-    }}</span>
-    <button
-      type="button"
-      hx-button
-      variant="text"
-      severity="secondary"
-      size="small"
-      class="item update-button"
+    <hx-status-item
+      slot="start"
+      [announce]="true"
+      tone="warn"
+      class="server-notice"
+      data-testid="server-notice"
+      [title]="text"
+    >
+      {{ text }}
+    </hx-status-item>
+  }
+  @if (serverNotice()) {
+    <hx-status-item
+      slot="start"
+      kind="button"
+      tone="accent"
+      class="update-button"
       data-testid="restart-server"
       (click)="restartServer.emit()"
     >
       Restart server
-    </button>
-    <button
-      type="button"
-      hx-button
-      variant="text"
-      severity="secondary"
-      size="small"
-      class="item update-button"
+    </hx-status-item>
+  }
+  @if (serverNotice()) {
+    <hx-status-item
+      slot="start"
+      kind="button"
+      tone="accent"
+      class="update-button"
       data-testid="later-server"
       (click)="laterServer.emit()"
     >
       Later
-    </button>
+    </hx-status-item>
   }
-  <span class="spacer"></span>
   @if (paneId(); as id) {
-    <span class="item">{{ id }}</span>
-    @if (mode(); as m) {
-      <button
-        type="button"
-        hx-button
-        variant="text"
-        severity="secondary"
-        size="small"
-        class="item mode-button"
-        [title]="modeHint(blocked())"
-        [attr.aria-label]="modeText(m, blocked())"
-        [attr.aria-pressed]="m === 'control'"
-        [disabled]="!!blocked()"
-        (click)="control.emit(m !== 'control')"
-      >
-        @if (m === "control") {
-          <svg class="icon pencil" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M2 14l1-4 8-8 3 3-8 8-4 1zM10 3l3 3" />
-          </svg>
-        } @else {
-          <svg class="icon lock" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M4 7h8v7H4zM5.5 7V5a2.5 2.5 0 015 0v2" />
-          </svg>
-        }
-        <span>{{ modeText(m, blocked()) }}</span>
-      </button>
-    }
-    @if (size()) {
-      <span class="item">{{ sizeText(size()) }}</span>
-    }
+    <hx-status-item slot="end" class="pane-id">{{ id }}</hx-status-item>
+  }
+  @if (paneId() && mode(); as m) {
+    <hx-status-item
+      slot="end"
+      kind="button"
+      class="mode-button"
+      [title]="modeHint(blocked())"
+      [ariaLabel]="modeText(m, blocked())"
+      [disabled]="!!blocked()"
+      (click)="!blocked() && control.emit(m !== 'control')"
+    >
+      @if (m === "control") {
+        <svg class="icon pencil" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M2 14l1-4 8-8 3 3-8 8-4 1zM10 3l3 3" />
+        </svg>
+      } @else {
+        <svg class="icon lock" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4 7h8v7H4zM5.5 7V5a2.5 2.5 0 015 0v2" />
+        </svg>
+      }
+      <span>{{ modeText(m, blocked()) }}</span>
+    </hx-status-item>
+  }
+  @if (paneId() && size()) {
+    <hx-status-item slot="end" class="size">{{ sizeText(size()) }}</hx-status-item>
   }
   @if (channel() === "rc") {
-    <span class="item channel" data-testid="channel" [title]="channelTitle">RC</span>
+    <hx-status-item
+      slot="end"
+      tone="warn"
+      class="channel"
+      data-testid="channel"
+      [title]="channelTitle"
+    >
+      RC
+    </hx-status-item>
   }
-  <span class="item version">{{ appLabel(appVersion()) }}</span>
-  <span
-    class="item version"
-    [class.warn]="warning(info()) !== ''"
+  <hx-status-item slot="end" class="version app-version">{{
+    appLabel(appVersion())
+  }}</hx-status-item>
+  <hx-status-item
+    slot="end"
+    class="version server-version"
+    [tone]="warning(info()) !== '' ? 'warn' : 'neutral'"
     [title]="warning(info()) || versionLabel(info())"
-    >{{ versionLabel(info()) }}</span
   >
+    {{ versionLabel(info()) }}
+  </hx-status-item>
   @if (channel() !== "rc") {
-    @switch (update().kind) {
-      @case ("checking") {
-        <span class="item update">Checking for updates…</span>
+    <ng-container ngProjectAs="[slot=end]">
+      @switch (update().kind) {
+        @case ("checking") {
+          <hx-status-item slot="end" [announce]="true" class="update"
+            >Checking for updates…</hx-status-item
+          >
+        }
+        @case ("current") {
+          <hx-status-item
+            slot="end"
+            kind="button"
+            tone="accent"
+            class="update-button"
+            (click)="checkUpdate.emit()"
+          >
+            Up to date
+          </hx-status-item>
+        }
+        @case ("available") {
+          <hx-status-item
+            slot="end"
+            kind="button"
+            tone="accent"
+            class="update-button available"
+            (click)="detailsOpen.set(!detailsOpen())"
+          >
+            Update available
+          </hx-status-item>
+        }
+        @case ("installing") {
+          <hx-status-item slot="end" [announce]="true" class="update"
+            >Installing the update…</hx-status-item
+          >
+        }
+        @case ("error") {
+          <hx-status-item
+            slot="end"
+            kind="button"
+            tone="error"
+            class="update-button failed"
+            (click)="detailsOpen.set(!detailsOpen())"
+          >
+            {{ errTitle($any(update()).step) }}
+          </hx-status-item>
+        }
+        @default {
+          <hx-status-item
+            slot="end"
+            kind="button"
+            tone="accent"
+            class="update-button"
+            (click)="checkUpdate.emit()"
+          >
+            Check for updates
+          </hx-status-item>
+        }
       }
-      @case ("current") {
-        <button
-          type="button"
-          hx-button
-          variant="text"
-          severity="secondary"
-          size="small"
-          class="item update-button"
-          (click)="checkUpdate.emit()"
-        >
-          Up to date
-        </button>
-      }
-      @case ("available") {
-        <button
-          type="button"
-          hx-button
-          variant="text"
-          severity="secondary"
-          size="small"
-          class="item update-button available"
-          (click)="detailsOpen.set(!detailsOpen())"
-        >
-          Update available
-        </button>
-      }
-      @case ("installing") {
-        <span class="item update">Installing the update…</span>
-      }
-      @case ("error") {
-        <button
-          type="button"
-          hx-button
-          variant="text"
-          severity="secondary"
-          size="small"
-          class="item update-button failed"
-          (click)="detailsOpen.set(!detailsOpen())"
-        >
-          {{ errTitle($any(update()).step) }}
-        </button>
-      }
-      @default {
-        <button
-          type="button"
-          hx-button
-          variant="text"
-          severity="secondary"
-          size="small"
-          class="item update-button"
-          (click)="checkUpdate.emit()"
-        >
-          Check for updates
-        </button>
-      }
-    }
+    </ng-container>
   }
-  <button
-    type="button"
-    hx-button
-    variant="text"
-    severity="secondary"
-    size="small"
-    class="item help-button"
-    aria-label="Keyboard shortcuts"
-    aria-haspopup="dialog"
+  <hx-status-item
+    slot="end"
+    kind="button"
+    class="help-button"
+    ariaLabel="Keyboard shortcuts"
     [title]="
       shortcutsShortcut()
         ? 'Keyboard shortcuts (' + shortcutsShortcut() + ')'
@@ -249,5 +265,5 @@
     (click)="showShortcuts.emit()"
   >
     ?
-  </button>
-</footer>
+  </hx-status-item>
+</hx-status-bar>
