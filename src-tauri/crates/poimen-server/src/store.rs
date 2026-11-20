@@ -109,10 +109,20 @@ pub(crate) struct Newer {
     pub(crate) file: PathBuf,
     pub(crate) found: u64,
     pub(crate) known: u64,
+    /// Set instead of the versions when a damaged file could not be moved aside: a save would
+    /// overwrite the good copy with it, so the server does not start.
+    pub(crate) stuck: Option<String>,
 }
 
 impl std::fmt::Display for Newer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(cause) = &self.stuck {
+            return write!(
+                f,
+                "{} is damaged and could not be moved aside: {cause}",
+                self.file.display()
+            );
+        }
         write!(
             f,
             "{} has version {}, this poimen-server knows version {}; update poimen-server, nothing was changed",
@@ -183,7 +193,7 @@ fn note(path: &Path, message: &str) {
 
 /// Moves a file that could not be read to `<name>.damaged-<unix seconds>` (a name that is free),
 /// keeps the newest [`KEEP_DAMAGED`] of those and removes the older ones.
-fn set_aside(path: &Path, cause: &str) {
+fn set_aside(path: &Path, cause: &str) -> io::Result<()> {
     let mut seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
@@ -198,7 +208,8 @@ fn set_aside(path: &Path, cause: &str) {
         }
         seconds += 1;
     };
-    match fs::rename(path, &target) {
+    let moved = fs::rename(path, &target);
+    match &moved {
         Ok(()) => note(
             path,
             &format!(
@@ -215,9 +226,12 @@ fn set_aside(path: &Path, cause: &str) {
             ),
         ),
     }
-    let Some(dir) = path.parent() else { return };
+    moved?;
+    let Some(dir) = path.parent() else {
+        return Ok(());
+    };
     let Ok(entries) = fs::read_dir(dir) else {
-        return;
+        return Ok(());
     };
     let mut kept: Vec<(u64, PathBuf)> = entries
         .flatten()
@@ -232,6 +246,7 @@ fn set_aside(path: &Path, cause: &str) {
         let (_, old) = kept.remove(0);
         let _ = fs::remove_file(old);
     }
+    Ok(())
 }
 
 /// Reads the layout from `server.json`; a missing one falls back to `server.json.bak` (the
@@ -244,6 +259,11 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
         file: file.to_path_buf(),
         found,
         known: VERSION,
+        stuck: None,
+    };
+    let stuck = |file: &Path, e: io::Error| Newer {
+        stuck: Some(e.to_string()),
+        ..newer(file, 0)
     };
     let file = match read_file(path) {
         Read::Good(file) => file,
@@ -251,7 +271,7 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
         read @ (Read::Missing | Read::Damaged(_)) => {
             let reason = match read {
                 Read::Damaged(cause) => {
-                    set_aside(path, &cause);
+                    set_aside(path, &cause).map_err(|e| stuck(path, e))?;
                     "damaged"
                 }
                 _ => "missing",
@@ -270,7 +290,7 @@ pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
                 }
                 Read::Newer(v) => return Err(newer(&backup, v)),
                 Read::Damaged(cause) => {
-                    set_aside(&backup, &cause);
+                    set_aside(&backup, &cause).map_err(|e| stuck(&backup, e))?;
                     File::default()
                 }
                 Read::Missing => File::default(),

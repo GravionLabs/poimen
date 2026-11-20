@@ -154,3 +154,31 @@ fn a_save_keeps_the_previous_file_as_backup() {
     assert!(previous.contains("\"s1\""), "{previous}");
     assert!(!path.with_extension("json.tmp").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_damaged_file_that_cannot_be_moved_aside_refuses_the_start_and_keeps_the_backup() {
+    use std::os::unix::fs::PermissionsExt;
+    let path = fresh("stuck");
+    save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
+    save(&path, &layout(&["s1", "s2"]), 3, Vec::new()).unwrap();
+    fs::write(&path, "{ nope").unwrap();
+    let dir = path.parent().unwrap();
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o500)).unwrap();
+    let result = load(&path);
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
+    if fs::write(dir.join("probe"), "").is_ok() && result.is_ok() {
+        return; // privileged user: permissions do not apply
+    }
+    let refused = result.unwrap_err();
+    assert!(
+        refused.to_string().contains("could not be moved aside"),
+        "{refused}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "{ nope");
+    assert!(
+        fs::read_to_string(backup_path(&path))
+            .unwrap()
+            .contains("\"s1\"")
+    );
+}
