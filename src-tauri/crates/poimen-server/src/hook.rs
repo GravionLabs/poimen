@@ -9,15 +9,17 @@
 //! terminal, in a terminal of the other channel (stable or rc), and an event poimen does not map,
 //! are not failures and leave no line.
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
+use crate::log::append;
 use poimen_client::{Client, ClientError};
+use poimen_protocol::files::{now_secs, utc};
 use poimen_protocol::{ENV_SOCKET, ENV_TERMINAL_ID, ErrorCode, TerminalReportAgent};
 use serde_json::Value;
 
@@ -25,8 +27,6 @@ use serde_json::Value;
 pub const HOOK_BUDGET: Duration = Duration::from_millis(1500);
 /// Most bytes read from stdin.
 const MAX_PAYLOAD: u64 = 1 << 20;
-/// Size at which `hooks.log` moves to `hooks.log.1` (replacing an older one).
-const MAX_LOG: u64 = 256 * 1024;
 const LOG_NAME: &str = "hooks.log";
 
 /// What a hook needs from its environment.
@@ -190,54 +190,10 @@ fn log_line(secs: u64, what: &str, why: &str, env: &HookEnv) -> String {
     )
 }
 
-/// Appends `line` to the log, moving a full log to `<name>.1` first. Never fails the hook.
-fn append(log: &Path, line: &str) {
-    if let Some(dir) = log.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if std::fs::metadata(log).is_ok_and(|m| m.len() >= MAX_LOG) {
-        let mut old = log.as_os_str().to_owned();
-        old.push(".1");
-        let _ = std::fs::rename(log, PathBuf::from(old));
-    }
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log)
-    {
-        let _ = writeln!(file, "{line}");
-    }
-}
-
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
-}
-
-/// `YYYY-MM-DDTHH:MM:SSZ` of seconds since the epoch (proleptic Gregorian, days to civil date).
-fn utc(secs: u64) -> String {
-    let (days, rest) = (secs / 86_400, secs % 86_400);
-    let z = days + 719_468;
-    let era = z / 146_097;
-    let doe = z % 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + u64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        rest / 3600,
-        rest % 3600 / 60,
-        rest % 60
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::log::MAX_LOG;
     use poimen_protocol::AgentStatus;
     use serde_json::json;
 

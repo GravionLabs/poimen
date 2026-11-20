@@ -266,7 +266,7 @@ impl Host {
 
     /// Serves clients until the host ends, then removes the endpoint. The caller ends the
     /// process (threads blocked on the PTY or a client stay behind).
-    pub fn serve(self) {
+    pub fn serve(self) -> String {
         let Host {
             shared,
             listener,
@@ -319,8 +319,31 @@ impl Host {
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
         }
+        let reason = if state.orphaned {
+            "no client within the orphan timeout, the child was killed".to_string()
+        } else if let Some(code) = state.exit {
+            code.map_or(
+                "the child ended with an unknown exit code".to_string(),
+                |c| format!("the child exited with code {c}"),
+            )
+        } else {
+            "killed on request".to_string()
+        };
         drop(state);
         remove_endpoint(&shared.endpoint);
+        reason
+    }
+
+    /// The line the host writes to stderr (the server's `hosts/<id>.log`) at its start.
+    pub fn start_line(&self) -> String {
+        format!(
+            "started version {} pid {} child pid {}",
+            env!("CARGO_PKG_VERSION"),
+            self.shared.pid,
+            self.shared
+                .child_pid
+                .map_or("unknown".to_string(), |p| p.to_string())
+        )
     }
 }
 
@@ -531,7 +554,9 @@ fn attach(shared: &Shared, id: u64, since: u64) {
 /// endpoint is bound and the child runs.
 pub fn spawn_in_thread(start: &HostStart) -> Result<(), String> {
     let host = Host::start(start)?;
-    thread::spawn(move || host.serve());
+    thread::spawn(move || {
+        host.serve();
+    });
     Ok(())
 }
 

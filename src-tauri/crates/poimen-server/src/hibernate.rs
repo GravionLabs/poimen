@@ -122,7 +122,7 @@ impl Shared {
         }
         for (writer, text) in typing {
             if let Err(e) = writer.write(text.as_bytes()) {
-                eprintln!("poimen-server: hibernate: the exit input was not typed: {e}");
+                self.log("hibernate", &format!("the exit input was not typed: {e}"));
             }
         }
     }

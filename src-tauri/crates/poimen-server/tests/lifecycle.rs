@@ -607,3 +607,54 @@ fn reporting_an_unknown_terminal_is_not_found() {
         }
     ));
 }
+
+fn server_log(config: &Config) -> String {
+    std::fs::read_to_string(config.state_file.with_file_name("server.log")).unwrap_or_default()
+}
+
+#[test]
+fn a_damaged_state_file_leaves_a_line_in_server_log() {
+    let env = Env::new("damaged");
+    let config = env.config();
+    std::fs::create_dir_all(config.state_file.parent().unwrap()).unwrap();
+    std::fs::write(&config.state_file, "{ not json").unwrap();
+    let client = start(&config);
+    client.ping().unwrap();
+    let log = server_log(&config);
+    assert!(log.lines().any(|l| l.contains(" store ignoring ")), "{log}");
+}
+
+#[test]
+fn start_and_shutdown_are_logged() {
+    let env = Env::new("logged");
+    let config = env.config();
+    let server = Server::bind(config.clone()).unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    server.on_shutdown(move || done_tx.send(()).unwrap());
+    thread::spawn(move || server.serve());
+    let client = Client::new(&config.socket);
+    client.ping().unwrap();
+    let log = server_log(&config);
+    let started = log.lines().find(|l| l.contains(" server started")).unwrap();
+    assert!(
+        started.contains(&format!("pid {}", std::process::id())),
+        "{started}"
+    );
+    assert!(started.contains("protocol"), "{started}");
+    client.shutdown().unwrap();
+    done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(
+        server_log(&config).contains(" server shutting down and ending the terminals"),
+        "{}",
+        server_log(&config)
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(config.state_file.with_file_name("server.log"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+}

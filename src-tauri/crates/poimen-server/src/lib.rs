@@ -8,6 +8,7 @@
 //! persist in `server.json` (`store.rs`); a new server adopts the hosts of that list (#604) and
 //! drops the leaves whose terminal did not come back.
 
+mod adopt;
 pub mod check;
 pub mod claude;
 mod confirm;
@@ -19,6 +20,7 @@ mod hibernate;
 pub mod hook;
 mod host;
 pub mod integration;
+pub mod log;
 pub mod mcp_config;
 mod pty;
 mod records;
@@ -531,11 +533,16 @@ impl Shared {
             .filter_map(|t| t.stored(now, now_ms))
             .collect();
         if let Err(e) = store::save(&self.state_file, &inner.layout, next_id, terminals) {
-            eprintln!(
-                "poimen-server: could not save {}: {e}",
-                self.state_file.display()
+            self.log(
+                "store",
+                &format!("could not save {}: {e}", self.state_file.display()),
             );
         }
+    }
+
+    /// One line in `server.log` and on stderr.
+    pub(crate) fn log(&self, component: &str, message: &str) {
+        log::line(&log::path(&self.state_file), component, message);
     }
 
     /// Expires the tokens whose TTL is up and tells the subscribers.
@@ -672,6 +679,13 @@ impl Shared {
         }
         entry.info.status = TerminalStatus::Exited;
         entry.info.exit_code = exit_code;
+        self.log(
+            "server",
+            &format!(
+                "terminal {terminal_id} ended, exit code {}",
+                exit_code.map_or("unknown".to_string(), |c| c.to_string())
+            ),
+        );
         // Nothing of it is left for a restart to keep.
         entry.info.survives_restart = false;
         entry.info.host_version = None;
@@ -760,6 +774,24 @@ impl Server {
             next_id,
             terminals,
         } = store::load(&config.state_file);
+        let log_file = log::path(&config.state_file);
+        log::prune_old(
+            &host::endpoint_for(&config.socket, "x")
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
+            log::HOST_LOG_AGE,
+        );
+        log::line(
+            &log_file,
+            "server",
+            &format!(
+                "started, version {}, protocol {}, pid {}",
+                env!("CARGO_PKG_VERSION"),
+                PROTOCOL_VERSION,
+                std::process::id()
+            ),
+        );
         let shared = Arc::new(Shared {
             inner: Mutex::new(Inner {
                 layout,
@@ -789,7 +821,7 @@ impl Server {
             // only once its terminal is in the list.
             let mut guard = lock(&shared.inner);
             let inner = &mut *guard;
-            adopt_terminals(&shared, inner, terminals);
+            adopt::adopt_terminals(&shared, inner, terminals);
             // The leaves of terminals that did not come back, the splits they leave behind and
             // the empty tabs go (#510).
             let live: Vec<tabs::Live<'_>> = inner
@@ -881,7 +913,7 @@ impl Server {
                     let shared = Arc::clone(&self.shared);
                     thread::spawn(move || handle_connection(&shared, stream));
                 }
-                Err(e) => eprintln!("poimen-server: accept failed: {e}"),
+                Err(e) => self.shared.log("server", &format!("accept failed: {e}")),
             }
         }
     }
@@ -1221,6 +1253,17 @@ fn server_shutdown(shared: &Arc<Shared>, p: ServerShutdown) -> ApiResult {
     let shared = Arc::clone(shared);
     thread::spawn(move || {
         thread::sleep(SHUTDOWN_DELAY);
+        shared.log(
+            "server",
+            &format!(
+                "shutting down {}",
+                if p.keep_terminals {
+                    "keeping the terminals"
+                } else {
+                    "and ending the terminals"
+                }
+            ),
+        );
         {
             let mut inner = lock(&shared.inner);
             if p.keep_terminals {
@@ -1991,6 +2034,7 @@ fn spawn_terminal(
         &shared.pty_host,
         &host::Spec {
             terminal_id: &id,
+            log: &log::path(&shared.state_file),
             socket: &shared.socket,
             command: &command,
             cwd: &cwd,
@@ -2085,119 +2129,6 @@ fn exit_to(shared: &Arc<Shared>, id: &str) -> impl FnOnce(Option<u32>) + Send + 
     let id = id.to_string();
     let shared = Arc::clone(shared);
     move |code| shared.terminal_exited(&id, code)
-}
-
-/// Adopts the hosts of the terminal list a previous server wrote (ADR 0009, "Server update"):
-/// connects to every one at once, then rebuilds each grid from its ring and restores name, size,
-/// agent status and tokens. A terminal keeps its id, so tabs and splits still point to it. A host
-/// that does not answer (or a terminal whose space is gone) is dropped with a line on stderr.
-fn adopt_terminals(shared: &Arc<Shared>, inner: &mut Inner, stored: Vec<store::StoredTerminal>) {
-    let reached: Vec<_> = thread::scope(|scope| {
-        let pending: Vec<_> = stored
-            .into_iter()
-            .map(|t| {
-                let (endpoint, seq) = (t.endpoint.clone(), t.seq);
-                let reach = scope.spawn(move || host::reach(&endpoint, seq, host::ADOPT_TIMEOUT));
-                (t, reach)
-            })
-            .collect();
-        pending
-            .into_iter()
-            .map(|(t, reach)| {
-                let reached = reach
-                    .join()
-                    .unwrap_or_else(|_| Err("the connect failed".into()));
-                (t, reached)
-            })
-            .collect()
-    });
-    for (t, reached) in reached {
-        let dropped = |why: &str| {
-            eprintln!(
-                "poimen-server: dropping terminal {} ({}): {why}",
-                t.id,
-                t.endpoint.display()
-            );
-        };
-        if inner.terminals.iter().any(|e| e.info.id == t.id) {
-            dropped("listed twice");
-            continue;
-        }
-        let reached = match reached {
-            Ok(reached) => reached,
-            Err(e) => {
-                dropped(&format!("its host does not answer: {e}"));
-                continue;
-            }
-        };
-        if inner.layout.space(&t.space_id).is_err() {
-            dropped(&format!("its space {} is gone", t.space_id));
-            reached.kill();
-            continue;
-        }
-        inner.terminals.push(adopted(shared, t, reached));
-    }
-}
-
-/// The entry of an adopted terminal: the stored state over a grid fed from the host's ring.
-fn adopted(
-    shared: &Arc<Shared>,
-    t: store::StoredTerminal,
-    reached: host::Reached,
-) -> TerminalEntry {
-    let (cols, rows) = (reached.size.cols.max(1), reached.size.rows.max(1));
-    let stream = new_stream(shared, &t.id, cols, rows);
-    let handle = host::adopt(reached, output_to(&stream), exit_to(shared, &t.id));
-    stream.set_writer(handle.writer());
-    let (now, now_ms) = (Instant::now(), now_millis());
-    let records = records::Records::from(t.records.clone());
-    let view = records.view(t.agent.as_ref());
-    let mut visible = std::collections::BTreeMap::new();
-    let mut tokens = Vec::new();
-    for token in t.tokens {
-        let expires = match token.expires_at_ms {
-            None => None,
-            Some(at) if at > now_ms => Some(now + Duration::from_millis(at - now_ms)),
-            // Its time ran out while no server was there.
-            Some(_) => continue,
-        };
-        visible.insert(token.name.clone(), token.value);
-        tokens.push(TokenEntry {
-            name: token.name,
-            source: token.source,
-            expires,
-        });
-    }
-    TerminalEntry {
-        info: Terminal {
-            id: t.id,
-            space_id: t.space_id,
-            name: t.name,
-            cwd: t.cwd,
-            cols,
-            rows,
-            status: TerminalStatus::Running,
-            exit_code: None,
-            program: t.program,
-            args: t.args,
-            agent: t.agent.clone(),
-            tokens: visible,
-            survives_restart: true,
-            host_version: Some(handle.version().to_string()),
-            host_bundled_version: Some(host_bundled_version()),
-            records: view,
-            hibernated: t.hibernated,
-        },
-        host: Some(handle),
-        stream,
-        agent_seq: t.agent_seq,
-        agent_persisted: None,
-        osc: t.osc.then(|| t.agent.clone()).flatten(),
-        hook_agent: t.hook_agent.clone(),
-        records,
-        tokens,
-        resuming: false,
-    }
 }
 
 /// The version of the host this server ships with. While the server and the host ship together

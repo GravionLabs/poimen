@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod files;
 pub mod host;
+pub use files::windows_dir_from;
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
@@ -216,17 +218,6 @@ impl SocketEnv {
             _ => self.default_path(channel),
         }
     }
-}
-
-/// `%LOCALAPPDATA%\poimen-server` (on rc `poimen-server-rc`) when `LOCALAPPDATA` is set and not
-/// empty.
-pub fn windows_dir_from(
-    local_app_data: Option<std::ffi::OsString>,
-    channel: Channel,
-) -> Option<PathBuf> {
-    local_app_data
-        .filter(|s| !s.is_empty())
-        .map(|dir| PathBuf::from(dir).join(windows_dir_name(channel)))
 }
 
 fn user_dir_name(user: Option<String>, channel: Channel) -> String {

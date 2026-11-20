@@ -185,6 +185,7 @@ export class SettingsView {
   protected readonly serverInfo = this.spacesStore.info;
   protected readonly serverState = this.spacesStore.backend;
   protected readonly socketPath = signal("");
+  protected readonly logPath = signal("");
   private readonly sounds = inject(Sounds);
   protected readonly transfer = inject(SettingsTransfer);
   protected readonly agentName = agentName;
@@ -329,6 +330,10 @@ export class SettingsView {
             .invoke<string>("server_socket_path")
             .then((path) => this.socketPath.set(path ?? ""))
             .catch(() => this.socketPath.set(""));
+          this.bridge
+            .invoke<string>("server_log_path")
+            .then((path) => this.logPath.set(path ?? ""))
+            .catch(() => this.logPath.set(""));
         });
       }
     });
