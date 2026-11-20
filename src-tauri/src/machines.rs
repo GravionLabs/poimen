@@ -980,29 +980,6 @@ impl SshConnector {
     }
 }
 
-/// The arguments of ssh for `target`: no terminal, never a prompt, bounded connect, a dead link
-/// noticed within 45 s, and the server of this build's channel in stdio mode.
-pub fn ssh_args(target: &str, server: &str) -> Vec<String> {
-    [
-        "-T",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=10",
-        "-o",
-        "ServerAliveInterval=15",
-        "-o",
-        "ServerAliveCountMax=3",
-        "--",
-        target,
-        server,
-        "stdio",
-    ]
-    .iter()
-    .map(|s| (*s).to_owned())
-    .collect()
-}
-
 impl Connector for SshConnector {
     fn connect(&self) -> io::Result<Pipe> {
         // A target from an older config would still be refused here, never passed as an option.
@@ -1012,8 +989,9 @@ impl Connector for SshConnector {
             None => gui_path::resolve_program("ssh", &gui_path::child_path())
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ssh is not on the PATH"))?,
         };
+        let mux = crate::machines::ssh_mux::for_target(&program, &self.target);
         let mut child = gui_path::command(&program)
-            .args(ssh_args(&self.target, &self.server))
+            .args(ssh_args_with(&self.target, &self.server, &mux.options))
             .env("PATH", gui_path::child_path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1091,7 +1069,12 @@ impl<R: Read> Read for SshOutput<R> {
     }
 }
 
+mod ssh_args;
+pub(crate) mod ssh_mux;
 pub mod wake;
+#[cfg(test)]
+pub use ssh_args::ssh_args;
+pub use ssh_args::ssh_args_with;
 #[cfg(test)]
 mod tests {
     use super::*;
