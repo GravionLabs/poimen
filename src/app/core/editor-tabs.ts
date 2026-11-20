@@ -308,8 +308,18 @@ export class EditorTabs {
   }
 
   /** Opens the changes tab of `dir` (at most one per directory) as a pinned tab, or activates it. */
-  openChanges(dir: string): void {
+  openChanges(dir: string, file?: string): void {
+    if (file) this.changesFocus.set({ dir, file });
     this.openPinned(changesTab(dir));
+  }
+
+  /** The file the next list of the changes tab of `dir` selects ("Show in Changes", #1003); read once. */
+  readonly changesFocus = signal<{ dir: string; file: string } | null>(null);
+  takeChangesFocus(dir: string): string | undefined {
+    const wanted = this.changesFocus();
+    if (wanted?.dir !== dir) return undefined;
+    this.changesFocus.set(null);
+    return wanted.file;
   }
 
   /** Opens the overview tab of `spaceId` (at most one per space) as a pinned tab, or activates it. */

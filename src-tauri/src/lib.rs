@@ -1,4 +1,4 @@
-use poimen_core::{agent_actions, copilot, transcripts};
+use poimen_core::{agent_actions, copilot, git, transcripts};
 mod agent_session;
 mod agent_settings;
 mod backend;
@@ -9,7 +9,6 @@ mod changes_git;
 mod commit_message;
 mod deliver;
 mod editor;
-use poimen_core::git;
 mod git_sync;
 use poimen_core::github;
 mod github_branches;
@@ -2993,6 +2992,7 @@ pub fn run() {
             set_sound,
             sound_file,
             editor::open_in_editor,
+            editor::resolve_file_links,
             paste_image,
             usage_claude,
             set_spaces_layout,
