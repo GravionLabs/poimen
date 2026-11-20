@@ -37,6 +37,8 @@ Read tools:
 - `list_terminals`: terminals with space, name, status, agent kind, agent status and tokens.
 - `current_space`: the space and terminal of the caller, found through `POIMEN_TERMINAL_ID`. Outside a poimen terminal it answers that there is none.
 - `list_runs`: deliver runs of a repository, read with `poimen_core::agent_events` (the same reducer and `Tailer` as the app).
+- `wait_agent` (#979, `terminal`, `timeout_s?`): returns when the agent of the terminal is `done`, `blocked`, in `error` or `gone` (also a closed or exited terminal), or at the timeout, with the status and, when blocked, the notification text. It subscribes to the server's events before it reads the status and never polls. A read tool: any space, no confirmation.
+- `read_agent` (#979, `terminal`): the last assistant message of the agent's transcript with the session id, through `agent.transcript` (the `main` update's `last_message`), so it also works for a terminal of a remote machine. An agent without a transcript is a tool error. A read tool: any space, no confirmation.
 
 Write tools:
 

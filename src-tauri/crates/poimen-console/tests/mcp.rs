@@ -2,8 +2,10 @@
 //! server). Unix-only: the terminals run POSIX shell scripts.
 #![cfg(unix)]
 
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 
 use poimen_client::Client;
@@ -17,6 +19,13 @@ struct Fixture {
     client: Client,
     space: String,
     terminal: String,
+    work: PathBuf,
+}
+
+impl Fixture {
+    fn home(&self) -> PathBuf {
+        self.dir.join("home")
+    }
 }
 
 impl Drop for Fixture {
@@ -33,7 +42,7 @@ fn fixture(name: &str) -> Fixture {
         socket: dir.join("run").join("server.sock"),
         state_file: dir.join("state").join("server.json"),
         scrollback: 1000,
-        home: None,
+        home: Some(dir.join("home")),
         pty_host: PtyHost::launch(poimen_pty_host::spawn_in_thread),
     };
     let server = Server::bind(config.clone()).unwrap();
@@ -71,6 +80,7 @@ fn fixture(name: &str) -> Fixture {
         client,
         space,
         terminal,
+        work,
     }
 }
 
@@ -131,7 +141,9 @@ fn initialize_and_tools_list() {
             "whoami",
             "list_runs",
             "start_agent",
-            "prompt_agent"
+            "prompt_agent",
+            "wait_agent",
+            "read_agent"
         ]
     );
     assert_eq!(replies[2]["error"]["code"], -32601);
@@ -288,4 +300,223 @@ fn list_runs_reads_the_agent_events_of_a_repository() {
         json!({"repository": plain.display().to_string()}),
     );
     assert_eq!(r["isError"], true);
+}
+
+fn report(client: &Client, terminal: &str, seq: u64, status: &str, message: Option<&str>) {
+    client
+        .request(
+            "terminal.report_agent",
+            json!({"terminal_id": terminal, "seq": seq, "status": status, "agent": "claude",
+                "session_id": "s-1", "message": message}),
+        )
+        .unwrap();
+}
+
+fn tool_text(result: &Value) -> String {
+    result["content"][0]["text"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn wait_agent_returns_at_once_for_a_finished_or_blocked_agent() {
+    let f = fixture("wait-final");
+    report(&f.client, &f.terminal, 2, "done", None);
+    let r = call(
+        &f.client,
+        None,
+        "wait_agent",
+        json!({"terminal": f.terminal}),
+    );
+    assert_eq!(r["structuredContent"]["status"], "done");
+    assert_eq!(r["structuredContent"]["timed_out"], false);
+
+    report(&f.client, &f.terminal, 3, "blocked", Some("Allow rm -rf?"));
+    let r = call(
+        &f.client,
+        None,
+        "wait_agent",
+        json!({"terminal": f.terminal}),
+    );
+    assert_eq!(r["structuredContent"]["status"], "blocked");
+    assert_eq!(r["structuredContent"]["message"], "Allow rm -rf?");
+}
+
+#[test]
+fn wait_agent_times_out_with_the_current_status() {
+    let f = fixture("wait-timeout");
+    let r = call(
+        &f.client,
+        None,
+        "wait_agent",
+        json!({"terminal": f.terminal, "timeout_s": 0.3}),
+    );
+    assert_eq!(r["structuredContent"]["status"], "working");
+    assert_eq!(r["structuredContent"]["timed_out"], true);
+}
+
+#[test]
+fn wait_agent_wakes_on_the_status_event() {
+    let f = fixture("wait-event");
+    // Reports `done` (a new seq each time) until the wait returned, so one lands after the wait
+    // subscribed whatever the interleaving.
+    let stop = Arc::new(AtomicBool::new(false));
+    let reporter = {
+        let (client, terminal, stop) = (f.client.clone(), f.terminal.clone(), stop.clone());
+        let seq = AtomicU64::new(10);
+        thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let n = seq.fetch_add(2, Ordering::Relaxed);
+                report(&client, &terminal, n, "working", None);
+                report(&client, &terminal, n + 1, "done", None);
+            }
+        })
+    };
+    let r = call(
+        &f.client,
+        None,
+        "wait_agent",
+        json!({"terminal": f.terminal, "timeout_s": 20}),
+    );
+    stop.store(true, Ordering::Relaxed);
+    reporter.join().unwrap();
+    assert_eq!(r["structuredContent"]["status"], "done");
+    assert_eq!(r["structuredContent"]["timed_out"], false);
+}
+
+#[test]
+fn wait_agent_reports_a_gone_agent_and_an_unknown_terminal_as_an_error() {
+    let f = fixture("wait-gone");
+    let stop = Arc::new(AtomicBool::new(false));
+    let reporter = {
+        let (client, terminal, stop) = (f.client.clone(), f.terminal.clone(), stop.clone());
+        thread::spawn(move || {
+            let mut seq = 10;
+            while !stop.load(Ordering::Relaxed) {
+                report(&client, &terminal, seq, "gone", None);
+                seq += 1;
+            }
+        })
+    };
+    let r = call(
+        &f.client,
+        None,
+        "wait_agent",
+        json!({"terminal": f.terminal, "timeout_s": 20}),
+    );
+    stop.store(true, Ordering::Relaxed);
+    reporter.join().unwrap();
+    assert_eq!(r["structuredContent"]["status"], "gone");
+
+    let r = call(&f.client, None, "wait_agent", json!({"terminal": "nope"}));
+    assert_eq!(r["isError"], true);
+    assert!(tool_text(&r).contains("not found"));
+    let r = call(&f.client, None, "wait_agent", json!({}));
+    assert_eq!(r["isError"], true);
+}
+
+fn transcript_of(f: &Fixture, session: &str) -> std::fs::File {
+    let dir = poimen_core::transcripts::projects_root(&f.home()).join(
+        poimen_core::transcripts::project_dir_name(&f.work.display().to_string()),
+    );
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join(format!("{session}.jsonl")))
+        .unwrap()
+}
+
+#[test]
+fn read_agent_returns_the_last_assistant_message_with_the_session() {
+    let f = fixture("read");
+    let mut file = transcript_of(&f, "s-1");
+    for line in [
+        r#"{"type":"user","uuid":"u1","message":{"role":"user","content":"Do it."}}"#,
+        r#"{"type":"assistant","uuid":"a1","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"First answer."}]}}"#,
+        r#"{"type":"assistant","uuid":"a2","message":{"id":"m2","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#,
+        r#"{"type":"assistant","uuid":"a3","message":{"id":"m3","role":"assistant","content":[{"type":"text","text":"All done."}]}}"#,
+    ] {
+        writeln!(file, "{line}").unwrap();
+    }
+    report(&f.client, &f.terminal, 2, "done", None);
+    let r = call(
+        &f.client,
+        None,
+        "read_agent",
+        json!({"terminal": f.terminal}),
+    );
+    assert_eq!(r["structuredContent"]["message"], "All done.");
+    assert_eq!(r["structuredContent"]["session"], "s-1");
+    // A second read gives the same answer (it does not consume the transcript).
+    let r = call(
+        &f.client,
+        None,
+        "read_agent",
+        json!({"terminal": f.terminal}),
+    );
+    assert_eq!(r["structuredContent"]["message"], "All done.");
+}
+
+#[test]
+fn read_agent_without_a_transcript_is_a_tool_error_that_says_so() {
+    let f = fixture("read-none");
+    // The agent reported no session: no transcript.
+    f.client
+        .request(
+            "terminal.report_agent",
+            json!({"terminal_id": f.terminal, "seq": 5, "status": "done", "agent": "claude"}),
+        )
+        .unwrap();
+    let r = call(
+        &f.client,
+        None,
+        "read_agent",
+        json!({"terminal": f.terminal}),
+    );
+    assert_eq!(r["isError"], true);
+    assert!(tool_text(&r).contains("no agent with a readable transcript"));
+
+    // A session whose file is not there yet.
+    report(&f.client, &f.terminal, 6, "done", None);
+    let r = call(
+        &f.client,
+        None,
+        "read_agent",
+        json!({"terminal": f.terminal}),
+    );
+    assert_eq!(r["isError"], true);
+    assert!(tool_text(&r).contains("not there yet"));
+
+    // A transcript without an assistant message.
+    let mut file = transcript_of(&f, "s-1");
+    writeln!(
+        file,
+        r#"{{"type":"user","uuid":"u1","message":{{"role":"user","content":"hi"}}}}"#
+    )
+    .unwrap();
+    let r = call(
+        &f.client,
+        None,
+        "read_agent",
+        json!({"terminal": f.terminal}),
+    );
+    assert_eq!(r["isError"], true);
+    assert!(tool_text(&r).contains("no assistant message"));
+
+    let r = call(&f.client, None, "read_agent", json!({"terminal": "nope"}));
+    assert_eq!(r["isError"], true);
+}
+
+#[test]
+fn the_read_tools_need_no_consent_from_another_space() {
+    // No calling terminal at all: a write would be refused, these read.
+    let f = fixture("read-any-space");
+    report(&f.client, &f.terminal, 2, "done", None);
+    let r = call(
+        &f.client,
+        None,
+        "wait_agent",
+        json!({"terminal": f.terminal}),
+    );
+    assert!(r.get("isError").is_none());
+    let _ = &f.space;
 }
