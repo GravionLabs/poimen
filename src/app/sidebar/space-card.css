@@ -449,3 +449,10 @@
   color: var(--h-text-muted-color);
   opacity: 0.8;
 }
+
+/* The origin stripe covers the first 3px: the active marker of a row starts after it. */
+.card.origin .row.active {
+  box-shadow:
+    inset 3px 0 0 transparent,
+    inset 7px 0 0 var(--h-primary-color);
+}
