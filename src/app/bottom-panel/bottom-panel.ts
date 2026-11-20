@@ -6,6 +6,7 @@ import {
   computed,
   effect,
   inject,
+  output,
   signal,
   untracked,
   viewChild,
@@ -71,6 +72,8 @@ export const PANEL_TAB_LABELS: Readonly<Record<string, string>> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class BottomPanel {
+  /** A started terminal's node in the Flow was clicked: focus that terminal. */
+  readonly paneChosen = output<string>();
   protected readonly ui = inject(UiState);
   protected readonly subagents = inject(Subagents);
   protected readonly editor = inject(EditorTabs);

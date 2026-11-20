@@ -71,7 +71,7 @@
       }
     </div>
     @if (ui.panelOpen()) {
-      <app-bottom-panel [style.height.px]="ui.panelHeight()" />
+      <app-bottom-panel [style.height.px]="ui.panelHeight()" (paneChosen)="openPaneById($event)" />
     }
   </div>
   <app-status-bar
@@ -204,7 +204,11 @@
         }
         @for (flowPaneId of [flowOf(g)]; track flowPaneId) {
           @if (flowPaneId) {
-            <app-flow-tab [paneId]="flowPaneId" (openAgent)="openAgentOutput($event)" />
+            <app-flow-tab
+              [paneId]="flowPaneId"
+              (openAgent)="openAgentOutput($event)"
+              (paneChosen)="openPaneById($event)"
+            />
           }
         }
         @for (spaceIdOfGroup of [spaceOf(g)]; track spaceIdOfGroup) {
