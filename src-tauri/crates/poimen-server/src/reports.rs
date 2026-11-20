@@ -44,6 +44,9 @@ pub(crate) fn terminal_report_done(shared: &Shared, p: TerminalReportDone) -> Ap
         if entry.info.status == TerminalStatus::Exited {
             return Err(invalid("the terminal has ended"));
         }
+        if entry.info.report.is_some() {
+            return Err(invalid("the terminal has already reported; report once"));
+        }
         let report = AgentReport {
             outcome: p.outcome,
             summary: summary.to_owned(),
@@ -94,6 +97,8 @@ impl Shared {
                 let tell = match target {
                     None => None,
                     Some(t) if t.info.status == TerminalStatus::Exited => None,
+                    // A hibernated agent is a bare shell: the line waits for the resume.
+                    Some(t) if t.info.hibernated.is_some() => continue,
                     Some(t) => match t.info.agent.as_ref().map(|a| a.status) {
                         None | Some(AgentStatus::Gone) => None,
                         Some(AgentStatus::Idle | AgentStatus::Done) => {

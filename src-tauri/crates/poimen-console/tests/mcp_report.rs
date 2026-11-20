@@ -99,7 +99,7 @@ fn eventually(what: &str, mut check: impl FnMut() -> bool) {
         if check() {
             return;
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::yield_now();
     }
     panic!("{what}");
 }
@@ -177,7 +177,7 @@ fn a_report_is_stored_closes_the_run_and_tells_the_idle_starter() {
     assert_eq!(mine["host"]["poimen.terminal"], helper.as_str());
 
     // The starter works: the line waits.
-    thread::sleep(Duration::from_millis(2500));
+    // The report call has returned: the starter works, so nothing was typed.
     assert_eq!(std::fs::read_to_string(&typed).unwrap_or_default(), "");
     agent_status(&f.client, &starter, 2, AgentStatus::Idle);
     eventually("the line in the starter", || {
@@ -198,6 +198,13 @@ fn a_report_is_stored_closes_the_run_and_tells_the_idle_starter() {
             .unwrap()
             .contains("Fixed it.")
     );
+
+    // The server refuses a second report too, whoever asks.
+    let direct = f.client.request(
+        "terminal.report_done",
+        json!({"terminal_id": helper, "outcome": "failed", "summary": "Again."}),
+    );
+    assert!(direct.is_err());
 
     // wait_agent returns the report.
     agent_status(&f.client, &helper, 2, AgentStatus::Done);
@@ -316,11 +323,10 @@ fn start_agent_appends_the_preamble_to_the_prompt() {
                 .into_iter()
                 .find(|t| t.name == "kid")
             {
-                thread::sleep(Duration::from_millis(300));
                 agent_status(&client, &t.id, 1, AgentStatus::Idle);
                 return;
             }
-            thread::sleep(Duration::from_millis(50));
+            thread::yield_now();
         }
     });
     let r = call(
@@ -339,7 +345,9 @@ fn start_agent_appends_the_preamble_to_the_prompt() {
         .find(|t| t.name == "kid")
         .unwrap();
     eventually("the prompt in the file", || out.exists());
-    thread::sleep(Duration::from_millis(200));
+    eventually("the whole prompt", || {
+        std::fs::read_to_string(&out).is_ok_and(|t| t.contains("report_done"))
+    });
     let prompt = std::fs::read_to_string(&out).unwrap();
     assert!(prompt.starts_with("Do the thing."), "{prompt}");
     assert!(prompt.contains("report_done"), "{prompt}");
