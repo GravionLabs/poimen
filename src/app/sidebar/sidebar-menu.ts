@@ -17,7 +17,8 @@ export interface SidebarMenuAction {
     | "unpin-space"
     | "start-task"
     | "cleanup-tasks"
-    | "show-changes";
+    | "show-changes"
+    | "open-in-editor";
 }
 
 /** One entry of a context menu. */
@@ -68,6 +69,7 @@ export function sidebarMenuItems(
             ...(pinned === null
               ? []
               : [
+                  { action: "open-in-editor" as const, label: "Open in editor" },
                   pinned
                     ? { action: "unpin-space" as const, label: "Unpin space" }
                     : { action: "pin-space" as const, label: "Pin space" },

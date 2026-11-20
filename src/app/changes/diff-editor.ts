@@ -157,6 +157,8 @@ export class DiffEditor {
   private merge: MergeView | null = null;
   private generation = 0;
   private draft: (Draft & { side: Side }) | null = null;
+  /** The last line a click on a line number picked, with its file ("Open in editor", #1002). */
+  lastLine: { path: string; line: number } | null = null;
   private anchor: { side: Side; line: number } | null = null;
 
   constructor() {
@@ -201,6 +203,7 @@ export class DiffEditor {
    * extends the range from where the comment was started.
    */
   lineClicked(side: Side, line: number, shift: boolean): void {
+    this.lastLine = { path: this.filePath(), line };
     const anchor = this.anchor;
     if (shift && anchor && anchor.side === side && this.draft?.side === side) {
       this.draft = {

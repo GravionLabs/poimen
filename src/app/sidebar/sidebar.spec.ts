@@ -132,6 +132,7 @@ describe("sidebarMenuItems", () => {
       );
     expect(actions("workspace", false)).toEqual([
       "new-terminal",
+      "open-in-editor",
       "pin-space",
       "rename-space",
       "close-space",

@@ -162,6 +162,7 @@
           [title]="title(file)"
           tabindex="-1"
           (click)="changes.select(file.path)"
+          (contextmenu)="openFileMenu($event, file.path)"
           (keydown.enter)="changes.select(file.path)"
         >
           @if (changes.scope() === "uncommitted") {
@@ -222,5 +223,17 @@
   </div>
 }
 @if (mapped().other.length) {
-  <app-findings-panel [items]="mapped().other" (sendFinding)="sendOther($event)" />
+  <app-findings-panel
+    [items]="mapped().other"
+    (sendFinding)="sendOther($event)"
+    (openInEditor)="openFinding($event)"
+  />
+}
+@if (menuAt(); as at) {
+  <app-context-menu
+    [at]="at"
+    [groups]="menuGroups"
+    (picked)="openFile(at.path)"
+    (closed)="menuAt.set(null)"
+  />
 }

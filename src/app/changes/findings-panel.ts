@@ -5,8 +5,11 @@ import {
   Input,
   Output,
   inject,
+  signal,
 } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
+import { ContextMenu } from "../ui/context-menu/context-menu";
+import { plainGroups } from "../ui/context-menu/menu-model";
 import { findingLocation, Findings, type IndexedFinding } from "./findings";
 
 /**
@@ -15,7 +18,7 @@ import { findingLocation, Findings, type IndexedFinding } from "./findings";
  */
 @Component({
   selector: "app-findings-panel",
-  imports: [HxButton],
+  imports: [HxButton, ContextMenu],
   templateUrl: "./findings-panel.html",
   styles: `
     :host {
@@ -67,6 +70,22 @@ export class FindingsPanel {
   // Decorator inputs: the specs run without Angular's compiler transform.
   @Input({ required: true }) items: readonly IndexedFinding[] = [];
   @Output() readonly sendFinding = new EventEmitter<IndexedFinding>();
+  /** "Open in editor" of a finding's context menu (#1002). */
+  @Output() readonly openInEditor = new EventEmitter<IndexedFinding>();
+  protected readonly menuAt = signal<{ item: IndexedFinding; x: number; y: number } | null>(null);
+
+  protected openMenu(event: MouseEvent, item: IndexedFinding): void {
+    if (!item.finding.file) return;
+    event.preventDefault();
+    this.menuAt.set({ item, x: event.clientX, y: event.clientY });
+  }
+
+  protected pick(item: IndexedFinding): void {
+    this.menuAt.set(null);
+    this.openInEditor.emit(item);
+  }
+
+  protected readonly menuGroups = plainGroups([{ id: "open-in-editor", label: "Open in editor" }]);
 
   protected location(item: IndexedFinding): string {
     return findingLocation(item.finding);

@@ -41,6 +41,7 @@ export interface PoimenCommand {
     | "agentsInSpaceOrder"
     | "startTask"
     | "openTerminalHere"
+    | "openInEditor"
     | "cleanupTasks"
     | "projectTeardown"
     | "quitAndStopServer"
@@ -95,6 +96,7 @@ export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
   { id: "showSpaceOverview", title: "Show Space Overview" },
   { id: "startTask", title: "Start task from issue…" },
   { id: "openTerminalHere", title: "Open terminal in the selected folder" },
+  { id: "openInEditor", title: "Open in Editor" },
   { id: "cleanupTasks", title: "Clean up merged tasks" },
   { id: "projectTeardown", title: "Project: Run teardown" },
   { id: "quitAndStopServer", title: "Quit poimen and stop server" },
@@ -191,6 +193,7 @@ export class CommandPalette {
         c.id === "agentsInSpaceOrder" ||
         c.id === "startTask" ||
         c.id === "openTerminalHere" ||
+        c.id === "openInEditor" ||
         c.id === "cleanupTasks" ||
         c.id === "projectTeardown" ||
         c.id === "quitAndStopServer" ||

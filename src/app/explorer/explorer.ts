@@ -11,6 +11,7 @@ import {
 } from "@angular/core";
 import { HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode, HxTreeNodeEvent } from "@gravionlabs/helix-ui";
+import { ExternalEditor } from "../core/external-editor";
 import { EditorTabs } from "../core/editor-tabs";
 import { ExplorerSelection } from "../core/explorer-selection";
 import { PaneActions } from "../core/pane-actions";
@@ -106,6 +107,7 @@ export function spaceDirs(
 })
 export class Explorer {
   private readonly bridge = inject(TauriBridge);
+  private readonly externalEditor = inject(ExternalEditor);
   private readonly ui = inject(UiState);
   private readonly settings = inject(SettingsStore);
   private readonly store = inject(SpacesStore);
@@ -170,6 +172,7 @@ export class Explorer {
     const items: MenuEntry[] = [
       { id: "create-space", label: "Create space here" },
       { id: "open-terminal", label: "Open terminal here" },
+      { id: "open-in-editor", label: "Open in editor" },
     ];
     if (repo === true) {
       items.push(
@@ -190,6 +193,9 @@ export class Explorer {
         return this.createSpace(path);
       case "open-terminal":
         return this.openTerminal(path);
+      case "open-in-editor":
+        this.closeMenu();
+        return void this.externalEditor.open(path);
       case "show-changes":
         return this.showChanges(path);
       case "start-task":
