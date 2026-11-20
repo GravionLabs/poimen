@@ -147,27 +147,79 @@ export function machineTag(m: MachineStatus): MachineTag {
   }
 }
 
+/** What to do about a machine that is not connected: one sentence and, when there is one, the command. */
+export interface MachineHint {
+  text: string;
+  /** The command to run in a terminal (copyable); poimen never runs it. */
+  command: string | null;
+}
+
+const SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
+const quote = (s: string): string => (SAFE_ARG.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+
+/** The host of an ssh target without its `user@` (what `ssh-keygen -R` takes). */
+const hostOf = (target: string): string => target.slice(target.lastIndexOf("@") + 1);
+
 /**
- * What to do about a machine that is not connected, from its state: unreachable, unknown host
- * key, server missing or server incompatible. `null` for a machine that is connected or
- * connecting. The text is advice; poimen runs nothing.
+ * What to do about a machine that is not connected, from its state: a key that needs its
+ * passphrase, an unknown or changed host key, no route, a refused connection, the server missing
+ * or incompatible. `null` for a machine that is connected or connecting. The text is advice and
+ * the command is shown for copying; poimen runs nothing and never asks for a secret.
  */
-export function machineGuidance(m: MachineStatus): string | null {
+export function machineHint(m: MachineStatus): MachineHint | null {
   if (m.state === "incompatible") {
     const older = m.serverProtocol < m.appProtocol;
-    return older
-      ? `The server on ${m.name} is older than this app. Update the server with Update server…, or install the same version by hand, then press Reconnect.`
-      : `The server on ${m.name} is newer than this app. Update poimen, then press Reconnect.`;
+    return {
+      text: older
+        ? `The server on ${m.name} is older than this app. Update the server with Update server…, or install the same version by hand, then press Reconnect.`
+        : `The server on ${m.name} is newer than this app. Update poimen, then press Reconnect.`,
+      command: null,
+    };
   }
   if (m.state !== "offline") return null;
   const e = m.error.toLowerCase();
-  if (e.includes("host key verification failed") || e.includes("host key"))
-    return `The host key of ${m.ssh} is not known or has changed. Run "ssh ${m.ssh}" once in a terminal, check the fingerprint and accept it, then press Reconnect.`;
-  if (serverMissing(m))
-    return `ssh works, but poimen-server is not installed on ${m.name} or not on its PATH. Use Install server…, or install it on the machine by hand, then press Reconnect.`;
+  const target = quote(m.ssh);
+  if (e.includes("remote host identification has changed") || e.includes("offending"))
+    return {
+      text: `The host key of ${m.ssh} has changed; if you expect that, remove the old key, then press Reconnect.`,
+      command: `ssh-keygen -R ${quote(hostOf(m.ssh))}`,
+    };
+  if (e.includes("host key"))
+    return {
+      text: `The host key of ${m.ssh} is not known yet; connect once in a terminal, check the fingerprint and accept it, then press Reconnect.`,
+      command: `ssh ${target}`,
+    };
+  if (e.includes("passphrase"))
+    return {
+      text: `The key for ${m.ssh} needs its passphrase; add it to the ssh agent, then press Reconnect.`,
+      command: "ssh-add",
+    };
   if (e.includes("permission denied"))
-    return `ssh refused the login to ${m.ssh}. poimen needs a key or the agent, no password prompt; check "ssh ${m.ssh}" in a terminal, then press Reconnect.`;
-  return `${m.name} cannot be reached. Check that "ssh ${m.ssh}" works without a prompt (network, VPN, host name), then press Reconnect.`;
+    // With BatchMode an encrypted key that is not in the agent fails as "Permission denied
+    // (publickey)", with no word about the passphrase, so this is the usual fix.
+    return {
+      text: `ssh refused the login to ${m.ssh}; if your key has a passphrase, add it to the ssh agent (poimen never asks for a password), then press Reconnect.`,
+      command: "ssh-add",
+    };
+  if (e.includes("no route to host") || e.includes("network is unreachable"))
+    return {
+      text: `There is no route to ${m.ssh}; check the network or VPN, then press Reconnect.`,
+      command: `ssh -v ${target}`,
+    };
+  if (e.includes("connection refused"))
+    return {
+      text: `${m.ssh} refused the connection; check that sshd runs there and the port is right, then press Reconnect.`,
+      command: `ssh -v ${target}`,
+    };
+  if (serverMissing(m))
+    return {
+      text: `ssh works, but poimen-server is not installed on ${m.name} or not on its PATH. Use Install server…, or install it on the machine by hand, then press Reconnect.`,
+      command: `ssh ${target} 'command -v poimen-server'`,
+    };
+  return {
+    text: `${m.name} cannot be reached. Check that ssh works without a prompt (network, VPN, host name), then press Reconnect.`,
+    command: `ssh ${target}`,
+  };
 }
 
 /** The ssh error of an offline machine says the server binary is not there (not on its PATH). */

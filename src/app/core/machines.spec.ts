@@ -1,6 +1,12 @@
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Machines, checkPassed, parseMachineCheck, parseMachineStatus } from "./machines";
+import {
+  Machines,
+  checkPassed,
+  machineHint,
+  parseMachineCheck,
+  parseMachineStatus,
+} from "./machines";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
@@ -164,5 +170,32 @@ describe("Machines.check", () => {
     tauri.answer("machine_check", () => result);
     await m.check("box");
     expect(m.checks()["box"]).toMatchObject({ checks: [{ id: "git", status: "ok" }] });
+  });
+});
+
+describe("machineHint", () => {
+  const off = (error: string, ssh = "me@box.lan") =>
+    machineHint({ ...box, ssh, state: "offline", error });
+
+  it.each([
+    ["Load key: incorrect passphrase supplied", "ssh-add"],
+    ["me@box.lan: Permission denied (publickey).", "ssh-add"],
+    ["Host key verification failed.", "ssh me@box.lan"],
+    [
+      "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed.",
+      "ssh-keygen -R box.lan",
+    ],
+    ["ssh: connect to host box.lan port 22: No route to host", "ssh -v me@box.lan"],
+    ["ssh: connect to host box.lan port 22: Connection refused", "ssh -v me@box.lan"],
+    ["bash: poimen-server: command not found", "ssh me@box.lan 'command -v poimen-server'"],
+  ])("names the command for %s", (error, command) => {
+    const hint = off(error)!;
+    expect(hint.command).toBe(command);
+    expect(hint.text.length).toBeGreaterThan(10);
+  });
+
+  it("quotes a target with unusual characters and has none for connected", () => {
+    expect(off("Host key verification failed.", "a b")!.command).toBe("ssh 'a b'");
+    expect(machineHint({ ...box, state: "connected", serverVersion: "1" })).toBeNull();
   });
 });

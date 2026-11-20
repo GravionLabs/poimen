@@ -256,6 +256,8 @@ describe("MachinesPage", () => {
     ]);
     expect(el.querySelector(".state")!.textContent).toContain("Host key verification failed");
     expect(el.querySelector(".guidance")!.textContent).toContain("accept it");
+    expect(el.querySelector(".fix")!.textContent).toBe("ssh box");
+    expect(el.querySelector(".hint-copy")).not.toBeNull();
     expect(el.querySelector<HTMLButtonElement>(".check")!.disabled).toBe(true);
   });
 

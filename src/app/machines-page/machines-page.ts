@@ -15,7 +15,7 @@ import {
   Machines,
   checkIcon,
   checkPassed,
-  machineGuidance,
+  machineHint,
   machineTag,
   machineWarnings,
   serverInstallOffer,
@@ -194,7 +194,7 @@ export class MachinesPage {
   protected readonly serverInstall = inject(ServerInstall);
   protected readonly offer = serverInstallOffer;
   protected readonly tag = machineTag;
-  protected readonly guidance = machineGuidance;
+  protected readonly hint = machineHint;
   protected readonly icon = checkIcon;
   /** The key of the fix whose Copy was pressed last, shown as "Copied" for a moment. */
   protected readonly copied = signal<string | null>(null);
