@@ -41,6 +41,7 @@ pub fn resolved(g_output: &str) -> Resolved {
 }
 
 /// The directory facts the check needs (a fake in tests).
+#[cfg_attr(not(unix), allow(dead_code))]
 pub struct DirInfo {
     pub is_dir: bool,
     pub is_symlink: bool,
@@ -49,6 +50,7 @@ pub struct DirInfo {
 }
 
 /// Only the owner may read the directory: a real directory, ours, no bit for group or others.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn check_dir(info: &DirInfo, uid: u32) -> Result<(), String> {
     if info.is_symlink || !info.is_dir {
         return Err("is not a plain directory".into());
