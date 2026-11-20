@@ -5,6 +5,24 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.27.0] — 2026-11-20
+
+### Bug Fixes
+- **server**: Server.json survives a power loss and a damaged file is kept (#967) (#1055)
+- **server**: Server.json survives a power loss and a damaged file is kept (#967)
+- **server**: Refuse to start when a damaged server.json cannot be moved aside (#967)
+- **console**: List doctor in --help and scrub the report in the bundle (#972)
+- **pty-host**: Closing a terminal ends its whole process tree (#968) (#1056)
+- **pty-host**: Closing a terminal ends its whole process tree (#968)
+
+
+### Features
+- **server**: Log file for the server and the PTY hosts (#966) (#1053)
+- **console**: Poimen doctor and a local diagnostics bundle (#972) (#1059)
+- **console**: Poimen doctor and a local diagnostics bundle (#972)
+- **hooks**: Permission requests and failed turns from Claude Code and Copilot CLI (#984) (#1060)
+
+
 ## [0.26.0] — 2026-11-20
 
 ### Bug Fixes
@@ -12,6 +30,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **shell**: Bottom panel lives inside the framed content slot (#930)
 - **sidebar**: Space on inner buttons, fold click keeps the tab stop, headers not selected (#937)
 - **deps**: Renovate config uses the dependencyDashboard object (#1047) (#1048)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.26.0 [skip ci]
 
 
 ### Features
