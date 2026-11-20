@@ -35,6 +35,22 @@ export default tseslint.config(
     },
   },
   {
+    // #1051: product templates live in .html files, so the template rules see every one of them.
+    files: ["src/**/*.ts"],
+    ignores: ["**/*.spec.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "Decorator > CallExpression[callee.name='Component'] > ObjectExpression > Property[key.name='template']",
+          message:
+            "Put the component template in a sibling .html file and use templateUrl (#1051).",
+        },
+      ],
+    },
+  },
+  {
     files: ["**/*.html"],
     extends: [...angular.configs.templateRecommended, ...angular.configs.templateAccessibility],
   },
