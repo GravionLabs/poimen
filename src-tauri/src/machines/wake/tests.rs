@@ -48,7 +48,7 @@ fn config() -> MachineConfig {
 }
 
 /// A machine that has failed its first attempt and now sits in its pause.
-fn offline_machine() -> (Machines, Receiver<u32>) {
+fn offline_machine() -> (Machines, Receiver<u32>, Receiver<()>) {
     let (tx, rx) = channel();
     let link = Mutex::new(Some(Failing {
         attempts: AtomicU32::new(0),
@@ -78,7 +78,7 @@ fn offline_machine() -> (Machines, Receiver<u32>) {
     // The attempt is reported before the state turns `Offline`, and a retry asked for in
     // `Connecting` is dropped, so wait for the state the wake needs.
     assert_eq!(offline.recv_timeout(Duration::from_secs(10)), Ok(()));
-    (machines, rx)
+    (machines, rx, offline)
 }
 
 fn ip(last: u8) -> Option<IpAddr> {
@@ -86,7 +86,7 @@ fn ip(last: u8) -> Option<IpAddr> {
 }
 
 fn retries_after(trigger: Option<Trigger>, expected: Trigger) {
-    let (machines, rx) = offline_machine();
+    let (machines, rx, offline) = offline_machine();
     assert_eq!(trigger, Some(expected));
     reconnect_all(&machines);
     assert_eq!(
@@ -94,7 +94,9 @@ fn retries_after(trigger: Option<Trigger>, expected: Trigger) {
         Ok(2),
         "the machine tries again at once"
     );
-    // And again: the loop never ends for good while the machine is configured.
+    // And again: the loop never ends for good while the machine is configured. The second failure
+    // turns the state `Offline` a moment after it is reported, as the first one did.
+    assert_eq!(offline.recv_timeout(Duration::from_secs(10)), Ok(()));
     reconnect_all(&machines);
     assert_eq!(rx.recv_timeout(Duration::from_secs(10)), Ok(3));
 }
