@@ -2,7 +2,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   Input,
-  ViewChild,
   DestroyRef,
   ElementRef,
   HostListener,
@@ -221,8 +220,12 @@ export class ChangesView {
   private readonly ui = inject(UiState);
   private readonly externalEditor = inject(ExternalEditor);
   /** The line the last click on a line number of the diff picked, and its file (#1002). */
-  @ViewChild(DiffEditor) private diff?: DiffEditor;
-  protected readonly menuAt = signal<{ path: string; x: number; y: number } | null>(null);
+  private lastLine: { path: string; line: number } | null = null;
+  protected readonly menuAt = signal<{
+    path: string;
+    x: number;
+    y: number;
+  } | null>(null);
   protected readonly menuGroups = plainGroups([{ id: "open-in-editor", label: "Open in editor" }]);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The latest `n`/`p` press, handed to the diff as an input (a new object each time). */
@@ -302,6 +305,10 @@ export class ChangesView {
     }
   }
 
+  protected readonly chooseLine = (chosen: { path: string; line: number }): void => {
+    this.lastLine = chosen;
+  };
+
   protected openFileMenu(event: MouseEvent, path: string): void {
     event.preventDefault();
     this.menuAt.set({ path, x: event.clientX, y: event.clientY });
@@ -310,7 +317,7 @@ export class ChangesView {
   /** Opens a changed file in the editor, at the picked line when it is a line of that file. */
   protected openFile(path: string): void {
     this.menuAt.set(null);
-    const chosen = this.diff?.lastLine;
+    const chosen = this.lastLine;
     const line = chosen?.path === path ? chosen.line : undefined;
     void this.externalEditor.open(joinPath(this.path(), path), line === undefined ? {} : { line });
   }

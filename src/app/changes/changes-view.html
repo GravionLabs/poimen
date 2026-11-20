@@ -126,7 +126,6 @@
     result.text
   }}</pre>
 }
-
 @if (findings.invalid(); as error) {
   <p class="findings-note invalid" role="status">
     The findings file is not valid and is ignored: {{ error }}
@@ -135,7 +134,6 @@
 @if (findings.staleNote(); as note) {
   <p class="findings-note stale" role="status">{{ note }}</p>
 }
-
 @if (changes.error(); as error) {
   <p class="problem" role="alert">{{ error }}</p>
 } @else if (changes.loading() && !changes.list()) {
@@ -210,6 +208,7 @@
               [jump]="jump()"
               [comments]="lineComments.forFile(changes.selected() ?? '')"
               [findings]="marks()"
+              [onLineChosen]="chooseLine"
               (findingSent)="sendMark($event.id, $event.quote)"
               (commentAdded)="lineComments.add($event)"
             />
