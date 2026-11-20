@@ -12,11 +12,15 @@
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use poimen_client::Client;
 use poimen_client::agent::{AgentError, PromptResult};
-use poimen_client::protocol::{AgentConfirm, AgentWriteAction, AgentWriteNotice, TerminalCreate};
+use poimen_client::protocol::{
+    AgentConfirm, AgentStatus, AgentWriteAction, AgentWriteNotice, Event, TerminalCreate,
+    TranscriptState,
+};
 use poimen_core::agent_events::{self, MAX_EVENTS_BYTES, Reducer};
 use poimen_core::{git, harness, settings};
 use serde_json::{Value, json};
@@ -29,6 +33,10 @@ pub const CONFIRM_WAIT: Duration = Duration::from_secs(60);
 
 /// How long `start_agent` waits for the agent's first report.
 const START_WAIT: Duration = Duration::from_secs(30);
+
+/// How long `wait_agent` waits when the caller gives no `timeout_s`, and the longest it waits.
+const WAIT_DEFAULT_S: f64 = 300.0;
+const WAIT_MAX_S: f64 = 3600.0;
 
 /// What the process knows about its caller and its machine.
 pub struct Env<'a> {
@@ -187,6 +195,21 @@ fn tools() -> Value {
                 "text": {"type": "string", "description": "The prompt."}
             }, "required": ["terminal", "text"]},
         },
+        {
+            "name": "wait_agent",
+            "description": "Waits until the agent of a terminal is done, blocked, in error or gone, or the timeout passed. Returns the status and, when blocked, the notification text. A read tool: any space, no confirmation. Uses the server's events, no polling.",
+            "inputSchema": {"type": "object", "properties": {
+                "terminal": {"type": "string", "description": "Terminal id."},
+                "timeout_s": {"type": "number", "description": "Seconds to wait (default 300, at most 3600). On timeout the current status is returned with timed_out true."}
+            }, "required": ["terminal"]},
+        },
+        {
+            "name": "read_agent",
+            "description": "The last assistant message of the agent's transcript in a terminal (Claude Code and Copilot CLI), with the session id. An error when the terminal has no agent transcript. A read tool: any space, no confirmation.",
+            "inputSchema": {"type": "object", "properties": {
+                "terminal": {"type": "string", "description": "Terminal id."}
+            }, "required": ["terminal"]},
+        },
     ])
 }
 
@@ -245,6 +268,8 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
         }
         "start_agent" => start_agent(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
+        "wait_agent" => wait_agent(client, args),
+        "read_agent" => read_agent(client, args),
         _ => Err(Fail::Unknown),
     }
 }
@@ -486,6 +511,157 @@ fn prompt_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail>
         PromptResult::NoAgent => Err(Fail::Tool(
             "refused: no agent reported in that terminal".into(),
         )),
+    }
+}
+
+/// The agent status a wait ends on: the agent finished a turn, needs the user, failed or ended.
+fn is_final(status: AgentStatus) -> bool {
+    matches!(
+        status,
+        AgentStatus::Done | AgentStatus::Blocked | AgentStatus::Error | AgentStatus::Gone
+    )
+}
+
+fn wait_result(terminal: &str, status: &str, message: Option<&str>, timed_out: bool) -> Value {
+    let mut v = json!({"terminal": terminal, "status": status, "timed_out": timed_out});
+    if let (Some(m), Some(o)) = (message, v.as_object_mut()) {
+        o.insert("message".into(), json!(m));
+    }
+    v
+}
+
+/// The status and blocked message of the agent of `terminal` now; `None` for an unknown terminal.
+fn agent_now(client: &Client, terminal: &str) -> Result<Option<(String, Option<String>)>, Fail> {
+    let terminals = client.list_terminals(None).map_err(server_error)?;
+    let Some(t) = terminals.iter().find(|t| t.id == terminal) else {
+        return Ok(None);
+    };
+    Ok(Some(match &t.agent {
+        Some(a) => {
+            let status = serde_json::to_value(a.status).unwrap_or_default();
+            (
+                status.as_str().unwrap_or("idle").to_owned(),
+                a.message
+                    .clone()
+                    .filter(|_| a.status == AgentStatus::Blocked),
+            )
+        }
+        None => ("gone".to_owned(), None),
+    }))
+}
+
+/// `wait_agent {terminal, timeout_s?}`: returns when the agent is done, blocked, in error or gone
+/// (also: the terminal is closed or its process ended), or at the timeout. It subscribes to the
+/// server's events before it reads the status, so no change is missed, and never polls.
+fn wait_agent(client: &Client, args: &Value) -> Result<Value, Fail> {
+    let terminal = text_arg(args, "terminal")
+        .ok_or_else(|| Fail::Tool("missing argument `terminal`".into()))?;
+    let seconds = args
+        .get("timeout_s")
+        .and_then(Value::as_f64)
+        .filter(|s| s.is_finite() && *s >= 0.0)
+        .unwrap_or(WAIT_DEFAULT_S)
+        .min(WAIT_MAX_S);
+    let deadline = Instant::now() + Duration::from_secs_f64(seconds);
+    let stream = client.subscribe().map_err(server_error)?;
+    let Some((status, message)) = agent_now(client, terminal)? else {
+        return Err(Fail::Tool(format!("terminal {terminal} not found")));
+    };
+    let mut last = (status, message);
+    if matches!(last.0.as_str(), "done" | "blocked" | "error" | "gone") {
+        return Ok(wait_result(terminal, &last.0, last.1.as_deref(), false));
+    }
+    // The stream blocks in a thread of its own so the wait can end at the deadline; the thread
+    // ends at the next event after that (or when the process does).
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for event in stream {
+            if tx.send(event).is_err() {
+                break;
+            }
+        }
+    });
+    let id = terminal.to_owned();
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let event = match rx.recv_timeout(left) {
+            Ok(Ok(event)) => event,
+            Ok(Err(e)) => return Err(server_error(e)),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Ok(wait_result(terminal, &last.0, last.1.as_deref(), true));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(Fail::Tool("poimen-server: the event stream ended".into()));
+            }
+        };
+        match event {
+            Event::AgentStatusChanged {
+                terminal_id,
+                status,
+                message,
+                ..
+            } if terminal_id == id => {
+                let name = serde_json::to_value(status).unwrap_or_default();
+                let name = name.as_str().unwrap_or("idle").to_owned();
+                let message = message.filter(|_| status == AgentStatus::Blocked);
+                if is_final(status) {
+                    return Ok(wait_result(terminal, &name, message.as_deref(), false));
+                }
+                last = (name, message);
+            }
+            Event::TerminalClosed { terminal_id, .. }
+            | Event::TerminalExited { terminal_id, .. }
+                if terminal_id == id =>
+            {
+                return Ok(wait_result(terminal, "gone", None, false));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `read_agent {terminal}`: the last assistant message of the agent's transcript, read by the
+/// server of the terminal (`agent.transcript`), so it works for a remote machine too.
+fn read_agent(client: &Client, args: &Value) -> Result<Value, Fail> {
+    let terminal = text_arg(args, "terminal")
+        .ok_or_else(|| Fail::Tool("missing argument `terminal`".into()))?;
+    let known = client.list_terminals(None).map_err(server_error)?;
+    if !known.iter().any(|t| t.id == terminal) {
+        return Err(Fail::Tool(format!("terminal {terminal} not found")));
+    }
+    // One reader per terminal and process; `restart` makes every answer start at the beginning.
+    let follower = format!("mcp-{}", std::process::id());
+    let answer = client
+        .agent_transcript(terminal, &follower, true)
+        .map_err(server_error)?;
+    match answer.state {
+        TranscriptState::Ok => {
+            let last = answer.updates.iter().rev().find_map(|u| {
+                (u.get("kind").and_then(Value::as_str) == Some("main"))
+                    .then(|| u.get("last_message").and_then(Value::as_str))
+                    .flatten()
+            });
+            match last {
+                Some(message) => Ok(json!({
+                    "terminal": terminal,
+                    "session": answer.session,
+                    "message": message,
+                })),
+                None => Err(Fail::Tool(
+                    "the agent's transcript has no assistant message yet".into(),
+                )),
+            }
+        }
+        TranscriptState::NoAgent => Err(Fail::Tool(format!(
+            "terminal {terminal} has no agent with a readable transcript (Claude Code or Copilot CLI with poimen hooks reporting a session)"
+        ))),
+        TranscriptState::Missing => Err(Fail::Tool(
+            "the agent's transcript file is not there yet; try again later".into(),
+        )),
+        TranscriptState::Unreadable => Err(Fail::Tool(format!(
+            "the agent's transcript cannot be read: {}",
+            answer.reason.unwrap_or_default()
+        ))),
     }
 }
 
