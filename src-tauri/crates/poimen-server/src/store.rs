@@ -73,6 +73,9 @@ pub(crate) struct StoredTerminal {
     /// The agent was hibernated (ADR 0014, #903); it survives a restart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) hibernated: Option<poimen_protocol::Hibernated>,
+    /// The terminal whose agent started this one (#982); survives a restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) started_by: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) tokens: Vec<StoredToken>,
 }
@@ -511,6 +514,7 @@ mod tests {
                 session_id: "abc".into(),
                 since: 1_700_000_100_000,
             }),
+            started_by: Some("t0".into()),
             tokens: vec![StoredToken {
                 name: "deliver_step".into(),
                 value: "review".into(),

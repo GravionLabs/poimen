@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from "@angular/core";
-import { agentKind, paneDir, type AgentStatus, type Terminal } from "../core/snapshot";
+import { agentKind, paneDir, rowName, type AgentStatus, type Terminal } from "../core/snapshot";
+import { starterOf } from "../core/started-by";
 import { SpacesStore } from "../core/spaces-store";
 import { Machines } from "../core/machines";
 import { TaskStarter } from "../core/task-start";
@@ -150,6 +151,21 @@ export class Deliver {
       return windowTotals(mine, from, to);
     };
   });
+
+  /**
+   * The agent that started the terminal of a run through `start_agent` (#982): its name, with
+   * its space when the run's own space is another. Empty without a link or when it is gone.
+   */
+  starterOf(card: DeliverCard): string | undefined {
+    if (card.state.kind !== "ok") return undefined;
+    const id = card.state.status.host["poimen.terminal"];
+    const { terminals, spaces } = this.store.all();
+    const pane = id ? terminals.find((t) => t.terminal_id === id) : undefined;
+    const starter = pane ? starterOf(terminals, pane) : undefined;
+    if (!starter) return undefined;
+    const space = spaces.find((s) => s.space_id === starter.space_id)?.label;
+    return space ? `${rowName(starter)} (${space})` : rowName(starter);
+  }
 
   private watchedKey: string | undefined;
   private listening: Promise<Unlisten> | undefined;

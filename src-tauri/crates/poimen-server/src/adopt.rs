@@ -124,6 +124,7 @@ fn adopted(
             host_bundled_version: Some(host_bundled_version()),
             records: view,
             hibernated: t.hibernated,
+            started_by: t.started_by,
         },
         host: Some(handle),
         stream,

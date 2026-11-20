@@ -419,6 +419,11 @@ fn start_agent_in_the_own_space_and_in_another_with_approval() {
     );
     assert_eq!(r["isError"], Value::Null, "{r}");
     assert_eq!(r["structuredContent"]["space"], f.own_space.as_str());
+    let started = f.client.list_terminals(None).unwrap();
+    let helper = started.iter().find(|t| t.name == "helper").unwrap();
+    assert_eq!(helper.started_by.as_deref(), Some(f.caller.as_str()));
+    let caller = started.iter().find(|t| t.id == f.caller).unwrap();
+    assert_eq!(caller.started_by, None);
 
     let answered = answer_next(&f.client, rx, true);
     agent_appears(&f.client, Some(&f.other_space), "remote-helper");

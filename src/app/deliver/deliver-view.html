@@ -324,6 +324,9 @@
         @if (tokens(run); as tk) {
           · <span data-testid="run-tokens" [attr.title]="tk.tip">{{ tk.text }}</span>
         }
+        @if (deliver.starterOf(run.card); as by) {
+          · <span data-testid="run-started-by">started by {{ by }}</span>
+        }
       </p>
     }
 
@@ -394,6 +397,9 @@
                 <span class="outcome" data-testid="outcome">{{ tl.outcome }}</span>
                 @if (tokens(r); as tk) {
                   <span class="hint" data-testid="tokens" [attr.title]="tk.tip">{{ tk.text }}</span>
+                }
+                @if (deliver.starterOf(r.card); as by) {
+                  <span class="hint" data-testid="started-by">started by {{ by }}</span>
                 }
               </button>
               @for (l of tl.prs; track l.url) {

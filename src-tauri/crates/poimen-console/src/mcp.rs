@@ -458,6 +458,7 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
         .create_terminal(&TerminalCreate {
             space_id: space_id.clone(),
             name: Some(text_arg(args, "name").unwrap_or(id).to_owned()),
+            started_by: env.terminal_id.map(str::to_owned),
             ..Default::default()
         })
         .map_err(|e| {
