@@ -540,6 +540,20 @@
                 afterwards; running terminals keep their environment. Inside Claude Code,
                 <code>/tui default</code> is the alternative.
               </p>
+              <label class="check" [class.hit]="hit('Keep the machine awake')">
+                <input
+                  hx-checkbox
+                  type="checkbox"
+                  role="switch"
+                  [checked]="settings().keepAwake"
+                  (change)="setKeepAwake($event)"
+                />
+                Keep the machine awake while agents work
+              </label>
+              <p class="hint">
+                The server holds a sleep inhibitor while an agent is working or a run is running,
+                and lets go a minute after the last one stopped. It works with the app closed.
+              </p>
               <h3>Supported agents</h3>
               <table class="grid agent-kinds" aria-label="Supported agents">
                 <thead>

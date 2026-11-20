@@ -46,6 +46,16 @@
   >
     {{ waiting() }} waiting
   </hx-status-item>
+  @if (awake()) {
+    <hx-status-item
+      slot="start"
+      class="awake"
+      data-testid="awake"
+      title="The machine is kept awake while agents work (Settings, Agents)"
+    >
+      awake
+    </hx-status-item>
+  }
   @if (!panelOpen()) {
     <hx-status-item
       slot="start"

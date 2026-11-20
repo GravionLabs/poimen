@@ -1,6 +1,7 @@
 use poimen_core::agent_actions;
 use poimen_core::{copilot, transcripts};
 mod agent_session;
+mod agent_settings;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
@@ -2102,14 +2103,6 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
-/// Writes only `agents.claude.classicRenderer`; the settings watcher emits the change and applies
-/// it to the backend for terminals created afterwards.
-#[tauri::command]
-fn set_claude_classic_renderer(on: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_claude_classic_renderer(&home, on)
-}
-
 /// Writes only `sounds.<kind>` (`blocked` or `done`: `false`, `true` or a file path).
 #[tauri::command]
 fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
@@ -3021,7 +3014,8 @@ pub fn run() {
             set_sidebar_agents,
             set_explorer_roots,
             set_explorer_show_hidden,
-            set_claude_classic_renderer,
+            agent_settings::set_claude_classic_renderer,
+            agent_settings::set_keep_awake,
             set_sound,
             sound_file,
             paste_image,

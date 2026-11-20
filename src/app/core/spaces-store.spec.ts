@@ -209,6 +209,18 @@ describe("SpacesStore", () => {
     expect(tauri.calls("snapshot")).toHaveLength(1);
   });
 
+  it("follows server.awake_changed and forgets it when the server goes", async () => {
+    await store.start();
+    expect(store.awake()).toBe(false);
+    tauri.emit("backend", { kind: "server.awake_changed", data: { awake: true } });
+    expect(store.awake()).toBe(true);
+    tauri.emit("backend", { kind: "server.awake_changed", data: { awake: false } });
+    expect(store.awake()).toBe(false);
+    tauri.emit("backend", { kind: "server.awake_changed", data: { awake: true } });
+    tauri.emit("backend", { kind: "poimen.disconnected", data: { reason: "gone" } });
+    expect(store.awake()).toBe(false);
+  });
+
   it("reports a failed re-read as not reachable and keeps the last snapshot", async () => {
     await store.start();
     tauri.answer("snapshot", () => {

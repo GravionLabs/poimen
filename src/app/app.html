@@ -78,6 +78,7 @@
     slot="status"
     [connection]="store.connection()"
     [waiting]="store.waiting()"
+    [awake]="store.awake()"
     [paneId]="activePaneId()"
     [mode]="activePaneId() ? editor.mode(activePaneId()!) : null"
     [blocked]="activePaneId() ? editor.blocked(activePaneId()!) : null"

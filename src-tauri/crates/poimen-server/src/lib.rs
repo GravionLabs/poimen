@@ -9,6 +9,7 @@
 //! drops the leaves whose terminal did not come back.
 
 mod adopt;
+mod awake;
 pub mod check;
 pub mod claude;
 mod confirm;
@@ -372,6 +373,8 @@ pub(crate) struct Shared {
     state_file: PathBuf,
     scrollback: usize,
     home: Option<PathBuf>,
+    /// The sleep inhibitor of `agents.keepAwake` (#987).
+    awake: Mutex<awake::Awake>,
     /// `agents.silentAfter` in minutes with the time it was read (#898).
     silent_after: Mutex<Option<(Instant, u64)>>,
     pty_host: PtyHost,
@@ -424,6 +427,7 @@ impl Shared {
                 let _ = tx.send(event);
             }
         }
+        self.announce_awake(&tx);
         let mut subs = lock(&self.subscribers);
         let event = Event::ServerClientsChanged {
             clients: {
@@ -806,6 +810,7 @@ impl Server {
             state_file: config.state_file,
             scrollback: config.scrollback,
             home: config.home,
+            awake: Mutex::default(),
             silent_after: Mutex::new(None),
             pty_host: config.pty_host,
             gh: RwLock::new(Arc::new(repos::SystemGh)),
@@ -866,22 +871,6 @@ impl Server {
         *self.shared.gh.write().unwrap_or_else(|e| e.into_inner()) = gh;
     }
 
-    /// How long a resumed agent has to report before the resume counts as failed (default 30 s).
-    pub fn set_resume_timeout(&self, timeout: Duration) {
-        let ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
-        self.shared
-            .resume_timeout_ms
-            .store(ms, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// One pass of the hibernation sweeper at the given time in milliseconds (ADR 0014, #903);
-    /// `serve` runs it on a timer, tests call this with a clock of their own. Take it before
-    /// `serve`, which consumes the server.
-    pub fn hibernate_sweeper(&self) -> impl Fn(u64) + Send + Sync + 'static {
-        let shared = Arc::clone(&self.shared);
-        move |now_ms| shared.hibernate_sweep(now_ms)
-    }
-
     /// Accepts connections forever, one thread each.
     pub fn serve(self) {
         let shared = Arc::clone(&self.shared);
@@ -899,6 +888,7 @@ impl Server {
                 hibernation.hibernate_sweep(now_millis());
             }
         });
+        awake::spawn_sweeper(&self.shared);
         let runs = Arc::clone(&self.shared);
         thread::spawn(move || {
             loop {
