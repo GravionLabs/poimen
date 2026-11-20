@@ -48,26 +48,37 @@ fn config() -> MachineConfig {
 }
 
 /// A machine that has failed its first attempt and now sits in its pause.
-fn offline_machine() -> (Machines, Receiver<u32>) {
+fn offline_machine() -> (Machines, Receiver<u32>, Receiver<()>) {
     let (tx, rx) = channel();
     let link = Mutex::new(Some(Failing {
         attempts: AtomicU32::new(0),
         tx: Mutex::new(tx),
     }));
+    let (went_offline, offline) = channel();
+    let went_offline = Mutex::new(went_offline);
     let machines = Machines::default();
     machines.sync(&[config()], |c| {
+        let went_offline = went_offline.lock().unwrap().clone();
+        let went_offline = Mutex::new(went_offline);
         Machine::start_with(
             c.clone(),
             Arc::new(NoConnector),
             Arc::new(UntilWoken),
-            |_| {},
+            move |status| {
+                if matches!(status.state, State::Offline { .. }) {
+                    let _ = lock(&went_offline).send(());
+                }
+            },
             |_| {},
             |_| Box::new(lock(&link).take().unwrap()),
         )
     });
     // The failed attempt is the first signal; the second only comes from a wake.
     assert_eq!(rx.recv_timeout(Duration::from_secs(10)), Ok(1));
-    (machines, rx)
+    // The attempt is reported before the state turns `Offline`, and a retry asked for in
+    // `Connecting` is dropped, so wait for the state the wake needs.
+    assert_eq!(offline.recv_timeout(Duration::from_secs(10)), Ok(()));
+    (machines, rx, offline)
 }
 
 fn ip(last: u8) -> Option<IpAddr> {
@@ -75,7 +86,7 @@ fn ip(last: u8) -> Option<IpAddr> {
 }
 
 fn retries_after(trigger: Option<Trigger>, expected: Trigger) {
-    let (machines, rx) = offline_machine();
+    let (machines, rx, offline) = offline_machine();
     assert_eq!(trigger, Some(expected));
     reconnect_all(&machines);
     assert_eq!(
@@ -83,7 +94,9 @@ fn retries_after(trigger: Option<Trigger>, expected: Trigger) {
         Ok(2),
         "the machine tries again at once"
     );
-    // And again: the loop never ends for good while the machine is configured.
+    // And again: the loop never ends for good while the machine is configured. The second failure
+    // turns the state `Offline` a moment after it is reported, as the first one did.
+    assert_eq!(offline.recv_timeout(Duration::from_secs(10)), Ok(()));
     reconnect_all(&machines);
     assert_eq!(rx.recv_timeout(Duration::from_secs(10)), Ok(3));
 }
