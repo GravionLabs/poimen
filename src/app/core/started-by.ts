@@ -6,9 +6,14 @@ import { qualifyId, rowName, type SpaceNode, type Snapshot, type Terminal } from
  * `undefined` when it was started by nobody or the starter is gone.
  */
 export function starterOf(terminals: readonly Terminal[], pane: Terminal): Terminal | undefined {
+  const id = starterId(pane);
+  return id ? terminals.find((t) => t.terminal_id === id) : undefined;
+}
+
+/** The (machine-qualified) id of the terminal that started `pane`. */
+export function starterId(pane: Terminal): string | undefined {
   if (!pane.started_by) return undefined;
-  const id = pane.machine ? qualifyId(pane.machine, pane.started_by) : pane.started_by;
-  return terminals.find((t) => t.terminal_id === id);
+  return pane.machine ? qualifyId(pane.machine, pane.started_by) : pane.started_by;
 }
 
 /** `name (space)` of the terminal that started `pane`, when it sits in another space. */

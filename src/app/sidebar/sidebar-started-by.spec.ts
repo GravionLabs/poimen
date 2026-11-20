@@ -74,6 +74,15 @@ describe("agents started by another agent (#982)", () => {
     expect(keys(node.children!)).toEqual(["a", "b", "c"]);
   });
 
+  it("nests a remote agent below its starter (ids qualified by machine)", () => {
+    const s = snapshot([
+      pane("m::lead", "s1", { machine: "m" }),
+      pane("m::helper", "s1", { machine: "m", started_by: "lead" }),
+    ]);
+    const [node] = spaceNodes(buildSpaces(s, new Map()));
+    expect(keys(node.children!)).toEqual([["m::lead", ["m::helper"]]]);
+  });
+
   it("qualifies the starter of a remote terminal with its machine", () => {
     const remote = pane("m::helper", "m::s1", { started_by: "lead", machine: "m" });
     const lead = pane("m::lead", "m::s1", { machine: "m" });
