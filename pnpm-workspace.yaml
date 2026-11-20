@@ -57,6 +57,5 @@ minimumReleaseAgeExclude:
   - "immutable@5.2.1"
   - "jsdom@31.0.1"
   - "node-releases@2.0.64"
-  - "prettier@3.10.1"
   - "tldts-core@7.5.2"
   - "tldts@7.5.2"

@@ -529,7 +529,7 @@ describe("Stage, commit and push", () => {
   it("stages a file through its checkbox and shows it staged after the refresh", async () => {
     const f = await renderUncommitted();
     tauri.answer("changes_stage", (args) => {
-      for (const p of args?.["paths"] as string[]) staged.add(p);
+      for (const p of args!["paths"] as string[]) staged.add(p);
     });
     expect(box(f, "Stage src/a.ts").checked).toBe(false);
     box(f, "Stage src/a.ts").click();

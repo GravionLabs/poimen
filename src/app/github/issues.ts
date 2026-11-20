@@ -42,9 +42,9 @@ export interface Issue {
   prs: LinkedPr[];
 }
 
-export type RepoIssues = { root: string; repo: string } & (
-  { status: "ok"; issues: Issue[]; truncated: boolean } | { status: "error"; error: GhError }
-);
+export type RepoIssues = { root: string; repo: string } & (IssuesLoaded | IssuesFailed);
+type IssuesLoaded = { status: "ok"; issues: Issue[]; truncated: boolean };
+type IssuesFailed = { status: "error"; error: GhError };
 
 export type Level = "epic" | "feature" | "pbi" | "bug" | "other";
 

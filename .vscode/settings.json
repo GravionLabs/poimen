@@ -1,0 +1,6 @@
+{
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "[rust]": { "editor.defaultFormatter": "rust-lang.rust-analyzer" },
+  "oxc.enable": true,
+  "oxc.configPath": ".oxlintrc.json"
+}

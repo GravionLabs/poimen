@@ -43,7 +43,7 @@ jobs:
             printf '%s\n' frontend=true rust=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          frontend='^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|angular\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|vitest\.[^/]*|\.prettier[^/]*|src/.*|\.github/workflows/ci\.yml)$'
+          frontend='^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|angular\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|\.oxlintrc\.json|\.oxfmtrc\.json|scripts/lint/.*|vitest\.[^/]*|src/.*|\.github/workflows/ci\.yml)$'
           rust='^(rust-toolchain\.toml|package\.json|src-tauri/.*|src/app/deliver/fixtures/.*|\.github/workflows/ci\.yml)$'
           git diff --name-only "$BASE_SHA" HEAD > changed.txt
           cat changed.txt
