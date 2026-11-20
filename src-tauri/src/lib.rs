@@ -7,6 +7,7 @@ mod backend;
 mod backend_fake;
 mod changes;
 mod changes_git;
+mod commit_message;
 mod deliver;
 use poimen_core::git;
 mod git_sync;
@@ -2264,34 +2265,6 @@ async fn changes_findings(dir: String) -> Result<changes::FindingsResult, String
         .map_err(|e| e.to_string())?
 }
 
-/// Stages (`stage: true`) or unstages the repository-relative `paths` of the worktree `dir`.
-#[tauri::command]
-async fn changes_stage(dir: String, paths: Vec<String>, stage: bool) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        changes_git::stage(&dir, &paths, stage, home_dir().as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Commits the staged changes of the worktree `dir` with `message`.
-#[tauri::command]
-async fn changes_commit(dir: String, message: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        changes_git::commit(&dir, &message, home_dir().as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Pushes the current branch of the worktree `dir` (never forced, refused on protected branches).
-#[tauri::command]
-async fn changes_push(dir: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || changes_git::push(&dir, home_dir().as_deref()))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
 /// `git fetch --prune` of the repository containing `dir`.
 #[tauri::command]
 async fn git_fetch(dir: String) -> Result<git_sync::Outcome, String> {
@@ -2994,9 +2967,11 @@ pub fn run() {
             changes_file,
             changes_write_comments,
             changes_findings,
-            changes_stage,
-            changes_commit,
-            changes_push,
+            changes_git::changes_stage,
+            changes_git::changes_commit,
+            changes_git::changes_push,
+            commit_message::changes_generate_message,
+            commit_message::changes_generate_cancel,
             git_fetch,
             git_pull,
             git_fetch_all,

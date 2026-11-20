@@ -6,6 +6,7 @@ import {
   nextTheme,
   defaultTerminalFontFamily,
   defaultTerminalFontSize,
+  parseHarnesses,
   parseSettings,
   parseTaskModes,
   windowsPtyOption,
@@ -453,5 +454,13 @@ describe("platform terminal font defaults", () => {
   it("a configured size wins over the platform default", () => {
     expect(parseSettings({ fontSize: 16 }).fontSize).toBe(16);
     expect(parseSettings({ fontFamily: "Hack" }).fontFamily).toBe("Hack");
+  });
+});
+
+describe("parseHarnesses printArgs", () => {
+  it("reads the headless arguments and defaults to none", () => {
+    const [a, b] = parseHarnesses([{ id: "a", printArgs: ["-p", "{prompt}", 1] }, { id: "b" }]);
+    expect(a.printArgs).toEqual(["-p", "{prompt}"]);
+    expect(b.printArgs).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import { Injectable, computed, effect, inject, signal, untracked } from "@angular/core";
 import { Attention } from "../core/attention";
+import { parseHarnesses } from "../core/settings";
 import { SpacesStore } from "../core/spaces-store";
 import { paneDir } from "../core/snapshot";
 import { TauriBridge } from "../core/tauri";
@@ -119,6 +120,13 @@ export class Changes {
   readonly canCommit = computed(
     () => !this.busy() && this.stagedCount() > 0 && this.commitMessage().trim() !== "",
   );
+  /** The harness that drafts commit messages (first available with `printArgs`); none hides the button. */
+  readonly messageHarness = signal<string | null>(null);
+  /** A commit message is being generated. */
+  readonly generating = signal(false);
+  private generation = 0;
+  private currentGeneration: string | null = null;
+
   readonly selectedFile = computed(() => this.files().find((f) => f.path === this.selected()));
 
   private listRun = 0;
@@ -142,9 +150,67 @@ export class Changes {
     });
   }
 
+  /** Reads which harness can draft a commit message (`printArgs`, program found). */
+  async loadMessageHarness(): Promise<void> {
+    try {
+      const harnesses = parseHarnesses(await this.bridge.invoke<unknown>("get_harnesses"));
+      const found = harnesses.find(
+        (h) => h.available && h.printArgs.some((a) => a.includes("{prompt}")),
+      );
+      this.messageHarness.set(found?.id ?? null);
+    } catch {
+      this.messageHarness.set(null);
+    }
+  }
+
+  /**
+   * Drafts a commit message from the staged diff into the box. Never commits; an error or a
+   * cancel leaves the box as it was and the error is shown.
+   */
+  async generateMessage(): Promise<void> {
+    const harness = this.messageHarness();
+    if (!harness || this.generating() || this.busy() || this.stagedCount() === 0) return;
+    const id = `commit-message-${++this.generation}`;
+    this.generating.set(true);
+    this.currentGeneration = id;
+    try {
+      const text = await this.bridge.invoke<string>("changes_generate_message", {
+        dir: this.dir(),
+        harness,
+        id,
+      });
+      if (this.currentGeneration !== id) return;
+      this.commitMessage.set(text);
+      this.actionResult.set(null);
+    } catch (error) {
+      if (this.currentGeneration !== id) return;
+      this.actionResult.set({ ok: false, text: String(error) });
+    } finally {
+      if (this.currentGeneration === id) {
+        this.generating.set(false);
+        this.currentGeneration = null;
+      }
+    }
+  }
+
+  /** Stops the running generation; the box stays as it was. */
+  async cancelGenerate(): Promise<void> {
+    const id = this.currentGeneration;
+    if (!id) return;
+    this.currentGeneration = null;
+    this.generating.set(false);
+    try {
+      await this.bridge.invoke("changes_generate_cancel", { id });
+    } catch {
+      // The call ends by its own deadline.
+    }
+  }
+
   /** Starts following `dir` (the tab's directory) and reads it. */
   follow(dir: string): Promise<void> {
+    if (this.dir() !== dir) void this.cancelGenerate();
     this.dir.set(dir);
+    void this.loadMessageHarness();
     return this.refresh();
   }
 

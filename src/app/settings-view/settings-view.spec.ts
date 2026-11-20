@@ -620,7 +620,7 @@ describe("parseHarnesses", () => {
         null,
         { id: "b" },
       ]),
-    ).toEqual([
+    ).toMatchObject([
       {
         id: "a",
         command: ["a", "x"],
