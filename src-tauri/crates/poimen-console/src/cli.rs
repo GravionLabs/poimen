@@ -13,6 +13,8 @@ pub const USAGE: &str = "usage: poimen [<command>]\n\
   send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)\n\
   prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked\n\
   mcp                                 a stdio MCP server with read-only tools for agents\n\
+  doctor [--json] [--bundle <file>]   checks console, server, PTY host, state, agent hooks, tools;\n\
+                                      --bundle writes a local diagnostics file (never uploaded)\n\
   -V, --version                       prints the version\n\
   attach [--control [--takeover]] <terminal>\n\
                                       shows a terminal; observes by default, --control sends your\n\

@@ -147,7 +147,12 @@ pub fn build(inputs: &Inputs, state_file: &Path, hosts: &Path, home: Option<&Pat
         .collect();
     json!({
         "bundle": 1,
-        "report": report(inputs, false).to_json(),
+        "report": serde_json::from_str::<Value>(&scrub(
+            &report(inputs, false).to_json().to_string(),
+            dir,
+            home,
+        ))
+        .unwrap_or(Value::Null),
         "state": state,
         "logs": {
             "server.log": log(&dir.join("server.log"), dir, home),
