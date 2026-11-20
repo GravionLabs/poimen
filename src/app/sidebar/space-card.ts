@@ -90,7 +90,8 @@ export function middleParts(text: string): { head: string; tail: string } {
 
 /** Where a space runs, as the card shows it. */
 export interface SpaceOrigin {
-  kind: "computer" | "machine";
+  /** A directory on this computer, or a machine; later kinds get their own icon. */
+  kind: "directory" | "machine";
   label: string;
   tip: string;
   color: number | null;
@@ -253,14 +254,12 @@ export class SpaceCard {
   protected readonly origin = computed<SpaceOrigin | null>(() => {
     const machine = splitId(this.id()).machine;
     if (machine === undefined) {
-      return this.machines.machines().length === 0
-        ? null
-        : {
-            kind: "computer",
-            label: "This computer",
-            tip: "This computer",
-            color: null,
-          };
+      return {
+        kind: "directory",
+        label: "This computer",
+        tip: "This computer",
+        color: null,
+      };
     }
     const label = `Machine ${machine}`;
     return {
@@ -273,7 +272,10 @@ export class SpaceCard {
   /** The accessible name of the card: the label, then where it runs. */
   protected readonly cardName = computed(() => {
     const origin = this.origin();
-    return origin ? `${this.label()}, ${origin.label}` : this.label();
+    // Where it runs is told only when there is more than this computer.
+    return origin && (origin.kind === "machine" || this.machines.machines().length > 0)
+      ? `${this.label()}, ${origin.label}`
+      : this.label();
   });
   /** The card holds the open terminal: its actions stay visible. */
   protected readonly chosen = computed(() => {

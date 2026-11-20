@@ -93,18 +93,15 @@
   color: var(--h-primary-color);
 }
 
-.details-toggle .chevron {
+/* An info mark, not a chevron (that is the card's own fold): filled while the details are shown. */
+.details-icon {
   display: block;
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid currentcolor;
-  border-bottom: 1.5px solid currentcolor;
-  transform: rotate(-45deg);
-  transition: transform 120ms;
+  border-radius: 50%;
+  transition: background-color 120ms;
 }
 
-.details-toggle .chevron.open {
-  transform: rotate(45deg) translate(-1px, -1px);
+.details-icon.open {
+  background: color-mix(in srgb, var(--h-primary-color) 28%, transparent);
 }
 
 .branch,

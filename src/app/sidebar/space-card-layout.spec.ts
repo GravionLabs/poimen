@@ -80,6 +80,22 @@ describe("space card layout styles (#1085)", () => {
     expect(html.indexOf('class="details-toggle"')).toBeLessThan(html.indexOf('class="dir"'));
   });
 
+  it("has the origin icon first and the fold chevron last in the header", () => {
+    const head = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    expect(head.indexOf('class="origin-mark"')).toBeGreaterThan(-1);
+    expect(head.indexOf('class="origin-mark"')).toBeLessThan(head.indexOf('class="title"'));
+    expect(head.indexOf('class="actions"')).toBeLessThan(head.indexOf('class="fold"'));
+  });
+
+  it("marks the details toggle with an info icon, not a chevron", () => {
+    const toggle = html.slice(
+      html.indexOf('class="details-toggle"'),
+      html.indexOf("</button>", html.indexOf('class="details-toggle"')),
+    );
+    expect(toggle).toContain("details-icon");
+    expect(toggle).not.toContain("chevron");
+  });
+
   it("makes every chip small, a pull request chip too, without a leading dot", () => {
     const chips = /\.chips \.text,\s*\.chips \.pr-link \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(chips).toMatch(/min-height:\s*0/);
