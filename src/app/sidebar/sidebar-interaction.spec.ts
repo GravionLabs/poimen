@@ -106,7 +106,7 @@ describe("Sidebar with the real hx-tree", () => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
   });
 
-  it("marks a terminal on an older host quietly, with both versions in the tooltip", async () => {
+  it("hints at a restart on the second line of a terminal on an older host, with both versions in the tooltip", async () => {
     const old: Terminal = {
       ...pane("w1:p3"),
       host_version: "0.15.0",
@@ -123,10 +123,13 @@ describe("Sidebar with the real hx-tree", () => {
     ];
     const { root, workspace, key } = await setup(null, nodes);
     await key(workspace(), "ArrowRight");
-    const marks = [...root.querySelectorAll<HTMLElement>(".host-note")];
+    const marks = [...root.querySelectorAll<HTMLElement>(".host-hint")];
     expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toContain("restart");
     expect(marks[0].title).toContain("0.15.0");
     expect(marks[0].title).toContain("0.16.0");
+    const lines = [...marks[0].closest(".main")!.querySelectorAll(".line")];
+    expect(marks[0].closest(".line")).toBe(lines[lines.length - 1]);
   });
 
   it("shows one disconnected message with a Retry button that asks the backend again", async () => {
