@@ -5,6 +5,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.28.1] — 2026-11-20
+
+### Bug Fixes
+- **sidebar**: Clearer separation, details block, small chips and a left bar for ringing cards (#1085)
+- **sidebar**: Origin icon first, fold chevron at the right end, info icon for the details (#1085)
+- **sidebar**: Details toggle in the header, smaller gaps, room beside the origin icon (#1085)
+- **sidebar**: The filter text is as small as the rows (#1085)
+- **sidebar**: Info icon left of the fold chevron, linked worktree cards not indented, machine cards aligned (#1085)
+
+
 ## [0.28.0] — 2026-11-20
 
 ### Bug Fixes
@@ -27,6 +37,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - Run the ratchets alone and first, not with the full suite (#1065)
 - **machines**: Note the limits of the connection sharing (#1012)
+- Update CHANGELOG.md for v0.28.0 [skip ci]
 
 
 ### Features
