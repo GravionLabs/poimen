@@ -2854,7 +2854,7 @@ pub fn run() {
             }
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
-                let machines = app.state::<SharedMachines>().inner().clone();
+                let machines = machines::wake::start(app.state::<SharedMachines>().inner().clone());
                 let loaded = settings::load(&home);
                 backend.set_claude_classic_renderer(loaded.claude_classic_renderer);
                 let watch_backend = backend.clone();
