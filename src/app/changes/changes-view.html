@@ -60,6 +60,37 @@
       [value]="changes.commitMessage()"
       (input)="changes.commitMessage.set($any($event.target).value)"
     ></textarea>
+    @if (changes.messageHarness()) {
+      @if (changes.generating()) {
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
+          class="generate"
+          aria-label="Cancel generating the commit message"
+          title="Cancel generating the commit message"
+          (click)="changes.cancelGenerate()"
+        >
+          Generating… Cancel
+        </button>
+      } @else {
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
+          class="generate"
+          [disabled]="changes.busy() || changes.stagedCount() === 0"
+          [title]="generateHint()"
+          (click)="changes.generateMessage()"
+        >
+          Generate
+        </button>
+      }
+    }
     <button
       type="button"
       hx-button

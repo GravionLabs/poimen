@@ -107,6 +107,8 @@ export interface HarnessInfo {
   exitInput: string | null;
   /** Argv template appended to the command to resume a session (`{session}`); empty: none. */
   resumeArgs: string[];
+  /** Argv template appended to the command for a headless one-shot call (`{prompt}`); empty: none. */
+  printArgs: string[];
   /** The program was found on the `PATH` of a child. */
   available: boolean;
 }
@@ -128,6 +130,7 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
         defaultModel: typeof r["defaultModel"] === "string" ? r["defaultModel"] : null,
         exitInput: typeof r["exitInput"] === "string" ? r["exitInput"] : null,
         resumeArgs: strings(r["resumeArgs"]),
+        printArgs: strings(r["printArgs"]),
         available: r["available"] === true,
       },
     ];

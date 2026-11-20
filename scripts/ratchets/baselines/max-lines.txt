@@ -21,7 +21,7 @@ src-tauri/src/changes.rs	1033
 src-tauri/src/deliver.rs	952
 src-tauri/src/github_issues.rs	1396
 src-tauri/src/github_pulls.rs	1096
-src-tauri/src/lib.rs	3867
+src-tauri/src/lib.rs	3842
 src-tauri/src/machines.rs	1956
 src-tauri/src/poimen_backend.rs	2615
 src-tauri/src/poimen_server.rs	1319

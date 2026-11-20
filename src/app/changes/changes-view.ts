@@ -309,6 +309,11 @@ export class ChangesView {
     this.ui.setChangesLayout(layout);
   }
 
+  protected generateHint(): string {
+    if (!this.changes.stagedCount()) return "Nothing is staged";
+    return "Draft a Conventional Commit message from the staged diff (does not commit)";
+  }
+
   protected commitHint(): string {
     if (!this.changes.stagedCount()) return "Nothing is staged";
     if (!this.changes.commitMessage().trim()) return "Enter a commit message";
