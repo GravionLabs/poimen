@@ -6,7 +6,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use poimen_protocol::{AgentInfo, Channel, Space, Tab};
+pub use poimen_protocol::files::state_file_path;
+use poimen_protocol::{AgentInfo, Space, Tab};
 use serde::{Deserialize, Serialize};
 
 use crate::tabs::Layout;
@@ -90,78 +91,16 @@ pub(crate) struct Stored {
     pub(crate) terminals: Vec<StoredTerminal>,
 }
 
-/// Unix: `$POIMEN_STATE_DIR/server.json`, else `$XDG_STATE_HOME/poimen/server.json`, else
-/// `~/.local/state/poimen/server.json`. Windows: `$POIMEN_STATE_DIR\server.json`, else
-/// `%LOCALAPPDATA%\poimen-server\server.json`, else `~\AppData\Local\poimen-server\server.json`.
-/// An rc build uses `poimen-rc` and `poimen-server-rc` ([`poimen_protocol::CHANNEL`]).
-pub fn state_file_path() -> PathBuf {
-    let channel = poimen_protocol::CHANNEL;
-    if cfg!(windows) {
-        windows_state_file_from(
-            std::env::var_os("POIMEN_STATE_DIR"),
-            std::env::var_os("LOCALAPPDATA"),
-            std::env::home_dir(),
-            channel,
-        )
-    } else {
-        state_file_from(
-            std::env::var_os("POIMEN_STATE_DIR"),
-            std::env::var_os("XDG_STATE_HOME"),
-            std::env::var_os("HOME"),
-            channel,
-        )
-    }
-}
-
-/// The Windows [`state_file_path`] with the environment passed in; empty values count as unset.
-pub(crate) fn windows_state_file_from(
-    state_dir: Option<std::ffi::OsString>,
-    local_app_data: Option<std::ffi::OsString>,
-    home: Option<PathBuf>,
-    channel: Channel,
-) -> PathBuf {
-    if let Some(dir) = state_dir.filter(|s| !s.is_empty()) {
-        return PathBuf::from(dir).join("server.json");
-    }
-    poimen_protocol::windows_dir_from(local_app_data, channel)
-        .unwrap_or_else(|| {
-            home.filter(|h| !h.as_os_str().is_empty())
-                .unwrap_or_else(std::env::temp_dir)
-                .join("AppData")
-                .join("Local")
-                .join(poimen_protocol::windows_dir_name(channel))
-        })
-        .join("server.json")
-}
-
-pub(crate) fn state_file_from(
-    state_dir: Option<std::ffi::OsString>,
-    xdg_state: Option<std::ffi::OsString>,
-    home: Option<std::ffi::OsString>,
-    channel: Channel,
-) -> PathBuf {
-    let set = |v: Option<std::ffi::OsString>| v.filter(|s| !s.is_empty()).map(PathBuf::from);
-    if let Some(dir) = set(state_dir) {
-        return dir.join("server.json");
-    }
-    let dir = channel.named("poimen");
-    if let Some(state) = set(xdg_state) {
-        return state.join(dir).join("server.json");
-    }
-    set(home)
-        .unwrap_or_else(std::env::temp_dir)
-        .join(".local")
-        .join("state")
-        .join(dir)
-        .join("server.json")
-}
-
 /// Reads the layout; a missing or unreadable file gives an empty one (a damaged file is reported
 /// on stderr and replaced by the next save).
 pub(crate) fn load(path: &Path) -> Stored {
     let file = match fs::read_to_string(path) {
         Ok(text) => serde_json::from_str::<File>(&text).unwrap_or_else(|e| {
-            eprintln!("poimen-server: ignoring {}: {e}", path.display());
+            crate::log::line(
+                &crate::log::path(path),
+                "store",
+                &format!("ignoring {}: {e}", path.display()),
+            );
             File::default()
         }),
         Err(_) => File::default(),
@@ -243,6 +182,8 @@ pub(crate) fn next_id<'a>(ids: impl IntoIterator<Item = &'a str>) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use poimen_protocol::Channel;
+    use poimen_protocol::files::{state_file_from, windows_state_file_from};
 
     use poimen_protocol::{Node, SplitDirection};
 

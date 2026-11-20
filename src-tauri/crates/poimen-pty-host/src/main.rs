@@ -13,6 +13,14 @@ usage:
   poimen-pty-host --version     print the version and the host protocol version
   poimen-pty-host --help, -h    print this usage";
 
+/// One line `<UTC timestamp> poimen-pty-host <message>` on stderr.
+fn log(message: &str) {
+    eprintln!(
+        "{} poimen-pty-host {message}",
+        poimen_protocol::files::utc_now()
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -41,7 +49,10 @@ fn main() {
         }
     };
     let _ = write_message(&mut stdout, &host.hello());
-    host.serve();
+    // Stderr is the server's `hosts/<terminal id>.log`; no output, input or environment here.
+    log(&host.start_line());
+    let reason = host.serve();
+    log(&format!("ended: {reason}"));
     // Threads blocked on the PTY or on a client stay behind; ending the process ends them.
     std::process::exit(0);
 }
