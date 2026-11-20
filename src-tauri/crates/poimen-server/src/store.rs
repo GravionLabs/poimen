@@ -12,8 +12,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::tabs::Layout;
 
+fn current_version() -> u64 {
+    VERSION
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct File {
+    /// Absent from a file before #967 (read as today); never above [`VERSION`] when read.
+    #[serde(default = "current_version")]
+    version: u64,
     #[serde(default)]
     spaces: Vec<Space>,
     /// Absent from a protocol 3 file.
@@ -91,19 +98,204 @@ pub(crate) struct Stored {
     pub(crate) terminals: Vec<StoredTerminal>,
 }
 
-/// Reads the layout; a missing or unreadable file gives an empty one (a damaged file is reported
-/// on stderr and replaced by the next save).
-pub(crate) fn load(path: &Path) -> Stored {
-    let file = match fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str::<File>(&text).unwrap_or_else(|e| {
-            crate::log::line(
-                &crate::log::path(path),
-                "store",
-                &format!("ignoring {}: {e}", path.display()),
+/// The version of the file this server writes and the highest it reads.
+pub(crate) const VERSION: u64 = 1;
+/// How many `server.json.damaged-<unix seconds>` files are kept.
+const KEEP_DAMAGED: usize = 3;
+
+/// A state file written by a newer server: this one neither reads nor writes it.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Newer {
+    pub(crate) file: PathBuf,
+    pub(crate) found: u64,
+    pub(crate) known: u64,
+    /// Set instead of the versions when a damaged file could not be moved aside: a save would
+    /// overwrite the good copy with it, so the server does not start.
+    pub(crate) stuck: Option<String>,
+}
+
+impl std::fmt::Display for Newer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(cause) = &self.stuck {
+            return write!(
+                f,
+                "{} is damaged and could not be moved aside: {cause}",
+                self.file.display()
             );
-            File::default()
-        }),
-        Err(_) => File::default(),
+        }
+        write!(
+            f,
+            "{} has version {}, this poimen-server knows version {}; update poimen-server, nothing was changed",
+            self.file.display(),
+            self.found,
+            self.known
+        )
+    }
+}
+
+/// [`load`] for the start: a file of a newer version is an `InvalidData` error whose message is
+/// also written to `server.log` (the line the app shows as the start failure). Called before the
+/// socket is touched, so a refused start leaves no stale entry.
+pub(crate) fn load_or_refuse(path: &Path) -> io::Result<Stored> {
+    load(path).map_err(|newer| {
+        let message = newer.to_string();
+        let now = poimen_protocol::files::utc_now();
+        crate::log::append(
+            &crate::log::path(path),
+            &format!("{now} server refusing to start: {message}"),
+        );
+        io::Error::new(io::ErrorKind::InvalidData, message)
+    })
+}
+
+/// The name of the previous copy: `server.json.bak`.
+fn backup_path(path: &Path) -> PathBuf {
+    with_suffix(path, ".bak")
+}
+
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+enum Read {
+    Missing,
+    Good(File),
+    Newer(u64),
+    Damaged(String),
+}
+
+fn read_file(path: &Path) -> Read {
+    #[derive(Deserialize)]
+    struct Probe {
+        version: Option<u64>,
+    }
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Read::Missing,
+        Err(e) => return Read::Damaged(e.to_string()),
+    };
+    match serde_json::from_str::<Probe>(&text) {
+        Ok(Probe { version: Some(v) }) if v > VERSION => return Read::Newer(v),
+        Ok(_) => {}
+        Err(e) => return Read::Damaged(e.to_string()),
+    }
+    match serde_json::from_str::<File>(&text) {
+        Ok(file) => Read::Good(file),
+        Err(e) => Read::Damaged(e.to_string()),
+    }
+}
+
+fn note(path: &Path, message: &str) {
+    crate::log::line(&crate::log::path(path), "store", message);
+}
+
+/// Moves a file that could not be read to `<name>.damaged-<unix seconds>` (a name that is free),
+/// keeps the newest [`KEEP_DAMAGED`] of those and removes the older ones.
+fn set_aside(path: &Path, cause: &str) -> io::Result<()> {
+    let mut seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let prefix = format!("{name}.damaged-");
+    let target = loop {
+        let candidate = with_suffix(path, &format!(".damaged-{seconds}"));
+        if !candidate.exists() {
+            break candidate;
+        }
+        seconds += 1;
+    };
+    let moved = fs::rename(path, &target);
+    match &moved {
+        Ok(()) => note(
+            path,
+            &format!(
+                "{} is damaged ({cause}), moved to {}",
+                path.display(),
+                target.display()
+            ),
+        ),
+        Err(e) => note(
+            path,
+            &format!(
+                "{} is damaged ({cause}) and could not be moved aside: {e}",
+                path.display()
+            ),
+        ),
+    }
+    moved?;
+    let Some(dir) = path.parent() else {
+        return Ok(());
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(());
+    };
+    let mut kept: Vec<(u64, PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            let secs = n.strip_prefix(&prefix)?.parse::<u64>().ok()?;
+            Some((secs, e.path()))
+        })
+        .collect();
+    kept.sort();
+    while kept.len() > KEEP_DAMAGED {
+        let (_, old) = kept.remove(0);
+        let _ = fs::remove_file(old);
+    }
+    Ok(())
+}
+
+/// Reads the layout from `server.json`; a missing one falls back to `server.json.bak` (the
+/// window between the two renames of [`save`]). A file that does not parse is moved aside to
+/// `.damaged-<unix seconds>` (never overwritten) and the backup is tried, else the layout is
+/// empty; each case writes a line. A file of a newer version is left untouched and refused.
+pub(crate) fn load(path: &Path) -> Result<Stored, Newer> {
+    let backup = backup_path(path);
+    let newer = |file: &Path, found| Newer {
+        file: file.to_path_buf(),
+        found,
+        known: VERSION,
+        stuck: None,
+    };
+    let stuck = |file: &Path, e: io::Error| Newer {
+        stuck: Some(e.to_string()),
+        ..newer(file, 0)
+    };
+    let file = match read_file(path) {
+        Read::Good(file) => file,
+        Read::Newer(v) => return Err(newer(path, v)),
+        read @ (Read::Missing | Read::Damaged(_)) => {
+            let reason = match read {
+                Read::Damaged(cause) => {
+                    set_aside(path, &cause).map_err(|e| stuck(path, e))?;
+                    "damaged"
+                }
+                _ => "missing",
+            };
+            match read_file(&backup) {
+                Read::Good(file) => {
+                    note(
+                        path,
+                        &format!(
+                            "{} is {reason}, loaded {}",
+                            path.display(),
+                            backup.display()
+                        ),
+                    );
+                    file
+                }
+                Read::Newer(v) => return Err(newer(&backup, v)),
+                Read::Damaged(cause) => {
+                    set_aside(&backup, &cause).map_err(|e| stuck(&backup, e))?;
+                    File::default()
+                }
+                Read::Missing => File::default(),
+            }
+        }
     };
     let layout = Layout::new(file.spaces, file.tabs);
     let ids = layout
@@ -111,15 +303,16 @@ pub(crate) fn load(path: &Path) -> Stored {
         .into_iter()
         .chain(file.terminals.iter().map(|t| t.id.as_str()));
     let next_id = next_id(ids).max(file.next_id.unwrap_or(1));
-    Stored {
+    Ok(Stored {
         layout,
         next_id,
         terminals: file.terminals,
-    }
+    })
 }
 
-/// Writes the layout, the id counter and the running terminals atomically (temp file, then
-/// rename), so a crash leaves the previous file or this one, never half of it.
+/// Writes the layout, the id counter and the running terminals: the temp file is synced, the
+/// previous `server.json` becomes `server.json.bak`, the temp file becomes `server.json` and
+/// the directory is synced (Unix). A crash leaves a readable `server.json` or `server.json.bak`.
 pub(crate) fn save(
     path: &Path,
     layout: &Layout,
@@ -130,6 +323,7 @@ pub(crate) fn save(
         create_private_dir(dir)?;
     }
     let text = serde_json::to_string_pretty(&File {
+        version: VERSION,
         spaces: layout.spaces.clone(),
         tabs: layout.tabs.clone(),
         next_id: Some(next_id),
@@ -138,7 +332,31 @@ pub(crate) fn save(
     .map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
     write_private(&tmp, text.as_bytes())?;
-    fs::rename(&tmp, path)
+    match fs::rename(path, backup_path(path)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    fs::rename(&tmp, path)?;
+    sync_dir(path.parent());
+    Ok(())
+}
+
+/// Syncs the directory so the renames survive a power loss (Unix; Windows has no such call).
+fn sync_dir(dir: Option<&Path>) {
+    #[cfg(unix)]
+    if let Some(dir) = dir.map(|d| {
+        if d.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            d
+        }
+    }) && let Ok(handle) = fs::File::open(dir)
+    {
+        let _ = handle.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
 }
 
 /// Creates the directory (and parents) with mode 0700; an existing one is left as it is.
@@ -163,7 +381,9 @@ fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
     options.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options.open(path)?.write_all(data)
+    let mut file = options.open(path)?;
+    file.write_all(data)?;
+    file.sync_all()
 }
 
 /// The first id counter value that collides with none of the ids (`<letters><number>`, e.g.
@@ -178,6 +398,10 @@ pub(crate) fn next_id<'a>(ids: impl IntoIterator<Item = &'a str>) -> u64 {
         .max()
         .map_or(1, |n| n + 1)
 }
+
+#[cfg(test)]
+#[path = "store_durability_tests.rs"]
+mod durability;
 
 #[cfg(test)]
 mod tests {
@@ -196,11 +420,11 @@ mod tests {
         }
     }
 
-    fn layout(spaces: &[&str]) -> Layout {
+    pub(super) fn layout(spaces: &[&str]) -> Layout {
         Layout::new(spaces.iter().map(|id| space(id)).collect(), Vec::new())
     }
 
-    fn temp(name: &str) -> PathBuf {
+    pub(super) fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("poimen-store-{}-{name}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir.join("server.json")
@@ -239,7 +463,7 @@ mod tests {
             place: None,
         });
         save(&path, &saved, 40, Vec::new()).unwrap();
-        let loaded = load(&path);
+        let loaded = load(&path).unwrap();
         assert_eq!(loaded.layout, saved);
         assert_eq!(loaded.next_id, 40);
     }
@@ -300,7 +524,7 @@ mod tests {
     fn the_terminal_list_round_trips_with_endpoint_seq_status_and_tokens() {
         let path = temp("terms");
         save(&path, &layout(&["s1"]), 20, vec![stored("t9")]).unwrap();
-        let loaded = load(&path);
+        let loaded = load(&path).unwrap();
         assert_eq!(loaded.terminals, vec![stored("t9")]);
         let text = fs::read_to_string(&path).unwrap();
         assert!(
@@ -317,7 +541,7 @@ mod tests {
         let path = temp("noterms");
         save(&path, &layout(&["s1"]), 2, Vec::new()).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("terminals"));
-        assert!(load(&path).terminals.is_empty());
+        assert!(load(&path).unwrap().terminals.is_empty());
     }
 
     #[test]
@@ -328,7 +552,7 @@ mod tests {
             r#"{"spaces":[{"id":"s1","name":"a","cwd":"/x"}],"terminals":[{"id":"t41","space_id":"s1","name":"sh","cwd":"/x","cols":80,"rows":24,"endpoint":"/e/t41"}]}"#,
         )
         .unwrap();
-        let loaded = load(&path);
+        let loaded = load(&path).unwrap();
         assert_eq!(loaded.next_id, 42);
         // Fields a server before #604 never wrote take their defaults.
         assert_eq!(loaded.terminals[0].seq, 0);
@@ -344,21 +568,11 @@ mod tests {
             r#"{"spaces":[{"id":"s1","name":"api","cwd":"/x"},{"id":"s3","name":"b","cwd":"/y"}]}"#,
         )
         .unwrap();
-        let loaded = load(&path);
+        let loaded = load(&path).unwrap();
         assert_eq!(loaded.layout.spaces.len(), 2);
         assert!(loaded.layout.spaces.iter().all(|s| s.tabs.is_empty()));
         assert!(loaded.layout.tabs.is_empty());
         assert_eq!(loaded.next_id, 4);
-    }
-
-    #[test]
-    fn missing_and_damaged_files_give_no_spaces() {
-        assert!(load(&temp("missing")).layout.spaces.is_empty());
-        let path = temp("bad");
-        fs::write(&path, "{ nope").unwrap();
-        let loaded = load(&path);
-        assert!(loaded.layout.spaces.is_empty());
-        assert_eq!(loaded.next_id, 1);
     }
 
     #[test]
@@ -373,9 +587,9 @@ mod tests {
         // A split that was dropped took its id with it; the counter still remembers it.
         let path = temp("counter");
         save(&path, &layout(&["s1"]), 30, Vec::new()).unwrap();
-        assert_eq!(load(&path).next_id, 30);
+        assert_eq!(load(&path).unwrap().next_id, 30);
         save(&path, &layout(&["s50"]), 30, Vec::new()).unwrap();
-        assert_eq!(load(&path).next_id, 51);
+        assert_eq!(load(&path).unwrap().next_id, 51);
     }
 
     #[test]

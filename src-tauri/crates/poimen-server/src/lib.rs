@@ -748,6 +748,11 @@ impl Server {
             }
             lock_file = Some(file);
         }
+        let store::Stored {
+            layout,
+            next_id,
+            terminals,
+        } = store::load_or_refuse(&config.state_file)?;
         match transport::inspect(&config.socket)? {
             Entry::Missing => {}
             Entry::Other => {
@@ -768,12 +773,6 @@ impl Server {
                 StartError::Io(e)
             }
         })?;
-
-        let store::Stored {
-            layout,
-            next_id,
-            terminals,
-        } = store::load(&config.state_file);
         let log_file = log::path(&config.state_file);
         log::prune_old(
             &host::endpoint_for(&config.socket, "x")

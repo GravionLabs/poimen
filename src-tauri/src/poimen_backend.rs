@@ -493,13 +493,13 @@ impl Backend for PoimenBackend {
     fn ensure_running(&self, auto_start: bool) -> Result<Outcome, StartError> {
         self.local_only()?;
         poimen_server::ensure_running(&poimen_server::SystemRunner::new(), auto_start)
-            .map_err(|e| StartError::Other(e.to_string()))
+            .map_err(crate::server_paths::describe)
     }
 
     fn restart_server(&self) -> Result<Outcome, StartError> {
         self.local_only()?;
         poimen_server::restart(&poimen_server::SystemRunner::new())
-            .map_err(|e| StartError::Other(e.to_string()))
+            .map_err(crate::server_paths::describe)
     }
 
     fn stop_server(&self) -> Result<(), StartError> {
