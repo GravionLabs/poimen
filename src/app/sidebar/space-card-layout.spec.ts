@@ -83,6 +83,12 @@ describe("space card layout styles (#1085)", () => {
     expect(html).toMatch(/@if \(!detailsHidden\(\)\) \{\s*<div class="details"/);
   });
 
+  it("sets the filter text as small as the rows", () => {
+    const filter = /^\.filter \{([^}]*)\}/m.exec(sidebar)?.[1] ?? "";
+    expect(filter).toMatch(/font-size:\s*12px/);
+    expect(filter).toMatch(/height:\s*var\(--control-height\)/);
+  });
+
   it("lets the name shrink before the header wraps and drops the fold chevron", () => {
     const title = block(".title");
     expect(title).toMatch(/flex:\s*1 1 0;/);

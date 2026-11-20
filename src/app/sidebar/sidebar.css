@@ -33,6 +33,10 @@
 .filter {
   margin: 0 10px 8px;
   width: calc(100% - 20px);
+  /* The text is as small as the rows below it, not the size of a form (#1085). */
+  height: var(--control-height);
+  font-size: 12px;
+  --h-form-field-font-size: 12px;
 }
 
 /*
