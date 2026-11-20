@@ -65,7 +65,8 @@ The step that installs the hooks (the *Install hooks* button, or `poimen-server 
 - `list_runs`: the agent runs of a repository (`repository` directory), read from its `.agents/events` files.
 - `start_agent` (`harness`, `space?`, `model?`, `prompt?`, `name?`): a new terminal running a harness of your `harnesses` config.
 - `prompt_agent` (`terminal`, `text`): types a prompt into the agent of a terminal, refused while it works or waits.
-- `wait_agent` (`terminal`, `timeout_s?`): waits until the agent of a terminal is done, blocked, in error or gone, or the timeout (default 300 s, at most 3600 s) passed; answers with the status and, when blocked, the notification text. Read tool.
+- `wait_agent` (`terminal`, `timeout_s?`): waits until the agent of a terminal is done, blocked, in error or gone, or the timeout (default 300 s, at most 3600 s) passed; answers with the status and, when blocked, the notification text. Read tool; it includes the agent's report when there is one.
+- `report_done` (`outcome`, `summary`, `files?`): an agent that was started with `start_agent` calls it once at its end (`start_agent` adds a short preamble with this rule to the prompt). poimen stores the report on the terminal, types one line (terminal and outcome) into the starting agent when it is idle (it waits while it works), and the Runs view shows the outcome and summary as the finished run.
 - `read_agent` (`terminal`): the last assistant message of the agent's transcript (Claude Code and Copilot CLI) with the session id; an error when the terminal has no agent transcript. Read tool, also for a terminal on a remote machine.
 
 The write tools act freely in the space of the agent that calls them. For any other space poimen asks you in the app (who asks, what, where) and the call waits up to 60 s; declined, no answer, poimen closed or an agent outside a poimen terminal are refused. Every write shows in the notification center with the calling terminal.

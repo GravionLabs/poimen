@@ -1,11 +1,10 @@
 //! `poimen-server`: a headless daemon that runs the terminals, so shells and agents keep running
 //! when the app closes. Each terminal's PTY and child live in a `poimen-pty-host` of its own,
 //! which the server reads as a client (`host.rs`, ADR 0009). One server per user listens on a
-//! local socket (Unix socket, named pipe on Windows; `docs/protocol.md`).
-//! The server keeps spaces (name, cwd) with terminals, and per space the tabs in order with a
-//! split tree of terminals each (`tabs.rs`). Spaces, tabs and the list of running terminals
-//! persist in `server.json` (`store.rs`); a new server adopts the hosts of that list (#604) and
-//! drops the leaves whose terminal did not come back.
+//! local socket (Unix socket, named pipe on Windows; `docs/protocol.md`). It keeps spaces (name,
+//! cwd) with terminals, and per space the tabs in order with a split tree each (`tabs.rs`).
+//! Spaces, tabs and the running terminals persist in `server.json` (`store.rs`); a new server
+//! adopts the hosts of that list (#604) and drops the leaves whose terminal did not come back.
 
 mod adopt;
 mod awake;
@@ -25,6 +24,7 @@ pub mod mcp_config;
 mod pty;
 mod records;
 pub mod report;
+mod reports;
 mod runs;
 pub mod stdio;
 mod store;
@@ -64,7 +64,6 @@ pub use host::{Launch, PtyHost, host_beside};
 pub use store::state_file_path;
 use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
 
-/// How long a write to a client may block before it is given up; only that client's writer thread waits.
 /// How often the tokens with a TTL are checked.
 const TOKEN_SWEEP: Duration = Duration::from_millis(500);
 
@@ -85,8 +84,7 @@ pub struct Config {
     /// The user's home: its `~/.config/poimen/config.json` gives `space.create` the `trustedProjects`,
     /// `spaceTemplates`, `spaces.layout` and `harnesses` (and takes `trustedProjects`); `None`: none.
     pub home: Option<PathBuf>,
-    /// How a new terminal's `poimen-pty-host` is started (ADR 0009): the binary next to the
-    /// server, or an in-process host in tests.
+    /// How a new terminal's `poimen-pty-host` starts (ADR 0009): the binary beside the server, or in-process in tests.
     pub pty_host: PtyHost,
 }
 
@@ -157,8 +155,7 @@ struct TerminalEntry {
     records: records::Records,
     /// Who set which token and until when; `info.tokens` is the visible name-to-value view.
     tokens: Vec<TokenEntry>,
-    /// A resume of the hibernated agent is under way (#904); not persisted, so a restart may
-    /// resume again, but never two at once.
+    /// A resume of the hibernated agent is under way (#904); not persisted, never two at once.
     resuming: bool,
 }
 
@@ -209,6 +206,7 @@ impl TerminalEntry {
             records: self.records.raw().to_vec(),
             hibernated: self.info.hibernated.clone(),
             started_by: self.info.started_by.clone(),
+            report: self.info.report.clone(),
             tokens,
         })
     }
@@ -886,6 +884,7 @@ impl Server {
             }
         });
         awake::spawn_sweeper(&self.shared);
+        reports::spawn_sweeper(&self.shared);
         let runs = Arc::clone(&self.shared);
         thread::spawn(move || {
             loop {
@@ -1223,6 +1222,7 @@ fn dispatch(shared: &Arc<Shared>, request: &Request, ctx: Option<&Attachment>) -
         "server.shutdown" => server_shutdown(shared, parsed(request)?),
         "server.set_colors" => server_set_colors(shared, parsed(request)?),
         "terminal.report_agent" => terminal_report_agent(shared, parsed(request)?),
+        "terminal.report_done" => reports::terminal_report_done(shared, parsed(request)?),
         "terminal.report_tokens" => terminal_report_tokens(shared, parsed(request)?),
         "terminal.clear_tokens" => terminal_clear_tokens(shared, parsed(request)?),
         "terminal.input" => terminal_input(shared, parsed(request)?, ctx),
@@ -2054,6 +2054,7 @@ fn spawn_terminal(
         records: Vec::new(),
         hibernated: None,
         started_by: p.started_by.clone(),
+        report: None,
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
@@ -2384,9 +2385,9 @@ fn tokens_changed(shared: &Shared, entry: &TerminalEntry) {
     });
 }
 
-/// Sets and removes the tokens of one source (herdr's `pane report-metadata` semantics: names of
-/// [`proto::valid_token_name`], at most [`proto::MAX_TOKENS_PER_REPORT`] per report, a TTL per
-/// report). The event is published only when the visible tokens changed.
+/// Sets and removes the tokens of one source (herdr's `pane report-metadata` semantics: names per
+/// [`proto::valid_token_name`], at most [`proto::MAX_TOKENS_PER_REPORT`], a TTL per report).
+/// The event is published only when the visible tokens changed.
 fn terminal_report_tokens(shared: &Shared, p: TerminalReportTokens) -> ApiResult {
     if p.source.trim().is_empty() {
         return Err(invalid("source must not be empty"));

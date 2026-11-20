@@ -177,9 +177,8 @@ fn text(err: ClientError) -> String {
 
 /// The neutral snapshot of the server's spaces (#586): a server tab is a tab with its terminals in
 /// split-tree order and the tree as `root`. A terminal without a leaf (exited, or from a protocol 3
-/// server) is a tab of its own, so none is lost. Tabs follow the space's `tabs` order. Agent status
-/// is what the hooks reported (`unknown` without an agent); a tab and a space show their most urgent
-/// terminal, and a space carries its own `cwd`.
+/// server) is a tab of its own. Tabs follow the space's `tabs` order. Agent status is what the hooks
+/// reported (`unknown` without an agent); a tab and a space show their most urgent terminal.
 pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
     let mut snapshot = Snapshot::default();
     for (i, space) in layout.spaces.iter().enumerate() {
@@ -1010,6 +1009,7 @@ mod tests {
             records: Vec::new(),
             hibernated: None,
             started_by: None,
+            report: None,
         }
     }
 

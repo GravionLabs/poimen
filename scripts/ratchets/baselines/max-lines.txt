@@ -1,7 +1,7 @@
 src-tauri/crates/poimen-client/src/lib.rs	1398
 src-tauri/crates/poimen-console/src/tui/mod.rs	1310
 src-tauri/crates/poimen-console/src/tui/palette.rs	1209
-src-tauri/crates/poimen-console/src/tui/sidebar.rs	1573
+src-tauri/crates/poimen-console/src/tui/sidebar.rs	1572
 src-tauri/crates/poimen-console/tests/tui.rs	938
 src-tauri/crates/poimen-core/src/agent_actions.rs	1093
 src-tauri/crates/poimen-core/src/agent_events.rs	954
@@ -11,7 +11,7 @@ src-tauri/crates/poimen-core/src/project.rs	856
 src-tauri/crates/poimen-core/src/settings.rs	1465
 src-tauri/crates/poimen-core/src/transcripts.rs	1115
 src-tauri/crates/poimen-core/src/worktree.rs	1893
-src-tauri/crates/poimen-protocol/src/lib.rs	2866
+src-tauri/crates/poimen-protocol/src/lib.rs	2863
 src-tauri/crates/poimen-server/src/emulator.rs	1318
 src-tauri/crates/poimen-server/src/host.rs	1115
 src-tauri/crates/poimen-server/src/lib.rs	2726
@@ -28,7 +28,7 @@ src-tauri/src/settings.rs	2650
 src-tauri/src/settings_transfer.rs	1195
 src/app/app.ts	1103
 src/app/core/snapshot.spec.ts	1050
-src/app/core/snapshot.ts	1070
+src/app/core/snapshot.ts	1059
 src/app/core/ui-state.ts	838
 src/app/deliver/deliver-status.ts	1006
 src/app/deliver/deliver-view.spec.ts	879

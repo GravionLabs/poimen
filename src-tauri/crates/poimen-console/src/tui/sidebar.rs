@@ -1,7 +1,6 @@
 //! The sidebar model: spaces, tabs and terminals from the server (`space.list`, `terminal.list`;
-//! events only make the TUI read them again), rendered into rows with the tokens of
-//! `sidebar.rows` like the app's sidebar (`src/app/sidebar/spaces.ts`).
-//! Tokens the TUI has no source for yet (`branch`, `dirty`, `sync`, `pr`) are empty and skipped.
+//! events only make the TUI read them again), rendered into rows with the tokens of `sidebar.rows`
+//! like the app's sidebar (`src/app/sidebar/spaces.ts`); tokens without a source are skipped.
 
 use std::collections::{HashMap, HashSet};
 
@@ -863,6 +862,7 @@ mod tests {
             records: Vec::new(),
             hibernated: None,
             started_by: None,
+            report: None,
         }
     }
 
