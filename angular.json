@@ -18,10 +18,12 @@
           "options": {
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
+            "externalDependencies": ["@tauri-apps/plugin-updater", "@tauri-apps/plugin-process"],
             "styles": [
               "node_modules/@xterm/xterm/css/xterm.css",
               "node_modules/@gravionlabs/helix-ui/tokens.css",
               "node_modules/@gravionlabs/helix-ui/styles.css",
+              "node_modules/@gravionlabs/helix-desktop/styles.css",
               "node_modules/@foblex/flow/styles/default.scss",
               "src/styles.css"
             ]

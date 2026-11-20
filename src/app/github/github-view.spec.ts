@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACTIVITY_VIEWS } from "../activity-bar/activity-bar";
+import { ACTIVITY_ENTRIES } from "../core/activity-items";
 import { POIMEN_COMMANDS } from "../core/command-palette";
 import { EditorTabs, GITHUB_TAB, tabKind } from "../core/editor-tabs";
 import { UI_STORAGE, UiState, type GithubPage } from "../core/ui-state";
@@ -554,9 +554,9 @@ describe("GitHub entry points", () => {
   });
 
   it("is offered by the activity bar (as a tab) and the command palette", () => {
-    expect(ACTIVITY_VIEWS.find((v) => v.id === "github")).toMatchObject({
+    expect(ACTIVITY_ENTRIES.find((v) => v.id === "github")).toMatchObject({
       label: "GitHub",
-      tab: "github",
+      target: { kind: "tab", tab: "github" },
     });
     expect(POIMEN_COMMANDS).toContainEqual({ id: "openGithub", title: "Open GitHub" });
   });

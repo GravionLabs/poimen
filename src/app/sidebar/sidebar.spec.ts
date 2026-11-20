@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SpaceNode } from "../core/snapshot";
-import {
-  filterValues,
-  isDoubleClick,
-  menuTarget,
-  sidebarMenuItems,
-  spaceNodes,
-  spaceRepoDir,
-} from "./sidebar";
-import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
+import { isDoubleClick, menuTarget, sidebarMenuItems, spaceNodes, spaceRepoDir } from "./sidebar";
+import { DEFAULT_SIDEBAR_ROWS, filterValues, type SidebarRows } from "./spaces";
 
 const space: SpaceNode = {
   workspace: { space_id: "w1", label: "One", number: 1, agent_status: "idle" },

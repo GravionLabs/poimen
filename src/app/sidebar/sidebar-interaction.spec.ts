@@ -10,6 +10,7 @@ import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { SpaceActions } from "../core/space-actions";
 import { Sidebar } from "./sidebar";
+import { inlineSpaceCard } from "./space-card.mock";
 
 const pane = (id: string, status: Terminal["agent_status"] = "idle"): Terminal => ({
   terminal_id: id,
@@ -44,6 +45,7 @@ async function setup(message: string | null = null, nodes: SpaceNode[] = spaces)
     ],
   });
   // JIT cannot fetch templateUrl/styleUrl: inline the real template.
+  inlineSpaceCard();
   TestBed.overrideComponent(Sidebar, {
     set: {
       templateUrl: undefined,

@@ -1,13 +1,33 @@
 import { Injectable, inject, signal } from "@angular/core";
+import { HX_UPDATE_BACKEND, type HxUpdateBackend } from "@gravionlabs/helix-desktop/tauri";
 import { TauriBridge } from "./tauri";
 
 /** A newer release than the running app (wire shape of `updater.rs`). */
 export interface UpdateInfo {
   version: string;
-  currentVersion: string;
+  currentVersion?: string;
   notes: string | null;
   date: string | null;
 }
+
+/**
+ * poimen's update backend (#932): the commands `update_check` and `update_install` instead of the
+ * JS updater plugin. `update_install` installs and restarts in one command, so `relaunch` has
+ * nothing left to do.
+ */
+export function poimenUpdateBackend(bridge: TauriBridge): HxUpdateBackend {
+  return {
+    check: () => bridge.invoke<UpdateInfo | null>("update_check"),
+    install: () => bridge.invoke<void>("update_install"),
+    relaunch: () => Promise.resolve(),
+  };
+}
+
+/** Provides {@link poimenUpdateBackend} as `HX_UPDATE_BACKEND`. */
+export const POIMEN_UPDATE_BACKEND_PROVIDER = {
+  provide: HX_UPDATE_BACKEND,
+  useFactory: () => poimenUpdateBackend(inject(TauriBridge)),
+};
 
 /** Which step failed: the check, or the download and install. */
 export type UpdateStep = "check" | "install";
@@ -40,13 +60,15 @@ function errorText(error: unknown): string {
 }
 
 /**
- * Self-update from the latest GitHub release. It only talks to the network when the user asks
+ * Self-update from the latest GitHub release, through `HX_UPDATE_BACKEND`. `HxUpdateService` is not
+ * used: after a failed install it drops the found update (a retry would need a new check) and it
+ * reads version and channel synchronously. It only talks to the network when the user asks
  * (`check`); `install` downloads, verifies, installs and restarts (the app does not come back
  * from a successful install). After a failed install the update stays available for a retry.
  */
 @Injectable({ providedIn: "root" })
 export class Updater {
-  private readonly bridge = inject(TauriBridge);
+  private readonly backend = inject(HX_UPDATE_BACKEND);
   private readonly _state = signal<UpdateState>({ kind: "idle" });
   readonly state = this._state.asReadonly();
 
@@ -54,7 +76,7 @@ export class Updater {
     if (this.busy()) return;
     this._state.set({ kind: "checking" });
     try {
-      const info = await this.bridge.invoke<UpdateInfo | null>("update_check");
+      const info = (await this.backend.check()) as UpdateInfo | null;
       this._state.set(info ? { kind: "available", info } : { kind: "current" });
     } catch (error) {
       this._state.set({ kind: "error", step: "check", message: errorText(error), info: null });
@@ -68,7 +90,7 @@ export class Updater {
     if (!info) return;
     this._state.set({ kind: "installing", info });
     try {
-      await this.bridge.invoke("update_install");
+      await this.backend.install();
     } catch (error) {
       this._state.set({ kind: "error", step: "install", message: errorText(error), info });
     }

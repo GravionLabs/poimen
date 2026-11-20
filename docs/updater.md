@@ -3,7 +3,7 @@
 poimen updates itself from the latest GitHub release. It checks only when the user clicks
 **Check for updates** (status bar, next to the running version); it makes no other network call.
 If a newer version exists, the status bar shows **Update available**; clicking it shows the release
-notes and **Install and restart**, which downloads, verifies and installs the update, then
+notes and **Install and restart** in a popover above the status bar (Escape or a click outside closes it), which downloads, verifies and installs the update, then
 restarts poimen.
 
 Terminals are not touched: `poimen-server` keeps them running, so closing or restarting poimen never closes a terminal or pane. On Windows a running `.exe` cannot be replaced, so poimen never starts the installed `poimen-server.exe` itself: it starts a copy under `%LOCALAPPDATA%\poimen-server\bin\<version>\`, and the installer can replace the installed file while that copy runs. The new version starts its own copy only when no server answers; the old server keeps running (and keeps the terminals) until it is stopped. Copies of other versions are removed when they are not running.

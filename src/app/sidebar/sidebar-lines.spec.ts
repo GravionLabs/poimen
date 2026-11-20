@@ -13,6 +13,7 @@ import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar } from "./sidebar";
 import { DEFAULT_SIDEBAR_ROWS, type SidebarRows } from "./spaces";
+import { inlineSpaceCard } from "./space-card.mock";
 
 const space: SpaceNode = {
   workspace: { space_id: "w1", label: "One", number: 1, agent_status: "idle" },
@@ -61,6 +62,7 @@ async function render(
       { provide: UI_STORAGE, useValue: null },
     ],
   });
+  inlineSpaceCard();
   TestBed.overrideComponent(Sidebar, {
     set: {
       templateUrl: undefined,

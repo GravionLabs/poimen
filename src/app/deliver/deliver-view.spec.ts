@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACTIVITY_VIEWS } from "../activity-bar/activity-bar";
+import { ACTIVITY_ENTRIES } from "../core/activity-items";
 import { POIMEN_COMMANDS } from "../core/command-palette";
 import { DELIVER_TAB, EditorTabs, tabKind } from "../core/editor-tabs";
 import type { Terminal } from "../core/snapshot";
@@ -698,9 +698,9 @@ describe("helpers", () => {
 
 describe("entry points", () => {
   it("is a tab in the activity bar, the palette and the editor tabs", () => {
-    expect(ACTIVITY_VIEWS.find((v) => v.id === "deliver")).toMatchObject({
+    expect(ACTIVITY_ENTRIES.find((v) => v.id === "deliver")).toMatchObject({
       label: "Runs",
-      tab: "deliver",
+      target: { kind: "tab", tab: "deliver" },
     });
     expect(POIMEN_COMMANDS).toContainEqual({ id: "openDeliver", title: "Open Runs" });
     expect(tabKind(DELIVER_TAB)).toBe("deliver");

@@ -1,0 +1,420 @@
+<ng-template #segs let-line let-edit="edit" let-label="label" let-nav="nav">
+  @for (seg of line; track $index) {
+    @switch (seg.kind) {
+      @case ("dot") {
+        <span class="dot status-{{ seg.status }}"></span>
+      }
+      @case ("name") {
+        @if (edit && isEditing(edit)) {
+          <input
+            #input
+            appSpaceEditFocus
+            class="edit"
+            type="text"
+            [attr.aria-label]="edit.kind === 'space' ? 'Space name' : 'Terminal name'"
+            autocomplete="off"
+            [value]="label"
+            (click)="$event.stopPropagation()"
+            (dblclick)="$event.stopPropagation()"
+            (keydown)="$event.stopPropagation()"
+            (keydown.enter)="finishEdit(edit, input, true)"
+            (keydown.escape)="finishEdit(edit, input, false)"
+            (input)="clearError()"
+            (blur)="finishEdit(edit, input, input.value !== label)"
+          />
+          @if (renameError(); as message) {
+            <span class="edit-error" role="alert">{{ message }}</span>
+          }
+        } @else {
+          <span
+            class="name"
+            [class.bold]="seg.bold"
+            [class.dim]="seg.dim"
+            (dblclick)="edit && startEdit(edit, $event)"
+            >{{ seg.text }}</span
+          >
+          @if (edit?.kind === "space" && pinned()) {
+            <svg
+              class="pin-mark"
+              viewBox="0 0 16 16"
+              width="11"
+              height="11"
+              fill="currentColor"
+              role="img"
+              aria-label="Pinned"
+            >
+              <title>Pinned</title>
+              <path
+                d="M9.5 1.5l5 5-1.4 1.4-.9-.4-2.3 2.3.3 3-1.1 1.1-3-3-4.2 4.2-1-1 4.2-4.2-3-3 1.1-1.1 3 .3 2.3-2.3-.4-.9z"
+              />
+            </svg>
+          }
+        }
+      }
+      @case ("state") {
+        <span class="state state-{{ seg.status }}" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
+          seg.text
+        }}</span>
+      }
+      @default {
+        @if (seg.url; as url) {
+          <button
+            type="button"
+            hx-button
+            variant="text"
+            severity="secondary"
+            size="small"
+            class="text pr-link"
+            [class.bold]="seg.bold"
+            [class.dim]="seg.dim"
+            [title]="seg.tip"
+            [attr.tabindex]="nav && nav === stopSignal() ? 0 : -1"
+            [attr.aria-label]="'Open pull request: ' + seg.text"
+            (click)="openPull(url, $event)"
+          >
+            {{ (seg.sep ? "· " : "") + seg.text }}
+          </button>
+        } @else {
+          <span
+            class="text"
+            [class.bold]="seg.bold"
+            [class.dim]="seg.dim"
+            [title]="seg.tip ?? ''"
+            >{{ (seg.sep ? "· " : "") + seg.text }}</span
+          >
+        }
+      }
+    }
+  }
+</ng-template>
+<ng-template #rowTpl let-node let-depth="depth">
+  @let d = row(node);
+  @let m = marks(d.row);
+  <div
+    class="row"
+    role="treeitem"
+    [attr.aria-level]="2 + depth"
+    [attr.aria-selected]="m.active"
+    [attr.data-nav]="d.row.pane.terminal_id"
+    [attr.tabindex]="stopSignal() === d.row.pane.terminal_id ? 0 : -1"
+    [class.open]="m.open"
+    [class.active]="m.active"
+    [class.attention]="rings(d.row)"
+    [class.dragging]="tabDragState(d.row) === 'source'"
+    [class.drop-before]="tabDragState(d.row) === 'before'"
+    [class.drop-after]="tabDragState(d.row) === 'after'"
+    [attr.draggable]="canDragTabs() ? 'true' : null"
+    (dragstart)="tabDragStart.emit({ event: $event, row: d.row })"
+    (dragover)="tabDragOver.emit({ event: $event, row: d.row })"
+    (drop)="tabDrop.emit({ event: $event, row: d.row })"
+    (dragend)="dragEnded.emit()"
+    [style.padding-left.px]="6 + depth * 12"
+    [title]="title(d.row)"
+    (click)="picked.emit(d.row.pane.terminal_id)"
+    (keydown.space)="onSpace($event, () => picked.emit(d.row.pane.terminal_id))"
+    (contextmenu)="askMenu($event, 'pane', d.row.pane.terminal_id)"
+  >
+    <span
+      class="icon"
+      [class.agent]="d.row.agent"
+      [attr.aria-label]="d.row.agent ? 'Agent ' + d.row.agent : 'Terminal'"
+      >{{ glyph(d.row) }}</span
+    >
+    @if (hostNote(d.row); as note) {
+      <span class="host-note" role="img" [attr.aria-label]="note" [title]="note"></span>
+    }
+    <span class="main">
+      @for (line of d.lines; track $index) {
+        <span class="line">
+          <ng-container
+            [ngTemplateOutlet]="segs"
+            [ngTemplateOutletContext]="{
+              $implicit: line,
+              edit: { kind: 'pane', id: d.row.pane.terminal_id },
+              label: d.row.name,
+              nav: d.row.pane.terminal_id,
+            }"
+          />
+        </span>
+      }
+      @if (records(d.row); as rv) {
+        <span class="records" role="group" aria-label="Child records">
+          @if (rv.many) {
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
+              class="records-toggle"
+              [attr.tabindex]="d.row.pane.terminal_id === stopSignal() ? 0 : -1"
+              [attr.aria-expanded]="rv.open"
+              (click)="toggleRecords(d.row.pane.terminal_id, $event)"
+            >
+              {{ rv.summary ?? "Hide records" }}
+            </button>
+          }
+          @for (r of rv.rows; track r.id) {
+            <span class="record" [style.padding-left.px]="r.depth * 10" [title]="r.id">
+              <span class="dot status-{{ r.status }}"></span>
+              <span class="name">{{ r.name }}</span>
+              @if (r.state; as state) {
+                <span class="state state-{{ r.status }}">{{ state }}</span>
+              }
+              @if (r.message; as message) {
+                <span class="text">{{ message }}</span>
+              }
+            </span>
+          }
+        </span>
+      }
+    </span>
+    @if (silentMark(d.row); as silent) {
+      <span class="silent" title="The agent reported nothing for a while">{{ silent }}</span>
+    }
+    @if (isUnread(d.row)) {
+      <span class="badge dot-badge" role="img" aria-label="Unread"></span>
+    }
+  </div>
+  @for (child of node.children ?? []; track child.key) {
+    <ng-container
+      [ngTemplateOutlet]="rowTpl"
+      [ngTemplateOutletContext]="{ $implicit: child, depth: depth + 1 }"
+    />
+  }
+</ng-template>
+<section
+  class="card"
+  role="none"
+  [class.member]="data().member"
+  [class.dragging]="dragState() === 'source'"
+  [class.drop-before]="dragState() === 'before'"
+  [class.drop-after]="dragState() === 'after'"
+  [class.collapsed]="collapsed()"
+  [class.closing]="closing()"
+  [class.attention]="ringing()"
+  [class.offline]="reason() !== null"
+  [attr.aria-disabled]="reason() !== null ? 'true' : null"
+  [attr.aria-busy]="closing() || null"
+  [attr.aria-label]="label()"
+  (dragover)="spaceDragOver.emit({ event: $event, id: id() })"
+  (drop)="spaceDrop.emit({ event: $event, id: id() })"
+>
+  <header
+    class="head"
+    role="none"
+    [attr.draggable]="canDragSpace() ? 'true' : null"
+    (dragstart)="spaceDragStart.emit({ event: $event, id: id() })"
+    (dragend)="dragEnded.emit()"
+    (contextmenu)="askMenu($event, 'workspace', id())"
+  >
+    @if (full()) {
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
+        iconOnly
+        class="fold"
+        tabindex="-1"
+        [attr.data-card]="id()"
+        [attr.aria-expanded]="!collapsed()"
+        [attr.aria-label]="(collapsed() ? 'Expand ' : 'Collapse ') + label()"
+        [title]="(collapsed() ? 'Expand ' : 'Collapse ') + label()"
+        (click)="toggle()"
+      >
+        <span class="chevron" [class.open]="!collapsed()" aria-hidden="true"></span>
+      </button>
+    }
+    <span
+      class="title"
+      role="treeitem"
+      aria-level="1"
+      aria-selected="false"
+      [attr.data-nav]="id()"
+      [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+      [attr.aria-expanded]="full() ? !collapsed() : null"
+      (click)="open()"
+      (keydown.space)="onSpace($event, () => open())"
+    >
+      @if (!firstHasDot()) {
+        <span class="dot status-{{ data().status }}"></span>
+      }
+      <ng-container
+        [ngTemplateOutlet]="segs"
+        [ngTemplateOutletContext]="{
+          $implicit: data().lines[0] ?? [],
+          edit: { kind: 'space', id: id() },
+          label: label(),
+          nav: id(),
+        }"
+      />
+    </span>
+    @if (rebuildMark(); as mark) {
+      @switch (mark.kind) {
+        @case ("consent") {
+          <button
+            type="button"
+            hx-button
+            variant="outlined"
+            severity="secondary"
+            size="small"
+            class="rebuild"
+            [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+            [attr.aria-label]="'Rebuild space ' + label()"
+            [title]="'Rebuild the layout: ' + mark.reasons.join('; ')"
+            (click)="rebuild($event)"
+          >
+            Rebuild
+          </button>
+        }
+        @case ("busy") {
+          <span class="rebuild-label" role="status">Rebuilding…</span>
+        }
+        @case ("missing") {
+          <span class="rebuild-hint" [title]="mark.reason">Directory gone</span>
+        }
+        @case ("failed") {
+          <span class="rebuild-hint" [title]="mark.reason">Not rebuilt</span>
+        }
+      }
+    }
+    @if (closing()) {
+      <span class="closing-label" role="status">Closing…</span>
+    }
+    @if (silent(); as silent) {
+      <span class="silent" title="The agent reported nothing for a while">{{ silent }}</span>
+    }
+    @if (unread(); as n) {
+      <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
+    }
+    <span class="actions">
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
+        iconOnly
+        [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+        [disabled]="closing() || reason() !== null"
+        [attr.aria-label]="'New terminal in ' + label()"
+        [title]="reason() ?? 'New terminal in ' + label()"
+        (click)="newTerminal($event)"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M8 3v10M3 8h10" />
+        </svg>
+      </button>
+      @if (!remote()) {
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          iconOnly
+          [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+          [attr.aria-label]="'Configure space ' + label()"
+          [title]="'Configure space ' + label()"
+          (click)="configureSpace($event)"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="12"
+            height="12"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.3"
+            aria-hidden="true"
+          >
+            <circle cx="8" cy="8" r="2.2" />
+            <path
+              d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
+      }
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
+        iconOnly
+        [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+        [disabled]="closing() || reason() !== null"
+        [attr.aria-label]="'Close space ' + label()"
+        [title]="reason() ?? 'Close space ' + label()"
+        (click)="closeSpace($event)"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M4 4l8 8M12 4l-8 8" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
+        iconOnly
+        class="more"
+        [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+        aria-haspopup="menu"
+        [disabled]="reason() !== null"
+        [attr.aria-label]="'More actions for ' + label()"
+        [title]="reason() ?? 'More actions for ' + label()"
+        (click)="askMore($event)"
+      >
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">
+          <circle cx="3.5" cy="8" r="1.2" />
+          <circle cx="8" cy="8" r="1.2" />
+          <circle cx="12.5" cy="8" r="1.2" />
+        </svg>
+      </button>
+    </span>
+  </header>
+  @if (full()) {
+    @if (!collapsed()) {
+      @for (line of data().lines.slice(1); track $index) {
+        <span class="line further">
+          <ng-container
+            [ngTemplateOutlet]="segs"
+            [ngTemplateOutletContext]="{ $implicit: line, label: label() }"
+          />
+        </span>
+      }
+      <div class="body" role="none">
+        @for (child of rows(); track child.key) {
+          <ng-container
+            [ngTemplateOutlet]="rowTpl"
+            [ngTemplateOutletContext]="{ $implicit: child, depth: 0 }"
+          />
+        } @empty {
+          <p class="empty">No terminals</p>
+        }
+      </div>
+    }
+  }
+</section>

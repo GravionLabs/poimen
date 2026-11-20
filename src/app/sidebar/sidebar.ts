@@ -3,7 +3,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
-  Directive,
   ElementRef,
   Injector,
   afterNextRender,
@@ -16,15 +15,14 @@ import {
 } from "@angular/core";
 import { HxButton, HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
+import { cardKeyboard } from "./card-keys";
 import {
   filterSpaces,
   olderHost,
   olderHostNote,
-  type AgentStatus,
   type Terminal,
   type PaneRow,
   type SpaceNode,
-  type Space,
   dropAllowed,
 } from "../core/snapshot";
 import { ContextMenu } from "../ui/context-menu/context-menu";
@@ -46,13 +44,12 @@ import {
   recordRows,
   recordsSummary,
   renderRow,
+  filterValues,
   spaceContext,
-  type Line,
   type RecordRow,
-  type RowType,
   type SidebarRows,
 } from "./spaces";
-import { SettingsStore, type SidebarAgents } from "../core/settings";
+import { SettingsStore, type SidebarAgents, type SidebarLayout } from "../core/settings";
 import {
   AGENT_SECTIONS,
   formatElapsed,
@@ -66,125 +63,21 @@ import { UiState } from "../core/ui-state";
 import { SpaceActions } from "../core/space-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { Machines } from "../core/machines";
+import { sidebarMenuItems, type SidebarMenuAction } from "./sidebar-menu";
+import { SpaceCard } from "./space-card";
+import { WORKSPACE_PREFIX, nestTabs, spaceNodes, type SpaceData } from "./space-nodes";
+
+export { nestTabs, spaceNodes, type SpaceData };
+import { SpaceEditFocus } from "./space-edit-focus";
 import { MachinesSection } from "./machines-section/machines-section";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 
-/** What a tree node carries back to the template. */
-export type SpaceData =
-  | {
-      kind: "workspace";
-      workspace: Space;
-      status: AgentStatus;
-      lines: Line[];
-      /** Split layout only: the workspace whose terminals are listed. */
-      selected?: boolean;
-      /** A linked worktree listed below the space of its repository: indented. */
-      member?: boolean;
-    }
-  | {
-      kind: "pane";
-      row: PaneRow;
-      lines: Line[];
-      /** Agents section: time since the last status change (`5m`, `2h`, `3d`). */
-      since?: string;
-    };
-
-const rowType = (row: PaneRow): RowType => (row.agent ? "agent" : "terminal");
-
-/** Texts of the shown tokens of a space and one of its panes: what the filter matches. */
-export function filterValues(
-  space: SpaceNode,
-  row: PaneRow,
-  rows: SidebarRows,
-  showBase = false,
-): string[] {
-  const ctx = spaceContext(space, showBase);
-  const texts = (lines: Line[]) => lines.flatMap((l) => l.map((s) => s.text));
-  return [
-    ...texts(renderRow(rowType(row), rows[rowType(row)], row, ctx)),
-    ...texts(renderRow("workspace", rows.workspace, space, ctx)),
-  ];
-}
-
-/** Tree keys: the pane id for a pane, a prefixed workspace id for a workspace. */
-const WORKSPACE_PREFIX = "workspace:";
-
-/** Tree nodes of the (filtered) spaces; a workspace starts expanded (helix only applies it once). */
-export function spaceNodes(
-  spaces: SpaceNode[],
-  rows: SidebarRows = DEFAULT_SIDEBAR_ROWS,
-  showBase = false,
-): HxTreeNode<SpaceData>[] {
-  return spaces.map((space) => {
-    const ctx = spaceContext(space, showBase);
-    const status = aggregateStatus(space);
-    return {
-      key: WORKSPACE_PREFIX + space.workspace.space_id,
-      label: space.workspace.label,
-      expanded: true,
-      data: {
-        kind: "workspace",
-        workspace: space.workspace,
-        status,
-        lines: renderRow("workspace", rows.workspace, space, ctx),
-        member: !!space.parent,
-      },
-      children: nestTabs(space.rows, (row) => ({
-        key: row.pane.terminal_id,
-        label: row.name,
-        leaf: true,
-        data: {
-          kind: "pane",
-          row,
-          lines: renderRow(rowType(row), rows[rowType(row)], row, ctx),
-        },
-      })),
-    };
-  });
-}
-
-/**
- * Nodes of pane rows nested by tab (#656): the rows of a tab with `parent` become children of the
- * first row of that parent tab, in tab order; the other rows of a tab stay siblings of its first
- * row. A tab whose parent has no row here (or a parent cycle) is top level. A node with children
- * is expandable and starts expanded.
- */
-export function nestTabs(
-  rows: readonly PaneRow[],
-  make: (row: PaneRow) => HxTreeNode<SpaceData>,
-): HxTreeNode<SpaceData>[] {
-  const entries = rows.map((row) => ({ row, node: make(row) }));
-  const firstOf = new Map<string, HxTreeNode<SpaceData>>();
-  const parentOf = new Map<string, string | undefined>();
-  for (const { row, node } of entries) {
-    if (!row.tabId) continue;
-    if (!firstOf.has(row.tabId)) firstOf.set(row.tabId, node);
-    parentOf.set(row.tabId, row.tabParent);
-  }
-  const containerOf = (tab: string | undefined): HxTreeNode<SpaceData> | undefined => {
-    const parent = tab ? parentOf.get(tab) : undefined;
-    if (!tab || !parent || !firstOf.has(parent)) return undefined;
-    // Only a chain that comes back to this tab is a cycle; one that joins another is fine.
-    const seen = new Set<string>();
-    for (let up: string | undefined = parent; up && !seen.has(up); up = parentOf.get(up)) {
-      if (up === tab) return undefined;
-      seen.add(up);
-    }
-    return firstOf.get(parent);
-  };
-  const top: HxTreeNode<SpaceData>[] = [];
-  for (const { row, node } of entries) {
-    const container = containerOf(row.tabId);
-    if (!container) {
-      top.push(node);
-      continue;
-    }
-    container.children = [...(container.children ?? []), node];
-    container.leaf = false;
-    container.expanded = true;
-  }
-  return top;
-}
+/** The layout the toggle in the header switches to next. */
+const LAYOUT_CYCLE: Record<SidebarLayout, SidebarLayout> = {
+  tree: "split",
+  split: "cards",
+  cards: "tree",
+};
 
 /** The two lists of the `split` layout. */
 export interface SplitSections {
@@ -349,101 +242,12 @@ export function spaceRepoDir(spaces: readonly SpaceNode[], id: string): string |
   return node?.repo?.branch != null ? node.workspace.cwd : undefined;
 }
 
-/** A row's context menu: `kind` says what was clicked, `action` what was picked. */
-export interface SidebarMenuAction {
-  kind: "workspace" | "pane";
-  id: string;
-  action:
-    | "new-terminal"
-    | "split-right"
-    | "split-down"
-    | "start-agent"
-    | "rename"
-    | "restart"
-    | "mark-unread"
-    | "close"
-    | "close-space"
-    | "rename-space"
-    | "pin-space"
-    | "unpin-space"
-    | "start-task"
-    | "cleanup-tasks"
-    | "show-changes";
-}
-
-/** One entry of a context menu. */
-export interface SidebarMenuItem {
-  action: SidebarMenuAction["action"];
-  label: string;
-  /** Why the entry cannot be used (its machine is not connected, #693); set means disabled. */
-  disabled?: string;
-}
-
-/** A group of context menu entries; `label` is the heading, `null` for the built-in group. */
-export interface SidebarMenuGroup {
-  id: string;
-  label: string | null;
-  items: SidebarMenuItem[];
-}
-
-/**
- * Groups of the context menu of a workspace row or a pane row: the built-in actions.
- */
-export function sidebarMenuItems(
-  kind: SidebarMenuAction["kind"],
-  /** The space is in a repository: it offers to start a task. */
-  repo = false,
-  /** The terminal runs on an older PTY host: it offers a restart on the new one. */
-  outdatedHost = false,
-  /** The row is on a machine that is not connected: every entry is disabled with this reason. */
-  blocked: string | null = null,
-  /** The row is an agent that is done or idle and not unread (#725). */
-  markable = false,
-  /** Whether a local space is pinned (#710); `null` offers no pin entry (pane, remote space). */
-  pinned: boolean | null = null,
-): SidebarMenuGroup[] {
-  const builtin: SidebarMenuGroup = {
-    id: "builtin",
-    label: null,
-    items:
-      kind === "workspace"
-        ? [
-            { action: "new-terminal", label: "New terminal..." },
-            ...(repo
-              ? [
-                  { action: "show-changes" as const, label: "Show changes" },
-                  { action: "start-task" as const, label: "Start task from issue…" },
-                  { action: "cleanup-tasks" as const, label: "Clean up merged tasks" },
-                ]
-              : []),
-            ...(pinned === null
-              ? []
-              : [
-                  pinned
-                    ? { action: "unpin-space" as const, label: "Unpin space" }
-                    : { action: "pin-space" as const, label: "Pin space" },
-                ]),
-            { action: "rename-space", label: "Rename space..." },
-            { action: "close-space", label: "Close space" },
-          ]
-        : [
-            ...(markable ? [{ action: "mark-unread" as const, label: "Mark as unread" }] : []),
-            { action: "split-right", label: "Split right" },
-            { action: "split-down", label: "Split down" },
-            { action: "start-agent", label: "Start agent..." },
-            { action: "rename", label: "Rename..." },
-            ...(outdatedHost
-              ? [{ action: "restart" as const, label: "Restart terminal on the new host..." }]
-              : []),
-            { action: "close", label: "Close pane..." },
-          ],
-  };
-  return [
-    blocked
-      ? { ...builtin, items: builtin.items.map((item) => ({ ...item, disabled: blocked })) }
-      : builtin,
-  ];
-}
+export {
+  sidebarMenuItems,
+  type SidebarMenuAction,
+  type SidebarMenuGroup,
+  type SidebarMenuItem,
+} from "./sidebar-menu";
 
 export { menuTarget } from "../ui/context-menu/menu-model";
 
@@ -459,18 +263,6 @@ export function isDoubleClick(
 }
 
 /** Workspaces and their panes with live agent status; a click or Enter opens the pane. */
-/** Focuses and selects the inline rename input once it is in the DOM. */
-@Directive({ selector: "input[appSpaceEditFocus]" })
-export class SpaceEditFocus {
-  constructor() {
-    const el = inject<ElementRef<HTMLInputElement>>(ElementRef).nativeElement;
-    afterNextRender(() => {
-      el.focus();
-      el.select();
-    });
-  }
-}
-
 @Component({
   selector: "app-sidebar",
   imports: [
@@ -484,6 +276,7 @@ export class SpaceEditFocus {
     NgTemplateOutlet,
     SplitPane,
     MachinesSection,
+    SpaceCard,
   ],
   templateUrl: "./sidebar.html",
   styleUrl: "./sidebar.css",
@@ -838,7 +631,7 @@ export class Sidebar {
   protected readonly layout = computed(() => this.settings.settings().sidebarLayout);
   protected readonly writeError = this.settings.writeError;
   /** The layout a click on the toggle switches to. */
-  protected readonly otherLayout = computed(() => (this.layout() === "tree" ? "split" : "tree"));
+  protected readonly otherLayout = computed(() => LAYOUT_CYCLE[this.layout()]);
 
   protected readonly sort = computed(() => this.settings.settings().sidebarSort);
 
@@ -909,9 +702,37 @@ export class Sidebar {
     );
   });
 
+  /** The cards of the spaces of each machine (`cards` layout, #938); not filtered, not reordered. */
+  protected readonly remoteNodes = computed(
+    () =>
+      new Map(
+        this.layout() !== "cards"
+          ? []
+          : this.machines
+              .machines()
+              .map((m) => [
+                m.name,
+                spaceNodes(this.store.remoteSpaces(m.name), this.rows(), this.showBase()),
+              ]),
+      ),
+  );
   protected readonly nodes = computed(() =>
     spaceNodes(this.filtered(), this.rows(), this.showBase()),
   );
+
+  /** Keyboard navigation of the cards layout (#937). */
+  private readonly cardKeys = cardKeyboard({
+    nodes: this.nodes,
+    collapsed: this.ui.collapsedCards,
+    filtering: computed(() => this.query().trim() !== ""),
+    toggle: (id, collapsed) => this.ui.setCardCollapsed(id, collapsed),
+    open: (key) => this.onSelect(key),
+    root: () => this.host.nativeElement,
+    injector: this.injector,
+  });
+  protected readonly cardStop = this.cardKeys.stop;
+  protected readonly onCardKey = this.cardKeys.onKey;
+  protected readonly onCardFocus = this.cardKeys.onFocus;
 
   /** The clock of the elapsed times in the Agents section; ticks once a minute. */
   private readonly now = signal(Date.now());

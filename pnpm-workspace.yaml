@@ -6,7 +6,8 @@ allowBuilds:
 # 7 days, in minutes: a younger release reaches neither the lockfile nor an install (GravionLabs/ci#239).
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
-  - "@gravionlabs/helix-ui@22.2.17"
+  # helix-ui and helix-desktop release together; every version is exempt, so a new one needs no edit here.
+  - "@gravionlabs/helix-*"
   - "@pnpm/exe.android-arm64@12.21.0"
   - "@pnpm/exe.android-x64@12.21.0"
   - "@pnpm/exe.darwin-arm64@12.21.0"

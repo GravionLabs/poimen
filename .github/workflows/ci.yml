@@ -72,6 +72,18 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  # Ratchets (scripts/ratchets/, no dependencies): checks with a baseline that may only shrink. Always runs; it is cheap.
+  ratchets:
+    name: ratchets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - run: node --test scripts/ratchets/core.test.mjs
+      - run: node scripts/ratchets/run.mjs
+
   # The server crates and the formatting of the whole workspace: no Tauri libraries, no frontend build.
   rust-server:
     needs: changes
@@ -153,12 +165,12 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy -p poimen-app --locked -- -D warnings
 
-  # The one check to require: green when frontend, rust-server, rust and windows passed or were skipped because their
+  # The one check to require: green when ratchets, frontend, rust-server, rust and windows passed or were skipped because their
   # area did not change; red when any of them (or `changes`) failed or was cancelled.
   ci:
     name: ci
     if: always()
-    needs: [changes, frontend, rust-server, rust, windows]
+    needs: [changes, ratchets, frontend, rust-server, rust, windows]
     runs-on: ubuntu-24.04
     steps:
       - env:

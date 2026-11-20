@@ -412,3 +412,20 @@ export function recordsSummary(records: readonly ChildRecord[]): string {
   }
   return parts.join(" · ");
 }
+
+export const rowType = (row: PaneRow): RowType => (row.agent ? "agent" : "terminal");
+
+/** Texts of the shown tokens of a space and one of its panes: what the filter matches. */
+export function filterValues(
+  space: SpaceNode,
+  row: PaneRow,
+  rows: SidebarRows,
+  showBase = false,
+): string[] {
+  const ctx = spaceContext(space, showBase);
+  const texts = (lines: Line[]) => lines.flatMap((l) => l.map((s) => s.text));
+  return [
+    ...texts(renderRow(rowType(row), rows[rowType(row)], row, ctx)),
+    ...texts(renderRow("workspace", rows.workspace, space, ctx)),
+  ];
+}

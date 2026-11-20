@@ -19,7 +19,7 @@ import {
   type SidebarRows,
 } from "../sidebar/spaces";
 
-export type SidebarLayout = "tree" | "split";
+export type SidebarLayout = "tree" | "split" | "cards";
 /** `sidebar.agents`: the Agents section in list order or by priority (#722). */
 export type SidebarAgents = "list" | "priority";
 /** `sidebar.sort`: the user's own space order, alphabetical, by attention or by last focus. */
@@ -476,7 +476,10 @@ export function parseSettings(raw: unknown): Settings {
     autoControl: r["autoControl"] !== false,
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
-    sidebarLayout: r["sidebarLayout"] === "split" ? "split" : "tree",
+    sidebarLayout:
+      r["sidebarLayout"] === "split" || r["sidebarLayout"] === "cards"
+        ? r["sidebarLayout"]
+        : "tree",
     sidebarAgents: r["sidebarAgents"] === "priority" ? "priority" : "list",
     sidebarSort: SIDEBAR_SORTS.find((v) => v === r["sidebarSort"]) ?? "manual",
     sidebarGroupWorktrees: r["sidebarGroupWorktrees"] !== false,

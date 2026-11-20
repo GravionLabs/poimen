@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
+import { HxStatusBar, HxStatusItem, HxStatusPopover } from "@gravionlabs/helix-desktop";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { SERVER_RESTART_NOTE, errorTitle, type UpdateState } from "../core/updater";
 import type { BarSummary } from "../deliver/deliver-status";
@@ -12,7 +13,6 @@ import {
   type Mode,
 } from "../core/backend";
 import type { LimitsItem } from "../core/claude-limits";
-import { Icon } from "../ui/icon/icon";
 
 /** Tooltip of the RC badge. */
 export const CHANNEL_TITLE =
@@ -51,14 +51,10 @@ export function modeTitle(blocked: string | null): string {
 /** Bottom bar: server connection, waiting agents (click jumps to the next) and the active tab. */
 @Component({
   selector: "app-status-bar",
-  imports: [HxButton, Icon],
+  imports: [HxButton, HxStatusBar, HxStatusItem, HxStatusPopover],
   templateUrl: "./status-bar.html",
   styleUrl: "./status-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: {
-    "(document:keydown.escape)": "closeDetails()",
-    "(document:click)": "onDocumentClick($event)",
-  },
 })
 export class StatusBar {
   readonly connection = input.required<ConnectionState>();
@@ -118,18 +114,6 @@ export class StatusBar {
   protected readonly versionLabel = backendVersionLabel;
   protected readonly warning = protocolWarning;
   protected readonly errTitle = errorTitle;
-  /** Whether the notes or the error of the update are shown above the bar. */
+  /** Whether the popover with the notes or the error of the update is open (Escape and an outside click close it). */
   protected readonly detailsOpen = signal(false);
-
-  /** Closes the update details (close button, Escape). */
-  closeDetails(): void {
-    this.detailsOpen.set(false);
-  }
-
-  /** Closes the details on a click outside them; the update buttons toggle on their own. */
-  onDocumentClick(event: Event): void {
-    const target = event.target;
-    if (target instanceof Element && target.closest(".update-details, .update-button")) return;
-    this.closeDetails();
-  }
 }

@@ -8,10 +8,13 @@ import {
   untracked,
   signal,
   inject,
+  viewChild,
+  type TemplateRef,
 } from "@angular/core";
 import { NgTemplateOutlet } from "@angular/common";
 import { Title } from "@angular/platform-browser";
 import { applyUiFont } from "./core/ui-font";
+import { HxActivityBar, HxAppShell, type HxSidebarState } from "@gravionlabs/helix-desktop";
 import { HxTheme } from "@gravionlabs/helix-ui";
 import {
   flowSession,
@@ -48,7 +51,7 @@ import { TerminalColorSync } from "./core/terminal-colors";
 import { UserSchemes } from "./core/user-schemes";
 import { TauriBridge } from "./core/tauri";
 import { Updater } from "./core/updater";
-import { ACTIVITY_VIEWS, ActivityBar } from "./activity-bar/activity-bar";
+import { SIDEBAR_VIEW_IDS, activityItems, tabOf } from "./core/activity-items";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
 import { Sidebar } from "./sidebar/sidebar";
@@ -125,7 +128,8 @@ const ZOOM_STEP = 1;
 @Component({
   selector: "app-root",
   imports: [
-    ActivityBar,
+    HxActivityBar,
+    HxAppShell,
     Icon,
     Sidebar,
     Explorer,
@@ -195,9 +199,29 @@ export class App {
   protected readonly claudeLimits = inject(ClaudeLimits);
   private readonly spaceRebuild = inject(SpaceRebuild);
 
+  private readonly spacesIcon = viewChild.required<TemplateRef<unknown>>("spacesIcon");
+  private readonly explorerIcon = viewChild.required<TemplateRef<unknown>>("explorerIcon");
+  private readonly notificationsIcon =
+    viewChild.required<TemplateRef<unknown>>("notificationsIcon");
+  private readonly githubIcon = viewChild.required<TemplateRef<unknown>>("githubIcon");
+  private readonly deliverIcon = viewChild.required<TemplateRef<unknown>>("deliverIcon");
+  private readonly settingsIcon = viewChild.required<TemplateRef<unknown>>("settingsIcon");
+
+  /** The items of the activity bar, with the SVG templates of app.html. */
+  protected readonly activityItems = computed(() =>
+    activityItems({
+      spaces: this.spacesIcon(),
+      explorer: this.explorerIcon(),
+      notifications: this.notificationsIcon(),
+      github: this.githubIcon(),
+      deliver: this.deliverIcon(),
+      settings: this.settingsIcon(),
+    }),
+  );
+
   /** A click on the activity bar: switch the view; the active one collapses the sidebar. */
   protected selectView(id: string): void {
-    const tab = ACTIVITY_VIEWS.find((v) => v.id === id)?.tab;
+    const tab = tabOf(id);
     if (tab === "github") {
       this.editor.openGithub();
       return;
@@ -206,14 +230,14 @@ export class App {
       this.editor.openDeliver();
       return;
     }
-    this.ui.selectView(
-      id,
-      ACTIVITY_VIEWS.filter((v) => !v.tab).map((v) => v.id),
-    );
+    if (tab === "settings") {
+      this.openSettings();
+      return;
+    }
+    this.ui.selectView(id, SIDEBAR_VIEW_IDS);
   }
   protected readonly minWidth = SIDEBAR_MIN_WIDTH;
   protected readonly maxWidth = SIDEBAR_MAX_WIDTH;
-  private drag: { startX: number; startWidth: number } | null = null;
 
   protected readonly editor = inject(EditorTabs);
   private readonly attention = inject(Attention);
@@ -956,29 +980,10 @@ export class App {
     this.sizes.update((m) => new Map(m).set(paneId, size));
   }
 
-  protected dragStart(event: PointerEvent): void {
-    const handle = event.target as HTMLElement;
-    handle.setPointerCapture(event.pointerId);
-    handle.classList.add("dragging");
-    this.drag = { startX: event.clientX, startWidth: this.ui.sidebarWidth() };
-  }
-
-  protected dragMove(event: PointerEvent): void {
-    if (!this.drag) return;
-    this.ui.setSidebarWidth(this.drag.startWidth + event.clientX - this.drag.startX);
-  }
-
-  protected dragEnd(event: PointerEvent): void {
-    this.drag = null;
-    (event.target as HTMLElement).classList.remove("dragging");
-  }
-
-  protected resizeKey(event: KeyboardEvent): void {
-    const step = event.shiftKey ? 40 : 10;
-    if (event.key === "ArrowLeft") this.ui.setSidebarWidth(this.ui.sidebarWidth() - step);
-    else if (event.key === "ArrowRight") this.ui.setSidebarWidth(this.ui.sidebarWidth() + step);
-    else return;
-    event.preventDefault();
+  /** The shell resized or collapsed the sidebar: persist it through `UiState`. */
+  protected onSidebarChange(state: HxSidebarState): void {
+    if (state.width !== this.ui.sidebarWidth()) this.ui.setSidebarWidth(state.width);
+    if (state.collapsed !== this.ui.sidebarCollapsed()) this.ui.toggleSidebar();
   }
 
   /** Single click previews, a double click pins; an open pane is only activated. */
