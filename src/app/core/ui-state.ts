@@ -1,5 +1,6 @@
-import { Injectable, InjectionToken, inject, signal } from "@angular/core";
+import { Injectable, InjectionToken, inject, signal, type WritableSignal } from "@angular/core";
 import { AGENT_SECTIONS, type AgentSection } from "./agent-priority";
+import { idLists, withMark } from "./card-marks";
 import { parseLineComments, type CommentSet } from "./line-comments-state";
 
 export const SIDEBAR_MIN_WIDTH = 180;
@@ -75,8 +76,9 @@ export interface LayoutState {
   spaceOrder?: string[];
   /** Pinned spaces (`space_id`s), shown first in the tree in every sort mode. */
   pinnedSpaces?: string[];
-  /** Spaces whose card is collapsed to its header in the `cards` sidebar layout (`space_id`s). */
+  /** Spaces whose card is collapsed to its header, or hides its details line (`cards` layout). */
   collapsedCards?: string[];
+  hiddenDetails?: string[];
   /** When the user last focused each space (`space_id` to epoch ms), for `sidebar.sort: recent`. */
   recentSpaces?: Record<string, number>;
   /** The user's order of the tabs (`tab_id`s) per `space_id`; tabs not listed follow by number. */
@@ -216,6 +218,7 @@ export function parseLayout(raw: string | null): LayoutState {
       spaceOrder,
       pinnedSpaces,
       collapsedCards,
+      hiddenDetails,
       recentSpaces,
       tabOrder,
       taskMachine,
@@ -322,18 +325,7 @@ export function parseLayout(raw: string | null): LayoutState {
       const keys = recentCommands.filter((k): k is string => typeof k === "string" && k !== "");
       state.recentCommands = [...new Set(keys)].slice(0, RECENT_COMMANDS_LIMIT);
     }
-    if (Array.isArray(spaceOrder)) {
-      const ids = spaceOrder.filter((k): k is string => typeof k === "string" && k !== "");
-      if (ids.length) state.spaceOrder = [...new Set(ids)];
-    }
-    if (Array.isArray(pinnedSpaces)) {
-      const ids = pinnedSpaces.filter((k): k is string => typeof k === "string" && k !== "");
-      if (ids.length) state.pinnedSpaces = [...new Set(ids)];
-    }
-    if (Array.isArray(collapsedCards)) {
-      const ids = collapsedCards.filter((k): k is string => typeof k === "string" && k !== "");
-      if (ids.length) state.collapsedCards = [...new Set(ids)];
-    }
+    Object.assign(state, idLists({ spaceOrder, pinnedSpaces, collapsedCards, hiddenDetails }));
     if (recentSpaces && typeof recentSpaces === "object" && !Array.isArray(recentSpaces)) {
       const times = Object.entries(recentSpaces).filter(
         (e): e is [string, number] => e[0] !== "" && typeof e[1] === "number" && e[1] >= 0,
@@ -391,6 +383,7 @@ export class UiState {
   readonly pinnedSpaces = signal<readonly string[]>(this.initial.pinnedSpaces ?? []);
   /** Collapsed space cards of the `cards` sidebar layout (persisted, pruned for closed spaces). */
   readonly collapsedCards = signal<readonly string[]>(this.initial.collapsedCards ?? []);
+  readonly hiddenDetails = signal<readonly string[]>(this.initial.hiddenDetails ?? []);
   /** When each space was last focused (epoch ms), newest 200 kept. */
   readonly recentSpaces = signal<Readonly<Record<string, number>>>(this.initial.recentSpaces ?? {});
   /** The user's tab order per space (`tab_id`s, persisted). */
@@ -598,12 +591,7 @@ export class UiState {
 
   /** Pins or unpins a space. */
   setSpacePinned(id: string, pinned: boolean): void {
-    const has = this.pinnedSpaces().includes(id);
-    if (has === pinned) return;
-    this.pinnedSpaces.set(
-      pinned ? [...this.pinnedSpaces(), id] : this.pinnedSpaces().filter((p) => p !== id),
-    );
-    this.save();
+    this.setMark(this.pinnedSpaces, id, pinned);
   }
 
   /** Notes that the user focused `id` at `at` (epoch ms); only the newest 200 spaces are kept. */
@@ -627,25 +615,36 @@ export class UiState {
 
   /** Drops the pins of spaces that no longer exist; saves only when something went. */
   prunePinnedSpaces(existing: readonly string[]): void {
-    const keep = this.pinnedSpaces().filter((id) => existing.includes(id));
-    if (keep.length === this.pinnedSpaces().length) return;
-    this.pinnedSpaces.set(keep);
-    this.save();
+    this.pruneMarks(this.pinnedSpaces, existing);
   }
 
   setCardCollapsed(id: string, collapsed: boolean): void {
-    if (this.collapsedCards().includes(id) === collapsed) return;
-    this.collapsedCards.set(
-      collapsed ? [...this.collapsedCards(), id] : this.collapsedCards().filter((c) => c !== id),
-    );
-    this.save();
+    this.setMark(this.collapsedCards, id, collapsed);
   }
 
   /** Drops the collapsed cards of spaces that no longer exist. */
   pruneCollapsedCards(existing: readonly string[]): void {
-    const keep = this.collapsedCards().filter((id) => existing.includes(id));
-    if (keep.length === this.collapsedCards().length) return;
-    this.collapsedCards.set(keep);
+    this.pruneMarks(this.collapsedCards, existing);
+  }
+
+  setDetailsHidden(id: string, hidden: boolean): void {
+    this.setMark(this.hiddenDetails, id, hidden);
+  }
+
+  private setMark(marks: WritableSignal<readonly string[]>, id: string, on: boolean): void {
+    if (marks().includes(id) === on) return;
+    marks.set(withMark(marks(), id, on));
+    this.save();
+  }
+
+  pruneHiddenDetails(existing: readonly string[]): void {
+    this.pruneMarks(this.hiddenDetails, existing);
+  }
+
+  private pruneMarks(marks: WritableSignal<readonly string[]>, existing: readonly string[]): void {
+    const keep = marks().filter((id) => existing.includes(id));
+    if (keep.length === marks().length) return;
+    marks.set(keep);
     this.save();
   }
 
@@ -800,6 +799,7 @@ export class UiState {
       spaceOrder: this.spaceOrder().length ? [...this.spaceOrder()] : undefined,
       pinnedSpaces: this.pinnedSpaces().length ? [...this.pinnedSpaces()] : undefined,
       collapsedCards: this.collapsedCards().length ? [...this.collapsedCards()] : undefined,
+      hiddenDetails: this.hiddenDetails().length ? [...this.hiddenDetails()] : undefined,
       recentSpaces: Object.keys(this.recentSpaces()).length
         ? { ...this.recentSpaces() }
         : undefined,

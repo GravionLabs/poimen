@@ -55,6 +55,7 @@ async function setup(layout: SidebarLayout, stored?: string) {
         provide: SpacesStore,
         useValue: {
           spaces,
+          allSpaces: () => spaces(),
           pinnedSpaces: signal<string[]>([]),
           snapshot: signal({ spaces: [one.workspace, two.workspace] }),
           agentSections: signal(new Map()),
@@ -153,25 +154,74 @@ describe("Sidebar in the cards layout (#934)", () => {
     expect(s.cards()[1].querySelector(".head")?.textContent).toContain("Two");
   });
 
-  it("shows new terminal, configure, close and more in the header and acts on them", async () => {
+  it("shows new terminal and more in the header; configure and close are menu entries", async () => {
     const s = await setup("cards");
     const head = s.cards()[0].querySelector<HTMLElement>(".head")!;
     const label = (b: Element) => b.getAttribute("aria-label");
     expect([...head.querySelectorAll("button")].map(label)).toEqual([
       "Collapse One",
       "New terminal in One",
-      "Configure space One",
-      "Close space One",
       "More actions for One",
     ]);
     head.querySelector<HTMLButtonElement>('[aria-label="New terminal in One"]')!.click();
-    head.querySelector<HTMLButtonElement>('[aria-label="Configure space One"]')!.click();
-    head.querySelector<HTMLButtonElement>('[aria-label="Close space One"]')!.click();
-    expect(s.actions).toEqual([
-      { kind: "workspace", id: "w1", action: "new-terminal" },
-      { kind: "workspace", id: "w1", action: "close-space" },
-    ]);
+    expect(s.actions).toEqual([{ kind: "workspace", id: "w1", action: "new-terminal" }]);
+    head.querySelector<HTMLButtonElement>(".more")!.click();
+    await s.settle();
+    const item = (text: string) =>
+      [...s.root.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (e) => e.textContent?.trim() === text,
+      )!;
+    item("Configure space...").click();
     expect(s.configured).toEqual(["w1"]);
+  });
+
+  it("has Close space, the sort entries and the details toggle in the more menu", async () => {
+    const s = await setup("cards");
+    s.cards()[0].querySelector<HTMLButtonElement>(".more")!.click();
+    await s.settle();
+    const items = [...s.root.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')].map(
+      (e) => e.textContent?.trim(),
+    );
+    expect(items).toEqual(
+      expect.arrayContaining([
+        "Close space",
+        "Pin space",
+        "Hide details",
+        "✓ Manual",
+        "By name",
+        "By attention",
+        "Most recent",
+        "Sort alphabetically now",
+      ]),
+    );
+    [...s.root.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((e) => e.textContent?.trim() === "Hide details")!
+      .click();
+    expect(s.ui.hiddenDetails()).toEqual(["w1"]);
+  });
+
+  it("hides the details line per card with the chevron and keeps line 1", async () => {
+    const s = await setup("cards");
+    const card = s.cards()[0];
+    const toggle = card.querySelector<HTMLButtonElement>(".details-toggle");
+    if (!toggle) return;
+    const head = card.querySelector(".head")!.textContent;
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    toggle.click();
+    await s.settle();
+    expect(s.ui.hiddenDetails()).toEqual(["w1"]);
+    const again = card.querySelector<HTMLButtonElement>(".details-toggle")!;
+    expect(again.getAttribute("aria-expanded")).toBe("false");
+    expect(card.querySelector(".branch")).toBeNull();
+    expect(card.querySelector(".head")!.textContent).toBe(head);
+  });
+
+  it("gives the dot a tooltip and label and no state word for a working space", async () => {
+    const s = await setup("cards");
+    const dot = s.cards()[0].querySelector<HTMLElement>(".head .dot")!;
+    expect(dot.getAttribute("aria-label")).toMatch(/^Status: /);
+    expect(dot.title).toBe(dot.getAttribute("aria-label"));
+    expect(s.cards()[0].querySelector(".head .state-working")).toBeNull();
   });
 
   it("opens the context menu of the tree row from the more button", async () => {
@@ -396,8 +446,6 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
     expect(stops.map((e) => e.dataset["nav"] ?? e.getAttribute("aria-label"))).toEqual([
       "w1",
       "New terminal in One",
-      "Configure space One",
-      "Close space One",
       "More actions for One",
     ]);
     nav(s, "w1:p1").dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
@@ -446,7 +494,7 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
   it("keeps Space on a button inside a treeitem, and the stop on a card whose fold was clicked", async () => {
     const s = await setup("cards");
     const space = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
-    s.root.querySelector('[aria-label="Close space One"]')!.dispatchEvent(space);
+    s.root.querySelector('[aria-label="More actions for One"]')!.dispatchEvent(space);
     expect(space.defaultPrevented).toBe(false);
     nav(s, "w2:p1").dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     s.root
@@ -462,7 +510,7 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
     const alt = new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true });
     head.dispatchEvent(alt);
     expect(alt.defaultPrevented).toBe(false);
-    const button = s.root.querySelector<HTMLElement>('[aria-label="Close space One"]')!;
+    const button = s.root.querySelector<HTMLElement>('[aria-label="More actions for One"]')!;
     const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
     button.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(false);

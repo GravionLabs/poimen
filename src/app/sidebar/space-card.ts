@@ -26,7 +26,14 @@ import { isGithubUrl } from "../github/pulls";
 import type { SpaceData } from "./sidebar";
 import { SpaceEditFocus } from "./space-edit-focus";
 import type { SidebarMenuAction } from "./sidebar-menu";
-import { RECORDS_SHOWN, paneMarks, recordRows, recordsSummary } from "./spaces";
+import {
+  RECORDS_SHOWN,
+  paneMarks,
+  recordRows,
+  recordsSummary,
+  stateLabel,
+  type Segment,
+} from "./spaces";
 
 /** A card or a tab row in a drag: the dragged one, or where the drop would land. */
 export type CardDragState = "source" | "before" | "after" | null;
@@ -47,6 +54,23 @@ export function originColor(name: string): number {
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return hash % ORIGIN_COLORS;
+}
+
+/** The details line of a card: branch and directory on the left, the markers as chips. */
+export interface CardDetails {
+  branch: Segment | undefined;
+  dir: Segment | undefined;
+  chips: Segment[];
+}
+
+/** The last `n` characters stay visible when a long text is cut in the middle. */
+export const TAIL_CHARS = 9;
+
+/** Splits a text for a cut in the middle: the head may be ellipsized, the tail always shows. */
+export function middleParts(text: string): { head: string; tail: string } {
+  return text.length <= TAIL_CHARS * 2
+    ? { head: text, tail: "" }
+    : { head: text.slice(0, -TAIL_CHARS), tail: text.slice(-TAIL_CHARS) };
 }
 
 /** Where a space runs, as the card shows it. */
@@ -174,8 +198,7 @@ export class SpaceCard {
 
   /** The card header was clicked: the app opens the overview of the space. */
   @Output() readonly opened = new EventEmitter<string>();
-  @Output() readonly configure = new EventEmitter<string>();
-  /** New terminal and close space: the entries of the context menu with an icon. */
+  /** The new terminal button: also an entry of the context menu. */
   @Output() readonly act = new EventEmitter<SidebarMenuAction>();
   /** The `⋯` button or a right click: the parent opens the same menu as the tree row has. */
   @Output() readonly menu = new EventEmitter<CardMenuRequest>();
@@ -237,6 +260,41 @@ export class SpaceCard {
     const origin = this.origin();
     return origin ? `${this.label()}, ${origin.label}` : this.label();
   });
+  /** The card holds the open terminal: its actions stay visible. */
+  protected readonly chosen = computed(() => {
+    const active = this.activeIdSignal();
+    return active !== null && this.rows().some((r) => this.row(r).row.pane.terminal_id === active);
+  });
+  protected readonly stateTip = computed(() => {
+    const status = this.data().status;
+    return `Status: ${stateLabel(status) ?? status}`;
+  });
+  /** The state word is shown only where the dot is not enough. */
+  protected wordy(status: string): boolean {
+    return status === "blocked" || status === "error";
+  }
+  protected readonly detailsHidden = computed(() => this.ui.hiddenDetails().includes(this.id()));
+  /** Line 2 of the card, sorted into its parts; `null` when it has nothing to show. */
+  protected readonly details = computed<CardDetails | null>(() => {
+    const line = this.data().lines[1];
+    if (!line?.length) return null;
+    const name = this.label().trim().toLowerCase();
+    const branch = line.find((s) => s.token === "branch");
+    let dir = line.find((s) => s.token === "dir");
+    const leaf = dir?.tip?.split(/[\\/]/).filter(Boolean).at(-1)?.toLowerCase();
+    if (leaf === name) dir = undefined;
+    const chips = line.filter((s) => s !== branch && s !== dir && s.kind !== "dot");
+    return branch || dir || chips.length ? { branch, dir, chips } : null;
+  });
+  protected readonly extraLines = computed(() => this.data().lines.slice(2));
+  protected parts(text: string) {
+    return middleParts(text);
+  }
+
+  protected toggleDetails(): void {
+    this.ui.setDetailsHidden(this.id(), !this.detailsHidden());
+  }
+
   protected readonly canDragSpace = computed(
     () => this.spaceDraggableSignal() && this.editing()?.kind !== "space",
   );
@@ -452,15 +510,5 @@ export class SpaceCard {
   protected newTerminal(event: Event): void {
     event.stopPropagation();
     this.act.emit({ kind: "workspace", id: this.id(), action: "new-terminal" });
-  }
-
-  protected closeSpace(event: Event): void {
-    event.stopPropagation();
-    this.act.emit({ kind: "workspace", id: this.id(), action: "close-space" });
-  }
-
-  protected configureSpace(event: Event): void {
-    event.stopPropagation();
-    this.configure.emit(this.id());
   }
 }
