@@ -72,15 +72,21 @@ describe("space card layout styles (#1085)", () => {
     expect(row).not.toMatch(/0 0 6px/);
   });
 
-  it("tints the details block; its toggle is an info icon in the header, before the actions", () => {
+  it("tints the details block; its toggle is an info icon in the header, left of the fold chevron", () => {
     expect(block(".details")).toMatch(/background:\s*color-mix\([^)]*--h-primary-color/);
     const head = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
     expect(head).toContain('class="details-toggle"');
-    expect(head.indexOf('class="details-toggle"')).toBeLessThan(head.indexOf('class="actions"'));
+    expect(head.indexOf('class="actions"')).toBeLessThan(head.indexOf('class="details-toggle"'));
+    expect(head.indexOf('class="details-toggle"')).toBeLessThan(head.indexOf('class="fold"'));
     // The block holds the branch with the chips; the directory is a line of its own below.
     expect(html.indexOf('class="branch"')).toBeLessThan(html.indexOf('class="dir"'));
     // Hidden, the block is not rendered at all.
     expect(html).toMatch(/@if \(!detailsHidden\(\)\) \{\s*<div class="details"/);
+  });
+
+  it("does not indent a linked worktree card: it keeps the width of the others", () => {
+    expect(block(".card.member")).not.toMatch(/margin-left/);
+    expect(block(".card.member")).toMatch(/border-left:\s*3px solid/);
   });
 
   it("sets the filter text as small as the rows", () => {

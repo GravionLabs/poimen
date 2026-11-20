@@ -82,7 +82,8 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
 
     .machine {
       border-top: 1px solid var(--h-content-border-color);
-      padding: 6px 10px;
+      /* The cards of a machine line up with the cards above (.cards in sidebar.css: 8px). */
+      padding: 6px 8px;
     }
 
     .machine.offline .space,

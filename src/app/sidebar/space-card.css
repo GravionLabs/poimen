@@ -84,7 +84,7 @@
   min-width: 0;
 }
 
-/* The toggle is in the header, next to the actions; it is shown while the details are. */
+/* The toggle is in the header, left of the fold chevron; it is blue while the details are shown. */
 .details-toggle {
   flex: none;
   color: var(--h-text-muted-color);
@@ -488,9 +488,8 @@
   text-transform: none;
 }
 
-/* A linked worktree follows its main checkout, indented under it. */
+/* A linked worktree follows its main checkout; the colored left edge marks it, the card keeps the width of the others. */
 .card.member {
-  margin-left: 0.75rem;
   border-left: 3px solid var(--h-primary-color, var(--h-text-muted-color));
 }
 

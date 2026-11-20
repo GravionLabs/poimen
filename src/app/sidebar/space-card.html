@@ -314,40 +314,6 @@
     @if (unread(); as n) {
       <span class="badge" [attr.aria-label]="n + ' unread'">{{ n }}</span>
     }
-    @if (full() && !collapsed()) {
-      @if (details()) {
-        <button
-          type="button"
-          hx-button
-          variant="text"
-          severity="secondary"
-          size="small"
-          iconOnly
-          class="details-toggle"
-          [attr.tabindex]="stopSignal() === id() ? 0 : -1"
-          [attr.aria-expanded]="!detailsHidden()"
-          [attr.aria-label]="(detailsHidden() ? 'Show details of ' : 'Hide details of ') + label()"
-          [title]="(detailsHidden() ? 'Show details of ' : 'Hide details of ') + label()"
-          (click)="toggleDetails()"
-        >
-          <svg
-            class="details-icon"
-            [class.open]="!detailsHidden()"
-            viewBox="0 0 16 16"
-            width="13"
-            height="13"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.4"
-            stroke-linecap="round"
-            aria-hidden="true"
-          >
-            <circle cx="8" cy="8" r="6.2" />
-            <path d="M8 7.2v4M8 4.9h.01" />
-          </svg>
-        </button>
-      }
-    }
     <span class="actions">
       <button
         type="button"
@@ -397,6 +363,40 @@
         </svg>
       </button>
     </span>
+    @if (full() && !collapsed()) {
+      @if (details()) {
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          iconOnly
+          class="details-toggle"
+          [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+          [attr.aria-expanded]="!detailsHidden()"
+          [attr.aria-label]="(detailsHidden() ? 'Show details of ' : 'Hide details of ') + label()"
+          [title]="(detailsHidden() ? 'Show details of ' : 'Hide details of ') + label()"
+          (click)="toggleDetails()"
+        >
+          <svg
+            class="details-icon"
+            [class.open]="!detailsHidden()"
+            viewBox="0 0 16 16"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+            aria-hidden="true"
+          >
+            <circle cx="8" cy="8" r="6.2" />
+            <path d="M8 7.2v4M8 4.9h.01" />
+          </svg>
+        </button>
+      }
+    }
     @if (full()) {
       <button
         type="button"
