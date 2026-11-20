@@ -2276,26 +2276,26 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         });
     }
     // The latest notification text: a new one replaces it, `working` clears it, else it stays.
-    let (message, message_at) = match p
-        .message
-        .as_deref()
-        .and_then(poimen_protocol::clean_message)
-    {
-        Some(text) => (Some(text), Some(now_millis())),
-        None if p.status == AgentStatus::Working => (None, None),
-        None => if entry.osc.is_some() {
-            entry.hook_agent.as_ref()
-        } else {
-            entry.info.agent.as_ref()
-        }
-        .map_or((None, None), |a| (a.message.clone(), a.message_at)),
-    };
-    let now_ms = now_millis();
+    // A stand-in text (the tool of a permission request) does not replace the text of a
+    // notification of the same question: the agent is `blocked` already and has one.
     let previous = if entry.osc.is_some() {
         entry.hook_agent.as_ref()
     } else {
         entry.info.agent.as_ref()
     };
+    let keep_text = p.message_fallback
+        && previous.is_some_and(|a| a.status == AgentStatus::Blocked && a.message.is_some());
+    let (message, message_at) = match p
+        .message
+        .as_deref()
+        .and_then(poimen_protocol::clean_message)
+        .filter(|_| !keep_text)
+    {
+        Some(text) => (Some(text), Some(now_millis())),
+        None if p.status == AgentStatus::Working => (None, None),
+        None => previous.map_or((None, None), |a| (a.message.clone(), a.message_at)),
+    };
+    let now_ms = now_millis();
     // The time the status last changed stays while the same status is reported again.
     let status_since = match previous {
         Some(a) if a.status == p.status => a.status_since.or(Some(now_ms)),

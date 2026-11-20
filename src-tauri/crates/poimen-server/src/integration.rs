@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use poimen_protocol::Channel;
 
+use crate::claude::{CliVersion, HookStatus, Version};
 use crate::hook::HookEnv;
 use crate::mcp_config::{self, McpKind};
 use crate::{claude, copilot, gemini};
@@ -16,14 +17,16 @@ use crate::{claude, copilot, gemini};
 pub struct Kind {
     /// The name on the command line and in the terminal's `agent` field.
     pub name: &'static str,
-    /// Number of hook events the installer registers.
-    pub events: usize,
+    /// The agent CLI whose version decides which events are registered (`claude`: an event an
+    /// older CLI does not know makes it reject the whole settings file); `None`: all events.
+    pub cli: Option<&'static str>,
     /// The file the installer writes by default, below the home directory.
     pub default_path: fn(&Path, Channel) -> PathBuf,
-    pub install: fn(&Path, &Path, Channel) -> Result<(), String>,
+    /// Registers the hooks for the CLI version (`None`: unknown).
+    pub install: fn(&Path, &Path, Channel, Option<Version>) -> Result<(), String>,
     pub uninstall: fn(&Path, Channel) -> Result<bool, String>,
-    /// The registered events whose hook is there.
-    pub status: fn(&Path, Channel) -> Result<Vec<&'static str>, String>,
+    /// The events whose hook is there and those the CLI of that version needs and lacks.
+    pub status: fn(&Path, Channel, Option<Version>) -> Result<HookStatus, String>,
     /// Where and how the agent's MCP config registers `poimen mcp` (#614); `None`: no MCP.
     pub mcp: Option<McpKind>,
     /// `hook <kind> [event]`: reads stdin and reports; never fails the agent.
@@ -34,7 +37,7 @@ pub struct Kind {
 pub const KINDS: [Kind; 3] = [
     Kind {
         name: "claude",
-        events: claude::EVENTS.len(),
+        cli: Some("claude"),
         default_path: |home, _| claude::default_settings_path(home),
         install: claude::install,
         uninstall: claude::uninstall,
@@ -46,7 +49,7 @@ pub const KINDS: [Kind; 3] = [
     },
     Kind {
         name: "copilot",
-        events: copilot::EVENTS.len(),
+        cli: None,
         default_path: copilot::default_hook_path,
         install: copilot::install,
         uninstall: copilot::uninstall,
@@ -58,7 +61,7 @@ pub const KINDS: [Kind; 3] = [
     },
     Kind {
         name: "gemini",
-        events: gemini::EVENTS.len(),
+        cli: None,
         default_path: |home, _| gemini::default_settings_path(home),
         install: gemini::install,
         uninstall: gemini::uninstall,
@@ -69,6 +72,14 @@ pub const KINDS: [Kind; 3] = [
         },
     },
 ];
+
+impl Kind {
+    /// The version of the CLI that decides the events of this kind; `None` when the kind has no
+    /// such CLI or its version is unknown.
+    pub fn cli_version(&self, cli: &impl CliVersion) -> Option<Version> {
+        self.cli.and_then(|program| cli.version(program))
+    }
+}
 
 /// The kind called `name`.
 pub fn kind(name: &str) -> Option<&'static Kind> {
@@ -90,7 +101,6 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), KINDS.len());
-        assert_eq!(kind("gemini").unwrap().events, gemini::EVENTS.len());
         assert!(kind("codex").is_none());
         assert_eq!(super::names(), "claude|copilot|gemini");
     }
@@ -139,16 +149,27 @@ mod tests {
         for k in &KINDS {
             let path = (k.default_path)(&dir, Channel::Stable);
             assert!(path.starts_with(&dir), "{}", k.name);
-            assert!((k.status)(&path, Channel::Stable).unwrap().is_empty());
-            (k.install)(&path, &exe, Channel::Stable).unwrap();
-            assert_eq!(
-                (k.status)(&path, Channel::Stable).unwrap().len(),
-                k.events,
+            let cli = Some((9, 9, 9));
+            assert!(
+                (k.status)(&path, Channel::Stable, cli)
+                    .unwrap()
+                    .installed
+                    .is_empty()
+            );
+            (k.install)(&path, &exe, Channel::Stable, cli).unwrap();
+            let status = (k.status)(&path, Channel::Stable, cli).unwrap();
+            assert!(
+                status.missing.is_empty() && !status.installed.is_empty(),
                 "{}",
                 k.name
             );
             assert!((k.uninstall)(&path, Channel::Stable).unwrap());
-            assert!((k.status)(&path, Channel::Stable).unwrap().is_empty());
+            assert!(
+                (k.status)(&path, Channel::Stable, cli)
+                    .unwrap()
+                    .installed
+                    .is_empty()
+            );
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

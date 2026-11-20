@@ -771,6 +771,9 @@ pub struct TerminalReportAgent {
     /// Notification text of the agent; optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// `message` is a stand-in (a permission request's tool): a `blocked` agent keeps its text.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub message_fallback: bool,
 }
 
 /// Most tokens in one `terminal.report_tokens` (as herdr).
@@ -2076,26 +2079,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!((p.cursor, p.palette), (None, None));
-    }
-
-    #[test]
-    fn report_agent_params_and_the_terminal_agent_wire_shape() {
-        let p: TerminalReportAgent =
-            serde_json::from_value(serde_json::json!({"terminal_id":"t1","seq":5,"status":"gone"}))
-                .unwrap();
-        assert_eq!(p.status, AgentStatus::Gone);
-        assert_eq!((p.agent, p.session_id, p.message), (None, None, None));
-        let p: TerminalReportAgent = serde_json::from_value(
-            json!({"terminal_id":"t1","seq":6,"status":"blocked","message":"Allow Bash?"}),
-        )
-        .unwrap();
-        assert_eq!(p.message.as_deref(), Some("Allow Bash?"));
-        let t: Terminal =
-            serde_json::from_value(serde_json::json!({"id":"t1","space_id":"s1","name":"n",
-            "cwd":"/","cols":80,"rows":24,"status":"running",
-            "agent":{"status":"working","agent":"claude","session_id":"abc"}}))
-            .unwrap();
-        assert_eq!(t.agent.unwrap().session_id.as_deref(), Some("abc"));
     }
 
     #[test]

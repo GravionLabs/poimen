@@ -17,14 +17,19 @@ use serde_json::{Map, Value, json};
 use crate::claude::Report;
 use crate::hook::{HookEnv, Outcome};
 
-/// The hook events poimen registers (camelCase keys of the hook file).
-pub const EVENTS: [&str; 6] = [
+/// The hook events poimen registers (camelCase keys of the hook file). An older Copilot CLI
+/// could not be checked for a hook file with an event it does not know (1.0.114 is the one
+/// tested), so there is no version gate as for Claude Code.
+pub const EVENTS: [&str; 9] = [
     "sessionStart",
     "userPromptSubmitted",
     "notification",
     "postToolUse",
     "agentStop",
     "sessionEnd",
+    "permissionRequest",
+    "errorOccurred",
+    "postToolUseFailure",
 ];
 /// Seconds Copilot CLI waits for the hook before giving up on it.
 const HOOK_TIMEOUT_SECS: u64 = 2;
@@ -51,8 +56,8 @@ fn normalize(event: &str) -> String {
 }
 
 /// Maps a hook payload to a report: `sessionStart` idle, `agentStop` done,
-/// `userPromptSubmitted`/`postToolUse` working, a `permission_prompt` notification blocked,
-/// `sessionEnd` gone. `event_hint` is the event the hook was registered for; the payload's own
+/// `userPromptSubmitted`/`postToolUse`/`postToolUseFailure` working, a `permission_prompt`
+/// notification or a `permissionRequest` blocked, `errorOccurred` error, `sessionEnd` gone. `event_hint` is the event the hook was registered for; the payload's own
 /// event name wins. Subagent events (an `agentId`/`agent_id`) and everything else give `None`.
 pub fn map_hook(event_hint: Option<&str>, payload: &Value) -> Option<Report> {
     if !payload.is_object() {
@@ -68,7 +73,11 @@ pub fn map_hook(event_hint: Option<&str>, payload: &Value) -> Option<Report> {
     let status = match normalize(event).as_str() {
         "sessionstart" => AgentStatus::Idle,
         "agentstop" | "stop" => AgentStatus::Done,
-        "userpromptsubmitted" | "userpromptsubmit" | "posttooluse" => AgentStatus::Working,
+        "userpromptsubmitted" | "userpromptsubmit" | "posttooluse" | "posttoolusefailure" => {
+            AgentStatus::Working
+        }
+        "permissionrequest" => AgentStatus::Blocked,
+        "erroroccurred" => AgentStatus::Error,
         "notification" => match first_str(payload, &["notification_type", "notificationType"]) {
             Some("permission_prompt") => AgentStatus::Blocked,
             _ => return None,
@@ -77,13 +86,29 @@ pub fn map_hook(event_hint: Option<&str>, payload: &Value) -> Option<Report> {
         _ => return None,
     };
     let session_id = first_str(payload, &["session_id", "sessionId"]).map(str::to_owned);
-    let message = (status == AgentStatus::Blocked)
-        .then(|| first_str(payload, &["message"]).and_then(poimen_protocol::clean_message))
-        .flatten();
+    let permission = normalize(event) == "permissionrequest";
+    let message = if permission {
+        let input = ["toolInput", "tool_input", "toolArgs", "tool_args"]
+            .iter()
+            .find_map(|k| payload.get(*k));
+        // `toolArgs` of the camelCase style may be a JSON string.
+        let parsed = input
+            .and_then(Value::as_str)
+            .and_then(|s| serde_json::from_str::<Value>(s).ok());
+        crate::claude::permission_message(
+            first_str(payload, &["toolName", "tool_name"]),
+            parsed.as_ref().or(input),
+        )
+    } else {
+        (status == AgentStatus::Blocked)
+            .then(|| first_str(payload, &["message"]).and_then(poimen_protocol::clean_message))
+            .flatten()
+    };
     Some(Report {
         status,
         session_id,
         message,
+        fallback_message: permission,
     })
 }
 
@@ -102,6 +127,7 @@ pub fn request_for(
         agent: Some("copilot".into()),
         session_id: report.session_id,
         message: report.message,
+        message_fallback: report.fallback_message,
     })
 }
 
@@ -176,7 +202,12 @@ fn read_ours(path: &Path, channel: Channel) -> Result<Option<Value>, String> {
 
 /// Writes the hook file for every event, replacing an earlier one of ours. A file at that path
 /// that does not carry our marker is left alone. Idempotent.
-pub fn install(path: &Path, exe: &Path, channel: Channel) -> Result<(), String> {
+pub fn install(
+    path: &Path,
+    exe: &Path,
+    channel: Channel,
+    _cli: Option<crate::claude::Version>,
+) -> Result<(), String> {
     read_ours(path, channel)?;
     let err = |e: std::io::Error| format!("cannot write {}: {e}", path.display());
     let dir = path.parent().unwrap_or(Path::new("."));
@@ -207,9 +238,13 @@ pub fn uninstall(path: &Path, channel: Channel) -> Result<bool, String> {
 
 /// The events of [`EVENTS`] that our hook file registers with a binary that is present (see
 /// [`crate::claude::binary_present`]).
-pub fn status(path: &Path, channel: Channel) -> Result<Vec<&'static str>, String> {
+pub fn status(
+    path: &Path,
+    channel: Channel,
+    _cli: Option<crate::claude::Version>,
+) -> Result<crate::claude::HookStatus, String> {
     let file = read_ours(path, channel)?;
-    Ok(EVENTS
+    let installed = EVENTS
         .into_iter()
         .filter(|event| {
             file.as_ref()
@@ -225,12 +260,21 @@ pub fn status(path: &Path, channel: Channel) -> Result<Vec<&'static str>, String
                     })
                 })
         })
-        .collect())
+        .collect();
+    Ok(crate::claude::HookStatus::new(installed, &EVENTS))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn install(p: &Path, e: &Path, c: Channel) -> Result<(), String> {
+        super::install(p, e, c, None)
+    }
+
+    fn status(p: &Path, c: Channel) -> Result<Vec<&'static str>, String> {
+        super::status(p, c, None).map(|s| s.installed)
+    }
 
     fn st(hint: Option<&str>, p: Value) -> Option<AgentStatus> {
         map_hook(hint, &p).map(|r| r.status)
@@ -516,6 +560,87 @@ mod tests {
         assert!(uninstall(&path, Channel::Stable).is_err());
         assert!(status(&path, Channel::Stable).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), theirs);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn permission_requests_errors_and_failed_tools_map_in_both_styles() {
+        let camel =
+            json!({"sessionId": "s", "toolName": "bash", "toolInput": {"command": "ls -la"}});
+        let r = map_hook(Some("permissionRequest"), &camel).unwrap();
+        assert_eq!(r.status, AgentStatus::Blocked);
+        assert_eq!(r.message.as_deref(), Some("bash: ls -la"));
+        assert!(r.fallback_message);
+        // `toolArgs` as the JSON string Copilot CLI sends.
+        let args =
+            json!({"sessionId": "s", "toolName": "bash", "toolArgs": "{\"command\":\"pwd\"}"});
+        assert_eq!(
+            map_hook(Some("permissionRequest"), &args)
+                .unwrap()
+                .message
+                .as_deref(),
+            Some("bash: pwd")
+        );
+        let pascal = json!({"hook_event_name": "PermissionRequest", "session_id": "s", "tool_name": "Bash", "tool_input": {"command": "ls"}});
+        assert_eq!(
+            map_hook(None, &pascal).unwrap().message.as_deref(),
+            Some("Bash: ls")
+        );
+        assert_eq!(
+            st(Some("errorOccurred"), json!({"sessionId": "s"})),
+            Some(AgentStatus::Error)
+        );
+        assert_eq!(
+            st(
+                None,
+                json!({"hook_event_name": "ErrorOccurred", "session_id": "s"})
+            ),
+            Some(AgentStatus::Error)
+        );
+        assert_eq!(
+            st(Some("postToolUseFailure"), json!({"sessionId": "s"})),
+            Some(AgentStatus::Working)
+        );
+        assert_eq!(
+            st(None, json!({"hook_event_name": "PostToolUseFailure"})),
+            Some(AgentStatus::Working)
+        );
+        for event in ["permissionRequest", "errorOccurred", "postToolUseFailure"] {
+            assert_eq!(
+                st(Some(event), json!({"sessionId": "s", "agentId": "a"})),
+                None
+            );
+        }
+        // The text of a notification is not a stand-in.
+        let n = json!({"sessionId": "s", "notificationType": "permission_prompt", "message": "m"});
+        assert!(!map_hook(Some("notification"), &n).unwrap().fallback_message);
+    }
+
+    #[test]
+    fn the_hook_file_registers_the_new_events_and_uninstall_removes_the_file() {
+        let path = temp("new-events");
+        let exe = path.with_file_name("poimen-server");
+        std::fs::write(&exe, "").unwrap();
+        install(&path, &exe, Channel::Stable).unwrap();
+        let s = super::status(&path, Channel::Stable, None).unwrap();
+        assert!(s.missing.is_empty());
+        for event in ["permissionRequest", "errorOccurred", "postToolUseFailure"] {
+            assert!(s.installed.contains(&event), "{event}");
+        }
+        // A file from before has the six: the new ones are missing (Repair).
+        let mut old: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for event in ["permissionRequest", "errorOccurred", "postToolUseFailure"] {
+            old["hooks"].as_object_mut().unwrap().remove(event);
+        }
+        std::fs::write(&path, old.to_string()).unwrap();
+        let s = super::status(&path, Channel::Stable, None).unwrap();
+        assert_eq!(
+            s.missing,
+            ["permissionRequest", "errorOccurred", "postToolUseFailure"]
+        );
+        assert!(uninstall(&path, Channel::Stable).unwrap());
+        assert!(!path.exists());
         cleanup(&path);
     }
 }

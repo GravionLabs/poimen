@@ -61,6 +61,7 @@ pub fn map_hook(payload: &Value) -> Option<Report> {
         status,
         session_id,
         message,
+        fallback_message: false,
     })
 }
 
@@ -74,6 +75,7 @@ pub fn request_for(terminal_id: &str, seq: u64, payload: &Value) -> Option<Termi
         agent: Some("gemini".into()),
         session_id: report.session_id,
         message: report.message,
+        message_fallback: false,
     })
 }
 
@@ -109,10 +111,16 @@ pub fn hook_entry(exe: &Path, windows: bool, channel: Channel) -> Value {
 }
 
 /// Registers the hook for every event, keeping everything else. Idempotent.
-pub fn install(settings_path: &Path, exe: &Path, channel: Channel) -> Result<(), String> {
+pub fn install(
+    settings_path: &Path,
+    exe: &Path,
+    channel: Channel,
+    _cli: Option<crate::claude::Version>,
+) -> Result<(), String> {
     crate::claude::install_events(
         settings_path,
         &EVENTS,
+        &[],
         &hook_entry(exe, cfg!(windows), channel),
         channel,
     )
@@ -126,13 +134,26 @@ pub fn uninstall(settings_path: &Path, channel: Channel) -> Result<bool, String>
 }
 
 /// The events of [`EVENTS`] that have our hook with its binary present.
-pub fn status(settings_path: &Path, channel: Channel) -> Result<Vec<&'static str>, String> {
-    crate::claude::status_events(settings_path, &EVENTS, channel)
+pub fn status(
+    settings_path: &Path,
+    channel: Channel,
+    _cli: Option<crate::claude::Version>,
+) -> Result<crate::claude::HookStatus, String> {
+    let installed = crate::claude::status_events(settings_path, &EVENTS, channel)?;
+    Ok(crate::claude::HookStatus::new(installed, &EVENTS))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn install(p: &Path, e: &Path, c: Channel) -> Result<(), String> {
+        super::install(p, e, c, None)
+    }
+
+    fn status(p: &Path, c: Channel) -> Result<Vec<&'static str>, String> {
+        super::status(p, c, None).map(|s| s.installed)
+    }
 
     fn st(p: Value) -> Option<AgentStatus> {
         map_hook(&p).map(|r| r.status)
