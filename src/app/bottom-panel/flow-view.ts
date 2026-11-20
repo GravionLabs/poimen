@@ -64,7 +64,10 @@ export class FlowView {
   /** A node of a started terminal was clicked: focus that terminal. */
   readonly paneChosen = output<string>();
   /** What was last seen of the terminals this agent started, so a closed one stays a node. */
-  private readonly seen = signal<readonly StartedTerminal[]>([]);
+  private readonly seen = signal<{ paneId: string; list: readonly StartedTerminal[] }>({
+    paneId: "",
+    list: [],
+  });
 
   protected readonly width = FLOW_NODE_WIDTH;
   protected readonly height = FLOW_NODE_HEIGHT;
@@ -85,7 +88,7 @@ export class FlowView {
       paneId,
       this.store.all().terminals,
       this.tokenTotals.totals(),
-      this.seen(),
+      this.seen().paneId === paneId ? this.seen().list : [],
     );
   });
 
@@ -116,7 +119,8 @@ export class FlowView {
     // Remember the started terminals; a pane change starts again.
     effect(() => {
       const started = this.started();
-      untracked(() => this.seen.set(started));
+      const paneId = this.subagents.paneId() ?? "";
+      untracked(() => this.seen.set({ paneId, list: started }));
     });
   }
 
