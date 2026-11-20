@@ -151,11 +151,17 @@ impl Drop for Env {
     }
 }
 
+/// Lets other threads run for a moment (a timed receive on a channel nobody sends to).
+fn pause(time: Duration) {
+    let (_tx, rx) = std::sync::mpsc::channel::<()>();
+    let _ = rx.recv_timeout(time);
+}
+
 fn wait_until(what: &str, mut ok: impl FnMut() -> bool) {
     let deadline = Instant::now() + LONG;
     while !ok() {
         assert!(Instant::now() < deadline, "{what} never happened");
-        thread::sleep(Duration::from_millis(20));
+        pause(Duration::from_millis(20));
     }
 }
 
@@ -216,7 +222,7 @@ fn nothing_is_held_while_the_setting_is_off_or_absent() {
         let env = Env::new(name, config);
         env.working_agent();
         (env.sweep)(now_ms());
-        thread::sleep(Duration::from_millis(300));
+        pause(Duration::from_millis(300));
         assert!(!env.dir.join("holder.pid").exists(), "{name}");
     }
 }
@@ -239,7 +245,13 @@ fn a_new_subscription_learns_that_the_machine_is_held() {
     env.working_agent();
     (env.sweep)(now_ms());
     wait_until("the hold", || env.held());
-    let stream = env.client.subscribe().unwrap();
+    let stream = env
+        .client
+        .subscribe_as(Some(poimen_client::protocol::ClientInfo {
+            kind: poimen_client::protocol::ClientKind::Tui,
+            pid: std::process::id(),
+        }))
+        .unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         for event in stream.flatten() {

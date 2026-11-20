@@ -271,18 +271,19 @@ pub(crate) fn spawn_sweeper(shared: &Arc<Shared>) {
     let shared = Arc::clone(shared);
     thread::spawn(move || {
         loop {
-            thread::sleep(crate::hibernate::SWEEP);
+            thread::park_timeout(crate::hibernate::SWEEP);
             shared.awake_sweep(now_millis());
         }
     });
 }
 
 impl Shared {
-    /// Tells a new subscription that the machine is held (once, while it is).
+    /// Tells a new subscription whether the machine is held, so a client that missed a change
+    /// while its stream was down learns the current state.
     pub(crate) fn announce_awake(&self, tx: &Sender<Event>) {
-        if self.awake_held() {
-            let _ = tx.send(Event::ServerAwakeChanged { awake: true });
-        }
+        let _ = tx.send(Event::ServerAwakeChanged {
+            awake: self.awake_held(),
+        });
     }
 }
 
