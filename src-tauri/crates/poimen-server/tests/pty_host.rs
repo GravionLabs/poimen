@@ -430,7 +430,10 @@ fn the_exit_of_the_child_ends_the_terminal_with_its_code_after_its_output() {
         let mut peer = Peer::accept(&listener, 0, &start);
         peer.read();
         peer.output(1, "bye");
-        peer.send(&HostMessage::Exit { code: Some(3) });
+        peer.send(&HostMessage::Exit {
+            code: Some(3),
+            tree: None,
+        });
         thread::sleep(Duration::from_secs(5));
     });
     let f = fixture("exit", host);
@@ -501,7 +504,10 @@ fn a_dropped_connection_is_attached_again_after_the_last_seq_read() {
         second.output(1, "a");
         second.output(2, "b");
         second.output(3, "c");
-        second.send(&HostMessage::Exit { code: Some(0) });
+        second.send(&HostMessage::Exit {
+            code: Some(0),
+            tree: None,
+        });
         thread::sleep(Duration::from_secs(5));
     });
     let f = fixture("again", host);
@@ -542,7 +548,10 @@ fn the_host_log_exists_while_the_terminal_runs_and_is_gone_after_a_normal_exit()
         let mut peer = Peer::accept(&listener, 0, &start);
         peer.read();
         go_rx.lock().unwrap().recv().unwrap();
-        peer.send(&HostMessage::Exit { code: Some(0) });
+        peer.send(&HostMessage::Exit {
+            code: Some(0),
+            tree: None,
+        });
         // Held open until the test ends and drops the sender.
         let _ = go_rx.lock().unwrap().recv();
     });

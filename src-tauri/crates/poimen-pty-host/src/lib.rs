@@ -11,6 +11,7 @@
 //! dropped and reconnects with `since`.
 
 pub mod ring;
+pub mod tree;
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -21,20 +22,23 @@ use std::time::{Duration, Instant};
 
 use poimen_client::transport::{self, Conn, Listener};
 use poimen_protocol::host::{
-    ClientMessage, HOST_VERSION, HostMessage, HostStart, MAX_RING_RECORDS, Size, parse_client_line,
-    to_line,
+    ClientMessage, HOST_VERSION, HostMessage, HostStart, MAX_RING_RECORDS, Size, TreeEnd,
+    parse_client_line, to_line,
 };
 use poimen_protocol::{decode_bytes, encode_bytes};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use ring::Ring;
+use tree::Tree;
 
 /// Records waiting for one client; a client this far behind is dropped.
 const CLIENT_QUEUE: usize = 1024;
 /// How long the exit report waits for the output of the dead child to be read.
 const DRAIN_WAIT: Duration = Duration::from_secs(1);
-/// How long the host waits for its child to end after a kill before it ends anyway.
+/// How long the processes of a terminal get to hang up before they are killed (#968).
 const KILL_WAIT: Duration = Duration::from_secs(5);
+/// The host's wait for the end after a kill: the grace time plus the SIGKILL and its check.
+const END_WAIT: Duration = Duration::from_secs(8);
 /// A client that stops reading is cut off after this (Unix; pipes have no timeouts).
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -68,6 +72,8 @@ struct State {
     size: Size,
     /// The child's exit code once it ended (`Some(None)`: unknown code).
     exit: Option<Option<u32>>,
+    /// What the sweep of the process tree found, reported with `exit`.
+    tree: Option<TreeEnd>,
     exited_at: Option<Instant>,
     /// A client got the `exit` record.
     delivered: bool,
@@ -104,6 +110,10 @@ struct Shared {
     input: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    /// The child's session (Unix) or job (Windows).
+    tree: Tree,
+    /// The outcome of the sweep once it ran; the lock is held while it runs.
+    swept: Mutex<Option<TreeEnd>>,
     pid: u32,
     child_pid: Option<u32>,
     endpoint: PathBuf,
@@ -126,8 +136,21 @@ impl Shared {
         }
     }
 
-    fn kill(&self) {
+    /// Ends the child and, on a thread of its own, the rest of its tree (the caller may hold the
+    /// state lock).
+    fn kill(self: &Arc<Self>) {
         let _ = self.killer.lock().unwrap_or_else(|e| e.into_inner()).kill();
+        let shared = Arc::clone(self);
+        thread::spawn(move || {
+            shared.sweep();
+        });
+    }
+
+    /// Hangs up, then kills, every process of the terminal; once, later calls wait for it and
+    /// get its outcome.
+    fn sweep(&self) -> TreeEnd {
+        let mut swept = self.swept.lock().unwrap_or_else(|e| e.into_inner());
+        *swept.get_or_insert_with(|| self.tree.end(KILL_WAIT))
     }
 }
 
@@ -201,6 +224,10 @@ impl Host {
         // Only the child holds the slave, so the reader sees end of file when it ends.
         drop(pair.slave);
         let killer = child.clone_killer();
+        #[cfg(unix)]
+        let tree = Tree::new(child.process_id());
+        #[cfg(windows)]
+        let tree = Tree::new(child.as_raw_handle());
         let child_pid = child.process_id();
         let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let input = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -215,6 +242,7 @@ impl Host {
                     rows: spawn.rows,
                 },
                 exit: None,
+                tree: None,
                 exited_at: None,
                 delivered: false,
                 alone_since: Some(Instant::now()),
@@ -225,6 +253,8 @@ impl Host {
             input: Mutex::new(input),
             master: Mutex::new(pair.master),
             killer: Mutex::new(killer),
+            tree,
+            swept: Mutex::new(None),
             pid: std::process::id(),
             child_pid,
             endpoint: start.endpoint.clone(),
@@ -239,14 +269,20 @@ impl Host {
         let waiter = Arc::clone(&shared);
         thread::spawn(move || {
             let code = child.wait().ok().map(|status| status.exit_code());
+            // The terminal is gone either way: what the child left in its session goes too.
+            let tree = waiter.sweep();
             // A grandchild that keeps the PTY open must not delay the report for ever (and
             // ConPTY keeps its output pipe open until the pseudoconsole is closed).
             let _ = drained_rx.recv_timeout(DRAIN_WAIT);
             let mut state = waiter.lock();
             state.exit = Some(code);
+            state.tree = Some(tree);
             state.exited_at = Some(Instant::now());
             if state.client.as_ref().is_some_and(|c| c.attached) {
-                state.send(Out::Exit(to_line(&HostMessage::Exit { code })));
+                state.send(Out::Exit(to_line(&HostMessage::Exit {
+                    code,
+                    tree: Some(tree),
+                })));
             }
             waiter.changed.notify_all();
         });
@@ -294,10 +330,10 @@ impl Host {
                 }
                 Some(at + exit_linger)
             } else if let Some(at) = state.killed_at {
-                if now >= at + KILL_WAIT {
+                if now >= at + END_WAIT {
                     break;
                 }
-                Some(at + KILL_WAIT)
+                Some(at + END_WAIT)
             } else if let Some(since) = state.alone_since {
                 if now >= since + orphan_timeout {
                     shared.kill();
@@ -436,7 +472,7 @@ fn gone(shared: &Shared, id: u64) {
     }
 }
 
-fn read_client(shared: &Shared, id: u64, conn: &Conn) {
+fn read_client(shared: &Arc<Shared>, id: u64, conn: &Conn) {
     let mut lines = BufReader::new(conn);
     let mut line = String::new();
     loop {
@@ -456,7 +492,7 @@ fn read_client(shared: &Shared, id: u64, conn: &Conn) {
     gone(shared, id);
 }
 
-fn handle(shared: &Shared, id: u64, line: &str) {
+fn handle(shared: &Arc<Shared>, id: u64, line: &str) {
     let reply = match parse_client_line(line) {
         Err(e) => Some(error(format!("invalid line: {e}"))),
         Ok(ClientMessage::Attach { since }) => {
@@ -545,7 +581,8 @@ fn attach(shared: &Shared, id: u64, since: u64) {
         state.send(Out::Line(lines));
     }
     if let Some(code) = state.exit {
-        state.send(Out::Exit(to_line(&HostMessage::Exit { code })));
+        let tree = state.tree;
+        state.send(Out::Exit(to_line(&HostMessage::Exit { code, tree })));
     }
 }
 
