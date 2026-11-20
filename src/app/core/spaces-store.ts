@@ -343,6 +343,10 @@ export class SpacesStore {
   remoteSpaces(machine: string): SpaceNode[] {
     return this.remoteSpaceMap().get(machine) ?? [];
   }
+  /** Every space, local and of the machines. */
+  allSpaces(): SpaceNode[] {
+    return [...this.spaces(), ...[...this.remoteSpaceMap().values()].flat()];
+  }
   private readonly remoteSpaceMap = computed(() => {
     const snapshot = this.remote?.snapshot();
     const spaces = new Map<string, SpaceNode[]>();
@@ -483,6 +487,7 @@ export class SpacesStore {
         this.ui?.prunePinnedSpaces(ids);
         const remote = this.remote?.snapshot()?.spaces.map((s) => s.space_id) ?? [];
         this.ui?.pruneCollapsedCards(keptCardIds([...ids, ...remote], this.ui.collapsedCards()));
+        this.ui?.pruneHiddenDetails(keptCardIds([...ids, ...remote], this.ui.hiddenDetails()));
         this.ui?.pruneRecentSpaces(ids);
       }
       if (snapshot.spaces.length) {

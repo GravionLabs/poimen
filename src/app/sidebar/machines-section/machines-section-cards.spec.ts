@@ -108,8 +108,8 @@ describe("MachinesSection cards (#938)", () => {
     expect(el.querySelector(".card")?.getAttribute("aria-label")).toBe("api, Machine box");
     el.querySelector<HTMLElement>(".row")!.click();
     expect(picked).toEqual(["box::t1"]);
-    el.querySelector<HTMLButtonElement>("[aria-label='Close space api']")!.click();
-    expect(acts).toEqual([{ kind: "workspace", id: "box::s1", action: "close-space" }]);
+    el.querySelector<HTMLButtonElement>("[aria-label='New terminal in api']")!.click();
+    expect(acts).toEqual([{ kind: "workspace", id: "box::s1", action: "new-terminal" }]);
   });
 
   it("offers no configure button, pin mark or drag for a remote card", async () => {
@@ -130,7 +130,7 @@ describe("MachinesSection cards (#938)", () => {
       error: "x",
     });
     expect(el.querySelector(".card")?.classList.contains("offline")).toBe(true);
-    const close = el.querySelector<HTMLButtonElement>("[aria-label='Close space api']")!;
+    const close = el.querySelector<HTMLButtonElement>("[aria-label='New terminal in api']")!;
     expect(close.disabled).toBe(true);
     expect(close.title).toBe("box is offline");
     expect(

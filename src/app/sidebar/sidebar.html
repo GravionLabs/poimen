@@ -525,7 +525,6 @@
           (tabDrop)="tabDrop($event.event, $event.row)"
           (dragEnded)="dragEnd(); tabDragEnd()"
           (opened)="spaceOpened.emit($event)"
-          (configure)="configOpened.emit($event)"
           (act)="menuAction.emit($event)"
           (menu)="menuAt.set($event)"
           (picked)="onSelect($event)"

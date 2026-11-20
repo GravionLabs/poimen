@@ -12,6 +12,7 @@ import {
   prTooltip,
   renderRow,
   DEFAULT_SIDEBAR_ROWS,
+  cardRows,
   spaceContext,
   spaceMeta,
   stateLabel,
@@ -497,5 +498,29 @@ describe("child records (#684)", () => {
 
   it("has no rows without records", () => {
     expect(recordRows(pane([]))).toEqual([]);
+  });
+});
+
+describe("cardRows (#1075)", () => {
+  it("gives the cards their own workspace lines and leaves the tree default as it is", () => {
+    expect(DEFAULT_SIDEBAR_ROWS.workspace.map((l) => l.map((t) => t.token))).toEqual([
+      ["state_icon", "name", "state_text", "dir"],
+      ["branch", "dirty", "sync"],
+    ]);
+    const rows = cardRows(DEFAULT_SIDEBAR_ROWS, "cards");
+    expect(rows.workspace.map((l) => l.map((t) => t.token))).toEqual([
+      ["state_icon", "name", "state_text"],
+      ["branch", "dir", "dirty", "sync", "pr"],
+    ]);
+    expect(rows.agent).toBe(DEFAULT_SIDEBAR_ROWS.agent);
+  });
+
+  it("leaves the other layouts alone", () => {
+    expect(cardRows(DEFAULT_SIDEBAR_ROWS, "tree")).toBe(DEFAULT_SIDEBAR_ROWS);
+  });
+
+  it("lets the user's own workspace lines win", () => {
+    const own = { ...DEFAULT_SIDEBAR_ROWS, workspace: [[{ token: "name" }]] };
+    expect(cardRows(own, "cards")).toBe(own);
   });
 });
