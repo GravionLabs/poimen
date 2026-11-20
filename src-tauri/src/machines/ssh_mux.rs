@@ -56,7 +56,7 @@ pub fn check_dir(info: &DirInfo, uid: u32) -> Result<(), String> {
         return Err("is not a plain directory".into());
     }
     if info.uid != uid {
-        return Err(format!("is owned by user {}, not by you", info.uid));
+        return Err("is owned by another user, not by you".into());
     }
     if info.mode & 0o077 != 0 {
         return Err(format!("has mode {:o}, expected 700", info.mode & 0o777));
@@ -127,6 +127,10 @@ fn current_uid() -> std::io::Result<u32> {
     uid
 }
 
+/// How the log names the control directory: its path holds the user id, which stays out of messages.
+#[cfg(unix)]
+const CONTROL_DIR: &str = "the ssh control directory";
+
 #[cfg(unix)]
 fn ensure_dir(dir: &Path, uid: u32) -> Result<PathBuf, String> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt};
@@ -134,16 +138,16 @@ fn ensure_dir(dir: &Path, uid: u32) -> Result<PathBuf, String> {
     if let Err(e) = made
         && e.kind() != std::io::ErrorKind::AlreadyExists
     {
-        return Err(format!("cannot create {}: {e}", dir.display()));
+        return Err(format!("cannot create {CONTROL_DIR}: {e}"));
     }
-    let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("{CONTROL_DIR}: {e}"))?;
     let info = DirInfo {
         is_dir: meta.is_dir(),
         is_symlink: meta.file_type().is_symlink(),
         uid: meta.uid(),
         mode: meta.mode(),
     };
-    check_dir(&info, uid).map_err(|why| format!("{} {why}", dir.display()))?;
+    check_dir(&info, uid).map_err(|why| format!("{CONTROL_DIR} {why}"))?;
     Ok(dir.to_owned())
 }
 
