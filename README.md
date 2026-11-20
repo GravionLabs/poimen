@@ -69,6 +69,8 @@ The step that installs the hooks (the *Install hooks* button, or `poimen-server 
 - `report_done` (`outcome`, `summary`, `files?`): an agent that was started with `start_agent` calls it once at its end (`start_agent` adds a short preamble with this rule to the prompt). poimen stores the report on the terminal, types one line (terminal and outcome) into the starting agent when it is idle (it waits while it works), and the Runs view shows the outcome and summary as the finished run.
 - `read_agent` (`terminal`): the last assistant message of the agent's transcript (Claude Code and Copilot CLI) with the session id; an error when the terminal has no agent transcript. Read tool, also for a terminal on a remote machine.
 
+To lead other agents with these tools (when to split, one worktree per worker, wait instead of polling, a blocked worker) install the short `poimen-lead` skill of [GravionLabs/skills](https://github.com/GravionLabs/skills/tree/main/skills/delivery/poimen-lead); it needs no CLI.
+
 The write tools act freely in the space of the agent that calls them. For any other space poimen asks you in the app (who asks, what, where) and the call waits up to 60 s; declined, no answer, poimen closed or an agent outside a poimen terminal are refused. Every write shows in the notification center with the calling terminal.
 
 The entry needs the `poimen` binary next to `poimen-server` or on `PATH`; without it only the hooks are installed and the status says `mcp: unavailable`. Settings > Server shows the state per agent. To remove the MCP entry together with the hooks run `poimen-server integration uninstall claude|copilot`; only the entry marked as poimen's (name, `mcp` argument and binary) is removed, any other `mcpServers` entry stays untouched.
