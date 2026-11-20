@@ -85,6 +85,7 @@ export class SpacesStore {
   private readonly _loaded = signal(false);
   private readonly _info = signal<BackendInfo | null>(null);
   private readonly _appVersion = signal<string | null>(null);
+  private readonly _awake = signal(false);
   private readonly _appChannel = signal<AppChannel>("stable");
   private readonly _backend = signal<BackendStatus | null>(null);
 
@@ -144,6 +145,8 @@ export class SpacesStore {
   readonly appVersion = this._appVersion.asReadonly();
   /** The release channel of this build: `rc` for the side-by-side "Poimen RC" app, else `stable`. */
   readonly appChannel = this._appChannel.asReadonly();
+  /** The server holds a sleep inhibitor while agents work (`agents.keepAwake`, #987). */
+  readonly awake = this._awake.asReadonly();
   /** Why the server is not reachable; `null` while connected. */
   readonly connectionError = this._connectionError.asReadonly();
   /** Branch and worktree flag per pane directory; poimen asks git. */
@@ -340,6 +343,10 @@ export class SpacesStore {
   remoteSpaces(machine: string): SpaceNode[] {
     return this.remoteSpaceMap().get(machine) ?? [];
   }
+  /** Every space, local and of the machines. */
+  allSpaces(): SpaceNode[] {
+    return [...this.spaces(), ...[...this.remoteSpaceMap().values()].flat()];
+  }
   private readonly remoteSpaceMap = computed(() => {
     const snapshot = this.remote?.snapshot();
     const spaces = new Map<string, SpaceNode[]>();
@@ -480,6 +487,7 @@ export class SpacesStore {
         this.ui?.prunePinnedSpaces(ids);
         const remote = this.remote?.snapshot()?.spaces.map((s) => s.space_id) ?? [];
         this.ui?.pruneCollapsedCards(keptCardIds([...ids, ...remote], this.ui.collapsedCards()));
+        this.ui?.pruneHiddenDetails(keptCardIds([...ids, ...remote], this.ui.hiddenDetails()));
         this.ui?.pruneRecentSpaces(ids);
       }
       if (snapshot.spaces.length) {
@@ -614,8 +622,13 @@ export class SpacesStore {
         this._watchLost.set(true);
         this._connectionError.set(event.data?.reason ?? "");
         this._info.set(null);
+        // Whatever it held is its own business; a server that comes back says so on subscribe.
+        this._awake.set(false);
         // The server may come back restarted: its spaces, and the terminals whose hosts it adopted.
         this.freshSession = true;
+        return;
+      case "server.awake_changed":
+        this._awake.set(event.data?.awake === true);
         return;
       case "terminal.agent_status_changed":
         if (event.data?.terminal_id && event.data.agent_status) {

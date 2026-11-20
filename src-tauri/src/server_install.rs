@@ -14,17 +14,16 @@
 //! the tests fake: no test runs ssh or touches the network.
 
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io;
 use std::process::Stdio;
 use std::sync::Mutex;
-use std::thread;
 
 use poimen_client::protocol::{CHANNEL, PROTOCOL_VERSION};
 use poimen_core::gui_path;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::machines::{MachineConfig, check_target};
+use crate::machines::MachineConfig;
 
 /// The repository whose releases carry the server archives.
 const RELEASES: &str = "https://github.com/GravionLabs/poimen/releases/download";
@@ -55,50 +54,6 @@ pub trait Remote: Send + Sync {
 /// Downloads a public release asset.
 pub trait Fetch: Send + Sync {
     fn get(&self, url: &str) -> Result<Vec<u8>, String>;
-}
-
-/// ssh in batch mode: never a prompt, bounded connect.
-pub struct Ssh;
-
-impl Remote for Ssh {
-    fn run(&self, target: &str, command: &str, input: Option<&[u8]>) -> io::Result<Out> {
-        check_target(target).map_err(io::Error::other)?;
-        let program = gui_path::resolve_program("ssh", &gui_path::child_path())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ssh is not on the PATH"))?;
-        let mut child = gui_path::command(&program)
-            .args([
-                "-T",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=10",
-                "-o",
-                "ServerAliveInterval=15",
-                "--",
-                target,
-                command,
-            ])
-            .env("PATH", gui_path::child_path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        let mut stdin = child.stdin.take();
-        let data = input.map(<[u8]>::to_vec);
-        // Writing and reading run apart, so a full pipe in either direction cannot stall.
-        let writer = thread::spawn(move || {
-            if let (Some(stdin), Some(data)) = (stdin.as_mut(), data) {
-                let _ = stdin.write_all(&data);
-            }
-            drop(stdin);
-        });
-        let output = child.wait_with_output()?;
-        let _ = writer.join();
-        Ok(Out {
-            ok: output.status.success(),
-            text: join_output(&output.stdout, &output.stderr),
-        })
-    }
 }
 
 fn join_output(stdout: &[u8], stderr: &[u8]) -> String {
@@ -465,6 +420,9 @@ impl Prepared {
         self.archive.len()
     }
 }
+
+mod ssh;
+pub use ssh::Ssh;
 
 #[cfg(test)]
 mod tests {

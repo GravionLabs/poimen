@@ -126,6 +126,13 @@
   --status-blocked-on-active: var(--h-orange-800);
   --status-done-on-active: var(--h-green-800);
   --status-error-on-active: color-mix(in srgb, var(--status-error) 65%, #000);
+  /* Origin colors of the space cards (#1074), one per machine by name: >= 3:1 on the card. */
+  --origin-0: var(--h-purple-700);
+  --origin-1: var(--h-teal-700);
+  --origin-2: var(--h-pink-700);
+  --origin-3: var(--h-indigo-700);
+  --origin-4: var(--h-amber-700);
+  --origin-5: var(--h-cyan-700);
 }
 
 :root.app-dark {
@@ -164,6 +171,12 @@
   --status-blocked-on-active: var(--h-orange-300);
   --status-done-on-active: var(--h-green-300);
   --status-error-on-active: color-mix(in srgb, var(--status-error) 65%, #fff);
+  --origin-0: var(--h-purple-300);
+  --origin-1: var(--h-teal-300);
+  --origin-2: var(--h-pink-300);
+  --origin-3: var(--h-indigo-300);
+  --origin-4: var(--h-amber-300);
+  --origin-5: var(--h-cyan-300);
 }
 
 * {
@@ -283,4 +296,9 @@ dialog.dialog .dialog-buttons {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* Focus given back to a button that a mouse click opened a menu or dialog from (#1072). */
+[data-pointer-focus]:focus-visible {
+  outline: none;
 }

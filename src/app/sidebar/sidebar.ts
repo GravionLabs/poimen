@@ -16,6 +16,7 @@ import {
 import { HxButton, HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import { cardKeyboard } from "./card-keys";
+import { cardMenuGroups, runCardEntry, sortGroups, spaceDirOf } from "./card-menu";
 import {
   filterSpaces,
   olderHost,
@@ -40,6 +41,7 @@ import {
   DEFAULT_SIDEBAR_ROWS,
   RECORDS_SHOWN,
   aggregateStatus,
+  cardRows,
   paneMarks,
   recordRows,
   recordsSummary,
@@ -342,11 +344,23 @@ export class Sidebar {
 
   /** The entries of the open menu as the shared menu shows them. */
   protected menuGroups(kind: SidebarMenuAction["kind"], id: string): MenuGroup[] {
-    return this.menuItems(kind, id).map((g) => ({
+    const groups: MenuGroup[] = this.menuItems(kind, id).map((g) => ({
       id: g.id,
       label: g.label,
       items: g.items.map((i) => ({ id: i.action, label: i.label, disabled: i.disabled })),
     }));
+    if (kind !== "workspace" || this.layout() !== "cards") return groups;
+    return [...groups, ...cardMenuGroups(id, this.cardMenu)];
+  }
+
+  private get cardMenu() {
+    return {
+      ui: this.ui,
+      sort: this.sort,
+      dir: (id: string) => spaceDirOf(this.store.allSpaces(), id),
+      configure: (id: string) => this.configOpened.emit(id),
+      chooseSort: (mode: string) => this.chooseSort(mode),
+    };
   }
 
   protected closeMenu(): void {
@@ -359,6 +373,7 @@ export class Sidebar {
     // A disabled entry (offline machine) does nothing, and never reaches another backend.
     if (at && this.machines.blockedReason(at.id)) return;
     this.closeMenu();
+    if (at && runCardEntry(picked, at.id, this.cardMenu)) return;
     if (at) this.menuAction.emit({ kind: at.kind, id: at.id, action });
   }
 
@@ -624,7 +639,9 @@ export class Sidebar {
   }
 
   private readonly settings = inject(SettingsStore);
-  private readonly rows = computed(() => this.settings.settings().sidebarRows);
+  private readonly rows = computed(() =>
+    cardRows(this.settings.settings().sidebarRows, this.layout()),
+  );
   private readonly showBase = computed(() => this.settings.settings().sidebarShowBaseBranch);
 
   protected readonly ui = inject(UiState);
@@ -660,26 +677,7 @@ export class Sidebar {
     this.sortMenuAt.set({ x: box.left, y: box.bottom + 2 });
   }
 
-  protected readonly sortGroups = computed<MenuGroup[]>(() => {
-    const mode = this.sort();
-    const radio = (id: "manual" | "name" | "attention" | "recent", label: string) => ({
-      id,
-      label,
-      checked: mode === id,
-    });
-    return [
-      {
-        id: "modes",
-        items: [
-          radio("manual", "Manual"),
-          radio("name", "By name"),
-          radio("attention", "By attention"),
-          radio("recent", "Most recent"),
-        ],
-      },
-      { id: "now", items: [{ id: "now", label: "Sort alphabetically now" }] },
-    ];
-  });
+  protected readonly sortGroups = computed<MenuGroup[]>(() => sortGroups(this.sort()));
 
   protected chooseSort(picked: string): void {
     const choice = picked as "manual" | "name" | "attention" | "recent" | "now";

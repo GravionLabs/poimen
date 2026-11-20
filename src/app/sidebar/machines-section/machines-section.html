@@ -50,6 +50,24 @@
       }
     </div>
     <p class="note" role="status">{{ g.note }}</p>
+    @if (g.hint; as h) {
+      <p class="note hint" role="status">{{ h.text }}</p>
+      @if (h.command; as cmd) {
+        <pre class="note command"><code>{{ cmd }}</code></pre>
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          size="small"
+          class="copy"
+          [attr.aria-label]="'Copy command for ' + g.machine.name"
+          (click)="copy(cmd)"
+        >
+          Copy
+        </button>
+      }
+    }
     @if (g.check) {
       <p class="note check" role="status">{{ g.check }}</p>
     }

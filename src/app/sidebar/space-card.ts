@@ -14,6 +14,7 @@ import { HxButton } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import { silentLabel } from "../core/agent-priority";
 import { Attention, workspaceUnread } from "../core/attention";
+import { Machines } from "../core/machines";
 import { PaneActions } from "../core/pane-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SpacesStore } from "../core/spaces-store";
@@ -25,7 +26,14 @@ import { isGithubUrl } from "../github/pulls";
 import type { SpaceData } from "./sidebar";
 import { SpaceEditFocus } from "./space-edit-focus";
 import type { SidebarMenuAction } from "./sidebar-menu";
-import { RECORDS_SHOWN, paneMarks, recordRows, recordsSummary } from "./spaces";
+import {
+  RECORDS_SHOWN,
+  paneMarks,
+  recordRows,
+  recordsSummary,
+  stateLabel,
+  type Segment,
+} from "./spaces";
 
 /** A card or a tab row in a drag: the dragged one, or where the drop would land. */
 export type CardDragState = "source" | "before" | "after" | null;
@@ -36,6 +44,41 @@ export interface CardMenuRequest {
   id: string;
   x: number;
   y: number;
+}
+
+/** Number of origin colors (`--origin-<n>` in `styles.css`). */
+export const ORIGIN_COLORS = 6;
+
+/** The color slot of a machine: a hash of its name, so it stays the same across sessions. */
+export function originColor(name: string): number {
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return hash % ORIGIN_COLORS;
+}
+
+/** The details line of a card: branch and directory on the left, the markers as chips. */
+export interface CardDetails {
+  branch: Segment | undefined;
+  dir: Segment | undefined;
+  chips: Segment[];
+}
+
+/** The last `n` characters stay visible when a long text is cut in the middle. */
+export const TAIL_CHARS = 9;
+
+/** Splits a text for a cut in the middle: the head may be ellipsized, the tail always shows. */
+export function middleParts(text: string): { head: string; tail: string } {
+  return text.length <= TAIL_CHARS * 2
+    ? { head: text, tail: "" }
+    : { head: text.slice(0, -TAIL_CHARS), tail: text.slice(-TAIL_CHARS) };
+}
+
+/** Where a space runs, as the card shows it. */
+export interface SpaceOrigin {
+  kind: "computer" | "machine";
+  label: string;
+  tip: string;
+  color: number | null;
 }
 
 /**
@@ -60,10 +103,16 @@ export class SpaceCard {
   private readonly spaceDraggableSignal = signal(false);
   private readonly tabDraggableSignal = signal(false);
   private readonly draggingSignal = signal<string | null>(null);
-  private readonly dropMarkSignal = signal<{ id: string; after: boolean } | null>(null);
+  private readonly dropMarkSignal = signal<{
+    id: string;
+    after: boolean;
+  } | null>(null);
   private readonly tabDragSignal = signal<{ pane: string } | null>(null);
   protected readonly stopSignal = signal<string | null>(null);
-  private readonly tabMarkSignal = signal<{ pane: string; after: boolean } | null>(null);
+  private readonly tabMarkSignal = signal<{
+    pane: string;
+    after: boolean;
+  } | null>(null);
   private readonly blockedSignal = signal<string | null>(null);
 
   /** The workspace node of `spaceNodes`; its children are the rows of the body. */
@@ -120,19 +169,36 @@ export class SpaceCard {
     this.tabMarkSignal.set(value);
   }
 
-  @Output() readonly spaceDragStart = new EventEmitter<{ event: DragEvent; id: string }>();
-  @Output() readonly spaceDragOver = new EventEmitter<{ event: DragEvent; id: string }>();
-  @Output() readonly spaceDrop = new EventEmitter<{ event: DragEvent; id: string }>();
-  @Output() readonly tabDragStart = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
-  @Output() readonly tabDragOver = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
-  @Output() readonly tabDrop = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
+  @Output() readonly spaceDragStart = new EventEmitter<{
+    event: DragEvent;
+    id: string;
+  }>();
+  @Output() readonly spaceDragOver = new EventEmitter<{
+    event: DragEvent;
+    id: string;
+  }>();
+  @Output() readonly spaceDrop = new EventEmitter<{
+    event: DragEvent;
+    id: string;
+  }>();
+  @Output() readonly tabDragStart = new EventEmitter<{
+    event: DragEvent;
+    row: PaneRow;
+  }>();
+  @Output() readonly tabDragOver = new EventEmitter<{
+    event: DragEvent;
+    row: PaneRow;
+  }>();
+  @Output() readonly tabDrop = new EventEmitter<{
+    event: DragEvent;
+    row: PaneRow;
+  }>();
   /** The drag ended (also a drop outside the list). */
   @Output() readonly dragEnded = new EventEmitter<void>();
 
   /** The card header was clicked: the app opens the overview of the space. */
   @Output() readonly opened = new EventEmitter<string>();
-  @Output() readonly configure = new EventEmitter<string>();
-  /** New terminal and close space: the entries of the context menu with an icon. */
+  /** The new terminal button: also an entry of the context menu. */
   @Output() readonly act = new EventEmitter<SidebarMenuAction>();
   /** The `⋯` button or a right click: the parent opens the same menu as the tree row has. */
   @Output() readonly menu = new EventEmitter<CardMenuRequest>();
@@ -146,6 +212,7 @@ export class SpaceCard {
   private readonly spaceActions = inject(SpaceActions);
   private readonly paneActions = inject(PaneActions);
   private readonly spaceRebuild = inject(SpaceRebuild);
+  private readonly machines = inject(Machines);
 
   /** The fold button, the further lines and the body: everything but the header. */
   protected readonly full = computed(() => !this.headerOnlySignal());
@@ -163,6 +230,71 @@ export class SpaceCard {
   protected readonly reason = this.blockedSignal.asReadonly();
   /** A space of a machine: its id is qualified (`<machine>::<id>`). */
   protected readonly remote = computed(() => splitId(this.id()).machine !== undefined);
+  /**
+   * Where the space runs (#1074): a symbol in the header and, for a machine, a stripe on the left
+   * edge. `null` when no machine is configured (every card would say "this computer"). The color
+   * is one of {@link ORIGIN_COLORS}, stable per machine name; the label is the accessible name.
+   */
+  protected readonly origin = computed<SpaceOrigin | null>(() => {
+    const machine = splitId(this.id()).machine;
+    if (machine === undefined) {
+      return this.machines.machines().length === 0
+        ? null
+        : {
+            kind: "computer",
+            label: "This computer",
+            tip: "This computer",
+            color: null,
+          };
+    }
+    const label = `Machine ${machine}`;
+    return {
+      kind: "machine",
+      label,
+      tip: this.blockedSignal() ? `${label}: ${this.blockedSignal()}` : label,
+      color: originColor(machine),
+    };
+  });
+  /** The accessible name of the card: the label, then where it runs. */
+  protected readonly cardName = computed(() => {
+    const origin = this.origin();
+    return origin ? `${this.label()}, ${origin.label}` : this.label();
+  });
+  /** The card holds the open terminal: its actions stay visible. */
+  protected readonly chosen = computed(() => {
+    const active = this.activeIdSignal();
+    return active !== null && this.rows().some((r) => this.row(r).row.pane.terminal_id === active);
+  });
+  protected readonly stateTip = computed(() => {
+    const status = this.data().status;
+    return `Status: ${stateLabel(status) ?? status}`;
+  });
+  /** The state word is shown only where the dot is not enough. */
+  protected wordy(status: string): boolean {
+    return status === "blocked" || status === "error";
+  }
+  protected readonly detailsHidden = computed(() => this.ui.hiddenDetails().includes(this.id()));
+  /** Line 2 of the card, sorted into its parts; `null` when it has nothing to show. */
+  protected readonly details = computed<CardDetails | null>(() => {
+    const line = this.data().lines[1];
+    if (!line?.length) return null;
+    const name = this.label().trim().toLowerCase();
+    const branch = line.find((s) => s.token === "branch");
+    let dir = line.find((s) => s.token === "dir");
+    const leaf = dir?.tip?.split(/[\\/]/).filter(Boolean).at(-1)?.toLowerCase();
+    if (leaf === name) dir = undefined;
+    const chips = line.filter((s) => s !== branch && s !== dir && s.kind !== "dot");
+    return branch || dir || chips.length ? { branch, dir, chips } : null;
+  });
+  protected readonly extraLines = computed(() => this.data().lines.slice(2));
+  protected parts(text: string) {
+    return middleParts(text);
+  }
+
+  protected toggleDetails(): void {
+    this.ui.setDetailsHidden(this.id(), !this.detailsHidden());
+  }
+
   protected readonly canDragSpace = computed(
     () => this.spaceDraggableSignal() && this.editing()?.kind !== "space",
   );
@@ -225,7 +357,10 @@ export class SpaceCard {
   });
 
   /** What is renamed in place: the space (the header) or a terminal; `null` when none. */
-  protected readonly editing = signal<{ kind: "space" | "pane"; id: string } | null>(null);
+  protected readonly editing = signal<{
+    kind: "space" | "pane";
+    id: string;
+  } | null>(null);
   protected readonly renameError = computed(() =>
     this.editing()?.kind === "pane" ? this.paneActions.error() : this.spaceActions.renameError(),
   );
@@ -364,21 +499,16 @@ export class SpaceCard {
     event.stopPropagation();
     if (this.closing() || this.blockedSignal()) return;
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    this.menu.emit({ kind: "workspace", id: this.id(), x: box.left, y: box.bottom + 2 });
+    this.menu.emit({
+      kind: "workspace",
+      id: this.id(),
+      x: box.left,
+      y: box.bottom + 2,
+    });
   }
 
   protected newTerminal(event: Event): void {
     event.stopPropagation();
     this.act.emit({ kind: "workspace", id: this.id(), action: "new-terminal" });
-  }
-
-  protected closeSpace(event: Event): void {
-    event.stopPropagation();
-    this.act.emit({ kind: "workspace", id: this.id(), action: "close-space" });
-  }
-
-  protected configureSpace(event: Event): void {
-    event.stopPropagation();
-    this.configure.emit(this.id());
   }
 }

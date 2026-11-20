@@ -54,6 +54,8 @@ import { Updater } from "./core/updater";
 import { SIDEBAR_VIEW_IDS, activityItems, tabOf } from "./core/activity-items";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
+import { followSystemTheme } from "./core/system-theme";
+import { RecentTabs } from "./recent-tabs/recent-tabs";
 import { Sidebar } from "./sidebar/sidebar";
 import { TabLayout } from "./tab-layout/tab-layout";
 import { TerminalView } from "./terminal-view/terminal-view";
@@ -89,6 +91,7 @@ import { SpaceRebuild } from "./core/space-rebuild";
 import { CommandPalette } from "./core/command-palette";
 import { JumpPalette, type JumpEntry } from "./core/jump-palette";
 import { JumpPaletteView } from "./jump-palette/jump-palette";
+import { ExternalEditor } from "./core/external-editor";
 import { ExplorerSelection } from "./core/explorer-selection";
 import { CommandPalette as PaletteView } from "./command-palette/command-palette";
 import { ShortcutsDialog } from "./shortcuts-dialog/shortcuts-dialog";
@@ -129,6 +132,7 @@ const ZOOM_STEP = 1;
   selector: "app-root",
   imports: [
     HxActivityBar,
+    RecentTabs,
     HxAppShell,
     Icon,
     Sidebar,
@@ -182,6 +186,7 @@ export class App {
   private readonly terminalSearch = inject(TerminalSearch);
   private readonly paneActions = inject(PaneActions);
   private readonly explorerSelection = inject(ExplorerSelection);
+  private readonly externalEditor = inject(ExternalEditor);
   protected readonly spaceActions = inject(SpaceActions);
   protected readonly ui = inject(UiState);
   private readonly palette = inject(CommandPalette);
@@ -338,9 +343,7 @@ export class App {
 
   constructor() {
     effect(() => {
-      const id = this.activePaneId();
-      const pane = id ? this.pane(id) : undefined;
-      this.projectEntries.setDir(pane ? paneDir(pane) : undefined);
+      this.projectEntries.setDir(this.activeDir());
     });
     // The space of the active tab (a pane or the overview) is the one the user focused last (#712).
     effect(() => {
@@ -436,7 +439,7 @@ export class App {
       const { uiFontFamily, uiFontSize } = this.prefs.settings();
       applyUiFont(document.documentElement, uiFontFamily, uiFontSize);
     });
-    destroyRef.onDestroy(this.followSystemTheme());
+    destroyRef.onDestroy(followSystemTheme((dark) => this.systemDark.set(dark)));
     // The output panel follows the active tab's agent (Claude Code, Copilot CLI); nothing is watched while it is hidden.
     effect(() => {
       const target = this.subagentTarget();
@@ -588,26 +591,15 @@ export class App {
       if (t?.kind === "issue") void this.issueTasks.start(t.root, t.number);
       return;
     }
-    if (id === "startTask") {
-      this.startTaskInActiveRepo();
+    if (id === "startTask") return this.startTaskInActiveRepo();
+    if (id === "openInEditor") {
+      this.externalEditor.openDir(this.activeDir());
       return;
     }
-    if (id === "openTerminalHere") {
-      this.openTerminalInSelectedDir();
-      return;
-    }
-    if (id === "cleanupTasks") {
-      this.cleanupInActiveRepo();
-      return;
-    }
-    if (id === "quitAndStopServer") {
-      this.serverRestart.askQuit();
-      return;
-    }
-    if (id === "projectTeardown") {
-      this.teardownInActiveSpace();
-      return;
-    }
+    if (id === "openTerminalHere") return this.openTerminalInSelectedDir();
+    if (id === "cleanupTasks") return this.cleanupInActiveRepo();
+    if (id === "quitAndStopServer") return this.serverRestart.askQuit();
+    if (id === "projectTeardown") return this.teardownInActiveSpace();
     if (id === "renameSpace") {
       const paneId = this.activePaneId();
       const spaceId = paneId ? this.pane(paneId)?.space_id : undefined;
@@ -716,11 +708,16 @@ export class App {
 
   /** The palette entry: the Changes tab of the directory of the focused space's active pane. */
   private showChangesOfActiveSpace(): void {
-    const id = this.activePaneId();
-    const pane = id ? this.pane(id) : undefined;
-    const dir = pane ? paneDir(pane) : undefined;
+    const dir = this.activeDir();
     if (dir) this.editor.openChanges(this.activeRepo() ?? dir);
     else this.spaceActions.notify("Show Changes: there is no focused space");
+  }
+
+  /** The directory of the active pane. */
+  private activeDir(): string | undefined {
+    const id = this.activePaneId();
+    const pane = id ? this.pane(id) : undefined;
+    return pane ? paneDir(pane) : undefined;
   }
 
   /** The palette entry: a terminal in the folder last picked in the explorer. */
@@ -758,9 +755,7 @@ export class App {
 
   /** The palette entry: run the project's teardown in the directory of the active pane. */
   private teardownInActiveSpace(): void {
-    const id = this.activePaneId();
-    const pane = id ? this.pane(id) : undefined;
-    const dir = pane ? paneDir(pane) : undefined;
+    const dir = this.activeDir();
     if (dir) void this.teardown.run(dir);
     else this.spaceActions.notify("Project: Run teardown: the active pane has no directory");
   }
@@ -773,9 +768,7 @@ export class App {
 
   /** The repository of the active pane (a pane in a subdirectory: the deepest known one above). */
   private activeRepo(): string | undefined {
-    const id = this.activePaneId();
-    const pane = id ? this.pane(id) : undefined;
-    const dir = pane ? paneDir(pane) : undefined;
+    const dir = this.activeDir();
     return dir
       ? [...this.store.repos().keys()]
           .filter((r) => dir === r || dir.startsWith(r.endsWith("/") ? r : `${r}/`))
@@ -790,6 +783,7 @@ export class App {
     else if (event.action === "pin-space" || event.action === "unpin-space")
       this.spaceActions.setPinned(event.id, event.action === "pin-space");
     else if (event.action === "rename-space") this.spaceActions.askRename(event.id);
+    else if (event.action === "open-in-editor") this.externalEditor.openSpace(event.id);
     else if (event.action === "show-changes") {
       const dir = spaceRepoDir(this.store.spaces(), event.id);
       if (dir) this.editor.openChanges(dir);
@@ -1106,14 +1100,4 @@ export class App {
 
   /** The OS appearance; light when it cannot be read. */
   private readonly systemDark = signal(false);
-
-  /** HxTheme reads the system setting once; track the OS appearance as it changes. */
-  private followSystemTheme(): () => void {
-    if (typeof matchMedia !== "function") return () => undefined;
-    const query = matchMedia("(prefers-color-scheme: dark)");
-    const update = () => this.systemDark.set(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }
 }

@@ -106,8 +106,23 @@
               Remove
             </button>
           </span>
-          @if (guidance(m); as g) {
-            <p class="guidance" role="status">{{ g }}</p>
+          @if (hint(m); as h) {
+            <p class="guidance" role="status">{{ h.text }}</p>
+            @if (h.command; as cmd) {
+              <pre class="fix"><code>{{ cmd }}</code></pre>
+              <button
+                type="button"
+                hx-button
+                size="small"
+                variant="text"
+                severity="secondary"
+                class="copy hint-copy"
+                [attr.aria-label]="'Copy command for ' + m.name"
+                (click)="copy(m.name + ':hint', cmd)"
+              >
+                {{ copied() === m.name + ":hint" ? "Copied" : "Copy" }}
+              </button>
+            }
           }
           @if (machines.running().has(m.name)) {
             <p class="progress" role="status">Checking {{ m.name }}…</p>

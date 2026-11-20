@@ -1,0 +1,14 @@
+@if (list(); as ids) {
+  <div class="switcher" role="listbox" aria-label="Recent tabs">
+    @for (id of ids; track id; let i = $index) {
+      <div
+        class="item"
+        role="option"
+        [class.selected]="i === index()"
+        [attr.aria-selected]="i === index()"
+      >
+        <span class="title">{{ label(id) }}</span>
+      </div>
+    }
+  </div>
+}

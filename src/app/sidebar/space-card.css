@@ -49,6 +49,104 @@
   display: flex;
   flex: none;
   margin-left: auto;
+  opacity: 0;
+}
+
+/* The actions show on hover, on focus inside the card and on the card of the open terminal (#1075). */
+.card:hover .actions,
+.card:focus-within .actions,
+.card.chosen .actions {
+  opacity: 1;
+}
+
+.details {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px 2px 4px;
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.details-toggle {
+  flex: none;
+}
+
+.details-toggle .chevron {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentcolor;
+  border-bottom: 1.5px solid currentcolor;
+  transform: rotate(-45deg);
+  transition: transform 120ms;
+}
+
+.details-toggle .chevron.open {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.branch,
+.dir {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.branch {
+  flex: 1 1 auto;
+  min-width: 4ch;
+}
+
+/* The directory is cut first, then the branch. */
+.dir {
+  flex: 0 100 auto;
+  min-width: 0;
+  font-style: italic;
+}
+
+.cut {
+  display: flex;
+  min-width: 0;
+}
+
+.branch-icon {
+  flex: none;
+}
+
+.head-part {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tail-part {
+  flex: none;
+  white-space: nowrap;
+}
+
+.dir {
+  overflow: hidden;
+}
+
+.chips {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.chips .text {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--h-text-muted-color) 16%, transparent);
+  font-style: normal;
 }
 
 .fold .chevron {
@@ -237,7 +335,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding-bottom: 4px;
+  padding-block: 4px;
   border-top: 1px solid var(--h-content-border-color, var(--h-text-muted-color));
 }
 
@@ -391,4 +489,68 @@
   outline: 2px solid var(--h-primary-color);
   outline-offset: -2px;
   border-radius: 4px;
+}
+
+/* Where the space runs (#1074): information, not a button. The stripe sits inside the card's border, so the member indent stays outside. */
+.origin-mark {
+  flex: none;
+  align-self: center;
+  margin: 0 0 0 4px;
+  color: var(--h-text-muted-color);
+  cursor: default;
+}
+
+.origin-mark.machine {
+  color: var(--origin, var(--h-text-muted-color));
+}
+
+.card.origin {
+  position: relative;
+}
+
+.card.origin::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 1;
+  width: 3px;
+  background: var(--origin);
+  pointer-events: none;
+}
+
+.card[data-origin="0"] {
+  --origin: var(--origin-0);
+}
+
+.card[data-origin="1"] {
+  --origin: var(--origin-1);
+}
+
+.card[data-origin="2"] {
+  --origin: var(--origin-2);
+}
+
+.card[data-origin="3"] {
+  --origin: var(--origin-3);
+}
+
+.card[data-origin="4"] {
+  --origin: var(--origin-4);
+}
+
+.card[data-origin="5"] {
+  --origin: var(--origin-5);
+}
+
+/* A machine that is not connected: the symbol is muted (the whole card is dimmed too). */
+.card.offline .origin-mark {
+  color: var(--h-text-muted-color);
+  opacity: 0.8;
+}
+
+/* The origin stripe covers the first 3px: the active marker of a row starts after it. */
+.card.origin .row.active {
+  box-shadow:
+    inset 3px 0 0 transparent,
+    inset 7px 0 0 var(--h-primary-color);
 }

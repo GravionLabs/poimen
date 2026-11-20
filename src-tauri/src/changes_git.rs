@@ -214,6 +214,34 @@ pub fn push(dir: &str, home: Option<&Path>) -> Result<String, String> {
     push_in(&validate(dir, home)?, PUSH_TIMEOUT)
 }
 
+/// Stages (`stage: true`) or unstages the repository-relative `paths` of the worktree `dir`.
+#[tauri::command]
+pub async fn changes_stage(dir: String, paths: Vec<String>, stage: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        self::stage(&dir, &paths, stage, crate::home_dir().as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Commits the staged changes of the worktree `dir` with `message`.
+#[tauri::command]
+pub async fn changes_commit(dir: String, message: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        commit(&dir, &message, crate::home_dir().as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Pushes the current branch of the worktree `dir` (never forced, refused on protected branches).
+#[tauri::command]
+pub async fn changes_push(dir: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || push(&dir, crate::home_dir().as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

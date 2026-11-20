@@ -59,6 +59,8 @@ export function modeTitle(blocked: string | null): string {
 export class StatusBar {
   readonly connection = input.required<ConnectionState>();
   readonly waiting = input(0);
+  /** The server holds a sleep inhibitor (`agents.keepAwake`, #987). */
+  readonly awake = input(false);
   readonly paneId = input<string | null>(null);
   /** The real mode of the active tab; `null` without a tab. */
   readonly mode = input<Mode | null>(null);

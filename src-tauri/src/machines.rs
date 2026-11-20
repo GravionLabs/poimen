@@ -6,16 +6,14 @@
 //! `events.subscribe` on the same connection) and reports its state: `connecting`, `connected`,
 //! `offline` (with the ssh error) or `incompatible` (other protocol; no further requests). A
 //! dropped connection is tried again with a backoff of 1 s doubling up to 60 s, or at once on
-//! demand ([`Machine::reconnect`]); an incompatible server only on demand.
+//! demand ([`Machine::reconnect`], on resume and network return: `machine_wake`).
 //!
 //! Requests of the machine go through a [`PoimenBackend`] whose connections are gated: none is
 //! opened while the machine is not `connected`, and a connection of an earlier session fails its
 //! reads and writes, so nothing is sent to a terminal while the machine is not connected and no
 //! request of before a reconnect is answered or replayed. A lost connection only ends poimen's own
-//! ssh processes; the terminals on the remote keep running and are attached again from the
-//! snapshot once the machine is back.
-//!
-//! BatchMode only: poimen never prompts for, stores or logs a password or a key.
+//! ssh processes; remote terminals keep running and are attached again once the machine is back.
+//! BatchMode only: poimen never prompts for, stores or logs a password or key.
 
 use std::collections::HashSet;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -982,29 +980,6 @@ impl SshConnector {
     }
 }
 
-/// The arguments of ssh for `target`: no terminal, never a prompt, bounded connect, a dead link
-/// noticed within 45 s, and the server of this build's channel in stdio mode.
-pub fn ssh_args(target: &str, server: &str) -> Vec<String> {
-    [
-        "-T",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=10",
-        "-o",
-        "ServerAliveInterval=15",
-        "-o",
-        "ServerAliveCountMax=3",
-        "--",
-        target,
-        server,
-        "stdio",
-    ]
-    .iter()
-    .map(|s| (*s).to_owned())
-    .collect()
-}
-
 impl Connector for SshConnector {
     fn connect(&self) -> io::Result<Pipe> {
         // A target from an older config would still be refused here, never passed as an option.
@@ -1014,8 +989,9 @@ impl Connector for SshConnector {
             None => gui_path::resolve_program("ssh", &gui_path::child_path())
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ssh is not on the PATH"))?,
         };
+        let mux = crate::machines::ssh_mux::for_target(&program, &self.target);
         let mut child = gui_path::command(&program)
-            .args(ssh_args(&self.target, &self.server))
+            .args(ssh_args_with(&self.target, &self.server, &mux.options))
             .env("PATH", gui_path::child_path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1093,6 +1069,12 @@ impl<R: Read> Read for SshOutput<R> {
     }
 }
 
+mod ssh_args;
+pub(crate) mod ssh_mux;
+pub mod wake;
+#[cfg(test)]
+pub use ssh_args::ssh_args;
+pub use ssh_args::ssh_args_with;
 #[cfg(test)]
 mod tests {
     use super::*;

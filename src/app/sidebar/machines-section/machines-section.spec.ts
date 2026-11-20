@@ -76,6 +76,8 @@ describe("MachinesSection", () => {
     const { el, picked, reconnect } = setup({ ...box, state: "offline", error: "ssh: timeout" });
     expect(el.querySelector(".machine")?.classList.contains("offline")).toBe(true);
     expect(el.querySelector(".note")?.textContent).toContain("Offline: ssh: timeout");
+    expect(el.querySelector(".command")?.textContent).toBe("ssh box");
+    expect(el.querySelector(".copy")).not.toBeNull();
     const row = el.querySelector<HTMLButtonElement>(".row")!;
     expect(row.disabled).toBe(true);
     row.click();

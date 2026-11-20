@@ -17,7 +17,15 @@ import { MachinesSection } from "./machines-section";
 const box = { name: "box", ssh: "box", reposDir: "~/Source/{owner}/{repo}" };
 const snap: Snapshot = {
   spaces: [{ space_id: "s1", label: "api", number: 1, agent_status: "idle" }],
-  tabs: [{ tab_id: "tab1", space_id: "s1", label: "shell", number: 1, agent_status: "idle" }],
+  tabs: [
+    {
+      tab_id: "tab1",
+      space_id: "s1",
+      label: "shell",
+      number: 1,
+      agent_status: "idle",
+    },
+  ],
   terminals: [{ terminal_id: "t1", tab_id: "tab1", space_id: "s1", agent_status: "idle" }],
 };
 
@@ -80,7 +88,13 @@ async function setup(status: MachineStatus, stored?: string) {
     fixture.detectChanges();
     await fixture.whenStable();
   }
-  return { fixture, el: fixture.nativeElement as HTMLElement, picked, acts, storage };
+  return {
+    fixture,
+    el: fixture.nativeElement as HTMLElement,
+    picked,
+    acts,
+    storage,
+  };
 }
 
 describe("MachinesSection cards (#938)", () => {
@@ -91,24 +105,32 @@ describe("MachinesSection cards (#938)", () => {
       serverVersion: "0.17.0",
     });
     expect(el.querySelectorAll("app-space-card")).toHaveLength(1);
-    expect(el.querySelector(".card")?.getAttribute("aria-label")).toBe("api");
+    expect(el.querySelector(".card")?.getAttribute("aria-label")).toBe("api, Machine box");
     el.querySelector<HTMLElement>(".row")!.click();
     expect(picked).toEqual(["box::t1"]);
-    el.querySelector<HTMLButtonElement>("[aria-label='Close space api']")!.click();
-    expect(acts).toEqual([{ kind: "workspace", id: "box::s1", action: "close-space" }]);
+    el.querySelector<HTMLButtonElement>("[aria-label='New terminal in api']")!.click();
+    expect(acts).toEqual([{ kind: "workspace", id: "box::s1", action: "new-terminal" }]);
   });
 
   it("offers no configure button, pin mark or drag for a remote card", async () => {
-    const { el } = await setup({ ...box, state: "connected", serverVersion: "0.17.0" });
+    const { el } = await setup({
+      ...box,
+      state: "connected",
+      serverVersion: "0.17.0",
+    });
     expect(el.querySelector("[aria-label='Configure space api']")).toBeNull();
     expect(el.querySelector(".head")?.getAttribute("draggable")).toBeNull();
     expect(el.querySelector(".row")?.getAttribute("draggable")).toBeNull();
   });
 
   it("greys the cards of a machine that is not connected and disables the actions with the reason", async () => {
-    const { el, picked, acts } = await setup({ ...box, state: "offline", error: "x" });
+    const { el, picked, acts } = await setup({
+      ...box,
+      state: "offline",
+      error: "x",
+    });
     expect(el.querySelector(".card")?.classList.contains("offline")).toBe(true);
-    const close = el.querySelector<HTMLButtonElement>("[aria-label='Close space api']")!;
+    const close = el.querySelector<HTMLButtonElement>("[aria-label='New terminal in api']")!;
     expect(close.disabled).toBe(true);
     expect(close.title).toBe("box is offline");
     expect(
@@ -135,7 +157,11 @@ describe("MachinesSection cards (#938)", () => {
   });
 
   it("keeps the tree rows when the layout is not cards", async () => {
-    const { fixture, el } = await setup({ ...box, state: "connected", serverVersion: "0.17.0" });
+    const { fixture, el } = await setup({
+      ...box,
+      state: "connected",
+      serverVersion: "0.17.0",
+    });
     fixture.componentInstance.cardsLayout = false;
     fixture.detectChanges();
     expect(el.querySelector("app-space-card")).toBeNull();

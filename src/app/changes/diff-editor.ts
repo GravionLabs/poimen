@@ -60,8 +60,12 @@ export function diffThemeRules(): Record<string, Record<string, string>> {
     ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "transparent" },
     "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, ::selection":
       { backgroundColor: "var(--term-selection-bg)" },
-    ".cm-insertedLine, .cm-changedLine": { backgroundColor: tint("--term-ansi-2", 14) },
-    ".cm-deletedLine, .cm-deletedChunk": { backgroundColor: tint("--term-ansi-1", 14) },
+    ".cm-insertedLine, .cm-changedLine": {
+      backgroundColor: tint("--term-ansi-2", 14),
+    },
+    ".cm-deletedLine, .cm-deletedChunk": {
+      backgroundColor: tint("--term-ansi-1", 14),
+    },
     "ins.cm-insertedLine, ins.cm-changedText, .cm-insertedLine .cm-changedText": {
       backgroundColor: tint("--term-ansi-2", 32),
     },
@@ -143,7 +147,15 @@ export class DiffEditor {
     this.marks.set(value ?? []);
   }
   /** "Send to agent" on a finding: its id and the code at its lines. */
-  @Output() readonly findingSent = new EventEmitter<{ id: string; quote: string }>();
+  @Output() readonly findingSent = new EventEmitter<{
+    id: string;
+    quote: string;
+  }>();
+  /**
+   * Called with a click on a line number of the new side, for "Open in editor" (#1002). A callback,
+   * not an output: an output marks the parent dirty and the next check rebuilds the draft box.
+   */
+  @Input() onLineChosen: ((chosen: { path: string; line: number }) => void) | null = null;
   /** A comment written in the draft box. */
   @Output() readonly commentAdded = new EventEmitter<NewComment>();
   @Input() set jump(request: DiffJump | null) {
@@ -201,6 +213,7 @@ export class DiffEditor {
    * extends the range from where the comment was started.
    */
   lineClicked(side: Side, line: number, shift: boolean): void {
+    if (side === "new") this.onLineChosen?.({ path: this.filePath(), line });
     const anchor = this.anchor;
     if (shift && anchor && anchor.side === side && this.draft?.side === side) {
       this.draft = {

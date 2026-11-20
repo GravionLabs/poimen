@@ -44,7 +44,10 @@ import { Keymap } from "../core/keymap";
 import { UiState } from "../core/ui-state";
 import { TerminalSession, TerminalStreamService } from "../core/terminal-stream";
 import { PromptBar } from "../prompt-bar/prompt-bar";
-import { isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
+import { FILE_LINK_MENU, FileLinkActions } from "./file-link-actions";
+import { fileLinkProvider, offersFileLinks, type FileLinkTarget } from "./file-links";
+import { ContextMenu } from "../ui/context-menu/context-menu";
+import { holdsLinkModifier, isRepo, linkHandler, taskLinkHandler, type IssueLink } from "./links";
 import { matchLabel, searchDecorations, TerminalSearch, type Searchable } from "./search";
 import { Icon } from "../ui/icon/icon";
 
@@ -107,7 +110,7 @@ export const IMAGE_OPTIONS = { pixelLimit: 16_777_216, storageLimit: 32 };
 
 @Component({
   selector: "app-terminal-view",
-  imports: [HxButton, PromptBar, Icon],
+  imports: [HxButton, PromptBar, Icon, ContextMenu],
   templateUrl: "./terminal-view.html",
   styleUrl: "./terminal-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -120,6 +123,12 @@ export const IMAGE_OPTIONS = { pixelLimit: 16_777_216, storageLimit: 32 };
 })
 export class TerminalView implements OnDestroy, Searchable {
   readonly pane = input.required<Terminal>();
+  /** The menu of a click on the path of a changed file (#1003). */
+  protected readonly fileMenu = signal<{
+    at: { x: number; y: number };
+    target: FileLinkTarget;
+  } | null>(null);
+  protected readonly fileMenuGroups = FILE_LINK_MENU;
   /** The mode the tab asks for; `control` is tried without a takeover and may fall back. */
   readonly wanted = input<Mode>("observe");
   /** The mode the stream really has. */
@@ -266,6 +275,36 @@ export class TerminalView implements OnDestroy, Searchable {
     return true;
   }
 
+  /** Cmd/Ctrl+click on a file path opens the editor (#1003); not on a remote pane (the file is not here). */
+  private registerFileLinks(term: XTerm): void {
+    if (!offersFileLinks(this.pane())) return;
+    const actions = this.injector.get(FileLinkActions);
+    term.registerLinkProvider(
+      fileLinkProvider(
+        term,
+        () => this.pane().foreground_cwd || this.pane().cwd,
+        (dir, paths) => actions.resolve(dir, paths),
+        (event, target) => {
+          if (!holdsLinkModifier(event)) return;
+          const at = { x: event.clientX, y: event.clientY };
+          void actions.isChanged(target).then((changed) => {
+            if (changed && !this.destroyed) this.fileMenu.set({ at, target });
+            else actions.open(target);
+          });
+        },
+      ),
+    );
+  }
+
+  protected pickFileLink(id: string): void {
+    const target = this.fileMenu()?.target;
+    this.fileMenu.set(null);
+    if (!target) return;
+    const actions = this.injector.get(FileLinkActions);
+    if (id === "changes") actions.showInChanges(target);
+    else actions.open(target);
+  }
+
   private createTerminal(): void {
     const open = (url: string) => this.tauri.openUrl(url);
     const openLink = linkHandler(open);
@@ -291,6 +330,7 @@ export class TerminalView implements OnDestroy, Searchable {
       // Detected URLs are trimmed before opening (the addon's range, and so the underline, stays).
       new WebLinksAddon(taskLinkHandler(open, (link) => this.startTask(link))),
     );
+    this.registerFileLinks(term);
     term.open(this.body().nativeElement);
     // Inline images (sixel and iTerm); live only, the server snapshot carries none. Limits keep a
     // flood of images from growing the webview: 16 Mpixel per image, 32 MB of stored images.

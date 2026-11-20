@@ -27,6 +27,9 @@ pub struct Harness {
     /// Appended to `command` to resume a session; `{session}` is replaced inside an element.
     /// Empty: the harness cannot resume.
     pub resume_args: Vec<String>,
+    /// Appended to `command` for a headless one-shot call that prints its answer and exits;
+    /// `{prompt}` is replaced inside an element. Empty: the harness cannot be called headless.
+    pub print_args: Vec<String>,
 }
 
 /// A harness with whether its program was found on the `PATH` of a child.
@@ -55,6 +58,7 @@ pub fn default_harnesses() -> Vec<Harness> {
             default_model: None,
             exit_input: Some("/exit".into()),
             resume_args: strings(&["--resume", "{session}"]),
+            print_args: strings(&["-p", "{prompt}"]),
         },
         Harness {
             id: "copilot".into(),
@@ -65,6 +69,7 @@ pub fn default_harnesses() -> Vec<Harness> {
             default_model: None,
             exit_input: Some("/exit".into()),
             resume_args: strings(&["--resume", "{session}"]),
+            print_args: strings(&["-p", "{prompt}"]),
         },
     ]
 }
@@ -110,6 +115,7 @@ fn parse_one(id: &str, value: &Value) -> Result<Harness, String> {
         default_model,
         exit_input,
         resume_args: optional_list(obj, "resumeArgs")?,
+        print_args: optional_list(obj, "printArgs")?,
     })
 }
 
@@ -167,6 +173,17 @@ pub fn build_resume_argv(h: &Harness, session: &str) -> Option<Vec<String>> {
     Some(argv)
 }
 
+/// The argv for a headless call of `h` with `prompt`: the command, then the print arguments with
+/// `{prompt}` replaced per element. `None` without `printArgs` or without a `{prompt}` in them.
+pub fn build_print_argv(h: &Harness, prompt: &str) -> Option<Vec<String>> {
+    if !h.print_args.iter().any(|a| a.contains("{prompt}")) {
+        return None;
+    }
+    let mut argv = h.command.clone();
+    argv.extend(expand(&h.print_args, "{prompt}", prompt));
+    Some(argv)
+}
+
 fn info_with(harnesses: Vec<Harness>, available: impl Fn(&str) -> bool) -> Vec<HarnessInfo> {
     harnesses
         .into_iter()
@@ -213,6 +230,36 @@ mod tests {
             assert_eq!(h.exit_input.as_deref(), Some("/exit"), "{}", h.id);
             assert_eq!(h.resume_args, ["--resume", "{session}"], "{}", h.id);
         }
+    }
+
+    #[test]
+    fn defaults_print_headless_and_a_config_entry_can_drop_it() {
+        for h in default_harnesses() {
+            assert_eq!(h.print_args, ["-p", "{prompt}"], "{}", h.id);
+        }
+        let (h, w) = resolved(json!({
+            "claude": {"command": ["claude"]},
+            "other": {"command": ["other"], "printArgs": ["--print", "{prompt}"]},
+            "bad": {"command": ["bad"], "printArgs": "x"}
+        }));
+        assert_eq!(w.len(), 1);
+        assert!(h[0].print_args.is_empty());
+        assert_eq!(h[2].print_args, ["--print", "{prompt}"]);
+        assert_eq!(
+            serde_json::to_value(&h[2]).unwrap()["printArgs"][0],
+            "--print"
+        );
+    }
+
+    #[test]
+    fn print_argv_keeps_the_prompt_one_element() {
+        let mut h = default_harnesses().remove(0);
+        let argv = build_print_argv(&h, "a b; $(x)\nc").unwrap();
+        assert_eq!(argv, ["claude", "-p", "a b; $(x)\nc"]);
+        h.print_args.clear();
+        assert_eq!(build_print_argv(&h, "x"), None);
+        h.print_args = vec!["-p".into()];
+        assert_eq!(build_print_argv(&h, "x"), None);
     }
 
     #[test]

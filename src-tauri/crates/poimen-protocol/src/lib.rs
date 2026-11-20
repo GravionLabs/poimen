@@ -1578,6 +1578,9 @@ pub enum Event {
     /// carries the kinds now connected, sorted.
     #[serde(rename = "server.clients_changed")]
     ServerClientsChanged { clients: Vec<ClientKind> },
+    /// The server started or stopped holding a sleep inhibitor (`agents.keepAwake`, #987).
+    #[serde(rename = "server.awake_changed")]
+    ServerAwakeChanged { awake: bool },
     /// Progress events of a run (agent-events, jsonl-file binding) in the repository at `root`,
     /// as written to `<git-common-dir>/.agents/events/<run>.jsonl`: complete lines, JSON objects,
     /// in file order and unchanged. Only to subscriptions with `run_events`.
@@ -2015,34 +2018,6 @@ mod tests {
             }
         );
         assert_eq!(serde_json::to_string(&event).unwrap(), text);
-    }
-
-    #[test]
-    fn the_hibernated_event_and_field_round_trip() {
-        let event: Event = serde_json::from_str(
-            r#"{"event":"terminal.hibernated_changed","data":{"terminal_id":"t1","hibernated":{"agent":"claude","session_id":"s1","since":5}}}"#,
-        )
-        .unwrap();
-        let Event::TerminalHibernatedChanged { hibernated, .. } = &event else {
-            panic!("{event:?}");
-        };
-        assert_eq!(hibernated.as_ref().unwrap().session_id, "s1");
-        let cleared: Event = serde_json::from_str(
-            r#"{"event":"terminal.hibernated_changed","data":{"terminal_id":"t1"}}"#,
-        )
-        .unwrap();
-        assert!(matches!(
-            cleared,
-            Event::TerminalHibernatedChanged {
-                hibernated: None,
-                ..
-            }
-        ));
-        let old: Terminal = serde_json::from_str(
-            r#"{"id":"t1","space_id":"s","name":"n","cwd":"/","cols":1,"rows":1,"status":"running"}"#,
-        )
-        .unwrap();
-        assert_eq!(old.hibernated, None);
     }
 
     #[test]

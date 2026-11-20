@@ -216,6 +216,26 @@ export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
   terminal: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
 };
 
+/**
+ * The workspace lines of the `cards` layout: the header (dot, name, state text for the states
+ * that need a word) and the details line (branch, directory, markers, #1075). The other row types
+ * are the same as in the tree.
+ */
+export const DEFAULT_CARD_ROWS: SidebarRows = {
+  ...DEFAULT_SIDEBAR_ROWS,
+  workspace: [
+    line("state_icon", "name", "state_text"),
+    line("branch", "dir", "dirty", "sync", "pr"),
+  ],
+};
+
+/** The rows of the cards layout: the card default unless the user set their own workspace lines. */
+export function cardRows(rows: SidebarRows, layout: string): SidebarRows {
+  if (layout !== "cards") return rows;
+  const own = JSON.stringify(rows.workspace) !== JSON.stringify(DEFAULT_SIDEBAR_ROWS.workspace);
+  return own ? rows : { ...rows, workspace: DEFAULT_CARD_ROWS.workspace };
+}
+
 /** Built-in token names (besides `$<name>`). */
 export const ROW_TOKENS = [
   "state_icon",
@@ -249,6 +269,8 @@ export interface Segment {
   /** `pr` token: the pull request to open on a click; `tip`: tooltip (`pr`, `notification`). */
   url?: string;
   tip?: string;
+  /** The token that made the segment (`branch`, `dir`, `dirty`, …); absent for `state_icon`. */
+  token?: string;
 }
 
 export type Line = Segment[];
@@ -340,6 +362,7 @@ export function renderRow(
             dim: base.dim || pr.isDraft,
             kind: "text",
             text,
+            token,
             sep: out.at(-1)?.kind === "text",
             url: pr.url,
             tip: prTooltip(pr),
@@ -349,7 +372,7 @@ export function renderRow(
         const text = value(token)?.trim();
         if (!text) continue;
         if (token === "name") {
-          out.push({ ...base, kind: "name", text, sep: false });
+          out.push({ ...base, kind: "name", text, sep: false, token });
           continue;
         }
         if (token === "state_text") {
@@ -362,13 +385,19 @@ export function renderRow(
           ...base,
           kind: "text",
           text,
+          token,
           sep: out.at(-1)?.kind === "text",
           ...(token === "notification" && { tip: text }),
+          ...(token === "dir" && { tip: dirPath(pane, ctx) }),
         });
       }
       return out;
     })
     .filter((l) => l.some((s) => s.kind !== "dot"));
+}
+
+function dirPath(pane: PaneRow | undefined, ctx: SpaceContext): string | undefined {
+  return pane ? pane.dir : ctx.dir;
 }
 
 /** More child records than this are folded into one summary line until the user opens them. */

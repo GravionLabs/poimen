@@ -597,6 +597,83 @@ describe("Stage, commit and push", () => {
     expect(el(f).querySelector(".result")!.textContent).toContain("feat: x");
   });
 
+  describe("generate a message", () => {
+    const generateButton = (f: { nativeElement: HTMLElement }) =>
+      el(f).querySelector<HTMLButtonElement>("button.generate");
+    const withHarness = (printArgs: string[]) =>
+      tauri.answer("get_harnesses", () => [
+        { id: "claude", command: ["claude"], available: true, printArgs },
+      ]);
+
+    it("hides the button without a harness that has printArgs", async () => {
+      withHarness([]);
+      const f = await renderUncommitted();
+      expect(generateButton(f)).toBeNull();
+    });
+
+    it("fills the box from the staged diff and never commits", async () => {
+      withHarness(["-p", "{prompt}"]);
+      const f = await renderUncommitted();
+      staged.add("src/a.ts");
+      click(button(f, "Refresh"));
+      await settle(f);
+      f.detectChanges();
+      tauri.answer("changes_generate_message", () => "feat(x): y");
+      generateButton(f)!.click();
+      await settle(f);
+      f.detectChanges();
+      expect(tauri.calls("changes_generate_message")).toMatchObject([
+        { dir: "/repo", harness: "claude" },
+      ]);
+      expect(el(f).querySelector<HTMLTextAreaElement>("textarea.message")!.value).toBe(
+        "feat(x): y",
+      );
+      expect(tauri.calls("changes_commit")).toEqual([]);
+    });
+
+    it("leaves the box as it was on an error", async () => {
+      withHarness(["-p", "{prompt}"]);
+      const f = await renderUncommitted();
+      staged.add("src/a.ts");
+      click(button(f, "Refresh"));
+      await settle(f);
+      message(f, "mine");
+      tauri.answer("changes_generate_message", () => {
+        throw "claude failed: boom";
+      });
+      f.detectChanges();
+      generateButton(f)!.click();
+      await settle(f);
+      f.detectChanges();
+      expect(el(f).querySelector<HTMLTextAreaElement>("textarea.message")!.value).toBe("mine");
+      expect(el(f).querySelector(".result.failed")!.textContent).toContain("boom");
+    });
+
+    it("shows progress and cancels without touching the box", async () => {
+      withHarness(["-p", "{prompt}"]);
+      const f = await renderUncommitted();
+      staged.add("src/a.ts");
+      click(button(f, "Refresh"));
+      await settle(f);
+      message(f, "mine");
+      let finish: (v: string) => void = () => {};
+      tauri.answer("changes_generate_message", () => new Promise<string>((r) => (finish = r)));
+      f.detectChanges();
+      generateButton(f)!.click();
+      f.detectChanges();
+      expect(generateButton(f)!.textContent).toContain("Cancel");
+      generateButton(f)!.click();
+      await settle(f);
+      f.detectChanges();
+      expect(tauri.calls("changes_generate_cancel")).toHaveLength(1);
+      finish("feat: late");
+      await settle(f);
+      f.detectChanges();
+      expect(el(f).querySelector<HTMLTextAreaElement>("textarea.message")!.value).toBe("mine");
+      expect(generateButton(f)!.textContent!.trim()).toBe("Generate");
+    });
+  });
+
   it("shows the output of a push and the refusal of a protected branch", async () => {
     const f = await renderUncommitted();
     tauri.answer("changes_push", () => "To origin\n * [new branch] feat/x -> feat/x");

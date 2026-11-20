@@ -57,6 +57,17 @@ describe("matchShortcut", () => {
     ).toBe("nextTab");
   });
 
+  it("yields the recent-tab keys from a focused terminal (#1006)", () => {
+    const inTerm = { mac: false, inTerminal: true };
+    expect(matchShortcut(key("Tab", { ctrlKey: true }), DEFAULT_SHORTCUTS, inTerm)).toBe(
+      "recentTab",
+    );
+    expect(
+      matchShortcut(key("Tab", { ctrlKey: true, shiftKey: true }), DEFAULT_SHORTCUTS, inTerm),
+    ).toBe("recentTabBack");
+    expect(matchShortcut(key("b", { ctrlKey: true }), DEFAULT_SHORTCUTS, inTerm)).toBeNull();
+  });
+
   it("leaves Cmd shortcuts to the native menu on macOS", () => {
     expect(matchShortcut(key("b", { metaKey: true }), DEFAULT_SHORTCUTS, mac)).toBeNull();
   });

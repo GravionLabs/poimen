@@ -107,6 +107,8 @@ export interface HarnessInfo {
   exitInput: string | null;
   /** Argv template appended to the command to resume a session (`{session}`); empty: none. */
   resumeArgs: string[];
+  /** Argv template appended to the command for a headless one-shot call (`{prompt}`); empty: none. */
+  printArgs: string[];
   /** The program was found on the `PATH` of a child. */
   available: boolean;
 }
@@ -128,6 +130,7 @@ export function parseHarnesses(raw: unknown): HarnessInfo[] {
         defaultModel: typeof r["defaultModel"] === "string" ? r["defaultModel"] : null,
         exitInput: typeof r["exitInput"] === "string" ? r["exitInput"] : null,
         resumeArgs: strings(r["resumeArgs"]),
+        printArgs: strings(r["printArgs"]),
         available: r["available"] === true,
       },
     ];
@@ -268,6 +271,8 @@ export interface Settings {
   explorerShowHidden: boolean;
   /** `agents.claude.classicRenderer`: new terminals set `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`. */
   claudeClassicRenderer: boolean;
+  /** `agents.keepAwake`: the server keeps the machine awake while an agent works (#987). */
+  keepAwake: boolean;
   /** Lines of scrollback xterm.js keeps (`terminal.scrollback`). */
   scrollback: number;
   /** `spaces.layout`: the pane layout of a new space; `null` uses the built-in default. */
@@ -377,6 +382,7 @@ export const DEFAULT_SETTINGS: Settings = {
   explorerRoots: ["~"],
   explorerShowHidden: false,
   claudeClassicRenderer: false,
+  keepAwake: false,
   scrollback: 10000,
   spacesLayout: null,
   layouts: [],
@@ -487,6 +493,7 @@ export function parseSettings(raw: unknown): Settings {
     explorerRoots: parseRoots(r["explorerRoots"]),
     explorerShowHidden: r["explorerShowHidden"] === true,
     claudeClassicRenderer: r["claudeClassicRenderer"] === true,
+    keepAwake: r["keepAwake"] === true,
     scrollback:
       typeof r["scrollback"] === "number" &&
       Number.isInteger(r["scrollback"]) &&
@@ -620,6 +627,11 @@ export class SettingsStore {
       "set_claude_classic_renderer",
       { on: claudeClassicRenderer },
     );
+  }
+
+  /** Writes `agents.keepAwake` of config.json; the server reads it and holds or releases. */
+  async setKeepAwake(keepAwake: boolean): Promise<void> {
+    await this.write({ keepAwake }, "the keep awake option", "set_keep_awake", { on: keepAwake });
   }
 
   /** Writes `sounds.<kind>` (`false`, `true` or an audio file path) and applies it at once. */

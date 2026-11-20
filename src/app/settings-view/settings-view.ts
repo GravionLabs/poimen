@@ -451,6 +451,10 @@ export class SettingsView {
     void this.store.setExplorerShowHidden((event.target as HTMLInputElement).checked);
   }
 
+  protected setKeepAwake(event: Event): void {
+    void this.store.setKeepAwake((event.target as HTMLInputElement).checked);
+  }
+
   protected setClassicRenderer(event: Event): void {
     void this.store.setClaudeClassicRenderer((event.target as HTMLInputElement).checked);
   }

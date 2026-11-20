@@ -4,7 +4,7 @@
 </header>
 <ul aria-label="Other findings">
   @for (item of items; track item.id) {
-    <li [class]="'sev-' + item.finding.severity">
+    <li [class]="'sev-' + item.finding.severity" (contextmenu)="openMenu($event, item)">
       <span class="sev">{{ item.finding.severity }}</span>
       <span class="body">
         <span class="where">{{ location(item) }}</span>
@@ -24,3 +24,11 @@
     </li>
   }
 </ul>
+@if (menuAt(); as at) {
+  <app-context-menu
+    [at]="at"
+    [groups]="menuGroups"
+    (picked)="pick(at.item)"
+    (closed)="menuAt.set(null)"
+  />
+}

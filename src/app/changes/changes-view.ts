@@ -12,6 +12,9 @@ import {
   untracked,
 } from "@angular/core";
 import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import { ExternalEditor, joinPath } from "../core/external-editor";
+import { ContextMenu } from "../ui/context-menu/context-menu";
+import { plainGroups } from "../ui/context-menu/menu-model";
 import { UiState } from "../core/ui-state";
 import {
   CHANGES_SCOPES,
@@ -48,7 +51,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
  */
 @Component({
   selector: "app-changes-view",
-  imports: [DiffEditor, CommentsPanel, FindingsPanel, HxButton, HxSelectButton],
+  imports: [DiffEditor, CommentsPanel, FindingsPanel, HxButton, HxSelectButton, ContextMenu],
   providers: [Changes, LineComments, Findings],
   templateUrl: "./changes-view.html",
   styles: `
@@ -215,6 +218,15 @@ export class ChangesView {
   protected readonly lineComments = inject(LineComments);
   protected readonly findings = inject(Findings);
   private readonly ui = inject(UiState);
+  private readonly externalEditor = inject(ExternalEditor);
+  /** The line the last click on a line number of the diff picked, and its file (#1002). */
+  private lastLine: { path: string; line: number } | null = null;
+  protected readonly menuAt = signal<{
+    path: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  protected readonly menuGroups = plainGroups([{ id: "open-in-editor", label: "Open in editor" }]);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** The latest `n`/`p` press, handed to the diff as an input (a new object each time). */
   protected readonly jump = signal<DiffJump | null>(null);
@@ -293,6 +305,28 @@ export class ChangesView {
     }
   }
 
+  protected readonly chooseLine = (chosen: { path: string; line: number }): void => {
+    this.lastLine = chosen;
+  };
+
+  protected openFileMenu(event: MouseEvent, path: string): void {
+    event.preventDefault();
+    this.menuAt.set({ path, x: event.clientX, y: event.clientY });
+  }
+
+  /** Opens a changed file in the editor, at the picked line when it is a line of that file. */
+  protected openFile(path: string): void {
+    this.menuAt.set(null);
+    const chosen = this.lastLine;
+    const line = chosen?.path === path ? chosen.line : undefined;
+    void this.externalEditor.open(joinPath(this.path(), path), line === undefined ? {} : { line });
+  }
+
+  protected openFinding(item: IndexedFinding): void {
+    const { file, line } = item.finding;
+    if (file) void this.externalEditor.open(joinPath(this.path(), file), line ? { line } : {});
+  }
+
   protected sendMark(id: string, quote: string): void {
     const entry = this.findings.all()[Number(id)];
     if (!entry) return;
@@ -307,6 +341,11 @@ export class ChangesView {
 
   protected setLayout(layout: DiffLayout): void {
     this.ui.setChangesLayout(layout);
+  }
+
+  protected generateHint(): string {
+    if (!this.changes.stagedCount()) return "Nothing is staged";
+    return "Draft a Conventional Commit message from the staged diff (does not commit)";
   }
 
   protected commitHint(): string {

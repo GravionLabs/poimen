@@ -1,13 +1,14 @@
-use poimen_core::agent_actions;
-use poimen_core::{copilot, transcripts};
+use poimen_core::{agent_actions, copilot, git, transcripts};
 mod agent_session;
+mod agent_settings;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
 mod changes;
 mod changes_git;
+mod commit_message;
 mod deliver;
-use poimen_core::git;
+mod editor;
 mod git_sync;
 use poimen_core::github;
 mod github_branches;
@@ -34,8 +35,7 @@ mod settings;
 mod settings_transfer;
 mod spaces;
 mod task_start;
-use poimen_core::tasks;
-use poimen_core::templates;
+use poimen_core::{tasks, templates};
 mod terminal_colors;
 use poimen_core::trust;
 mod updater;
@@ -2102,14 +2102,6 @@ fn set_explorer_show_hidden(show: bool) -> Result<(), String> {
     settings::save_explorer_show_hidden(&home, show)
 }
 
-/// Writes only `agents.claude.classicRenderer`; the settings watcher emits the change and applies
-/// it to the backend for terminals created afterwards.
-#[tauri::command]
-fn set_claude_classic_renderer(on: bool) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_claude_classic_renderer(&home, on)
-}
-
 /// Writes only `sounds.<kind>` (`blocked` or `done`: `false`, `true` or a file path).
 #[tauri::command]
 fn set_sound(kind: String, value: serde_json::Value) -> Result<(), String> {
@@ -2267,34 +2259,6 @@ async fn changes_write_comments(dir: String, content: String) -> Result<String, 
 #[tauri::command]
 async fn changes_findings(dir: String) -> Result<changes::FindingsResult, String> {
     tauri::async_runtime::spawn_blocking(move || changes::findings(&dir, home_dir().as_deref()))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-/// Stages (`stage: true`) or unstages the repository-relative `paths` of the worktree `dir`.
-#[tauri::command]
-async fn changes_stage(dir: String, paths: Vec<String>, stage: bool) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        changes_git::stage(&dir, &paths, stage, home_dir().as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Commits the staged changes of the worktree `dir` with `message`.
-#[tauri::command]
-async fn changes_commit(dir: String, message: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        changes_git::commit(&dir, &message, home_dir().as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Pushes the current branch of the worktree `dir` (never forced, refused on protected branches).
-#[tauri::command]
-async fn changes_push(dir: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || changes_git::push(&dir, home_dir().as_deref()))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -2890,7 +2854,7 @@ pub fn run() {
             }
             if let Some(home) = home_dir() {
                 let handle = handle.clone();
-                let machines = app.state::<SharedMachines>().inner().clone();
+                let machines = machines::wake::start(app.state::<SharedMachines>().inner().clone());
                 let loaded = settings::load(&home);
                 backend.set_claude_classic_renderer(loaded.claude_classic_renderer);
                 let watch_backend = backend.clone();
@@ -3001,9 +2965,11 @@ pub fn run() {
             changes_file,
             changes_write_comments,
             changes_findings,
-            changes_stage,
-            changes_commit,
-            changes_push,
+            changes_git::changes_stage,
+            changes_git::changes_commit,
+            changes_git::changes_push,
+            commit_message::changes_generate_message,
+            commit_message::changes_generate_cancel,
             git_fetch,
             git_pull,
             git_fetch_all,
@@ -3021,9 +2987,12 @@ pub fn run() {
             set_sidebar_agents,
             set_explorer_roots,
             set_explorer_show_hidden,
-            set_claude_classic_renderer,
+            agent_settings::set_claude_classic_renderer,
+            agent_settings::set_keep_awake,
             set_sound,
             sound_file,
+            editor::open_in_editor,
+            editor::resolve_file_links,
             paste_image,
             usage_claude,
             set_spaces_layout,
