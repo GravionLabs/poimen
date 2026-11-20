@@ -1,4 +1,5 @@
 import { Injectable, computed, effect, inject, signal, untracked } from "@angular/core";
+import { EditorTabs } from "../core/editor-tabs";
 import { Attention } from "../core/attention";
 import { parseHarnesses } from "../core/settings";
 import { SpacesStore } from "../core/spaces-store";
@@ -97,6 +98,7 @@ export class Changes {
   private readonly bridge = inject(TauriBridge);
   private readonly store = inject(SpacesStore);
   private readonly attention = inject(Attention);
+  private readonly tabs = inject(EditorTabs);
 
   readonly dir = signal("");
   readonly scope = signal<ChangesScope>("base");
@@ -133,6 +135,13 @@ export class Changes {
   private fileRun = 0;
 
   constructor() {
+    // "Show in Changes" for a file of this directory: read again, the refresh selects it.
+    effect(() => {
+      const wanted = this.tabs.changesFocus();
+      untracked(() => {
+        if (wanted && wanted.dir === this.dir()) void this.refresh();
+      });
+    });
     // An agent of this directory finished: its edits are what the list should show now.
     effect(() => {
       const changes = this.attention.lastChanges();
@@ -234,8 +243,10 @@ export class Changes {
       if (run !== this.listRun) return;
       this.list.set(list);
       this.error.set(null);
+      const wanted = this.tabs.takeChangesFocus(dir);
       const keep = list.files.some((f) => f.path === this.selected());
-      await this.select(keep ? this.selected() : (list.files[0]?.path ?? null), true);
+      const pick = wanted && list.files.some((f) => f.path === wanted) ? wanted : undefined;
+      await this.select(pick ?? (keep ? this.selected() : (list.files[0]?.path ?? null)), true);
     } catch (error) {
       if (run !== this.listRun) return;
       this.error.set(String(error));

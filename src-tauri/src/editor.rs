@@ -237,6 +237,72 @@ pub fn open_in_editor(path: String, line: Option<u32>, column: Option<u32>) -> R
     Ok(())
 }
 
+/// A path found in terminal text that is a file (#1003).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileLink {
+    /// The file, absolute.
+    pub path: String,
+    /// The root of the git worktree that holds it and its path there (`/` separators).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo: Option<RepoFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RepoFile {
+    pub root: String,
+    pub rel: String,
+}
+
+/// The file `text` names, relative to `dir` (a leading `~/` is the home directory); `None` when
+/// it is not an existing file.
+pub fn resolve_file(dir: &str, text: &str, home: Option<&Path>) -> Option<PathBuf> {
+    if text.is_empty() || text.contains('\0') {
+        return None;
+    }
+    let path = match (text.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => Path::new(dir).join(text),
+    };
+    path.is_file().then_some(path)
+}
+
+fn repo_file(path: &Path) -> Option<RepoFile> {
+    let parent = path.parent()?.to_str()?;
+    let out =
+        poimen_core::git::run_bytes(parent, &["rev-parse", "--show-toplevel", "--show-prefix"])
+            .ok()?;
+    let out = String::from_utf8_lossy(&out);
+    let mut lines = out.lines();
+    let root = lines.next()?.trim().to_owned();
+    let prefix = lines.next().unwrap_or("").trim();
+    let name = path.file_name()?.to_str()?;
+    (!root.is_empty()).then(|| RepoFile {
+        root,
+        rel: format!("{prefix}{name}"),
+    })
+}
+
+/// For each of `paths` (as written in the terminal) the file it names, or `null`. Read only.
+#[tauri::command]
+pub async fn resolve_file_links(dir: String, paths: Vec<String>) -> Vec<Option<FileLink>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = std::env::home_dir();
+        paths
+            .iter()
+            .take(64)
+            .map(|text| {
+                let path = resolve_file(&dir, text, home.as_deref())?;
+                Some(FileLink {
+                    repo: repo_file(&path),
+                    path: path.to_string_lossy().into_owned(),
+                })
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,5 +378,25 @@ mod tests {
         assert!(err.contains("\"editor\""), "{err}");
         let err = launch("{}", "", "/definitely/not/here", None, None).unwrap_err();
         assert!(err.contains("does not exist"), "{err}");
+    }
+
+    #[test]
+    fn only_existing_files_resolve() {
+        let dir = std::env::temp_dir().join(format!("poimen-links-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/a.ts"), "x").unwrap();
+        let d = dir.to_string_lossy().into_owned();
+        assert_eq!(
+            resolve_file(&d, "src/a.ts", None),
+            Some(dir.join("src/a.ts"))
+        );
+        assert_eq!(resolve_file(&d, "src", None), None);
+        assert_eq!(resolve_file(&d, "src/b.ts", None), None);
+        assert_eq!(resolve_file(&d, "", None), None);
+        assert_eq!(
+            resolve_file("/elsewhere", "~/src/a.ts", Some(&dir)),
+            Some(dir.join("src/a.ts"))
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

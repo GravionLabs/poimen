@@ -96,3 +96,11 @@
   </div>
 }
 <div class="view-pad"><div #body class="view-body"></div></div>
+@if (fileMenu(); as menu) {
+  <app-context-menu
+    [at]="menu.at"
+    [groups]="fileMenuGroups"
+    (picked)="pickFileLink($event.id)"
+    (closed)="fileMenu.set(null)"
+  />
+}

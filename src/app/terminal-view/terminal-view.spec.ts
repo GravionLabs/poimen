@@ -11,6 +11,7 @@ import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { TerminalStreamService } from "../core/terminal-stream";
 
+const frame: StreamRecord = { type: "reset", cols: 80, rows: 24 };
 type FakeTerm = { selection: string; pasted: string[]; options: Record<string, unknown> };
 const fake = vi.hoisted(() => ({
   cols: 80,
@@ -47,6 +48,7 @@ vi.mock("@xterm/xterm", () => ({
       fake.addons.push(addon);
     }
     open() {}
+    registerLinkProvider() {}
     onData(handler: (data: string) => void) {
       fake.onData = handler;
     }
@@ -1128,7 +1130,6 @@ describe("TerminalView stream (poimen backend)", () => {
   });
 
   it("attaches again in its mode after the server went away, without a takeover", async () => {
-    const frame: StreamRecord = { type: "reset", cols: 80, rows: 24 };
     const { send, open, fixture, modes } = await setup("control", pane);
     await send(0, frame);
     await send(0, attached);
@@ -1194,7 +1195,6 @@ describe("TerminalView stream (poimen backend)", () => {
 });
 
 describe("TerminalView image paste (#906)", () => {
-  const frame: StreamRecord = { type: "reset", cols: 80, rows: 24 };
   const imageEvent = (types: string[]) => {
     const file = new File([new Uint8Array([1, 2, 3])], "x.png", { type: "image/png" });
     const event = new Event("paste", { bubbles: true, cancelable: true }) as ClipboardEvent;
