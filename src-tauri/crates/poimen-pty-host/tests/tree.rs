@@ -66,7 +66,7 @@ impl Terminal {
             .read_line(&mut hello)
             .unwrap();
         parse_host_line(&hello).expect("hello");
-        let conn = wait_connect(&endpoint);
+        let conn = connect(&endpoint);
         let (tx, messages) = mpsc::channel();
         let reader = BufReader::new(conn.clone());
         thread::spawn(move || {
@@ -133,15 +133,9 @@ impl Terminal {
     }
 }
 
-fn wait_connect(endpoint: &Path) -> Conn {
-    let deadline = Instant::now() + WAIT;
-    loop {
-        match Conn::connect(endpoint) {
-            Ok(conn) => return conn,
-            Err(e) if Instant::now() > deadline => panic!("cannot connect: {e}"),
-            Err(_) => thread::sleep(Duration::from_millis(50)),
-        }
-    }
+/// The host binds its endpoint before it answers `hello`, so one connect is enough.
+fn connect(endpoint: &Path) -> Conn {
+    Conn::connect(endpoint).unwrap_or_else(|e| panic!("cannot connect: {e}"))
 }
 
 fn alive(pid: u32) -> bool {
@@ -168,14 +162,8 @@ fn alive(pid: u32) -> bool {
     }
 }
 
-fn gone_within(pid: u32, within: Duration) -> bool {
-    let deadline = Instant::now() + within;
-    while Instant::now() < deadline {
-        if !alive(pid) {
-            return true;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
+/// `Ended` is the host's own confirmation that the tree is empty, so one look is enough.
+fn gone(pid: u32) -> bool {
     !alive(pid)
 }
 
@@ -193,11 +181,8 @@ mod unix {
         let (shell, job) = (t.pid("sh"), t.pid("gc"));
         t.send(&ClientMessage::Kill);
         assert_eq!(t.exit_tree(), Some(TreeEnd::Ended));
-        assert!(gone_within(job, Duration::from_secs(2)), "job {job} runs");
-        assert!(
-            gone_within(shell, Duration::from_secs(2)),
-            "shell {shell} runs"
-        );
+        assert!(gone(job), "job {job} runs");
+        assert!(gone(shell), "shell {shell} runs");
     }
 
     #[test]
@@ -213,7 +198,7 @@ mod unix {
         t.output_until("ready");
         let job = t.pid("gc");
         assert_eq!(t.exit_tree(), Some(TreeEnd::Ended));
-        assert!(gone_within(job, Duration::from_secs(2)), "job {job} runs");
+        assert!(gone(job), "job {job} runs");
     }
 
     #[test]
@@ -230,7 +215,7 @@ mod unix {
         let job = t.pid("gc");
         t.send(&ClientMessage::Kill);
         assert_eq!(t.exit_tree(), Some(TreeEnd::Ended));
-        assert!(gone_within(job, Duration::from_secs(2)), "job {job} runs");
+        assert!(gone(job), "job {job} runs");
     }
 
     #[test]
