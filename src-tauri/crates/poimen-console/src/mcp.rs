@@ -10,10 +10,13 @@
 //! refuse with the reason. The target space is the id the server holds for the target, never a
 //! name the agent supplies.
 
+mod worktree;
+
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use worktree::{WorktreeSpec, make_worktree_space};
 
 use poimen_client::Client;
 use poimen_client::agent::{AgentError, PromptResult};
@@ -184,7 +187,14 @@ fn tools() -> Value {
                 "harness": {"type": "string", "description": "A harness id of the user's config, e.g. claude or copilot."},
                 "model": {"type": "string", "description": "A model of the harness."},
                 "prompt": {"type": "string", "description": "The first prompt of the agent."},
-                "name": {"type": "string", "description": "The name of the new terminal; the harness id by default."}
+                "name": {"type": "string", "description": "The name of the new terminal; the harness id by default."},
+                "worktree": {"type": "object", "description": "Start in a new space on a task worktree of the repository of `space` (or your own space) instead: {issue: number, title?, mode?} (the task mode, `agent` by default) or {branch: name}. An existing worktree of that branch is reused, never changed. A new space always needs the user's confirmation in the poimen app. The answer names the space, the worktree path and the branch.",
+                    "properties": {
+                        "issue": {"type": "integer"},
+                        "title": {"type": "string"},
+                        "mode": {"type": "string"},
+                        "branch": {"type": "string"}
+                    }}
             }, "required": ["harness"]},
         },
         {
@@ -289,6 +299,7 @@ fn authorize(
     action: AgentWriteAction,
     terminal_id: Option<&str>,
     text: &str,
+    always_ask: bool,
 ) -> Result<bool, Fail> {
     let Some(caller) = env.terminal_id.filter(|i| !i.is_empty()) else {
         return Err(Fail::Tool(
@@ -302,7 +313,7 @@ fn authorize(
         .iter()
         .find(|t| t.id == caller)
         .ok_or_else(|| Fail::Tool(format!("terminal {caller} is not known to the server")))?;
-    if own.space_id == space_id {
+    if own.space_id == space_id && !always_ask {
         return Ok(false);
     }
     let asked = AgentConfirm {
@@ -372,7 +383,7 @@ fn agent_error(e: AgentError) -> Fail {
     Fail::Tool(e.to_string())
 }
 
-/// `start_agent {space?, harness, model?, prompt?, name?}`: a new terminal in the space (the
+/// `start_agent {space?, harness, model?, prompt?, name?, worktree?}`: a new terminal in the space (the
 /// caller's by default) running the harness.
 fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> {
     let id =
@@ -389,6 +400,7 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
     let (program, rest) = argv
         .split_first()
         .ok_or_else(|| Fail::Tool(format!("harness `{id}` has no command")))?;
+    let worktree = WorktreeSpec::parse(args.get("worktree"))?;
     let spaces = client.list_spaces().map_err(server_error)?;
     let space_id = match text_arg(args, "space") {
         Some(s) => s.to_owned(),
@@ -412,21 +424,46 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
         return Err(Fail::Tool(format!("space {space_id} not found")));
     }
     let command_line = argv.join(" ");
+    let confirm_text = match &worktree {
+        Some(spec) => format!("{command_line} (in a new worktree: {})", spec.describe()),
+        None => command_line.clone(),
+    };
     let confirmed = authorize(
         client,
         env,
         &space_id,
         AgentWriteAction::StartAgent,
         None,
-        &command_line,
+        &confirm_text,
+        worktree.is_some(),
     )?;
+    let (space_id, new_space) = match &worktree {
+        Some(spec) => {
+            let source = spaces
+                .iter()
+                .find(|s| s.id == space_id)
+                .ok_or_else(|| Fail::Tool(format!("space {space_id} not found")))?;
+            let made = make_worktree_space(client, env, &source.cwd, spec)?;
+            (made.space.id.clone(), Some(made))
+        }
+        None => (space_id, None),
+    };
+    // A space made for this start does not outlive a failed start (the worktree stays).
+    let drop_new_space = || {
+        if new_space.is_some() {
+            let _ = client.close_space(&space_id);
+        }
+    };
     let terminal = client
         .create_terminal(&TerminalCreate {
             space_id: space_id.clone(),
             name: Some(text_arg(args, "name").unwrap_or(id).to_owned()),
             ..Default::default()
         })
-        .map_err(server_error)?;
+        .map_err(|e| {
+            drop_new_space();
+            server_error(e)
+        })?;
     match client.start_agent(&terminal.id, program, rest, START_WAIT) {
         Ok(agent) => {
             announce(
@@ -438,16 +475,25 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
                 &command_line,
                 confirmed,
             );
-            Ok(json!({
+            let mut answer = json!({
                 "terminal": terminal.id,
                 "space": space_id,
                 "agent": agent.agent,
                 "status": agent.status,
-            }))
+            });
+            if let Some(made) = &new_space {
+                answer["worktree"] = json!({
+                    "path": made.path,
+                    "branch": made.branch,
+                    "created": made.created,
+                });
+            }
+            Ok(answer)
         }
         Err(e) => {
             // The agent never started: the empty terminal is not left behind.
             let _ = client.close_terminal(&terminal.id);
+            drop_new_space();
             Err(agent_error(e))
         }
     }
@@ -473,6 +519,7 @@ fn prompt_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail>
         AgentWriteAction::PromptAgent,
         Some(terminal),
         text,
+        false,
     )?;
     match client
         .prompt_agent(terminal, text, crate::commands::PROMPT_WAIT)
