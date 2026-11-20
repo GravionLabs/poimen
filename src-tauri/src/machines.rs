@@ -6,16 +6,14 @@
 //! `events.subscribe` on the same connection) and reports its state: `connecting`, `connected`,
 //! `offline` (with the ssh error) or `incompatible` (other protocol; no further requests). A
 //! dropped connection is tried again with a backoff of 1 s doubling up to 60 s, or at once on
-//! demand ([`Machine::reconnect`]); an incompatible server only on demand.
+//! demand ([`Machine::reconnect`], on resume and network return: `machine_wake`).
 //!
 //! Requests of the machine go through a [`PoimenBackend`] whose connections are gated: none is
 //! opened while the machine is not `connected`, and a connection of an earlier session fails its
 //! reads and writes, so nothing is sent to a terminal while the machine is not connected and no
 //! request of before a reconnect is answered or replayed. A lost connection only ends poimen's own
-//! ssh processes; the terminals on the remote keep running and are attached again from the
-//! snapshot once the machine is back.
-//!
-//! BatchMode only: poimen never prompts for, stores or logs a password or a key.
+//! ssh processes; remote terminals keep running and are attached again once the machine is back.
+//! BatchMode only: poimen never prompts for, stores or logs a password or key.
 
 use std::collections::HashSet;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -1093,6 +1091,7 @@ impl<R: Read> Read for SshOutput<R> {
     }
 }
 
+pub mod wake;
 #[cfg(test)]
 mod tests {
     use super::*;
