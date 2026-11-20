@@ -1,8 +1,7 @@
 //! `poimen-server`: a headless daemon that runs the terminals, so shells and agents keep running
 //! when the app closes. Each terminal's PTY and child live in a `poimen-pty-host` of its own,
-//! which the server reads as a client (`host.rs`, ADR 0009). One server per user listens on a local socket (a Unix socket, a named pipe on
-//! Windows; `docs/protocol.md`).
-//!
+//! which the server reads as a client (`host.rs`, ADR 0009). One server per user listens on a
+//! local socket (Unix socket, named pipe on Windows; `docs/protocol.md`).
 //! The server keeps spaces (name, cwd) with terminals, and per space the tabs in order with a
 //! split tree of terminals each (`tabs.rs`). Spaces, tabs and the list of running terminals
 //! persist in `server.json` (`store.rs`); a new server adopts the hosts of that list (#604) and
@@ -65,8 +64,7 @@ pub use host::{Launch, PtyHost, host_beside};
 pub use store::state_file_path;
 use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
 
-/// How long a write to a client may block before the connection is given up. Only the writer
-/// thread of that client waits; the PTY and the other clients never do.
+/// How long a write to a client may block before it is given up; only that client's writer thread waits.
 /// How often the tokens with a TTL are checked.
 const TOKEN_SWEEP: Duration = Duration::from_millis(500);
 
@@ -84,9 +82,8 @@ pub struct Config {
     pub state_file: PathBuf,
     /// Lines of scrollback kept per terminal for the attach snapshot.
     pub scrollback: usize,
-    /// The user's home, whose `~/.config/poimen/config.json` gives `trustedProjects`,
-    /// `spaceTemplates`, `spaces.layout` and `harnesses` to `space.create` (which also writes
-    /// `trustedProjects`); `None`: no user config.
+    /// The user's home: its `~/.config/poimen/config.json` gives `space.create` the `trustedProjects`,
+    /// `spaceTemplates`, `spaces.layout` and `harnesses` (and takes `trustedProjects`); `None`: none.
     pub home: Option<PathBuf>,
     /// How a new terminal's `poimen-pty-host` is started (ADR 0009): the binary next to the
     /// server, or an in-process host in tests.
@@ -211,13 +208,13 @@ impl TerminalEntry {
             agent_seq: self.agent_seq,
             records: self.records.raw().to_vec(),
             hibernated: self.info.hibernated.clone(),
+            started_by: self.info.started_by.clone(),
             tokens,
         })
     }
 
-    /// One signal of the output. Only the root record of OSC 7501 counts; the program's status
-    /// replaces the hook status until it clears it, at RIS, or when a new prompt drops
-    /// `working` and `blocked`.
+    /// One signal of the output. Only the root OSC 7501 record counts; the program's status replaces the
+    /// hook status until it clears it, at RIS, or when a new prompt drops `working` and `blocked`.
     fn apply_signal(&mut self, signal: emulator::Signal, now_ms: u64) {
         use emulator::{ReportState, Signal};
         match signal {
@@ -2056,6 +2053,7 @@ fn spawn_terminal(
         host_bundled_version: Some(host_bundled_version()),
         records: Vec::new(),
         hibernated: None,
+        started_by: p.started_by.clone(),
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
@@ -2624,6 +2622,7 @@ fn tab_split(shared: &Arc<Shared>, p: TabSplit) -> ApiResult {
             cols: None,
             rows: None,
             env: p.env,
+            started_by: None,
         },
     )?;
     let split_id = shared.new_id("split");

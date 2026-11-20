@@ -107,5 +107,39 @@ export function nestTabs(
     container.leaf = false;
     container.expanded = true;
   }
-  return top;
+  return nestStarted(entries, top);
+}
+
+/**
+ * Nodes of agents started by another agent of the same list (`started_by`, #982) become children
+ * of the starting agent's node, which starts expanded. A start chain that comes back to the row
+ * (a cycle) and a row nested under a tab parent are left where they are.
+ */
+function nestStarted(
+  entries: readonly { row: PaneRow; node: HxTreeNode<SpaceData> }[],
+  top: HxTreeNode<SpaceData>[],
+): HxTreeNode<SpaceData>[] {
+  const byTerminal = new Map(entries.map((e) => [e.row.pane.terminal_id, e]));
+  const startedBy = (id: string) => byTerminal.get(id)?.row.pane.started_by;
+  const keep: HxTreeNode<SpaceData>[] = [];
+  for (const node of top) {
+    const entry = entries.find((e) => e.node === node)!;
+    const starter = entry.row.pane.started_by
+      ? byTerminal.get(entry.row.pane.started_by)
+      : undefined;
+    let cycle = false;
+    const seen = new Set<string>();
+    for (let up = entry.row.pane.started_by; up && !seen.has(up); up = startedBy(up)) {
+      if (up === entry.row.pane.terminal_id) cycle = true;
+      seen.add(up);
+    }
+    if (!starter || starter.node === node || cycle) {
+      keep.push(node);
+      continue;
+    }
+    starter.node.children = [...(starter.node.children ?? []), node];
+    starter.node.leaf = false;
+    starter.node.expanded = true;
+  }
+  return keep;
 }

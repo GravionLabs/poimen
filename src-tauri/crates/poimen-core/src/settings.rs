@@ -1,6 +1,5 @@
-//! The parts of the user settings (`~/.config/poimen/config.json`) that the project-side modules
-//! need: the `tasks` and `spaceTemplates` parsers, the trusted projects, and the editor that
-//! changes one key of the file in place and keeps comments, formatting and every other key.
+//! The parts of the user settings (`~/.config/poimen/config.json`) the project-side modules need:
+//! the `tasks` and `spaceTemplates` parsers, trusted projects, and the in-place key editor.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -86,6 +85,7 @@ pub const ROW_TOKENS: &[&str] = &[
     "notification",
     "dir",
     "tab",
+    "started_by",
 ];
 
 fn parse_row_token(value: &Value) -> Result<RowToken, String> {

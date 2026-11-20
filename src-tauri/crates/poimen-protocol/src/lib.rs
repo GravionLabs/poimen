@@ -46,8 +46,7 @@ pub enum Channel {
 impl Channel {
     pub const ALL: [Channel; 2] = [Channel::Stable, Channel::Rc];
 
-    /// The channel of a `POIMEN_CHANNEL` value: unset, empty or `stable` is stable, `rc` is rc,
-    /// anything else `None`.
+    /// The channel of a `POIMEN_CHANNEL` value: unset, empty or `stable` is stable, `rc` is rc, else `None`.
     pub const fn parse(value: Option<&str>) -> Option<Channel> {
         match value {
             None => Some(Channel::Stable),
@@ -78,15 +77,13 @@ impl Channel {
         format!("{base}{}", self.suffix())
     }
 
-    /// The file name of this channel's `poimen-server` binary (`poimen-server-rc` on rc; `.exe`
-    /// on Windows).
+    /// The file name of this channel's `poimen-server` binary (`poimen-server-rc` on rc; `.exe` on Windows).
     pub fn server_program(self, windows: bool) -> String {
         let name = self.named("poimen-server");
         if windows { format!("{name}.exe") } else { name }
     }
 
-    /// The file name of this channel's `poimen-pty-host` binary, which ships next to the server
-    /// (`poimen-pty-host-rc` on rc; `.exe` on Windows).
+    /// The file name of this channel's `poimen-pty-host` binary, next to the server (`-rc` on rc; `.exe` on Windows).
     pub fn host_program(self, windows: bool) -> String {
         let name = self.named("poimen-pty-host");
         if windows { format!("{name}.exe") } else { name }
@@ -554,12 +551,10 @@ pub struct Terminal {
     /// Set once `status` is `exited`; `None` when the process was killed by a signal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<u32>,
-    /// The program the terminal runs (the shell, for a default terminal); lets a client quote
-    /// what it types for that shell. Absent from servers that do not report it.
+    /// The program the terminal runs (the shell by default); lets a client quote what it types. Absent from older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
-    /// The arguments after `program` (the command line the terminal was created with); lets a
-    /// client start the same command again. Absent when there are none and from older servers.
+    /// The arguments after `program`; lets a client start the same command again. Absent when none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
     /// The agent in the terminal, as its hooks last reported it; absent when there is none.
@@ -579,8 +574,7 @@ pub struct Terminal {
     /// and from terminals without a host (exited).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_version: Option<String>,
-    /// The version of the host this server ships with (the one a new terminal gets); set
-    /// together with `host_version`.
+    /// The version of the host this server ships with (a new terminal gets it); set with `host_version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_bundled_version: Option<String>,
     /// The child records the program reported with OSC 7501 `id=` (#684), least recently updated
@@ -592,6 +586,9 @@ pub struct Terminal {
     /// (ADR 0014, #903); the shell stays. Absent when the terminal is not hibernated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hibernated: Option<Hibernated>,
+    /// The terminal whose agent started this one with `start_agent` (#982); outlives the starter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
 }
 
 /// A hibernated agent: what a resume needs (ADR 0014). Set by the server's sweeper before it
@@ -1338,6 +1335,9 @@ pub struct TerminalCreate {
     /// (`POIMEN_SOCKET` and `POIMEN_TERMINAL_ID` cannot be overridden). Absent: none.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
+    /// Becomes `Terminal.started_by` (#982).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
 }
 
 /// `tab.create`: a new tab at the end of the space, with `terminal_id` (moved out of its tab) or

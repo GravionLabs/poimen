@@ -212,8 +212,14 @@ const line = (...tokens: string[]): TokenSpec[] => tokens.map((token) => ({ toke
 /** The layout poimen shipped before it became configurable. */
 export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
   workspace: [line("state_icon", "name", "state_text", "dir"), line("branch", "dirty", "sync")],
-  agent: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
-  terminal: [line("state_icon", "name", "state_text"), line("agent", "title", "branch", "dir")],
+  agent: [
+    line("state_icon", "name", "state_text"),
+    line("agent", "title", "started_by", "branch", "dir"),
+  ],
+  terminal: [
+    line("state_icon", "name", "state_text"),
+    line("agent", "title", "started_by", "branch", "dir"),
+  ],
 };
 
 /**
@@ -250,6 +256,7 @@ export const ROW_TOKENS = [
   "notification",
   "dir",
   "tab",
+  "started_by",
 ] as const;
 
 /** Whether `name` is a built-in token or `$<name>` with a herdr token name. */
@@ -315,6 +322,8 @@ export function renderRow(
         return pane ? paneDetail(pane) : undefined;
       case "tab":
         return pane?.tab;
+      case "started_by":
+        return pane?.startedBy ? `↳ ${pane.startedBy}` : undefined;
       case "notification":
         return pane ? pane.pane.agent_message : ctx.notification;
       case "branch":
