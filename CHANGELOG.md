@@ -5,6 +5,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.26.0] — 2026-11-20
+
+### Bug Fixes
+- **site**: Vite 6.4.6 for VitePress closes the Dependabot alerts of the site (#942) (#943)
+- **shell**: Bottom panel lives inside the framed content slot (#930)
+- **sidebar**: Space on inner buttons, fold click keeps the tab stop, headers not selected (#937)
+- **deps**: Renovate config uses the dependencyDashboard object (#1047) (#1048)
+
+
+### Features
+- **sidebar**: Cards layout with one card per space (sidebar.layout: cards) (#934) (#1042)
+- **sidebar**: Attention and space states on the cards (#935) (#1043)
+- **sidebar**: Worktree grouping, pins, sort, filter and drag and drop in the cards layout (#936) (#1044)
+- **sidebar**: Keyboard navigation and ARIA of the cards layout (#937) (#1045)
+- **sidebar**: Keyboard navigation and ARIA of the cards layout (#937)
+- **sidebar**: Cards for the spaces of remote machines (#938) (#1046)
+
+
+### Refactoring
+- **shell**: HxActivityBar replaces the activity bar (#929) (#945)
+- **shell**: HxAppShell and HxAppToolbar replace the layout, the resizer and the toolbar (#930) (#1026)
+- **shell**: HxAppShell and HxAppToolbar replace the layout, the resizer and the toolbar (#930)
+- **status-bar**: HxStatusBar and hx-status-item replace the status bar markup (#931) (#1027)
+- **updater**: Own HX_UPDATE_BACKEND and update item on hx-status-item (#932) (#1028)
+
+
 ## [0.25.0] — 2026-11-19
 
 ### Bug Fixes
@@ -17,6 +43,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - ADR 0014 hibernation of idle agents (#901) (#916)
 - **protocol**: Drop a duplicated sentence (#898)
+- Update CHANGELOG.md for v0.25.0 [skip ci]
 
 
 ### Features
