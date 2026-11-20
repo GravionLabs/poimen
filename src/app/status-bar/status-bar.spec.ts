@@ -68,6 +68,7 @@ describe("mode button", () => {
     server: string | null = null,
     update: UpdateState = { kind: "idle" },
     channel: "stable" | "rc" = "stable",
+    awake = false,
   ) => {
     const emitted: boolean[] = [];
     const serverClicks: string[] = [];
@@ -82,6 +83,7 @@ describe("mode button", () => {
     class Host {
       connection = () => ({ state: "connected" }) as const;
       waiting = () => 0;
+      awake = () => awake;
       paneId = () => "p1";
       mode = () => mode;
       blocked = () => blocked;
@@ -259,6 +261,13 @@ describe("mode button", () => {
     );
     expect(root.querySelector(".update-button")).toBeNull();
     expect(root.textContent).not.toContain("Check for updates");
+  });
+
+  it("shows that the machine is kept awake only while it is", () => {
+    const off = render("control", null);
+    expect(off.root.querySelector("[data-testid=awake]")).toBeNull();
+    const on = render("control", null, true, null, null, { kind: "idle" }, "stable", true);
+    expect(on.root.querySelector("[data-testid=awake]")?.textContent?.trim()).toBe("awake");
   });
 
   it("has no RC badge in a stable build", () => {

@@ -159,6 +159,7 @@ describe("parseSettings", () => {
       explorerRoots: ["~"],
       explorerShowHidden: false,
       claudeClassicRenderer: false,
+      keepAwake: false,
       scrollback: 10000,
       spacesLayout: { panes: [{ name: "solo", command: "nvim", split: null }] },
       layouts: [],
@@ -206,6 +207,9 @@ describe("parseSettings", () => {
     expect(parseSettings({}).claudeClassicRenderer).toBe(false);
     expect(parseSettings({ claudeClassicRenderer: true }).claudeClassicRenderer).toBe(true);
     expect(parseSettings({ claudeClassicRenderer: "yes" }).claudeClassicRenderer).toBe(false);
+    expect(parseSettings({}).keepAwake).toBe(false);
+    expect(parseSettings({ keepAwake: true }).keepAwake).toBe(true);
+    expect(parseSettings({ keepAwake: "yes" }).keepAwake).toBe(false);
   });
 
   it("reads the scrollback and keeps 10000 for a value that is not a whole number from 0", () => {

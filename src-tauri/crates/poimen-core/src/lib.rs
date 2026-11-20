@@ -11,6 +11,7 @@ pub mod git;
 pub mod github;
 pub mod gui_path;
 pub mod harness;
+pub mod keep_awake;
 pub mod layout;
 pub mod order;
 pub mod project;

@@ -238,6 +238,8 @@ pub struct Settings {
     /// `agents.claude.classicRenderer`: new poimen terminals set
     /// `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` (default false).
     pub claude_classic_renderer: bool,
+    /// `agents.keepAwake`: the server holds a sleep inhibitor while an agent works (#987).
+    pub keep_awake: bool,
     /// `agents.silentAfter`: minutes of `working` without an agent report before the server marks
     /// the agent silent; `0` is off (default 10, #898).
     pub silent_after: u64,
@@ -428,6 +430,7 @@ impl Default for Settings {
             sounds: Sounds::default(),
             usage: Usage::default(),
             claude_classic_renderer: false,
+            keep_awake: false,
             silent_after: poimen_core::settings::DEFAULT_SILENT_AFTER_MIN,
             home: None,
             warnings: Vec::new(),
@@ -508,6 +511,10 @@ fn resolve_agents(value: &Value, s: &mut Settings) {
         poimen_core::settings::hibernate_after_minutes(&serde_json::json!({ "agents": value }))
     {
         s.warnings.push(e);
+    }
+    match poimen_core::keep_awake::keep_awake(&serde_json::json!({ "agents": value })) {
+        Ok(on) => s.keep_awake = on,
+        Err(e) => s.warnings.push(e),
     }
     let Some(claude) = agents.get("claude") else {
         return;
@@ -1047,15 +1054,6 @@ pub fn set_explorer_roots_text(text: &str, roots: &[String]) -> Result<String, S
     set_path_text(text, &["explorer", "roots"], &value)
 }
 
-/// Returns `text` with `agents.claude.classicRenderer` set, touching nothing else.
-pub fn set_claude_classic_renderer_text(text: &str, on: bool) -> Result<String, String> {
-    set_path_text(
-        text,
-        &["agents", "claude", "classicRenderer"],
-        &on.to_string(),
-    )
-}
-
 /// Returns `text` with `explorer.showHidden` set, touching nothing else.
 pub fn set_explorer_show_hidden_text(text: &str, show: bool) -> Result<String, String> {
     set_path_text(text, &["explorer", "showHidden"], &show.to_string())
@@ -1186,11 +1184,6 @@ pub fn save_sound(home: &Path, kind: &str, value: &Value) -> Result<(), String> 
     save_with(home, |text| set_sound_text(text, kind, value))
 }
 
-/// Writes `agents.claude.classicRenderer` below `home`, like `save_theme`.
-pub fn save_claude_classic_renderer(home: &Path, on: bool) -> Result<(), String> {
-    save_with(home, |text| set_claude_classic_renderer_text(text, on))
-}
-
 /// Writes `explorer.showHidden` below `home`, like `save_theme`.
 pub fn save_explorer_show_hidden(home: &Path, show: bool) -> Result<(), String> {
     save_with(home, |text| set_explorer_show_hidden_text(text, show))
@@ -1265,6 +1258,7 @@ pub fn watch(home: &Path, interval: Duration, emit: impl Fn(&Settings)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent_settings::set_claude_classic_renderer_text;
     use crate::tasks::CommandSpec;
 
     fn none() -> Option<String> {

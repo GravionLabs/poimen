@@ -16,7 +16,7 @@ use poimen_core::harness;
 use poimen_core::settings::{config_path, hibernate_after_minutes};
 use poimen_protocol::{AgentStatus, Event, Hibernated, TerminalStatus};
 
-use crate::{Shared, lock};
+use crate::{Server, Shared, lock};
 
 /// How often the sweeper looks.
 pub(crate) const SWEEP: Duration = Duration::from_secs(5);
@@ -271,4 +271,22 @@ enum ResumeState {
     AgentRuns,
     AgentGone,
     Over,
+}
+
+impl Server {
+    /// How long a resumed agent has to report before the resume counts as failed (default 30 s).
+    pub fn set_resume_timeout(&self, timeout: Duration) {
+        let ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
+        self.shared
+            .resume_timeout_ms
+            .store(ms, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// One pass of the hibernation sweeper at the given time in milliseconds (ADR 0014, #903);
+    /// `serve` runs it on a timer, tests call this with a clock of their own. Take it before
+    /// `serve`, which consumes the server.
+    pub fn hibernate_sweeper(&self) -> impl Fn(u64) + Send + Sync + 'static {
+        let shared = Arc::clone(&self.shared);
+        move |now_ms| shared.hibernate_sweep(now_ms)
+    }
 }

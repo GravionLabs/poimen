@@ -18,6 +18,7 @@ export interface BackendEvent {
     agent_kind?: string;
     agent_title?: string;
     reason?: string;
+    awake?: boolean;
   } | null;
 }
 
