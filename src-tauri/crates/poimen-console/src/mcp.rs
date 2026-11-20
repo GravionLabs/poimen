@@ -10,6 +10,7 @@
 //! refuse with the reason. The target space is the id the server holds for the target, never a
 //! name the agent supplies.
 
+mod report;
 mod worktree;
 
 use std::io::{BufRead, Write};
@@ -207,11 +208,20 @@ fn tools() -> Value {
         },
         {
             "name": "wait_agent",
-            "description": "Waits until the agent of a terminal is done, blocked, in error or gone, or the timeout passed. Returns the status and, when blocked, the notification text. A read tool: any space, no confirmation. Uses the server's events, no polling.",
+            "description": "Waits until the agent of a terminal is done, blocked, in error or gone, or the timeout passed. Returns the status, when blocked the notification text, and the agent's `report_done` report when there is one. A read tool: any space, no confirmation. Uses the server's events, no polling.",
             "inputSchema": {"type": "object", "properties": {
                 "terminal": {"type": "string", "description": "Terminal id."},
                 "timeout_s": {"type": "number", "description": "Seconds to wait (default 300, at most 3600). On timeout the current status is returned with timed_out true."}
             }, "required": ["terminal"]},
+        },
+        {
+            "name": "report_done",
+            "description": "Call once at the very end of your work when another agent started you: reports the result to the agent that started you (poimen types a line into it when it is idle) and closes your run in the Runs view. Report once, with a summary of at most three sentences.",
+            "inputSchema": {"type": "object", "properties": {
+                "outcome": {"type": "string", "enum": ["succeeded", "failed", "cancelled"]},
+                "summary": {"type": "string", "description": "What came out, at most three sentences."},
+                "files": {"type": "array", "items": {"type": "string"}, "description": "The files you changed."}
+            }, "required": ["outcome", "summary"]},
         },
         {
             "name": "read_agent",
@@ -278,7 +288,8 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
         }
         "start_agent" => start_agent(client, env, args),
         "prompt_agent" => prompt_agent(client, env, args),
-        "wait_agent" => wait_agent(client, args),
+        "wait_agent" => wait_agent(client, args).map(|v| report::with_report(client, v)),
+        "report_done" => report::report_done(client, env, args),
         "read_agent" => read_agent(client, args),
         _ => Err(Fail::Unknown),
     }
@@ -396,7 +407,8 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
             known.join(", ")
         ))
     })?;
-    let argv = harness::build_argv(found, text_arg(args, "model"), text_arg(args, "prompt"));
+    let prompt = text_arg(args, "prompt").map(report::with_preamble);
+    let argv = harness::build_argv(found, text_arg(args, "model"), prompt.as_deref());
     let (program, rest) = argv
         .split_first()
         .ok_or_else(|| Fail::Tool(format!("harness `{id}` has no command")))?;

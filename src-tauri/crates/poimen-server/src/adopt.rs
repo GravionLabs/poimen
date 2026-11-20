@@ -125,6 +125,7 @@ fn adopted(
             records: view,
             hibernated: t.hibernated,
             started_by: t.started_by,
+            report: t.report,
         },
         host: Some(handle),
         stream,
