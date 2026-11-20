@@ -1,0 +1,82 @@
+<app-dialog-shell
+  [heading]="original ? 'Edit machine' : 'Add machine'"
+  width="520px"
+  (cancelled)="machines.closeForm()"
+>
+  <form (submit)="submit($event)" novalidate>
+    <label>
+      Name
+      <input
+        name="name"
+        autocomplete="off"
+        [value]="name()"
+        (input)="name.set($any($event.target).value)"
+      />
+    </label>
+    @if (fieldError("name"); as e) {
+      <p class="error" role="alert">{{ e }}</p>
+    }
+    <label>
+      SSH target
+      <input
+        name="ssh"
+        autocomplete="off"
+        placeholder="me@host or a Host alias"
+        [value]="ssh()"
+        (input)="ssh.set($any($event.target).value)"
+      />
+    </label>
+    <p class="hint">One host as in ~/.ssh/config; no options. No password is stored.</p>
+    @if (suggestions().length) {
+      <div class="suggestions" role="group" aria-label="Hosts of your SSH config">
+        @for (h of suggestions(); track h.host) {
+          <button
+            type="button"
+            hx-button
+            size="small"
+            variant="outlined"
+            severity="secondary"
+            class="suggestion"
+            [disabled]="h.configured"
+            [attr.title]="h.configured ? 'Already configured' : null"
+            (click)="pick(h)"
+          >
+            {{ h.host }}{{ h.configured ? " (configured)" : "" }}
+          </button>
+        }
+      </div>
+    }
+    @if (fieldError("ssh"); as e) {
+      <p class="error" role="alert">{{ e }}</p>
+    }
+    <label>
+      Repositories directory
+      <input
+        name="reposDir"
+        autocomplete="off"
+        [placeholder]="defaultReposDir"
+        [value]="reposDir()"
+        (input)="reposDir.set($any($event.target).value)"
+      />
+    </label>
+    @if (fieldError("reposDir"); as e) {
+      <p class="error" role="alert">{{ e }}</p>
+    }
+    @if (fieldError(null); as e) {
+      <p class="error" role="alert">{{ e }}</p>
+    }
+    <div class="dialog-buttons">
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        class="cancel"
+        (click)="machines.closeForm()"
+      >
+        Cancel
+      </button>
+      <button type="submit" hx-button class="confirm" [disabled]="busy()">Save</button>
+    </div>
+  </form>
+</app-dialog-shell>

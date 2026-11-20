@@ -92,8 +92,8 @@ pnpm tauri dev
 | Check | Command |
 |---|---|
 | Frontend types (incl. templates) | `pnpm check` |
-| Frontend lint | `pnpm lint` |
-| Frontend format | `pnpm format:check` |
+| Frontend lint (oxlint for TypeScript, ESLint for templates) | `pnpm lint` |
+| Frontend format (oxfmt) | `pnpm format:check` |
 | Frontend tests | `pnpm test` |
 | Frontend build | `pnpm build` |
 | Rust tests | `cd src-tauri && cargo test` |

@@ -6,5 +6,5 @@
     "types": []
   },
   "include": ["src/**/*.ts", "src/app/themes/*.json"],
-  "exclude": ["src/**/*.spec.ts", "src/**/*.mock.ts"]
+  "exclude": ["src/**/*.spec.ts", "src/**/*.mock.ts", "src/testing/lint-probe/**"]
 }

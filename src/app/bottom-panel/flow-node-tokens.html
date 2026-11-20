@@ -1,0 +1,8 @@
+@if (tokens(); as line) {
+  <div class="meta tokens">
+    <span>{{ line }}</span>
+    @if (context(); as ctx) {
+      <span>{{ ctx }}</span>
+    }
+  </div>
+}

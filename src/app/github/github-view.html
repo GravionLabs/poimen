@@ -51,7 +51,8 @@
             (click)="selectPage(p.id)"
             (keydown)="onNavKey($event, p.id)"
           >
-            <span class="nav-label">{{ p.label }}</span>{{ " " }}
+            <span class="nav-label">{{ p.label }}</span
+            >{{ " " }}
             @if (p.count !== null) {
               <span class="nav-count" [attr.data-testid]="'count-' + p.id">{{ p.count }}</span>
             }
@@ -198,7 +199,8 @@
                                   role="img"
                                   [attr.aria-label]="c.count + ' ' + c.label"
                                 >
-                                  <span aria-hidden="true">{{ c.icon }}</span>{{ c.count }}
+                                  <span aria-hidden="true">{{ c.icon }}</span
+                                  >{{ c.count }}
                                 </span>
                               }
                             </span>

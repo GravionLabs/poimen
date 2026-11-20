@@ -31,9 +31,7 @@ filter_unconventional = true
 split_commits = true
 # A squash merge lists the commits of the pull request as "* type: message" lines in its body.
 # Strip the bullet so each one is read as its own conventional commit.
-commit_preprocessors = [
-  { pattern = '(?m)^\* ', replace = "" },
-]
+commit_preprocessors = [{ pattern = '(?m)^\* ', replace = "" }]
 commit_parsers = [
   { message = "^feat", group = "Features" },
   { message = "^fix", group = "Bug Fixes" },

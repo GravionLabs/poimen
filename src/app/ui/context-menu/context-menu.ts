@@ -30,65 +30,7 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
   selector: "app-context-menu",
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { "(document:keydown.escape)": "close()" },
-  template: `
-    <button
-      type="button"
-      class="menu-backdrop"
-      tabindex="-1"
-      aria-label="Close menu"
-      (click)="close()"
-      (contextmenu)="$event.preventDefault(); close()"
-    ></button>
-    <div
-      #menu
-      class="menu {{ cssClass }}"
-      role="menu"
-      tabindex="-1"
-      [attr.aria-label]="label"
-      [attr.data-testid]="testId"
-      [style.left.px]="pos().left"
-      [style.top.px]="pos().top"
-      (keydown)="key($event, menu)"
-    >
-      @for (group of groups; track group.id; let first = $first) {
-        @if (!first) {
-          <div class="menu-separator" role="separator"></div>
-        }
-        <div role="group" [attr.aria-label]="group.label ?? 'Actions'">
-          @if (group.label) {
-            <div class="menu-heading" aria-hidden="true">{{ group.label }}</div>
-          }
-          @for (item of group.items; track item.id) {
-            <button
-              type="button"
-              class="menu-item"
-              [class.active]="item.active"
-              [class.attention]="item.mark === 'attention'"
-              [attr.role]="item.checked === undefined ? 'menuitem' : 'menuitemradio'"
-              [attr.aria-checked]="item.checked === undefined ? null : item.checked"
-              [attr.aria-disabled]="item.disabled ? 'true' : null"
-              [attr.title]="reason(item.disabled)"
-              [attr.data-testid]="item.testId ?? null"
-              (click)="pick(item.id, !!item.disabled, $event)"
-            >
-              <span class="label">{{ item.checked ? "✓ " : "" }}{{ item.label }}</span>
-              @if (item.shortcut) {
-                <span class="shortcut">{{ item.shortcut }}</span>
-              }
-              @if (item.mark === "attention") {
-                <span class="mark attention-mark" role="img" aria-label="Needs attention"></span>
-              } @else if (item.mark === "unread") {
-                <span class="mark unread" role="img" aria-label="Unread"></span>
-              }
-            </button>
-          }
-        </div>
-      }
-      @if (empty && !hasItems()) {
-        <div class="menu-empty">{{ empty }}</div>
-      }
-    </div>
-  `,
+  templateUrl: "./context-menu.html",
   styles: `
     .menu-backdrop {
       all: unset;

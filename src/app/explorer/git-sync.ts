@@ -5,7 +5,9 @@ import { TauriBridge } from "../core/tauri";
 
 /** Result of one repository (`git_sync.rs`). */
 export type SyncOutcome =
-  { state: "updated" } | { state: "current" } | { state: "failed"; reason: string };
+  | { state: "updated" }
+  | { state: "current" }
+  | { state: "failed"; reason: string };
 
 export type RepoResult = SyncOutcome & { path: string };
 

@@ -16,34 +16,7 @@ import { findingLocation, Findings, type IndexedFinding } from "./findings";
 @Component({
   selector: "app-findings-panel",
   imports: [HxButton],
-  template: `
-    <header>
-      <strong>Other findings</strong>
-      <span class="count">{{ items.length }}</span>
-    </header>
-    <ul aria-label="Other findings">
-      @for (item of items; track item.id) {
-        <li [class]="'sev-' + item.finding.severity">
-          <span class="sev">{{ item.finding.severity }}</span>
-          <span class="body">
-            <span class="where">{{ location(item) }}</span>
-            <strong class="title">{{ item.finding.title }}</strong>
-            <span class="why">{{ item.finding.why }}</span>
-          </span>
-          <button
-            type="button"
-            hx-button
-            size="small"
-            class="send"
-            [disabled]="findings.added().has(item.id)"
-            (click)="sendFinding.emit(item)"
-          >
-            {{ findings.added().has(item.id) ? "Added to comments" : "Send to agent" }}
-          </button>
-        </li>
-      }
-    </ul>
-  `,
+  templateUrl: "./findings-panel.html",
   styles: `
     :host {
       display: block;

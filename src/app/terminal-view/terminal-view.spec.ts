@@ -11,6 +11,7 @@ import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
 import { TerminalStreamService } from "../core/terminal-stream";
 
+type FakeTerm = { selection: string; pasted: string[]; options: Record<string, unknown> };
 const fake = vi.hoisted(() => ({
   cols: 80,
   rows: 24,
@@ -22,8 +23,7 @@ const fake = vi.hoisted(() => ({
   observers: [] as (() => void)[],
   addons: [] as unknown[],
   openUrl: undefined as unknown,
-  term: undefined as
-    { selection: string; pasted: string[]; options: Record<string, unknown> } | undefined,
+  term: undefined as FakeTerm | undefined,
   keyHandler: undefined as ((event: KeyboardEvent) => boolean) | undefined,
   wheelHandler: undefined as ((event: WheelEvent) => boolean) | undefined,
 }));
@@ -686,7 +686,7 @@ describe("TerminalView search (#714)", () => {
     fake.addons.find((a) => typeof (a as FakeSearch).findNext === "function") as FakeSearch;
   const key = (k: string, init: KeyboardEventInit = {}) =>
     new KeyboardEvent("keydown", { key: k, cancelable: true, ...init });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // oxlint-disable-next-line typescript/no-explicit-any
   const view = (fixture: { componentInstance: unknown }) => fixture.componentInstance as any;
 
   it("loads the search addon with the others", async () => {

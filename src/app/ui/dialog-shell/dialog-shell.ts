@@ -33,39 +33,7 @@ const FOCUSABLE = `${FIELDS}, button:not([disabled]):not([tabindex="-1"]), a[hre
   host: { "(keydown)": "key($event)", "(click)": "backdrop($event)" },
   imports: [HxButton, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <dialog
-      #dialog
-      class="dialog"
-      [attr.role]="alert ? 'alertdialog' : 'dialog'"
-      [attr.aria-label]="label ?? heading"
-      [style.width]="'min(' + width + ', 92vw)'"
-    >
-      <div class="inner">
-        <div class="head">
-          @if (heading) {
-            <h2>{{ heading }}</h2>
-          } @else {
-            <h2><ng-content select="[dialogHeading]" /></h2>
-          }
-          <button
-            type="button"
-            hx-button
-            variant="text"
-            severity="secondary"
-            size="small"
-            class="dialog-close"
-            aria-label="Close"
-            title="Close"
-            (click)="cancelled.emit()"
-          >
-            <app-icon name="close" />
-          </button>
-        </div>
-        <div class="body"><ng-content /></div>
-      </div>
-    </dialog>
-  `,
+  templateUrl: "./dialog-shell.html",
   styles: `
     .dialog {
       max-height: 80vh;

@@ -104,25 +104,25 @@ describe("CommandPalette", () => {
   });
 
   it("offers Close Space for the active space", async () => {
-    await palette.open();
+    palette.open();
     palette.setQuery("close space");
     expect(palette.items()[0]).toMatchObject({ command: "closeSpace" });
   });
 
   it("offers Rename Space", async () => {
-    await palette.open();
+    palette.open();
     palette.setQuery("rename space");
     expect(palette.items()[0]).toMatchObject({ command: "renameSpace" });
   });
 
   it("shows the shortcut of a command", async () => {
-    await palette.open();
+    palette.open();
     const toggle = palette.items().find((i) => i.key === "command:toggleSidebar");
     expect(toggle?.shortcut).not.toBe("");
   });
 
   it("groups an empty query under Poimen", async () => {
-    await palette.open();
+    palette.open();
     const headings = palette.rows().flatMap((r) => (r.type === "heading" ? [r.label] : []));
     expect(headings).toEqual(["Poimen"]);
     expect(palette.rows()[0]).toMatchObject({ type: "heading", label: "Poimen" });
@@ -130,7 +130,7 @@ describe("CommandPalette", () => {
   });
 
   it("shows one ranked list with title match positions for a query", async () => {
-    await palette.open();
+    palette.open();
     palette.setQuery("zoom");
     expect(palette.rows().every((r) => r.type === "item")).toBe(true);
     const first = palette.rows()[0];
@@ -138,12 +138,12 @@ describe("CommandPalette", () => {
   });
 
   it("lists the last run entries under Recent, newest first, without repeating them", async () => {
-    await palette.open();
+    palette.open();
     for (const key of ["command:closeTab", "command:refresh", "command:zoomIn"]) {
       palette.recordRun(palette.items().find((i) => i.key === key)!);
     }
     palette.recordRun(palette.items().find((i) => i.key === "command:closeTab")!);
-    await palette.open();
+    palette.open();
     const rows = palette.rows();
     expect(rows[0]).toMatchObject({ type: "heading", label: "Recent" });
     expect(rows.slice(1, 4).map((r) => r.key)).toEqual([
@@ -156,11 +156,11 @@ describe("CommandPalette", () => {
   });
 
   it("keeps only the last five run entries and ignores ones that no longer exist", async () => {
-    await palette.open();
+    palette.open();
     const keys = ["newTerminal", "closeTab", "closeAll", "refresh", "toggleSidebar", "splitRight"];
     for (const k of keys) palette.recordRun(palette.items().find((i) => i.key === `command:${k}`)!);
     palette.recordRun({ ...palette.items()[0], key: "gone" });
-    await palette.open();
+    palette.open();
     const recent = palette
       .rows()
       .slice(1, 5)
@@ -174,7 +174,7 @@ describe("CommandPalette", () => {
   });
 
   it("filters fuzzily across the commands", async () => {
-    await palette.open();
+    palette.open();
     palette.setQuery("tglsb");
     expect(palette.items().map((i) => i.title)).toEqual(["Toggle Sidebar"]);
     palette.setQuery("zoom");
@@ -185,7 +185,7 @@ describe("CommandPalette", () => {
   });
 
   it("moves the highlight with wrap-around and resets it on a new query", async () => {
-    await palette.open();
+    palette.open();
     const n = palette.items().length;
     palette.move(-1);
     expect(palette.selected()).toBe(n - 1);
