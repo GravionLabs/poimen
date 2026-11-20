@@ -156,4 +156,17 @@ describe("DialogShell", () => {
     await settle();
     expect(document.activeElement).toBe(opener);
   });
+
+  it("returns the focus without a ring after a mouse open, with it after a key", async () => {
+    document.dispatchEvent(new MouseEvent("mousedown"));
+    const a = await mount();
+    a.host.open.set(false);
+    await a.settle();
+    expect(a.opener.hasAttribute("data-pointer-focus")).toBe(true);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    const b = await mount();
+    b.host.open.set(false);
+    await b.settle();
+    expect(b.opener.hasAttribute("data-pointer-focus")).toBe(false);
+  });
 });

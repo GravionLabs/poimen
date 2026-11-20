@@ -13,6 +13,7 @@ import {
   inject,
   signal,
 } from "@angular/core";
+import { openedByKeyboard, returnFocus } from "../focus-return";
 import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-model";
 
 /**
@@ -158,6 +159,7 @@ export class ContextMenu implements OnChanges, OnDestroy {
   private readonly injector = inject(Injector);
   private readonly doc = inject(DOCUMENT);
   private readonly opener: Element | null = this.doc.activeElement;
+  private readonly byKeyboard = openedByKeyboard();
   private done = false;
   protected readonly pos = signal({ left: 0, top: 0 });
 
@@ -180,7 +182,7 @@ export class ContextMenu implements OnChanges, OnDestroy {
   ngOnDestroy(): void {
     const opener = this.opener;
     if (opener instanceof HTMLElement && opener.isConnected && opener !== this.doc.body) {
-      opener.focus({ preventScroll: true });
+      returnFocus(opener, this.byKeyboard);
     }
   }
 

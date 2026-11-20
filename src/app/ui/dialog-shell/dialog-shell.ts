@@ -10,6 +10,7 @@ import {
   ViewChild,
 } from "@angular/core";
 import { HxButton } from "@gravionlabs/helix-ui";
+import { openedByKeyboard, returnFocus } from "../focus-return";
 import { Icon } from "../icon/icon";
 
 const FIELDS =
@@ -92,6 +93,8 @@ export class DialogShell implements OnDestroy {
   private readonly opener =
     typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null);
 
+  private readonly byKeyboard = openedByKeyboard();
+
   constructor() {
     afterNextRender(() => {
       const el = this.dialogRef?.nativeElement;
@@ -107,7 +110,7 @@ export class DialogShell implements OnDestroy {
     const el = this.dialogRef?.nativeElement;
     if (el && typeof el.close === "function") el.close();
     else el?.removeAttribute("open");
-    if (this.opener?.isConnected) this.opener.focus();
+    if (this.opener?.isConnected) returnFocus(this.opener, this.byKeyboard);
   }
 
   protected backdrop(event: MouseEvent): void {
