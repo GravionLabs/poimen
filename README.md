@@ -242,6 +242,8 @@ The `poimen` binary (CLI and TUI, [ADR 0006](docs/adr/0006-poimen-console-with-h
 - **Linux:** the `.deb` and `.rpm` of the app install `/usr/bin/poimen`. For a host without the app, install the `poimen-cli` package (`.deb` or `.rpm` of the release; it conflicts with the app package). In the AppImage the binary is at `squashfs-root/usr/bin/poimen` after `./poimen_<version>_amd64.AppImage --appimage-extract`.
 - **Without the app:** the release assets `poimen-<version>-<target>.tar.gz` (Linux musl, macOS) and `.zip` (Windows) hold only the binary.
 
+**`poimen doctor`** checks the setup, one line per check (`ok`, `warning` or `error`): the console, the server (answers, version, protocol, outdated or incompatible), the `poimen-pty-host` next to it, `server.json` (parses, counts, an interrupted save or a damaged copy beside it), the agent CLIs `claude`, `copilot` and `gemini` on the login-shell `PATH` with their hooks and MCP entry, and `gh` and `git`. `--json` prints the same as one JSON document (`checks[]` with `id`, `status`, `detail`). `--bundle <file>` also writes a local JSON file for a bug report: the report, the shape of `server.json` (ids and counts; no names, directories, commands or agent messages) and the last 200 KiB of `server.log`, `hooks.log` and the host logs. The file is private (0600), never overwrites an existing one and is not uploaded; read it before you send it. It works without a running server. Exit code 0 when no check is an error, 1 otherwise, 2 for a usage error. It fixes nothing: hooks are installed with `poimen-server integration install <agent>`.
+
 A pre-release (RC) installs the CLI as `poimen-cli-rc` beside the "Poimen RC" app and has no `.rpm`.
 
 ## Releases
