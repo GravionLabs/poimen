@@ -458,7 +458,10 @@ fn the_exit_code_is_reported_and_the_host_ends_with_its_child() {
         client.input("\r");
     }
     let seen = client.read_until(|m, _| is_exit(m));
-    assert_eq!(seen.last(), Some(&HostMessage::Exit { code: Some(7) }));
+    assert!(matches!(
+        seen.last(),
+        Some(HostMessage::Exit { code: Some(7), .. })
+    ));
     // Nothing follows `exit`: the connection ends with the host.
     assert_eq!(client.read_to_end(), vec![]);
     assert_eq!(f.wait_end(WAIT), Some(0));
@@ -489,7 +492,10 @@ fn input_reaches_the_child_in_its_directory_and_environment() {
     let text = output_text(&seen);
     assert!(text.contains("got:hello v=42"), "{text:?}");
     assert!(text.contains(&dir.display().to_string()), "{text:?}");
-    assert_eq!(seen.last(), Some(&HostMessage::Exit { code: Some(3) }));
+    assert!(matches!(
+        seen.last(),
+        Some(HostMessage::Exit { code: Some(3), .. })
+    ));
     // Every record is one more than the one before.
     let seqs = output_seqs(&seen);
     assert!(!seqs.is_empty());
@@ -666,7 +672,10 @@ fn an_exit_without_a_client_waits_for_one_to_collect_it() {
     client.send(&ClientMessage::Attach { since: 0 });
     let seen = client.read_until(|m, _| is_exit(m));
     assert!(output_text(&seen).contains("bye"));
-    assert_eq!(seen.last(), Some(&HostMessage::Exit { code: Some(4) }));
+    assert!(matches!(
+        seen.last(),
+        Some(HostMessage::Exit { code: Some(4), .. })
+    ));
     assert_eq!(f.wait_end(WAIT), Some(0));
 }
 

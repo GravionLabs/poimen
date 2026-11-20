@@ -326,3 +326,74 @@ fn a_hook_that_cannot_report_leaves_a_line_in_the_hook_log() {
     assert_eq!(log.lines().count(), 4, "{log}");
     assert!(log.lines().last().unwrap().contains("JSON"), "{log}");
 }
+
+/// Runs `poimen-server hook <args>` with `payload` in the terminal `id`.
+fn report(env: &Env, args: &[&str], id: &str, payload: &str) {
+    let socket = env.config("run").socket;
+    let (status, _, _) = env.hook(args, Some(id), &socket, payload, Duration::ZERO);
+    assert!(status.success());
+}
+
+#[test]
+fn permission_requests_and_failed_turns_report_from_claude_code() {
+    let env = Env::new("claude-new-events");
+    let client = env.start("run");
+    let space = client.create_space("api", &env.work()).unwrap();
+    let id = sh(&client, &space.id);
+    let claude = |payload: &str| report(&env, &["hook", "claude"], &id, payload);
+    claude(r#"{"hook_event_name":"UserPromptSubmit","session_id":"s1"}"#);
+    wait_for(&client, &id, AgentStatus::Working);
+    // The request names the tool and its input.
+    claude(
+        r#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"rm -rf build"}}"#,
+    );
+    let info = wait_for(&client, &id, AgentStatus::Blocked);
+    assert_eq!(info.message.as_deref(), Some("Bash: rm -rf build"));
+    // The notification of the same question brings its text; the request after it does not
+    // replace that text. One status, `blocked`, throughout.
+    claude(
+        r#"{"hook_event_name":"Notification","session_id":"s1","notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"}"#,
+    );
+    // The hook returns after the server answered, so the text is there.
+    assert_eq!(
+        agent(&client, &id).and_then(|a| a.message).as_deref(),
+        Some("Claude needs your permission to use Bash")
+    );
+    claude(
+        r#"{"hook_event_name":"PermissionRequest","session_id":"s1","tool_name":"Bash","tool_input":{"command":"rm -rf build"}}"#,
+    );
+    assert_eq!(
+        agent(&client, &id).and_then(|a| a.message).as_deref(),
+        Some("Claude needs your permission to use Bash")
+    );
+    claude(r#"{"hook_event_name":"PostToolBatch","session_id":"s1"}"#);
+    let info = wait_for(&client, &id, AgentStatus::Working);
+    assert_eq!(info.message, None, "a denied permission does not stay");
+    claude(r#"{"hook_event_name":"StopFailure","session_id":"s1","error":"rate_limit"}"#);
+    wait_for(&client, &id, AgentStatus::Error);
+    claude(r#"{"hook_event_name":"PostToolUseFailure","session_id":"s1","tool_name":"Bash"}"#);
+    wait_for(&client, &id, AgentStatus::Working);
+    assert_eq!(env.log(), "", "nothing failed");
+}
+
+#[test]
+fn permission_requests_and_errors_report_from_copilot_cli() {
+    let env = Env::new("copilot-new-events");
+    let client = env.start("run");
+    let space = client.create_space("api", &env.work()).unwrap();
+    let id = sh(&client, &space.id);
+    let copilot = |event: &str, payload: &str| {
+        report(&env, &["hook", "copilot", event], &id, payload);
+    };
+    copilot(
+        "permissionRequest",
+        r#"{"sessionId":"s1","toolName":"bash","toolInput":{"command":"ls"}}"#,
+    );
+    let info = wait_for(&client, &id, AgentStatus::Blocked);
+    assert_eq!(info.message.as_deref(), Some("bash: ls"));
+    copilot("postToolUseFailure", r#"{"sessionId":"s1"}"#);
+    wait_for(&client, &id, AgentStatus::Working);
+    copilot("errorOccurred", r#"{"sessionId":"s1"}"#);
+    wait_for(&client, &id, AgentStatus::Error);
+    assert_eq!(env.log(), "", "nothing failed");
+}

@@ -95,9 +95,14 @@ pub fn host_beside(exe: &Path, windows: bool, channel: Channel) -> PathBuf {
     }
 }
 
+mod launch;
+use launch::{launch, prepare_endpoint};
+
 /// What the server starts in a host.
 pub(crate) struct Spec<'a> {
     pub terminal_id: &'a str,
+    /// The server's `server.log`, for the lines about this host.
+    pub log: &'a Path,
     /// The server's socket, for `POIMEN_SOCKET` of the child; the host endpoints live next to it.
     pub socket: &'a Path,
     pub command: &'a [String],
@@ -428,7 +433,9 @@ pub(crate) fn start(
     let endpoint = endpoint_for(spec.socket, spec.terminal_id);
     prepare_endpoint(&endpoint)?;
     let start = start_line(spec, endpoint.clone());
-    let process = launch(host, &start)?;
+    // The host's stderr: `hosts/<id>.log`, kept when the host vanishes (see `Reader::run`).
+    let host_log = crate::log::open(&crate::log::host_path(&endpoint));
+    let process = launch(host, &start, host_log)?;
     let attached = attach(&endpoint, 0);
     if let Some(mut child) = process {
         if attached.is_err() {
@@ -440,9 +447,15 @@ pub(crate) fn start(
         });
     }
     let (conn, lines, version) = attached.map_err(|e| format!("could not reach the host: {e}"))?;
-    Ok(follow(
-        endpoint, conn, lines, 0, version, on_output, on_exit,
-    ))
+    let source = Source {
+        endpoint,
+        log: spec.log.to_path_buf(),
+        conn,
+        lines,
+        replay_until: 0,
+        version,
+    };
+    Ok(follow(source, on_output, on_exit))
 }
 
 /// A host that already ran when the server started, connected and attached from the start of
@@ -496,6 +509,11 @@ pub(crate) fn reach(endpoint: &Path, min_seq: u64, timeout: Duration) -> Result<
 }
 
 impl Reached {
+    /// The host binary's version.
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
     /// Ends the child of a host the server does not adopt (its terminal has no space any more).
     pub fn kill(self) {
         let _ = (&self.conn).write_all(&to_line(&ClientMessage::Kill));
@@ -522,6 +540,7 @@ fn hello_of(endpoint: &Path) -> HelloOf {
 /// `on_output` as a replay (`live` false), so their queries are not answered a second time.
 pub(crate) fn adopt(
     reached: Reached,
+    log: &Path,
     on_output: impl FnMut(&[u8], bool) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Handle {
@@ -533,19 +552,42 @@ pub(crate) fn adopt(
         version,
         ..
     } = reached;
-    follow(endpoint, conn, lines, seq, version, on_output, on_exit)
+    let source = Source {
+        endpoint,
+        log: log.to_path_buf(),
+        conn,
+        lines,
+        replay_until: seq,
+        version,
+    };
+    follow(source, on_output, on_exit)
 }
 
-/// Starts the threads that read and write an attached host connection.
-fn follow(
+/// An attached host connection and what the threads that read it need.
+struct Source {
     endpoint: PathBuf,
+    /// The server's `server.log`.
+    log: PathBuf,
     conn: Conn,
     lines: BufReader<Conn>,
     replay_until: u64,
     version: String,
+}
+
+/// Starts the threads that read and write an attached host connection.
+fn follow(
+    source: Source,
     on_output: impl FnMut(&[u8], bool) + Send + 'static,
     on_exit: impl FnOnce(Option<u32>) + Send + 'static,
 ) -> Handle {
+    let Source {
+        endpoint,
+        log,
+        conn,
+        lines,
+        replay_until,
+        version,
+    } = source;
     let conn = HostConn(Arc::new(Mutex::new(conn)));
     let handle = Handle {
         endpoint,
@@ -563,6 +605,7 @@ fn follow(
     let reader = Reader {
         feed: Feed {
             endpoint: handle.endpoint.clone(),
+            log,
             read: Arc::clone(&handle.read),
             tx,
             queued: Arc::clone(&queued),
@@ -592,123 +635,6 @@ pub(crate) fn gap_marker(from: u64, to: u64, after_output: bool) -> Vec<u8> {
     let what = if records == 1 { "record" } else { "records" };
     format!("{lead}[poimen: earlier output lost, {records} {what} left the host's buffer]\r\n")
         .into_bytes()
-}
-
-/// Creates the private `hosts` directory and removes a stale entry at the endpoint (a host of an
-/// earlier server that ended); a host that still answers there is an error.
-fn prepare_endpoint(endpoint: &Path) -> Result<(), String> {
-    if let Some(dir) = endpoint.parent().filter(|d| !d.as_os_str().is_empty()) {
-        let mut builder = std::fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-        builder
-            .create(dir)
-            .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    }
-    match transport::inspect(endpoint) {
-        Ok(Entry::Socket) if transport::is_listening(endpoint) => {
-            Err(format!("a host already listens on {}", endpoint.display()))
-        }
-        Ok(Entry::Socket) => std::fs::remove_file(endpoint)
-            .map_err(|e| format!("could not remove {}: {e}", endpoint.display())),
-        _ => Ok(()),
-    }
-}
-
-/// Starts the host; for a binary also the process, to reap it (or kill it when it cannot be
-/// reached).
-fn launch(host: &PtyHost, start: &HostStart) -> Result<Option<std::process::Child>, String> {
-    match host {
-        PtyHost::Launch(f) => f(start).map(|()| None),
-        PtyHost::Binary(program) => {
-            if !program.is_file() {
-                return Err(format!(
-                    "poimen-pty-host is missing: {} (it ships next to poimen-server)",
-                    program.display()
-                ));
-            }
-            run_binary(program, start).map(Some)
-        }
-    }
-}
-
-/// Runs the host binary in its own process group without a terminal, writes the start line and
-/// waits for `hello` (or the host's `error`) on its stdout.
-#[allow(clippy::disallowed_methods)] // CREATE_NO_WINDOW is set below; gui_path is the app's
-fn run_binary(program: &Path, start: &HostStart) -> Result<std::process::Child, String> {
-    use std::process::{Command, Stdio};
-    let mut command = Command::new(program);
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // Signals to the server's group (a Ctrl+C in the terminal that started it) do not reach
-        // the host, which is meant to outlive the server.
-        command.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-        command.creation_flags(0x0000_0200 | 0x0800_0000);
-    }
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("could not start {}: {e}", program.display()))?;
-    let fail = |child: &mut std::process::Child, message: String| {
-        let _ = child.kill();
-        let _ = child.wait();
-        Err(message)
-    };
-    let written = child
-        .stdin
-        .take()
-        .map(|mut stdin| stdin.write_all(&to_line(start)));
-    if let Some(Err(e)) = written {
-        return fail(&mut child, format!("could not start the host: {e}"));
-    }
-    let Some(stdout) = child.stdout.take() else {
-        return fail(&mut child, "the host has no stdout".into());
-    };
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = tx.send(first_line(stdout));
-    });
-    let line = match rx.recv_timeout(START_TIMEOUT) {
-        Ok(Ok(line)) => line,
-        Ok(Err(e)) => return fail(&mut child, format!("the host did not answer: {e}")),
-        Err(_) => {
-            let message = format!(
-                "the host did not answer within {} s",
-                START_TIMEOUT.as_secs()
-            );
-            return fail(&mut child, message);
-        }
-    };
-    match poimen_protocol::host::parse_host_line(&line) {
-        Ok(HostMessage::Hello { .. }) => Ok(child),
-        Ok(HostMessage::Error { message }) => fail(&mut child, message),
-        _ => fail(
-            &mut child,
-            format!("the host answered {:?}", line.trim_end()),
-        ),
-    }
-}
-
-fn first_line(input: impl Read) -> io::Result<String> {
-    let mut line = String::new();
-    BufReader::new(input).read_line(&mut line)?;
-    if line.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "it ended without a line",
-        ));
-    }
-    Ok(line)
 }
 
 /// Connects to the host, reads its `hello` and attaches after record `since`.
@@ -754,6 +680,8 @@ enum Ended {
 /// Where the records of a host go: the last `seq` read and the queue to the stream.
 struct Feed {
     endpoint: PathBuf,
+    /// The server's `server.log`.
+    log: PathBuf,
     read: Arc<AtomicU64>,
     tx: mpsc::Sender<Chunk>,
     /// Bytes in `tx` not yet fed ([`QUEUE_BYTES`]).
@@ -776,7 +704,11 @@ impl Reader {
         let code = loop {
             let before = feed.read.load(Ordering::SeqCst);
             match feed.pump(&mut lines) {
-                Ended::Exit(code) => break code,
+                Ended::Exit(code) => {
+                    // Ended normally: nothing left to look into.
+                    let _ = std::fs::remove_file(crate::log::host_path(&feed.endpoint));
+                    break code;
+                }
                 Ended::Stopped => return,
                 Ended::Replaced => break None,
                 Ended::Lost if self.closing.load(Ordering::SeqCst) => break None,
@@ -788,6 +720,7 @@ impl Reader {
                 0
             };
             if idle > MAX_IDLE_RECONNECTS {
+                feed.vanished("the host does not answer any more");
                 break None;
             }
             match attach(&feed.endpoint, feed.read.load(Ordering::SeqCst)) {
@@ -801,7 +734,10 @@ impl Reader {
                         break None;
                     }
                 }
-                Err(_) => break None,
+                Err(e) => {
+                    feed.vanished(&format!("could not attach again: {e}"));
+                    break None;
+                }
             }
         };
         let _ = feed.tx.send(Chunk::End(code));
@@ -809,6 +745,19 @@ impl Reader {
 }
 
 impl Feed {
+    /// The host is gone without an `exit`; its log stays for a look.
+    fn vanished(&self, why: &str) {
+        crate::log::line(
+            &self.log,
+            "host",
+            &format!(
+                "host {} vanished: {why} (log {})",
+                self.endpoint.display(),
+                crate::log::host_path(&self.endpoint).display()
+            ),
+        );
+    }
+
     /// Reads one connection: output records after the last `seq` read go on, older ones are
     /// dropped.
     fn pump(&self, lines: &mut impl BufRead) -> Ended {
@@ -822,6 +771,7 @@ impl Feed {
             let Ok(message) = poimen_protocol::host::parse_host_line(&line) else {
                 continue;
             };
+            crate::log::tree_end(&self.log, &self.endpoint, &message);
             match message {
                 HostMessage::Output { seq, bytes } => {
                     if seq <= self.read.load(Ordering::SeqCst) {
@@ -851,10 +801,14 @@ impl Feed {
                         return Ended::Stopped;
                     }
                 }
-                HostMessage::Exit { code } => return Ended::Exit(code),
+                HostMessage::Exit { code, .. } => return Ended::Exit(code),
                 HostMessage::Replaced => return Ended::Replaced,
                 HostMessage::Error { message } => {
-                    eprintln!("poimen-server: host {}: {message}", self.endpoint.display());
+                    crate::log::line(
+                        &self.log,
+                        "host",
+                        &format!("host {}: {message}", self.endpoint.display()),
+                    );
                 }
                 // Not for here.
                 HostMessage::Hello { .. } | HostMessage::Unknown => {}
@@ -912,6 +866,7 @@ mod tests {
     fn spec<'a>(command: &'a [String], term: Option<&'a str>) -> Spec<'a> {
         Spec {
             terminal_id: "t3",
+            log: Path::new("/run/server.log"),
             socket: Path::new("/run/s.sock"),
             command,
             cwd: "/w",
@@ -1036,7 +991,7 @@ mod tests {
     fn a_missing_host_binary_is_a_clear_error() {
         let host = PtyHost::Binary(PathBuf::from("/nonexistent/poimen-pty-host"));
         let start = start_line(&spec(&["sh".into()], None), PathBuf::from("/e"));
-        let err = launch(&host, &start).unwrap_err();
+        let err = launch(&host, &start, None).unwrap_err();
         assert_eq!(
             err,
             "poimen-pty-host is missing: /nonexistent/poimen-pty-host (it ships next to poimen-server)"
@@ -1047,6 +1002,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let feed = Feed {
             endpoint: PathBuf::from("/e"),
+            log: PathBuf::from("/e.server.log"),
             read: Arc::new(AtomicU64::new(read)),
             tx,
             queued: Arc::default(),
@@ -1143,12 +1099,11 @@ mod tests {
     #[test]
     fn exit_replaced_and_noise_end_or_pass_as_documented() {
         let (reader, rx) = reader(0);
-        let exit = String::from_utf8(to_line(&HostMessage::Exit { code: Some(7) })).unwrap();
         let lines = [
             "not json\n".to_string(),
             "{\"type\":\"title\",\"text\":\"x\"}\n".to_string(),
             output(1, "x"),
-            exit,
+            "{\"type\":\"exit\",\"code\":7}\n".to_string(), // a host before #968
             output(2, "after"),
         ]
         .concat();

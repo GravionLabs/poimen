@@ -11,18 +11,7 @@ import { paneSizes } from "./split-pane";
 @Component({
   selector: "app-split-pane",
   imports: [NgTemplateOutlet],
-  template: `
-    @for (i of indexes(); track i) {
-      <div class="pane" [style.flex-grow]="shares()[i]">
-        @if (pane) {
-          <ng-container [ngTemplateOutlet]="pane" [ngTemplateOutletContext]="{ $implicit: i }" />
-        }
-      </div>
-      @if (i < count - 1) {
-        <div class="divider" role="separator" tabindex="0" (keydown)="key($event, i)"></div>
-      }
-    }
-  `,
+  templateUrl: "./split-pane.testing.html",
 })
 export class SplitPaneStub {
   @Input() direction: "row" | "column" = "row";

@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod files;
 pub mod host;
+pub use files::windows_dir_from;
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
@@ -216,17 +218,6 @@ impl SocketEnv {
             _ => self.default_path(channel),
         }
     }
-}
-
-/// `%LOCALAPPDATA%\poimen-server` (on rc `poimen-server-rc`) when `LOCALAPPDATA` is set and not
-/// empty.
-pub fn windows_dir_from(
-    local_app_data: Option<std::ffi::OsString>,
-    channel: Channel,
-) -> Option<PathBuf> {
-    local_app_data
-        .filter(|s| !s.is_empty())
-        .map(|dir| PathBuf::from(dir).join(windows_dir_name(channel)))
 }
 
 fn user_dir_name(user: Option<String>, channel: Channel) -> String {
@@ -780,6 +771,9 @@ pub struct TerminalReportAgent {
     /// Notification text of the agent; optional.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// `message` is a stand-in (a permission request's tool): a `blocked` agent keeps its text.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub message_fallback: bool,
 }
 
 /// Most tokens in one `terminal.report_tokens` (as herdr).
@@ -2085,26 +2079,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!((p.cursor, p.palette), (None, None));
-    }
-
-    #[test]
-    fn report_agent_params_and_the_terminal_agent_wire_shape() {
-        let p: TerminalReportAgent =
-            serde_json::from_value(serde_json::json!({"terminal_id":"t1","seq":5,"status":"gone"}))
-                .unwrap();
-        assert_eq!(p.status, AgentStatus::Gone);
-        assert_eq!((p.agent, p.session_id, p.message), (None, None, None));
-        let p: TerminalReportAgent = serde_json::from_value(
-            json!({"terminal_id":"t1","seq":6,"status":"blocked","message":"Allow Bash?"}),
-        )
-        .unwrap();
-        assert_eq!(p.message.as_deref(), Some("Allow Bash?"));
-        let t: Terminal =
-            serde_json::from_value(serde_json::json!({"id":"t1","space_id":"s1","name":"n",
-            "cwd":"/","cols":80,"rows":24,"status":"running",
-            "agent":{"status":"working","agent":"claude","session_id":"abc"}}))
-            .unwrap();
-        assert_eq!(t.agent.unwrap().session_id.as_deref(), Some("abc"));
     }
 
     #[test]

@@ -84,7 +84,7 @@ export function diffThemeRules(): Record<string, Record<string, string>> {
  */
 @Component({
   selector: "app-diff-editor",
-  template: "",
+  templateUrl: "./diff-editor.html",
   styles: `
     :host {
       display: block;

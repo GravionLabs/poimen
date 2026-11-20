@@ -97,7 +97,7 @@ beforeEach(() => {
   tauri.answer("terminal_create", () => "p1");
   tauri.answer("agent_start", () => undefined);
   tauri.answer("agent_action_plan", (args) =>
-    (args?.["items"] as unknown[]).map(() => ({ kind: "claude", args: ["x"] })),
+    (args!["items"] as unknown[]).map(() => ({ kind: "claude", args: ["x"] })),
   );
   tauri.answer("get_harnesses", () => [
     { id: "claude", command: ["claude"], models: ["opus"], defaultModel: null, available: true },

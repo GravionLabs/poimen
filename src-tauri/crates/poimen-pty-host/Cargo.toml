@@ -22,12 +22,19 @@ poimen-protocol = { path = "../poimen-protocol" }
 portable-pty = "0.9"
 serde_json = "1"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["handleapi", "jobapi2", "winnt", "minwinbase"] }
+
 [dev-dependencies]
 # tests/server.rs: a poimen-server that starts this binary for its terminals.
 poimen-server = { path = "../poimen-server" }
 
 [lints.rust]
-unsafe_code = "forbid"
+# Only `tree` calls the OS (process lists, signals, job objects).
+unsafe_code = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

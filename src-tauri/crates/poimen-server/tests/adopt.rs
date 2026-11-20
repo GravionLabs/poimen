@@ -451,6 +451,38 @@ fn a_host_that_does_not_answer_is_dropped_and_its_leaf_leaves_the_tree() {
 }
 
 #[test]
+fn the_terminals_of_a_backup_are_adopted_when_the_main_file_is_damaged() {
+    let env = Env::new("backup");
+    let (endpoint, rx) = standing_host(&env, 3);
+    write_state(&env, &endpoint, 3);
+    // The window of a crash: the good file is the backup, the main file is gone or torn.
+    let state = env.state_file();
+    let mut bak = state.clone().into_os_string();
+    bak.push(".bak");
+    std::fs::rename(&state, &bak).unwrap();
+    std::fs::write(&state, "{ torn").unwrap();
+    let (b, _) = start(&env.config(2, no_new_host()));
+    assert_eq!(said(&rx), "Some(Attach { since: 0 })");
+    let ids: Vec<String> = b
+        .list_terminals(None)
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(ids, ["t1"]);
+    let kept = std::fs::read_dir(state.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("server.json.damaged-")
+        })
+        .count();
+    assert_eq!(kept, 1);
+}
+
+#[test]
 fn a_host_behind_the_seq_read_from_it_is_another_one_and_is_not_adopted() {
     let env = Env::new("behind");
     let (endpoint, _rx) = standing_host(&env, 3);

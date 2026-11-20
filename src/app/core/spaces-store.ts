@@ -39,7 +39,8 @@ export const REPOS_REFRESH_MS = 60_000;
 
 /** `reconnecting`: the event watcher lost the server and retries; `unreachable`: a snapshot read failed. */
 export type ConnectionState =
-  { state: "connected" } | { state: "reconnecting" | "unreachable"; reason: string };
+  | { state: "connected" }
+  | { state: "reconnecting" | "unreachable"; reason: string };
 
 /**
  * What `ensure_backend` found: `running` (already), `started`,

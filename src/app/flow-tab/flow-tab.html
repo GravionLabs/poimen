@@ -1,0 +1,7 @@
+@if (paneBlock() || !subagents.supported()) {
+  <p class="empty">{{ emptyText() }}</p>
+} @else {
+  @defer {
+    <app-flow-view [now]="now()" (openAgent)="openAgent.emit($event)" />
+  }
+}

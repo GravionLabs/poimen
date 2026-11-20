@@ -47,7 +47,9 @@ export interface ChangeList {
 
 /** The answer of `changes_file`. */
 export type FileContent =
-  { state: "text"; old: string; new: string } | { state: "binary" } | { state: "too_large" };
+  | { state: "text"; old: string; new: string }
+  | { state: "binary" }
+  | { state: "too_large" };
 
 /** The one-letter mark of a status, as in `git status`. */
 export function statusLetter(status: ChangeStatus): string {

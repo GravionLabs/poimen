@@ -24,15 +24,7 @@ import { Subagents } from "../core/transcripts";
   selector: "app-flow-tab",
   imports: [FlowView],
   providers: [Subagents],
-  template: `
-    @if (paneBlock() || !subagents.supported()) {
-      <p class="empty">{{ emptyText() }}</p>
-    } @else {
-      @defer {
-        <app-flow-view [now]="now()" (openAgent)="openAgent.emit($event)" />
-      }
-    }
-  `,
+  templateUrl: "./flow-tab.html",
   styles: `
     :host {
       flex: 1;

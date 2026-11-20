@@ -859,7 +859,7 @@ describe("SettingsView categories", () => {
     it("shows the server version, state and socket and opens the restart confirmation", async () => {
       const { fixture, host } = setup(undefined, undefined, "server");
       tauri.answer("server_socket_path", () => "/run/user/1/poimen.sock");
-      tauri.answer("hooks_status", () => []);
+      tauri.answer("server_log_path", () => "/run/user/1/server.log");
       item(host, "p:appearance").click();
       fixture.detectChanges();
       item(host, "p:server").click();
@@ -868,7 +868,7 @@ describe("SettingsView categories", () => {
         fixture.detectChanges();
         expect(host.querySelector(".server-socket")!.textContent).toBe("/run/user/1/poimen.sock");
       });
-      expect(host.querySelector(".server-state")!.textContent).toBeDefined();
+      expect(host.querySelector(".server-log")!.textContent).toBe("/run/user/1/server.log");
       (host.querySelector("button.restart-server") as HTMLButtonElement).click();
       expect(TestBed.inject(ServerRestart).action()).toBe("restart");
     });

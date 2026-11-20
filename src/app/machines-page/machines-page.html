@@ -1,0 +1,208 @@
+<section aria-label="Machines">
+  <p class="hint">
+    Remote machines over SSH. Check lists the prerequisites of a connected machine; the commands
+    listed for a missing item are for you to run on the machine, poimen never runs them.
+  </p>
+  <div class="toolbar">
+    <button type="button" hx-button size="small" class="add" (click)="machines.openForm()">
+      Add machine
+    </button>
+  </div>
+  @for (w of warnings(); track $index) {
+    <p class="error warning" role="alert">{{ w }}</p>
+  }
+  @if (machines.machines().length === 0) {
+    <p class="hint">No machine is configured.</p>
+    <p class="hint">
+      A machine needs SSH access without a password prompt (a key or the agent) and
+      <code>poimen-server</code> installed on it. poimen stores no secret; it runs
+      <code>ssh &lt;target&gt; poimen-server stdio</code>.
+    </p>
+    @if (ui.machinesHidden()) {
+      <button
+        type="button"
+        hx-button
+        size="small"
+        variant="text"
+        severity="secondary"
+        class="show-sidebar"
+        (click)="ui.setMachinesHidden(false)"
+      >
+        Show Machines in the sidebar
+      </button>
+    }
+  } @else {
+    <ul class="rows" aria-label="Machines">
+      @for (m of machines.machines(); track m.name) {
+        <li class="row-item machine" (contextmenu)="openMenu($event, m)">
+          <span class="name">{{ m.name }}</span>
+          <hx-tag class="state" [severity]="tag(m).severity"
+            >{{ tag(m).icon }} {{ tag(m).label }}</hx-tag
+          >
+          <span class="actions">
+            <button
+              type="button"
+              hx-button
+              size="small"
+              variant="outlined"
+              severity="secondary"
+              class="check"
+              [attr.aria-label]="'Check ' + m.name"
+              [disabled]="m.state !== 'connected' || machines.running().has(m.name)"
+              [attr.title]="m.state === 'connected' ? null : 'Connect the machine first'"
+              (click)="machines.check(m.name)"
+            >
+              {{ machines.running().has(m.name) ? "Checking…" : "Check" }}
+            </button>
+            <button
+              type="button"
+              hx-button
+              size="small"
+              variant="outlined"
+              severity="secondary"
+              class="reconnect"
+              [attr.aria-label]="'Reconnect ' + m.name"
+              [disabled]="m.state === 'connecting'"
+              (click)="machines.reconnect(m.name)"
+            >
+              Reconnect
+            </button>
+            @if (offer(m); as o) {
+              <button
+                type="button"
+                hx-button
+                size="small"
+                class="install"
+                [attr.aria-label]="
+                  (o === 'update' ? 'Update server on ' : 'Install server on ') + m.name
+                "
+                (click)="serverInstall.open(m)"
+              >
+                {{ o === "update" ? "Update server…" : "Install server…" }}
+              </button>
+            }
+            <button
+              type="button"
+              hx-button
+              size="small"
+              variant="outlined"
+              severity="secondary"
+              class="edit"
+              [attr.aria-label]="'Edit ' + m.name"
+              (click)="machines.openForm(m.name)"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              hx-button
+              size="small"
+              variant="outlined"
+              severity="danger"
+              class="remove"
+              [attr.aria-label]="'Remove ' + m.name"
+              (click)="removing.set(m.name)"
+            >
+              Remove
+            </button>
+          </span>
+          @if (guidance(m); as g) {
+            <p class="guidance" role="status">{{ g }}</p>
+          }
+          @if (machines.running().has(m.name)) {
+            <p class="progress" role="status">Checking {{ m.name }}…</p>
+          }
+          @if (resultOf(m.name); as r) {
+            @if (isError(r)) {
+              <p class="error" role="alert">Check failed: {{ r.error }}</p>
+            } @else {
+              <p class="summary">{{ passed(r) ? "All required checks passed" : "Missing" }}</p>
+              <ul class="checks" aria-label="Checks of {{ m.name }}">
+                @for (c of r.checks; track c.id) {
+                  <li class="check-row" [attr.data-status]="c.status">
+                    <span class="status" [attr.aria-label]="c.status"
+                      ><span aria-hidden="true">{{ icon(c.status) }}</span> {{ c.status }}</span
+                    >
+                    <span class="id">{{ label(c.id) }}</span>
+                    @if (c.detail) {
+                      <span class="detail">{{ c.detail }}</span>
+                    }
+                    @if (c.fix) {
+                      <pre class="fix"><code>{{ c.fix }}</code></pre>
+                      <button
+                        type="button"
+                        hx-button
+                        size="small"
+                        variant="text"
+                        severity="secondary"
+                        class="copy"
+                        (click)="copy(m.name + c.id, c.fix)"
+                      >
+                        {{ copied() === m.name + c.id ? "Copied" : "Copy" }}
+                      </button>
+                    }
+                  </li>
+                }
+              </ul>
+            }
+          }
+        </li>
+      }
+    </ul>
+  }
+  <app-server-install-dialog />
+  @if (machines.form(); as f) {
+    <app-machine-form [original]="f.original" />
+  }
+  @if (removing(); as name) {
+    <app-dialog-shell
+      heading="Remove machine?"
+      width="520px"
+      [alert]="true"
+      [cancelDefault]="true"
+      (cancelled)="removing.set(null)"
+    >
+      <p class="hint">
+        Remove <strong>{{ name }}</strong> from the settings? poimen disconnects from it; its
+        terminals keep running on the machine and are not ended.
+      </p>
+      @if (openSpaces(name); as spaces) {
+        @if (spaces.length) {
+          <p class="hint">Open spaces on it: {{ spaces.join(", ") }}.</p>
+        }
+      }
+      @if (removeError(); as e) {
+        <p class="error" role="alert">{{ e }}</p>
+      }
+      <div class="dialog-buttons">
+        <button
+          type="button"
+          hx-button
+          variant="text"
+          severity="secondary"
+          class="cancel"
+          (click)="removing.set(null)"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          hx-button
+          severity="danger"
+          class="confirm"
+          (click)="confirmRemove(name)"
+        >
+          Remove
+        </button>
+      </div>
+    </app-dialog-shell>
+  }
+  @if (menu(); as m) {
+    <app-context-menu
+      [at]="m"
+      [groups]="menuGroups"
+      (picked)="checkMachine()"
+      (closed)="closeMenu()"
+    />
+  }
+</section>

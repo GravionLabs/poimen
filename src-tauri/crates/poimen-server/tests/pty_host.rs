@@ -31,7 +31,7 @@ impl Drop for Env {
 }
 
 struct Fixture {
-    _env: Env,
+    env: Env,
     client: Client,
     space: String,
     events: Receiver<Event>,
@@ -66,7 +66,7 @@ fn fixture(name: &str, pty_host: PtyHost) -> Fixture {
         }
     });
     Fixture {
-        _env: env,
+        env,
         client,
         space,
         events,
@@ -74,6 +74,15 @@ fn fixture(name: &str, pty_host: PtyHost) -> Fixture {
 }
 
 impl Fixture {
+    /// The `hosts/<terminal id>.log` of a terminal.
+    fn host_log(&self, id: &str) -> PathBuf {
+        self.env
+            .dir
+            .join("run")
+            .join("hosts")
+            .join(format!("{id}.log"))
+    }
+
     fn create(&self) -> Result<String, ClientError> {
         self.client
             .create_terminal(&TerminalCreate {
@@ -421,7 +430,10 @@ fn the_exit_of_the_child_ends_the_terminal_with_its_code_after_its_output() {
         let mut peer = Peer::accept(&listener, 0, &start);
         peer.read();
         peer.output(1, "bye");
-        peer.send(&HostMessage::Exit { code: Some(3) });
+        peer.send(&HostMessage::Exit {
+            code: Some(3),
+            tree: None,
+        });
         thread::sleep(Duration::from_secs(5));
     });
     let f = fixture("exit", host);
@@ -492,7 +504,10 @@ fn a_dropped_connection_is_attached_again_after_the_last_seq_read() {
         second.output(1, "a");
         second.output(2, "b");
         second.output(3, "c");
-        second.send(&HostMessage::Exit { code: Some(0) });
+        second.send(&HostMessage::Exit {
+            code: Some(0),
+            tree: None,
+        });
         thread::sleep(Duration::from_secs(5));
     });
     let f = fixture("again", host);
@@ -523,4 +538,47 @@ fn a_host_that_answers_with_an_error_fails_terminal_create() {
         }
         other => panic!("expected spawn_failed, got {other:?}"),
     }
+}
+
+#[test]
+fn the_host_log_exists_while_the_terminal_runs_and_is_gone_after_a_normal_exit() {
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let go_rx = Mutex::new(go_rx);
+    let (host, _said, _) = fake(move |listener, start, _tx| {
+        let mut peer = Peer::accept(&listener, 0, &start);
+        peer.read();
+        go_rx.lock().unwrap().recv().unwrap();
+        peer.send(&HostMessage::Exit {
+            code: Some(0),
+            tree: None,
+        });
+        // Held open until the test ends and drops the sender.
+        let _ = go_rx.lock().unwrap().recv();
+    });
+    let f = fixture("hostlog-exit", host);
+    let id = f.create().unwrap();
+    assert!(f.host_log(&id).is_file());
+    go_tx.send(()).unwrap();
+    f.wait_for(|e| matches!(e, Event::TerminalExited { .. }));
+    assert!(!f.host_log(&id).exists());
+}
+
+#[test]
+fn the_host_log_stays_when_the_host_vanished() {
+    let (host, _said, _) = fake(|listener, start, _tx| {
+        let mut peer = Peer::accept(&listener, 0, &start);
+        peer.read();
+        drop(listener);
+        let _ = std::fs::remove_file(&start.endpoint);
+        peer.close();
+    });
+    let f = fixture("hostlog-vanish", host);
+    let id = f.create().unwrap();
+    f.wait_for(|e| matches!(e, Event::TerminalExited { .. }));
+    assert!(f.host_log(&id).is_file());
+    let server_log = std::fs::read_to_string(f.env.dir.join("state").join("server.log")).unwrap();
+    assert!(
+        server_log.contains(&format!("terminal {id} ended")),
+        "{server_log}"
+    );
 }

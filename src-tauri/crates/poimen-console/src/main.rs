@@ -42,6 +42,7 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Ok(Command::Doctor { json, bundle }) => doctor(json, bundle.as_deref()),
         Ok(Command::Request(r)) => {
             let client = Client::new(poimen_protocol::terminal_socket_path());
             match commands::run(&client, &r, commands::PROMPT_WAIT, &mut std::io::stdout()) {
@@ -200,4 +201,45 @@ fn tui() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `poimen doctor`: the report on stdout (text or JSON), optionally the bundle file.
+fn doctor(json: bool, bundle: Option<&str>) -> ExitCode {
+    use poimen_console::doctor::{self, collect};
+    let client = Client::new(poimen_protocol::terminal_socket_path());
+    let state_file = poimen_protocol::files::state_file_path();
+    let path = poimen_core::gui_path::child_path();
+    let env = collect::Env {
+        client: &client,
+        state_file: state_file.clone(),
+        bin_dir: std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(std::path::Path::to_path_buf)),
+        path: path.clone(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    let inputs = collect::collect(&env, &collect::SystemRunner { path });
+    let report = doctor::report(&inputs, true);
+    if json {
+        println!("{}", report.to_json());
+    } else {
+        print!("{}", report.to_text());
+    }
+    if let Some(out) = bundle {
+        let hosts = poimen_protocol::terminal_socket_path()
+            .parent()
+            .map(|d| d.join("hosts"))
+            .unwrap_or_default();
+        let home = std::env::home_dir();
+        let value = doctor::bundle::build(&inputs, &state_file, &hosts, home.as_deref());
+        match doctor::bundle::write(std::path::Path::new(out), &value) {
+            // On stderr, so `--json` stays one document.
+            Ok(()) => eprintln!("wrote the diagnostics bundle to {out}; nothing was uploaded"),
+            Err(e) => {
+                eprintln!("poimen: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    ExitCode::from(report.exit_code())
 }
