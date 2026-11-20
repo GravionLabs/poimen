@@ -25,17 +25,18 @@
         [class]="'node ' + item.node.kind"
         [class.running]="item.node.status === 'running'"
         [class.failed]="item.node.status === 'failed'"
-        [class.link]="item.node.agentId !== null"
+        [class.closed]="item.node.closed"
+        [class.link]="isLink(item.node)"
         [fNodeId]="item.node.id"
         [fNodePosition]="item.position"
         [fNodeSize]="{ width: width, height: height }"
         [fNodeDraggingDisabled]="true"
         [fNodeSelectionDisabled]="true"
         [fConnectOnNode]="false"
-        [attr.role]="item.node.agentId ? 'button' : null"
-        [attr.tabindex]="item.node.agentId ? 0 : null"
+        [attr.role]="isLink(item.node) ? 'button' : null"
+        [attr.tabindex]="isLink(item.node) ? 0 : null"
         [attr.title]="tooltip(item.node)"
-        [attr.aria-label]="item.node.title + ', ' + item.node.kind + ', ' + item.node.status"
+        [attr.aria-label]="item.node.title + ', ' + item.node.kind + ', ' + statusText(item.node)"
         (click)="open(item.node)"
         (keydown)="onKey($event, item.node)"
       >
@@ -51,8 +52,16 @@
           ></span>
         }
         <div class="row">
-          <span class="kind">{{ item.node.kind === "agent" ? "subagent" : item.node.kind }}</span>
-          <span class="status" [attr.data-status]="item.node.status">{{ item.node.status }}</span>
+          <span class="kind">{{
+            item.node.kind === "agent"
+              ? "subagent"
+              : item.node.kind === "terminal"
+                ? "started agent"
+                : item.node.kind
+          }}</span>
+          <span class="status" [attr.data-status]="item.node.status">{{
+            statusText(item.node)
+          }}</span>
         </div>
         <div class="title" [title]="item.node.title">{{ item.node.title }}</div>
         <div class="meta">
