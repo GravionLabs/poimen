@@ -1,4 +1,4 @@
-<ng-template #segs let-line let-edit="edit" let-label="label" let-nav="nav">
+<ng-template #segs let-line let-edit="edit" let-label="label" let-nav="nav" let-chip="chip">
   @for (seg of line; track $index) {
     @switch (seg.kind) {
       @case ("dot") {
@@ -86,7 +86,7 @@
             [attr.aria-label]="'Open pull request: ' + seg.text"
             (click)="openPull(url, $event)"
           >
-            {{ (seg.sep ? "· " : "") + seg.text }}
+            {{ (seg.sep && !chip ? "· " : "") + seg.text }}
           </button>
         } @else {
           <span
@@ -94,7 +94,7 @@
             [class.bold]="seg.bold"
             [class.dim]="seg.dim"
             [title]="seg.tip ?? ''"
-            >{{ (seg.sep ? "· " : "") + seg.text }}</span
+            >{{ (seg.sep && !chip ? "· " : "") + seg.text }}</span
           >
         }
       }
@@ -388,60 +388,79 @@
     @if (!collapsed()) {
       @if (details(); as d) {
         <div class="details" role="none">
-          <button
-            type="button"
-            hx-button
-            variant="text"
-            severity="secondary"
-            size="small"
-            iconOnly
-            class="details-toggle"
-            [attr.tabindex]="stopSignal() === id() ? 0 : -1"
-            [attr.aria-expanded]="!detailsHidden()"
-            [attr.aria-label]="
-              (detailsHidden() ? 'Show details of ' : 'Hide details of ') + label()
-            "
-            [title]="(detailsHidden() ? 'Show details of ' : 'Hide details of ') + label()"
-            (click)="toggleDetails()"
-          >
-            <span class="chevron" [class.open]="!detailsHidden()" aria-hidden="true"></span>
-          </button>
+          <div class="details-main" role="none">
+            @if (!detailsHidden()) {
+              @if (d.branch; as b) {
+                <span class="branch" [title]="b.text">
+                  <svg
+                    class="branch-icon"
+                    viewBox="0 0 16 16"
+                    width="11"
+                    height="11"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    aria-hidden="true"
+                  >
+                    <circle cx="4.5" cy="3.5" r="1.5" />
+                    <circle cx="4.5" cy="12.5" r="1.5" />
+                    <circle cx="11.5" cy="5.5" r="1.5" />
+                    <path d="M4.5 5v6M11.5 7c0 2.5-3 2-7 4" />
+                  </svg>
+                  <span class="cut">
+                    <span class="head-part">{{ parts(b.text).head }}</span
+                    ><span class="tail-part">{{ parts(b.text).tail }}</span>
+                  </span>
+                </span>
+              }
+              <span class="chips">
+                <ng-container
+                  [ngTemplateOutlet]="segs"
+                  [ngTemplateOutletContext]="{ $implicit: d.chips, label: label(), chip: true }"
+                />
+              </span>
+            }
+            <button
+              type="button"
+              hx-button
+              variant="text"
+              severity="secondary"
+              size="small"
+              iconOnly
+              class="details-toggle"
+              [attr.tabindex]="stopSignal() === id() ? 0 : -1"
+              [attr.aria-expanded]="!detailsHidden()"
+              [attr.aria-label]="
+                (detailsHidden() ? 'Show details of ' : 'Hide details of ') + label()
+              "
+              [title]="(detailsHidden() ? 'Show details of ' : 'Hide details of ') + label()"
+              (click)="toggleDetails()"
+            >
+              <span class="chevron" [class.open]="!detailsHidden()" aria-hidden="true"></span>
+            </button>
+          </div>
           @if (!detailsHidden()) {
-            @if (d.branch; as b) {
-              <span class="branch" [title]="b.text">
+            @if (d.dir; as dir) {
+              <span class="dir" [title]="dir.tip ?? dir.text">
                 <svg
-                  class="branch-icon"
+                  class="dir-icon"
                   viewBox="0 0 16 16"
                   width="11"
                   height="11"
                   fill="none"
                   stroke="currentColor"
                   stroke-width="1.4"
+                  stroke-linejoin="round"
                   aria-hidden="true"
                 >
-                  <circle cx="4.5" cy="3.5" r="1.5" />
-                  <circle cx="4.5" cy="12.5" r="1.5" />
-                  <circle cx="11.5" cy="5.5" r="1.5" />
-                  <path d="M4.5 5v6M11.5 7c0 2.5-3 2-7 4" />
+                  <path d="M1.5 4.5v8h13v-7H7.5l-1.5-2h-4.5z" />
                 </svg>
                 <span class="cut">
-                  <span class="head-part">{{ parts(b.text).head }}</span
-                  ><span class="tail-part">{{ parts(b.text).tail }}</span>
+                  <span class="head-part">{{ parts(dir.text).head }}</span
+                  ><span class="tail-part">{{ parts(dir.text).tail }}</span>
                 </span>
               </span>
             }
-            @if (d.dir; as dir) {
-              <span class="dir" [title]="dir.tip ?? dir.text">
-                <span class="head-part">{{ parts(dir.text).head }}</span
-                ><span class="tail-part">{{ parts(dir.text).tail }}</span>
-              </span>
-            }
-            <span class="chips">
-              <ng-container
-                [ngTemplateOutlet]="segs"
-                [ngTemplateOutletContext]="{ $implicit: d.chips, label: label(), chip: true }"
-              />
-            </span>
           }
         </div>
       }

@@ -63,6 +63,21 @@ export interface CardDetails {
   chips: Segment[];
 }
 
+/**
+ * Sorts line 2 of a card into its parts. A directory that only repeats the name is left out, and it
+ * is not a chip either (#1085).
+ */
+export function splitDetails(line: Segment[], label: string): CardDetails | null {
+  if (!line.length) return null;
+  const name = label.trim().toLowerCase();
+  const branch = line.find((s) => s.token === "branch");
+  const dirSegment = line.find((s) => s.token === "dir");
+  const leaf = dirSegment?.tip?.split(/[\\/]/).filter(Boolean).at(-1)?.toLowerCase();
+  const dir = leaf === name ? undefined : dirSegment;
+  const chips = line.filter((s) => s !== branch && s !== dirSegment && s.kind !== "dot");
+  return branch || dir || chips.length ? { branch, dir, chips } : null;
+}
+
 /** The last `n` characters stay visible when a long text is cut in the middle. */
 export const TAIL_CHARS = 9;
 
@@ -275,17 +290,9 @@ export class SpaceCard {
   }
   protected readonly detailsHidden = computed(() => this.ui.hiddenDetails().includes(this.id()));
   /** Line 2 of the card, sorted into its parts; `null` when it has nothing to show. */
-  protected readonly details = computed<CardDetails | null>(() => {
-    const line = this.data().lines[1];
-    if (!line?.length) return null;
-    const name = this.label().trim().toLowerCase();
-    const branch = line.find((s) => s.token === "branch");
-    let dir = line.find((s) => s.token === "dir");
-    const leaf = dir?.tip?.split(/[\\/]/).filter(Boolean).at(-1)?.toLowerCase();
-    if (leaf === name) dir = undefined;
-    const chips = line.filter((s) => s !== branch && s !== dir && s.kind !== "dot");
-    return branch || dir || chips.length ? { branch, dir, chips } : null;
-  });
+  protected readonly details = computed<CardDetails | null>(() =>
+    splitDetails(this.data().lines[1] ?? [], this.label()),
+  );
   protected readonly extraLines = computed(() => this.data().lines.slice(2));
   protected parts(text: string) {
     return middleParts(text);

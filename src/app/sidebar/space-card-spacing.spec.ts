@@ -8,7 +8,7 @@ describe("space card body spacing", () => {
 
   it("pads the body at the top and the bottom by the same amount", () => {
     expect(body).toContain("border-top");
-    expect(body).toMatch(/padding-block:\s*4px/);
+    expect(body).toMatch(/padding-block:\s*6px/);
     expect(body).not.toMatch(/padding-bottom/);
   });
 });

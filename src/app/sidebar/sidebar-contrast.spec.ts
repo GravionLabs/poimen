@@ -73,8 +73,8 @@ describe.each([
   });
 });
 
-// The ringing card of the cards layout (space-card.css `.card.attention`): the blocked color at
-// 10% over the content background, with the text the header and rows draw on it (the `-on-active` state colors, as in the tint of the active row).
+// The ringing card of the cards layout (space-card.css `.card.attention`, #1085): a bar of the blocked
+// color at the left edge (a graphic, 3:1) on the card background, which also carries the text.
 describe.each([
   ["light", false],
   ["dark", true],
@@ -89,11 +89,13 @@ describe.each([
     if (!m) throw new Error(`--status-${name} missing`);
     return m[1];
   };
-  const blocked = rgb(resolve(theme, status("blocked")));
-  const tint = base.map((b, i) => blocked[i] * 0.1 + b * 0.9);
+  const blocked = rgb(resolve(theme, status("blocked-bar")));
+  const text = hex("--h-text-color");
+  // The card background of space-card.css: 5% of the text color over the content background.
+  const card = base.map((b, i) => text[i] * 0.05 + b * 0.95);
 
-  it("tells the ringing card from a plain one by its tint and border", () => {
-    expect(contrast(blocked, base)).toBeGreaterThan(1.15);
+  it("shows the bar against the card", () => {
+    expect(contrast(blocked, card)).toBeGreaterThanOrEqual(3);
   });
 
   it.each([
@@ -102,8 +104,8 @@ describe.each([
     ["blocked state and silent mark", statusToken("blocked", dk), 4.5],
     ["working state", statusToken("working", dk), 4.5],
     ["done state", statusToken("done", dk), 4.5],
-  ])("%s stays legible on the tint", (_label, token, min) => {
-    expect(contrast(hex(token), tint)).toBeGreaterThanOrEqual(min);
+  ])("%s stays legible on the card", (_label, token, min) => {
+    expect(contrast(hex(token), card)).toBeGreaterThanOrEqual(min);
   });
 });
 
