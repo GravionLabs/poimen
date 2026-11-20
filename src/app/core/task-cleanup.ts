@@ -72,7 +72,8 @@ export function cleanupLog(
 
 /** The outcome of one target: its report, or why it failed. */
 export type TargetOutcome =
-  { target: CleanupTarget; report: CleanupReport } | { target: CleanupTarget; error: string };
+  | { target: CleanupTarget; report: CleanupReport }
+  | { target: CleanupTarget; error: string };
 
 /**
  * The one notification of a run: one `<machine> <n> removed, <m> left` (or `<machine> failed:

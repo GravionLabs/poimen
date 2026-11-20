@@ -40,7 +40,8 @@ export interface Pull {
 
 /** One repository: its pull requests, or why they could not be read. */
 export type RepoPulls = { root: string; repo: string } & (
-  { status: "ok"; pulls: Pull[] } | { status: "error"; error: GhError }
+  | { status: "ok"; pulls: Pull[] }
+  | { status: "error"; error: GhError }
 );
 
 export interface PullsResult {
@@ -152,7 +153,13 @@ export function canEditPeople(detail: Actionable): boolean {
 
 /** A write on a pull request (`PrAction` of `github_pulls.rs`). */
 export type PrAction =
-  "approve" | "request_changes" | "comment" | "ready" | "draft" | "close" | "reopen";
+  | "approve"
+  | "request_changes"
+  | "comment"
+  | "ready"
+  | "draft"
+  | "close"
+  | "reopen";
 
 export const PR_ACTION_LABELS: Record<PrAction, string> = {
   approve: "Approve",

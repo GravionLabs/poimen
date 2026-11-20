@@ -22,7 +22,8 @@ export interface Milestone {
 }
 
 export type RepoMilestones = { root: string; repo: string } & (
-  { status: "ok"; milestones: Milestone[] } | { status: "error"; error: GhError }
+  | { status: "ok"; milestones: Milestone[] }
+  | { status: "error"; error: GhError }
 );
 
 /** Share of closed issues in percent, 0 for a milestone without issues. */

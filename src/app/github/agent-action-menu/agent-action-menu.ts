@@ -65,7 +65,7 @@ export class AgentActionMenu {
       return;
     }
     const o = this.offered().find((x) => x.action.id === pick.id);
-    if (o) this.actions.request(o.action, m.targets, pick.shiftKey);
+    if (o) void this.actions.request(o.action, m.targets, pick.shiftKey);
   }
 
   protected close(): void {

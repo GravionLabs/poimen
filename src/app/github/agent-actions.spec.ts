@@ -176,7 +176,7 @@ describe("AgentActions", () => {
     tauri.answer("terminal_create", () => `p${++pane}`);
     tauri.answer("agent_start", () => undefined);
     tauri.answer("agent_action_plan", (args) =>
-      (args?.["items"] as { nr: number }[]).map((i) => LAUNCH(i.nr)),
+      (args!["items"] as { nr: number }[]).map((i) => LAUNCH(i.nr)),
     );
     tauri.answer("get_harnesses", () => [
       {
@@ -407,7 +407,7 @@ describe("AgentActions", () => {
     it("a log action writes the failed logs into the worktree, then plans with the file", async () => {
       tauri.answer("github_pr_ci_log", () => "/src/n-pr7/.agents/state/ci-failed-7.log");
       tauri.answer("agent_action_plan", (args) => {
-        const log = (args?.["items"] as { log: string }[])[0].log;
+        const log = (args!["items"] as { log: string }[])[0].log;
         return [{ kind: "claude", args: [`logs in ${log || "{log}"}`] }];
       });
       const fix = wt({ on: "pr", prompt: "fix, logs in {log}" });
@@ -486,7 +486,7 @@ describe("AgentActions", () => {
 
     it("each target gets its own worktree and space; one failure leaves the others", async () => {
       tauri.answer("task_worktree", (args) => {
-        const nr = (args?.["issue"] as { nr: number }).nr;
+        const nr = (args!["issue"] as { nr: number }).nr;
         if (nr === 1) throw "boom";
         return { path: `/src/n-${nr}`, branch: `feat/${nr}`, created: true };
       });
