@@ -126,7 +126,6 @@
     result.text
   }}</pre>
 }
-
 @if (findings.invalid(); as error) {
   <p class="findings-note invalid" role="status">
     The findings file is not valid and is ignored: {{ error }}
@@ -135,7 +134,6 @@
 @if (findings.staleNote(); as note) {
   <p class="findings-note stale" role="status">{{ note }}</p>
 }
-
 @if (changes.error(); as error) {
   <p class="problem" role="alert">{{ error }}</p>
 } @else if (changes.loading() && !changes.list()) {
@@ -162,6 +160,7 @@
           [title]="title(file)"
           tabindex="-1"
           (click)="changes.select(file.path)"
+          (contextmenu)="openFileMenu($event, file.path)"
           (keydown.enter)="changes.select(file.path)"
         >
           @if (changes.scope() === "uncommitted") {
@@ -209,6 +208,7 @@
               [jump]="jump()"
               [comments]="lineComments.forFile(changes.selected() ?? '')"
               [findings]="marks()"
+              [onLineChosen]="chooseLine"
               (findingSent)="sendMark($event.id, $event.quote)"
               (commentAdded)="lineComments.add($event)"
             />
@@ -222,5 +222,17 @@
   </div>
 }
 @if (mapped().other.length) {
-  <app-findings-panel [items]="mapped().other" (sendFinding)="sendOther($event)" />
+  <app-findings-panel
+    [items]="mapped().other"
+    (sendFinding)="sendOther($event)"
+    (openInEditor)="openFinding($event)"
+  />
+}
+@if (menuAt(); as at) {
+  <app-context-menu
+    [at]="at"
+    [groups]="menuGroups"
+    (picked)="openFile(at.path)"
+    (closed)="menuAt.set(null)"
+  />
 }

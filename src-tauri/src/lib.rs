@@ -1,5 +1,4 @@
-use poimen_core::agent_actions;
-use poimen_core::{copilot, transcripts};
+use poimen_core::{agent_actions, copilot, transcripts};
 mod agent_session;
 mod agent_settings;
 mod backend;
@@ -9,6 +8,7 @@ mod changes;
 mod changes_git;
 mod commit_message;
 mod deliver;
+mod editor;
 use poimen_core::git;
 mod git_sync;
 use poimen_core::github;
@@ -36,8 +36,7 @@ mod settings;
 mod settings_transfer;
 mod spaces;
 mod task_start;
-use poimen_core::tasks;
-use poimen_core::templates;
+use poimen_core::{tasks, templates};
 mod terminal_colors;
 use poimen_core::trust;
 mod updater;
@@ -2993,6 +2992,7 @@ pub fn run() {
             agent_settings::set_keep_awake,
             set_sound,
             sound_file,
+            editor::open_in_editor,
             paste_image,
             usage_claude,
             set_spaces_layout,
