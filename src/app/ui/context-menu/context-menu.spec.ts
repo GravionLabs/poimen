@@ -82,6 +82,24 @@ describe("ContextMenu", () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it("returns the focus without a ring when a mouse click opened the menu", async () => {
+    document.dispatchEvent(new MouseEvent("mousedown"));
+    const { key, settle, opener } = await mount();
+    key("Escape");
+    await settle();
+    expect(document.activeElement).toBe(opener);
+    expect(opener.hasAttribute("data-pointer-focus")).toBe(true);
+  });
+
+  it("returns the focus with its ring when the keyboard opened the menu", async () => {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    const { key, settle, opener } = await mount();
+    key("Escape");
+    await settle();
+    expect(document.activeElement).toBe(opener);
+    expect(opener.hasAttribute("data-pointer-focus")).toBe(false);
+  });
+
   it("moves with the arrows (wrapping), Home and End, and picks with Enter", async () => {
     const { items, key, host, settle } = await mount();
     key("ArrowDown");

@@ -284,3 +284,8 @@ dialog.dialog .dialog-buttons {
   gap: 8px;
   margin-top: 12px;
 }
+
+/* Focus given back to a button that a mouse click opened a menu or dialog from (#1072). */
+[data-pointer-focus]:focus-visible {
+  outline: none;
+}
