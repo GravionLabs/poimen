@@ -159,9 +159,9 @@ describe("Sidebar in the cards layout (#934)", () => {
     const head = s.cards()[0].querySelector<HTMLElement>(".head")!;
     const label = (b: Element) => b.getAttribute("aria-label");
     expect([...head.querySelectorAll("button")].map(label)).toEqual([
-      "Collapse One",
       "New terminal in One",
       "More actions for One",
+      "Collapse One",
     ]);
     head.querySelector<HTMLButtonElement>('[aria-label="New terminal in One"]')!.click();
     expect(s.actions).toEqual([{ kind: "workspace", id: "w1", action: "new-terminal" }]);

@@ -63,6 +63,21 @@ export interface CardDetails {
   chips: Segment[];
 }
 
+/**
+ * Sorts line 2 of a card into its parts. A directory that only repeats the name is left out, and it
+ * is not a chip either (#1085).
+ */
+export function splitDetails(line: Segment[], label: string): CardDetails | null {
+  if (!line.length) return null;
+  const name = label.trim().toLowerCase();
+  const branch = line.find((s) => s.token === "branch");
+  const dirSegment = line.find((s) => s.token === "dir");
+  const leaf = dirSegment?.tip?.split(/[\\/]/).filter(Boolean).at(-1)?.toLowerCase();
+  const dir = leaf === name ? undefined : dirSegment;
+  const chips = line.filter((s) => s !== branch && s !== dirSegment && s.kind !== "dot");
+  return branch || dir || chips.length ? { branch, dir, chips } : null;
+}
+
 /** The last `n` characters stay visible when a long text is cut in the middle. */
 export const TAIL_CHARS = 9;
 
@@ -75,7 +90,8 @@ export function middleParts(text: string): { head: string; tail: string } {
 
 /** Where a space runs, as the card shows it. */
 export interface SpaceOrigin {
-  kind: "computer" | "machine";
+  /** A directory on this computer, or a machine; later kinds get their own icon. */
+  kind: "directory" | "machine";
   label: string;
   tip: string;
   color: number | null;
@@ -238,14 +254,12 @@ export class SpaceCard {
   protected readonly origin = computed<SpaceOrigin | null>(() => {
     const machine = splitId(this.id()).machine;
     if (machine === undefined) {
-      return this.machines.machines().length === 0
-        ? null
-        : {
-            kind: "computer",
-            label: "This computer",
-            tip: "This computer",
-            color: null,
-          };
+      return {
+        kind: "directory",
+        label: "This computer",
+        tip: "This computer",
+        color: null,
+      };
     }
     const label = `Machine ${machine}`;
     return {
@@ -258,7 +272,10 @@ export class SpaceCard {
   /** The accessible name of the card: the label, then where it runs. */
   protected readonly cardName = computed(() => {
     const origin = this.origin();
-    return origin ? `${this.label()}, ${origin.label}` : this.label();
+    // Where it runs is told only when there is more than this computer.
+    return origin && (origin.kind === "machine" || this.machines.machines().length > 0)
+      ? `${this.label()}, ${origin.label}`
+      : this.label();
   });
   /** The card holds the open terminal: its actions stay visible. */
   protected readonly chosen = computed(() => {
@@ -275,17 +292,9 @@ export class SpaceCard {
   }
   protected readonly detailsHidden = computed(() => this.ui.hiddenDetails().includes(this.id()));
   /** Line 2 of the card, sorted into its parts; `null` when it has nothing to show. */
-  protected readonly details = computed<CardDetails | null>(() => {
-    const line = this.data().lines[1];
-    if (!line?.length) return null;
-    const name = this.label().trim().toLowerCase();
-    const branch = line.find((s) => s.token === "branch");
-    let dir = line.find((s) => s.token === "dir");
-    const leaf = dir?.tip?.split(/[\\/]/).filter(Boolean).at(-1)?.toLowerCase();
-    if (leaf === name) dir = undefined;
-    const chips = line.filter((s) => s !== branch && s !== dir && s.kind !== "dot");
-    return branch || dir || chips.length ? { branch, dir, chips } : null;
-  });
+  protected readonly details = computed<CardDetails | null>(() =>
+    splitDetails(this.data().lines[1] ?? [], this.label()),
+  );
   protected readonly extraLines = computed(() => this.data().lines.slice(2));
   protected parts(text: string) {
     return middleParts(text);

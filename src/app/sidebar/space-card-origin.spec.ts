@@ -90,9 +90,9 @@ describe("space card origin (#1074)", () => {
     expect(card.hasAttribute("data-origin")).toBe(false);
   });
 
-  it("shows no symbol while no machine is configured", () => {
+  it("shows the directory symbol also while no machine is configured, without naming the computer", () => {
     const { card, mark } = setup("s1", []);
-    expect(mark).toBeNull();
+    expect(mark?.getAttribute("aria-label")).toBe("This computer");
     expect(card.getAttribute("aria-label")).toBe("api");
   });
 
