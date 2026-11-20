@@ -154,7 +154,9 @@ export class Changes {
   async loadMessageHarness(): Promise<void> {
     try {
       const harnesses = parseHarnesses(await this.bridge.invoke<unknown>("get_harnesses"));
-      const found = harnesses.find((h) => h.available && h.printArgs.length > 0);
+      const found = harnesses.find(
+        (h) => h.available && h.printArgs.some((a) => a.includes("{prompt}")),
+      );
       this.messageHarness.set(found?.id ?? null);
     } catch {
       this.messageHarness.set(null);
@@ -206,6 +208,7 @@ export class Changes {
 
   /** Starts following `dir` (the tab's directory) and reads it. */
   follow(dir: string): Promise<void> {
+    if (this.dir() !== dir) void this.cancelGenerate();
     this.dir.set(dir);
     void this.loadMessageHarness();
     return this.refresh();

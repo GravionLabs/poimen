@@ -18,8 +18,8 @@ use crate::git::run_bytes;
 
 /// Longest the harness may take.
 const TIMEOUT: Duration = Duration::from_secs(120);
-/// Bytes of diff sent as is; more is shortened.
-pub(crate) const DIFF_LIMIT: usize = 60_000;
+/// Bytes of diff sent as is; more is shortened (Windows caps a command line near 32 000).
+pub(crate) const DIFF_LIMIT: usize = if cfg!(windows) { 20_000 } else { 60_000 };
 /// Bytes of one hunk kept when the diff is shortened.
 const HUNK_LIMIT: usize = 4_000;
 /// Fewest bytes of a hunk worth keeping.
@@ -142,6 +142,20 @@ pub(crate) fn clean(output: &str) -> String {
     text.trim().to_owned()
 }
 
+/// Kills the process `pid` and what it started (its own process group on Unix, `taskkill /T` on
+/// Windows).
+fn kill_tree(pid: u32) {
+    #[cfg(unix)]
+    let _ = poimen_core::gui_path::command("kill")
+        .args(["-KILL", "--", &format!("-{pid}")])
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(windows)]
+    let _ = poimen_core::gui_path::command("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .status();
+}
+
 fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
     std::thread::spawn(move || {
         let mut buf = Vec::new();
@@ -160,7 +174,10 @@ fn run(
     let resolved =
         poimen_core::gui_path::resolve_program(program, &poimen_core::gui_path::child_path())
             .ok_or_else(|| format!("{program} was not found on the PATH"))?;
-    let mut child = poimen_core::gui_path::command(resolved)
+    let mut command = poimen_core::gui_path::command(resolved);
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command
         .args(args)
         .current_dir(dir)
         .env("PATH", poimen_core::gui_path::child_path())
@@ -171,22 +188,25 @@ fn run(
         .map_err(|e| format!("{program} could not be started: {e}"))?;
     let out = drain(child.stdout.take().expect("piped"));
     let err = drain(child.stderr.take().expect("piped"));
+    let pid = child.id();
+    let (done, exited) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(child.wait());
+    });
     let started = Instant::now();
     let status = loop {
         if cancelled.load(Ordering::SeqCst) {
-            let _ = child.kill();
-            let _ = child.wait();
+            kill_tree(pid);
             return Err("Cancelled".into());
         }
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("{program} timed out after {} s", timeout.as_secs()));
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(e) => return Err(format!("{program} failed: {e}")),
+        if started.elapsed() >= timeout {
+            kill_tree(pid);
+            return Err(format!("{program} timed out after {} s", timeout.as_secs()));
+        }
+        match exited.recv_timeout(Duration::from_millis(50)) {
+            Ok(Ok(status)) => break status,
+            Ok(Err(e)) => return Err(format!("{program} failed: {e}")),
+            Err(_) => {}
         }
     };
     let out = String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned();
@@ -208,6 +228,22 @@ pub fn generate(
     dir: &str,
     harness: &Harness,
     id: &str,
+    home: Option<&Path>,
+) -> Result<String, String> {
+    let flag = Arc::new(AtomicBool::new(false));
+    running()
+        .lock()
+        .unwrap()
+        .insert(id.to_owned(), flag.clone());
+    let result = draft(dir, harness, &flag, home);
+    running().lock().unwrap().remove(id);
+    result
+}
+
+fn draft(
+    dir: &str,
+    harness: &Harness,
+    flag: &AtomicBool,
     home: Option<&Path>,
 ) -> Result<String, String> {
     let top = validate(dir, home)?;
@@ -233,14 +269,10 @@ pub fn generate(
     let text = prompt(&shorten(&diff, DIFF_LIMIT), &branch);
     let argv = harness::build_print_argv(harness, &text)
         .ok_or_else(|| format!("{} has no printArgs", harness.id))?;
-    let flag = Arc::new(AtomicBool::new(false));
-    running()
-        .lock()
-        .unwrap()
-        .insert(id.to_owned(), flag.clone());
-    let result = run(&argv, &top, &flag, TIMEOUT);
-    running().lock().unwrap().remove(id);
-    let message = clean(&result?);
+    if flag.load(Ordering::SeqCst) {
+        return Err("Cancelled".into());
+    }
+    let message = clean(&run(&argv, &top, flag, TIMEOUT)?);
     if message.is_empty() {
         return Err(format!("{} returned no message", harness.id));
     }
