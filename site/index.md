@@ -15,8 +15,8 @@ hero:
       text: Installation
       link: /guide/installation
     - theme: alt
-      text: Features
-      link: /guide/features
+      text: Guide
+      link: /guide/getting-started
 features:
   - title: Spaces sidebar
     details: Every space with its terminals, agent status, branch and worktree, filterable by name, agent or branch.
@@ -26,6 +26,14 @@ features:
     details: Blocked and done agents ring on their tab and sidebar row, with unread counts, notifications and a dock badge.
   - title: Subagents and Flow
     details: Read-only view of the subagents of Claude Code and GitHub Copilot CLI, and the run drawn as a graph.
+  - title: GitHub and tasks
+    details: Pull requests, issues and milestones in one tab. Start a task from an issue in its own worktree with an agent.
+  - title: Runs
+    details: "Follow deliver loops and other agent runs: what works now, what needs you, and what finished."
+  - title: Remote machines
+    details: Spaces and agents of another computer next to yours, over ssh, without an open port.
+  - title: Console and MCP
+    details: The same terminals from a shell or a phone with the poimen TUI and CLI, and an MCP server so agents can lead other agents.
   - title: Color schemes
     details: Bundled and imported WezTerm color schemes, light and dark, with a chrome derived from the scheme.
 ---
@@ -54,7 +62,7 @@ The sidebar lists the spaces as a tree of spaces with their panes. Each row show
 
 ### Agent status
 
-Statuses come from the backend (agent hooks on `poimen-server`). A pane that turns blocked while you are not looking rings on its tab and sidebar row, one that turns done counts as unread, and viewing the tab clears both. "Next waiting agent" jumps to the next blocked agent, and the dock icon shows the number of waiting agents.
+Statuses come from the agent hooks that report to `poimen-server`. A pane that turns blocked while you are not looking rings on its tab and sidebar row, one that turns done counts as unread, and viewing the tab clears both. "Next waiting agent" jumps to the next blocked agent, and the dock icon shows the number of waiting agents.
 
 <Screenshot src="blocked-dark.png" alt="A blocked agent: its tab and sidebar row are ringed and the terminal shows the question Claude Code asks, with a 1 waiting count in the status bar" caption="A blocked agent rings on its tab and sidebar row; the status bar counts the waiting agents (demo data)." />
 
@@ -76,6 +84,6 @@ Light, dark or follow the system. Choose a bundled scheme, or drop WezTerm color
 
 ## Learn more
 
-- [Features](/guide/features) in detail
+- [Getting started](/guide/getting-started), then the guide pages for [spaces](/guide/spaces), [agents](/guide/agents), [GitHub](/guide/github), [runs](/guide/runs), [remote machines](/guide/remote-machines), the [console and MCP](/guide/console) and [settings](/guide/settings)
 - [Installation](/guide/installation) per platform
 - [Source and issues on GitHub](https://github.com/GravionLabs/poimen)

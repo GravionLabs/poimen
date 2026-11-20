@@ -4,7 +4,7 @@ A desktop app for AI coding agent sessions: watch and steer your terminals and a
 
 *Poimen* (ποιμήν) is Greek for shepherd. `poimen-server` keeps the herd; poimen is the window you watch it through.
 
-Site, downloads and installation guide: <https://gravionlabs.github.io/poimen/>.
+Site, downloads and the user guide (getting started, spaces, agents, GitHub, runs, remote machines, console and MCP, settings): <https://gravionlabs.github.io/poimen/>. This README is the detailed reference.
 
 > **Status: early.** poimen is in daily use and released regularly, but it still changes quickly. Expect rough edges.
 
