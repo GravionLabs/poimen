@@ -106,3 +106,21 @@ describe.each([
     expect(contrast(hex(token), tint)).toBeGreaterThanOrEqual(min);
   });
 });
+
+// The origin stripe and symbol of the space cards (#1074): graphics, so 3:1 against the card.
+describe.each([
+  ["light", false],
+  ["dark", true],
+])("space card origin colors, %s theme", (_name, dk) => {
+  const theme = dk ? new Map([...light, ...dark]) : light;
+  const base = rgb(resolve(theme, "--h-content-background"));
+  const cssBlock = dk
+    ? css.slice(css.indexOf(":root.app-dark"))
+    : css.slice(0, css.indexOf(":root.app-dark"));
+
+  it.each([0, 1, 2, 3, 4, 5])("origin color %i reaches 3:1 on the card", (n) => {
+    const m = cssBlock.match(new RegExp(`--origin-${n}:\\s*var\\((--[\\w-]+)\\)`));
+    if (!m) throw new Error(`--origin-${n} missing`);
+    expect(contrast(rgb(resolve(theme, m[1])), base)).toBeGreaterThanOrEqual(3);
+  });
+});
