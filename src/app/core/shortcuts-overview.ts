@@ -19,6 +19,8 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
       "closeAll",
       "nextTab",
       "previousTab",
+      "recentTab",
+      "recentTabBack",
       "splitRight",
       "splitDown",
       "find",
@@ -31,6 +33,8 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 /** The title of an action, from the same list as the command palette (which does not list itself). */
 export function shortcutTitle(action: ShortcutAction): string {
   if (action === "commandPalette") return "Command Palette";
+  if (action === "recentTab") return "Recent Tab";
+  if (action === "recentTabBack") return "Recent Tab (Back)";
   return POIMEN_COMMANDS.find((c) => c.id === action)?.title ?? action;
 }
 

@@ -54,6 +54,8 @@ import { Updater } from "./core/updater";
 import { SIDEBAR_VIEW_IDS, activityItems, tabOf } from "./core/activity-items";
 import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
+import { followSystemTheme } from "./core/system-theme";
+import { RecentTabs } from "./recent-tabs/recent-tabs";
 import { Sidebar } from "./sidebar/sidebar";
 import { TabLayout } from "./tab-layout/tab-layout";
 import { TerminalView } from "./terminal-view/terminal-view";
@@ -130,6 +132,7 @@ const ZOOM_STEP = 1;
   selector: "app-root",
   imports: [
     HxActivityBar,
+    RecentTabs,
     HxAppShell,
     Icon,
     Sidebar,
@@ -436,7 +439,7 @@ export class App {
       const { uiFontFamily, uiFontSize } = this.prefs.settings();
       applyUiFont(document.documentElement, uiFontFamily, uiFontSize);
     });
-    destroyRef.onDestroy(this.followSystemTheme());
+    destroyRef.onDestroy(followSystemTheme((dark) => this.systemDark.set(dark)));
     // The output panel follows the active tab's agent (Claude Code, Copilot CLI); nothing is watched while it is hidden.
     effect(() => {
       const target = this.subagentTarget();
@@ -1097,14 +1100,4 @@ export class App {
 
   /** The OS appearance; light when it cannot be read. */
   private readonly systemDark = signal(false);
-
-  /** HxTheme reads the system setting once; track the OS appearance as it changes. */
-  private followSystemTheme(): () => void {
-    if (typeof matchMedia !== "function") return () => undefined;
-    const query = matchMedia("(prefers-color-scheme: dark)");
-    const update = () => this.systemDark.set(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }
 }
