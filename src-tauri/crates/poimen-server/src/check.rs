@@ -24,6 +24,8 @@ pub trait Env {
     fn run(&self, program: &str, args: &[&str]) -> io::Result<(bool, String)>;
     /// The user's home, whose settings the hook integrations are read from.
     fn home(&self) -> Option<PathBuf>;
+    /// The version of the installed agent CLI `program`; `None` when unknown.
+    fn cli_version(&self, program: &str) -> Option<claude::Version>;
 }
 
 /// The real machine.
@@ -56,6 +58,10 @@ impl Env for System {
 
     fn home(&self) -> Option<PathBuf> {
         std::env::home_dir().filter(|h| !h.as_os_str().is_empty())
+    }
+
+    fn cli_version(&self, program: &str) -> Option<claude::Version> {
+        claude::CliVersion::version(&claude::SystemCli, program)
     }
 }
 
@@ -158,9 +164,13 @@ pub fn run(env: &dyn Env, version: &str, protocol: u32, channel: Channel) -> Mac
         checks.push(hooks(
             "hooks_claude",
             "claude",
-            home.as_deref()
-                .map(|h| claude::status(&claude::default_settings_path(h), CHANNEL)),
-            claude::EVENTS.len(),
+            home.as_deref().map(|h| {
+                claude::status(
+                    &claude::default_settings_path(h),
+                    CHANNEL,
+                    env.cli_version("claude"),
+                )
+            }),
             server,
         ));
     }
@@ -169,8 +179,7 @@ pub fn run(env: &dyn Env, version: &str, protocol: u32, channel: Channel) -> Mac
             "hooks_copilot",
             "copilot",
             home.as_deref()
-                .map(|h| copilot::status(&copilot::default_hook_path(h, CHANNEL), CHANNEL)),
-            copilot::EVENTS.len(),
+                .map(|h| copilot::status(&copilot::default_hook_path(h, CHANNEL), CHANNEL, None)),
             server,
         ));
     }
@@ -202,23 +211,26 @@ fn agent(name: &str, present: bool, missing: CheckStatus, fix: &str) -> MachineC
 fn hooks(
     id: &str,
     agent: &str,
-    installed: Option<Result<Vec<&'static str>, String>>,
-    all: usize,
+    installed: Option<Result<claude::HookStatus, String>>,
     server: &str,
 ) -> MachineCheckItem {
     let fix = Some(format!("{server} integration install {agent}"));
     match installed {
-        Some(Ok(events)) if events.len() == all => item(id, CheckStatus::Ok, None, None),
-        Some(Ok(events)) if events.is_empty() => item(
+        Some(Ok(s)) if s.missing.is_empty() => item(id, CheckStatus::Ok, None, None),
+        Some(Ok(s)) if s.installed.is_empty() => item(
             id,
             CheckStatus::Warning,
             Some("agent status hooks are not installed".into()),
             fix,
         ),
-        Some(Ok(events)) => item(
+        Some(Ok(s)) => item(
             id,
             CheckStatus::Warning,
-            Some(format!("partially installed: {}", events.join(", "))),
+            Some(format!(
+                "partially installed: {}; missing: {}",
+                s.installed.join(", "),
+                s.missing.join(", ")
+            )),
             fix,
         ),
         Some(Err(e)) => item(id, CheckStatus::Warning, Some(e), fix),
@@ -256,6 +268,9 @@ mod tests {
         fn home(&self) -> Option<PathBuf> {
             self.home.clone()
         }
+        fn cli_version(&self, _: &str) -> Option<claude::Version> {
+            None
+        }
     }
 
     fn home(name: &str) -> PathBuf {
@@ -289,8 +304,14 @@ mod tests {
         );
         let h = env.home.clone().unwrap();
         let exe = std::env::current_exe().unwrap();
-        claude::install(&claude::default_settings_path(&h), &exe, CHANNEL).unwrap();
-        copilot::install(&copilot::default_hook_path(&h, CHANNEL), &exe, CHANNEL).unwrap();
+        claude::install(&claude::default_settings_path(&h), &exe, CHANNEL, None).unwrap();
+        copilot::install(
+            &copilot::default_hook_path(&h, CHANNEL),
+            &exe,
+            CHANNEL,
+            None,
+        )
+        .unwrap();
         let r = run(&env, "0.18.0", 7, Channel::Stable);
         assert_eq!(get(&r, "hooks_claude").status, CheckStatus::Ok);
         assert_eq!(get(&r, "hooks_copilot").status, CheckStatus::Ok);

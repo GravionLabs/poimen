@@ -167,6 +167,11 @@ mod tests {
             parse_status("partially installed: Stop, Notification\n"),
             HookState::Partial
         );
+        // With the events the installed CLI needs and lacks (#984): Repair.
+        assert_eq!(
+            parse_status("partially installed: Stop; missing: PermissionRequest\nmcp: installed\n"),
+            HookState::Partial
+        );
         assert_eq!(parse_status(""), HookState::Unknown);
         assert_eq!(parse_status("whatever"), HookState::Unknown);
     }

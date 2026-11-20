@@ -158,6 +158,7 @@ pub fn plan(args: &[String], env_terminal: Option<String>, nanos: u64) -> Result
                     agent: Some(agent.clone()),
                     session_id: None,
                     message: None,
+                    message_fallback: false,
                 })
             })
         }

@@ -239,6 +239,7 @@ mod tests {
             agent: Some("copilot".into()),
             session_id: None,
             message: None,
+            message_fallback: false,
         })
     }
 

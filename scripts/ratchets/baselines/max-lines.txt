@@ -12,8 +12,7 @@ src-tauri/crates/poimen-core/src/project.rs	856
 src-tauri/crates/poimen-core/src/settings.rs	1465
 src-tauri/crates/poimen-core/src/transcripts.rs	1775
 src-tauri/crates/poimen-core/src/worktree.rs	1893
-src-tauri/crates/poimen-protocol/src/lib.rs	2908
-src-tauri/crates/poimen-server/src/claude.rs	839
+src-tauri/crates/poimen-protocol/src/lib.rs	2891
 src-tauri/crates/poimen-server/src/emulator.rs	1318
 src-tauri/crates/poimen-server/src/host.rs	1115
 src-tauri/crates/poimen-server/src/lib.rs	2736

@@ -123,13 +123,14 @@ fn integration(args: &[String]) -> ExitCode {
         .mcp
         .filter(|_| args.get(2).is_none())
         .and_then(|m| Some((m, (m.default_path)(&std::env::home_dir()?))));
+    let cli = kind.cli_version(&claude::SystemCli);
     let result = match action.as_str() {
         "install" => claude::hook_exe(
             std::env::var_os(poimen_protocol::ENV_HOOK_EXE),
             std::env::current_exe,
         )
         .and_then(|exe| {
-            (kind.install)(&path, &exe, CHANNEL)?;
+            (kind.install)(&path, &exe, CHANNEL, cli)?;
             let mut message = format!("installed in {}", path.display());
             if let Some((m, mcp_path)) = &mcp {
                 let path_var = std::env::var_os("PATH");
@@ -154,13 +155,17 @@ fn integration(args: &[String]) -> ExitCode {
                 "nothing to remove".to_owned()
             })
         }),
-        "status" => (kind.status)(&path, CHANNEL).and_then(|events| {
-            let mut out = if events.is_empty() {
+        "status" => (kind.status)(&path, CHANNEL, cli).and_then(|status| {
+            let mut out = if status.installed.is_empty() {
                 "not installed".to_owned()
-            } else if events.len() == kind.events {
+            } else if status.missing.is_empty() {
                 "installed".to_owned()
             } else {
-                format!("partially installed: {}", events.join(", "))
+                format!(
+                    "partially installed: {}; missing: {}",
+                    status.installed.join(", "),
+                    status.missing.join(", ")
+                )
             };
             if let Some((_, mcp_path)) = &mcp {
                 out.push('\n');
