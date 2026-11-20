@@ -133,6 +133,7 @@ The menu bar has File (new terminal, close tab), Edit, View (sidebar, output pan
 | Command palette (poimen commands) | `commandPalette` | CmdOrCtrl+Shift+P |
 | Next waiting agent | `nextWaiting` | CmdOrCtrl+Shift+A |
 | Next / previous tab | `nextTab` / `previousTab` | CmdOrCtrl+Alt+Right / CmdOrCtrl+Alt+Left |
+| Recent tab / back (hold Ctrl: a list shows the most-recently-used order, release selects; works in a terminal) | `recentTab` / `recentTabBack` | Ctrl+Tab / Ctrl+Shift+Tab |
 | Keyboard shortcuts overview (also the ? button in the status bar) | `showShortcuts` | CmdOrCtrl+/ |
 
 The command palette is a compact popup (480px, no dimming, a click outside closes it) centered on the editor area rather than the whole window; without an open tab it is centered on the window. It follows a window resize, a sidebar toggle or a panel change (such as the output panel) while open, stays inside the window, and its top edge stays put while the list filters. It is styled after JetBrains "Find Action": each row shows the title (the characters your query matched are highlighted), and the shortcut as a key cap. With an empty query the list is grouped under "Recent" (the last 5 entries you ran, kept in the window layout UI state), and "Poimen"; with a query it is one ranked list. Arrow keys skip the headings; Enter runs, Esc closes.

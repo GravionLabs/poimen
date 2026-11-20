@@ -15,6 +15,8 @@ export const SHORTCUT_ACTIONS = [
   "nextWaiting",
   "nextTab",
   "previousTab",
+  "recentTab",
+  "recentTabBack",
   "showShortcuts",
   "find",
 ] as const;
@@ -40,6 +42,8 @@ export const DEFAULT_SHORTCUTS: Shortcuts = {
   nextWaiting: "CmdOrCtrl+Shift+A",
   nextTab: "CmdOrCtrl+Alt+Right",
   previousTab: "CmdOrCtrl+Alt+Left",
+  recentTab: "Ctrl+Tab",
+  recentTabBack: "Ctrl+Shift+Tab",
   showShortcuts: "CmdOrCtrl+/",
   find: "CmdOrCtrl+Shift+F",
 };
@@ -159,6 +163,9 @@ export function formatShortcut(accelerator: string, mac: boolean): string {
   return [...mods, label].join("+");
 }
 
+/** Actions a focused terminal yields although they have no Cmd (the program has no use for them). */
+const TERMINAL_KEYS: readonly ShortcutAction[] = ["recentTab", "recentTabBack"];
+
 export interface MatchContext {
   mac: boolean;
   /** The key event happened inside a terminal that has focus. */
@@ -179,7 +186,8 @@ export function matchShortcut(
   for (const action of SHORTCUT_ACTIONS) {
     const chord = parseChord(shortcuts[action], context.mac);
     if (!chord || !matches(event, chord)) continue;
-    if (context.inTerminal && !chord.meta) return null;
+    // The recent-tab keys must reach the app also from a terminal (#1006).
+    if (context.inTerminal && !chord.meta && !TERMINAL_KEYS.includes(action)) return null;
     return action;
   }
   return null;

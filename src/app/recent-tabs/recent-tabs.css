@@ -1,0 +1,36 @@
+.switcher {
+  position: fixed;
+  z-index: 61;
+  top: 15vh;
+  left: 50%;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  width: min(420px, 90vw);
+  max-height: 60vh;
+  padding: 2px 0;
+  overflow-y: auto;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 6px;
+  background: var(--h-content-background);
+  color: var(--h-text-color);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 22%);
+  font-size: 12px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+}
+
+.item.selected {
+  background: var(--h-highlight-background, rgb(128 128 128 / 20%));
+  color: var(--h-highlight-color, inherit);
+}
+
+.title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
