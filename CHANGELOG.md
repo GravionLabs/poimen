@@ -5,6 +5,55 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.28.0] — 2026-11-20
+
+### Bug Fixes
+- **server**: Announce the awake state to every declared subscription (#987)
+- **changes**: Harden commit message generation (#997)
+- **app**: Open in editor uses only new-side lines and keeps absolute finding paths (#1002)
+- **app**: Keep the diff editor deferred and raise the initial bundle budget to 2.2 MB (#1002)
+- **machines**: Reconnect at once after wake and network return (#1011) (#1071)
+- **machines**: Reconnect at once after wake and network return (#1011)
+- **machines**: Wait with park_timeout in the wake watcher (#1011)
+- **machines**: Allow the unused dir check on non-unix targets (#1012)
+- **machines**: Permission denied hint names ssh-add (#1014)
+- **ui**: A card button keeps its focus ring after the action it opened was cancelled (#1072) (#1078)
+- **sidebar**: Active row marker starts after the origin stripe (#1074)
+- The first row of a space card sits too close to the header line (#1079) (#1082)
+- **machines**: Wake tests wait for the offline state, ssh_mux logs no user id (#1083)
+- **machines**: The second retry of the wake tests waits for the offline state too (#1083)
+
+
+### Documentation
+- Run the ratchets alone and first, not with the full suite (#1065)
+- **machines**: Note the limits of the connection sharing (#1012)
+
+
+### Features
+- **app**: Keep the machine awake while agents work (#987) (#1063)
+- **app**: Keep the machine awake while agents work (#987)
+- **changes**: Generate a commit message (#997) (#1067)
+- **changes**: Generate a commit message (#997)
+- **app**: Open a path in an external editor (#1002) (#1068)
+- **app**: Open a path in an external editor (#1002)
+- **terminal-view**: File path links open the external editor (#1003) (#1069)
+- **tabs**: Ctrl+Tab switches tabs in most-recently-used order (#1006) (#1070)
+- **machines**: Ssh failures say what to run (#1014) (#1077)
+- **machines**: Ssh failures say what to run (#1014)
+- **sidebar**: Origin symbol on the space cards (this computer, machine) (#1074) (#1080)
+- **sidebar**: Origin symbol on the space cards (this computer, machine) (#1074)
+
+
+### Performance
+- **machines**: Reuse one SSH connection per machine (#1012) (#1076)
+- **machines**: Reuse one SSH connection per machine (#1012)
+
+
+### Refactoring
+- **server**: Keep the awake announcement in awake.rs (#987)
+- **sidebar**: Spread the header of the space cards (path, branch, actions) (#1075) (#1081)
+
+
 ## [0.27.0] — 2026-11-20
 
 ### Bug Fixes
@@ -14,6 +63,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **console**: List doctor in --help and scrub the report in the bundle (#972)
 - **pty-host**: Closing a terminal ends its whole process tree (#968) (#1056)
 - **pty-host**: Closing a terminal ends its whole process tree (#968)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.27.0 [skip ci]
 
 
 ### Features
