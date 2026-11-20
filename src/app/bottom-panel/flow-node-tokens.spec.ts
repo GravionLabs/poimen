@@ -19,6 +19,9 @@ function node(over: Partial<FlowNode> = {}): FlowNode {
     tokens: null,
     model: null,
     context: null,
+    terminalId: null,
+    agentStatus: null,
+    closed: false,
     ...over,
   };
 }

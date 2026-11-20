@@ -4,7 +4,7 @@
 
 None. The installers bundle `poimen-server`, the terminal server poimen uses by default. poimen starts it detached when nothing answers on its socket, and never stops it, so your terminals and agents keep running when you close the app.
 
-Optional: Claude Code or GitHub Copilot CLI. On the first start poimen offers to install their hooks (`poimen-server integration install`), which report whether an agent works, waits or is done; "Not now" is remembered. The same Claude Code and Copilot CLI are used for the subagent and Flow views.
+Optional: Claude Code, GitHub Copilot CLI or Gemini CLI. On the first start poimen offers to install their hooks (`poimen-server integration install`), which report whether an agent works, waits or is done, and an MCP entry so agents can look around in poimen; "Not now" is remembered. The GitHub views need the GitHub CLI (`gh auth login`).
 
 ### Coming from herdr
 
@@ -73,6 +73,17 @@ Pick one:
 - **Debian, Ubuntu:** `sudo apt install ./poimen_*_amd64.deb`
 - **Fedora, openSUSE:** `sudo rpm -i poimen-*.x86_64.rpm` (or `sudo dnf install ./poimen-*.x86_64.rpm`)
 
+## Console
+
+The `poimen` binary (TUI and CLI, see [Console and MCP](/guide/console)) ships with every installer and as its own download:
+
+- **macOS:** inside the app at `/Applications/poimen.app/Contents/MacOS/poimen`. Link it onto the PATH with `sudo ln -sf /Applications/poimen.app/Contents/MacOS/poimen /usr/local/bin/poimen`.
+- **Windows:** the `-setup.exe` and the `.msi` install `poimen.exe` next to the app and add that directory to your user PATH (open a new terminal afterwards).
+- **Linux:** the `.deb` and `.rpm` of the app install `/usr/bin/poimen`. For a host without the app, install the `poimen-cli` package (`.deb` or `.rpm` of the release; it conflicts with the app package).
+- **Without the app:** the release assets `poimen-<version>-<target>.tar.gz` (Linux, macOS) and `.zip` (Windows) hold only the binary.
+
+Run `poimen doctor` to check the setup.
+
 ## Build from source
 
 Needs Rust 1.99.1, Node.js 26 and pnpm. See "Development" in the [README](https://github.com/GravionLabs/poimen#development).
@@ -80,4 +91,4 @@ Needs Rust 1.99.1, Node.js 26 and pnpm. See "Development" in the [README](https:
 ## First start
 
 - The status bar shows "poimen connected" and the sidebar your spaces. If it shows "unreachable", press **Retry**; the message names the reason (for example the server did not answer in 10 s, or it speaks another protocol).
-- Settings are optional: `~/.config/poimen/config.json`, applied without a restart. See [Features](/guide/features#settings).
+- Settings are optional: `~/.config/poimen/config.json`, applied without a restart. See [Settings](/guide/settings).

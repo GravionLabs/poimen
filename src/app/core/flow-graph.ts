@@ -1,3 +1,6 @@
+import { rowName, type AgentStatus, type Terminal } from "./snapshot";
+import { starterId } from "./started-by";
+import type { TokenTotals } from "./token-totals";
 import {
   formatTokens,
   type MainSnapshot,
@@ -24,7 +27,7 @@ export interface NodeTokens {
 
 export interface FlowNode {
   id: string;
-  kind: "main" | "skill" | "agent";
+  kind: "main" | "skill" | "agent" | "terminal";
   title: string;
   /** Agent type, skill arguments, or the agent product for the main node. */
   type: string;
@@ -45,6 +48,12 @@ export interface FlowNode {
    * skills and subagents; `null` when unknown.
    */
   context: number | null;
+  /** The terminal of a `terminal` node (an agent started through `start_agent`, #1088); else `null`. */
+  terminalId: string | null;
+  /** Live agent status of a `terminal` node; `null` for the others. */
+  agentStatus: AgentStatus | null;
+  /** The terminal of a `terminal` node is closed: the node keeps its last status. */
+  closed: boolean;
 }
 
 export interface FlowEdge {
@@ -318,6 +327,9 @@ export function buildFlowGraph(
                 tokens: sumTokens(own),
                 model: modelOf(own),
                 context: call.context,
+                terminalId: null,
+                agentStatus: null,
+                closed: false,
               }
             : {
                 id: call.id,
@@ -336,6 +348,9 @@ export function buildFlowGraph(
                 tokens: sumTokens(own),
                 model: modelOf(own),
                 context: call.context,
+                terminalId: null,
+                agentStatus: null,
+                closed: false,
               };
         nodes.push(node);
         for (const from of previous) edges.push({ id: `${from}->${call.id}`, from, to: call.id });
@@ -359,6 +374,9 @@ export function buildFlowGraph(
     tokens: sumTokens(mainSamples),
     model: modelOf(mainSamples),
     context: main.usage?.length ? contextOf(main.usage[main.usage.length - 1].usage) : null,
+    terminalId: null,
+    agentStatus: null,
+    closed: false,
   };
   nodes.push(mainNode);
   place(MAIN_NODE_ID, new Set());
@@ -402,4 +420,96 @@ export function flowTooltip(node: FlowNode): string {
   if (context) lines.push(`Context fill: ${context.replace("context ", "")}`);
   if (node.model) lines.push(`Model: ${node.model}`);
   return lines.join("\n");
+}
+
+/** An agent terminal that the Flow's agent started through `start_agent` (#1088). */
+export interface StartedTerminal {
+  terminalId: string;
+  name: string;
+  status: AgentStatus;
+  tokens: TokenTotals | null;
+  /** The terminal is no longer in the snapshot; the rest is what was last seen. */
+  closed: boolean;
+}
+
+/**
+ * The terminals `starter` started (`started_by`, #982) in the snapshot's `terminals`, with their
+ * token totals when known. `remembered` holds what was seen before: a terminal that is gone from
+ * the snapshot stays, marked `closed`, with its last status and totals.
+ */
+export function startedTerminals(
+  starter: string,
+  terminals: readonly Terminal[],
+  totals: ReadonlyMap<string, TokenTotals>,
+  remembered: readonly StartedTerminal[] = [],
+): StartedTerminal[] {
+  const live = terminals
+    .filter((t) => starterId(t) === starter)
+    .map((t): StartedTerminal => ({
+      terminalId: t.terminal_id,
+      name: rowName(t),
+      status: t.agent_status,
+      tokens: totals.get(t.terminal_id) ?? null,
+      closed: false,
+    }));
+  const ids = new Set(live.map((t) => t.terminalId));
+  const gone = remembered
+    .filter((t) => !ids.has(t.terminalId))
+    .map((t) => ({ ...t, closed: true }));
+  return [...live, ...gone];
+}
+
+const NODE_STATUS: Record<AgentStatus, FlowStatus> = {
+  working: "running",
+  blocked: "running",
+  done: "done",
+  idle: "done",
+  error: "failed",
+  unknown: "done",
+};
+
+const toNodeTokens = (t: TokenTotals): NodeTokens => ({
+  input: t.input + t.cache_read + t.cache_creation,
+  output: t.output,
+  rawInput: t.input,
+  cacheRead: t.cache_read,
+  cacheCreation: t.cache_creation,
+});
+
+/** Adds a `terminal` node per started terminal, each with an edge from the main node. */
+export function withStartedTerminals(
+  graph: FlowGraph,
+  started: readonly StartedTerminal[],
+): FlowGraph {
+  if (started.length === 0) return graph;
+  const nodes = [...graph.nodes];
+  const edges = [...graph.edges];
+  for (const t of started) {
+    const id = `terminal:${t.terminalId}`;
+    nodes.push({
+      id,
+      kind: "terminal",
+      title: t.name,
+      type: "",
+      status: NODE_STATUS[t.status] ?? "done",
+      startedMs: null,
+      endedMs: null,
+      tools: 0,
+      agentId: null,
+      tokens: t.tokens ? toNodeTokens(t.tokens) : null,
+      model: null,
+      context: null,
+      terminalId: t.terminalId,
+      agentStatus: t.status,
+      closed: t.closed,
+    });
+    edges.push({ id: `${MAIN_NODE_ID}->${id}`, from: MAIN_NODE_ID, to: id });
+  }
+  return { nodes, edges };
+}
+
+/** The status text of a node: the agent status of a terminal (`closed, last: working`), else its status. */
+export function flowStatusText(node: FlowNode): string {
+  if (node.kind !== "terminal") return node.status;
+  return node.closed ? `closed, last: ${node.agentStatus}` : (node.agentStatus ?? node.status);
 }

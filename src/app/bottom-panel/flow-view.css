@@ -126,6 +126,14 @@
   border-left: 3px solid var(--status-working);
 }
 
+.node.terminal {
+  border-left: 3px solid var(--status-blocked, var(--h-text-muted-color));
+}
+
+.node.closed {
+  opacity: 0.7;
+}
+
 .node.running {
   border-color: var(--status-working);
   box-shadow: 0 0 0 1px var(--status-working);

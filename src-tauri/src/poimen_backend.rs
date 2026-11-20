@@ -176,11 +176,9 @@ fn text(err: ClientError) -> String {
 }
 
 /// The neutral snapshot of the server's spaces (#586): a server tab is a tab with its terminals in
-/// the order of its split tree (the first leaf first) and the tree as `root`. A terminal without
-/// a leaf (an exited one, or every terminal of a protocol 3 server) is a tab of its own with the
-/// terminal's id, so no terminal is lost. Tabs follow the space's `tabs` order and are numbered by
-/// it. Agent status is what the agent's hooks reported (`unknown` without an agent); a tab and a
-/// space show their most urgent terminal, and a space carries its own `cwd`.
+/// split-tree order and the tree as `root`. A terminal without a leaf (exited, or from a protocol 3
+/// server) is a tab of its own. Tabs follow the space's `tabs` order. Agent status is what the hooks
+/// reported (`unknown` without an agent); a tab and a space show their most urgent terminal.
 pub fn map_snapshot(layout: &SpaceList, terminals: &[Terminal]) -> Snapshot {
     let mut snapshot = Snapshot::default();
     for (i, space) in layout.spaces.iter().enumerate() {
@@ -276,8 +274,7 @@ fn most_urgent<'a>(terminals: impl Iterator<Item = &'a Terminal>) -> snap::Agent
     snap::AgentStatus::most_urgent(terminals.map(status_of))
 }
 
-/// A server terminal in the snapshot: `agent` (the name the hooks report, `claude` or `copilot`)
-/// and `agent_session.value` are set only when known.
+/// A server terminal in the snapshot: `agent` (`claude`, `copilot`) and `agent_session.value` only when known.
 fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap::Terminal {
     let agent = terminal.agent.as_ref();
     let message = agent.and_then(|a| a.message.clone());
@@ -293,6 +290,7 @@ fn snapshot_terminal(terminal: &Terminal, space_id: &str, tab_id: &str) -> snap:
             .map(|value| snap::AgentSessionRef { value: Some(value) }),
         agent_status: status_of(terminal),
         hibernated: terminal.hibernated.is_some(),
+        started_by: terminal.started_by.clone(),
         agent_message_at: message.as_ref().and(agent.and_then(|a| a.message_at)),
         agent_message: message,
         agent_reported_at: agent.and_then(|a| a.reported_at),
@@ -1010,6 +1008,8 @@ mod tests {
             host_bundled_version: None,
             records: Vec::new(),
             hibernated: None,
+            started_by: None,
+            report: None,
         }
     }
 

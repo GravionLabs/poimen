@@ -162,6 +162,9 @@ pub struct Terminal {
     /// The server stopped the idle agent and resumes it on the next controller attach (#904).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hibernated: bool,
+    /// The terminal whose agent started this one through `start_agent` (#982).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
     /// The child records of the terminal, least recently updated first (#684).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub records: Vec<ChildRecord>,

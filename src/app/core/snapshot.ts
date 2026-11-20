@@ -4,6 +4,7 @@
 import { HOOK_AGENTS, agentName, hasTranscripts } from "./backend";
 import type { Checks } from "../github/pulls";
 import type { SidebarSort } from "./settings";
+import { markStarters } from "./started-by";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "error" | "unknown";
 
@@ -121,10 +122,7 @@ export function treeTerminals(tree: TabTree | undefined): string[] {
   return tree.children.flatMap(treeTerminals);
 }
 
-/**
- * The terminal that takes over the tab of a closed pane: the tab's server-active terminal, else
- * its first leaf, never `closedId` itself; `undefined` when the tab has no other leaf.
- */
+/** The terminal that takes over the tab of a closed pane: the tab's active one, else its first leaf, never `closedId`. */
 export function survivingLeaf(tab: Tab | undefined, closedId: string): string | undefined {
   const leaves = treeTerminals(tab?.root).filter((id) => id !== closedId);
   const active = tab?.active_terminal;
@@ -145,10 +143,7 @@ export function paneSuccessor(snapshot: Snapshot, paneId: string): string | unde
   );
 }
 
-/**
- * The panes of `tab` in the order of its split tree (the first leaf first), then the panes of
- * the tab the tree does not name, in snapshot order; so no terminal of the tab is left out.
- */
+/** The panes of `tab` in split-tree order (first leaf first), then those the tree does not name. */
 export function tabPanes(tab: Tab, terminals: readonly Terminal[]): Terminal[] {
   const own = terminals.filter((t) => t.tab_id === tab.tab_id);
   const leaves = treeTerminals(tab.root);
@@ -164,10 +159,7 @@ export function tabTerminal(tab: Tab, terminals: readonly Terminal[]): Terminal 
   return tabPanes(tab, terminals)[0];
 }
 
-/**
- * The root terminal of a space: the terminal its first tab (by number) shows, which is the root
- * pane of the layout of a new space; else its first terminal.
- */
+/** The root terminal of a space: the one its first tab (by number) shows, else its first terminal. */
 export function spaceRoot(snapshot: Snapshot, spaceId: string): Terminal | undefined {
   const first = snapshot.tabs
     .filter((t) => t.space_id === spaceId)
@@ -211,6 +203,7 @@ export interface Terminal {
   agent_title?: string;
   /** The server stopped the idle agent; the next controller attach resumes it (poimen backend, #904). */
   hibernated?: boolean;
+  started_by?: string;
   /** Child records, least recently updated first (poimen backend, #684). */
   records?: ChildRecord[];
   cwd?: string;
@@ -452,10 +445,7 @@ export interface SortKeys {
 /** Rank of a space without an agent, and of one the map does not know. */
 export const NO_AGENT_RANK = 4;
 
-/**
- * Rank of one terminal for `sidebar.sort: attention`: blocked 0, done and unread 1, working 2,
- * idle or done and read 3, no agent 4.
- */
+/** Rank for `sidebar.sort: attention`: blocked 0, done and unread 1, working 2, idle or read 3, none 4. */
 export function attentionRank(terminal: Terminal, unread: ReadonlySet<string>): number {
   switch (terminal.agent_status) {
     case "blocked":
@@ -535,10 +525,7 @@ function orderUnpinned<T extends { space_id: string; label: string; number: numb
   return [...known, ...rest];
 }
 
-/**
- * The order after dropping `sourceId` before or after `targetId`, or `null` when nothing changes
- * (same space, an unknown id, or the space already sits there).
- */
+/** The order after dropping `sourceId` before or after `targetId`; `null` when nothing changes. */
 export function reorderIds(
   ids: readonly string[],
   sourceId: string,
@@ -757,6 +744,7 @@ export interface PaneRow {
   agent?: string;
   branch?: string;
   worktree: boolean;
+  startedBy?: string;
   /** The branch is the repository's base branch. */
   onBase?: boolean;
   dirty?: number;
@@ -883,6 +871,7 @@ export function buildSpaces(
       ),
     }),
   );
+  markStarters(nodes, snapshot);
   return group ? groupWorktrees(nodes) : nodes;
 }
 

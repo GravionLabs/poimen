@@ -51,6 +51,8 @@ export class FlowTab {
   readonly paneId = input.required<string>();
   /** A subagent node was clicked: show its transcript. */
   readonly openAgent = output<string>();
+  /** A started terminal's node was clicked: focus that terminal. */
+  readonly paneChosen = output<string>();
   private readonly machines = inject(Machines);
   /** Why the machine of a remote pane cannot be asked for its transcripts (#698). */
   protected readonly paneBlock = computed(() => this.machines.blockedReason(this.paneId()));

@@ -1,8 +1,6 @@
-//! The sidebar model: spaces, their tabs and terminals from the server (`space.list` and
-//! `terminal.list`; events only make the TUI read them again), rendered into rows with the
-//! tokens of `sidebar.rows` the way the app's sidebar does (`src/app/sidebar/spaces.ts`).
-//!
-//! Tokens the TUI has no source for yet (`branch`, `dirty`, `sync`, `pr`) are empty and skipped.
+//! The sidebar model: spaces, tabs and terminals from the server (`space.list`, `terminal.list`;
+//! events only make the TUI read them again), rendered into rows with the tokens of `sidebar.rows`
+//! like the app's sidebar (`src/app/sidebar/spaces.ts`); tokens without a source are skipped.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,8 +14,7 @@ pub struct Model {
     pub spaces: Vec<Space>,
     pub tabs: Vec<Tab>,
     pub terminals: Vec<Terminal>,
-    /// Repository of a space's `cwd` (by directory), for the worktree groups; empty when
-    /// grouping is off. A directory missing here is a flat space.
+    /// Repository per directory for the worktree groups (empty when off); a missing one is a flat space.
     pub repos: HashMap<String, RepoRef>,
 }
 
@@ -29,8 +26,7 @@ pub struct RepoRef {
     pub worktree: bool,
 }
 
-/// Repository info per directory, read once: a failed read (not a repository, or a directory
-/// that does not exist on this machine, as for a remote server) is kept as `None`.
+/// Repository info per directory, read once; a failed read (no repository, or a directory missing here) stays `None`.
 pub struct RepoCache {
     known: HashMap<String, Option<RepoRef>>,
     lookup: fn(&str) -> Option<RepoRef>,
@@ -145,7 +141,7 @@ pub fn default_lines(kind: &str) -> Vec<Vec<RowToken>> {
         ],
         _ => vec![
             tokens(&["state_icon", "name", "state_text"]),
-            tokens(&["agent", "title", "branch", "dir"]),
+            tokens(&["agent", "title", "started_by", "branch", "dir"]),
         ],
     }
 }
@@ -225,10 +221,10 @@ struct Subject<'a> {
     terminal: Option<&'a Terminal>,
     tab: Option<&'a str>,
     space: &'a Space,
+    starter: Option<&'a str>,
 }
 
-/// Text a program reported is shown as plain text whatever server sent it (an older or remote
-/// one may not clean it): bidi overrides and invisible characters go, an unknown kind goes.
+/// Reported text is shown as plain text whatever server sent it: bidi overrides, invisible characters and an unknown kind go.
 pub fn plain_agent_text(t: &mut Terminal) {
     for r in &mut t.records {
         r.message = r
@@ -305,9 +301,8 @@ fn silent_label(since_ms: u64, now_ms: u64) -> String {
     format!("silent {elapsed}")
 }
 
-/// The rows of the child records of a terminal: one per record in id order (a parent before its
-/// children, indented by its level), or one summary row when there are more than
-/// [`RECORDS_SHOWN`].
+/// The child-record rows of a terminal: one per record in id order (parent first, indented by
+/// level), or one summary row when there are more than [`RECORDS_SHOWN`].
 fn record_rows(t: &Terminal, depth: u16) -> Vec<Row> {
     let seg = |kind, text: String, dim| Segment {
         kind,
@@ -406,6 +401,7 @@ fn value(token: &str, s: &Subject<'_>, home: Option<&str>) -> Option<String> {
             .filter(|t| t.agent.is_some())
             .and_then(|t| t.tokens.get("deliver_step").cloned()),
         "tab" => s.tab.map(str::to_owned),
+        "started_by" => s.starter.map(|n| format!("↳ {n}")),
         "notification" => t.and_then(|t| t.agent.as_ref()?.message.clone()),
         "dir" => match t {
             None => Some(short_path(&s.space.cwd, home)),
@@ -418,8 +414,7 @@ fn value(token: &str, s: &Subject<'_>, home: Option<&str>) -> Option<String> {
     }
 }
 
-/// The lines of a row: empty values are skipped, and so is a value equal to an earlier one on
-/// the row (the name counts as shown); lines without anything but the icon are dropped.
+/// The lines of a row: empty values and repeats of an earlier one (the name counts) are skipped, icon-only lines dropped.
 fn render(lines: &[Vec<RowToken>], s: &Subject<'_>, home: Option<&str>) -> Vec<Vec<Segment>> {
     let mut seen = HashSet::from([same(s.name)]);
     lines
@@ -473,18 +468,16 @@ impl Model {
         })
     }
 
-    /// [`Model::load`] plus the repositories of the spaces' directories for the worktree
-    /// groups (`sidebar.groupWorktrees`), read through `cache`.
+    /// [`Model::load`] plus the spaces' repositories for the worktree groups (`sidebar.groupWorktrees`), via `cache`.
     pub fn load_grouped(client: &Client, cache: &mut RepoCache) -> Result<Self, ClientError> {
         let mut model = Self::load(client)?;
         model.repos = cache.resolve(model.spaces.iter().map(|s| s.cwd.as_str()));
         Ok(model)
     }
 
-    /// Puts the spaces of linked worktrees directly after the space of the main checkout of
-    /// their repository, keeping the given order inside heads and inside members. A group
-    /// without a main checkout and a space without repository stay flat. Returns each space
-    /// with whether it is a member.
+    /// Puts linked-worktree spaces directly after the space of their repository's main checkout,
+    /// keeping the order inside heads and members. A group without a main checkout and a space
+    /// without repository stay flat. Returns each space with whether it is a member.
     fn grouped<'a>(&self, spaces: Vec<&'a Space>) -> Vec<(&'a Space, bool)> {
         let repo = |s: &Space| self.repos.get(&s.cwd);
         let mut heads: HashMap<&str, &str> = HashMap::new();
@@ -513,6 +506,12 @@ impl Model {
         out
     }
 
+    /// The name of the terminal that started `t` (#982), when it is still there.
+    fn starter_of(&self, t: &Terminal) -> Option<&str> {
+        let id = t.started_by.as_deref()?;
+        Some(&self.terminal(id)?.name)
+    }
+
     pub fn terminal(&self, id: &str) -> Option<&Terminal> {
         self.terminals.iter().find(|t| t.id == id)
     }
@@ -537,9 +536,8 @@ impl Model {
     }
 
     /// The tabs of a space as a tree (#656): a tab right before its children (`Tab::parent`), each
-    /// with its terminals depth first and its nesting level (0 top level). A tab whose parent is
-    /// not in the space is top level. Terminals of the space in no tab (an older server) come
-    /// last, as tabs of their own.
+    /// with its terminals depth first and its level (0 top level); a tab whose parent is not in
+    /// the space is top level. Terminals in no tab (an older server) come last, as tabs of their own.
     fn tabs_of<'a>(&'a self, space: &'a Space) -> Vec<TabEntry<'a>> {
         let tabs: Vec<&Tab> = space
             .tabs
@@ -599,15 +597,13 @@ impl Model {
         out
     }
 
-    /// The sidebar rows: spaces in server order for `manual`, by name for `name` and `recent`
-    /// (the focus times are UI state of the app), by agent urgency for `attention` without any
-    /// unread terminal.
+    /// The sidebar rows: spaces in server order for `manual`, by name for `name` and `recent` (the
+    /// focus times are app UI state), by agent urgency for `attention` without any unread terminal.
     pub fn rows(&self, config: &SidebarRows, sort: SidebarSort, home: Option<&str>) -> Vec<Row> {
         self.rows_unread(config, sort, home, &HashSet::new())
     }
 
-    /// [`Model::rows`] with the terminals the TUI marks unread (`tui/attention.rs`): a done agent
-    /// ranks as unread only through that set.
+    /// [`Model::rows`] with the terminals the TUI marks unread (`tui/attention.rs`); a done agent ranks as unread only so.
     pub fn rows_unread(
         &self,
         config: &SidebarRows,
@@ -669,6 +665,7 @@ impl Model {
                 terminal: None,
                 tab: None,
                 space,
+                starter: None,
             };
             rows.push(Row {
                 kind: RowKind::Space,
@@ -705,6 +702,7 @@ impl Model {
                         terminal: Some(t),
                         tab: tab.map(|t| t.name.as_str()),
                         space,
+                        starter: self.starter_of(t),
                     };
                     let lines = if t.agent.is_some() { &agent } else { &terminal };
                     rows.push(Row {
@@ -761,9 +759,9 @@ pub fn focus_target(tab: &Tab, skip: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The terminal to focus when the server's focus moved while `selected` stayed: the other
-/// active tab of the selected terminal's space, or the other focused leaf of its tab. `None`
-/// when nothing moved (also on the first read, and for the terminal this client just focused).
+/// The terminal to focus when the server's focus moved while `selected` stayed: the other active
+/// tab of its space, or the other focused leaf of its tab. `None` when nothing moved (also on the
+/// first read, and for the terminal this client just focused).
 pub fn remote_focus(
     old: &Model,
     new: &Model,
@@ -791,9 +789,8 @@ pub fn remote_focus(
     .then(|| tab.active_terminal.clone())
 }
 
-/// The terminal to focus when `selected` is gone from `new`: the focus of its tab when the
-/// tab is still there (a pane closed), else the active tab of its space (the tab closed), else
-/// the first usable terminal.
+/// The terminal to focus when `selected` is gone from `new`: the focus of its tab (a pane closed),
+/// else the active tab of its space (the tab closed), else the first usable terminal.
 pub fn after_loss(old: &Model, new: &Model, selected: &str, skip: Option<&str>) -> Option<String> {
     let lost = old.tab_of(selected);
     if let Some(lost) = lost {
@@ -864,6 +861,8 @@ mod tests {
             host_bundled_version: None,
             records: Vec::new(),
             hibernated: None,
+            started_by: None,
+            report: None,
         }
     }
 

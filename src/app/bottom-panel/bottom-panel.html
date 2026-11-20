@@ -160,7 +160,11 @@
     <p class="empty body">{{ flowEmpty() }}</p>
   } @else {
     @defer {
-      <app-flow-view [now]="now()" (openAgent)="openInOutput($event)" />
+      <app-flow-view
+        [now]="now()"
+        (openAgent)="openInOutput($event)"
+        (paneChosen)="paneChosen.emit($event)"
+      />
     }
   }
 }

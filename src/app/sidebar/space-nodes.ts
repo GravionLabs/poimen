@@ -1,4 +1,5 @@
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
+import { starterId } from "../core/started-by";
 import type { AgentStatus, PaneRow, Space, SpaceNode } from "../core/snapshot";
 import {
   DEFAULT_SIDEBAR_ROWS,
@@ -107,5 +108,41 @@ export function nestTabs(
     container.leaf = false;
     container.expanded = true;
   }
-  return top;
+  return nestStarted(entries, top);
+}
+
+/**
+ * Nodes of agents started by another agent of the same list (`started_by`, #982) become children
+ * of the starting agent's node, which starts expanded. A start chain that comes back to the row
+ * (a cycle) and a row nested under a tab parent are left where they are.
+ */
+function nestStarted(
+  entries: readonly { row: PaneRow; node: HxTreeNode<SpaceData> }[],
+  top: HxTreeNode<SpaceData>[],
+): HxTreeNode<SpaceData>[] {
+  const byTerminal = new Map(entries.map((e) => [e.row.pane.terminal_id, e]));
+  const startedBy = (id: string) => {
+    const e = byTerminal.get(id);
+    return e && starterId(e.row.pane);
+  };
+  const keep: HxTreeNode<SpaceData>[] = [];
+  for (const node of top) {
+    const entry = entries.find((e) => e.node === node)!;
+    const first = starterId(entry.row.pane);
+    const starter = first ? byTerminal.get(first) : undefined;
+    let cycle = false;
+    const seen = new Set<string>();
+    for (let up = starterId(entry.row.pane); up && !seen.has(up); up = startedBy(up)) {
+      if (up === entry.row.pane.terminal_id) cycle = true;
+      seen.add(up);
+    }
+    if (!starter || starter.node === node || cycle) {
+      keep.push(node);
+      continue;
+    }
+    starter.node.children = [...(starter.node.children ?? []), node];
+    starter.node.leaf = false;
+    starter.node.expanded = true;
+  }
+  return keep;
 }
