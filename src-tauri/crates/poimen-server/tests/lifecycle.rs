@@ -621,7 +621,11 @@ fn a_damaged_state_file_leaves_a_line_in_server_log() {
     let client = start(&config);
     client.ping().unwrap();
     let log = server_log(&config);
-    assert!(log.lines().any(|l| l.contains(" store ignoring ")), "{log}");
+    assert!(
+        log.lines()
+            .any(|l| l.contains(" store ") && l.contains("is damaged")),
+        "{log}"
+    );
 }
 
 #[test]
@@ -657,4 +661,21 @@ fn start_and_shutdown_are_logged() {
             .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
+}
+
+#[test]
+fn a_state_file_of_a_newer_version_is_refused_and_left_unchanged() {
+    let env = Env::new("newer-state");
+    let config = env.config();
+    std::fs::create_dir_all(config.state_file.parent().unwrap()).unwrap();
+    let text = r#"{"version": 99, "spaces": []}"#;
+    std::fs::write(&config.state_file, text).unwrap();
+    let err = Server::bind(config.clone()).err().expect("refused");
+    let message = err.to_string();
+    assert!(message.contains("99") && message.contains("1"), "{message}");
+    assert!(message.contains("server.json"), "{message}");
+    assert_eq!(std::fs::read_to_string(&config.state_file).unwrap(), text);
+    assert!(!config.socket.exists(), "no socket was bound");
+    let log = std::fs::read_to_string(config.state_file.with_file_name("server.log")).unwrap();
+    assert!(log.contains("refusing to start"), "{log}");
 }
