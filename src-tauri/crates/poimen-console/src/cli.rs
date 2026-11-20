@@ -13,6 +13,8 @@ pub const USAGE: &str = "usage: poimen [<command>]\n\
   send <terminal> [--enter] <text..>  types the text as it is (--enter adds Enter)\n\
   prompt <terminal> <text..>          prompts the agent; refused while it is working or blocked\n\
   mcp                                 a stdio MCP server with read-only tools for agents\n\
+  doctor [--json] [--bundle <file>]   checks console, server, PTY host, state, agent hooks, tools;\n\
+                                      --bundle writes a local diagnostics file (never uploaded)\n\
   -V, --version                       prints the version\n\
   attach [--control [--takeover]] <terminal>\n\
                                       shows a terminal; observes by default, --control sends your\n\
@@ -60,6 +62,11 @@ pub enum Command {
     Request(Request),
     /// A stdio MCP server (ADR 0012).
     Mcp,
+    /// `poimen doctor` (#972).
+    Doctor {
+        json: bool,
+        bundle: Option<String>,
+    },
     /// No arguments: the TUI.
     Tui,
     Help,
@@ -79,6 +86,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "-V" | "--version" => Ok(Command::Version),
         "attach" => parse_attach(rest),
         "mcp" => no_more(rest, 0).map(|()| Command::Mcp),
+        "doctor" => parse_doctor(rest),
         "ls" => {
             let (json, pos) = switch(rest, "--json")?;
             no_more(&pos, 0)?;
@@ -207,6 +215,20 @@ fn parse_new(args: &[String]) -> Result<Command, String> {
     }))
 }
 
+fn parse_doctor(args: &[String]) -> Result<Command, String> {
+    let (mut json, mut bundle) = (false, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--json" => json = true,
+            "--bundle" => bundle = Some(it.next().ok_or("--bundle needs a file")?.clone()),
+            other if other.starts_with('-') => return Err(format!("unknown option `{other}`")),
+            other => return Err(format!("unexpected argument `{other}`")),
+        }
+    }
+    Ok(Command::Doctor { json, bundle })
+}
+
 fn parse_attach(args: &[String]) -> Result<Command, String> {
     let (mut control, mut take_over, mut terminal) = (false, false, None);
     for a in args {
@@ -239,6 +261,30 @@ mod tests {
 
     fn p(args: &[&str]) -> Result<Command, String> {
         parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn doctor_options() {
+        let d = |json, bundle: Option<&str>| {
+            Ok(Command::Doctor {
+                json,
+                bundle: bundle.map(String::from),
+            })
+        };
+        assert_eq!(p(&["doctor"]), d(false, None));
+        assert_eq!(p(&["doctor", "--json"]), d(true, None));
+        assert_eq!(
+            p(&["doctor", "--bundle", "out.json"]),
+            d(false, Some("out.json"))
+        );
+        assert_eq!(
+            p(&["doctor", "--json", "--bundle", "o"]),
+            d(true, Some("o"))
+        );
+        assert!(p(&["doctor", "--bundle"]).is_err());
+        assert!(p(&["doctor", "--x"]).is_err());
+        assert!(p(&["doctor", "extra"]).is_err());
+        assert_eq!(p(&["doctor", "--help"]), Ok(Command::Help));
     }
 
     #[test]
