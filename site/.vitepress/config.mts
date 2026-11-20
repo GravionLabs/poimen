@@ -20,7 +20,7 @@ export default defineConfig({
     nav: [
       { text: "Download", link: "/download" },
       { text: "Installation", link: "/guide/installation" },
-      { text: "Features", link: "/guide/features" },
+      { text: "Guide", link: "/guide/getting-started" },
       { text: "GitHub", link: REPO_URL },
     ],
     sidebar: [
@@ -29,7 +29,19 @@ export default defineConfig({
         items: [
           { text: "Download", link: "/download" },
           { text: "Installation", link: "/guide/installation" },
-          { text: "Features", link: "/guide/features" },
+        ],
+      },
+      {
+        text: "Using poimen",
+        items: [
+          { text: "Getting started", link: "/guide/getting-started" },
+          { text: "Spaces and layouts", link: "/guide/spaces" },
+          { text: "Agents", link: "/guide/agents" },
+          { text: "GitHub and tasks", link: "/guide/github" },
+          { text: "Runs", link: "/guide/runs" },
+          { text: "Remote machines", link: "/guide/remote-machines" },
+          { text: "Console and MCP", link: "/guide/console" },
+          { text: "Settings", link: "/guide/settings" },
         ],
       },
     ],
