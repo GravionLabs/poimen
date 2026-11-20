@@ -4,16 +4,7 @@ import { flowContextLine, flowTokenLine, type FlowNode } from "../core/flow-grap
 /** The token row of a flow node: hidden when the transcript has no usage for the node. */
 @Component({
   selector: "app-flow-node-tokens",
-  template: `
-    @if (tokens(); as line) {
-      <div class="meta tokens">
-        <span>{{ line }}</span>
-        @if (context(); as ctx) {
-          <span>{{ ctx }}</span>
-        }
-      </div>
-    }
-  `,
+  templateUrl: "./flow-node-tokens.html",
   styles: `
     .meta {
       display: flex;

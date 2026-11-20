@@ -1,0 +1,97 @@
+@if (machines.machines().length === 0 && !ui.machinesHidden()) {
+  <section class="machine empty" aria-label="Machines">
+    <div class="machine-head">
+      <h2 class="machine-name">Machines</h2>
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
+        aria-label="Add machine"
+        title="Add machine"
+        (click)="add()"
+      >
+        +
+      </button>
+      <button
+        type="button"
+        hx-button
+        variant="text"
+        severity="secondary"
+        size="small"
+        aria-label="Hide Machines"
+        title="Hide Machines"
+        (click)="ui.setMachinesHidden(true)"
+      >
+        Hide
+      </button>
+    </div>
+  </section>
+}
+@for (g of groups(); track g.machine.name) {
+  <section class="machine" [class.offline]="!g.usable" [attr.aria-label]="g.machine.name">
+    <div class="machine-head" (contextmenu)="openMenu($event, g.machine.name)">
+      <span class="dot state-{{ g.machine.state }}" aria-hidden="true"></span>
+      <h2 class="machine-name">{{ g.machine.name }}</h2>
+      @if (g.machine.state === "offline" || g.machine.state === "incompatible") {
+        <button
+          type="button"
+          hx-button
+          variant="outlined"
+          severity="secondary"
+          size="small"
+          class="reconnect"
+          [attr.aria-label]="'Reconnect ' + g.machine.name"
+          (click)="reconnect(g.machine.name)"
+        >
+          Reconnect
+        </button>
+      }
+    </div>
+    <p class="note" role="status">{{ g.note }}</p>
+    @if (g.check) {
+      <p class="note check" role="status">{{ g.check }}</p>
+    }
+    @if (cards()) {
+      @for (node of cardNodes(g.machine.name); track node.key) {
+        @defer (on immediate) {
+          <app-space-card
+            [node]="node"
+            [blocked]="g.blocked"
+            [openIds]="openIds"
+            [activeId]="activeId"
+            (act)="cardAct.emit($event)"
+            (menu)="cardMenu.emit($event)"
+            (picked)="pickId($event)"
+          />
+        }
+      }
+    } @else {
+      @for (s of g.spaces; track s.node.workspace.space_id) {
+        <div class="space" [attr.aria-disabled]="!g.usable || null">
+          <span class="space-name">{{ s.node.workspace.label }}</span>
+          @for (r of s.rows; track r.terminal.terminal_id) {
+            <button
+              type="button"
+              class="row"
+              [disabled]="!g.usable"
+              (click)="pick(r.terminal, g.usable)"
+            >
+              <span class="dot status-{{ r.terminal.agent_status }}" aria-hidden="true"></span>
+              {{ r.name }}
+            </button>
+          }
+        </div>
+      }
+    }
+  </section>
+}
+@if (menuAt(); as at) {
+  <app-context-menu
+    [at]="at"
+    [groups]="menuGroups()"
+    (picked)="choose(at.name, $event.id)"
+    (closed)="closeMenu()"
+  />
+}
