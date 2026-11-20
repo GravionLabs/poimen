@@ -258,9 +258,6 @@ mod windows {
         let grandchild = t.pid("gc");
         t.send(&ClientMessage::Kill);
         assert_eq!(t.exit_tree(), Some(TreeEnd::Ended));
-        assert!(
-            gone_within(grandchild, Duration::from_secs(5)),
-            "grandchild {grandchild} runs"
-        );
+        assert!(gone(grandchild), "grandchild {grandchild} runs");
     }
 }
