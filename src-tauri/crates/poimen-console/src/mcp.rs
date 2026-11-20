@@ -448,13 +448,22 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
         }
         None => (space_id, None),
     };
+    // A space made for this start does not outlive a failed start (the worktree stays).
+    let drop_new_space = || {
+        if new_space.is_some() {
+            let _ = client.close_space(&space_id);
+        }
+    };
     let terminal = client
         .create_terminal(&TerminalCreate {
             space_id: space_id.clone(),
             name: Some(text_arg(args, "name").unwrap_or(id).to_owned()),
             ..Default::default()
         })
-        .map_err(server_error)?;
+        .map_err(|e| {
+            drop_new_space();
+            server_error(e)
+        })?;
     match client.start_agent(&terminal.id, program, rest, START_WAIT) {
         Ok(agent) => {
             announce(
@@ -484,6 +493,7 @@ fn start_agent(client: &Client, env: &Env, args: &Value) -> Result<Value, Fail> 
         Err(e) => {
             // The agent never started: the empty terminal is not left behind.
             let _ = client.close_terminal(&terminal.id);
+            drop_new_space();
             Err(agent_error(e))
         }
     }
