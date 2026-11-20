@@ -5,6 +5,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.29.0] — 2026-11-20
+
+### Bug Fixes
+- **mcp**: Close the new space when start_agent fails (#981)
+- **sidebar**: Nest remote agents below their starter (#982)
+- **mcp**: Report once on the server, wait for a hibernated starter (#980)
+- **flow**: Forget started terminals when the pane changes (#1088)
+- **sidebar**: Hint "restart for new host" on the second line instead of a hollow dot (#1098) (#1100)
+
+
+### Documentation
+- **skills**: A lead skill for the start, wait, read, report loop (#983) (#1107)
+- **site**: Rewrite the guide by task (#1087) (#1108)
+
+
+### Features
+- **mcp**: Wait_agent and read_agent tools (#979) (#1101)
+- **mcp**: Start_agent in a new task worktree (#981) (#1103)
+- **mcp**: Start_agent in a new task worktree (#981)
+- **sidebar**: Show which agent started which (#982) (#1104)
+- **sidebar**: Show which agent started which (#982)
+- **mcp**: A started agent reports its result to the agent that started it (#980) (#1105)
+- **mcp**: A started agent reports its result to the agent that started it (#980)
+- **flow**: Show agents started by an agent (#1088) (#1106)
+- **flow**: Show agents started by an agent (#1088)
+
+
 ## [0.28.1] — 2026-11-20
 
 ### Bug Fixes
@@ -13,6 +40,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - **sidebar**: Details toggle in the header, smaller gaps, room beside the origin icon (#1085)
 - **sidebar**: The filter text is as small as the rows (#1085)
 - **sidebar**: Info icon left of the fold chevron, linked worktree cards not indented, machine cards aligned (#1085)
+
+
+### Documentation
+- Update CHANGELOG.md for v0.28.1 [skip ci]
 
 
 ## [0.28.0] — 2026-11-20
