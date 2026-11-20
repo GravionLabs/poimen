@@ -203,7 +203,7 @@ export class DiffEditor {
    * extends the range from where the comment was started.
    */
   lineClicked(side: Side, line: number, shift: boolean): void {
-    this.lastLine = { path: this.filePath(), line };
+    if (side === "new") this.lastLine = { path: this.filePath(), line };
     const anchor = this.anchor;
     if (shift && anchor && anchor.side === side && this.draft?.side === side) {
       this.draft = {

@@ -8,7 +8,8 @@ import { TauriBridge } from "./tauri";
 describe("joinPath", () => {
   it("joins with one slash", () => {
     expect(joinPath("/r/", "a/b.ts")).toBe("/r/a/b.ts");
-    expect(joinPath("/r", "/a.ts")).toBe("/r/a.ts");
+    expect(joinPath("/r", "a.ts")).toBe("/r/a.ts");
+    expect(joinPath("/r", "/x/a.ts")).toBe("/x/a.ts");
   });
 });
 
