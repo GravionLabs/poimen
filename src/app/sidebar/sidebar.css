@@ -621,7 +621,7 @@
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   padding: 2px 8px 10px;
 }

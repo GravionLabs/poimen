@@ -50,12 +50,12 @@ describe("space card layout styles (#1085)", () => {
       css,
     )?.[1] ?? "";
 
-  it("separates the cards: a raised background, a visible border and a wider gap", () => {
+  it("separates the cards: a raised background, a visible border and a small gap", () => {
     const card = block(".card");
     expect(card).toMatch(/background:\s*color-mix/);
     expect(card).toMatch(/border:\s*1px solid color-mix/);
     expect(card).toMatch(/box-shadow:/);
-    expect(/\.cards \{[^}]*gap:\s*(\d+)px/.exec(sidebar)?.[1]).toBe("12");
+    expect(/\.cards \{[^}]*gap:\s*(\d+)px/.exec(sidebar)?.[1]).toBe("8");
   });
 
   it("ringing is a bar at the left edge, not a frame around the card", () => {
@@ -72,12 +72,25 @@ describe("space card layout styles (#1085)", () => {
     expect(row).not.toMatch(/0 0 6px/);
   });
 
-  it("tints the details block and puts its chevron at the right end", () => {
+  it("tints the details block; its toggle is an info icon in the header, before the actions", () => {
     expect(block(".details")).toMatch(/background:\s*color-mix\([^)]*--h-primary-color/);
-    expect(block(".details-toggle")).toMatch(/right:\s*2px/);
-    // The branch line holds the branch and the chips; the directory is a line of its own.
-    expect(html.indexOf('class="branch"')).toBeLessThan(html.indexOf('class="details-toggle"'));
-    expect(html.indexOf('class="details-toggle"')).toBeLessThan(html.indexOf('class="dir"'));
+    const head = html.slice(html.indexOf("<header"), html.indexOf("</header>"));
+    expect(head).toContain('class="details-toggle"');
+    expect(head.indexOf('class="details-toggle"')).toBeLessThan(head.indexOf('class="actions"'));
+    // The block holds the branch with the chips; the directory is a line of its own below.
+    expect(html.indexOf('class="branch"')).toBeLessThan(html.indexOf('class="dir"'));
+    // Hidden, the block is not rendered at all.
+    expect(html).toMatch(/@if \(!detailsHidden\(\)\) \{\s*<div class="details"/);
+  });
+
+  it("lets the name shrink before the header wraps and drops the fold chevron", () => {
+    const title = block(".title");
+    expect(title).toMatch(/flex:\s*1 1 0;/);
+    expect(title).toMatch(/min-width:\s*3rem/);
+  });
+
+  it("keeps room between the origin icon and the status dot", () => {
+    expect(block(".origin-mark")).toMatch(/margin:\s*0 6px 0 4px/);
   });
 
   it("has the origin icon first and the fold chevron last in the header", () => {

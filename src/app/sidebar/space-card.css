@@ -38,10 +38,11 @@
 
 .title {
   display: flex;
-  flex: 1 1 5rem;
+  /* A zero basis: a long name is cut before the header wraps and drops the fold chevron to line 2. */
+  flex: 1 1 0;
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  min-width: 3rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -62,13 +63,11 @@
 
 /* The details block (branch, chips, directory) is a tinted band under the header (#1085). */
 .details {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  min-height: 22px;
-  padding: 3px 28px 3px 10px;
+  padding: 4px 8px 4px 10px;
   border-top: 1px solid color-mix(in srgb, var(--h-primary-color) 24%, transparent);
   background: color-mix(in srgb, var(--h-primary-color) 11%, transparent);
   color: var(--h-text-muted-color);
@@ -85,11 +84,13 @@
   min-width: 0;
 }
 
-/* The toggle sits at the right end of the first line, whatever wraps. */
+/* The toggle is in the header, next to the actions; it is shown while the details are. */
 .details-toggle {
-  position: absolute;
-  top: 1px;
-  right: 2px;
+  flex: none;
+  color: var(--h-text-muted-color);
+}
+
+.details-toggle[aria-expanded="true"] {
   color: var(--h-primary-color);
 }
 
@@ -525,7 +526,7 @@
 .origin-mark {
   flex: none;
   align-self: center;
-  margin: 0 0 0 4px;
+  margin: 0 6px 0 4px;
   color: var(--h-text-muted-color);
   cursor: default;
 }
