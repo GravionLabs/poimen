@@ -383,14 +383,14 @@ fn sleeper_home(f: &Fixture) -> PathBuf {
     home
 }
 
-/// Reports an agent for the terminal named `name` once it exists in `space`.
-fn agent_appears(client: &Client, space: &str, name: &str) {
-    let (client, space, name) = (client.clone(), space.to_owned(), name.to_owned());
+/// Reports an agent for the terminal named `name` once it exists in `space` (any space: `None`).
+fn agent_appears(client: &Client, space: Option<&str>, name: &str) {
+    let (client, space, name) = (client.clone(), space.map(str::to_owned), name.to_owned());
     thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             let found = client
-                .list_terminals(Some(&space))
+                .list_terminals(space.as_deref())
                 .unwrap()
                 .into_iter()
                 .find(|t| t.name == name && t.status == TerminalStatus::Running);
@@ -410,7 +410,7 @@ fn start_agent_in_the_own_space_and_in_another_with_approval() {
     let home = sleeper_home(&f);
     let rx = app(&f.client);
 
-    agent_appears(&f.client, &f.own_space, "helper");
+    agent_appears(&f.client, Some(&f.own_space), "helper");
     let r = call(
         &f.client,
         &env(Some(&f.caller), Some(home.clone()), WAIT),
@@ -421,7 +421,7 @@ fn start_agent_in_the_own_space_and_in_another_with_approval() {
     assert_eq!(r["structuredContent"]["space"], f.own_space.as_str());
 
     let answered = answer_next(&f.client, rx, true);
-    agent_appears(&f.client, &f.other_space, "remote-helper");
+    agent_appears(&f.client, Some(&f.other_space), "remote-helper");
     let r = call(
         &f.client,
         &env(Some(&f.caller), Some(home), WAIT),
@@ -470,4 +470,128 @@ fn start_agent_names_an_unknown_harness_and_a_missing_space() {
         json!({"harness": "claude", "space": "s999"}),
     );
     assert!(text(&r).contains("not found"), "{r}");
+}
+
+/// A repository with the local branch `topic` at `dir/repo`.
+fn repo_with_topic(f: &Fixture) -> PathBuf {
+    let repo = f.dir.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let ok = poimen_core::gui_path::command("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&["branch", "topic"]);
+    repo.canonicalize().unwrap()
+}
+
+#[test]
+fn start_agent_in_a_worktree_asks_even_in_the_own_space_and_reuses_the_branch() {
+    let f = fixture("worktree");
+    let home = sleeper_home(&f);
+    let repo = repo_with_topic(&f);
+    let repo_space = f
+        .client
+        .create_space("repo", &repo.display().to_string())
+        .unwrap()
+        .id;
+    let rx = app(&f.client);
+    let e = env(Some(&f.caller), Some(home), WAIT);
+
+    let answered = answer_next(&f.client, rx, true);
+    agent_appears(&f.client, None, "wt");
+    let r = call(
+        &f.client,
+        &e,
+        "start_agent",
+        json!({"space": repo_space, "harness": "sleeper", "name": "wt",
+               "worktree": {"branch": "topic"}}),
+    );
+    assert_eq!(r["isError"], Value::Null, "{r}");
+    let wt = &r["structuredContent"]["worktree"];
+    assert_eq!(wt["branch"], "topic");
+    assert_eq!(wt["created"], true);
+    let path = wt["path"].as_str().unwrap();
+    assert!(std::path::Path::new(path).join(".git").exists(), "{path}");
+    let new_space = r["structuredContent"]["space"].as_str().unwrap();
+    assert_ne!(new_space, repo_space);
+    let spaces = f.client.list_spaces().unwrap();
+    assert_eq!(spaces.iter().find(|s| s.id == new_space).unwrap().cwd, path);
+    let (asked, rx) = answered.join().unwrap();
+    let Event::AgentConfirmRequested { text, .. } = asked else {
+        unreachable!()
+    };
+    assert!(text.contains("branch topic"), "{text}");
+
+    // The branch has a worktree now: it is reused, never changed.
+    let answered = answer_next(&f.client, rx, true);
+    agent_appears(&f.client, None, "wt2");
+    let r = call(
+        &f.client,
+        &e,
+        "start_agent",
+        json!({"space": repo_space, "harness": "sleeper", "name": "wt2",
+               "worktree": {"branch": "topic"}}),
+    );
+    assert_eq!(r["isError"], Value::Null, "{r}");
+    assert_eq!(r["structuredContent"]["worktree"]["created"], false);
+    assert_eq!(r["structuredContent"]["worktree"]["path"], path);
+    answered.join().unwrap();
+}
+
+#[test]
+fn a_declined_worktree_start_creates_no_worktree_and_bad_arguments_are_refused() {
+    let f = fixture("worktree-declined");
+    let home = sleeper_home(&f);
+    let repo = repo_with_topic(&f);
+    let repo_space = f
+        .client
+        .create_space("repo", &repo.display().to_string())
+        .unwrap()
+        .id;
+    let rx = app(&f.client);
+    let e = env(Some(&f.caller), Some(home), WAIT);
+
+    let answered = answer_next(&f.client, rx, false);
+    let r = call(
+        &f.client,
+        &e,
+        "start_agent",
+        json!({"space": repo_space, "harness": "sleeper", "worktree": {"branch": "topic"}}),
+    );
+    assert_eq!(r["isError"], true, "{r}");
+    answered.join().unwrap();
+    assert_eq!(f.client.list_spaces().unwrap().len(), 3);
+    let listed = poimen_core::gui_path::command("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["worktree", "list"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&listed.stdout).lines().count(), 1);
+
+    for bad in [
+        json!({"issue": 1, "branch": "topic"}),
+        json!({}),
+        json!({"branch": "a{nr}"}),
+        json!("topic"),
+    ] {
+        let r = call(
+            &f.client,
+            &e,
+            "start_agent",
+            json!({"harness": "sleeper", "worktree": bad}),
+        );
+        assert_eq!(r["isError"], true, "{bad}: {r}");
+        assert!(text(&r).contains("worktree"), "{}", text(&r));
+    }
 }
