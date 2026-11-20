@@ -19,7 +19,13 @@ import { EditorTabs } from "../../core/editor-tabs";
 import { SpaceCard, type CardMenuRequest } from "../space-card";
 import type { SpaceData } from "../sidebar";
 import type { SidebarMenuAction } from "../sidebar-menu";
-import { checkPassed, machineHint, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
+import {
+  checkPassed,
+  machineHint,
+  Machines,
+  type MachineCheck,
+  type MachineStatus,
+} from "../../core/machines";
 
 /** One line for the last check of a machine: its result, the error, or what is missing. */
 export function checkNote(check: MachineCheck | { error: string } | undefined): string | null {
