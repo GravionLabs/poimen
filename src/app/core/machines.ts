@@ -195,9 +195,11 @@ export function machineHint(m: MachineStatus): MachineHint | null {
       command: "ssh-add",
     };
   if (e.includes("permission denied"))
+    // With BatchMode an encrypted key that is not in the agent fails as "Permission denied
+    // (publickey)", with no word about the passphrase, so this is the usual fix.
     return {
-      text: `ssh refused the login to ${m.ssh}; poimen needs a key in the agent, never a password prompt. Check that this works in a terminal, then press Reconnect.`,
-      command: `ssh ${target}`,
+      text: `ssh refused the login to ${m.ssh}; if your key has a passphrase, add it to the ssh agent (poimen never asks for a password), then press Reconnect.`,
+      command: "ssh-add",
     };
   if (e.includes("no route to host") || e.includes("network is unreachable"))
     return {

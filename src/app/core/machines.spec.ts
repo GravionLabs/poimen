@@ -179,6 +179,7 @@ describe("machineHint", () => {
 
   it.each([
     ["Load key: incorrect passphrase supplied", "ssh-add"],
+    ["me@box.lan: Permission denied (publickey).", "ssh-add"],
     ["Host key verification failed.", "ssh me@box.lan"],
     [
       "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed.",

@@ -197,11 +197,11 @@ export class MachinesSection {
     return this.nodesSignal().get(machine) ?? [];
   }
 
-  /** A row of a card: the terminal by its qualified id, only on a connected machine. */
   protected copy(text: string): void {
     void Promise.resolve(navigator.clipboard?.writeText(text)).catch(() => undefined);
   }
 
+  /** A row of a card: the terminal by its qualified id, only on a connected machine. */
   protected pickId(id: string): void {
     for (const g of this.groups()) {
       const row = this.store
