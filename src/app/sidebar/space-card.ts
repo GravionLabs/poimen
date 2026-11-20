@@ -14,6 +14,7 @@ import { HxButton } from "@gravionlabs/helix-ui";
 import type { HxTreeNode } from "@gravionlabs/helix-ui";
 import { silentLabel } from "../core/agent-priority";
 import { Attention, workspaceUnread } from "../core/attention";
+import { Machines } from "../core/machines";
 import { PaneActions } from "../core/pane-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SpacesStore } from "../core/spaces-store";
@@ -38,6 +39,24 @@ export interface CardMenuRequest {
   y: number;
 }
 
+/** Number of origin colors (`--origin-<n>` in `styles.css`). */
+export const ORIGIN_COLORS = 6;
+
+/** The color slot of a machine: a hash of its name, so it stays the same across sessions. */
+export function originColor(name: string): number {
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return hash % ORIGIN_COLORS;
+}
+
+/** Where a space runs, as the card shows it. */
+export interface SpaceOrigin {
+  kind: "computer" | "machine";
+  label: string;
+  tip: string;
+  color: number | null;
+}
+
 /**
  * One card per space for the `cards` sidebar layout (#934). It renders the node `spaceNodes` builds
  * (no second model): the header (status dot, first line of `sidebar.rows.space`, unread count and
@@ -60,10 +79,16 @@ export class SpaceCard {
   private readonly spaceDraggableSignal = signal(false);
   private readonly tabDraggableSignal = signal(false);
   private readonly draggingSignal = signal<string | null>(null);
-  private readonly dropMarkSignal = signal<{ id: string; after: boolean } | null>(null);
+  private readonly dropMarkSignal = signal<{
+    id: string;
+    after: boolean;
+  } | null>(null);
   private readonly tabDragSignal = signal<{ pane: string } | null>(null);
   protected readonly stopSignal = signal<string | null>(null);
-  private readonly tabMarkSignal = signal<{ pane: string; after: boolean } | null>(null);
+  private readonly tabMarkSignal = signal<{
+    pane: string;
+    after: boolean;
+  } | null>(null);
   private readonly blockedSignal = signal<string | null>(null);
 
   /** The workspace node of `spaceNodes`; its children are the rows of the body. */
@@ -120,12 +145,30 @@ export class SpaceCard {
     this.tabMarkSignal.set(value);
   }
 
-  @Output() readonly spaceDragStart = new EventEmitter<{ event: DragEvent; id: string }>();
-  @Output() readonly spaceDragOver = new EventEmitter<{ event: DragEvent; id: string }>();
-  @Output() readonly spaceDrop = new EventEmitter<{ event: DragEvent; id: string }>();
-  @Output() readonly tabDragStart = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
-  @Output() readonly tabDragOver = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
-  @Output() readonly tabDrop = new EventEmitter<{ event: DragEvent; row: PaneRow }>();
+  @Output() readonly spaceDragStart = new EventEmitter<{
+    event: DragEvent;
+    id: string;
+  }>();
+  @Output() readonly spaceDragOver = new EventEmitter<{
+    event: DragEvent;
+    id: string;
+  }>();
+  @Output() readonly spaceDrop = new EventEmitter<{
+    event: DragEvent;
+    id: string;
+  }>();
+  @Output() readonly tabDragStart = new EventEmitter<{
+    event: DragEvent;
+    row: PaneRow;
+  }>();
+  @Output() readonly tabDragOver = new EventEmitter<{
+    event: DragEvent;
+    row: PaneRow;
+  }>();
+  @Output() readonly tabDrop = new EventEmitter<{
+    event: DragEvent;
+    row: PaneRow;
+  }>();
   /** The drag ended (also a drop outside the list). */
   @Output() readonly dragEnded = new EventEmitter<void>();
 
@@ -146,6 +189,7 @@ export class SpaceCard {
   private readonly spaceActions = inject(SpaceActions);
   private readonly paneActions = inject(PaneActions);
   private readonly spaceRebuild = inject(SpaceRebuild);
+  private readonly machines = inject(Machines);
 
   /** The fold button, the further lines and the body: everything but the header. */
   protected readonly full = computed(() => !this.headerOnlySignal());
@@ -163,6 +207,36 @@ export class SpaceCard {
   protected readonly reason = this.blockedSignal.asReadonly();
   /** A space of a machine: its id is qualified (`<machine>::<id>`). */
   protected readonly remote = computed(() => splitId(this.id()).machine !== undefined);
+  /**
+   * Where the space runs (#1074): a symbol in the header and, for a machine, a stripe on the left
+   * edge. `null` when no machine is configured (every card would say "this computer"). The color
+   * is one of {@link ORIGIN_COLORS}, stable per machine name; the label is the accessible name.
+   */
+  protected readonly origin = computed<SpaceOrigin | null>(() => {
+    const machine = splitId(this.id()).machine;
+    if (machine === undefined) {
+      return this.machines.machines().length === 0
+        ? null
+        : {
+            kind: "computer",
+            label: "This computer",
+            tip: "This computer",
+            color: null,
+          };
+    }
+    const label = `Machine ${machine}`;
+    return {
+      kind: "machine",
+      label,
+      tip: this.blockedSignal() ? `${label}: ${this.blockedSignal()}` : label,
+      color: originColor(machine),
+    };
+  });
+  /** The accessible name of the card: the label, then where it runs. */
+  protected readonly cardName = computed(() => {
+    const origin = this.origin();
+    return origin ? `${this.label()}, ${origin.label}` : this.label();
+  });
   protected readonly canDragSpace = computed(
     () => this.spaceDraggableSignal() && this.editing()?.kind !== "space",
   );
@@ -225,7 +299,10 @@ export class SpaceCard {
   });
 
   /** What is renamed in place: the space (the header) or a terminal; `null` when none. */
-  protected readonly editing = signal<{ kind: "space" | "pane"; id: string } | null>(null);
+  protected readonly editing = signal<{
+    kind: "space" | "pane";
+    id: string;
+  } | null>(null);
   protected readonly renameError = computed(() =>
     this.editing()?.kind === "pane" ? this.paneActions.error() : this.spaceActions.renameError(),
   );
@@ -364,7 +441,12 @@ export class SpaceCard {
     event.stopPropagation();
     if (this.closing() || this.blockedSignal()) return;
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    this.menu.emit({ kind: "workspace", id: this.id(), x: box.left, y: box.bottom + 2 });
+    this.menu.emit({
+      kind: "workspace",
+      id: this.id(),
+      x: box.left,
+      y: box.bottom + 2,
+    });
   }
 
   protected newTerminal(event: Event): void {

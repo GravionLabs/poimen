@@ -392,3 +392,60 @@
   outline-offset: -2px;
   border-radius: 4px;
 }
+
+/* Where the space runs (#1074): information, not a button. The stripe sits inside the card's border, so the member indent stays outside. */
+.origin-mark {
+  flex: none;
+  align-self: center;
+  margin: 0 0 0 4px;
+  color: var(--h-text-muted-color);
+  cursor: default;
+}
+
+.origin-mark.machine {
+  color: var(--origin, var(--h-text-muted-color));
+}
+
+.card.origin {
+  position: relative;
+}
+
+.card.origin::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 1;
+  width: 3px;
+  background: var(--origin);
+  pointer-events: none;
+}
+
+.card[data-origin="0"] {
+  --origin: var(--origin-0);
+}
+
+.card[data-origin="1"] {
+  --origin: var(--origin-1);
+}
+
+.card[data-origin="2"] {
+  --origin: var(--origin-2);
+}
+
+.card[data-origin="3"] {
+  --origin: var(--origin-3);
+}
+
+.card[data-origin="4"] {
+  --origin: var(--origin-4);
+}
+
+.card[data-origin="5"] {
+  --origin: var(--origin-5);
+}
+
+/* A machine that is not connected: the symbol is muted (the whole card is dimmed too). */
+.card.offline .origin-mark {
+  color: var(--h-text-muted-color);
+  opacity: 0.8;
+}

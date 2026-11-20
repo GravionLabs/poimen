@@ -88,8 +88,7 @@
   }
 </ng-template>
 <ng-template #rowTpl let-node let-depth="depth">
-  @let d = row(node);
-  @let m = marks(d.row);
+  @let d = row(node); @let m = marks(d.row);
   <div
     class="row"
     role="treeitem"
@@ -196,7 +195,9 @@
   [class.offline]="reason() !== null"
   [attr.aria-disabled]="reason() !== null ? 'true' : null"
   [attr.aria-busy]="closing() || null"
-  [attr.aria-label]="label()"
+  [attr.aria-label]="cardName()"
+  [class.origin]="origin()?.color !== null && origin()?.color !== undefined"
+  [attr.data-origin]="origin()?.color ?? null"
   (dragover)="spaceDragOver.emit({ event: $event, id: id() })"
   (drop)="spaceDrop.emit({ event: $event, id: id() })"
 >
@@ -226,6 +227,30 @@
       >
         <span class="chevron" [class.open]="!collapsed()" aria-hidden="true"></span>
       </button>
+    }
+    @if (origin(); as o) {
+      <svg
+        class="origin-mark"
+        [class.machine]="o.kind === 'machine'"
+        viewBox="0 0 16 16"
+        width="13"
+        height="13"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        role="img"
+        [attr.aria-label]="o.label"
+      >
+        <title>{{ o.tip }}</title>
+        @if (o.kind === "computer") {
+          <rect x="1.5" y="2.5" width="13" height="8" rx="1" />
+          <path d="M5.5 13.5h5M8 10.5v3" />
+        } @else {
+          <rect x="2" y="2" width="12" height="5" rx="1" />
+          <rect x="2" y="9" width="12" height="5" rx="1" />
+          <path d="M4.5 4.5h.01M4.5 11.5h.01" stroke-linecap="round" />
+        }
+      </svg>
     }
     <span
       class="title"
