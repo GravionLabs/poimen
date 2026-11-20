@@ -280,7 +280,12 @@ pub(crate) fn spawn_sweeper(shared: &Arc<Shared>) {
 impl Shared {
     /// Tells a new subscription whether the machine is held, so a client that missed a change
     /// while its stream was down learns the current state.
-    pub(crate) fn announce_awake(&self, tx: &Sender<Event>) {
+    /// Called under the `subscribers` lock, so no change falls between it and the listing. Only
+    /// a declared client (one that knows the event) gets it.
+    pub(crate) fn announce_awake(&self, tx: &Sender<Event>, declared: bool) {
+        if !declared {
+            return;
+        }
         let _ = tx.send(Event::ServerAwakeChanged {
             awake: self.awake_held(),
         });

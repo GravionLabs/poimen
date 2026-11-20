@@ -428,10 +428,7 @@ impl Shared {
             }
         }
         let mut subs = lock(&self.subscribers);
-        // Under the lock, so a change cannot fall between the announcement and the listing.
-        if declared {
-            self.announce_awake(&tx);
-        }
+        self.announce_awake(&tx, declared);
         let event = Event::ServerClientsChanged {
             clients: {
                 let mut k: Vec<_> = subs.iter().map(|s| s.kind).collect();
