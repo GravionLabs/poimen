@@ -70,7 +70,8 @@ pub fn start(machines: Arc<Machines>) -> Arc<Machines> {
 fn run(on_trigger: impl Fn(Trigger)) {
     let mut watch = Watch::default();
     loop {
-        std::thread::sleep(TICK);
+        // A park with a timeout: an early wake-up only makes a tick come sooner.
+        std::thread::park_timeout(TICK);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
