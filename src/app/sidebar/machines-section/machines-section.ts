@@ -19,7 +19,7 @@ import { EditorTabs } from "../../core/editor-tabs";
 import { SpaceCard, type CardMenuRequest } from "../space-card";
 import type { SpaceData } from "../sidebar";
 import type { SidebarMenuAction } from "../sidebar-menu";
-import { checkPassed, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
+import { checkPassed, machineHint, Machines, type MachineCheck, type MachineStatus } from "../../core/machines";
 
 /** One line for the last check of a machine: its result, the error, or what is missing. */
 export function checkNote(check: MachineCheck | { error: string } | undefined): string | null {
@@ -82,6 +82,12 @@ export function machineRows(node: WorkspaceNode): MachineRow[] {
     .machine.offline .space,
     .machine.offline .note {
       opacity: 0.55;
+    }
+
+    .command {
+      margin: 0;
+      font-family: var(--font-mono, monospace);
+      overflow-x: auto;
     }
 
     .machine-head {
@@ -186,6 +192,10 @@ export class MachinesSection {
   }
 
   /** A row of a card: the terminal by its qualified id, only on a connected machine. */
+  protected copy(text: string): void {
+    void Promise.resolve(navigator.clipboard?.writeText(text)).catch(() => undefined);
+  }
+
   protected pickId(id: string): void {
     for (const g of this.groups()) {
       const row = this.store
@@ -200,6 +210,7 @@ export class MachinesSection {
     this.machines.machines().map((machine) => ({
       machine,
       note: machineNote(machine),
+      hint: machine.state === "offline" ? machineHint(machine) : null,
       usable: machineUsable(machine),
       blocked: this.machines.blockedReason(qualifyId(machine.name, "")),
       check: checkNote(this.machines.checks()[machine.name]),
