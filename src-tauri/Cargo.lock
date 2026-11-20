@@ -3300,11 +3300,13 @@ dependencies = [
 name = "poimen-pty-host"
 version = "0.26.0"
 dependencies = [
+ "libc",
  "poimen-client",
  "poimen-protocol",
  "poimen-server",
  "portable-pty",
  "serde_json",
+ "winapi",
 ]
 
 [[package]]

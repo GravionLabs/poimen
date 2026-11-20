@@ -771,6 +771,7 @@ impl Feed {
             let Ok(message) = poimen_protocol::host::parse_host_line(&line) else {
                 continue;
             };
+            crate::log::tree_end(&self.log, &self.endpoint, &message);
             match message {
                 HostMessage::Output { seq, bytes } => {
                     if seq <= self.read.load(Ordering::SeqCst) {
@@ -800,7 +801,7 @@ impl Feed {
                         return Ended::Stopped;
                     }
                 }
-                HostMessage::Exit { code } => return Ended::Exit(code),
+                HostMessage::Exit { code, .. } => return Ended::Exit(code),
                 HostMessage::Replaced => return Ended::Replaced,
                 HostMessage::Error { message } => {
                     crate::log::line(
@@ -1098,12 +1099,11 @@ mod tests {
     #[test]
     fn exit_replaced_and_noise_end_or_pass_as_documented() {
         let (reader, rx) = reader(0);
-        let exit = String::from_utf8(to_line(&HostMessage::Exit { code: Some(7) })).unwrap();
         let lines = [
             "not json\n".to_string(),
             "{\"type\":\"title\",\"text\":\"x\"}\n".to_string(),
             output(1, "x"),
-            exit,
+            "{\"type\":\"exit\",\"code\":7}\n".to_string(), // a host before #968
             output(2, "after"),
         ]
         .concat();

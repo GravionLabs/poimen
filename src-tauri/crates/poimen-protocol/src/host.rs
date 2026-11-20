@@ -73,6 +73,16 @@ pub struct Size {
     pub rows: u16,
 }
 
+/// Whether anything of a terminal's process tree is left once the host swept it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TreeEnd {
+    /// No process of the session (Unix) or job (Windows) is left.
+    Ended,
+    /// A process could not be confirmed gone.
+    Unconfirmed,
+}
+
 /// A line from the host (on stdout at start, then on the endpoint).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -102,6 +112,10 @@ pub enum HostMessage {
     /// The child ended (after all its output); the host ends after it.
     Exit {
         code: Option<u32>,
+        /// Whether the sweep of the terminal's process tree left nothing (absent from a host
+        /// before the sweep).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tree: Option<TreeEnd>,
     },
     /// Another client connected; this connection ends.
     Replaced,
@@ -219,6 +233,31 @@ mod tests {
     }
 
     #[test]
+    fn exit_carries_the_tree_when_the_host_reports_it() {
+        let ended = parse_host_line(r#"{"type":"exit","code":0,"tree":"ended"}"#).unwrap();
+        assert_eq!(
+            ended,
+            HostMessage::Exit {
+                code: Some(0),
+                tree: Some(TreeEnd::Ended)
+            }
+        );
+        let unconfirmed = HostMessage::Exit {
+            code: None,
+            tree: Some(TreeEnd::Unconfirmed),
+        };
+        let line = String::from_utf8(to_line(&unconfirmed)).unwrap();
+        assert!(line.contains(r#""tree":"unconfirmed""#), "{line}");
+        assert_eq!(parse_host_line(&line).unwrap(), unconfirmed);
+        // Absent from an older host, and not written when unknown.
+        let none = HostMessage::Exit {
+            code: Some(1),
+            tree: None,
+        };
+        assert!(!String::from_utf8(to_line(&none)).unwrap().contains("tree"));
+    }
+
+    #[test]
     fn host_lines_parse() {
         assert_eq!(
             parse_host_line(r#"{"type":"output","seq":3,"bytes":"aGk="}"#).unwrap(),
@@ -233,7 +272,10 @@ mod tests {
         );
         assert_eq!(
             parse_host_line(r#"{"type":"exit","code":null}"#).unwrap(),
-            HostMessage::Exit { code: None }
+            HostMessage::Exit {
+                code: None,
+                tree: None
+            }
         );
         assert_eq!(
             parse_host_line(r#"{"type":"replaced"}"#).unwrap(),
@@ -249,7 +291,10 @@ mod tests {
         );
         assert_eq!(
             parse_host_line(r#"{"type":"exit","code":3,"signal":"HUP"}"#).unwrap(),
-            HostMessage::Exit { code: Some(3) }
+            HostMessage::Exit {
+                code: Some(3),
+                tree: None
+            }
         );
         assert_eq!(
             parse_client_line(r#"{"type":"pause"}"#).unwrap(),

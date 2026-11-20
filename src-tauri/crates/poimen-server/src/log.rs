@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use poimen_protocol::files::utc_now;
+use poimen_protocol::host::{HostMessage, TreeEnd};
 
 /// Size at which a log moves to `<name>.1`.
 pub const MAX_LOG: u64 = 256 * 1024;
@@ -34,6 +35,28 @@ pub fn line(log: &Path, component: &str, message: &str) {
     let line = format!("{} {component} {message}", utc_now());
     eprintln!("{line}");
     append(log, &line);
+}
+
+/// Logs an `exit` of a host whose process tree is unconfirmed (#968).
+pub fn tree_end(log: &Path, endpoint: &Path, message: &HostMessage) {
+    if !matches!(
+        message,
+        HostMessage::Exit {
+            tree: Some(TreeEnd::Unconfirmed),
+            ..
+        }
+    ) {
+        return;
+    }
+    let id = endpoint
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned());
+    let id = id.unwrap_or_else(|| endpoint.display().to_string());
+    line(
+        log,
+        "host",
+        &format!("terminal {id} ended, process tree unconfirmed"),
+    );
 }
 
 /// Appends `line` to the log, moving a full log to `<name>.1` first. Never fails the caller.
@@ -91,6 +114,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn only_an_unconfirmed_tree_is_logged_with_the_terminal_id() {
+        let dir = temp("tree");
+        let log = dir.join("server.log");
+        let endpoint = dir.join("hosts").join("t7");
+        let exit = |tree| HostMessage::Exit {
+            code: Some(0),
+            tree,
+        };
+        tree_end(&log, &endpoint, &exit(None));
+        tree_end(&log, &endpoint, &exit(Some(TreeEnd::Ended)));
+        assert!(!log.exists());
+        tree_end(&log, &endpoint, &exit(Some(TreeEnd::Unconfirmed)));
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            text.contains("terminal t7 ended, process tree unconfirmed"),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
