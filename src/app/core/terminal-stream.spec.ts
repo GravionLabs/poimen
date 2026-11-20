@@ -116,7 +116,7 @@ describe("TerminalStreamService", () => {
     const session = await service.open(OBSERVE, () => {});
 
     session.input("ls\r");
-    session.resize(100, 30);
+    void session.resize(100, 30);
 
     expect(tauri.calls("terminal_input")).toEqual([{ id: 7, text: "ls\r" }]);
     expect(tauri.calls("terminal_resize")).toEqual([{ id: 7, cols: 100, rows: 30 }]);
@@ -127,7 +127,7 @@ describe("TerminalStreamService", () => {
     session.close();
 
     session.input("x");
-    session.resize(100, 30);
+    void session.resize(100, 30);
 
     expect(tauri.calls("terminal_input")).toEqual([]);
     expect(tauri.calls("terminal_resize")).toEqual([]);

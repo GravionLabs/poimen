@@ -132,7 +132,14 @@
             "prefix": "app",
             "style": "kebab-case"
           }
-        ]
+        ],
+        "typescript/no-floating-promises": "error",
+        "typescript/await-thenable": "error",
+        "typescript/no-misused-promises": "error",
+        "typescript/no-for-in-array": "error",
+        "typescript/no-implied-eval": "error",
+        "typescript/restrict-template-expressions": "warn",
+        "typescript/no-base-to-string": "warn"
       },
       "plugins": ["typescript"],
       "jsPlugins": ["@angular-eslint/eslint-plugin"]
@@ -151,5 +158,8 @@
       },
       "jsPlugins": ["./scripts/lint/oxlint-plugin-poimen.mjs"]
     }
-  ]
+  ],
+  "options": {
+    "typeAware": true
+  }
 }
