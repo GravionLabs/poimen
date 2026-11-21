@@ -22,19 +22,6 @@
   overflow: hidden;
 }
 
-.mode {
-  font: 600 9px var(--font-mono);
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: var(--h-primary-color);
-  color: var(--h-primary-contrast-color);
-}
-
-.mode.ro {
-  background: color-mix(in srgb, currentColor 15%, transparent);
-  color: inherit;
-}
-
 .mode-switch {
   display: flex;
   align-items: center;

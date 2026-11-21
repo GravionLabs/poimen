@@ -44,6 +44,7 @@
               (click)="choose(row.entry)"
               (mousemove)="palette.hover(row.index)"
             >
+              <app-icon class="kind" [name]="row.entry.icon" [size]="16" />
               <span class="title">
                 @for (part of parts(row.entry.title, row.positions); track $index) {
                   @if (part.hit) {

@@ -67,6 +67,7 @@ import {
   spaceOfTab,
   spaceTab,
   tabKind,
+  withKindIcons,
   tabPaneId,
   type EditorGroup,
 } from "./core/editor-tabs";
@@ -256,7 +257,7 @@ export class App {
   private readonly known = new Map<string, Terminal>();
   /** The clock of the silent marks on tabs; ticks once a minute. */
   private readonly clock = signal(Date.now());
-  protected readonly groupItems = computed(() => {
+  private readonly baseItems = computed(() => {
     const snap = this.store.all();
     this.store.panes();
     const ringing = this.attention.attention();
@@ -328,6 +329,7 @@ export class App {
       ]),
     );
   });
+  protected readonly groupItems = computed(() => withKindIcons(this.baseItems()));
   /** The leaf the user focused last per split tab; the server's focus is the fallback. */
   private readonly leafFocus = signal<ReadonlyMap<string, string>>(new Map());
   /** Size of each terminal that reported one; the status bar shows the focused group's. */
@@ -839,10 +841,6 @@ export class App {
     return group.activeId === null ? null : spaceOfTab(group.activeId);
   }
 
-  protected isSpace(id: string): boolean {
-    return tabKind(id) === "space";
-  }
-
   /** A space closed in herdr: all its panes go, so their tabs close without a successor. */
   protected onSpaceClosed(paneIds: string[]): void {
     for (const id of paneIds) this.editor.closePane(id);
@@ -1028,10 +1026,6 @@ export class App {
     return group.activeId === null ? null : flowPane(group.activeId);
   }
 
-  protected isFlow(id: string): boolean {
-    return tabKind(id) === "flow";
-  }
-
   /** A subagent node of a flow tab was clicked: show its transcript in the Output tab. */
   protected openAgentOutput(agentId: string): void {
     this.subagents.pick(agentId);
@@ -1041,10 +1035,6 @@ export class App {
   /** The directory of the group's active tab when that is a changes tab. */
   protected changesOf(group: EditorGroup): string | null {
     return group.activeId === null ? null : changesDir(group.activeId);
-  }
-
-  protected isChanges(id: string): boolean {
-    return tabKind(id) === "changes";
   }
 
   protected isDeliver(id: string | null): boolean {
