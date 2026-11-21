@@ -9,6 +9,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { Icon } from "../ui/icon/icon";
 import { SERVER_RESTART_NOTE, type UpdateState } from "../core/updater";
 import type { BarSummary } from "../deliver/deliver-status";
+import type { LimitsItem } from "../core/claude-limits";
+import type { ConnectionState } from "../core/spaces-store";
+import { densityFlags, shortRuns, type DensityLevel } from "./status-density";
 import { CHANNEL_TITLE, connectionLabel, modeLabel, modeTitle, sizeLabel } from "./status-bar";
 
 beforeAll(() => {
@@ -69,6 +72,10 @@ describe("mode button", () => {
     update: UpdateState = { kind: "idle" },
     channel: "stable" | "rc" = "stable",
     awake = false,
+    level: DensityLevel = 0,
+    limits: LimitsItem | null = null,
+    waiting = 0,
+    connection: ConnectionState = { state: "connected" },
   ) => {
     const emitted: boolean[] = [];
     const serverClicks: string[] = [];
@@ -81,8 +88,10 @@ describe("mode button", () => {
       template: readFileSync("src/app/status-bar/status-bar.html", "utf8"),
     })
     class Host {
-      connection = () => ({ state: "connected" }) as const;
-      waiting = () => 0;
+      connection = () => connection;
+      waiting = () => waiting;
+      density = () => densityFlags(level);
+      shortRuns = shortRuns;
       awake = () => awake;
       paneId = () => "p1";
       mode = () => mode;
@@ -117,7 +126,7 @@ describe("mode button", () => {
       versionLabel = () => "";
       warning = () => "";
       deliver = () => deliver;
-      limits = () => null;
+      limits = () => limits;
       showDeliver = { emit: () => deliverClicks++ };
     }
     TestBed.resetTestingModule();
@@ -335,5 +344,81 @@ describe("mode button", () => {
     expect(button.title).toContain("controller held");
     button.click();
     expect(emitted).toEqual([]);
+  });
+
+  describe("status bar density (#1034)", () => {
+    const LIMITS: LimitsItem = {
+      text: "5h 62 %",
+      full: "5h 62 % · 7d 20 %",
+      title: "Claude limits\n5h: 62 %\n7d: 20 %",
+      warning: false,
+    };
+    const RUNS: BarSummary = {
+      text: "▶ M5 7/19",
+      title: "M5: 7/19",
+      warning: false,
+    };
+    const text = (root: HTMLElement, sel: string) =>
+      root.querySelector(sel)?.textContent?.replace(/\s+/g, " ").trim();
+    const at = (level: DensityLevel, connection?: ConnectionState) =>
+      render(
+        "control",
+        null,
+        false,
+        RUNS,
+        null,
+        { kind: "idle" },
+        "stable",
+        true,
+        level,
+        LIMITS,
+        3,
+        connection,
+      ).root;
+
+    it("steps down in the order limits, runs, low-priority items", () => {
+      const l0 = at(0);
+      expect(text(l0, ".limits")).toBe("5h 62 % · 7d 20 %");
+      expect(text(l0, ".deliver")).toBe("▶ M5 7/19");
+      expect(text(l0, ".panel-button")).toBe("Output");
+      expect(text(l0, ".mode-button")).toContain("Input");
+      expect(text(l0, ".awake")).toBe("awake");
+
+      const l1 = at(1);
+      expect(text(l1, ".limits")).toBe("5h 62 %");
+      expect(text(l1, ".deliver")).toBe("▶ M5 7/19");
+      expect(text(l1, ".panel-button")).toBe("Output");
+
+      const l2 = at(2);
+      expect(text(l2, ".limits")).toBe("5h 62 %");
+      expect(text(l2, ".deliver")).toBe("▶ 7/19");
+      expect(text(l2, ".panel-button")).toBe("Output");
+
+      const l3 = at(3);
+      expect(text(l3, ".deliver")).toBe("▶ 7/19");
+      expect(text(l3, ".panel-button")).toBe("");
+      expect(text(l3, ".mode-button")).toBe("");
+      expect(text(l3, ".awake")).toBe("");
+    });
+
+    it("never shortens the waiting count or the connection warning", () => {
+      const unreachable: ConnectionState = { state: "unreachable", reason: "no socket" };
+      for (const level of [0, 1, 2, 3] as const) {
+        const root = at(level, unreachable);
+        expect(text(root, ".waiting")).toBe("3 waiting");
+        expect(text(root, "[data-testid=connection]")).toBe("poimen unreachable: no socket");
+      }
+    });
+
+    it("keeps what was dropped in the tooltip", () => {
+      const root = at(3);
+      const title = (sel: string) =>
+        root.querySelector(`${sel} [title], ${sel}[title]`)?.getAttribute("title") ?? "";
+      expect(title(".limits")).toContain("7d: 20 %");
+      expect(title(".deliver")).toBe("M5: 7/19");
+      expect(title(".panel-button")).toContain("output panel");
+      expect(title(".mode-button")).toContain("Input");
+      expect(title(".awake")).toContain("kept awake");
+    });
   });
 });

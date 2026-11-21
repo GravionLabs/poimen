@@ -6,6 +6,13 @@
 hx-status-bar {
   /* The shell sets the top border to 0 for `.hx-app-shell > .hx-status-bar`; the wrapper hides it. */
   border-block-start: 0;
+  /* One line (#1034): the bar gives way in steps (status-density.ts) instead of wrapping or shrinking items. */
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+hx-status-item {
+  flex: none;
 }
 
 .update-details {
