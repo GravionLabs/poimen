@@ -5,6 +5,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.32.0] — 2026-11-21
+
+### Bug Fixes
+- **github**: Keep the pending state across a failed pull request read (#995)
+- **tabs**: Show a silent agent as a hollow status dot with the time in the tooltip (#1149) (#1159)
+
+
+### Features
+- **agents**: Resume an earlier session of a space (#986) (#1147)
+- **github**: Notify when the checks of a space's pull request finish (#995) (#1150)
+- **github**: Notify when the checks of a space's pull request finish (#995)
+- **changes**: Create a pull request with a drafted title and body (#996) (#1151)
+- **github**: Agent action Resolve conflicts (#998) (#1155)
+- **github**: Failed check log in the pull request detail (#999) (#1157)
+- **mcp**: List_runs can be filtered and bounded, get_events returns the events after a seq (#1142) (#1158)
+- **protocol**: OSC 7501 done with a warning (tone=warning) (#1152) (#1160)
+- **mcp**: Get_terminal shows where an agent status came from and its last changes (#1153) (#1161)
+- **mcp**: Read_terminal returns the last lines of any terminal as text (#1154) (#1162)
+
+
 ## [0.31.0] — 2026-11-21
 
 ### Bug Fixes
@@ -18,6 +38,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - **sidebar**: Default workspace lines and card wording
 - **site**: New screenshots from a demo backend (#1109) (#1138)
+- Update CHANGELOG.md for v0.31.0 [skip ci]
 
 
 ### Features
