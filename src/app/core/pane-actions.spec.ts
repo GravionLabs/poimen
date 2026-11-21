@@ -255,26 +255,39 @@ describe("PaneActions", () => {
 
   it("renames an agent pane through agent.rename", async () => {
     actions.askRename("w1:p2");
-    expect(actions.dialog()).toMatchObject({ kind: "rename", agent: true });
-    expect(await actions.confirmRename(" review ")).toBe(true);
+    expect(actions.renaming()).toBe("w1:p2");
+    expect(actions.dialog()).toBeNull();
+    expect(await actions.rename("w1:p2", " review ")).toBe(true);
     expect(tauri.calls("agent_rename")).toEqual([{ target: "w1:p2", name: "review" }]);
     expect(tauri.calls("pane_rename")).toEqual([]);
   });
 
   it("renames a plain terminal through pane.rename and clears with an empty name", async () => {
-    actions.askRename("w1:p1");
-    expect(actions.dialog()).toMatchObject({ kind: "rename", agent: false });
-    await actions.confirmRename("build");
-    actions.askRename("w1:p1");
-    await actions.confirmRename("  ");
+    await actions.rename("w1:p1", "build");
+    await actions.rename("w1:p1", "  ");
     expect(tauri.calls("pane_rename")).toEqual([
       { terminalId: "w1:p1", label: "build" },
       { terminalId: "w1:p1", label: null },
     ]);
   });
 
+  it("cancels an inline rename and clears the error", () => {
+    actions.askRename("w1:p1");
+    actions.cancelRename();
+    expect(actions.renaming()).toBeNull();
+  });
+
+  it("is busy while the rename is sent", async () => {
+    let release!: () => void;
+    tauri.invoke.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    const sent = actions.rename("w1:p1", "x");
+    expect(actions.renameBusy()).toBe(true);
+    release();
+    await sent;
+    expect(actions.renameBusy()).toBe(false);
+  });
+
   it("does nothing on confirm without the matching dialog", async () => {
-    expect(await actions.confirmRename("x")).toBe(false);
     expect(await actions.confirmStartAgent("claude", "", "")).toBe(false);
     expect(tauri.invoke).not.toHaveBeenCalledWith("agent_rename", expect.anything());
   });
