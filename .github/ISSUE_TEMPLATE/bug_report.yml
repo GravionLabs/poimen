@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in poimen does not work as expected
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The poimen version (status bar, or `poimen --version`).
+      placeholder: "0.29.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and package
+      description: Your operating system and how you installed poimen.
+      placeholder: "macOS 15 .dmg, Windows 11 setup.exe, Ubuntu 24.04 .deb or .AppImage"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happens instead. Screenshots are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `poimen doctor`
+      description: Run `poimen doctor` when it is available and paste the output. Check it for anything private first.
+      render: shell
+    validations:
+      required: false

@@ -7,6 +7,7 @@
 //! adopts the hosts of that list (#604) and drops the leaves whose terminal did not come back.
 
 mod adopt;
+mod agent_state;
 mod awake;
 pub mod check;
 pub mod claude;
@@ -59,6 +60,7 @@ use poimen_protocol::{
 };
 use serde_json::{Value, json};
 
+use agent_state::{agent_event, reset_error_on_input};
 pub use emulator::DEFAULT_SCROLLBACK;
 pub use host::{Launch, PtyHost, host_beside};
 pub use store::state_file_path;
@@ -2358,22 +2360,6 @@ fn records_event(entry: &TerminalEntry) -> Event {
     }
 }
 
-/// The event for the agent of a terminal; no agent is `gone`.
-fn agent_event(terminal_id: &str, agent: Option<&AgentInfo>) -> Event {
-    Event::AgentStatusChanged {
-        terminal_id: terminal_id.to_string(),
-        status: agent.map_or(AgentStatus::Gone, |a| a.status),
-        agent: agent.and_then(|a| a.agent.clone()),
-        session_id: agent.and_then(|a| a.session_id.clone()),
-        message: agent.and_then(|a| a.message.clone()),
-        message_at: agent.and_then(|a| a.message_at),
-        progress: agent.and_then(|a| a.progress),
-        kind: agent.and_then(|a| a.kind.clone()),
-        title: agent.and_then(|a| a.title.clone()),
-        silent_since: agent.and_then(|a| a.silent_since),
-    }
-}
-
 fn invalid(message: impl Into<String>) -> (ErrorCode, String) {
     (ErrorCode::InvalidParams, message.into())
 }
@@ -2691,7 +2677,9 @@ fn terminal_input(shared: &Shared, p: TerminalInput, ctx: Option<&Attachment>) -
         let mut inner = lock(&shared.inner);
         let entry = terminal_mut(&mut inner, &p.terminal_id)?;
         authorize(&entry.stream, ctx, &p.terminal_id, false)?;
-        running_host(entry, &p.terminal_id)?.writer()
+        let writer = running_host(entry, &p.terminal_id)?.writer();
+        reset_error_on_input(shared, &mut inner, &p.terminal_id, &p.data);
+        writer
     };
     writer
         .write(p.data.as_bytes())

@@ -1,0 +1,15 @@
+{
+  "comment": "The path rules of the `changes` job in .github/workflows/ci.yml and of `pnpm check:changed` (scripts/check-changed.mjs). Regular expressions over repo-relative paths. `rustAll` are the rust paths that affect every crate; `compat` are the paths that run the previous-release job (CI only).",
+  "frontend": [
+    "^(package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|\\.nvmrc|angular\\.json|tsconfig[^/]*\\.json|eslint\\.config\\.mjs|\\.oxlintrc\\.json|\\.oxfmtrc\\.json|scripts/lint/.*|vitest\\.[^/]*|src/.*|\\.github/workflows/ci\\.yml|scripts/changed-paths\\.json)$"
+  ],
+  "rust": [
+    "^(rust-toolchain\\.toml|package\\.json|src-tauri/.*|src/app/deliver/fixtures/.*|\\.github/workflows/ci\\.yml|scripts/changed-paths\\.json)$"
+  ],
+  "compat": [
+    "^(src-tauri/(Cargo\\.(toml|lock)|crates/(poimen-protocol|poimen-pty-host|poimen-server|poimen-client)/.*)|rust-toolchain\\.toml|\\.github/workflows/ci\\.yml|scripts/changed-paths\\.json)$"
+  ],
+  "rustAll": [
+    "^(rust-toolchain\\.toml|package\\.json|src/app/deliver/fixtures/.*|\\.github/workflows/ci\\.yml|scripts/changed-paths\\.json|src-tauri/(Cargo\\.toml|Cargo\\.lock|rust-toolchain\\.toml|clippy\\.toml))$"
+  ]
+}
