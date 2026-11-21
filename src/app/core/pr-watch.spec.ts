@@ -87,7 +87,7 @@ describe("finishedChecks", () => {
       pull("", checks("passing", 3)),
     ]);
     expect(finished).toEqual([]);
-    expect(next.size).toBe(0);
+    expect(next.get("u/1")).toEqual({ sha: "a", pending: true });
   });
 });
 
