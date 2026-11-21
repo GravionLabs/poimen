@@ -141,6 +141,7 @@ export interface AgentActionWhen {
   label: string[];
   noChildren: boolean;
   checks: string | null;
+  conflicting: boolean;
   state: string[];
   review: string | null;
 }
@@ -169,6 +170,7 @@ function parseWhen(raw: unknown): AgentActionWhen {
     label: list(r["label"]),
     noChildren: r["noChildren"] === true,
     checks: typeof r["checks"] === "string" ? r["checks"] : null,
+    conflicting: r["conflicting"] === true,
     state: list(r["state"]),
     review: typeof r["review"] === "string" ? r["review"] : null,
   };

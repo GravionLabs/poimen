@@ -33,6 +33,8 @@ export interface Pull {
   headRef: string;
   isCrossRepository: boolean;
   baseRef: string;
+  /** `MERGEABLE`, `CONFLICTING` or `UNKNOWN`; missing in an old answer. */
+  mergeable?: string;
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   reviewRequests: string[];
   checks: Checks;

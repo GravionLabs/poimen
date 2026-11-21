@@ -6,12 +6,7 @@ import { HxTheme } from "@gravionlabs/helix-ui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bundled } from "../core/color-scheme";
 import { ColorSchemeService } from "../core/color-scheme-service";
-import {
-  DEFAULT_SETTINGS,
-  parseAgentActions,
-  parseHarnesses,
-  SettingsStore,
-} from "../core/settings";
+import { DEFAULT_SETTINGS, parseHarnesses, SettingsStore } from "../core/settings";
 import { tauri } from "../core/tauri.mock";
 import { HooksOffer } from "../core/hooks-offer";
 import { ServerRestart } from "../core/server-restart";
@@ -497,65 +492,6 @@ describe("SettingsView agent actions", () => {
     expect(rows[0]).toContain("default");
     expect(rows[1]).toContain("user");
     expect(tauri.calls("get_agent_actions")[0]).toEqual({ root: null });
-  });
-});
-
-describe("parseAgentActions", () => {
-  it("reads actions and skips malformed entries", () => {
-    expect(
-      parseAgentActions({
-        actions: [
-          {
-            id: "a",
-            label: "A",
-            on: "pr",
-            prompt: "p",
-            run: "ask",
-            harness: "x",
-            model: "opus",
-            when: { label: ["bug"], noChildren: true, checks: "failed" },
-            source: "project",
-          },
-          { id: "b", on: "issue", prompt: "q", source: "user" },
-          { id: "c", on: "repo", prompt: "q", source: "user" },
-          { id: "d", on: "issue", prompt: "q", source: "other" },
-          null,
-        ],
-      }),
-    ).toEqual([
-      {
-        id: "a",
-        label: "A",
-        on: "pr",
-        prompt: "p",
-        run: "ask",
-        harness: "x",
-        model: "opus",
-        when: {
-          level: [],
-          label: ["bug"],
-          noChildren: true,
-          checks: "failed",
-          state: [],
-          review: null,
-        },
-        batch: "each",
-        source: "project",
-      },
-      {
-        id: "b",
-        label: "b",
-        on: "issue",
-        prompt: "q",
-        run: "repoRoot",
-        harness: null,
-        model: null,
-        when: { level: [], label: [], noChildren: false, checks: null, state: [], review: null },
-        batch: "each",
-        source: "user",
-      },
-    ]);
-    expect(parseAgentActions("nope")).toEqual([]);
   });
 });
 

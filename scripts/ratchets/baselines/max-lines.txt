@@ -3,7 +3,6 @@ src-tauri/crates/poimen-console/src/tui/mod.rs	1310
 src-tauri/crates/poimen-console/src/tui/palette.rs	1209
 src-tauri/crates/poimen-console/src/tui/sidebar.rs	1572
 src-tauri/crates/poimen-console/tests/tui.rs	938
-src-tauri/crates/poimen-core/src/agent_actions.rs	1093
 src-tauri/crates/poimen-core/src/agent_events.rs	954
 src-tauri/crates/poimen-core/src/github.rs	1364
 src-tauri/crates/poimen-core/src/layout.rs	1186
@@ -19,7 +18,6 @@ src-tauri/crates/poimen-server/src/tabs.rs	986
 src-tauri/src/changes.rs	908
 src-tauri/src/deliver.rs	952
 src-tauri/src/github_issues.rs	1396
-src-tauri/src/github_pulls.rs	1096
 src-tauri/src/lib.rs	3789
 src-tauri/src/machines.rs	1938
 src-tauri/src/poimen_backend.rs	2615
@@ -33,5 +31,5 @@ src/app/deliver/deliver-status.ts	1006
 src/app/deliver/deliver-view.spec.ts	879
 src/app/github/github-view.spec.ts	853
 src/app/github/issues.ts	1019
-src/app/settings-view/settings-view.spec.ts	1142
+src/app/settings-view/settings-view.spec.ts	1078
 src/app/terminal-view/terminal-view.spec.ts	1262
