@@ -114,7 +114,7 @@ CI (`.github/workflows/ci.yml`, built on GravionLabs/ci) runs the frontend check
 
 ### App icon
 
-The icon source is `src-tauri/icons/source/icon.svg` (1024 x 1024, a shepherd's crook and a terminal prompt inside a terminal panel). After changing it, regenerate all sizes and drop the mobile outputs:
+The icon source is `src-tauri/icons/source/icon.svg` (1024 x 1024, a dark π, the first letter of ποιμήν, on a gold squircle). After changing it, regenerate all sizes and drop the mobile outputs:
 
 ```sh
 pnpm tauri icon src-tauri/icons/source/icon.svg
