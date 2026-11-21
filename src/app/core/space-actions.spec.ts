@@ -100,9 +100,7 @@ describe("SpaceActions", () => {
       terminals: [],
     }));
     tauri.answer("create_space", () => ({ space_id: "w1", created: false }));
-    const ui = injector.get(UiState);
     await actions.create("/work/app", "");
-    expect(ui.splitWorkspace()).toBe("w1");
     expect(actions.warning()).toBe('Opened the existing space "app".');
   });
 

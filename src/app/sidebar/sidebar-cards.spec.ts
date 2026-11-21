@@ -10,7 +10,7 @@ import { PaneActions } from "../core/pane-actions";
 import { SpaceActions } from "../core/space-actions";
 import { SpaceRebuild, type RebuildMark } from "../core/space-rebuild";
 import { SpacesStore } from "../core/spaces-store";
-import { DEFAULT_SETTINGS, SettingsStore, type SidebarLayout } from "../core/settings";
+import { DEFAULT_SETTINGS, SettingsStore } from "../core/settings";
 import { UI_STATE_KEY, UI_STORAGE, UiState } from "../core/ui-state";
 import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
 import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
@@ -41,10 +41,9 @@ const one = mk("w1", "One", [
 ]);
 const two = mk("w2", "Two", [["w2:p1", "shell-b", false]]);
 
-async function setup(layout: SidebarLayout, stored?: string) {
+async function setup(stored?: string) {
   TestBed.resetTestingModule();
-  const setSidebarLayout = vi.fn(async (layout: SidebarLayout) => void layout);
-  const settings = signal({ ...DEFAULT_SETTINGS, sidebarLayout: layout });
+  const settings = signal({ ...DEFAULT_SETTINGS });
   const spaces = signal<SpaceNode[]>([one, two]);
   const marks = signal<ReadonlyMap<string, RebuildMark>>(new Map());
   const rebuild = vi.fn(async () => undefined);
@@ -58,8 +57,6 @@ async function setup(layout: SidebarLayout, stored?: string) {
           allSpaces: () => spaces(),
           pinnedSpaces: signal<string[]>([]),
           snapshot: signal({ spaces: [one.workspace, two.workspace] }),
-          agentSections: signal(new Map()),
-          agentChangedAt: signal(new Map()),
           disconnected: signal<string | null>(null),
           ensureBackend: vi.fn(),
         },
@@ -67,7 +64,7 @@ async function setup(layout: SidebarLayout, stored?: string) {
       { provide: SpaceRebuild, useValue: { marks, rebuild } },
       {
         provide: SettingsStore,
-        useValue: { settings, writeError: signal(null), setSidebarLayout },
+        useValue: { settings, writeError: signal(null) },
       },
       {
         provide: UI_STORAGE,
@@ -122,32 +119,17 @@ async function setup(layout: SidebarLayout, stored?: string) {
     spaceActions: TestBed.inject(SpaceActions),
     paneActions: TestBed.inject(PaneActions),
     ui: TestBed.inject(UiState),
-    setSidebarLayout,
     cards: () => [...root.querySelectorAll<HTMLElement>("app-space-card")],
   };
 }
 
-describe("Sidebar in the cards layout (#934)", () => {
+describe("Sidebar cards (#934, #1111)", () => {
   beforeAll(() => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
   });
 
-  it("names the next layout on the toggle: tree, split, cards, tree", async () => {
-    for (const [layout, next] of [
-      ["tree", "split"],
-      ["split", "cards"],
-      ["cards", "tree"],
-    ] as const) {
-      const s = await setup(layout);
-      const toggle = s.root.querySelector<HTMLButtonElement>(".layout-toggle")!;
-      expect(toggle.getAttribute("aria-label")).toBe(`Show ${next} layout`);
-      toggle.click();
-      expect(s.setSidebarLayout).toHaveBeenCalledWith(next);
-    }
-  });
-
   it("renders one card per space and no tree", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     expect(s.cards()).toHaveLength(2);
     expect(s.root.querySelector("hx-tree")).toBeNull();
     expect(s.cards()[0].querySelector(".head")?.textContent).toContain("One");
@@ -155,7 +137,7 @@ describe("Sidebar in the cards layout (#934)", () => {
   });
 
   it("shows new terminal and more in the header; configure and close are menu entries", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     const head = s.cards()[0].querySelector<HTMLElement>(".head")!;
     const label = (b: Element) => b.getAttribute("aria-label");
     expect([...head.querySelectorAll("button")].map(label)).toEqual([
@@ -176,7 +158,7 @@ describe("Sidebar in the cards layout (#934)", () => {
   });
 
   it("has Close space, the sort entries and the details toggle in the more menu", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     s.cards()[0].querySelector<HTMLButtonElement>(".more")!.click();
     await s.settle();
     const items = [...s.root.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')].map(
@@ -201,7 +183,7 @@ describe("Sidebar in the cards layout (#934)", () => {
   });
 
   it("hides the details line per card with the chevron and keeps line 1", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     const card = s.cards()[0];
     const toggle = card.querySelector<HTMLButtonElement>(".details-toggle");
     if (!toggle) return;
@@ -217,7 +199,7 @@ describe("Sidebar in the cards layout (#934)", () => {
   });
 
   it("gives the dot a tooltip and label and no state word for a working space", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     const dot = s.cards()[0].querySelector<HTMLElement>(".head .dot")!;
     expect(dot.getAttribute("aria-label")).toMatch(/^Status: /);
     expect(dot.title).toBe(dot.getAttribute("aria-label"));
@@ -225,7 +207,7 @@ describe("Sidebar in the cards layout (#934)", () => {
   });
 
   it("opens the context menu of the tree row from the more button", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     s.cards()[0].querySelector<HTMLButtonElement>(".more")!.click();
     await s.settle();
     const items = [...s.root.querySelectorAll('[role="menuitem"]')].map((e) =>
@@ -237,7 +219,7 @@ describe("Sidebar in the cards layout (#934)", () => {
   });
 
   it("lists the tabs and terminals, a child tab indented below its parent, and opens a click", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     const rows = [...s.cards()[0].querySelectorAll<HTMLElement>(".row")];
     expect(rows.map((r) => r.textContent)).toEqual([
       expect.stringContaining("agent-a"),
@@ -250,7 +232,7 @@ describe("Sidebar in the cards layout (#934)", () => {
   });
 
   it("collapses a card to its header, persists it and prunes closed spaces", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     s.cards()[0].querySelector<HTMLButtonElement>(".fold")!.click();
     await s.settle();
     expect(s.cards()[0].querySelector(".body")).toBeNull();
@@ -258,7 +240,7 @@ describe("Sidebar in the cards layout (#934)", () => {
     expect(s.cards()[1].querySelector(".body")).not.toBeNull();
     expect(JSON.parse(s.storage.get(UI_STATE_KEY)!).collapsedCards).toEqual(["w1"]);
 
-    const again = await setup("cards", s.storage.get(UI_STATE_KEY));
+    const again = await setup(s.storage.get(UI_STATE_KEY));
     expect(again.cards()[0].querySelector(".body")).toBeNull();
 
     again.ui.pruneCollapsedCards(["w2"]);
@@ -266,10 +248,10 @@ describe("Sidebar in the cards layout (#934)", () => {
     expect(JSON.parse(again.storage.get(UI_STATE_KEY)!).collapsedCards).toBeUndefined();
   });
 
-  it("keeps the tree layout as before", async () => {
-    const s = await setup("tree");
-    expect(s.cards()).toHaveLength(0);
-    expect(s.root.querySelector('[role="tree"]')).not.toBeNull();
+  it("ignores an old sidebar.layout value: the cards are the only layout (#1111)", async () => {
+    const s = await setup();
+    expect(s.cards()).toHaveLength(2);
+    expect(s.root.querySelector(".layout-toggle")).toBeNull();
   });
 
   describe("states (#935)", () => {
@@ -282,7 +264,7 @@ describe("Sidebar in the cards layout (#934)", () => {
       );
 
     it("rings the whole card of a pane that turned blocked while not viewed, until viewed", async () => {
-      const s = await setup("cards");
+      const s = await setup();
       s.attention.observe(statuses([]), new Set());
       s.attention.observe(statuses(["w1:p1"]), new Set());
       await s.settle();
@@ -295,7 +277,7 @@ describe("Sidebar in the cards layout (#934)", () => {
     });
 
     it("shows the unread count and the most urgent status in a collapsed header", async () => {
-      const s = await setup("cards");
+      const s = await setup();
       s.spaces.set([
         {
           ...one,
@@ -317,7 +299,7 @@ describe("Sidebar in the cards layout (#934)", () => {
     });
 
     it("shows the silent mark on the terminal row and the header", async () => {
-      const s = await setup("cards");
+      const s = await setup();
       const silentPane = {
         ...one.rows[0].pane,
         agent_silent_since: Date.now() - 5 * 60_000 - 30_000,
@@ -331,7 +313,7 @@ describe("Sidebar in the cards layout (#934)", () => {
     });
 
     it("shows the pin mark in the header of a pinned space only", async () => {
-      const s = await setup("cards");
+      const s = await setup();
       s.store.pinnedSpaces.set(["w2"]);
       await s.settle();
       expect(s.cards()[0].querySelector(".head .pin-mark")).toBeNull();
@@ -341,7 +323,7 @@ describe("Sidebar in the cards layout (#934)", () => {
     });
 
     it("shows the rebuild marks and Closing… in the header of an empty space", async () => {
-      const s = await setup("cards");
+      const s = await setup();
       s.spaces.set([{ ...one, rows: [] }, two]);
       const head = () => s.cards()[0].querySelector<HTMLElement>(".head")!;
       const mark = async (m: RebuildMark) => {
@@ -362,7 +344,7 @@ describe("Sidebar in the cards layout (#934)", () => {
     });
 
     it("renames a space inline: Enter saves, Escape cancels", async () => {
-      const s = await setup("cards");
+      const s = await setup();
       const rename = vi.spyOn(s.spaceActions, "rename").mockResolvedValue(true);
       const edit = async () => {
         s.cards()[0]
@@ -389,7 +371,7 @@ describe("Sidebar in the cards layout (#934)", () => {
     });
 
     it("renames a terminal inline and keeps editing when the rename fails", async () => {
-      const s = await setup("cards");
+      const s = await setup();
       const rename = vi
         .spyOn(s.paneActions, "rename")
         .mockResolvedValueOnce(false)
@@ -427,7 +409,7 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
     s.root.querySelector<HTMLElement>(`[data-nav="${key}"]`)!;
 
   it("is a tree of treeitems with level, expanded and selected", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     expect(s.root.querySelector('.cards[role="tree"]')).not.toBeNull();
     expect(s.root.querySelector('[role="listitem"]')).toBeNull();
     const head = nav(s, "w1");
@@ -441,7 +423,7 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
   });
 
   it("has one tab stop; the header buttons are tabbable from the focused header", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     const stops = [...s.root.querySelectorAll<HTMLElement>(".cards [tabindex='0']")];
     expect(stops.map((e) => e.dataset["nav"] ?? e.getAttribute("aria-label"))).toEqual([
       "w1",
@@ -455,7 +437,7 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
   });
 
   it("moves with the arrow keys over headers and visible rows in display order", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     await press(s, nav(s, "w1"), "ArrowDown");
     expect(nav(s, "w1:p1").getAttribute("tabindex")).toBe("0");
     expect(document.activeElement).toBe(nav(s, "w1:p1"));
@@ -469,7 +451,7 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
   });
 
   it("collapses and expands with Left and Right, Enter toggles a header", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     await press(s, nav(s, "w1"), "ArrowLeft");
     expect(s.ui.collapsedCards()).toEqual(["w1"]);
     expect(s.root.querySelector('[data-nav="w1:p1"]')).toBeNull();
@@ -486,13 +468,13 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
   });
 
   it("opens a terminal with Enter, once", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     await press(s, nav(s, "w1:p1"), "Enter");
     expect(s.selected).toEqual(["w1:p1"]);
   });
 
   it("keeps Space on a button inside a treeitem, and the stop on a card whose fold was clicked", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     const space = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
     s.root.querySelector('[aria-label="More actions for One"]')!.dispatchEvent(space);
     expect(space.defaultPrevented).toBe(false);
@@ -505,7 +487,7 @@ describe("Sidebar cards keyboard and ARIA (#937)", () => {
   });
 
   it("leaves keys with a modifier, buttons and fields to the app shortcuts", async () => {
-    const s = await setup("cards");
+    const s = await setup();
     const head = nav(s, "w1");
     const alt = new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true });
     head.dispatchEvent(alt);

@@ -49,7 +49,6 @@ function plan(over: Partial<TaskPlan> = {}): TaskPlan {
 describe("TaskStarter", () => {
   let starter: TaskStarter;
   let spaces: SpaceActions;
-  let ui: UiState;
 
   beforeEach(() => {
     tauri.reset();
@@ -79,7 +78,6 @@ describe("TaskStarter", () => {
     });
     starter = injector.get(TaskStarter);
     spaces = injector.get(SpaceActions);
-    ui = injector.get(UiState);
   });
 
   it("creates the worktree, then the space on its path with label and command", async () => {
@@ -219,7 +217,6 @@ describe("TaskStarter", () => {
       expect(tauri.calls("machine_task_tab")).toEqual([]);
       expect(tauri.calls("task_worktree")).toEqual([]);
       expect(tauri.calls("create_space")).toEqual([]);
-      expect(ui.splitWorkspace()).toBe(qualifyId("dev", "s3"));
     });
 
     it("a mode without a worktree runs in a tab at the clone root", async () => {
@@ -242,7 +239,6 @@ describe("TaskStarter", () => {
         { space_id: qualifyId("dev", "s7"), label: "#12 Add picker" } as Snapshot["spaces"][number],
       ];
       expect(await starter.run("/work/app", REMOTE)).toBe(true);
-      expect(ui.splitWorkspace()).toBe(qualifyId("dev", "s7"));
       expect(lastToast(injector)).toBe('Opened the existing space "#12 Add picker" on dev.');
       expect(tauri.calls("machine_task_tab")).toEqual([]);
     });

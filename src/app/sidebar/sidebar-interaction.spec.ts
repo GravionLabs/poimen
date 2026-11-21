@@ -6,8 +6,6 @@ import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Terminal, SpaceNode } from "../core/snapshot";
 import { SpacesStore } from "../core/spaces-store";
-import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
-import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { SpaceActions } from "../core/space-actions";
 import { Sidebar } from "./sidebar";
 import { inlineSpaceCard } from "./space-card.mock";
@@ -53,10 +51,6 @@ async function setup(message: string | null = null, nodes: SpaceNode[] = spaces)
       template: readFileSync("src/app/sidebar/sidebar.html", "utf8"),
     },
   });
-  TestBed.overrideComponent(Sidebar, {
-    remove: { imports: [SplitPane] },
-    add: { imports: [SplitPaneStub] },
-  });
   const fixture = TestBed.createComponent(Sidebar);
   const selected: string[] = [];
   const pinned: string[] = [];
@@ -71,13 +65,13 @@ async function setup(message: string | null = null, nodes: SpaceNode[] = spaces)
       await fixture.whenStable();
     }
   };
-  /** Clicks the row and lets the tree and the sidebar settle. */
+  /** Clicks the row and lets the cards and the sidebar settle. */
   const click = async (name: string) => {
-    const item = [...root.querySelectorAll<HTMLElement>('[role="treeitem"]')].find((e) =>
+    const item = [...root.querySelectorAll<HTMLElement>(".row")].find((e) =>
       e.textContent?.includes(name),
     );
     if (!item) throw new Error(`no row ${name}`);
-    (item.querySelector(".row") as HTMLElement).click();
+    item.click();
     await settle();
   };
   const workspace = () => root.querySelector<HTMLElement>('[role="treeitem"][aria-level="1"]')!;
@@ -101,7 +95,7 @@ async function setup(message: string | null = null, nodes: SpaceNode[] = spaces)
   };
 }
 
-describe("Sidebar with the real hx-tree", () => {
+describe("Sidebar cards", () => {
   beforeAll(() => {
     getTestBed().initTestEnvironment(BrowserTestingModule, platformBrowserTesting());
   });
@@ -121,8 +115,7 @@ describe("Sidebar with the real hx-tree", () => {
         ],
       },
     ];
-    const { root, workspace, key } = await setup(null, nodes);
-    await key(workspace(), "ArrowRight");
+    const { root } = await setup(null, nodes);
     const marks = [...root.querySelectorAll<HTMLElement>(".host-hint")];
     expect(marks).toHaveLength(1);
     expect(marks[0].textContent).toContain("restart");
@@ -164,88 +157,11 @@ describe("Sidebar with the real hx-tree", () => {
     expect(selected).toEqual(["w1:p1", "w1:p1"]);
   });
 
-  it("keeps the chevron outside the text lines and anchors the row actions to line 1", async () => {
-    const { workspace } = await setup();
-    const space = workspace().querySelector<HTMLElement>(".space")!;
-    const main = space.querySelector(".main")!;
-    const chevron = space.querySelector(".chevron")!;
-    // The actions are siblings of the text block, so line 2 holds only its own segments.
-    expect(chevron.parentElement).toBe(space);
-    expect(main.contains(chevron)).toBe(false);
-    // jsdom has no layout: the placement is the stylesheet's top alignment, not centering.
-    const css = readFileSync("src/app/sidebar/sidebar.css", "utf8");
-    expect(css).toMatch(/\.space \{[^}]*align-items: flex-start;/);
-    expect(css).toMatch(/\.badge \{[^}]*align-self: flex-start;/);
-    expect(css).toMatch(/\.space-name \{[^}]*flex: 0 4 auto;/);
-    expect(css).toMatch(/\.state \{\s*flex: none;/);
-  });
-
-  it("starts expanded and collapses and expands again with the chevron, without selecting", async () => {
-    const { root, settle, workspace, selected } = await setup();
-    expect(workspace().getAttribute("aria-expanded")).toBe("true");
-    const chevron = workspace().querySelector<HTMLElement>(".chevron")!;
-    expect(chevron.getAttribute("aria-hidden")).toBe("true");
-    expect(chevron.classList.contains("open")).toBe(true);
-
-    chevron.click();
-    await settle();
-    expect(workspace().getAttribute("aria-expanded")).toBe("false");
-    expect(workspace().querySelector(".chevron")!.classList.contains("open")).toBe(false);
-    // The collapsed workspace still shows its panes' aggregate state (#67).
-    expect(workspace().querySelector(".space .state")?.textContent).toBe("working");
-    expect(root.querySelector(".row")).toBeNull();
-
-    workspace().querySelector<HTMLElement>(".chevron")!.click();
-    await settle();
-    expect(workspace().getAttribute("aria-expanded")).toBe("true");
-    expect(root.querySelectorAll(".row")).toHaveLength(2);
-    expect(selected).toEqual([]);
-  });
-
-  it("collapses with ArrowLeft and expands with ArrowRight on the workspace row", async () => {
-    const { workspace, key } = await setup();
-    await key(workspace(), "ArrowLeft");
-    expect(workspace().getAttribute("aria-expanded")).toBe("false");
-    await key(workspace(), "ArrowRight");
-    expect(workspace().getAttribute("aria-expanded")).toBe("true");
-  });
-
-  it("shows a labeled close icon directly left of the chevron", async () => {
-    const { workspace } = await setup();
-    const close = workspace().querySelector<HTMLButtonElement>(".close")!;
-    expect(close.getAttribute("aria-label")).toBe("Close space One");
-    expect(close.title).toBe("Close space One");
-    expect(close.nextElementSibling?.classList.contains("chevron")).toBe(true);
-  });
-
-  it("opens the configuration of the space from the gear without selecting the row", async () => {
-    const { fixture, workspace, settle, selected } = await setup();
-    const configured: string[] = [];
-    fixture.componentInstance.configOpened.subscribe((id) => configured.push(id));
-    const gear = workspace().querySelector<HTMLButtonElement>(".gear")!;
-    expect(gear.getAttribute("aria-label")).toBe("Configure space One");
-    gear.click();
-    await settle();
-    expect(configured).toEqual(["w1"]);
-    expect(selected).toEqual([]);
-  });
-
-  it("closes through the menu action without selecting or toggling the row", async () => {
-    const { fixture, workspace, settle, selected } = await setup();
-    const actions: unknown[] = [];
-    fixture.componentInstance.menuAction.subscribe((a) => actions.push(a));
-    workspace().querySelector<HTMLButtonElement>(".close")!.click();
-    await settle();
-    expect(actions).toEqual([{ kind: "workspace", id: "w1", action: "close-space" }]);
-    expect(selected).toEqual([]);
-    expect(workspace().getAttribute("aria-expanded")).toBe("true");
-  });
-
   it("opens the overview of the space on a click on its row, not on a pane row", async () => {
     const { fixture, workspace, settle, click, selected } = await setup();
     const opened: string[] = [];
     fixture.componentInstance.spaceOpened.subscribe((id) => opened.push(id));
-    workspace().querySelector<HTMLElement>(".space")!.click();
+    workspace().click();
     await settle();
     expect(opened).toEqual(["w1"]);
     await click("claude");
@@ -255,10 +171,10 @@ describe("Sidebar with the real hx-tree", () => {
 
   describe("inline rename", () => {
     const dbl = async (s: Awaited<ReturnType<typeof setup>>) => {
-      const name = s.root.querySelector<HTMLElement>(".space-name")!;
+      const name = s.root.querySelector<HTMLElement>("header .name")!;
       name.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
       await s.settle();
-      return s.root.querySelector<HTMLInputElement>(".space-edit")!;
+      return s.root.querySelector<HTMLInputElement>("header input.edit")!;
     };
 
     it("starts an edit prefilled with the label on a double click and confirms with Enter", async () => {
@@ -270,7 +186,7 @@ describe("Sidebar with the real hx-tree", () => {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       await s.settle();
       expect(rename).toHaveBeenCalledWith("w1", "Uno");
-      expect(s.root.querySelector(".space-edit")).toBeNull();
+      expect(s.root.querySelector("header input.edit")).toBeNull();
     });
 
     it("focuses and selects the input when the edit starts", async () => {
@@ -288,7 +204,7 @@ describe("Sidebar with the real hx-tree", () => {
       input.value = "";
       input.blur();
       await s.settle();
-      expect(s.root.querySelector(".space-edit")).toBe(input);
+      expect(s.root.querySelector("header input.edit")).toBe(input);
       expect(document.activeElement).toBe(input);
     });
 
@@ -300,8 +216,8 @@ describe("Sidebar with the real hx-tree", () => {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       await s.settle();
       expect(rename).not.toHaveBeenCalled();
-      expect(s.root.querySelector(".space-edit")).toBeNull();
-      expect(s.root.querySelector(".space-name")?.textContent).toContain("One");
+      expect(s.root.querySelector("header input.edit")).toBeNull();
+      expect(s.root.querySelector("header .name")?.textContent).toContain("One");
     });
 
     it("cancels on blur without a change", async () => {
@@ -311,7 +227,7 @@ describe("Sidebar with the real hx-tree", () => {
       input.dispatchEvent(new FocusEvent("blur"));
       await s.settle();
       expect(rename).not.toHaveBeenCalled();
-      expect(s.root.querySelector(".space-edit")).toBeNull();
+      expect(s.root.querySelector("header input.edit")).toBeNull();
     });
 
     it("keeps the edit open when the rename fails", async () => {
@@ -321,36 +237,8 @@ describe("Sidebar with the real hx-tree", () => {
       input.value = "";
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       await s.settle();
-      expect(s.root.querySelector(".space-edit")).not.toBeNull();
+      expect(s.root.querySelector("header input.edit")).not.toBeNull();
     });
-  });
-
-  it("keeps the close icon calm until hover, focus or the active space", () => {
-    const css = readFileSync("src/app/sidebar/sidebar.css", "utf8");
-    expect(css).toMatch(/\.close\s*\{[^}]*opacity:\s*0/);
-    expect(css).toMatch(/\.space:hover \.close[^{]*\{\s*opacity:\s*1/);
-    expect(css).toContain(".space.chosen .close");
-    expect(css).toContain(".close:focus-visible");
-    // the treeitem is rendered by hx-tree, so only ::ng-deep reaches it from this component
-    expect(css).toMatch(
-      /\.spaces ::ng-deep \[role="treeitem"\]:focus-visible \.close[^{]*\{\s*opacity:\s*1/,
-    );
-    expect(css).not.toContain(':host [role="treeitem"]');
-  });
-
-  it("makes the close icon a real button for Tab, Enter and Space", async () => {
-    const { workspace } = await setup();
-    const close = workspace().querySelector<HTMLButtonElement>(".close")!;
-    expect(close.tagName).toBe("BUTTON");
-    expect(close.tabIndex).toBe(0);
-  });
-
-  it("hides helix's left toggle and gives panes no chevron", async () => {
-    const { root } = await setup();
-    expect(root.querySelectorAll(".chevron")).toHaveLength(1);
-    expect(readFileSync("src/app/sidebar/sidebar.css", "utf8")).toMatch(
-      /hx-tree-node-toggle\s*\{\s*display:\s*none/,
-    );
   });
 
   it("moves focus over the entries of the pane context menu", async () => {

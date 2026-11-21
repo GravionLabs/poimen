@@ -18,7 +18,7 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 
 - `spaces.layout`, `layouts` and `spaceTemplates`: what a new space contains, see [Spaces and layouts](/guide/spaces#layouts-and-templates).
 - `explorer.roots` and `explorer.showHidden`.
-- `sidebar.layout` (`tree`, `split`, `cards`), `sidebar.sort` (`manual`, `name`, `attention`, `recent`), `sidebar.groupWorktrees` and `sidebar.rows`, which says per row which tokens it shows (`state_icon`, `name`, `agent`, `branch`, `dirty`, `sync`, `pr`, `dir` and tokens your scripts set with `poimen-server report tokens`).
+- `sidebar.sort` (`manual`, `name`, `attention`, `recent`), `sidebar.groupWorktrees` and `sidebar.rows`, which says per row which tokens it shows (`state_icon`, `name`, `agent`, `branch`, `dirty`, `sync`, `pr`, `dir` and tokens your scripts set with `poimen-server report tokens`).
 
 ## Agents
 
