@@ -42,7 +42,6 @@ export function createPoimenDemo(): DemoBackend {
       ...DEFAULT_SETTINGS,
       home: HOME,
       theme: "system",
-      sidebarLayout: "cards",
       machines: MACHINES.map(({ name, ssh, reposDir }) => ({ name, ssh, reposDir })),
     },
     usage_claude: [
