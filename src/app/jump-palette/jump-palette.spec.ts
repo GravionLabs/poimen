@@ -21,6 +21,7 @@ afterEach(() => TestBed.resetTestingModule());
 const entry = (key: string, disabled: string | null = null): JumpEntry => ({
   key,
   kind: "space",
+  icon: "space",
   title: key,
   detail: "",
   spaceId: key,

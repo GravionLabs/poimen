@@ -19,7 +19,7 @@ import {
 
 import { ContextMenu } from "../../context-menu/context-menu";
 import type { MenuGroup } from "../../context-menu/menu-model";
-import { Icon } from "../../icon/icon";
+import { Icon, type IconName } from "../../icon/icon";
 import { dropSide, tabWidth } from "./tab-bar-rules";
 
 /** One tab of the bar. Generic on purpose: no herdr knowledge (candidate for helix-ui, ADR 0001). */
@@ -39,6 +39,8 @@ export interface TabBarItem {
   note?: string;
   /** A short warning text after the label, such as `silent 12m`. */
   mark?: string;
+  /** The icon of the tab kind (#1033); the app draws it in the tab, the "All tabs" menu shows it too. */
+  icon?: IconName;
 }
 
 /** An entry of the tab context menu; `action` is reported back with the tab id. */
@@ -274,6 +276,7 @@ export class TabBar implements OnChanges {
         items: this.tabs.map((tab) => ({
           id: tab.id,
           label: `${tab.group ? tab.group + " / " : ""}${tab.label}`,
+          icon: tab.icon,
           active: tab.id === this.activeId,
           mark: tab.attention
             ? ("attention" as const)

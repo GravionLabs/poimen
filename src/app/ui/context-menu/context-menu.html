@@ -38,6 +38,9 @@
           [attr.data-testid]="item.testId ?? null"
           (click)="pick(item.id, !!item.disabled, $event)"
         >
+          @if (item.icon) {
+            <app-icon [name]="item.icon" [size]="16" />
+          }
           <span class="label">{{ item.checked ? "✓ " : "" }}{{ item.label }}</span>
           @if (item.shortcut) {
             <span class="shortcut">{{ item.shortcut }}</span>

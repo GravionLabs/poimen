@@ -13,6 +13,7 @@ import {
 } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
 import { UiState } from "./ui-state";
+import type { IconName } from "../ui/icon/icon";
 
 export const NEEDS_YOU_GROUP = "Needs you";
 export const RECENT_GROUP = "Recent";
@@ -23,6 +24,8 @@ export const RECENT_LIMIT = 8;
 export interface JumpEntry {
   key: string;
   kind: "pane" | "space";
+  /** The icon of the kind, as on a tab. */
+  icon: IconName;
   title: string;
   /** Directory and branch (and pull request) shown beside the title. */
   detail: string;
@@ -84,6 +87,7 @@ export class JumpPalette {
     return {
       key: `pane:${pane.terminal_id}`,
       kind: "pane",
+      icon: "terminal",
       title: paneTitle(this.store.all(), pane),
       detail: this.detail(paneDir(pane)),
       pane,
@@ -101,6 +105,7 @@ export class JumpPalette {
     return {
       key: `space:${space.space_id}`,
       kind: "space",
+      icon: "space",
       title: withMachine(space.label, space.machine),
       detail: this.detail(dir),
       pane,
