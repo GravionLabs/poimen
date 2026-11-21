@@ -106,38 +106,6 @@
         </div>
       </form>
     </app-dialog-shell>
-  } @else if (d.kind === "rename") {
-    <app-dialog-shell
-      [heading]="d.agent ? 'Rename agent' : 'Rename pane'"
-      [label]="d.agent ? 'Rename agent' : 'Rename pane'"
-      (cancelled)="cancel()"
-    >
-      <form (submit)="$event.preventDefault(); rename($any($event.target))">
-        <label>
-          Name
-          <input
-            class="field"
-            name="name"
-            type="text"
-            placeholder="Empty clears the name"
-            [value]="d.current"
-          />
-        </label>
-        <div class="dialog-buttons">
-          <button
-            type="button"
-            hx-button
-            variant="outlined"
-            severity="secondary"
-            class="cancel"
-            (click)="cancel()"
-          >
-            Cancel
-          </button>
-          <button type="submit" hx-button class="confirm">Rename</button>
-        </div>
-      </form>
-    </app-dialog-shell>
   } @else if (d.kind === "save-layout") {
     <app-dialog-shell
       heading="Save tab as layout"

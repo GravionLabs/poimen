@@ -1,7 +1,9 @@
+import { isComposing, refocus } from "./rename-keys";
 import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
+  Injector,
   EventEmitter,
   Input,
   Output,
@@ -227,6 +229,7 @@ export class SpaceCard {
   private readonly bridge = inject(TauriBridge);
   private readonly spaceActions = inject(SpaceActions);
   private readonly paneActions = inject(PaneActions);
+  private readonly injector = inject(Injector);
   private readonly spaceRebuild = inject(SpaceRebuild);
   private readonly machines = inject(Machines);
 
@@ -371,7 +374,9 @@ export class SpaceCard {
     id: string;
   } | null>(null);
   protected readonly renameError = computed(() =>
-    this.editing()?.kind === "pane" ? this.paneActions.error() : this.spaceActions.renameError(),
+    this.paneActions.renaming() !== null && this.editing() === null
+      ? this.paneActions.error()
+      : this.spaceActions.renameError(),
   );
   protected readonly rows = computed(() => this.nodeSignal()!.children ?? []);
 
@@ -426,6 +431,7 @@ export class SpaceCard {
   }
 
   protected isEditing(edit: { kind: "space" | "pane"; id: string }): boolean {
+    if (edit.kind === "pane") return this.paneActions.renaming() === edit.id;
     const now = this.editing();
     return now?.kind === edit.kind && now.id === edit.id;
   }
@@ -433,12 +439,31 @@ export class SpaceCard {
   protected startEdit(edit: { kind: "space" | "pane"; id: string }, event: Event): void {
     event.stopPropagation();
     if (this.closing() || this.blockedSignal()) return;
+    if (edit.kind === "pane") {
+      this.paneActions.askRename(edit.id);
+      return;
+    }
     this.spaceActions.clearRenameError();
     this.editing.set(edit);
   }
 
-  protected clearError(): void {
-    this.spaceActions.clearRenameError();
+  protected renameBusy(edit: { kind: "space" | "pane" }): boolean {
+    return edit.kind === "pane" && this.paneActions.renameBusy();
+  }
+
+  /** Enter that ends an IME composition (or is keyCode 229) only picks the candidate. */
+  protected enter(
+    edit: { kind: "space" | "pane"; id: string },
+    input: HTMLInputElement,
+    event: Event,
+  ): void {
+    if (isComposing(event)) return;
+    void this.finishEdit(edit, input, true);
+  }
+
+  protected clearError(edit: { kind: "space" | "pane" }): void {
+    if (edit.kind === "pane") this.paneActions.clearError();
+    else this.spaceActions.clearRenameError();
   }
 
   /** Enter or blur confirms, Escape cancels; a failed rename keeps editing, the old label stays. */
@@ -448,8 +473,10 @@ export class SpaceCard {
     commit: boolean,
   ): Promise<void> {
     if (!this.isEditing(edit)) return;
+    if (this.renameBusy(edit)) return;
     if (!commit) {
-      this.editing.set(null);
+      if (edit.kind === "pane") this.paneActions.cancelRename();
+      else this.editing.set(null);
       this.spaceActions.clearRenameError();
       return;
     }
@@ -457,8 +484,10 @@ export class SpaceCard {
       edit.kind === "space"
         ? await this.spaceActions.rename(edit.id, input.value)
         : await this.paneActions.rename(edit.id, input.value);
-    if (ok) this.editing.set(null);
-    else input.focus();
+    if (ok) {
+      if (edit.kind === "pane") this.paneActions.cancelRename();
+      else this.editing.set(null);
+    } else refocus(input, this.injector);
   }
 
   protected glyph(row: PaneRow): string {

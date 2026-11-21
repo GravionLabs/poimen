@@ -1,3 +1,5 @@
+import { paneRename, spaceRename } from "./rename-keys";
+import { PaneActions } from "../core/pane-actions";
 import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
@@ -378,6 +380,7 @@ export class Sidebar {
   }
 
   private readonly injector = inject(Injector);
+  protected readonly paneActions = inject(PaneActions);
   protected readonly store = inject(SpacesStore);
   protected readonly spaceActions = inject(SpaceActions);
   private readonly attn = inject(Attention);
@@ -592,31 +595,19 @@ export class Sidebar {
     return this.spaceActions.closingIds().has(workspaceId);
   }
 
+  private readonly spaceEdit = spaceRename({
+    actions: this.spaceActions,
+    closing: (id) => this.isClosing(id),
+  });
   /** The space whose label is being edited in place; `null` when none. */
-  protected readonly editing = signal<string | null>(null);
-
-  protected startEdit(workspaceId: string, event: Event): void {
-    event.stopPropagation();
-    if (this.isClosing(workspaceId)) return;
-    this.spaceActions.clearRenameError();
-    this.editing.set(workspaceId);
-  }
-
-  /** Enter or blur confirms, Escape cancels; a failed rename keeps editing, the old label stays. */
-  protected async finishEdit(
-    workspaceId: string,
-    input: HTMLInputElement,
-    commit: boolean,
-  ): Promise<void> {
-    if (this.editing() !== workspaceId) return;
-    if (!commit) {
-      this.editing.set(null);
-      this.spaceActions.clearRenameError();
-      return;
-    }
-    if (await this.spaceActions.rename(workspaceId, input.value)) this.editing.set(null);
-    else input.focus();
-  }
+  protected readonly editing = this.spaceEdit.editing;
+  protected readonly startEdit = this.spaceEdit.start;
+  protected readonly finishEdit = this.spaceEdit.finish;
+  protected readonly paneEdit = paneRename({
+    actions: this.paneActions,
+    injector: this.injector,
+    pane: (id) => this.store.pane(id),
+  });
 
   protected configureSpace(workspaceId: string, event: Event): void {
     event.stopPropagation();

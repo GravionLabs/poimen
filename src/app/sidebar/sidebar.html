@@ -355,6 +355,7 @@
     @let m = marks(d.row);
     <span
       class="row"
+      [attr.data-pane]="d.row.pane.terminal_id"
       [class.open]="m.open"
       [class.active]="m.active"
       [class.attention]="rings(d.row.pane.terminal_id)"
@@ -384,15 +385,43 @@
                   <span class="dot status-{{ seg.status }}"></span>
                 }
                 @case ("name") {
-                  <span
-                    class="name"
-                    [class.bold]="seg.bold"
-                    [class.dim]="seg.dim"
-                    [class.unread-name]="isUnread(d.row.pane.terminal_id)"
-                    >{{ seg.text }}</span
-                  >
-                  @if (isUnread(d.row.pane.terminal_id)) {
-                    <span class="sr-only">Unread</span>
+                  @if (paneActions.renaming() === d.row.pane.terminal_id) {
+                    <input
+                      #pedit
+                      appSpaceEditFocus
+                      class="pane-edit"
+                      type="text"
+                      aria-label="Terminal name"
+                      autocomplete="off"
+                      [value]="d.row.name"
+                      [disabled]="paneActions.renameBusy()"
+                      (click)="$event.stopPropagation()"
+                      (dblclick)="$event.stopPropagation()"
+                      (keydown)="$event.stopPropagation()"
+                      (keydown.enter)="paneEdit.enter(d.row.pane.terminal_id, pedit, $event)"
+                      (keydown.escape)="paneEdit.finish(d.row.pane.terminal_id, pedit, false)"
+                      (input)="paneActions.clearError()"
+                      (blur)="
+                        paneEdit.finish(d.row.pane.terminal_id, pedit, pedit.value !== d.row.name)
+                      "
+                    />
+                    @if (paneActions.error(); as message) {
+                      <span class="pane-edit-error" role="alert" [title]="message">{{
+                        message
+                      }}</span>
+                    }
+                  } @else {
+                    <span
+                      class="name"
+                      [class.bold]="seg.bold"
+                      [class.dim]="seg.dim"
+                      [class.unread-name]="isUnread(d.row.pane.terminal_id)"
+                      (dblclick)="paneEdit.start(d.row.pane.terminal_id, $event)"
+                      >{{ seg.text }}</span
+                    >
+                    @if (isUnread(d.row.pane.terminal_id)) {
+                      <span class="sr-only">Unread</span>
+                    }
                   }
                 }
                 @case ("state") {
@@ -490,6 +519,7 @@
   <hx-tree
     #tree
     class="spaces"
+    (keydown.f2)="paneEdit.onKey($event)"
     ariaLabel="Spaces"
     emptyMessage="No matching panes"
     selectionMode="single"
@@ -511,6 +541,7 @@
     role="tree"
     aria-label="Spaces"
     (keydown)="onCardKey($event)"
+    (keydown.f2)="paneEdit.onKey($event)"
     (focusin)="onCardFocus($event)"
   >
     @for (node of nodes(); track node.key) {

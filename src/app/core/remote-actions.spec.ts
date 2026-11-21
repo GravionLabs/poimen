@@ -119,8 +119,7 @@ describe("actions on remote spaces and terminals (#693)", () => {
   it("sends new terminal, rename and close of a connected machine with the qualified ids", async () => {
     panes.askNew("box::1");
     await panes.confirmNew("/r");
-    panes.askRename("box::p1");
-    await panes.confirmRename("x");
+    await panes.rename("box::p1", "x");
     panes.askClose("box::p1");
     await panes.confirmClose();
     expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "box::1", cwd: "/r" }]);
@@ -141,7 +140,8 @@ describe("actions on remote spaces and terminals (#693)", () => {
     panes.askNew("lab::1");
     await panes.confirmNew("/l");
     panes.askRename("lab::p1");
-    expect(await panes.confirmRename("x")).toBe(false);
+    expect(panes.renaming()).toBeNull();
+    expect(await panes.rename("lab::p1", "x")).toBe(false);
     panes.askClose("lab::p1");
     expect(await panes.confirmClose()).toBeUndefined();
     await panes.resizeSplit("lab::t1", "s1", 0.4);
