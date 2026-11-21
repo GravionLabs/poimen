@@ -79,6 +79,7 @@ describe("sidebarMenuItems", () => {
   it("offers a new terminal on a workspace", () => {
     expect(sidebarMenuItems("workspace").flatMap((g) => g.items.map((i) => i.action))).toEqual([
       "new-terminal",
+      "resume-session",
       "rename-space",
       "close-space",
     ]);
@@ -89,6 +90,7 @@ describe("sidebarMenuItems", () => {
       sidebarMenuItems(kind, repo).flatMap((g) => g.items.map((i) => i.action));
     expect(actions(true, "workspace")).toEqual([
       "new-terminal",
+      "resume-session",
       "show-changes",
       "start-task",
       "cleanup-tasks",
@@ -108,11 +110,22 @@ describe("sidebarMenuItems", () => {
       "split-right",
       "split-down",
       "start-agent",
+      "resume-session",
       "rename",
       "restart",
       "close",
     ]);
     expect(actions(false)).not.toContain("restart");
+  });
+
+  it("disables Resume session with the reason on a remote machine (#986)", () => {
+    const resume = (kind: "workspace" | "pane", reason: string | null) =>
+      sidebarMenuItems(kind, false, false, null, false, null, reason)
+        .flatMap((g) => g.items)
+        .find((i) => i.action === "resume-session");
+    expect(resume("pane", null)?.disabled).toBeUndefined();
+    expect(resume("pane", "remote")?.disabled).toBe("remote");
+    expect(resume("workspace", "remote")?.disabled).toBe("remote");
   });
 
   it("offers Mark as unread first, only on a pane that can be marked", () => {
@@ -132,6 +145,7 @@ describe("sidebarMenuItems", () => {
       );
     expect(actions("workspace", false)).toEqual([
       "new-terminal",
+      "resume-session",
       "open-in-editor",
       "pin-space",
       "rename-space",
@@ -148,6 +162,7 @@ describe("sidebarMenuItems", () => {
       "split-right",
       "split-down",
       "start-agent",
+      "resume-session",
       "rename",
       "close",
     ]);
@@ -174,6 +189,7 @@ describe("sidebarMenuItems", () => {
       "Split right",
       "Split down",
       "Start agent...",
+      "Resume session...",
       "Rename...",
       "Close pane...",
     ]);
@@ -184,6 +200,7 @@ describe("sidebarMenuItems", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].items.map((i) => i.action)).toEqual([
       "new-terminal",
+      "resume-session",
       "rename-space",
       "close-space",
     ]);

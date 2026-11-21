@@ -24,7 +24,6 @@ import {
   paneTitle,
   rowName,
   splitId,
-  supportsFlow,
   tabHeader,
   treeTerminals,
   withMachine,
@@ -89,6 +88,9 @@ import { Subagents } from "./core/transcripts";
 import { Toolbar } from "./toolbar/toolbar";
 import { PaneActions, type PaneClosed } from "./core/pane-actions";
 import { PaneDialog } from "./pane-dialog/pane-dialog";
+import { tabMenuItems } from "./tab-menu";
+import { ResumeDialog } from "./resume-dialog/resume-dialog";
+import { SessionResume } from "./core/session-resume";
 import { SpaceActions } from "./core/space-actions";
 import { SpaceRebuild } from "./core/space-rebuild";
 import { CommandPalette } from "./core/command-palette";
@@ -157,6 +159,7 @@ const ZOOM_STEP = 1;
     SpaceOverview,
     NgTemplateOutlet,
     PaneDialog,
+    ResumeDialog,
     SpaceDialog,
     HooksDialog,
     ServerDialog,
@@ -189,6 +192,7 @@ export class App {
   private readonly keymap = inject(Keymap);
   private readonly terminalSearch = inject(TerminalSearch);
   private readonly paneActions = inject(PaneActions);
+  private readonly sessionResume = inject(SessionResume);
   private readonly explorerSelection = inject(ExplorerSelection);
   private readonly externalEditor = inject(ExternalEditor);
   protected readonly spaceActions = inject(SpaceActions);
@@ -589,6 +593,7 @@ export class App {
       return;
     }
     if (id === "startTask") return this.startTaskInActiveRepo();
+    if (id === "resumeSession") return this.sessionResume.openActive(this.activePaneId());
     if (id === "openInEditor") {
       this.externalEditor.openDir(this.activeDir());
       return;
@@ -772,6 +777,8 @@ export class App {
   /** Context menu of a sidebar row: new terminal in a workspace, split or close a pane. */
   protected onSidebarMenu(event: SidebarMenuAction): void {
     if (event.action === "new-terminal") this.paneActions.askNew(event.id);
+    else if (event.action === "resume-session" && event.kind === "workspace")
+      void this.sessionResume.open({ kind: "space", spaceId: event.id });
     else if (event.action === "close-space") this.closeSpace(event.id);
     else if (event.action === "pin-space" || event.action === "unpin-space")
       this.spaceActions.setPinned(event.id, event.action === "pin-space");
@@ -850,6 +857,8 @@ export class App {
       void this.paneActions.split(paneId, direction).then((pane) => pane && this.open(pane, true));
     } else if (action === "start-agent") {
       this.paneActions.askStartAgent(paneId);
+    } else if (action === "resume-session") {
+      void this.sessionResume.open({ kind: "pane", paneId });
     } else if (action === "rename") {
       this.paneActions.askRename(paneId);
     } else if (action === "save-layout") {
@@ -872,48 +881,11 @@ export class App {
 
   /** Context menu of a group's tabs; splitting needs a second tab in the group. */
   protected menuFor(group: EditorGroup): TabBarMenuItem[] {
-    const single = group.tabs.length < 2;
-    return [
-      {
-        action: "split-right",
-        label: "Split right",
-        shortcut: this.keymap.label("splitRight"),
-        disabled: single,
-      },
-      {
-        action: "split-down",
-        label: "Split down",
-        shortcut: this.keymap.label("splitDown"),
-        disabled: single,
-      },
-      { action: "close", label: "Close" },
-      {
-        action: "open-flow",
-        label: "Open agent flow",
-        appliesTo: (id) => tabKind(id) === "pane" && supportsFlow(this.pane(id)),
-      },
-      { action: "pane-split-right", label: "New pane to the right" },
-      { action: "pane-split-down", label: "New pane below" },
-      { action: "pane-start-agent", label: "Start agent..." },
-      {
-        action: "pane-mark-unread",
-        label: "Mark as unread",
-        appliesTo: (id) =>
-          tabKind(id) === "pane" && canMarkUnread(this.pane(id), this.attention.unread()),
-      },
-      { action: "pane-rename", label: "Rename pane..." },
-      {
-        action: "pane-save-layout",
-        label: "Save current tab as layout…",
-        appliesTo: (id) => tabKind(id) === "pane",
-      },
-      {
-        action: "pane-restart",
-        label: "Restart terminal on the new host...",
-        appliesTo: (id) => tabKind(id) === "pane" && olderHost(this.pane(id)) !== null,
-      },
-      { action: "pane-close", label: "Close pane..." },
-    ];
+    return tabMenuItems(group.tabs.length < 2, {
+      shortcut: (action) => this.keymap.label(action),
+      pane: (id) => this.pane(id),
+      unread: () => this.attention.unread(),
+    });
   }
 
   protected onTabMenu(id: string, action: string): void {

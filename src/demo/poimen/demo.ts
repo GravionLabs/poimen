@@ -52,6 +52,7 @@ export function createPoimenDemo(): DemoBackend {
     server_socket_path: `${HOME}/Library/Application Support/poimen/server.sock`,
     server_log_path: `${HOME}/Library/Logs/poimen/server.log`,
     get_harnesses: HARNESSES,
+    list_agent_sessions: [],
     get_agent_actions: { actions: [] },
     set_terminal_colors: null,
     get_color_schemes: { schemes: [], warnings: [] },

@@ -1815,15 +1815,6 @@ fn get_settings() -> settings::Settings {
     home_dir().map(|h| settings::load(&h)).unwrap_or_default()
 }
 
-/// The agent harnesses with availability (program found on the `PATH` of a child).
-#[tauri::command]
-async fn get_harnesses() -> Vec<harness::HarnessInfo> {
-    let harnesses = get_settings().harnesses;
-    tauri::async_runtime::spawn_blocking(move || harness::with_availability(harnesses))
-        .await
-        .unwrap_or_default()
-}
-
 /// Creates or reuses the git worktree and branch of `issue` for the task mode `mode` of the
 /// repository of `repo_dir` (see `worktree::ensure`).
 #[tauri::command]
@@ -2927,7 +2918,8 @@ pub fn run() {
             updater::update_check,
             updater::update_install,
             get_settings,
-            get_harnesses,
+            agent_session::get_harnesses,
+            agent_session::list_agent_sessions,
             get_agent_actions,
             agent_action_plan,
             get_task_modes,
