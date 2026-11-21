@@ -277,4 +277,15 @@ describe("Attention with presence (#1030)", () => {
     a.observe(st({ p1: "done" }), none);
     expect([...a.unread()]).toEqual(["p1"]);
   });
+
+  it("clears a manual mark on the first input after the pane was away, as for a tab switch (#725)", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "done" }), tab);
+    a.markUnread("p1");
+    a.observe(st({ p1: "done" }), tab);
+    expect([...a.unread()]).toEqual(["p1"]);
+    a.observe(st({ p1: "done" }), none);
+    a.observe(st({ p1: "done" }), tab);
+    expect(a.unread().size).toBe(0);
+  });
 });
