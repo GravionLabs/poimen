@@ -28,6 +28,7 @@ const pane = (terminal_id: string, over: Partial<Terminal> = {}): Terminal => ({
 describe("PaneActions", () => {
   let current: Snapshot;
   let actions: PaneActions;
+  let ui: UiState;
   let store: SpacesStore;
 
   beforeEach(async () => {
@@ -51,6 +52,7 @@ describe("PaneActions", () => {
     });
     store = injector.get(SpacesStore);
     actions = injector.get(PaneActions);
+    ui = injector.get(UiState);
     await store.refresh();
   });
 
@@ -269,6 +271,12 @@ describe("PaneActions", () => {
       { terminalId: "w1:p1", label: "build" },
       { terminalId: "w1:p1", label: null },
     ]);
+  });
+
+  it("shows a collapsed sidebar for the field", () => {
+    ui.sidebarCollapsed.set(true);
+    actions.askRename("w1:p1");
+    expect(ui.sidebarCollapsed()).toBe(false);
   });
 
   it("cancels an inline rename and clears the error", () => {

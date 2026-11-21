@@ -18,6 +18,7 @@ import { uniqueName } from "./named-layouts";
 import { Machines } from "./machines";
 import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
+import { UiState } from "./ui-state";
 
 /** A dialog the user has to answer before a pane is created or closed. */
 export type PaneDialogState =
@@ -47,6 +48,7 @@ export class PaneActions {
   private readonly spaces = inject(SpaceActions);
   private readonly machines = inject(Machines, { optional: true });
   private readonly settings = inject(SettingsStore, { optional: true });
+  private readonly ui = inject(UiState, { optional: true });
 
   /** Ratios waiting behind a request in flight, per `tab/split`; `null` = nothing waiting. */
   private readonly resizing = new Map<string, number | null>();
@@ -117,6 +119,8 @@ export class PaneActions {
   askRename(paneId: string): void {
     if (this.blocked(paneId)) return;
     this._error.set(null);
+    // The field lives in the sidebar row: callers outside it (overview, tab menu) need it shown.
+    this.ui?.sidebarCollapsed.set(false);
     this.renaming.set(paneId);
   }
 
