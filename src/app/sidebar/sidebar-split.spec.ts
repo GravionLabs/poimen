@@ -276,7 +276,6 @@ describe("Sidebar toggle", () => {
   it("shows the other layout in its name and asks for it on a click", async () => {
     const tree = await setup("tree");
     expect(tree.toggle().getAttribute("aria-label")).toBe("Show split layout");
-    expect(tree.toggle().title).toBe("Show split layout");
     expect(tree.toggle().querySelector("svg")).not.toBeNull();
     tree.toggle().click();
     expect(tree.setSidebarLayout).toHaveBeenCalledWith("split");

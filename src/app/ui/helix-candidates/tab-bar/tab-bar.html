@@ -36,7 +36,6 @@
       [class.drop-after]="side(i) === 'after'"
       [attr.aria-selected]="tab.id === activeId"
       [attr.tabindex]="tab.id === activeId ? 0 : -1"
-      [title]="tab.title ?? tab.label"
       (pointerup)="pointerUp($event, tab.id)"
       (click)="click($event, tab.id)"
       (dblclick)="pinned.emit(tab.id)"
@@ -54,7 +53,13 @@
       @if (tab.group) {
         <span class="group">{{ tab.group }} /</span>
       }
-      <span class="label" [class.unread-label]="tab.unread">{{ tab.label }}</span>
+      <span
+        class="label"
+        [class.unread-label]="tab.unread"
+        [hx-tooltip]="tab.title ?? tab.label"
+        [hxTooltipWhenTruncated]="!tab.title"
+        >{{ tab.label }}</span
+      >
       @if (tab.note) {
         <span class="note" role="img" [attr.aria-label]="tab.note" [title]="tab.note"></span>
       }

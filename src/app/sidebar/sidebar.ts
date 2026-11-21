@@ -16,7 +16,7 @@ import {
   signal,
 } from "@angular/core";
 import { HxButton, HxInput, HxMessage, HxTree, HxTreeNodeTemplate } from "@gravionlabs/helix-ui";
-import type { HxTreeNode } from "@gravionlabs/helix-ui";
+import { HxTooltip, type HxTreeNode } from "@gravionlabs/helix-ui";
 import { cardKeyboard } from "./card-keys";
 import { cardMenuGroups, runCardEntry, sortGroups, spaceDirOf } from "./card-menu";
 import {
@@ -139,8 +139,7 @@ export function splitSections(
     return {
       key: WORKSPACE_PREFIX + space.workspace.space_id,
       label: space.workspace.label,
-      // helix applies `expanded` once per key, so every workspace starts open; only the selected
-      // one has children, the others are leaves until they are selected.
+      // helix applies `expanded` once per key: all start open, only the selected one has children.
       expanded: true,
       leaf: !isSelected,
       data: {
@@ -273,6 +272,7 @@ export function isDoubleClick(
     ContextMenu,
     SpaceEditFocus,
     HxButton,
+    HxTooltip,
     HxMessage,
     HxTree,
     HxTreeNodeTemplate,
