@@ -300,7 +300,7 @@
         type="button"
         class="gear"
         [attr.aria-label]="'Configure space ' + d.workspace.label"
-        [title]="'Configure space ' + d.workspace.label"
+        [hx-tooltip]="'Configure space ' + d.workspace.label"
         (click)="configureSpace(d.workspace.space_id, $event)"
         (keydown)="$event.stopPropagation()"
       >
@@ -325,7 +325,7 @@
         class="close"
         [disabled]="isClosing(d.workspace.space_id)"
         [attr.aria-label]="'Close space ' + d.workspace.label"
-        [title]="'Close space ' + d.workspace.label"
+        [hx-tooltip]="'Close space ' + d.workspace.label"
         (click)="closeSpace(d.workspace.space_id, $event)"
         (keydown)="$event.stopPropagation()"
       >
@@ -622,7 +622,9 @@
               [attr.aria-label]="
                 agentsMode() === 'priority' ? 'Agents in space order' : 'Agents by priority'
               "
-              [title]="agentsMode() === 'priority' ? 'Agents in space order' : 'Agents by priority'"
+              [hx-tooltip]="
+                agentsMode() === 'priority' ? 'Agents in space order' : 'Agents by priority'
+              "
               (click)="toggleAgentsMode()"
             >
               <svg

@@ -214,7 +214,7 @@ describe("Sidebar with the real hx-tree", () => {
     const { workspace } = await setup();
     const close = workspace().querySelector<HTMLButtonElement>(".close")!;
     expect(close.getAttribute("aria-label")).toBe("Close space One");
-    expect(close.title).toBe("Close space One");
+    expect(close.getAttribute("aria-label")).toBe("Close space One");
     expect(close.nextElementSibling?.classList.contains("chevron")).toBe(true);
   });
 

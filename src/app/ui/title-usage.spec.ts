@@ -32,7 +32,7 @@ const LEGACY: Record<string, number> = {
   "src/app/settings-view/settings-view.html": 5,
   "src/app/settings-view/space-templates-editor.html": 6,
   "src/app/sidebar/machines-section/machines-section.html": 2,
-  "src/app/sidebar/sidebar.html": 17,
+  "src/app/sidebar/sidebar.html": 14,
   "src/app/sidebar/space-card.html": 18,
   "src/app/space-dialog/space-dialog.html": 1,
   "src/app/space-overview/space-overview.html": 2,
