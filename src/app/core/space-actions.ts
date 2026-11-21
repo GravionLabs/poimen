@@ -186,7 +186,6 @@ export class SpaceActions {
 
   /** An existing space was focused instead of a new one: select it and say so. */
   private announceExisting(id: string): void {
-    this.ui.setSplitWorkspace(id);
     const label = this.store.snapshot().spaces.find((s) => s.space_id === id)?.label ?? id;
     this._warning.set(`Opened the existing space "${label}".`);
   }

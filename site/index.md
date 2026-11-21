@@ -56,7 +56,7 @@ New here? Read the [installation guide](/guide/installation): no other tool is n
 
 ### Spaces and live terminals
 
-The sidebar lists the spaces as a tree of spaces with their panes. Each row shows the agent, its status, the branch and the directory, and you choose what a row shows. A pane opens as an editor tab with one live terminal (xterm.js) for the active tab. By default it opens for input; if another client already controls the terminal, the tab falls back to read-only and offers an explicit *Take over*.
+The sidebar lists the spaces as cards with their panes. Each card and row shows the agent, its status, the branch and the directory, and you choose what a row shows. A pane opens as an editor tab with one live terminal (xterm.js) for the active tab. By default it opens for input; if another client already controls the terminal, the tab falls back to read-only and offers an explicit *Take over*.
 
 <Screenshot src="tabs-dark.png" light="tabs-light.png" alt="Editor tabs with a live terminal of a Claude Code session; the IN badge marks input tabs" caption="Editor tabs with live terminals; IN and RO mark input and read-only tabs (demo data, follows the site theme)." />
 

@@ -12,7 +12,6 @@ import {
   prTooltip,
   renderRow,
   DEFAULT_SIDEBAR_ROWS,
-  cardRows,
   spaceContext,
   spaceMeta,
   stateLabel,
@@ -242,7 +241,10 @@ describe("renderRow", () => {
     ]);
     expect(
       texts(renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, space([a, a]), ctx)),
-    ).toEqual([["One", "idle", "…/b/c"], ["main"]]);
+    ).toEqual([
+      ["One", "idle"],
+      ["main", "…/b/c"],
+    ]);
   });
 
   it("skips empty values, repeats of the name or an earlier value, and empty lines", () => {
@@ -279,14 +281,14 @@ describe("renderRow", () => {
       expect(ws(row({}))).toEqual([]);
     });
 
-    it("puts the path in the first line and branch, dirty and sync in the second of the default layout", () => {
+    it("puts name and state in the first line and branch, path, dirty and sync in the second of the default layout", () => {
       const r = row({ dir: "/a/b/c", branch: "main", dirty: 2, ahead: 1, behind: 0 });
       const sp = space([r, r]);
       expect(
         texts(renderRow("workspace", DEFAULT_SIDEBAR_ROWS.workspace, sp, spaceContext(sp))),
       ).toEqual([
-        ["One", "idle", "…/b/c"],
-        ["main", "●2", "↑1"],
+        ["One", "idle"],
+        ["main", "…/b/c", "●2", "↑1"],
       ]);
     });
 
@@ -501,26 +503,11 @@ describe("child records (#684)", () => {
   });
 });
 
-describe("cardRows (#1075)", () => {
-  it("gives the cards their own workspace lines and leaves the tree default as it is", () => {
+describe("DEFAULT_SIDEBAR_ROWS (#1075, #1111)", () => {
+  it("has the card lines as the workspace default", () => {
     expect(DEFAULT_SIDEBAR_ROWS.workspace.map((l) => l.map((t) => t.token))).toEqual([
-      ["state_icon", "name", "state_text", "dir"],
-      ["branch", "dirty", "sync"],
-    ]);
-    const rows = cardRows(DEFAULT_SIDEBAR_ROWS, "cards");
-    expect(rows.workspace.map((l) => l.map((t) => t.token))).toEqual([
       ["state_icon", "name", "state_text"],
       ["branch", "dir", "dirty", "sync", "pr"],
     ]);
-    expect(rows.agent).toBe(DEFAULT_SIDEBAR_ROWS.agent);
-  });
-
-  it("leaves the other layouts alone", () => {
-    expect(cardRows(DEFAULT_SIDEBAR_ROWS, "tree")).toBe(DEFAULT_SIDEBAR_ROWS);
-  });
-
-  it("lets the user's own workspace lines win", () => {
-    const own = { ...DEFAULT_SIDEBAR_ROWS, workspace: [[{ token: "name" }]] };
-    expect(cardRows(own, "cards")).toBe(own);
   });
 });

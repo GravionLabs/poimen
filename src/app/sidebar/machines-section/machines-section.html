@@ -71,36 +71,17 @@
     @if (g.check) {
       <p class="note check" role="status">{{ g.check }}</p>
     }
-    @if (cards()) {
-      @for (node of cardNodes(g.machine.name); track node.key) {
-        @defer (on immediate) {
-          <app-space-card
-            [node]="node"
-            [blocked]="g.blocked"
-            [openIds]="openIds"
-            [activeId]="activeId"
-            (act)="cardAct.emit($event)"
-            (menu)="cardMenu.emit($event)"
-            (picked)="pickId($event)"
-          />
-        }
-      }
-    } @else {
-      @for (s of g.spaces; track s.node.workspace.space_id) {
-        <div class="space" [attr.aria-disabled]="!g.usable || null">
-          <span class="space-name">{{ s.node.workspace.label }}</span>
-          @for (r of s.rows; track r.terminal.terminal_id) {
-            <button
-              type="button"
-              class="row"
-              [disabled]="!g.usable"
-              (click)="pick(r.terminal, g.usable)"
-            >
-              <span class="dot status-{{ r.terminal.agent_status }}" aria-hidden="true"></span>
-              {{ r.name }}
-            </button>
-          }
-        </div>
+    @for (node of cardNodes(g.machine.name); track node.key) {
+      @defer (on immediate) {
+        <app-space-card
+          [node]="node"
+          [blocked]="g.blocked"
+          [openIds]="openIds"
+          [activeId]="activeId"
+          (act)="cardAct.emit($event)"
+          (menu)="cardMenu.emit($event)"
+          (picked)="pickId($event)"
+        />
       }
     }
   </section>

@@ -6,7 +6,6 @@ import { qualifyId } from "./snapshot";
 import { RemoteSpaces } from "./remote-spaces";
 import { SpaceActions, type SpaceOutcome } from "./space-actions";
 import { TauriBridge } from "./tauri";
-import { UiState } from "./ui-state";
 
 /** The steps of starting a task; a failure names the one that failed. */
 export type TaskStep = "mode" | "clone" | "worktree" | "space" | "tab";
@@ -61,7 +60,6 @@ export class TaskStarter {
   private readonly spaces = inject(SpaceActions);
   private readonly store = inject(SpacesStore);
   private readonly remote = inject(RemoteSpaces);
-  private readonly ui = inject(UiState);
   private readonly _steps = signal<SpaceStep[] | null>(null);
   /** The steps of the space with a worktree being created (current one marked), else null. */
   readonly steps = this._steps.asReadonly();
@@ -161,7 +159,6 @@ export class TaskStarter {
       }
     }
     await this.remote.refresh(machine);
-    this.ui.setSplitWorkspace(qualifyId(machine, outcome.space_id));
     if (!outcome.created) {
       const label = this.remote
         .snapshot()

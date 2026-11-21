@@ -209,9 +209,16 @@ export type SidebarRows = Record<RowType, RowLines>;
 
 const line = (...tokens: string[]): TokenSpec[] => tokens.map((token) => ({ token }));
 
-/** The layout poimen shipped before it became configurable. */
+/**
+ * The default rows. The workspace lines are the header of a card (dot, name, state text for the
+ * states that need a word) and its details line (branch, directory, markers, #1075); a user's own
+ * `sidebar.rows.workspace` replaces them.
+ */
 export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
-  workspace: [line("state_icon", "name", "state_text", "dir"), line("branch", "dirty", "sync")],
+  workspace: [
+    line("state_icon", "name", "state_text"),
+    line("branch", "dir", "dirty", "sync", "pr"),
+  ],
   agent: [
     line("state_icon", "name", "state_text"),
     line("agent", "title", "started_by", "branch", "dir"),
@@ -221,26 +228,6 @@ export const DEFAULT_SIDEBAR_ROWS: SidebarRows = {
     line("agent", "title", "started_by", "branch", "dir"),
   ],
 };
-
-/**
- * The workspace lines of the `cards` layout: the header (dot, name, state text for the states
- * that need a word) and the details line (branch, directory, markers, #1075). The other row types
- * are the same as in the tree.
- */
-export const DEFAULT_CARD_ROWS: SidebarRows = {
-  ...DEFAULT_SIDEBAR_ROWS,
-  workspace: [
-    line("state_icon", "name", "state_text"),
-    line("branch", "dir", "dirty", "sync", "pr"),
-  ],
-};
-
-/** The rows of the cards layout: the card default unless the user set their own workspace lines. */
-export function cardRows(rows: SidebarRows, layout: string): SidebarRows {
-  if (layout !== "cards") return rows;
-  const own = JSON.stringify(rows.workspace) !== JSON.stringify(DEFAULT_SIDEBAR_ROWS.workspace);
-  return own ? rows : { ...rows, workspace: DEFAULT_CARD_ROWS.workspace };
-}
 
 /** Built-in token names (besides `$<name>`). */
 export const ROW_TOKENS = [

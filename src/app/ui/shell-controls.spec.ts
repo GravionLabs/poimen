@@ -29,25 +29,29 @@ describe("status bar", () => {
 describe("sidebar", () => {
   const html = read("src/app/sidebar/sidebar.html");
   const css = read("src/app/sidebar/sidebar.css");
+  const card = read("src/app/sidebar/space-card.html");
+  const cardCss = read("src/app/sidebar/space-card.css");
 
-  it("the toggles, +, Retry and Rebuild are hx-buttons; the toggles show their pressed state", () => {
-    for (const name of ["layout-toggle", "add", "retry", "rebuild"]) {
-      const tag = tags(html, /<button\b[^>]*>/g).find((t) => t.includes(`class="${name}`));
-      expect(tag, name).toBeDefined();
+  it("the sort toggle, +, Retry and Rebuild are hx-buttons; the toggle shows its pressed state", () => {
+    for (const [source, name] of [
+      [html, "sort-toggle"],
+      [html, "add"],
+      [html, "retry"],
+      [card, "rebuild"],
+    ] as const) {
+      const tag = tags(source, /<button\b[^>]*>/g).find((t) => t.includes(`class="${name}`));
+      expect(tag, name).toContain("hx-button");
     }
-    const toggles = html.match(/<button[^>]*class="layout-toggle[\s\S]*?>/g) ?? [];
-    expect(toggles).toHaveLength(3);
-    for (const t of toggles) {
-      expect(t).toContain("hx-button");
-      expect(t).toContain("aria-pressed");
-    }
-    expect(css).toMatch(/\.layout-toggle\[aria-pressed="true"\]/);
+    const toggles = html.match(/<button[^>]*class="sort-toggle[\s\S]*?>/g) ?? [];
+    expect(toggles).toHaveLength(1);
+    expect(toggles[0]).toContain("aria-pressed");
+    expect(css).toMatch(/\.sort-toggle\[aria-pressed="true"\]/);
   });
 
   it("the pane-kind mark has no border and the pin is an icon, not an emoji", () => {
-    expect(css).toMatch(/\.icon \{[^}]*border: 0/);
-    expect(html).not.toContain("📌");
-    expect(html).toMatch(/<svg\s+class="pin-mark"/);
+    expect(/\.icon \{[^}]*[\s;{]border\s*:/.test(cardCss)).toBe(false);
+    expect(card).not.toContain("📌");
+    expect(card).toMatch(/<svg\s+class="pin-mark"/);
   });
 });
 

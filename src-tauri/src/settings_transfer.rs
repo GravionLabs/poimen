@@ -822,12 +822,12 @@ mod tests {
     #[test]
     fn replace_plan_removes_keys_the_file_does_not_have() {
         let current =
-            obj(json!({ "theme": "dark", "sidebar": { "layout": "tree", "agents": "list" } }));
-        let file = obj(json!({ "sidebar": { "layout": "tree" } }));
+            obj(json!({ "theme": "dark", "sidebar": { "sort": "name", "agents": "list" } }));
+        let file = obj(json!({ "sidebar": { "agents": "list" } }));
         let (p, _) = plan(&current, &file, Mode::Replace, Scope::All);
         assert!(p.added.is_empty());
         assert!(p.changed.is_empty());
-        assert_eq!(paths(&p.removed), ["sidebar.agents", "theme"]);
+        assert_eq!(paths(&p.removed), ["sidebar.sort", "theme"]);
     }
 
     #[test]
@@ -841,7 +841,7 @@ mod tests {
     fn invalid_entries_are_listed_and_skipped() {
         let file = obj(json!({
             "theme": "purple",
-            "sidebar": { "layout": "zigzag", "agents": "priority" },
+            "sidebar": { "sort": "zigzag", "agents": "priority" },
             "spaceTemplates": [
                 serde_json::from_str::<Value>(TEMPLATE_A).unwrap(),
                 { "agent": "claude" },
@@ -852,13 +852,13 @@ mod tests {
         assert_eq!(
             rejected(&p.invalid),
             [
-                "sidebar.layout",
+                "sidebar.sort",
                 "spaceTemplates[1]",
                 "spaceTemplates[a]",
                 "theme"
             ]
         );
-        assert!(p.invalid[0].reason.contains("sidebar.layout"));
+        assert!(p.invalid[0].reason.contains("sidebar.sort"));
         assert_eq!(paths(&p.added), ["sidebar", "spaceTemplates"]);
         assert_eq!(after["sidebar"], json!({ "agents": "priority" }));
         assert_eq!(after["spaceTemplates"].as_array().unwrap().len(), 1);

@@ -20,9 +20,6 @@ import {
   type SidebarRows,
 } from "../sidebar/spaces";
 
-export type SidebarLayout = "tree" | "split" | "cards";
-/** `sidebar.agents`: the Agents section in list order or by priority (#722). */
-export type SidebarAgents = "list" | "priority";
 /** `sidebar.sort`: the user's own space order, alphabetical, by attention or by last focus. */
 export type SidebarSort = "manual" | "name" | "attention" | "recent";
 
@@ -256,12 +253,8 @@ export interface Settings {
   shortcuts: Shortcuts;
   /** Lines and tokens per row type: the defaults over the valid `sidebar.rows` of config.json. */
   sidebarRows: SidebarRows;
-  /** `sidebar.layout`: the Spaces view as a tree or as two lists (Spaces, Agents). */
-  sidebarLayout: SidebarLayout;
   /** `sidebar.sort`: how the spaces tree is ordered. */
   sidebarSort: SidebarSort;
-  /** `sidebar.agents`: order of the Agents section. */
-  sidebarAgents: SidebarAgents;
   /** `sidebar.groupWorktrees`: list linked worktrees below the space of their repository. */
   sidebarGroupWorktrees: boolean;
   /** `sidebar.showBaseBranch`: show the branch token on the base branch too. */
@@ -375,9 +368,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoControl: true,
   shortcuts: DEFAULT_SHORTCUTS,
   sidebarRows: DEFAULT_SIDEBAR_ROWS,
-  sidebarLayout: "tree",
   sidebarSort: "manual",
-  sidebarAgents: "list",
   sidebarGroupWorktrees: true,
   sidebarShowBaseBranch: false,
   explorerRoots: ["~"],
@@ -483,11 +474,6 @@ export function parseSettings(raw: unknown): Settings {
     autoControl: r["autoControl"] !== false,
     shortcuts: parseShortcuts(r["shortcuts"]),
     sidebarRows: parseSidebarRows(r["sidebarRows"]),
-    sidebarLayout:
-      r["sidebarLayout"] === "split" || r["sidebarLayout"] === "cards"
-        ? r["sidebarLayout"]
-        : "tree",
-    sidebarAgents: r["sidebarAgents"] === "priority" ? "priority" : "list",
     sidebarSort: SIDEBAR_SORTS.find((v) => v === r["sidebarSort"]) ?? "manual",
     sidebarGroupWorktrees: r["sidebarGroupWorktrees"] !== false,
     sidebarShowBaseBranch: r["sidebarShowBaseBranch"] === true,
@@ -562,19 +548,6 @@ export class SettingsStore {
     }
   }
 
-  /** Writes `sidebar.layout` of config.json and applies it at once; the watcher confirms. */
-  async setSidebarLayout(sidebarLayout: SidebarLayout): Promise<void> {
-    const previous = this._settings();
-    this._settings.set({ ...previous, sidebarLayout });
-    try {
-      await this.bridge.invoke("set_sidebar_layout", { layout: sidebarLayout });
-      this._writeError.set(null);
-    } catch (e) {
-      this._settings.set(previous);
-      this.failed("the sidebar layout", e);
-    }
-  }
-
   /** Writes `sidebar.sort` of config.json and applies it at once; the watcher confirms. */
   async setSidebarSort(sidebarSort: SidebarSort): Promise<void> {
     const previous = this._settings();
@@ -585,19 +558,6 @@ export class SettingsStore {
     } catch (e) {
       this._settings.set(previous);
       this.failed("the sidebar sort", e);
-    }
-  }
-
-  /** Writes `sidebar.agents` of config.json and applies it at once; the watcher confirms. */
-  async setSidebarAgents(sidebarAgents: SidebarAgents): Promise<void> {
-    const previous = this._settings();
-    this._settings.set({ ...previous, sidebarAgents });
-    try {
-      await this.bridge.invoke("set_sidebar_agents", { mode: sidebarAgents });
-      this._writeError.set(null);
-    } catch (e) {
-      this._settings.set(previous);
-      this.failed("the agents order", e);
     }
   }
 
