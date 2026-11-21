@@ -14,6 +14,8 @@ export const OUT_DIR = resolve("tmp/shots");
 export const TARGETS = {
   fixtures: { name: "poimen:fixtures", port: 1421 },
   app: { name: "poimen:serve", port: 1420 },
+  /** The app with the demo backend instead of Tauri (`build` configuration `demo`, #1109). */
+  demo: { name: "poimen:serve:demo", port: 1422 },
 };
 
 async function reachable(url) {
@@ -63,15 +65,27 @@ export async function ensureServer(target) {
 
 /**
  * Runs `fn({ open, url })` with a headless Chromium and the dev server of `target`. `open(path, theme,
- * viewport)` returns a page in that theme (`prefers-color-scheme` and the `app-dark` class of HxTheme).
+ * viewport, options)` returns a page in that theme (`prefers-color-scheme` and the `app-dark` class of
+ * HxTheme). `options.time` fixes `Date.now()` (the timers stay real), `options.storage` is put into
+ * `localStorage` before the page runs, and `options.reducedMotion` turns animations off.
  */
 export async function withBrowser(target, fn) {
   await ensureBrowser();
   const server = await ensureServer(target);
   const browser = await chromium.launch();
-  const open = async (path, theme, viewport = { width: 900, height: 600 }) => {
-    const context = await browser.newContext({ colorScheme: theme, viewport });
+  const open = async (path, theme, viewport = { width: 900, height: 600 }, options = {}) => {
+    const context = await browser.newContext({
+      colorScheme: theme,
+      viewport,
+      reducedMotion: options.reducedMotion ? "reduce" : "no-preference",
+    });
     const page = await context.newPage();
+    if (options.time !== undefined) await page.clock.setFixedTime(options.time);
+    if (options.storage) {
+      await page.addInitScript((entries) => {
+        for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v);
+      }, options.storage);
+    }
     page.on("pageerror", (err) => console.error(`page error: ${err.message}`));
     await page.goto(new URL(path, server.url).href);
     return page;

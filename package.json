@@ -21,7 +21,8 @@
     "ratchets": "node scripts/ratchets/run.mjs",
     "ratchets:test": "node --test scripts/ratchets/core.test.mjs",
     "fixtures:list": "node scripts/fixtures.mjs list",
-    "fixtures:shot": "node scripts/fixtures.mjs shot"
+    "fixtures:shot": "node scripts/fixtures.mjs shot",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "@angular/cdk": "^22.2.7",

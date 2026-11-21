@@ -48,6 +48,17 @@
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true
+            },
+            "demo": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": false,
+              "fileReplacements": [
+                {
+                  "replace": "src/app/core/tauri.ts",
+                  "with": "src/demo/tauri.demo.ts"
+                }
+              ]
             }
           },
           "defaultConfiguration": "production"
@@ -63,6 +74,10 @@
             },
             "development": {
               "buildTarget": "poimen:build:development"
+            },
+            "demo": {
+              "buildTarget": "poimen:build:demo",
+              "port": 1422
             }
           },
           "defaultConfiguration": "development"
