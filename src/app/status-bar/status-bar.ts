@@ -140,7 +140,13 @@ export class StatusBar {
       if (!bar || typeof ResizeObserver === "undefined") return;
       const observer = new ResizeObserver(() => this.measure(bar));
       observer.observe(bar);
-      destroyRef.onDestroy(() => observer.disconnect());
+      // The bar keeps its width when its content changes (a notice, a longer text): watch the content too.
+      const content = new MutationObserver(() => this.measure(bar));
+      content.observe(bar, { childList: true, subtree: true, characterData: true });
+      destroyRef.onDestroy(() => {
+        observer.disconnect();
+        content.disconnect();
+      });
       this.measure(bar);
     });
   }
