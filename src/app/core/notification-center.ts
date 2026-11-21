@@ -19,6 +19,27 @@ export interface NotificationEntry {
   deliver?: { root: string; machine?: string };
   /** Set for a write of an agent through `poimen mcp` (#615): what it typed. */
   detail?: string;
+  /** Set for the result of the checks of a pull request (#995); a failed one offers `fix-checks`. */
+  checks?: CheckResult;
+}
+
+/** The checks of the pull request of a space finished (#995). */
+export interface CheckResult {
+  passed: boolean;
+  number: number;
+  title: string;
+  url: string;
+  /** The head commit the result belongs to. */
+  sha: string;
+  /** The space label. */
+  label: string;
+  /** A pane of the space, so a click opens it. */
+  paneId: string;
+  /** The directory of the space (the root of the `fix-checks` action). */
+  dir: string;
+  branch: string;
+  base: string;
+  crossRepo: boolean;
 }
 
 /** An attention of a run that asks for the user (needs you, warning or danger). */
@@ -107,6 +128,22 @@ export class NotificationCenter {
       time: now,
       read: false,
       deliver: { root: a.root, ...(a.machine === undefined ? {} : { machine: a.machine }) },
+    }));
+    this.entries.update((list) => prependCapped(list, added));
+  }
+
+  /** Records the results of checks (#995): the pull request and the space, one entry each. */
+  recordChecks(results: readonly CheckResult[], now: number): void {
+    if (results.length === 0) return;
+    const added = results.map((r): NotificationEntry => ({
+      id: this.nextId++,
+      paneId: r.paneId,
+      label: r.label,
+      status: r.passed ? "done" : "error",
+      message: `Checks of #${r.number} ${r.passed ? "passed" : "failed"}: ${r.title}`,
+      time: now,
+      read: false,
+      checks: r,
     }));
     this.entries.update((list) => prependCapped(list, added));
   }

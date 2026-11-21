@@ -2,7 +2,7 @@
 // pure helpers on it. Every backend maps its own model onto it in Rust (`poimen_core::snapshot`).
 
 import { HOOK_AGENTS, agentName, hasTranscripts } from "./backend";
-import type { Checks } from "../github/pulls";
+import type { BranchPull } from "./branch-pull";
 import type { SidebarSort } from "./settings";
 import { markStarters } from "./started-by";
 
@@ -241,15 +241,7 @@ export interface RepoInfo {
   on_base?: boolean;
 }
 
-/** The pull request of a branch as `branch_pulls` returns it (`BranchPull` of `github_branches.rs`). */
-export interface BranchPull {
-  number: number;
-  title: string;
-  url: string;
-  state: "open" | "merged";
-  isDraft: boolean;
-  checks: Checks;
-}
+export type { BranchPull } from "./branch-pull";
 
 /** The backend-neutral state: spaces hold tabs hold terminals (a terminal is identified by `terminal_id`). */
 export interface Snapshot {

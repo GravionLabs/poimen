@@ -24,6 +24,11 @@ pub struct BranchPull {
     pub state: String,
     pub is_draft: bool,
     pub checks: Checks,
+    /// The head commit the checks belong to (#995: a result is reported once per commit).
+    pub head_sha: String,
+    pub base_ref: String,
+    /// The head branch lives in a fork, where poimen cannot push.
+    pub is_cross_repository: bool,
 }
 
 /// Branches that never get a lookup: the trunk and release branches.
@@ -38,7 +43,7 @@ pub fn build_query(count: usize) -> String {
         .map(|i| {
             format!(
                 " b{i}: pullRequests(headRefName: $b{i}, states: [OPEN, MERGED], first: 1, \
-orderBy: {{field: UPDATED_AT, direction: DESC}}) {{ nodes {{ number title url state isDraft \
+orderBy: {{field: UPDATED_AT, direction: DESC}}) {{ nodes {{ number title url state isDraft headRefOid baseRefName isCrossRepository \
 commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ state contexts(first: 1) {{ \
 checkRunCountsByState {{ state count }} statusContextCountsByState {{ state count }} }} }} }} }} }} }} }}"
             )
@@ -72,6 +77,9 @@ fn parse_node(node: &Value) -> Option<BranchPull> {
         },
         is_draft: node["isDraft"].as_bool().unwrap_or(false),
         checks: parse_checks(node),
+        head_sha: node["headRefOid"].as_str().unwrap_or_default().to_owned(),
+        base_ref: node["baseRefName"].as_str().unwrap_or_default().to_owned(),
+        is_cross_repository: node["isCrossRepository"].as_bool().unwrap_or(false),
     })
 }
 
@@ -232,6 +240,12 @@ mod tests {
     }
 
     #[test]
+    fn the_query_asks_for_the_head_commit() {
+        let query = build_query(1);
+        assert!(query.contains("headRefOid baseRefName isCrossRepository"));
+    }
+
+    #[test]
     fn the_query_has_balanced_braces() {
         for count in [1, 3] {
             let query = build_query(count);
@@ -260,6 +274,9 @@ mod tests {
         let a = &found["feat/a"];
         assert_eq!((a.number, a.state.as_str(), a.is_draft), (12, "open", true));
         assert_eq!(a.title, "Add the thing");
+        assert_eq!(a.head_sha, "abc123");
+        assert_eq!(a.base_ref, "release/next");
+        assert!(!a.is_cross_repository);
         assert_eq!(a.url, "https://github.com/o/r/pull/12");
         assert_eq!(
             (

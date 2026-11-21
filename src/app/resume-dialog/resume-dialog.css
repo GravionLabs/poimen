@@ -1,0 +1,38 @@
+.dir {
+  overflow-wrap: anywhere;
+}
+
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 50vh;
+  margin: 0 0 12px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.session {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  height: auto;
+  min-height: var(--control-height);
+  padding-block: 4px;
+  text-align: left;
+}
+
+.prompt {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: var(--h-text-muted-color);
+  font-size: 11px;
+}
