@@ -11,6 +11,7 @@ use poimen_server::{Config, PtyHost, Server};
 use serde_json::json;
 
 const MIN: u64 = 60_000;
+const WORKING: &str = r"\033]7501;state=working:app=loop\007";
 
 struct Env {
     dir: PathBuf,
@@ -89,6 +90,53 @@ impl Env {
 
     fn agent(&self) -> AgentInfo {
         agent_of(&self.client)
+    }
+
+    /// Runs a shell command that prints an OSC 7501 report.
+    fn print(&self, escape: &str) {
+        self.client
+            .input(&self.terminal, &format!("printf '{escape}'\n"))
+            .unwrap();
+    }
+
+    /// Waits until the agent exists and `reported_at` is not `after` anymore.
+    fn reported_after(&self, after: Option<u64>) -> u64 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let at = self
+                .client
+                .list_terminals(None)
+                .unwrap()
+                .remove(0)
+                .agent
+                .and_then(|a| a.reported_at);
+            if let Some(at) = at.filter(|at| Some(*at) != after) {
+                return at;
+            }
+            assert!(Instant::now() < deadline, "no report arrived");
+            thread::yield_now();
+        }
+    }
+
+    /// Repeats the report until `reported_at` moves past `after` (the clock has milliseconds).
+    fn repeat_after(&self, after: u64) -> u64 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            self.print(WORKING);
+            let at = self.reported_after(Some(after));
+            if at > after {
+                return at;
+            }
+            assert!(Instant::now() < deadline, "no repeat arrived");
+        }
+    }
+
+    fn wait_silent_cleared(&self) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while self.agent().silent_since.is_some() {
+            assert!(Instant::now() < deadline, "mark stays");
+            thread::yield_now();
+        }
     }
 }
 
@@ -217,4 +265,57 @@ fn the_mark_is_in_the_server_file_and_survives_a_restart() {
     };
     let (client, _, _) = serve(&config3);
     assert_eq!(agent_of(&client).silent_since, marked.silent_since);
+}
+
+#[test]
+fn a_repeated_osc_report_keeps_a_working_program_alive() {
+    let env = Env::new("osc-heartbeat");
+    let rx = events(&env.client);
+    env.print(WORKING);
+    let first = env.reported_after(None);
+    assert_eq!(silent_events(&rx), vec![None]);
+    // The same state again moves `reported_at` and publishes nothing.
+    let reported = env.repeat_after(first);
+    assert_eq!(silent_events(&rx), Vec::<Option<u64>>::new());
+
+    (env.sweep)(reported + 10 * MIN - 1, 10);
+    assert_eq!(env.agent().silent_since, None);
+    (env.sweep)(reported + 10 * MIN, 10);
+    assert_eq!(env.agent().silent_since, Some(reported + 10 * MIN));
+    assert_eq!(silent_events(&rx), vec![Some(reported + 10 * MIN)]);
+
+    // The repeat after the mark clears it with one event.
+    env.print(WORKING);
+    env.wait_silent_cleared();
+    assert_eq!(silent_events(&rx), vec![None]);
+}
+
+#[test]
+fn output_without_a_report_does_not_keep_a_program_alive() {
+    let env = Env::new("osc-output");
+    env.print(WORKING);
+    let reported = env.reported_after(None);
+    // Plain output, then a child record: the shell runs both in order, so the record shows
+    // that the output went through. A child record never moves the root `reported_at`.
+    env.client
+        .input(
+            &env.terminal,
+            "echo still-printing; printf '\\033]7501;state=working:id=probe\\007'\n",
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while env
+        .client
+        .list_terminals(None)
+        .unwrap()
+        .remove(0)
+        .records
+        .is_empty()
+    {
+        assert!(Instant::now() < deadline, "output did not arrive");
+        thread::yield_now();
+    }
+    assert_eq!(env.agent().reported_at, Some(reported));
+    (env.sweep)(reported + 10 * MIN, 10);
+    assert_eq!(env.agent().silent_since, Some(reported + 10 * MIN));
 }
