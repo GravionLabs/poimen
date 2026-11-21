@@ -37,6 +37,7 @@ import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
 import { RemoteSpaces } from "./core/remote-spaces";
 import { Attention, canMarkUnread } from "./core/attention";
+import { Presence } from "./core/presence";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
@@ -336,15 +337,14 @@ export class App {
     return id ? this.sizes().get(id) : undefined;
   });
 
-  /** Panes whose tab is on screen: the active tab of each editor group. */
-  private readonly viewedPanes = computed(
-    () => new Set(this.editor.groups().flatMap((g) => (g.activeId ? [g.activeId] : []))),
+  private readonly presence = inject(Presence);
+  /** Active tab of each editor group, while the user is present (#1030). */
+  private readonly viewedPanes = computed(() =>
+    this.presence.whenPresent(this.editor.groups().flatMap((g) => g.activeId ?? [])),
   );
 
   constructor() {
-    effect(() => {
-      this.projectEntries.setDir(this.activeDir());
-    });
+    effect(() => this.projectEntries.setDir(this.activeDir()));
     // The space of the active tab (a pane or the overview) is the one the user focused last (#712).
     effect(() => {
       const id = this.editor.activeId();
