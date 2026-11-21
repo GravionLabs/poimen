@@ -12,6 +12,7 @@
 
 mod report;
 mod runs;
+mod screen;
 mod terminal;
 mod worktree;
 
@@ -178,6 +179,14 @@ fn tools() -> Value {
             }, "required": ["terminal"], "additionalProperties": false},
         },
         {
+            "name": "read_terminal",
+            "description": "The last lines of any terminal as plain text (its screen and scrollback: a shell, a build, a deliver loop), with whether it still runs. Observes only: no input, no control. Cut to 64 KiB with a note. Terminal output can hold secrets; a read tool: any space, no confirmation (ADR 0012).",
+            "inputSchema": {"type": "object", "properties": {
+                "terminal": {"type": "string", "description": "Terminal id."},
+                "lines": {"type": "integer", "minimum": 1, "maximum": 500, "description": "How many lines from the end (default 50, at most 500)."}
+            }, "required": ["terminal"], "additionalProperties": false},
+        },
+        {
             "name": "whoami",
             "description": "The terminal and space this agent runs in (from POIMEN_TERMINAL_ID); empty outside a poimen terminal.",
             "inputSchema": none,
@@ -297,6 +306,7 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
                 .ok_or_else(|| Fail::Tool(format!("terminal {id} is not known to the server")))?;
             Ok(terminal_detail(t))
         }
+        "read_terminal" => screen::read_terminal(client, args),
         "whoami" => {
             let Some(id) = terminal_id.filter(|i| !i.is_empty()) else {
                 return Ok(json!({"in_poimen": false}));
