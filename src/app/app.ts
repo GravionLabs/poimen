@@ -40,7 +40,7 @@ import { Presence } from "./core/presence";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
-import { silentLabel } from "./core/agent-priority";
+import { withSilent } from "./core/agent-priority";
 import { TokenTotalsService } from "./core/token-totals";
 import { Sounds, soundChanges } from "./core/sounds";
 import { Notifications } from "./notifications/notifications";
@@ -320,6 +320,7 @@ export class App {
               title: `Agent flow of ${header.title}`,
             };
           }
+          const base = `${withMachine(header.title, pane?.machine)}${tab.pinned ? "" : " (preview)"}`;
           return {
             id: tab.paneId,
             label: header.label,
@@ -328,8 +329,7 @@ export class App {
             attention: ringing.has(tab.paneId),
             unread: unread.has(tab.paneId),
             note: this.hostNote(pane),
-            mark: silentLabel(pane?.agent_silent_since, this.clock()),
-            title: `${withMachine(header.title, pane?.machine)}${tab.pinned ? "" : " (preview)"}`,
+            title: withSilent(base, pane?.agent_silent_since, this.clock()),
           };
         }),
       ]),

@@ -156,14 +156,6 @@
   border-left: 1px solid var(--h-content-border-color);
 }
 
-.mark {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  align-self: center;
-  border-radius: 50%;
-}
-
 .note {
   flex: none;
   width: 6px;
@@ -172,17 +164,6 @@
   border-radius: 50%;
   border: 1px solid var(--h-text-muted-color, currentColor);
   opacity: 0.7;
-}
-
-.mark {
-  flex: none;
-  align-self: center;
-  font-size: 11px;
-  color: var(--status-blocked);
-}
-
-.attention-mark {
-  background: var(--status-blocked);
 }
 
 .strip.drop-end {

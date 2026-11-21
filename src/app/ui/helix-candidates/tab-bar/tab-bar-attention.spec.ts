@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
-import { Component, signal } from "@angular/core";
+import { Component } from "@angular/core";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -52,33 +52,5 @@ describe("TabBar attention and unread marks", () => {
     ]);
     expect(rows.map((t) => t.querySelector(".note") !== null)).toEqual([false, false, false, true]);
     expect(rows[3].querySelector<HTMLElement>(".note")!.title).toContain("0.15.0");
-  });
-});
-
-describe("TabBar silent mark (#899)", () => {
-  it("shows the mark text and removes it when cleared", () => {
-    @Component({
-      selector: "app-host",
-      imports: [TabBar],
-      template: `<app-tab-bar [tabs]="tabs()" activeId="a" />`,
-    })
-    class Host {
-      tabs = signal([{ id: "a", label: "agent", mark: "silent 12m" }]);
-    }
-    TestBed.resetTestingModule();
-    TestBed.overrideComponent(TabBar, {
-      set: {
-        templateUrl: undefined,
-        styleUrl: undefined,
-        template: readFileSync("src/app/ui/helix-candidates/tab-bar/tab-bar.html", "utf8"),
-      },
-    });
-    const fixture = TestBed.createComponent(Host);
-    fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector(".mark")?.textContent?.trim()).toBe("silent 12m");
-    fixture.componentInstance.tabs.set([{ id: "a", label: "agent", mark: undefined as never }]);
-    fixture.detectChanges();
-    expect(root.querySelector(".mark")).toBeNull();
   });
 });

@@ -161,7 +161,10 @@
             }
             @if (!tab.icon) {
               @let p = tabPane(tab.id);
-              <span class="dot status-{{ p?.agent_status ?? 'unknown' }}"></span>
+              <span
+                class="dot status-{{ p?.agent_status ?? 'unknown' }}"
+                [class.silent]="p?.agent_silent_since !== undefined"
+              ></span>
               @if (editor.mode(tab.id) === "control") {
                 <app-icon
                   name="terminal"
