@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from "@angular/common";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -16,6 +17,8 @@ import { ExternalEditor, joinPath } from "../core/external-editor";
 import { ContextMenu } from "../ui/context-menu/context-menu";
 import { plainGroups } from "../ui/context-menu/menu-model";
 import { UiState } from "../core/ui-state";
+import { DialogShell } from "../ui/dialog-shell/dialog-shell";
+import { sectionsOf, splitPath } from "./change-sections";
 import {
   CHANGES_SCOPES,
   effectiveLayout,
@@ -51,7 +54,16 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
  */
 @Component({
   selector: "app-changes-view",
-  imports: [DiffEditor, CommentsPanel, FindingsPanel, HxButton, HxSelectButton, ContextMenu],
+  imports: [
+    DiffEditor,
+    CommentsPanel,
+    FindingsPanel,
+    HxButton,
+    HxSelectButton,
+    ContextMenu,
+    DialogShell,
+    NgTemplateOutlet,
+  ],
   providers: [Changes, LineComments, Findings],
   templateUrl: "./changes-view.html",
   styles: `
@@ -99,13 +111,25 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
       min-height: 0;
     }
     .files {
-      list-style: none;
       margin: 0;
       padding: 0;
       width: 280px;
       min-width: 160px;
       overflow: auto;
       border-right: 1px solid var(--h-content-border-color);
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 4px;
+      position: sticky;
+      top: 0;
+      background: var(--h-content-background);
+      border-bottom: 1px solid var(--h-content-border-color);
+    }
+    .tag {
+      color: var(--h-text-muted-color);
     }
     .file {
       display: flex;
@@ -116,6 +140,31 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .file.selected {
       background: var(--h-content-hover-background);
+    }
+    .file.picked {
+      outline: 1px solid var(--h-content-border-color);
+      outline-offset: -1px;
+      background: var(--h-content-hover-background);
+    }
+    .actions {
+      display: none;
+      gap: 2px;
+    }
+    .file:hover .actions,
+    .file:focus-within .actions,
+    .files:focus .file.selected .actions {
+      display: inline-flex;
+    }
+    .file:hover .stat,
+    .file:focus-within .stat {
+      display: none;
+    }
+    .discard-list {
+      max-height: 160px;
+      overflow: auto;
+      margin: 0 0 8px;
+      padding-left: 18px;
+      font-family: var(--font-mono);
     }
     .status {
       width: 14px;
@@ -139,11 +188,22 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     .path {
       flex: 1;
       min-width: 0;
+      display: flex;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .name {
+      flex: 0 1 auto;
+      min-width: 4ch;
       overflow: hidden;
       text-overflow: ellipsis;
-      white-space: nowrap;
-      direction: rtl;
-      text-align: left;
+    }
+    .dir {
+      flex: 1 1 0;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--h-text-muted-color);
     }
     .stat {
       display: inline-flex;
@@ -269,6 +329,10 @@ export class ChangesView {
     label: SCOPE_LABEL[value],
   }));
   protected readonly statusLetter = statusLetter;
+  protected readonly split = splitPath;
+  protected readonly sections = computed(() => sectionsOf(this.changes.files()));
+  /** The files a Discard waits to confirm. */
+  protected readonly discarding = signal<ChangedFile[] | null>(null);
 
   /** Width of the tab; unknown (no resize observer) counts as wide. */
   private readonly width = signal(Number.POSITIVE_INFINITY);
@@ -358,8 +422,37 @@ export class ChangesView {
     return file.old_path ? `${file.old_path} → ${file.path}` : file.path;
   }
 
-  /** Up and Down move through the file list. */
+  protected clickRow(event: MouseEvent, file: ChangedFile): void {
+    this.changes.pick(file.path, event.shiftKey);
+    void this.changes.select(file.path);
+  }
+
+  protected stage(file: ChangedFile): void {
+    const targets = this.changes.targets(file);
+    const stage = !file.staged;
+    void this.changes.setStagedMany(
+      targets.filter((f) => f.staged !== stage),
+      stage,
+    );
+  }
+
+  protected askDiscard(file: ChangedFile): void {
+    this.discarding.set(this.changes.targets(file));
+  }
+
+  protected confirmDiscard(): void {
+    const files = this.discarding();
+    this.discarding.set(null);
+    if (files) void this.changes.discard(files);
+  }
+
+  /** Up and Down move through the file list, Escape clears the picked files. */
   protected onListKey(event: KeyboardEvent): void {
+    if (event.key === "Escape" && this.changes.picked().size) {
+      event.preventDefault();
+      this.changes.clearPicked();
+      return;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       void this.changes.move(event.key === "ArrowDown" ? 1 : -1);

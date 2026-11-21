@@ -56,6 +56,7 @@ const LIST: ChangeList = {
       deletions: 1,
       binary: false,
       staged: false,
+      conflicted: false,
     },
     {
       path: "img.png",
@@ -65,6 +66,7 @@ const LIST: ChangeList = {
       deletions: 0,
       binary: true,
       staged: false,
+      conflicted: false,
     },
     {
       path: "big.txt",
@@ -74,6 +76,7 @@ const LIST: ChangeList = {
       deletions: 9,
       binary: false,
       staged: false,
+      conflicted: false,
     },
   ],
 };
@@ -131,7 +134,7 @@ async function settle(f: { detectChanges(): void; whenStable(): Promise<unknown>
 
 const el = (f: { nativeElement: HTMLElement }) => f.nativeElement;
 const names = (f: { nativeElement: HTMLElement }) =>
-  [...el(f).querySelectorAll(".file .path")].map((n) => n.textContent);
+  [...el(f).querySelectorAll(".file")].map((n) => n.getAttribute("data-path"));
 const click = (e: Element | null) => (e as HTMLElement).click();
 const button = (f: { nativeElement: HTMLElement }, text: string) =>
   [...el(f).querySelectorAll("button")].find((b) => b.textContent!.trim() === text)!;
@@ -155,7 +158,7 @@ describe("Changes tab", () => {
     expect(el(f).querySelector(".totals .add")!.textContent).toBe("+12");
     expect(el(f).querySelector(".totals .del")!.textContent).toBe("−10");
     expect(el(f).querySelector(".totals .count")!.textContent).toBe("3 files");
-    expect(el(f).querySelector(".file.selected .path")!.textContent).toBe("src/a.ts");
+    expect(el(f).querySelector(".file.selected")!.getAttribute("data-path")).toBe("src/a.ts");
     expect(el(f).querySelector(".cm-mergeView")).not.toBeNull();
     expect(el(f).querySelector(".cm-mergeViewEditors")!.textContent).toContain("one");
     expect(el(f).querySelector(".cm-mergeViewEditors")!.textContent).toContain("two");
@@ -169,7 +172,7 @@ describe("Changes tab", () => {
     click(el(f).querySelectorAll(".file")[1]);
     await settle(f);
     f.detectChanges();
-    expect(el(f).querySelector(".file.selected .path")!.textContent).toBe("img.png");
+    expect(el(f).querySelector(".file.selected")!.getAttribute("data-path")).toBe("img.png");
 
     const list = el(f).querySelector(".files")!;
     list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
@@ -179,7 +182,7 @@ describe("Changes tab", () => {
     list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     await settle(f);
     f.detectChanges();
-    expect(el(f).querySelector(".file.selected .path")!.textContent).toBe("img.png");
+    expect(el(f).querySelector(".file.selected")!.getAttribute("data-path")).toBe("img.png");
   });
 
   it("reads the other scope when the toggle is used", async () => {
@@ -511,7 +514,7 @@ describe("Stage, commit and push", () => {
   }
 
   const box = (f: { nativeElement: HTMLElement }, label: string) =>
-    el(f).querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+    el(f).querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
   const message = (f: { nativeElement: HTMLElement }, text: string) => {
     const area = el(f).querySelector<HTMLTextAreaElement>("textarea.message")!;
     area.value = text;
@@ -523,24 +526,25 @@ describe("Stage, commit and push", () => {
   it("shows no git controls in the base scope", async () => {
     const f = await render();
     expect(el(f).querySelector("textarea.message")).toBeNull();
-    expect(el(f).querySelector("input.stage")).toBeNull();
+    expect(el(f).querySelector(".file .stage")).toBeNull();
   });
 
-  it("stages a file through its checkbox and shows it staged after the refresh", async () => {
+  it("stages a file through its Stage button and shows it staged after the refresh", async () => {
     const f = await renderUncommitted();
     tauri.answer("changes_stage", (args) => {
       for (const p of args!["paths"] as string[]) staged.add(p);
     });
-    expect(box(f, "Stage src/a.ts").checked).toBe(false);
+    expect(box(f, "Stage src/a.ts")).not.toBeNull();
     box(f, "Stage src/a.ts").click();
     await settle(f);
     f.detectChanges();
     expect(tauri.calls("changes_stage")).toEqual([
       { dir: "/repo", paths: ["src/a.ts"], stage: true },
     ]);
-    expect(box(f, "Unstage src/a.ts").checked).toBe(true);
+    expect(el(f).querySelector('[data-section="staged"]')).not.toBeNull();
+    expect(box(f, "Unstage src/a.ts")).not.toBeNull();
     // The click did not select another file.
-    expect(el(f).querySelector(".file.selected .path")!.textContent).toBe("src/a.ts");
+    expect(el(f).querySelector(".file.selected")!.getAttribute("data-path")).toBe("src/a.ts");
   });
 
   it("unstages a staged file", async () => {

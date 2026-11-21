@@ -1,22 +1,20 @@
-use poimen_core::{agent_actions, copilot, git, transcripts};
+use poimen_core::{agent_actions, copilot, git, github, gui_path, harness, transcripts};
 mod agent_session;
 mod agent_settings;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
 mod changes;
+mod changes_files;
 mod changes_git;
 mod commit_message;
 mod deliver;
 mod editor;
 mod git_sync;
-use poimen_core::github;
 mod github_branches;
 mod github_issues;
 mod github_milestones;
 mod github_pulls;
-use poimen_core::gui_path;
-use poimen_core::harness;
 mod hooks;
 mod layout;
 mod layout_file;
@@ -2966,6 +2964,7 @@ pub fn run() {
             changes_write_comments,
             changes_findings,
             changes_git::changes_stage,
+            changes_git::changes_discard,
             changes_git::changes_commit,
             changes_git::changes_push,
             commit_message::changes_generate_message,
