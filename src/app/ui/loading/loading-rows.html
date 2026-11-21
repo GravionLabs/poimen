@@ -1,0 +1,8 @@
+@if (visible()) {
+  <div class="rows" role="status" [attr.data-testid]="testId">
+    <span class="sr-only">{{ label }}</span>
+    @for (row of rowList(); track row) {
+      <hx-skeleton height="14px" [width]="widthOf(row)" />
+    }
+  </div>
+}

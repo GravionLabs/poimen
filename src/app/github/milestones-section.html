@@ -11,7 +11,12 @@
     </p>
   }
   @if (milestones.loading() && !milestones.repos().length) {
-    <p class="hint" role="status" data-testid="milestones-loading">Loading milestones…</p>
+    <app-loading-rows
+      [active]="true"
+      label="Loading milestones"
+      testId="milestones-loading"
+      [rows]="4"
+    />
   }
   @for (r of milestones.repos(); track r.root) {
     <h3 class="mono">

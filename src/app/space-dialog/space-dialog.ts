@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, output, signal } from "@angular/core";
 import { SpaceActions, dirName } from "../core/space-actions";
 import { DialogShell } from "../ui/dialog-shell/dialog-shell";
+import { delayedBusy } from "../ui/loading/delayed";
 import { Icon } from "../ui/icon/icon";
 import { HxButton } from "@gravionlabs/helix-ui";
 
@@ -14,6 +15,8 @@ import { HxButton } from "@gravionlabs/helix-ui";
 })
 export class SpaceDialog {
   protected readonly actions = inject(SpaceActions);
+  /** "Creating…" shows only after 1 s; the button is disabled from the first moment (#1041). */
+  protected readonly slow = delayedBusy(() => this.actions.busy());
   /** A space was closed in herdr; the host drops the tabs of these panes. */
   readonly closed = output<string[]>();
   protected readonly path = signal("");

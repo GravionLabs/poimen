@@ -339,7 +339,12 @@
         }
       </section>
     } @else {
-      <p class="hint" data-testid="detail-loading">Loading...</p>
+      <app-loading-rows
+        [active]="true"
+        label="Loading the pull request"
+        testId="detail-loading"
+        [rows]="6"
+      />
     }
   </aside>
 }

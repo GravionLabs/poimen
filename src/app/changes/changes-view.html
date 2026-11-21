@@ -137,7 +137,7 @@
 @if (changes.error(); as error) {
   <p class="problem" role="alert">{{ error }}</p>
 } @else if (changes.loading() && !changes.list()) {
-  <p class="empty" role="status" data-testid="changes-loading">Loading changes…</p>
+  <app-loading-rows [active]="true" label="Loading changes" testId="changes-loading" [rows]="8" />
 } @else if (changes.list() && !changes.files().length) {
   <p class="empty">No changes against {{ changes.list()?.base }}.</p>
 } @else if (changes.list()) {

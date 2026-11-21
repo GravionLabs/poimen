@@ -56,6 +56,8 @@ import {
   type Step,
   type TimelineLine,
 } from "./deliver-status";
+import { delayedBusy } from "../ui/loading/delayed";
+import { LoadingRows } from "../ui/loading/loading-rows";
 
 /** "PR #343" for a pull request URL, the URL itself when it has no number at the end. */
 export function prLabel(url: string): string {
@@ -99,7 +101,7 @@ export function lineCounts(line: TimelineLine): string[] {
  */
 @Component({
   selector: "app-deliver-view",
-  imports: [NgTemplateOutlet, HxButton],
+  imports: [LoadingRows, NgTemplateOutlet, HxButton],
   templateUrl: "./deliver-view.html",
   styleUrl: "./deliver-view.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -109,6 +111,7 @@ export class DeliverView {
   protected readonly deliver = inject(Deliver);
   protected readonly ui = inject(UiState);
   protected readonly overview = inject(Overview);
+  protected readonly slowRefresh = delayedBusy(() => this.overview.loading());
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly supported = SUPPORTED_SCHEMA;
   protected readonly eventsVersion = SUPPORTED_EVENTS;

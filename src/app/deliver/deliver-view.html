@@ -11,6 +11,9 @@
       appears here as soon as the file exists.
     </p>
   }
+  @if (overview.loading() && overview.repos().length === 0 && !overview.failure()) {
+    <app-loading-rows [active]="true" label="Loading milestones" testId="runs-loading" [rows]="5" />
+  }
   @if (overview.repos().length > 0 || overview.failure()) {
     <section class="section" data-testid="overview" aria-labelledby="runs-overview">
       <h2 id="runs-overview" class="section-title">
@@ -26,7 +29,7 @@
           [attr.title]="overview.loading() ? 'Already refreshing' : 'Refresh the milestones'"
           (click)="overview.load()"
         >
-          {{ overview.loading() ? "Refreshing…" : "Refresh" }}
+          {{ slowRefresh() ? "Refreshing…" : "Refresh" }}
         </button>
       </h2>
       @if (overview.failure(); as f) {

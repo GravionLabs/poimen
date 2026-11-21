@@ -10,7 +10,7 @@
       (click)="refresh()"
       [disabled]="loading"
     >
-      {{ loading ? "Refreshing..." : "Refresh" }}
+      {{ slowRefresh() ? "Refreshing…" : "Refresh" }}
     </button>
   </header>
   <div class="layout">
@@ -73,7 +73,12 @@
           @let result = pulls.result();
           @if (!result) {
             @if (!pulls.error()) {
-              <p class="hint">Loading...</p>
+              <app-loading-rows
+                [active]="true"
+                label="Loading pull requests"
+                testId="pulls-loading"
+                [rows]="6"
+              />
             }
           } @else {
             <div class="toolbar" role="group" aria-label="Filters">

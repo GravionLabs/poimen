@@ -28,6 +28,7 @@ import {
 } from "../pulls";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { Icon } from "../../ui/icon/icon";
+import { LoadingRows } from "../../ui/loading/loading-rows";
 
 /**
  * The detail pane of the selected pull request: description, checks, reviews and linked issues.
@@ -38,7 +39,7 @@ import { Icon } from "../../ui/icon/icon";
   selector: "app-pull-detail",
   templateUrl: "./pull-detail.html",
   styleUrl: "./pull-detail.css",
-  imports: [HxButton, ChipPicker, Icon],
+  imports: [LoadingRows, HxButton, ChipPicker, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PullDetailPane {

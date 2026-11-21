@@ -1,0 +1,13 @@
+@if (starter.steps(); as steps) {
+  <ul class="progress" role="status" aria-label="Creating the space">
+    @for (step of steps; track step.id) {
+      <li
+        [class.current]="step.state === 'current'"
+        [attr.aria-current]="step.state === 'current' ? 'step' : null"
+      >
+        <span aria-hidden="true">{{ mark(step.state) }}</span>
+        <span>{{ step.label }}{{ step.state === "skipped" ? " (none)" : "" }}</span>
+      </li>
+    }
+  </ul>
+}

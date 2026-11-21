@@ -3,11 +3,12 @@ import { ChangeDetectionStrategy, Component, HostListener, inject } from "@angul
 import { GithubMilestones, dueText, progressPercent, readyToClose } from "./milestones";
 import { errorText, isGithubUrl } from "./pulls";
 import { HxButton } from "@gravionlabs/helix-ui";
+import { LoadingRows } from "../ui/loading/loading-rows";
 
 /** The "Milestones" section of the GitHub tab: open milestones with progress; selecting filters the issues. */
 @Component({
   selector: "app-github-milestones",
-  imports: [HxButton, NgTemplateOutlet],
+  imports: [LoadingRows, HxButton, NgTemplateOutlet],
   templateUrl: "./milestones-section.html",
   styleUrl: "./milestones-section.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

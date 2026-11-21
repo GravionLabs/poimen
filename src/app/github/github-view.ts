@@ -31,11 +31,14 @@ import {
   type PullRow,
 } from "./pulls";
 import { HxButton, HxSelectButton } from "@gravionlabs/helix-ui";
+import { delayedBusy } from "../ui/loading/delayed";
+import { LoadingRows } from "../ui/loading/loading-rows";
 
 /** The GitHub pull request view as an editor tab: open pull requests of the known repositories. */
 @Component({
   selector: "app-github-view",
   imports: [
+    LoadingRows,
     HxButton,
     HxSelectButton,
     AgentActionMenu,
@@ -138,6 +141,8 @@ export class GithubView {
     else if (page === "issues") void this.issues.load();
     else void this.milestones.load();
   }
+
+  protected readonly slowRefresh = delayedBusy(() => this.loading);
 
   protected get loading(): boolean {
     const page = this.ui.githubPage();
