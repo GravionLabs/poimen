@@ -994,27 +994,11 @@ mod tests {
     }
 
     fn terminal(id: &str, space_id: &str, name: &str) -> Terminal {
-        Terminal {
-            id: id.into(),
-            space_id: space_id.into(),
-            name: name.into(),
-            cwd: format!("/work/{name}"),
-            cols: 80,
-            rows: 24,
-            status: TerminalStatus::Running,
-            exit_code: None,
-            program: None,
-            args: Vec::new(),
-            agent: None,
-            tokens: Default::default(),
-            survives_restart: false,
-            host_version: None,
-            host_bundled_version: None,
-            records: Vec::new(),
-            hibernated: None,
-            started_by: None,
-            report: None,
-        }
+        serde_json::from_value(json!({
+            "id": id, "space_id": space_id, "name": name, "cwd": format!("/work/{name}"),
+            "cols": 80, "rows": 24, "status": "running",
+        }))
+        .unwrap()
     }
 
     #[test]

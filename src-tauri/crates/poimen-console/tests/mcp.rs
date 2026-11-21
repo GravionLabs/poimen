@@ -138,6 +138,7 @@ fn initialize_and_tools_list() {
         [
             "list_spaces",
             "list_terminals",
+            "get_terminal",
             "whoami",
             "list_runs",
             "get_events",
@@ -695,4 +696,70 @@ fn get_events_returns_the_events_after_a_seq() {
     ] {
         assert_eq!(get(args.clone())["isError"], true, "{args}");
     }
+}
+
+#[test]
+fn get_terminal_shows_the_source_and_the_changes_of_a_status() {
+    let f = fixture("get-terminal");
+    let shell = f
+        .client
+        .create_terminal(&TerminalCreate {
+            space_id: f.space.clone(),
+            name: Some("deliver".into()),
+            command: Some(vec!["sh".into()]),
+            ..Default::default()
+        })
+        .unwrap()
+        .id;
+    report(&f.client, &shell, 1, "working", Some("hooked"));
+    let r = call(&f.client, None, "get_terminal", json!({"terminal": shell}));
+    let t = &r["structuredContent"];
+    assert_eq!(t["agent"]["source"], "claude");
+    assert_eq!(t["agent"]["status"], "working");
+    assert!(t["agent"]["status_since"].as_u64().is_some());
+    assert!(t["agent"]["reported_at"].as_u64().is_some());
+
+    // The program's own report wins over the hook.
+    f.client
+        .input(
+            &shell,
+            "printf '\\033]7501;state=error:app=deliver:title=TG9vcA==:msg=YmxvY2tlZA==\\033\\\\'\n",
+        )
+        .unwrap();
+    let w = call(&f.client, None, "wait_agent", json!({"terminal": shell}));
+    assert_eq!(w["structuredContent"]["status"], "error");
+    let r = call(&f.client, None, "get_terminal", json!({"terminal": shell}));
+    let t = &r["structuredContent"];
+    assert_eq!(t["agent"]["source"], "osc7501");
+    assert_eq!(t["agent"]["kind"], "deliver");
+    assert_eq!(t["agent"]["title"], "Loop");
+    assert_eq!(t["agent"]["message"], "blocked");
+    let changes = t["status_changes"].as_array().unwrap();
+    let seen: Vec<(&str, &str)> = changes
+        .iter()
+        .map(|c| (c["status"].as_str().unwrap(), c["source"].as_str().unwrap()))
+        .collect();
+    assert_eq!(seen, [("working", "claude"), ("error", "osc7501")]);
+    assert_eq!(changes[1]["message"], "blocked");
+
+    // list_terminals stays compact.
+    let r = call(&f.client, None, "list_terminals", json!({}));
+    let listed = r["structuredContent"]["terminals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == shell.as_str())
+        .unwrap()
+        .clone();
+    assert!(listed.get("status_changes").is_none());
+    assert!(listed["agent"].get("source").is_none());
+}
+
+#[test]
+fn get_terminal_of_an_unknown_terminal_is_a_tool_error() {
+    let f = fixture("get-terminal-unknown");
+    let r = call(&f.client, None, "get_terminal", json!({"terminal": "nope"}));
+    assert_eq!(r["isError"], true);
+    let r = call(&f.client, None, "get_terminal", json!({}));
+    assert_eq!(r["isError"], true);
 }

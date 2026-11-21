@@ -12,12 +12,14 @@
 
 mod report;
 mod runs;
+mod terminal;
 mod worktree;
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use terminal::{terminal_detail, terminal_json};
 use worktree::{WorktreeSpec, make_worktree_space};
 
 use poimen_client::Client;
@@ -163,10 +165,17 @@ fn tools() -> Value {
         },
         {
             "name": "list_terminals",
-            "description": "The poimen terminals: id, space, name, state, agent kind and status, tokens. Optionally of one space.",
+            "description": "The poimen terminals: id, space, name, state, agent kind and status, tokens. Optionally of one space. Compact: `get_terminal` has the source of a status, its times and its recent changes.",
             "inputSchema": {"type": "object", "properties": {
                 "space": {"type": "string", "description": "Space id; all spaces when absent."}
             }},
+        },
+        {
+            "name": "get_terminal",
+            "description": "One terminal in full: what list_terminals has, plus where the agent status came from (`source`: `osc7501` or the hook kind), its times, title, progress, tone, hibernation, the OSC 7501 child records and the last status changes (at most 20, newest last; only since the server started). A read tool: any space, no confirmation.",
+            "inputSchema": {"type": "object", "properties": {
+                "terminal": {"type": "string", "description": "Terminal id."}
+            }, "required": ["terminal"], "additionalProperties": false},
         },
         {
             "name": "whoami",
@@ -273,6 +282,20 @@ fn call(client: &Client, env: &Env, name: &str, args: &Value) -> Result<Value, F
             let space = args.get("space").and_then(Value::as_str);
             let terminals = client.list_terminals(space).map_err(server_error)?;
             Ok(json!({"terminals": terminals.iter().map(terminal_json).collect::<Vec<_>>()}))
+        }
+        "get_terminal" => {
+            runs::only_keys(args, &["terminal"])?;
+            let id = args
+                .get("terminal")
+                .and_then(Value::as_str)
+                .filter(|i| !i.is_empty())
+                .ok_or_else(|| Fail::Tool("terminal is required".into()))?;
+            let terminals = client.list_terminals(None).map_err(server_error)?;
+            let t = terminals
+                .iter()
+                .find(|t| t.id == id)
+                .ok_or_else(|| Fail::Tool(format!("terminal {id} is not known to the server")))?;
+            Ok(terminal_detail(t))
         }
         "whoami" => {
             let Some(id) = terminal_id.filter(|i| !i.is_empty()) else {
@@ -743,24 +766,4 @@ fn read_agent(client: &Client, args: &Value) -> Result<Value, Fail> {
 
 fn server_error(e: poimen_client::ClientError) -> Fail {
     Fail::Tool(format!("poimen-server: {e}"))
-}
-
-fn terminal_json(t: &poimen_client::protocol::Terminal) -> Value {
-    let agent = t.agent.as_ref().map(|a| {
-        json!({
-            "kind": a.agent,
-            "status": a.status,
-            "tone": a.tone,
-            "message": a.message,
-        })
-    });
-    json!({
-        "id": t.id,
-        "space": t.space_id,
-        "name": t.name,
-        "directory": t.cwd,
-        "state": t.status,
-        "agent": agent,
-        "tokens": t.tokens,
-    })
 }

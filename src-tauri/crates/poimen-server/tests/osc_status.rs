@@ -342,3 +342,52 @@ fn a_warning_tone_belongs_to_done_and_lives_like_done() {
     env.print(r"\033]7501;state=clear\007");
     wait_for(&env, None);
 }
+
+#[test]
+fn the_status_history_keeps_changes_with_their_source_and_at_most_twenty() {
+    let env = Env::new("history");
+    let history = || {
+        let t = env.client.list_terminals(None).unwrap().remove(0);
+        (t.agent_source, t.status_history)
+    };
+    assert_eq!(history(), (None, Vec::new()));
+    env.hook(1, "working");
+    // The same status again is no change.
+    env.hook(2, "working");
+    env.print(r"\033]7501;state=done:app=deliver\033\\");
+    wait_for(&env, Some(AgentStatus::Done));
+    let (source, changes) = history();
+    assert_eq!(source.as_deref(), Some("osc7501"));
+    let seen: Vec<_> = changes
+        .iter()
+        .map(|c| (c.status, c.source.clone().unwrap_or_default()))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (AgentStatus::Working, String::new()),
+            (AgentStatus::Done, "osc7501".to_string())
+        ]
+    );
+    assert!(changes[0].at <= changes[1].at);
+
+    // Clearing the program's status brings the hook's back, as a change.
+    env.print(r"\033]7501;state=clear\033\\");
+    wait_for(&env, Some(AgentStatus::Working));
+    assert_eq!(history().1.len(), 3);
+
+    // Many changes: only the last twenty stay, newest last.
+    for i in 0..25 {
+        let state = if i % 2 == 0 { "blocked" } else { "working" };
+        env.print(&format!(r"\033]7501;state={state}\033\\"));
+        let want = if i % 2 == 0 {
+            AgentStatus::Blocked
+        } else {
+            AgentStatus::Working
+        };
+        wait_for(&env, Some(want));
+    }
+    let changes = history().1;
+    assert_eq!(changes.len(), poimen_client::protocol::MAX_STATUS_HISTORY);
+    assert_eq!(changes.last().unwrap().status, AgentStatus::Blocked);
+}
