@@ -4,7 +4,8 @@ name: CI
 # job decides from the diff which areas changed (frontend, rust, or this workflow = both); jobs of an untouched area
 # are skipped. The Rust jobs follow the `rust` area: src-tauri/, rust-toolchain.toml, the root package.json (the version
 # test reads it) and the frontend fixtures that Rust tests read (src/app/deliver/fixtures/); the frontend job covers the
-# frontend build that the Rust jobs also run. The `ci` job always runs
+# frontend build that the Rust jobs also run. The path rules are in scripts/changed-paths.json (also read by
+# `pnpm check:changed`). The `ci` job always runs
 # last and is the single check to require on a branch (green when the checks passed or were skipped for lack of
 # changes in their area).
 # Pushes to main run these checks through release.yml (workflow_call), so they run once per release.
@@ -44,18 +45,8 @@ jobs:
             printf '%s\n' frontend=true rust=true compat=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          frontend='^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|angular\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|\.oxlintrc\.json|\.oxfmtrc\.json|scripts/lint/.*|vitest\.[^/]*|src/.*|\.github/workflows/ci\.yml)$'
-          rust='^(rust-toolchain\.toml|package\.json|src-tauri/.*|src/app/deliver/fixtures/.*|\.github/workflows/ci\.yml)$'
-          compat='^(src-tauri/(Cargo\.(toml|lock)|crates/(poimen-protocol|poimen-pty-host|poimen-server|poimen-client)/.*)|rust-toolchain\.toml|\.github/workflows/ci\.yml)$'
-          git diff --name-only "$BASE_SHA" HEAD > changed.txt
-          cat changed.txt
-          f=false
-          r=false
-          c=false
-          grep -Eq "$frontend" changed.txt && f=true
-          grep -Eq "$rust" changed.txt && r=true
-          grep -Eq "$compat" changed.txt && c=true
-          printf '%s\n' "frontend=$f" "rust=$r" "compat=$c" >> "$GITHUB_OUTPUT"
+          # The path rules are in scripts/changed-paths.json, shared with `pnpm check:changed`.
+          node scripts/check-changed.mjs --github-output "$BASE_SHA"
 
   frontend:
     needs: changes
@@ -85,7 +76,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
-      - run: node --test scripts/ratchets/core.test.mjs
+      - run: node --test scripts/ratchets/core.test.mjs scripts/check-changed.test.mjs
       - run: node scripts/ratchets/run.mjs
 
   # The server crates and the formatting of the whole workspace: no Tauri libraries, no frontend build.
