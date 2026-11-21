@@ -139,6 +139,7 @@ fn initialize_and_tools_list() {
             "list_spaces",
             "list_terminals",
             "get_terminal",
+            "read_terminal",
             "whoami",
             "list_runs",
             "get_events",
