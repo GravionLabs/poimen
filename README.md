@@ -48,7 +48,7 @@ Panes are managed by `poimen-server`, so the result shows up through its events 
 
 - **New space**: the "+" button in the Spaces header opens a dialog with a directory field (completes directories as you type), a Browse button (native folder picker) and a label (default: the directory name). It creates a space on the backend (`space.create`) and focuses it. A space that already has a pane inside the directory, else one labelled with the directory name, is focused instead and nothing is created. A label that another space uses falls back to the path relative to the home directory. A missing directory or a failing backend call shows the error in the dialog.
 - **Close space**: right click a space in the sidebar and pick "Close space", click the x icon left of the chevron on its row (shown on hover, keyboard focus and for the active space; Tab reaches it, Enter or Space triggers it, and it neither selects nor collapses the row), or run "Close Space" in the command palette (closes the space of the active tab). It closes the space on the backend (`space.close`) and ends every pane in the space, so a space with panes asks for confirmation (pane and agent count) and an empty one closes right away. The tabs of its panes close, and the neighboring space is focused. The backend's error is shown when the close fails and the space stays.
-- **New terminal**: File > New Terminal (`CmdOrCtrl+T`), or right click a workspace in the sidebar. A dialog asks for the directory (the workspace's pane directories are suggested; empty uses the backend's default: the space directory on poimen-server). It creates a tab in the workspace (`terminal.create`) and opens it.
+- **New pane**: File > New Terminal (`CmdOrCtrl+T`), or right click a workspace in the sidebar. A dialog asks for the type: Terminal (default) or one entry per installed agent harness (`get_harnesses`). It creates a tab in the workspace in the space directory (`terminal.create`), starts the agent in it for an agent type (`agent_start`) and opens it.
 - **Split**: right click a pane in the sidebar (Split right / Split down), or its tab (New pane to the right / below). The new shell starts in the pane's directory (`tab.split`).
 - **Close pane**: right click a pane in the sidebar or its tab (Close pane). It always asks first and warns when an agent is working or waiting (`terminal.close`). It ends the whole terminal: the shell and every process of its session (background jobs, dev servers) get SIGHUP and, after 5 s, SIGKILL (Windows: the terminal's job object is terminated); a process that left the session (`setsid`, a daemon) stays, as in any terminal. Closing a tab with the tab's own Close entry still only closes the view.
 - **Start agent**: right click a pane in the sidebar or its tab (Start agent...). A dialog asks for the agent kind, an optional name (defaults to the kind) and optional arguments (split on spaces); the pane has to be at its shell prompt.
@@ -127,7 +127,7 @@ The menu bar has File (new terminal, close tab), Edit, View (sidebar, output pan
 
 | Action | Setting key | Default |
 |---|---|---|
-| New terminal (asks for the directory) | `newTerminal` | CmdOrCtrl+T |
+| New pane (asks for the type) | `newTerminal` | CmdOrCtrl+T |
 | Close tab | `closeTab` | CmdOrCtrl+W |
 | Close all tabs | `closeAll` | CmdOrCtrl+Shift+W |
 | Refresh | `refresh` | CmdOrCtrl+R |

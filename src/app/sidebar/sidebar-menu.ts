@@ -58,7 +58,7 @@ export function sidebarMenuItems(
     items:
       kind === "workspace"
         ? [
-            { action: "new-terminal", label: "New terminal..." },
+            { action: "new-terminal", label: "New pane" },
             ...(repo
               ? [
                   { action: "show-changes" as const, label: "Show changes" },
