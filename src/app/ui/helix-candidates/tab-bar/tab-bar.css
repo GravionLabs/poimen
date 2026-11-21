@@ -12,10 +12,15 @@
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+  /* Set by the component from the strip width (`tabWidth`). */
+  --tab-width: 320px;
 }
 
 .tab {
   flex: none;
+  box-sizing: border-box;
+  width: var(--tab-width);
+  min-width: 144px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -28,6 +33,14 @@
   position: relative;
 }
 
+/* The active tab sticks to the left or right edge of the strip when scrolled past. */
+.tab.active {
+  position: sticky;
+  left: 0;
+  right: 0;
+  z-index: 1;
+}
+
 .tab.active {
   color: var(--h-text-color);
   background: var(--term-bg, var(--h-content-background));
@@ -38,12 +51,25 @@
   font-style: italic;
 }
 
-.tab.drop-before {
-  box-shadow: inset 2px 0 0 var(--h-primary-color);
+/* The insertion bar: 2px, drawn over the edge so no tab moves and no ring is replaced. */
+.tab.drop-before::before,
+.tab.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--h-primary-color);
+  pointer-events: none;
+  z-index: 2;
 }
 
-.tab.drop-after {
-  box-shadow: inset -2px 0 0 var(--h-primary-color);
+.tab.drop-before::before {
+  left: 0;
+}
+
+.tab.drop-after::after {
+  right: 0;
 }
 
 .group {
