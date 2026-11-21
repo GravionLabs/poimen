@@ -28,7 +28,7 @@ src-tauri/src/settings.rs	2531
 src-tauri/src/settings_transfer.rs	1195
 src/app/app.ts	1056
 src/app/core/snapshot.spec.ts	1040
-src/app/core/snapshot.ts	1043
+src/app/core/snapshot.ts	1035
 src/app/deliver/deliver-status.ts	1006
 src/app/deliver/deliver-view.spec.ts	879
 src/app/github/github-view.spec.ts	853

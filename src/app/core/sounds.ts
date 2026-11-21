@@ -80,6 +80,16 @@ export class Sounds {
     void this.play(kind);
   }
 
+  /** Plays `kind` for a result that is not a pane transition (#995), under the same rules as `notify`. */
+  notifyResult(kind: SoundKind, now: number = Date.now()): void {
+    if (this.prefs.settings().sounds[kind] === false) return;
+    const last = this.last;
+    if (last && now - last.at < SOUND_WINDOW_MS && !(kind === "blocked" && last.kind === "done"))
+      return;
+    this.last = { at: now, kind };
+    void this.play(kind);
+  }
+
   /** The "Test" button: plays the configured sound of `kind`, or the built-in tone when it is off. */
   async test(kind: SoundKind): Promise<void> {
     await this.play(kind, true);
