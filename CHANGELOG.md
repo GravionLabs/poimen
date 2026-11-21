@@ -5,6 +5,21 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.30.0] — 2026-11-21
+
+### Bug Fixes
+- Error status of a terminal is never reset (e.g. by clear) (#1110) (#1120)
+- A terminal with a living program is not marked silent (#1119) (#1123)
+
+
+### Documentation
+- **agents**: Test rules with a revert criterion (#1019) (#1113)
+
+
+### Features
+- **icon**: Pi on gold as the app icon (#1121) (#1122)
+
+
 ## [0.29.0] — 2026-11-20
 
 ### Bug Fixes
@@ -18,6 +33,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Documentation
 - **skills**: A lead skill for the start, wait, read, report loop (#983) (#1107)
 - **site**: Rewrite the guide by task (#1087) (#1108)
+- Update CHANGELOG.md for v0.29.0 [skip ci]
 
 
 ### Features
