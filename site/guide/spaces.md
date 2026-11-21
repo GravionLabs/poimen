@@ -12,7 +12,7 @@ The sidebar lists **spaces**, one per project directory, with their terminals. E
 ## Creating, splitting and closing
 
 - **New space:** the **+** in the Spaces header, a folder in the Explorer, or the command palette.
-- **New terminal:** `CmdOrCtrl+T` or right-click a space.
+- **New pane:** `CmdOrCtrl+T` or right-click a space. A dialog asks for the type: Terminal (the default) or an installed agent; the pane starts in the space's directory.
 - **Split:** right-click a pane or its tab, *Split right* or *Split down*. The new shell starts in the pane's directory.
 - **Start agent:** right-click a shell pane, *Start agent...* (kind, optional name and arguments).
 - **Rename and close:** from the same menu. Closing a pane always asks first and warns while an agent works. It ends the terminal and the processes of its session. Closing a **tab** only closes the view.

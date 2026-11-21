@@ -231,7 +231,7 @@ describe("Sidebar in the cards layout (#934)", () => {
     const items = [...s.root.querySelectorAll('[role="menuitem"]')].map((e) =>
       e.textContent?.trim(),
     );
-    expect(items).toContain("New terminal...");
+    expect(items).toContain("New pane");
     expect(items).toContain("Rename space...");
     expect(items).toContain("Close space");
   });

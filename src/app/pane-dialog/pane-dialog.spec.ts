@@ -14,7 +14,7 @@ async function setup(
   ask: (a: PaneActions) => void = (a) => a.askStartAgent("p1"),
 ) {
   const store = {
-    pane: () => undefined,
+    pane: (id: string) => (id === "p9" ? { terminal_id: "p9" } : undefined),
     snapshot: () => ({ tabs: [], spaces: [], terminals: [] }),
     refresh: vi.fn(async () => undefined),
   };
@@ -91,9 +91,58 @@ describe("PaneDialog start agent (#410)", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it("new terminal: the directory field has the focus", async () => {
-    const { root } = await setup([], (a) => a.askNew("w1"));
+  it("new pane: the type has the focus, Terminal is the default and Enter creates it (#1049)", async () => {
+    const { root, bridge } = await setup([], (a) => a.askNew("w1"));
     expectFocusInside(root);
-    expect(document.activeElement?.localName).toBe("input");
+    expect(root.querySelector("input[name='directory'], input[type='text']")).toBeNull();
+    const checked = root.querySelector<HTMLInputElement>("input[name='type']:checked");
+    expect(checked?.value).toBe("terminal");
+    root.querySelector<HTMLFormElement>("form")!.requestSubmit();
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith("terminal_create", {
+        spaceId: "w1",
+        cwd: null,
+      }),
+    );
+    expect(bridge.invoke).not.toHaveBeenCalledWith("agent_start", expect.anything());
+  });
+
+  it("new pane: a space without installed agents offers only Terminal", async () => {
+    const { root } = await setup([{ id: "claude", command: ["claude"], available: false }], (a) =>
+      a.askNew("w1"),
+    );
+    const types = [...root.querySelectorAll<HTMLInputElement>("input[name='type']")];
+    expect(types.map((t) => t.value)).toEqual(["terminal"]);
+  });
+
+  it("new pane: an agent type starts the agent in the new pane", async () => {
+    const { root, bridge, fixture } = await setup(
+      [
+        { id: "claude", command: ["claude"], available: true },
+        {
+          id: "aider",
+          command: ["aider-bin", "--no-auto-commits"],
+          available: true,
+        },
+        { id: "gemini", command: ["gemini"], available: false },
+      ],
+      (a) => a.askNew("w1"),
+    );
+    const types = [...root.querySelectorAll<HTMLInputElement>("input[name='type']")];
+    expect(types.map((t) => t.value)).toEqual(["terminal", "claude", "aider"]);
+    bridge.invoke.mockImplementation(async (command: string): Promise<unknown> =>
+      command === "terminal_create" ? "p9" : undefined,
+    );
+    types[2]!.checked = true;
+    root.querySelector<HTMLFormElement>("form")!.requestSubmit();
+    await vi.waitFor(() =>
+      expect(bridge.invoke).toHaveBeenCalledWith("agent_start", {
+        terminalId: "p9",
+        kind: "aider-bin",
+        name: null,
+        args: ["--no-auto-commits"],
+      }),
+    );
+    fixture.detectChanges();
   });
 });

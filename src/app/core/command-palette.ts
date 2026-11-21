@@ -52,7 +52,7 @@ export interface PoimenCommand {
 }
 
 export const POIMEN_COMMANDS: readonly PoimenCommand[] = [
-  { id: "newTerminal", title: "New Terminal..." },
+  { id: "newTerminal", title: "New pane..." },
   { id: "renameSpace", title: "Rename Space..." },
   { id: "pinSpace", title: "Pin Space" },
   { id: "unpinSpace", title: "Unpin Space" },
