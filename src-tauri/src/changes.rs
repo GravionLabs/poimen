@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::changes_content::{MAX_CONTENT, over_limit, read_worktree_file};
 use crate::git::{base_ref, run_bytes};
 
-/// Largest file content sent to the merge view.
-pub const MAX_CONTENT: usize = 1024 * 1024;
+pub use crate::changes_content::FileContent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -53,14 +53,6 @@ pub struct ChangeList {
     /// The commit the old content comes from.
     pub from: String,
     pub files: Vec<ChangedFile>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum FileContent {
-    Text { old: String, new: String },
-    Binary,
-    TooLarge,
 }
 
 /// The ref the scope compares against and the revision the old content is read from.
@@ -145,27 +137,6 @@ pub fn parse_numstat(out: &[u8]) -> HashMap<String, (u32, u32, bool)> {
     map
 }
 
-/// A file of the working tree, read without following symlinks (a link yields its target
-/// path) and only up to `MAX_CONTENT` bytes: `Err(())` means too large, `Ok(None)` unreadable.
-fn read_worktree_file(root: &str, path: &str) -> Result<Option<Vec<u8>>, ()> {
-    let full = Path::new(root).join(path);
-    let Ok(meta) = std::fs::symlink_metadata(&full) else {
-        return Ok(None);
-    };
-    if meta.file_type().is_symlink() {
-        return Ok(std::fs::read_link(&full)
-            .ok()
-            .map(|t| t.into_os_string().into_encoded_bytes()));
-    }
-    if !meta.is_file() {
-        return Ok(None);
-    }
-    if meta.len() > MAX_CONTENT as u64 {
-        return Err(());
-    }
-    Ok(std::fs::read(&full).ok())
-}
-
 fn count_lines(b: &[u8]) -> u32 {
     let newlines = b.iter().filter(|c| **c == b'\n').count();
     let partial = usize::from(b.last().is_some_and(|c| *c != b'\n'));
@@ -236,7 +207,7 @@ fn list_in(dir: &str, scope: Scope) -> Result<ChangeList, String> {
     })
 }
 
-fn file_in(dir: &str, scope: Scope, path: &str) -> Result<FileContent, String> {
+fn file_in(dir: &str, scope: Scope, path: &str, force: bool) -> Result<FileContent, String> {
     let list = list_in(dir, scope)?;
     let file = list
         .files
@@ -245,6 +216,9 @@ fn file_in(dir: &str, scope: Scope, path: &str) -> Result<FileContent, String> {
         .ok_or_else(|| format!("{path} is not a changed file"))?;
     if file.binary {
         return Ok(FileContent::Binary);
+    }
+    if let Some(limit) = over_limit(dir, file, force) {
+        return Ok(limit);
     }
     let old = match file.status {
         Status::Added | Status::Untracked => Vec::new(),
@@ -290,9 +264,10 @@ pub fn file(
     dir: &str,
     scope: Scope,
     path: &str,
+    force: bool,
     home: Option<&Path>,
 ) -> Result<FileContent, String> {
-    file_in(&validate(dir, home)?, scope, path)
+    file_in(&validate(dir, home)?, scope, path, force)
 }
 
 pub use crate::changes_files::{write_ci_log, write_comments};
@@ -590,21 +565,21 @@ mod tests {
 
         let same = "rename me\nline 2\nline 3\nline 4\n".to_owned();
         assert_eq!(
-            file_in(&f.dir(), Scope::Base, "renamed.txt").unwrap(),
+            file_in(&f.dir(), Scope::Base, "renamed.txt", false).unwrap(),
             FileContent::Text {
                 old: same.clone(),
                 new: same
             }
         );
         assert_eq!(
-            file_in(&f.dir(), Scope::Base, "gone.txt").unwrap(),
+            file_in(&f.dir(), Scope::Base, "gone.txt", false).unwrap(),
             FileContent::Text {
                 old: "bye\n".into(),
                 new: String::new()
             }
         );
         assert_eq!(
-            file_in(&f.dir(), Scope::Base, "loose.txt").unwrap(),
+            file_in(&f.dir(), Scope::Base, "loose.txt", false).unwrap(),
             FileContent::Text {
                 old: String::new(),
                 new: "a\nb".into()
@@ -623,14 +598,14 @@ mod tests {
         assert_eq!(files["img.bin"].status, Status::Added);
         assert!(!files["big.txt"].binary);
         assert_eq!(
-            file_in(&f.dir(), Scope::Base, "img.bin").unwrap(),
+            file_in(&f.dir(), Scope::Base, "img.bin", false).unwrap(),
             FileContent::Binary
         );
         assert_eq!(
-            file_in(&f.dir(), Scope::Base, "big.txt").unwrap(),
+            file_in(&f.dir(), Scope::Base, "big.txt", true).unwrap(),
             FileContent::TooLarge
         );
-        assert!(file_in(&f.dir(), Scope::Base, "nope.txt").is_err());
+        assert!(file_in(&f.dir(), Scope::Base, "nope.txt", false).is_err());
     }
 
     #[test]
@@ -667,7 +642,7 @@ mod tests {
         );
         for p in ["keep.txt", "outside.txt", "sub/loose.txt"] {
             assert!(matches!(
-                file(&sub, Scope::Base, p, None).unwrap(),
+                file(&sub, Scope::Base, p, false, None).unwrap(),
                 FileContent::Text { .. }
             ));
         }
@@ -690,7 +665,7 @@ mod tests {
         std::fs::write(&secret, "secret\n").unwrap();
         std::os::unix::fs::symlink(&secret, f.app.join("link")).unwrap();
         assert_eq!(
-            file_in(&f.dir(), Scope::Base, "link").unwrap(),
+            file_in(&f.dir(), Scope::Base, "link", false).unwrap(),
             FileContent::Text {
                 old: String::new(),
                 new: secret.to_string_lossy().into_owned()
