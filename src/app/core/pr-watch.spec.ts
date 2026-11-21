@@ -75,8 +75,11 @@ describe("finishedChecks", () => {
     expect(again.finished).toHaveLength(1);
   });
 
-  it("forgets a pull request that is no longer watched", () => {
-    expect(finishedChecks(seenPending, new Set(), []).next.size).toBe(0);
+  it("keeps what it saw of a pull request a failed read left out", () => {
+    const gap = finishedChecks(seenPending, new Set(), []);
+    expect(gap.next.get("u/1")).toEqual({ sha: "a", pending: true });
+    const back = finishedChecks(gap.next, new Set(), [pull("a", checks("failing", 1, 1))]);
+    expect(back.finished).toHaveLength(1);
   });
 
   it("ignores a pull request without a head commit", () => {

@@ -40,7 +40,8 @@ export function finishedChecks(
   reported: ReadonlySet<string>,
   pulls: readonly WatchedPull[],
 ): { next: Map<string, Seen>; finished: WatchedPull[] } {
-  const next = new Map<string, Seen>();
+  // A failed or partial read leaves a pull request out; what was seen of it stays.
+  const next = new Map<string, Seen>(previous);
   const finished: WatchedPull[] = [];
   for (const pull of pulls) {
     if (!pull.sha) continue;
