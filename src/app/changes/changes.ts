@@ -54,6 +54,9 @@ export interface ChangeList {
 export type FileContent =
   | { state: "text"; old: string; new: string }
   | { state: "binary" }
+  /** Above the soft limit: counts only, "Load diff" reads it with `force`. */
+  | { state: "large"; additions: number; deletions: number }
+  /** Above the hard limit: never offered. */
   | { state: "too_large" };
 
 /** The one-letter mark of a status, as in `git status`. */
@@ -271,8 +274,20 @@ export class Changes {
     }
   }
 
-  /** Selects a file and reads its content (`force` reads again though it is already selected). */
+  /**
+   * Selects a file and reads its content (`force` reads again though it is already selected; `full`
+   * loads a diff above the soft limit).
+   */
   async select(path: string | null, force = false): Promise<void> {
+    return this.read(path, force, false);
+  }
+
+  /** Reads the selected file in full though it is above the soft limit ("Load diff"). */
+  async loadDiff(): Promise<void> {
+    return this.read(this.selected(), true, true);
+  }
+
+  private async read(path: string | null, force: boolean, full: boolean): Promise<void> {
     if (!force && path === this.selected()) return;
     this.selected.set(path);
     const run = ++this.fileRun;
@@ -286,6 +301,7 @@ export class Changes {
         dir: this.dir(),
         scope: this.scope(),
         path,
+        ...(full ? { force: true } : {}),
       });
       if (run !== this.fileRun) return;
       this.content.set(content);

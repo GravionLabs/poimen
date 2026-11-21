@@ -5,6 +5,7 @@ mod backend;
 #[cfg(test)]
 mod backend_fake;
 mod changes;
+mod changes_content;
 mod changes_files;
 mod changes_git;
 mod commit_message;
@@ -2228,20 +2229,6 @@ async fn changes_list(dir: String, scope: changes::Scope) -> Result<changes::Cha
         .map_err(|e| e.to_string())?
 }
 
-/// Old and new content of one changed file for the merge view (read-only git).
-#[tauri::command]
-async fn changes_file(
-    dir: String,
-    scope: changes::Scope,
-    path: String,
-) -> Result<changes::FileContent, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        changes::file(&dir, scope, &path, home_dir().as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 /// Writes review comments to a new `.agents/state/comments-<timestamp>.md` of the worktree `dir`
 /// (excluded from git) and returns its absolute path.
 #[tauri::command]
@@ -2960,7 +2947,7 @@ pub fn run() {
             get_task_modes,
             task_worktree,
             changes_list,
-            changes_file,
+            changes_content::changes_file,
             changes_write_comments,
             changes_findings,
             changes_git::changes_stage,

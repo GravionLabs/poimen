@@ -259,6 +259,12 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     .findings-note.invalid {
       color: var(--status-error);
     }
+    .note.large {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
     .note,
     .empty,
     .problem {

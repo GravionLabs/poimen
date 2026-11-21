@@ -4,7 +4,7 @@ import { TestBed, getTestBed } from "@angular/core/testing";
 import { By } from "@angular/platform-browser";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { goToNextChunk, goToPreviousChunk } from "@codemirror/merge";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Attention } from "../core/attention";
 import type { AgentStatus, Terminal } from "../core/snapshot";
 import { SpacesStore } from "../core/spaces-store";
@@ -206,7 +206,7 @@ describe("Changes tab", () => {
     click(el(f).querySelectorAll(".file")[2]);
     await settle(f);
     f.detectChanges();
-    expect(el(f).querySelector(".note")!.textContent).toContain("too large");
+    expect(el(f).querySelector(".note")!.textContent).toContain("Too large");
     expect(el(f).querySelector(".cm-editor")).toBeNull();
   });
 
@@ -297,6 +297,42 @@ describe("Changes tab", () => {
     await settle(f);
     f.detectChanges();
     expect(el(f).querySelector(".empty")!.textContent).toContain("No changes");
+  });
+});
+
+describe("large diffs", () => {
+  it("shows the counts and loads the diff on demand; a hard limit offers no button", async () => {
+    const original = CONTENT["src/a.ts"];
+    CONTENT["src/a.ts"] = { state: "large", additions: 9000, deletions: 3 };
+    onTestFinished(() => void (CONTENT["src/a.ts"] = original));
+    const f = await render();
+    expect(el(f).querySelector(".cm-mergeView")).toBeNull();
+    const note = el(f).querySelector(".note.large")!;
+    expect(note.textContent).toContain("+9000");
+    expect(note.textContent).toContain("−3");
+    CONTENT["src/a.ts"] = original;
+    click(button(f, "Load diff"));
+    await settle(f);
+    f.detectChanges();
+    await settle(f);
+    expect(tauri.calls("changes_file")).toContainEqual({
+      dir: "/repo",
+      scope: "base",
+      path: "src/a.ts",
+      force: true,
+    });
+    expect(el(f).querySelector(".note.large")).toBeNull();
+
+    CONTENT["src/a.ts"] = { state: "too_large" };
+    click(button(f, "Refresh"));
+    await settle(f);
+    f.detectChanges();
+    expect(el(f).querySelector(".diff .note")!.textContent).toContain("external editor");
+    expect(
+      Array.from(el(f).querySelectorAll("button")).some((b) =>
+        b.textContent?.includes("Load diff"),
+      ),
+    ).toBe(false);
   });
 });
 

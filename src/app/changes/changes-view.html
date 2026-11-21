@@ -266,8 +266,28 @@
         @let content = changes.content();
         @if (content?.state === "binary") {
           <p class="note">Binary file, no diff shown.</p>
+        } @else if (content?.state === "large") {
+          <div class="note large">
+            <span
+              >Large diff, not shown: <span class="add">+{{ content.additions }}</span>
+              <span class="del">−{{ content.deletions }}</span></span
+            >
+            <button
+              hx-button
+              type="button"
+              size="small"
+              variant="outlined"
+              severity="secondary"
+              (click)="changes.loadDiff()"
+            >
+              Load diff
+            </button>
+          </div>
         } @else if (content?.state === "too_large") {
-          <p class="note">File too large, no diff shown (limit 1 MiB).</p>
+          <p class="note">
+            Too large to show a diff (over 120,000 changed lines or 1 MiB). Open the file in an
+            external editor.
+          </p>
         } @else if (content?.state === "text") {
           @defer {
             <app-diff-editor
