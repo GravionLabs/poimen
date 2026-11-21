@@ -173,6 +173,7 @@
  * background and on helix's selected node (--h-tree-node-selected-background = highlight-background);
  * the muted line 2 uses --h-text-muted-color (AA on both). The active bar uses --h-primary-color.
  */
+.space-name.unread-name,
 .name.unread-name {
   font-weight: 600;
 }

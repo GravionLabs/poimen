@@ -194,9 +194,13 @@
                       class="space-name"
                       [class.bold]="seg.bold"
                       [class.dim]="seg.dim"
+                      [class.unread-name]="unreadOf(d.workspace.space_id) > 0"
                       (dblclick)="startEdit(d.workspace.space_id, $event)"
                       >{{ seg.text }}</span
                     >
+                    @if (unreadOf(d.workspace.space_id) > 0) {
+                      <span class="sr-only">Unread</span>
+                    }
                     @if (isPinned(d.workspace.space_id)) {
                       <svg
                         class="pin-mark"
