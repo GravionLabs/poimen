@@ -13,7 +13,9 @@ use serde_json::Value;
 pub mod files;
 pub mod host;
 pub mod report;
+pub mod status;
 pub use files::windows_dir_from;
+pub use status::{Hibernated, MAX_STATUS_HISTORY, StatusChange};
 
 /// The protocol version the server speaks and this crate is written for. Raised on every
 /// incompatible change; `ping` reports it.
@@ -586,18 +588,12 @@ pub struct Terminal {
     /// What the agent in the terminal reported with `report_done` (#980); the last one wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report: Option<report::AgentReport>,
-}
-
-/// A hibernated agent: what a resume needs (ADR 0014). Set by the server's sweeper before it
-/// types the harness's exit input, kept when the hook reports the agent `gone`, cleared by a
-/// resume or by any other agent report (the user came back).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Hibernated {
-    /// Which agent (the harness id, e.g. `claude`).
-    pub agent: String,
-    pub session_id: String,
-    /// When the server hibernated it, milliseconds since the epoch.
-    pub since: u64,
+    /// Where `agent` comes from: `osc7501` or the hook kind (#1153).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_source: Option<String>,
+    /// The last status changes, newest last, in memory only (#1153).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub status_history: Vec<StatusChange>,
 }
 
 /// What an agent in a terminal is doing (reported by hooks). `Gone` is only ever reported: the

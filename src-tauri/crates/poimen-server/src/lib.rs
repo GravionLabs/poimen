@@ -16,6 +16,7 @@ pub mod copilot;
 mod create;
 mod emulator;
 pub mod gemini;
+mod hex_color;
 mod hibernate;
 pub mod hook;
 mod host;
@@ -43,7 +44,6 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use alacritty_terminal::vte::ansi::Rgb;
 use emulator::Colors;
 use poimen_core::snapshot::{self, Snapshot};
 use poimen_core::{repos, worktree};
@@ -62,6 +62,7 @@ use serde_json::{Value, json};
 
 use agent_state::{agent_event, reset_error_on_input};
 pub use emulator::DEFAULT_SCROLLBACK;
+use hex_color::parse_hex;
 pub use host::{Launch, PtyHost, host_beside};
 pub use store::state_file_path;
 use stream::{CLIENT_QUEUE, Line, Link, TermStream, line_of};
@@ -641,6 +642,7 @@ impl Shared {
         for signal in signals {
             entry.apply_signal(signal, now_millis());
         }
+        entry.track_status(now_millis());
         // `reported_at` alone moves with a repeated report: no event, a write at most every 10 s.
         let strip = |a: &Option<AgentInfo>| {
             a.clone().map(|mut i| {
@@ -1928,26 +1930,6 @@ fn terminal_list(shared: &Shared, p: TerminalList) -> ApiResult {
     Ok(json!({ "terminals": terminals }))
 }
 
-/// `#rrggbb` (the `#` optional).
-fn parse_hex(value: &str) -> Result<Rgb, (ErrorCode, String)> {
-    let bad = || {
-        (
-            ErrorCode::InvalidParams,
-            format!("{value:?} is not a #rrggbb color"),
-        )
-    };
-    let hex = value.strip_prefix('#').unwrap_or(value);
-    if hex.len() != 6 || !hex.is_ascii() {
-        return Err(bad());
-    }
-    let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| bad());
-    Ok(Rgb {
-        r: byte(0)?,
-        g: byte(2)?,
-        b: byte(4)?,
-    })
-}
-
 fn server_set_colors(shared: &Shared, p: SetColors) -> ApiResult {
     let mut colors = Colors {
         foreground: parse_hex(&p.foreground)?,
@@ -2058,6 +2040,8 @@ fn spawn_terminal(
         hibernated: None,
         started_by: p.started_by.clone(),
         report: None,
+        agent_source: None,
+        status_history: Vec::new(),
     };
     inner.terminals.push(TerminalEntry {
         info: info.clone(),
@@ -2323,6 +2307,7 @@ fn terminal_report_agent(shared: &Shared, p: TerminalReportAgent) -> ApiResult {
         entry.hook_agent = next;
     } else if !unchanged {
         entry.info.agent = next;
+        entry.track_status(now_ms);
         shared.publish(agent_event(&p.terminal_id, entry.info.agent.as_ref()));
     } else {
         // Only `reported_at` moves: no event, and the list is written at most every 10 s.

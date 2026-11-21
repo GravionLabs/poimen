@@ -23,6 +23,8 @@ fn term(id: &str, space: &str, name: &str, cwd: &str) -> Terminal {
         hibernated: None,
         started_by: None,
         report: None,
+        agent_source: None,
+        status_history: Vec::new(),
     }
 }
 
