@@ -458,3 +458,23 @@ mod tests {
         assert!(!valid_ref(""));
     }
 }
+
+/// The failed log of one check of a pull request's head commit (`gh run view --log-failed`).
+#[tauri::command]
+pub async fn github_check_log(
+    client: tauri::State<'_, crate::GithubClient>,
+    root: String,
+    url: String,
+) -> Result<String, GhError> {
+    let client = client.inner().clone();
+    let root = crate::github_pulls::expand_home(&root, crate::home_dir().as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo =
+            poimen_core::github::repo_of(std::path::Path::new(&root)).ok_or(GhError::NotFound)?;
+        poimen_core::check_log::check_log(&client, &repo, &url)
+    })
+    .await
+    .map_err(|e| GhError::Other {
+        message: e.to_string(),
+    })?
+}

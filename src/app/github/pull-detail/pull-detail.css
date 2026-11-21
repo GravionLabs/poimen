@@ -16,3 +16,22 @@
   flex-direction: column;
   gap: 0.4rem;
 }
+.list li:has(.check-log, .check-log-note) {
+  flex-wrap: wrap;
+}
+.check-log,
+.check-log-note {
+  flex: 1 1 100%;
+  margin: 0;
+}
+.check-log {
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--h-content-border-color);
+  border-radius: 4px;
+}

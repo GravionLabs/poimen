@@ -7,6 +7,7 @@
 pub mod agent_actions;
 pub mod agent_events;
 pub mod agent_sessions;
+pub mod check_log;
 pub mod copilot;
 pub mod git;
 pub mod github;
