@@ -6,7 +6,7 @@
         [attr.aria-current]="step.state === 'current' ? 'step' : null"
       >
         <span aria-hidden="true">{{ mark(step.state) }}</span>
-        <span>{{ step.label }}{{ step.state === "skipped" ? " (none)" : "" }}</span>
+        <span>{{ step.label }}</span>
       </li>
     }
   </ul>

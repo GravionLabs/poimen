@@ -1,7 +1,7 @@
 /** The steps of creating a space with a worktree (#1041), in order. */
 export type SpaceStepId = "worktree" | "setup" | "agent";
 
-export type SpaceStepState = "pending" | "current" | "done" | "skipped";
+export type SpaceStepState = "pending" | "current" | "done";
 
 export interface SpaceStep {
   id: SpaceStepId;
@@ -24,9 +24,4 @@ export function stepsAt(current: SpaceStepId | null): SpaceStep[] {
     label: SPACE_STEP_LABELS[id],
     state: i < at ? "done" : i === at ? "current" : "pending",
   }));
-}
-
-/** Marks one step as skipped (a project without a setup command). */
-export function skip(steps: SpaceStep[], id: SpaceStepId): SpaceStep[] {
-  return steps.map((s) => (s.id === id ? { ...s, state: "skipped" } : s));
 }

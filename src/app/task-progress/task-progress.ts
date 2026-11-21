@@ -36,6 +36,6 @@ import { TaskStarter } from "../core/task-start";
 export class TaskProgress {
   protected readonly starter = inject(TaskStarter);
   protected mark(state: string): string {
-    return state === "done" ? "✓" : state === "current" ? "▸" : state === "skipped" ? "–" : "○";
+    return state === "done" ? "✓" : state === "current" ? "▸" : "○";
   }
 }

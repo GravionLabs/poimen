@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { skip, stepsAt } from "./task-steps";
+import { stepsAt } from "./task-steps";
 
 describe("task steps", () => {
   it("marks the current step and the ones before it done", () => {
@@ -14,9 +14,5 @@ describe("task steps", () => {
       "Run setup",
       "Start agent",
     ]);
-  });
-
-  it("skips one step", () => {
-    expect(skip(stepsAt(null), "setup").map((s) => s.state)).toEqual(["done", "skipped", "done"]);
   });
 });
