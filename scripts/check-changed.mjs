@@ -16,6 +16,7 @@ export function loadRules(file = path.join(root, "scripts", "changed-paths.json"
     frontend: compile(json.frontend),
     rust: compile(json.rust),
     rustAll: compile(json.rustAll),
+    compat: compile(json.compat ?? []),
   };
 }
 
@@ -130,7 +131,8 @@ function main(argv) {
       .filter(Boolean);
     console.log(files.join("\n"));
     const s = select(files, rules, deps);
-    const out = [`frontend=${s.frontend}`, `rust=${s.rust}`].join("\n") + "\n";
+    const compat = matches(rules.compat, files);
+    const out = [`frontend=${s.frontend}`, `rust=${s.rust}`, `compat=${compat}`].join("\n") + "\n";
     if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, out);
     else process.stdout.write(out);
     return 0;

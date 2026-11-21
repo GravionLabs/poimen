@@ -19,7 +19,9 @@
     "format:check": "oxfmt --check",
     "check:changed": "node scripts/check-changed.mjs",
     "ratchets": "node scripts/ratchets/run.mjs",
-    "ratchets:test": "node --test scripts/ratchets/core.test.mjs"
+    "ratchets:test": "node --test scripts/ratchets/core.test.mjs",
+    "fixtures:list": "node scripts/fixtures.mjs list",
+    "fixtures:shot": "node scripts/fixtures.mjs shot"
   },
   "dependencies": {
     "@angular/cdk": "^22.2.7",
@@ -68,6 +70,7 @@
     "oxfmt": "0.78.0",
     "oxlint": "1.93.0",
     "oxlint-tsgolint": "7.0.2007",
+    "playwright": "^1.65.1",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.2",
     "vitest": "^5.1.0"
