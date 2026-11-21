@@ -335,11 +335,13 @@ export class Changes {
     return [file];
   }
 
-  /** The files in the order the list shows them (sections in the uncommitted scope). */
+  /** The files in the order the list shows them (sections in the uncommitted scope, collapsed ones left out). */
   listed(): ChangedFile[] {
-    return this.scope() === "uncommitted"
-      ? sectionsOf(this.files()).flatMap((s) => s.files)
-      : this.files();
+    if (this.scope() !== "uncommitted") return this.files();
+    const collapsed = this.collapsed();
+    return sectionsOf(this.files())
+      .filter((s) => !collapsed.has(s.id))
+      .flatMap((s) => s.files);
   }
 
   /** Click on a row: Shift extends the pick from the last clicked row, a plain click resets it. */
@@ -361,6 +363,8 @@ export class Changes {
     const next = new Set(this.collapsed());
     if (!next.delete(id)) next.add(id);
     this.collapsed.set(next);
+    const shown = new Set(this.listed().map((f) => f.path));
+    this.picked.set(new Set([...this.picked()].filter((p) => shown.has(p))));
   }
 
   /** Commits the staged files with the message; the message is cleared on success. */

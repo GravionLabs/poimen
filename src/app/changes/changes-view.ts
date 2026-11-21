@@ -152,7 +152,7 @@ const SCOPE_LABEL: Record<ChangesScope, string> = {
     }
     .file:hover .actions,
     .file:focus-within .actions,
-    .file.selected:focus .actions {
+    .files:focus .file.selected .actions {
       display: inline-flex;
     }
     .file:hover .stat,

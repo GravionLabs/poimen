@@ -77,7 +77,7 @@ describe("Changes file list sections", () => {
 
   async function settle(f: { detectChanges(): void; whenStable(): Promise<unknown> }) {
     for (let i = 0; i < 3; i++) {
-      await new Promise((r) => setTimeout(r, 0));
+      await new Promise<void>((r) => queueMicrotask(r));
       f.detectChanges();
       await f.whenStable();
     }
@@ -239,5 +239,17 @@ describe("Changes file list sections", () => {
       .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     f.detectChanges();
     expect(root(f).querySelectorAll(".file.picked").length).toBe(0);
+  });
+
+  it("a range skips the rows of a collapsed section", async () => {
+    const f = await render();
+    root(f).querySelector<HTMLElement>('[data-section="staged"] .toggle')!.click();
+    f.detectChanges();
+    row(f, "c.ts").click();
+    shiftClick(row(f, "m2.ts"));
+    f.detectChanges();
+    expect(
+      [...root(f).querySelectorAll(".file.picked")].map((r) => r.getAttribute("data-path")),
+    ).toEqual(["c.ts", "src/m1.ts", "m2.ts"]);
   });
 });
