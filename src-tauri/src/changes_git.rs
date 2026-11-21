@@ -44,6 +44,36 @@ fn stage_in(top: &str, paths: &[String], stage: bool) -> Result<(), String> {
     run_bytes(top, &args).map(|_| ())
 }
 
+/// Throws away the changes of the files: tracked files go back to `HEAD` (index and worktree), a
+/// file new to the index is removed from it and the worktree, an untracked file is deleted.
+fn discard_in(top: &str, paths: &[String]) -> Result<(), String> {
+    for p in paths {
+        check_path(p)?;
+    }
+    for p in paths {
+        let in_head = run_bytes(top, &["cat-file", "-e", &format!("HEAD:{p}")]).is_ok();
+        let in_index =
+            !run_bytes(top, &["--literal-pathspecs", "ls-files", "-z", "--", p])?.is_empty();
+        let args: Vec<&str> = if in_head {
+            vec![
+                "--literal-pathspecs",
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+                "--",
+                p,
+            ]
+        } else if in_index {
+            vec!["--literal-pathspecs", "rm", "-f", "-q", "--", p]
+        } else {
+            vec!["--literal-pathspecs", "clean", "-f", "-q", "--", p]
+        };
+        run_bytes(top, &args)?;
+    }
+    Ok(())
+}
+
 fn commit_in(top: &str, message: &str) -> Result<String, String> {
     if message.trim().is_empty() {
         return Err("The commit message is empty".into());
@@ -206,6 +236,10 @@ pub fn stage(dir: &str, paths: &[String], stage: bool, home: Option<&Path>) -> R
     stage_in(&validate(dir, home)?, paths, stage)
 }
 
+pub fn discard(dir: &str, paths: &[String], home: Option<&Path>) -> Result<(), String> {
+    discard_in(&validate(dir, home)?, paths)
+}
+
 pub fn commit(dir: &str, message: &str, home: Option<&Path>) -> Result<String, String> {
     commit_in(&validate(dir, home)?, message)
 }
@@ -219,6 +253,16 @@ pub fn push(dir: &str, home: Option<&Path>) -> Result<String, String> {
 pub async fn changes_stage(dir: String, paths: Vec<String>, stage: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         self::stage(&dir, &paths, stage, crate::home_dir().as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Discards the changes of the repository-relative `paths` of the worktree `dir` (not undoable).
+#[tauri::command]
+pub async fn changes_discard(dir: String, paths: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        self::discard(&dir, &paths, crate::home_dir().as_deref())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -322,6 +366,27 @@ mod tests {
     }
 
     const SECS: Duration = Duration::from_secs(30);
+
+    #[test]
+    fn discards_tracked_staged_new_and_untracked_files() {
+        let f = Fixture::new();
+        std::fs::write(f.app.join("a.txt"), "changed\n").unwrap();
+        std::fs::write(f.app.join("staged.txt"), "s\n").unwrap();
+        std::fs::write(f.app.join("loose.txt"), "l\n").unwrap();
+        stage_in(f.top(), &v(&["a.txt", "staged.txt"]), true).unwrap();
+        discard_in(f.top(), &v(&["a.txt", "staged.txt", "loose.txt"])).unwrap();
+        assert_eq!(std::fs::read_to_string(f.app.join("a.txt")).unwrap(), "a\n");
+        assert!(!f.app.join("staged.txt").exists());
+        assert!(!f.app.join("loose.txt").exists());
+        let list = crate::changes::list(f.top(), crate::changes::Scope::Uncommitted, None).unwrap();
+        assert!(list.files.is_empty());
+    }
+
+    #[test]
+    fn discard_refuses_paths_outside_the_repository() {
+        let f = Fixture::new();
+        assert!(discard_in(f.top(), &v(&["../x"])).is_err());
+    }
 
     #[test]
     fn stages_and_unstages_a_file() {

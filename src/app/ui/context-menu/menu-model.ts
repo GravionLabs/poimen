@@ -1,3 +1,5 @@
+import type { IconName } from "../icon/icon";
+
 /** One entry of a context menu. */
 export interface MenuEntry {
   /** What `picked` reports. */
@@ -11,6 +13,8 @@ export interface MenuEntry {
   checked?: boolean;
   /** A mark after the label. */
   mark?: "attention" | "unread";
+  /** A decorative icon before the label (the tab kind in the "All tabs" menu). */
+  icon?: IconName;
   /** Bold, for the current choice of a list. */
   active?: boolean;
   testId?: string;

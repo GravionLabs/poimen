@@ -2,17 +2,19 @@
 
 ## Spaces and the sidebar
 
-The sidebar lists **spaces**, one per project directory, with their terminals. Each row shows what you configure it to show: the agent and its status, the git branch (`wt` for a linked worktree), the directory, a pull request badge with its checks, and counts such as changed files or commits ahead and behind. A filter field matches name, agent, branch, tab and directory. The arrow keys, Home and End, and type-ahead move through the rows; Enter opens one.
+The sidebar lists **spaces**, one per project directory, with their terminals. Each card and row shows what you configure it to show: the agent and its status, the git branch (`wt` for a linked worktree), the directory, a pull request badge with its checks, and counts such as changed files or commits ahead and behind. A filter field matches name, agent, branch, tab and directory. The arrow keys, Home and End, and type-ahead move through the rows; Enter opens one.
 
-- **Layout.** `sidebar.layout` picks the tree, two lists (Spaces, and the agents across all of them) or cards (one collapsible card per space). `sidebar.rows` defines what a row shows.
+- **Cards.** Each space is a collapsible card; `sidebar.rows` defines what its lines show. An old `sidebar.layout` or `sidebar.agents` entry in the config is ignored.
 - **Order.** Drag spaces and tabs to arrange them, or sort by name, attention or most recently used (`sidebar.sort`). Pin a space from its menu to keep it on top. Spaces in linked git worktrees sit below the space of their main checkout.
 - **Explorer.** The second item of the activity bar browses directories. Double-click a folder or pick *Create space here* to open it as a space.
 - **Notifications.** The bell lists the last 100 status changes (blocked, done) with time and tab. A click opens the tab.
 
+<Screenshot src="sidebar-dark.png" light="sidebar-light.png" alt="The Spaces sidebar as cards: each space is a card with its panes, the agent and its status, and remote machines sit below" caption="Space cards: one collapsible card per space with its panes, agent status and directory (demo data)." />
+
 ## Creating, splitting and closing
 
 - **New space:** the **+** in the Spaces header, a folder in the Explorer, or the command palette.
-- **New terminal:** `CmdOrCtrl+T` or right-click a space.
+- **New pane:** `CmdOrCtrl+T` or right-click a space. A dialog asks for the type: Terminal (the default) or an installed agent; the pane starts in the space's directory.
 - **Split:** right-click a pane or its tab, *Split right* or *Split down*. The new shell starts in the pane's directory.
 - **Start agent:** right-click a shell pane, *Start agent...* (kind, optional name and arguments).
 - **Rename and close:** from the same menu. Closing a pane always asks first and warns while an agent works. It ends the terminal and the processes of its session. Closing a **tab** only closes the view.
@@ -24,6 +26,8 @@ A space that lost its terminals, for example after a restart that could not adop
 A pane opens as a tab above the terminal: a click opens a preview tab, a double click pins it. Tabs reorder by drag, and a tab can be split right or down into another group (`CmdOrCtrl+\`). Only the active tab of each group streams; the others keep running on the server.
 
 A pane opens **for input** when no other client controls it. If another client (for example the `poimen` console) holds the controller, the tab is read-only and says why, with an explicit **Take over** button, never automatic. The mode button in the status bar toggles input and read-only per tab. Cmd+click (macOS) or Ctrl+click opens links, and Shift bypasses a pane application's mouse mode for selecting text. Dropped files type their quoted paths, and a pasted image is saved and its path typed.
+
+<Screenshot src="tabs-dark.png" light="tabs-light.png" alt="An editor tab with a live Claude Code session next to a shell in a split" caption="A tab with two panes: a Claude Code session and a shell (demo data)." />
 
 ## Layouts and templates
 

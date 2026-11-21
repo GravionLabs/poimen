@@ -1,11 +1,11 @@
-import { Injectable, inject } from "@angular/core";
+import { Injectable, inject, signal } from "@angular/core";
+import { stepsAt, type SpaceStep } from "./task-steps";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
 import { SpacesStore } from "./spaces-store";
 import { qualifyId } from "./snapshot";
 import { RemoteSpaces } from "./remote-spaces";
 import { SpaceActions, type SpaceOutcome } from "./space-actions";
 import { TauriBridge } from "./tauri";
-import { UiState } from "./ui-state";
 
 /** The steps of starting a task; a failure names the one that failed. */
 export type TaskStep = "mode" | "clone" | "worktree" | "space" | "tab";
@@ -60,7 +60,9 @@ export class TaskStarter {
   private readonly spaces = inject(SpaceActions);
   private readonly store = inject(SpacesStore);
   private readonly remote = inject(RemoteSpaces);
-  private readonly ui = inject(UiState);
+  private readonly _steps = signal<SpaceStep[] | null>(null);
+  /** The steps of the space with a worktree being created (current one marked), else null. */
+  readonly steps = this._steps.asReadonly();
 
   /** Opens the picker for the repository at `dir` (issue `preselect` highlighted); resolves to whether a task was started. */
   async start(dir: string, preselect?: number): Promise<boolean> {
@@ -100,7 +102,7 @@ export class TaskStarter {
     plan: TaskPlan,
   ): Promise<boolean> {
     const fail = (step: TaskStep, reason: unknown): false => {
-      this.spaces.notify(remoteStepFailure(machine, step, reason));
+      this.spaces.fail(remoteStepFailure(machine, step, reason));
       return false;
     };
     let cwd: string;
@@ -157,7 +159,6 @@ export class TaskStarter {
       }
     }
     await this.remote.refresh(machine);
-    this.ui.setSplitWorkspace(qualifyId(machine, outcome.space_id));
     if (!outcome.created) {
       const label = this.remote
         .snapshot()
@@ -173,6 +174,20 @@ export class TaskStarter {
     mode: string,
     plan: TaskPlan,
   ): Promise<boolean> {
+    this._steps.set(stepsAt("worktree"));
+    try {
+      return await this.createInWorktree(dir, issue, mode, plan);
+    } finally {
+      this._steps.set(null);
+    }
+  }
+
+  private async createInWorktree(
+    dir: string,
+    issue: { nr: number; title: string; url: string },
+    mode: string,
+    plan: TaskPlan,
+  ): Promise<boolean> {
     let worktree: TaskWorktree;
     try {
       worktree = await this.bridge.invoke<TaskWorktree>("task_worktree", {
@@ -183,6 +198,8 @@ export class TaskStarter {
     } catch (err) {
       return this.fail("worktree", err);
     }
+    // One call creates the space, runs the project's setup and starts the agent's command.
+    this._steps.set(stepsAt("setup"));
     const outcome = await this.spaces.create(worktree.path, plan.label, null, plan.command);
     if (outcome) return true;
     // Held for the trust question: the answer creates the space with the same command.
@@ -216,7 +233,7 @@ export class TaskStarter {
   }
 
   private fail(step: TaskStep, reason: unknown): false {
-    this.spaces.notify(stepFailure(step, reason));
+    this.spaces.fail(stepFailure(step, reason));
     return false;
   }
 }

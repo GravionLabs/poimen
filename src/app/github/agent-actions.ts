@@ -415,7 +415,7 @@ export class AgentActions {
     try {
       launches = await planFor(targets);
     } catch (err) {
-      this.spaces.notify(`${action.label}: ${text(err)}`);
+      this.spaces.notify(`${action.label}: ${text(err)}`, "error");
       return null;
     }
     // `each` has one launch per target, `once` one for all of them.
@@ -434,7 +434,7 @@ export class AgentActions {
     if (outcome) return summary;
     // Held for the trust question: the answer creates the space, then `after` starts the agents.
     if (this.spaces.trust()) return null;
-    this.spaces.notify(`${action.label}: ${this.spaces.error() ?? "the space was not created"}`);
+    this.spaces.fail(`${action.label}: ${this.spaces.error() ?? "the space was not created"}`);
     return null;
   }
 

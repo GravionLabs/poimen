@@ -13,6 +13,10 @@ import {
   spaceOfTab,
   spaceTab,
   tabKind,
+  tabKindIcon,
+  SETTINGS_TAB,
+  GITHUB_TAB,
+  DELIVER_TAB,
   tabPaneId,
 } from "./editor-tabs";
 import { UI_STATE_KEY, UI_STORAGE } from "./ui-state";
@@ -537,5 +541,17 @@ describe("restoring the editor area", () => {
     const next = open(JSON.parse(data.get(UI_STATE_KEY)!).editor);
     expect(next.groups().map((g) => g.tabs.map((t) => t.paneId))).toEqual([["x"], ["y"]]);
     expect(next.focusedId()).toBe(tabs.focusedId());
+  });
+});
+
+describe("tabKindIcon", () => {
+  it("gives every non-pane kind an icon and a pane none", () => {
+    expect(tabKindIcon(SETTINGS_TAB)).toBe("settings");
+    expect(tabKindIcon(GITHUB_TAB)).toBe("github");
+    expect(tabKindIcon(DELIVER_TAB)).toBe("runs");
+    expect(tabKindIcon(flowTab("p1"))).toBe("flow");
+    expect(tabKindIcon(changesTab("/a"))).toBe("changes");
+    expect(tabKindIcon(spaceTab("s1"))).toBe("space");
+    expect(tabKindIcon("p1")).toBeUndefined();
   });
 });

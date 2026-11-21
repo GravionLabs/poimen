@@ -5,11 +5,12 @@ import { GithubFilter } from "./github-filter";
 import { GithubIssues } from "./issues";
 import { GithubPulls, flattenPulls } from "./pulls";
 import { HxButton } from "@gravionlabs/helix-ui";
+import { LoadingRows } from "../ui/loading/loading-rows";
 
 /** The "Inbox" sub-page: what waits for the viewer, from the loaded pull requests and issues. */
 @Component({
   selector: "app-github-inbox",
-  imports: [HxButton],
+  imports: [LoadingRows, HxButton],
   templateUrl: "./inbox-section.html",
   styleUrl: "./inbox-section.css",
   changeDetection: ChangeDetectionStrategy.OnPush,

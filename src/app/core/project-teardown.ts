@@ -46,7 +46,7 @@ export class ProjectTeardown {
       report = await this.bridge.invoke<TeardownReport>("project_teardown", { dir });
     } catch (err) {
       const reason = err && typeof err === "object" && "message" in err ? err.message : err;
-      this.spaces.notify(`Project: Run teardown failed: ${String(reason)}`);
+      this.spaces.notify(`Project: Run teardown failed: ${String(reason)}`, "error");
       return null;
     }
     const output = report.result?.output ?? "";

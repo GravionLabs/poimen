@@ -28,6 +28,6 @@
       <p class="hint" data-testid="inbox-empty">Nothing waits for you.</p>
     }
   } @else {
-    <p class="hint">Loading...</p>
+    <app-loading-rows [active]="true" label="Loading the inbox" testId="inbox-loading" [rows]="6" />
   }
 </section>

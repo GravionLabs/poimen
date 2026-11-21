@@ -1,6 +1,8 @@
+import { lastToast, testMessages } from "../../testing/toasts";
 import { Injector } from "@angular/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SpacesStore } from "./spaces-store";
+import { MESSAGES } from "./toast";
 import { SpaceActions, closeSpaceWarning, dirName, neighbourSpace } from "./space-actions";
 import type { Snapshot } from "./snapshot";
 import { TauriBridge } from "./tauri";
@@ -35,6 +37,7 @@ describe("SpaceActions", () => {
     tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
     injector = Injector.create({
       providers: [
+        testMessages(),
         TauriBridge,
         SpacesStore,
         { provide: UI_STORAGE, useValue: null },
@@ -43,6 +46,18 @@ describe("SpaceActions", () => {
       ],
     });
     actions = injector.get(SpaceActions);
+  });
+
+  it("notify shows a toast, not a status bar warning", () => {
+    actions.notify("Copied");
+    actions.notify("Fetch failed: no route", "error");
+    const shown = injector.get(MESSAGES).messages();
+    expect(shown.map((m) => [m.severity, m.summary])).toEqual([
+      ["info", "Copied"],
+      ["error", "Fetch failed: no route"],
+    ]);
+    expect(lastToast(injector)).toBe("Fetch failed: no route");
+    expect(actions.warning()).toBeNull();
   });
 
   it("opens and cancels the dialog", () => {
@@ -85,9 +100,7 @@ describe("SpaceActions", () => {
       terminals: [],
     }));
     tauri.answer("create_space", () => ({ space_id: "w1", created: false }));
-    const ui = injector.get(UiState);
     await actions.create("/work/app", "");
-    expect(ui.splitWorkspace()).toBe("w1");
     expect(actions.warning()).toBe('Opened the existing space "app".');
   });
 

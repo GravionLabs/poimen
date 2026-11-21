@@ -2,6 +2,8 @@
 
 poimen can show spaces and agents of another computer next to your own. It reaches the machine over **ssh**; no port is opened and poimen stores no password or key.
 
+<Screenshot src="machines-dark.png" light="machines-light.png" alt="Settings, Machines: one connected machine with its checks and one that is offline with the command to try" caption="Settings > Backend > Machines: a connected machine with its check and an offline one (demo data)." />
+
 ## Add a machine
 
 In your config, `machines` lists them:

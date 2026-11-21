@@ -1,4 +1,5 @@
 import { NgTemplateOutlet } from "@angular/common";
+import { HxTooltip } from "@gravionlabs/helix-ui";
 import {
   ChangeDetectionStrategy,
   Component,
@@ -19,7 +20,8 @@ import {
 
 import { ContextMenu } from "../../context-menu/context-menu";
 import type { MenuGroup } from "../../context-menu/menu-model";
-import { Icon } from "../../icon/icon";
+import { Icon, type IconName } from "../../icon/icon";
+import { dropSide, tabWidth } from "./tab-bar-rules";
 
 /** One tab of the bar. Generic on purpose: no herdr knowledge (candidate for helix-ui, ADR 0001). */
 export interface TabBarItem {
@@ -38,6 +40,8 @@ export interface TabBarItem {
   note?: string;
   /** A short warning text after the label, such as `silent 12m`. */
   mark?: string;
+  /** The icon of the tab kind (#1033); the app draws it in the tab, the "All tabs" menu shows it too. */
+  icon?: IconName;
 }
 
 /** An entry of the tab context menu; `action` is reported back with the tab id. */
@@ -78,7 +82,7 @@ export function arrowTarget(key: string, index: number, count: number): number |
 /** Tabs side by side in one row with close buttons and drag-to-reorder; projects trailing actions. */
 @Component({
   selector: "app-tab-bar",
-  imports: [NgTemplateOutlet, ContextMenu, Icon],
+  imports: [NgTemplateOutlet, ContextMenu, Icon, HxTooltip],
   templateUrl: "./tab-bar.html",
   styleUrl: "./tab-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -108,6 +112,8 @@ export class TabBar implements OnChanges {
 
   /** Whether the tabs are wider than the strip: scroll buttons and the all-tabs button show. */
   protected readonly overflowing = signal(false);
+  /** The width of each tab (`tabWidth`), set from the strip width. */
+  protected readonly width = signal(tabWidth(0, 0));
   /** Whether the all-tabs menu is open, with its anchor. */
   protected readonly allAt = signal<{ x: number; y: number } | null>(null);
 
@@ -139,6 +145,7 @@ export class TabBar implements OnChanges {
       () => {
         this.pending = false;
         this.measure();
+        this.trackNew();
         if (this.activeId !== this.revealed) {
           // An active tab that is not rendered (removed, or null) forgets the reveal so its return scrolls.
           this.revealed = this.revealActive() ? this.activeId : null;
@@ -164,7 +171,68 @@ export class TabBar implements OnChanges {
   /** Re-reads whether the strip overflows (resize, tab add/remove, scroll). */
   protected measure(): void {
     const el = this.strip?.nativeElement;
-    if (el) this.overflowing.set(el.scrollWidth > el.clientWidth + 1);
+    if (!el) return;
+    this.width.set(tabWidth(el.clientWidth, this.tabs.length));
+    this.overflowing.set(el.scrollWidth > el.clientWidth + 1);
+  }
+
+  /** The ids seen at the last render; `null` before the first, so the initial tabs are not "new". */
+  private known: Set<string> | null = null;
+  /** Whether the pointer is over the strip. */
+  private hovering = false;
+  /** A tab opened in the background that waits for the pointer to leave the strip. */
+  private waiting: string | null = null;
+
+  /** Scrolls the tab `id` into view. */
+  private revealId(id: string): void {
+    const el = this.strip?.nativeElement;
+    const index = this.tabs.findIndex((tab) => tab.id === id);
+    el?.querySelectorAll<HTMLElement>('[role="tab"]')[index]?.scrollIntoView?.({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }
+
+  /** Background tabs are revealed when the pointer is away, so tabs do not move under a click. */
+  private trackNew(): void {
+    const ids = new Set(this.tabs.map((tab) => tab.id));
+    if (this.known !== null) {
+      const added = this.tabs.filter((tab) => !this.known!.has(tab.id) && tab.id !== this.activeId);
+      if (added.length > 0) this.waiting = added[added.length - 1].id;
+    }
+    this.known = ids;
+    if (this.waiting !== null && !ids.has(this.waiting)) this.waiting = null;
+    this.flushWaiting();
+  }
+
+  private flushWaiting(): void {
+    if (this.hovering || this.waiting === null) return;
+    this.revealId(this.waiting);
+    this.waiting = null;
+  }
+
+  protected pointerEnter(): void {
+    this.hovering = true;
+  }
+
+  protected pointerLeave(): void {
+    this.hovering = false;
+    this.flushWaiting();
+  }
+
+  /** A tab is activated when the pointer goes up (a drag never gets there); keys come as a click without detail. */
+  protected pointerUp(event: PointerEvent, id: string): void {
+    if (event.button !== 0) return;
+    this.activate(id);
+  }
+
+  protected click(event: MouseEvent, id: string): void {
+    if (event.detail === 0) this.activate(id);
+  }
+
+  /** The side of tab `i` that shows the insertion bar of a drag inside this bar. */
+  protected side(i: number): "before" | "after" | null {
+    return dropSide(this.dragging(), this.dropAt() === i ? i : null);
   }
 
   /** Scrolls the strip by 60% of its width in `direction` (-1 left, 1 right). */
@@ -209,6 +277,7 @@ export class TabBar implements OnChanges {
         items: this.tabs.map((tab) => ({
           id: tab.id,
           label: `${tab.group ? tab.group + " / " : ""}${tab.label}`,
+          icon: tab.icon,
           active: tab.id === this.activeId,
           mark: tab.attention
             ? ("attention" as const)

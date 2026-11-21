@@ -12,7 +12,7 @@
     <p class="problem" role="alert">Could not read the issues: {{ err }}</p>
   }
   @if (issues.loading() && !issues.result()) {
-    <p class="hint" role="status" data-testid="issues-loading">Loading issues…</p>
+    <app-loading-rows [active]="true" label="Loading issues" testId="issues-loading" [rows]="6" />
   }
   @if (issues.result()) {
     <div class="toolbar" role="group" aria-label="Issue filters">

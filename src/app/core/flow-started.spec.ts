@@ -3,6 +3,7 @@ import {
   MAIN_NODE_ID,
   buildFlowGraph,
   flowStatusText,
+  sameStarted,
   startedTerminals,
   withStartedTerminals,
 } from "./flow-graph";
@@ -99,5 +100,29 @@ describe("withStartedTerminals", () => {
     expect(flowStatusText(mk("working"))).toBe("working");
     expect(flowStatusText(mk("working", true))).toBe("closed, last: working");
     expect(flowStatusText(base().nodes[0])).toBe("done");
+  });
+});
+
+describe("sameStarted", () => {
+  const started = (over = {}) => ({
+    terminalId: "b",
+    name: "agent b",
+    status: "working" as const,
+    tokens: totals(1),
+    closed: false,
+    ...over,
+  });
+
+  it("is true for lists with equal terminals, so remembering them again changes nothing", () => {
+    expect(sameStarted([started()], [started()])).toBe(true);
+    expect(sameStarted([], [])).toBe(true);
+  });
+
+  it("is false when a terminal, its status, its totals or its closed flag differ", () => {
+    expect(sameStarted([started()], [])).toBe(false);
+    expect(sameStarted([started()], [started({ status: "done" })])).toBe(false);
+    expect(sameStarted([started()], [started({ tokens: totals(2) })])).toBe(false);
+    expect(sameStarted([started()], [started({ tokens: null })])).toBe(false);
+    expect(sameStarted([started()], [started({ closed: true })])).toBe(false);
   });
 });

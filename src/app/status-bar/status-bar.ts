@@ -1,4 +1,16 @@
-import { ChangeDetectionStrategy, Component, input, output, signal } from "@angular/core";
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  Injector,
+  afterNextRender,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+} from "@angular/core";
 import { HxStatusBar, HxStatusItem, HxStatusPopover } from "@gravionlabs/helix-desktop";
 import { HxButton } from "@gravionlabs/helix-ui";
 import { SERVER_RESTART_NOTE, errorTitle, type UpdateState } from "../core/updater";
@@ -13,6 +25,12 @@ import {
   type Mode,
 } from "../core/backend";
 import type { LimitsItem } from "../core/claude-limits";
+import { densityFlags, nextLevel, shortRuns, type DensityLevel } from "./status-density";
+import { TaskProgress } from "../task-progress/task-progress";
+
+/** Room per item beyond its measured width (the gap between items) and the bar's own padding. */
+const ITEM_GAP = 2;
+const BAR_PADDING = 8;
 
 /** Tooltip of the RC badge. */
 export const CHANNEL_TITLE =
@@ -51,7 +69,7 @@ export function modeTitle(blocked: string | null): string {
 /** Bottom bar: server connection, waiting agents (click jumps to the next) and the active tab. */
 @Component({
   selector: "app-status-bar",
-  imports: [HxButton, HxStatusBar, HxStatusItem, HxStatusPopover],
+  imports: [TaskProgress, HxButton, HxStatusBar, HxStatusItem, HxStatusPopover],
   templateUrl: "./status-bar.html",
   styleUrl: "./status-bar.css",
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -108,6 +126,60 @@ export class StatusBar {
   /** The deliver item was clicked. */
   readonly showDeliver = output<void>();
 
+  private readonly injector = inject(Injector);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  /** How far the bar has given way (#1034): 0 shows everything, see `status-density.ts`. */
+  protected readonly level = signal<DensityLevel>(0);
+  protected readonly density = computed(() => densityFlags(this.level()));
+  /** The width the content needed at each level, as measured while it was shown. */
+  private readonly needed: (number | undefined)[] = [];
+
+  constructor() {
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => {
+      const bar = this.host.nativeElement.querySelector("hx-status-bar");
+      if (!bar || typeof ResizeObserver === "undefined") return;
+      const observer = new ResizeObserver(() => this.measure(bar));
+      observer.observe(bar);
+      // The bar keeps its width when its content changes (a notice, a longer text): watch the content too.
+      const content = new MutationObserver(() => this.measure(bar));
+      content.observe(bar, { childList: true, subtree: true, characterData: true });
+      destroyRef.onDestroy(() => {
+        observer.disconnect();
+        content.disconnect();
+      });
+      this.measure(bar);
+    });
+  }
+
+  /** Measures the items against the bar. Runs on every size change of the bar. */
+  private measure(bar: Element): void {
+    const items = Array.from(bar.querySelectorAll<HTMLElement>("hx-status-item"));
+    const needed = items.reduce((sum, i) => sum + i.offsetWidth + ITEM_GAP, 0) + BAR_PADDING;
+    this.fit(needed, bar.clientWidth);
+  }
+
+  /**
+   * Takes the width the content needs at the current level and the width of the bar, and moves
+   * to the next level; the render that follows is measured again (the bar's own size observer
+   * does not fire for a change of content), so it settles in at most one step per call.
+   */
+  fit(needed: number, available: number): void {
+    const level = this.level();
+    this.needed[level] = needed;
+    const next = nextLevel(level, this.needed, available);
+    if (next === level) return;
+    this.level.set(next);
+    afterNextRender(
+      () => {
+        const bar = this.host.nativeElement.querySelector("hx-status-bar");
+        if (bar && typeof ResizeObserver !== "undefined") this.measure(bar);
+      },
+      { injector: this.injector },
+    );
+  }
+
+  protected readonly shortRuns = shortRuns;
   protected readonly label = connectionLabel;
   protected readonly modeText = modeLabel;
   protected readonly modeHint = modeTitle;

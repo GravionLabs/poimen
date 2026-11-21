@@ -58,7 +58,6 @@ describe("theme button", () => {
     expect(button.tagName).toBe("BUTTON");
     expect(button.querySelector(`svg.${icon}`)).not.toBeNull();
     expect(button.getAttribute("aria-label")).toBe(themeLabel(theme));
-    expect(button.title).toBe(themeLabel(theme));
     button.click();
     expect(emitted).toEqual([next]);
   });
@@ -66,7 +65,6 @@ describe("theme button", () => {
   it("is disabled with a tooltip naming the color schema that fixes the theme", () => {
     const { button, emitted } = render("system", "dracula");
     expect(button.disabled).toBe(true);
-    expect(button.title).toBe("Theme fixed by color schema dracula");
     expect(button.getAttribute("aria-label")).toBe("Theme fixed by color schema dracula");
     button.click();
     expect(emitted).toEqual([]);

@@ -1,23 +1,20 @@
 @if (actions.dialog(); as d) {
   @if (d.kind === "new") {
-    <app-dialog-shell heading="New terminal" label="New terminal" (cancelled)="cancel()">
-      <form (submit)="$event.preventDefault(); create(d.cwd)">
-        <label>
-          Directory
-          <input
-            class="field"
-            type="text"
-            list="pane-dialog-dirs"
-            placeholder="Default directory of the workspace"
-            [value]="cwd(d.cwd)"
-            (input)="type($event)"
-          />
-        </label>
-        <datalist id="pane-dialog-dirs">
-          @for (dir of d.dirs; track dir) {
-            <option [value]="dir"></option>
+    <app-dialog-shell heading="New pane" label="New pane" (cancelled)="cancel()">
+      <form (submit)="$event.preventDefault(); create($any($event.target))">
+        <fieldset class="types">
+          <legend>Type</legend>
+          <label class="type">
+            <input type="radio" name="type" value="terminal" checked />
+            Terminal
+          </label>
+          @for (agent of agents(); track agent.id) {
+            <label class="type">
+              <input type="radio" name="type" [value]="agent.id" />
+              {{ agent.id }}{{ note(agent.id) }}
+            </label>
           }
-        </datalist>
+        </fieldset>
         <div class="dialog-buttons">
           <button
             type="button"
@@ -103,38 +100,6 @@
             Cancel
           </button>
           <button type="submit" hx-button class="confirm">Start</button>
-        </div>
-      </form>
-    </app-dialog-shell>
-  } @else if (d.kind === "rename") {
-    <app-dialog-shell
-      [heading]="d.agent ? 'Rename agent' : 'Rename pane'"
-      [label]="d.agent ? 'Rename agent' : 'Rename pane'"
-      (cancelled)="cancel()"
-    >
-      <form (submit)="$event.preventDefault(); rename($any($event.target))">
-        <label>
-          Name
-          <input
-            class="field"
-            name="name"
-            type="text"
-            placeholder="Empty clears the name"
-            [value]="d.current"
-          />
-        </label>
-        <div class="dialog-buttons">
-          <button
-            type="button"
-            hx-button
-            variant="outlined"
-            severity="secondary"
-            class="cancel"
-            (click)="cancel()"
-          >
-            Cancel
-          </button>
-          <button type="submit" hx-button class="confirm">Rename</button>
         </div>
       </form>
     </app-dialog-shell>

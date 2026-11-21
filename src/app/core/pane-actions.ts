@@ -8,7 +8,6 @@ import {
   rowName,
   spaceContaining,
   spaceRoot,
-  workspaceDirs,
   type Terminal,
   type SplitDirection,
 } from "./snapshot";
@@ -18,14 +17,14 @@ import { uniqueName } from "./named-layouts";
 import { Machines } from "./machines";
 import { SpaceActions } from "./space-actions";
 import { TauriBridge } from "./tauri";
+import { UiState } from "./ui-state";
 
 /** A dialog the user has to answer before a pane is created or closed. */
 export type PaneDialogState =
-  | { kind: "new"; workspaceId: string; dirs: string[]; cwd: string }
+  | { kind: "new"; workspaceId: string }
   | { kind: "close"; paneId: string; name: string; warning: string }
   | { kind: "restart"; paneId: string; name: string; have: string; bundled: string }
   | { kind: "agent"; paneId: string; name: string }
-  | { kind: "rename"; paneId: string; agent: boolean; current: string }
   | { kind: "save-layout"; tabId: string; current: string };
 
 /**
@@ -48,6 +47,7 @@ export class PaneActions {
   private readonly spaces = inject(SpaceActions);
   private readonly machines = inject(Machines, { optional: true });
   private readonly settings = inject(SettingsStore, { optional: true });
+  private readonly ui = inject(UiState, { optional: true });
 
   /** Ratios waiting behind a request in flight, per `tab/split`; `null` = nothing waiting. */
   private readonly resizing = new Map<string, number | null>();
@@ -58,13 +58,12 @@ export class PaneActions {
   /** Why the last action failed; cleared by the next one. */
   readonly error = this._error.asReadonly();
 
-  /** Asks where to start a new terminal in `workspaceId` (default: the first workspace). */
+  /** Asks which type of pane to create in `workspaceId` (default: the first workspace) (#1049). */
   askNew(workspaceId?: string): void {
     const id = workspaceId ?? this.store.snapshot().spaces[0]?.space_id;
     if (!id) return;
-    const dirs = workspaceDirs(this.store.snapshot(), id);
     this._error.set(null);
-    this._dialog.set({ kind: "new", workspaceId: id, dirs, cwd: dirs[0] ?? "" });
+    this._dialog.set({ kind: "new", workspaceId: id });
   }
 
   /** Asks for confirmation to close a pane. */
@@ -108,17 +107,30 @@ export class PaneActions {
     });
   }
 
-  /** Asks for a new name: the agent's name for an agent pane, else the pane label. */
+  /** The terminal whose name is edited in place (#1035); `null` when none. */
+  readonly renaming = signal<string | null>(null);
+  private readonly _renameBusy = signal(false);
+  /** A rename is on its way: the field is disabled. */
+  readonly renameBusy = this._renameBusy.asReadonly();
+
+  /** Starts the inline rename of a terminal (double click, F2, "Rename" in the menu). */
   askRename(paneId: string): void {
-    const pane = this.store.pane(paneId);
-    const tab = this.store.snapshot().tabs.find((t) => t.tab_id === pane?.tab_id);
+    if (this.blocked(paneId)) return;
     this._error.set(null);
-    this._dialog.set({
-      kind: "rename",
-      paneId,
-      agent: !!pane && !!agentKind(pane),
-      current: pane ? rowName(pane, tab?.label) : "",
-    });
+    // The field lives in the sidebar row: callers outside it (overview, tab menu) need it shown.
+    this.ui?.sidebarCollapsed.set(false);
+    this.renaming.set(paneId);
+  }
+
+  /** The user typed again: the last error is stale. */
+  clearError(): void {
+    this._error.set(null);
+  }
+
+  /** Ends the inline rename without saving. */
+  cancelRename(): void {
+    this.renaming.set(null);
+    this._error.set(null);
   }
 
   /** Asks for the name of a layout made from the tab of `paneId` (with the tabs below it). */
@@ -181,18 +193,33 @@ export class PaneActions {
     this._error.set(null);
   }
 
-  /** Creates a terminal in the workspace of the open dialog; resolves to the new pane. */
-  async confirmNew(cwd: string): Promise<Terminal | undefined> {
+  /**
+   * Creates a pane in the space of the open dialog, in the space's directory (the server's
+   * default), and resolves to it. With `agent` the agent starts in the new pane; when that fails
+   * the pane stays as a shell and `error` says why.
+   */
+  async confirmNew(agent?: { kind: string; args: string[] }): Promise<Terminal | undefined> {
     const dialog = this._dialog();
     if (dialog?.kind !== "new") return undefined;
     this._dialog.set(null);
     if (this.blocked(dialog.workspaceId)) return undefined;
-    return this.create(() =>
+    const pane = await this.create(() =>
       this.bridge.invoke<string | null>("terminal_create", {
         spaceId: dialog.workspaceId,
-        cwd: cwd.trim() || null,
+        cwd: null,
       }),
     );
+    if (pane && agent) {
+      await this.run(() =>
+        this.bridge.invoke("agent_start", {
+          terminalId: pane.terminal_id,
+          kind: agent.kind,
+          name: null,
+          args: agent.args,
+        }),
+      );
+    }
+    return pane;
   }
 
   /**
@@ -321,19 +348,18 @@ export class PaneActions {
     );
   }
 
-  /** Renames the pane of the open rename dialog; an empty name clears it. */
-  async confirmRename(name: string): Promise<boolean> {
-    const dialog = this._dialog();
-    if (dialog?.kind !== "rename") return false;
-    this._dialog.set(null);
-    return this.rename(dialog.paneId, name, dialog.agent);
-  }
-
-  /** Renames a pane without the dialog (inline rename); an empty name clears it. */
+  /** Renames a pane (inline rename); an empty name clears it. */
   async rename(paneId: string, name: string, agent?: boolean): Promise<boolean> {
     if (this.blocked(paneId)) return false;
     const pane = this.store.pane(paneId);
     const isAgent = agent ?? (!!pane && !!agentKind(pane));
+    this._renameBusy.set(true);
+    const ok = await this.renameCall(paneId, name, isAgent);
+    this._renameBusy.set(false);
+    return ok;
+  }
+
+  private renameCall(paneId: string, name: string, isAgent: boolean): Promise<boolean> {
     return this.run(() =>
       isAgent
         ? this.bridge.invoke("agent_rename", { target: paneId, name: name.trim() || null })

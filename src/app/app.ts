@@ -37,6 +37,7 @@ import { ColorSchemeService } from "./core/color-scheme-service";
 import { Machines } from "./core/machines";
 import { RemoteSpaces } from "./core/remote-spaces";
 import { Attention, canMarkUnread } from "./core/attention";
+import { Presence } from "./core/presence";
 import { AgentRuns } from "./github/agent-runs";
 import { DockBadge } from "./core/dock-badge";
 import { NotificationCenter } from "./core/notification-center";
@@ -56,6 +57,7 @@ import { Explorer } from "./explorer/explorer";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, UiState, type GithubPage } from "./core/ui-state";
 import { followSystemTheme } from "./core/system-theme";
 import { RecentTabs } from "./recent-tabs/recent-tabs";
+import { Toasts } from "./ui/toasts/toasts";
 import { Sidebar } from "./sidebar/sidebar";
 import { TabLayout } from "./tab-layout/tab-layout";
 import { TerminalView } from "./terminal-view/terminal-view";
@@ -66,6 +68,7 @@ import {
   spaceOfTab,
   spaceTab,
   tabKind,
+  withKindIcons,
   tabPaneId,
   type EditorGroup,
 } from "./core/editor-tabs";
@@ -133,6 +136,7 @@ const ZOOM_STEP = 1;
   imports: [
     HxActivityBar,
     RecentTabs,
+    Toasts,
     HxAppShell,
     Icon,
     Sidebar,
@@ -255,7 +259,7 @@ export class App {
   private readonly known = new Map<string, Terminal>();
   /** The clock of the silent marks on tabs; ticks once a minute. */
   private readonly clock = signal(Date.now());
-  protected readonly groupItems = computed(() => {
+  private readonly baseItems = computed(() => {
     const snap = this.store.all();
     this.store.panes();
     const ringing = this.attention.attention();
@@ -327,6 +331,7 @@ export class App {
       ]),
     );
   });
+  protected readonly groupItems = computed(() => withKindIcons(this.baseItems()));
   /** The leaf the user focused last per split tab; the server's focus is the fallback. */
   private readonly leafFocus = signal<ReadonlyMap<string, string>>(new Map());
   /** Size of each terminal that reported one; the status bar shows the focused group's. */
@@ -336,15 +341,14 @@ export class App {
     return id ? this.sizes().get(id) : undefined;
   });
 
-  /** Panes whose tab is on screen: the active tab of each editor group. */
-  private readonly viewedPanes = computed(
-    () => new Set(this.editor.groups().flatMap((g) => (g.activeId ? [g.activeId] : []))),
+  private readonly presence = inject(Presence);
+  /** Active tab of each editor group, while the user is present (#1030). */
+  private readonly viewedPanes = computed(() =>
+    this.presence.whenPresent(this.editor.groups().flatMap((g) => g.activeId ?? [])),
   );
 
   constructor() {
-    effect(() => {
-      this.projectEntries.setDir(this.activeDir());
-    });
+    effect(() => this.projectEntries.setDir(this.activeDir()));
     // The space of the active tab (a pane or the overview) is the one the user focused last (#712).
     effect(() => {
       const id = this.editor.activeId();
@@ -483,13 +487,6 @@ export class App {
     { equal: (a, b) => a?.paneId === b?.paneId && a?.session === b?.session },
   );
 
-  /** Set when restored tabs lost their pane, until dismissed. */
-  protected readonly notice = signal<string | null>(null);
-
-  protected dismissNotice(): void {
-    this.notice.set(null);
-  }
-
   /** After the first snapshot, closes restored tabs whose pane is gone, and says so. */
   private dropMissing(): void {
     if (this.store.connectionError() !== null) return;
@@ -498,7 +495,7 @@ export class App {
     for (const id of this.editor.openIds()) if (splitId(id).machine) alive.add(id);
     const gone = this.editor.prune(alive);
     if (gone.length === 0) return;
-    this.notice.set(
+    this.spaceActions.notify(
       gone.length === 1
         ? "1 tab was closed because its pane no longer exists."
         : `${gone.length} tabs were closed because their panes no longer exist.`,
@@ -626,10 +623,6 @@ export class App {
     } as const;
     if (id in sorts) {
       void this.prefs.setSidebarSort(sorts[id as keyof typeof sorts]);
-      return;
-    }
-    if (id === "agentsByPriority" || id === "agentsInSpaceOrder") {
-      void this.prefs.setSidebarAgents(id === "agentsByPriority" ? "priority" : "list");
       return;
     }
     if (id === "sortSpacesNow") {
@@ -839,10 +832,6 @@ export class App {
     return group.activeId === null ? null : spaceOfTab(group.activeId);
   }
 
-  protected isSpace(id: string): boolean {
-    return tabKind(id) === "space";
-  }
-
   /** A space closed in herdr: all its panes go, so their tabs close without a successor. */
   protected onSpaceClosed(paneIds: string[]): void {
     for (const id of paneIds) this.editor.closePane(id);
@@ -1028,10 +1017,6 @@ export class App {
     return group.activeId === null ? null : flowPane(group.activeId);
   }
 
-  protected isFlow(id: string): boolean {
-    return tabKind(id) === "flow";
-  }
-
   /** A subagent node of a flow tab was clicked: show its transcript in the Output tab. */
   protected openAgentOutput(agentId: string): void {
     this.subagents.pick(agentId);
@@ -1041,10 +1026,6 @@ export class App {
   /** The directory of the group's active tab when that is a changes tab. */
   protected changesOf(group: EditorGroup): string | null {
     return group.activeId === null ? null : changesDir(group.activeId);
-  }
-
-  protected isChanges(id: string): boolean {
-    return tabKind(id) === "changes";
   }
 
   protected isDeliver(id: string | null): boolean {

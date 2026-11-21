@@ -4,6 +4,8 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 
 ## Appearance
 
+<Screenshot src="schemas-dark.png" light="schemas-light.png" alt="The settings view with the appearance switch and the color scheme picker listing dark and light schemes with their palettes" caption="Settings > Appearance: the theme switch and the color scheme picker (demo data)." />
+
 - `theme`: `light`, `dark` or `system`. The button in the top bar cycles them.
 - `colorSchema`: a bundled scheme, or a pair `{ "light": "...", "dark": "..." }`. Bundled: `poimen` (default), `catppuccin`, `tokyo-night`, `dracula`, `gruvbox`, `one-dark`, `solarized` and more. Your own WezTerm color schemes go into `~/.config/poimen/themes/` and are picked up without a restart.
 - `terminal.fontFamily`, `terminal.fontSize` (6 to 72), `terminal.scrollback` (default 10000) and `terminal.ghostty` to take font and colors from your Ghostty config.
@@ -18,7 +20,7 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 
 - `spaces.layout`, `layouts` and `spaceTemplates`: what a new space contains, see [Spaces and layouts](/guide/spaces#layouts-and-templates).
 - `explorer.roots` and `explorer.showHidden`.
-- `sidebar.layout` (`tree`, `split`, `cards`), `sidebar.sort` (`manual`, `name`, `attention`, `recent`), `sidebar.groupWorktrees` and `sidebar.rows`, which says per row which tokens it shows (`state_icon`, `name`, `agent`, `branch`, `dirty`, `sync`, `pr`, `dir` and tokens your scripts set with `poimen-server report tokens`).
+- `sidebar.sort` (`manual`, `name`, `attention`, `recent`), `sidebar.groupWorktrees` and `sidebar.rows`, which says per row which tokens it shows (`state_icon`, `name`, `agent`, `branch`, `dirty`, `sync`, `pr`, `dir` and tokens your scripts set with `poimen-server report tokens`).
 
 ## Agents
 
@@ -28,6 +30,8 @@ Settings are optional. They live in `~/.config/poimen/config.json` (comments are
 - `github.agentActions` and `tasks`: see [GitHub and tasks](/guide/github).
 
 ## Machines, trust and console
+
+<Screenshot src="settings-server-dark.png" light="settings-server-light.png" alt="Settings, Backend, Server: the version, state, socket and log of poimen-server, and the hook and MCP state of Claude Code and Copilot CLI" caption="Settings > Backend > Server: the server, and the hooks and MCP entries of your agents (demo data)." />
 
 - `machines`: see [Remote machines](/guide/remote-machines).
 - `trustedProjects`: managed by the trust dialog and **Settings > Workspace > Trusted projects**, never imported.

@@ -13,6 +13,7 @@ import {
   inject,
   signal,
 } from "@angular/core";
+import { Icon } from "../icon/icon";
 import { openedByKeyboard, returnFocus } from "../focus-return";
 import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-model";
 
@@ -30,6 +31,7 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
 @Component({
   selector: "app-context-menu",
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [Icon],
   host: { "(document:keydown.escape)": "close()" },
   templateUrl: "./context-menu.html",
   styles: `
@@ -75,6 +77,10 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
     .menu-item:hover,
     .menu-item:focus-visible {
       background: color-mix(in srgb, currentColor 12%, transparent);
+    }
+
+    .menu-item .label {
+      flex: 1;
     }
 
     .menu-item[aria-disabled="true"] {
@@ -135,7 +141,7 @@ import { clampMenu, menuTarget, type MenuGroup, type MenuPick } from "./menu-mod
     }
 
     .unread {
-      background: var(--status-done);
+      background: var(--status-unread);
     }
   `,
 })

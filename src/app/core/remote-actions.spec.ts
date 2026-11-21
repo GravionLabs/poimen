@@ -118,12 +118,11 @@ describe("actions on remote spaces and terminals (#693)", () => {
 
   it("sends new terminal, rename and close of a connected machine with the qualified ids", async () => {
     panes.askNew("box::1");
-    await panes.confirmNew("/r");
-    panes.askRename("box::p1");
-    await panes.confirmRename("x");
+    await panes.confirmNew();
+    await panes.rename("box::p1", "x");
     panes.askClose("box::p1");
     await panes.confirmClose();
-    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "box::1", cwd: "/r" }]);
+    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "box::1", cwd: null }]);
     expect(tauri.calls("pane_rename")).toEqual([{ terminalId: "box::p1", label: "x" }]);
     expect(tauri.calls("pane_close")).toEqual([{ terminalId: "box::p1" }]);
   });
@@ -139,9 +138,10 @@ describe("actions on remote spaces and terminals (#693)", () => {
     expect(await panes.split("lab::p1", "down")).toBeUndefined();
     expect(panes.error()).toBe("lab is offline: timed out");
     panes.askNew("lab::1");
-    await panes.confirmNew("/l");
+    await panes.confirmNew();
     panes.askRename("lab::p1");
-    expect(await panes.confirmRename("x")).toBe(false);
+    expect(panes.renaming()).toBeNull();
+    expect(await panes.rename("lab::p1", "x")).toBe(false);
     panes.askClose("lab::p1");
     expect(await panes.confirmClose()).toBeUndefined();
     await panes.resizeSplit("lab::t1", "s1", 0.4);

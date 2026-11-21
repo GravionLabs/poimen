@@ -1,4 +1,5 @@
 import { Injector } from "@angular/core";
+import { lastToast, testMessages } from "../../testing/toasts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectTeardown, teardownSummary, type TeardownReport } from "./project-teardown";
 import { ResultDialog } from "./result-dialog";
@@ -7,6 +8,8 @@ import { SpacesStore } from "./spaces-store";
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 import { UI_STORAGE, UiState } from "./ui-state";
+
+let injector: Injector;
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./tauri.mock")).tauri.invoke,
@@ -33,13 +36,13 @@ describe("teardownSummary", () => {
 describe("ProjectTeardown", () => {
   let teardown: ProjectTeardown;
   let dialog: ResultDialog;
-  let spaces: SpaceActions;
 
   beforeEach(() => {
     tauri.reset();
     tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
-    const injector = Injector.create({
+    injector = Injector.create({
       providers: [
+        testMessages(),
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
         SpacesStore,
@@ -51,7 +54,6 @@ describe("ProjectTeardown", () => {
     });
     teardown = injector.get(ProjectTeardown);
     dialog = injector.get(ResultDialog);
-    spaces = injector.get(SpaceActions);
   });
 
   it("runs in the directory and shows the output in the dialog", async () => {
@@ -82,7 +84,7 @@ describe("ProjectTeardown", () => {
       throw new Error("not a repo");
     });
     expect(await teardown.run("/w")).toBeNull();
-    expect(spaces.warning()).toContain("not a repo");
+    expect(lastToast(injector)).toContain("not a repo");
     expect(dialog.content()).toBeNull();
   });
 });

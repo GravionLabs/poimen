@@ -314,14 +314,19 @@ fn start_agent_appends_the_preamble_to_the_prompt() {
     }}});
     std::fs::write(config, harness.to_string()).unwrap();
     let client = f.client.clone();
+    let reported = out.clone();
     thread::spawn(move || {
+        // Like a real agent, report only once the command line has run (it writes the prompt
+        // file). Earlier, `start_agent` may still be checking the terminal for an agent and
+        // would refuse it as already running.
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
-            if let Some(t) = client
-                .list_terminals(None)
-                .unwrap()
-                .into_iter()
-                .find(|t| t.name == "kid")
+            if reported.exists()
+                && let Some(t) = client
+                    .list_terminals(None)
+                    .unwrap()
+                    .into_iter()
+                    .find(|t| t.name == "kid")
             {
                 agent_status(&client, &t.id, 1, AgentStatus::Idle);
                 return;

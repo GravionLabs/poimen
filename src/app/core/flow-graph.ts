@@ -432,6 +432,29 @@ export interface StartedTerminal {
   closed: boolean;
 }
 
+/** Whether two lists hold the same started terminals; remembering an equal list again would loop the Flow tab's effect. */
+export function sameStarted(a: readonly StartedTerminal[], b: readonly StartedTerminal[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((t, i) => {
+      const u = b[i];
+      return (
+        t.terminalId === u.terminalId &&
+        t.name === u.name &&
+        t.status === u.status &&
+        t.closed === u.closed &&
+        (t.tokens === u.tokens ||
+          (t.tokens !== null &&
+            u.tokens !== null &&
+            t.tokens.input === u.tokens.input &&
+            t.tokens.output === u.tokens.output &&
+            t.tokens.cache_read === u.tokens.cache_read &&
+            t.tokens.cache_creation === u.tokens.cache_creation))
+      );
+    })
+  );
+}
+
 /**
  * The terminals `starter` started (`started_by`, #982) in the snapshot's `terminals`, with their
  * token totals when known. `remembered` holds what was seen before: a terminal that is gone from

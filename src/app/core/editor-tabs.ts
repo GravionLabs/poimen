@@ -1,5 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from "@angular/core";
 import { UiState } from "./ui-state";
+import type { IconName } from "../ui/icon/icon";
 import type { Mode } from "./backend";
 import {
   groupIds,
@@ -74,6 +75,32 @@ export function tabKind(id: string): TabKind {
   if (changesDir(id) !== null) return "changes";
   if (spaceOfTab(id) !== null) return "space";
   return flowPane(id) !== null ? "flow" : "pane";
+}
+
+const KIND_ICONS: Partial<Record<TabKind, IconName>> = {
+  settings: "settings",
+  github: "github",
+  deliver: "runs",
+  flow: "flow",
+  changes: "changes",
+  space: "space",
+};
+
+/** The icon of a tab kind (#1033); a pane tab has none, it shows its agent status instead. */
+export function tabKindIcon(id: string): IconName | undefined {
+  return KIND_ICONS[tabKind(id)];
+}
+
+/** `groups` (tabs by group id) with the icon of each tab's kind set. */
+export function withKindIcons<T extends { id: string; icon?: IconName }>(
+  groups: Map<number, T[]>,
+): Map<number, T[]> {
+  return new Map(
+    [...groups].map(([id, items]) => [
+      id,
+      items.map((item) => ({ ...item, icon: tabKindIcon(item.id) })),
+    ]),
+  );
 }
 
 /** The herdr pane a tab is about: the pane itself or the pane of a flow tab; else `null`. */

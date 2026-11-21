@@ -8,8 +8,6 @@ import type { SpaceNode } from "../core/snapshot";
 import { SpacesStore } from "../core/spaces-store";
 import { DEFAULT_SETTINGS, SettingsStore, type SidebarSort } from "../core/settings";
 import { SpaceActions } from "../core/space-actions";
-import { SplitPane } from "../ui/helix-candidates/split-pane/split-pane";
-import { SplitPaneStub } from "../ui/helix-candidates/split-pane/split-pane.testing";
 import { Sidebar } from "./sidebar";
 import { inlineSpaceCard } from "./space-card.mock";
 
@@ -23,6 +21,7 @@ const node = (id: string, n: number): SpaceNode => ({
       agent_status: "idle" as const,
     },
     tab: "main",
+    tabId: `${id}:t${t}`,
     name: `shell ${id}.${t}`,
     worktree: false,
   })),
@@ -60,10 +59,6 @@ async function setup(
       template: readFileSync("src/app/sidebar/sidebar.html", "utf8"),
     },
   });
-  TestBed.overrideComponent(Sidebar, {
-    remove: { imports: [SplitPane] },
-    add: { imports: [SplitPaneStub] },
-  });
   const reorder = vi.spyOn(TestBed.inject(SpaceActions), "reorder").mockImplementation(() => {});
   const reorderTabs = vi
     .spyOn(TestBed.inject(SpaceActions), "reorderTabs")
@@ -78,9 +73,10 @@ async function setup(
   await settle();
   const root = fixture.nativeElement as HTMLElement;
   const rowOf = (id: string) =>
-    [...root.querySelectorAll<HTMLElement>(".space")].find((e) =>
-      e.textContent?.includes(`Space ${id}`),
+    [...root.querySelectorAll<HTMLElement>("section.card")].find(
+      (e) => e.getAttribute("aria-label") === `Space ${id}`,
     )!;
+  const headOf = (id: string) => rowOf(id).querySelector<HTMLElement>("header")!;
   const fire = async (el: HTMLElement, type: string, clientY = 0) => {
     const event = new Event(type, { bubbles: true, cancelable: true });
     Object.defineProperty(event, "clientY", { value: clientY });
@@ -89,7 +85,7 @@ async function setup(
     return event;
   };
   const sortNow = vi.spyOn(TestBed.inject(SpaceActions), "sortNow").mockImplementation(() => {});
-  return { fixture, root, sortNow, reorder, reorderTabs, rowOf, fire, settle };
+  return { fixture, root, sortNow, reorder, reorderTabs, rowOf, headOf, fire, settle };
 }
 
 describe("Sidebar space drag and drop", () => {
@@ -98,9 +94,9 @@ describe("Sidebar space drag and drop", () => {
   });
 
   it("makes space rows draggable and shows a marker at the target", async () => {
-    const { rowOf, fire } = await setup();
-    expect(rowOf("w1").getAttribute("draggable")).toBe("true");
-    await fire(rowOf("w1"), "dragstart");
+    const { rowOf, headOf, fire } = await setup();
+    expect(headOf("w1").getAttribute("draggable")).toBe("true");
+    await fire(headOf("w1"), "dragstart");
     expect(rowOf("w1").classList).toContain("dragging");
     await fire(rowOf("w3"), "dragover", 0);
     expect(rowOf("w3").classList).toContain("drop-before");
@@ -109,8 +105,8 @@ describe("Sidebar space drag and drop", () => {
   });
 
   it("reorders on a drop and clears the marker", async () => {
-    const { rowOf, fire, reorder } = await setup();
-    await fire(rowOf("w1"), "dragstart");
+    const { rowOf, headOf, fire, reorder } = await setup();
+    await fire(headOf("w1"), "dragstart");
     await fire(rowOf("w3"), "dragover", 5);
     await fire(rowOf("w3"), "drop");
     expect(reorder).toHaveBeenCalledExactlyOnceWith("w1", "w3", true);
@@ -119,24 +115,24 @@ describe("Sidebar space drag and drop", () => {
   });
 
   it("changes nothing when the drag ends outside the list or over itself", async () => {
-    const { rowOf, fire, reorder } = await setup();
-    await fire(rowOf("w1"), "dragstart");
+    const { rowOf, headOf, fire, reorder } = await setup();
+    await fire(headOf("w1"), "dragstart");
     await fire(rowOf("w1"), "dragover");
     await fire(rowOf("w1"), "drop");
-    await fire(rowOf("w2"), "dragstart");
-    await fire(rowOf("w2"), "dragend");
+    await fire(headOf("w2"), "dragstart");
+    await fire(headOf("w2"), "dragend");
     expect(reorder).not.toHaveBeenCalled();
     expect(rowOf("w2").classList).not.toContain("dragging");
   });
 
   it("does not start a drag while a filter is active", async () => {
-    const { root, rowOf, fire, reorder, settle } = await setup();
+    const { root, rowOf, headOf, fire, reorder, settle } = await setup();
     const input = root.querySelector<HTMLInputElement>("input.filter")!;
     input.value = "space";
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await settle();
-    expect(rowOf("w1").getAttribute("draggable")).toBeNull();
-    const start = await fire(rowOf("w1"), "dragstart");
+    expect(headOf("w1").getAttribute("draggable")).toBeNull();
+    const start = await fire(headOf("w1"), "dragstart");
     expect(start.defaultPrevented).toBe(true);
     await fire(rowOf("w2"), "dragover", 5);
     await fire(rowOf("w2"), "drop");
@@ -146,9 +142,9 @@ describe("Sidebar space drag and drop", () => {
 
 describe("Sidebar sort", () => {
   it("turns drag and drop of spaces off outside manual", async () => {
-    const { rowOf, fire, reorder } = await setup("name");
-    expect(rowOf("w1").getAttribute("draggable")).toBeNull();
-    const start = await fire(rowOf("w1"), "dragstart");
+    const { rowOf, headOf, fire, reorder } = await setup("name");
+    expect(headOf("w1").getAttribute("draggable")).toBeNull();
+    const start = await fire(headOf("w1"), "dragstart");
     expect(start.defaultPrevented).toBe(true);
     await fire(rowOf("w2"), "drop");
     expect(reorder).not.toHaveBeenCalled();
@@ -203,8 +199,8 @@ describe("Sidebar sort", () => {
 
   it("turns drag and drop off in attention and recent", async () => {
     for (const mode of ["attention", "recent"] as const) {
-      const { rowOf } = await setup(mode);
-      expect(rowOf("w1").getAttribute("draggable")).toBeNull();
+      const { headOf } = await setup(mode);
+      expect(headOf("w1").getAttribute("draggable")).toBeNull();
     }
   });
 });
@@ -273,21 +269,21 @@ describe("Sidebar tab drag and drop", () => {
     });
 
     it("lets a member be dropped on a sibling only", async () => {
-      const { rowOf, fire, reorder } = await setup("manual", grouped());
-      await fire(rowOf("w2"), "dragstart");
+      const { rowOf, headOf, fire, reorder } = await setup("manual", grouped());
+      await fire(headOf("w2"), "dragstart");
       await fire(rowOf("w4"), "dragover", 5);
       expect(rowOf("w4").classList).not.toContain("drop-after");
       await fire(rowOf("w4"), "drop");
       expect(reorder).not.toHaveBeenCalled();
-      await fire(rowOf("w2"), "dragstart");
+      await fire(headOf("w2"), "dragstart");
       await fire(rowOf("w3"), "dragover", 5);
       await fire(rowOf("w3"), "drop");
       expect(reorder).toHaveBeenCalledExactlyOnceWith("w2", "w3", true);
     });
 
     it("refuses a head dropped on a member", async () => {
-      const { rowOf, fire, reorder } = await setup("manual", grouped());
-      await fire(rowOf("w4"), "dragstart");
+      const { rowOf, headOf, fire, reorder } = await setup("manual", grouped());
+      await fire(headOf("w4"), "dragstart");
       await fire(rowOf("w2"), "dragover", 5);
       await fire(rowOf("w2"), "drop");
       expect(reorder).not.toHaveBeenCalled();

@@ -205,6 +205,10 @@
   line-height: 16px;
 }
 
+.name.unread-name {
+  font-weight: 600;
+}
+
 .text {
   min-width: 0;
   color: var(--h-text-muted-color);
@@ -249,7 +253,7 @@
   min-width: 16px;
   padding: 0 5px;
   border-radius: 8px;
-  background: var(--status-done);
+  background: var(--status-unread);
   color: var(--h-content-background);
   font-size: 10px;
   line-height: 16px;

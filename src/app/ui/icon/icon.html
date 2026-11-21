@@ -1,1 +1,16 @@
-<svg viewBox="0 0 24 24" fill="currentColor"><path [attr.d]="path" /></svg>
+@if (strokes; as paths) {
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    @for (d of paths; track $index) {
+      <path [attr.d]="d" />
+    }
+  </svg>
+} @else {
+  <svg viewBox="0 0 24 24" fill="currentColor"><path [attr.d]="path" /></svg>
+}

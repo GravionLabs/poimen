@@ -9,12 +9,14 @@ import {
   viewChild,
 } from "@angular/core";
 import { JumpPalette, type JumpEntry } from "../core/jump-palette";
+import { Icon } from "../ui/icon/icon";
 import { titleParts } from "../command-palette/title-parts";
 
 /** The jump palette dialog: type to filter, arrows to move, Enter to jump, Escape to close. */
 @Component({
   selector: "app-jump-palette",
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [Icon],
   templateUrl: "./jump-palette.html",
   styleUrl: "./jump-palette.css",
 })

@@ -1,22 +1,21 @@
-use poimen_core::{agent_actions, copilot, git, transcripts};
+use poimen_core::{agent_actions, copilot, git, github, gui_path, harness, transcripts};
 mod agent_session;
 mod agent_settings;
 mod backend;
 #[cfg(test)]
 mod backend_fake;
 mod changes;
+mod changes_content;
+mod changes_files;
 mod changes_git;
 mod commit_message;
 mod deliver;
 mod editor;
 mod git_sync;
-use poimen_core::github;
 mod github_branches;
 mod github_issues;
 mod github_milestones;
 mod github_pulls;
-use poimen_core::gui_path;
-use poimen_core::harness;
 mod hooks;
 mod layout;
 mod layout_file;
@@ -2067,20 +2066,6 @@ fn set_color_schema(schema: serde_json::Value) -> Result<(), String> {
     settings::save_color_schema(&home, &schema)
 }
 
-/// Writes only `sidebar.layout` (`tree` or `split`); the settings watcher emits the change.
-#[tauri::command]
-fn set_sidebar_layout(layout: String) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_sidebar_layout(&home, &layout)
-}
-
-/// Writes only `sidebar.agents` (`list` or `priority`); the settings watcher emits the change.
-#[tauri::command]
-fn set_sidebar_agents(mode: String) -> Result<(), String> {
-    let home = home_dir().ok_or("the home directory is not known (HOME or USERPROFILE)")?;
-    settings::save_sidebar_agents(&home, &mode)
-}
-
 /// Writes only `sidebar.sort` (`manual`, `name`, `attention` or `recent`); the settings watcher emits the change.
 #[tauri::command]
 fn set_sidebar_sort(sort: String) -> Result<(), String> {
@@ -2228,20 +2213,6 @@ async fn changes_list(dir: String, scope: changes::Scope) -> Result<changes::Cha
     tauri::async_runtime::spawn_blocking(move || changes::list(&dir, scope, home_dir().as_deref()))
         .await
         .map_err(|e| e.to_string())?
-}
-
-/// Old and new content of one changed file for the merge view (read-only git).
-#[tauri::command]
-async fn changes_file(
-    dir: String,
-    scope: changes::Scope,
-    path: String,
-) -> Result<changes::FileContent, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        changes::file(&dir, scope, &path, home_dir().as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Writes review comments to a new `.agents/state/comments-<timestamp>.md` of the worktree `dir`
@@ -2962,10 +2933,11 @@ pub fn run() {
             get_task_modes,
             task_worktree,
             changes_list,
-            changes_file,
+            changes_content::changes_file,
             changes_write_comments,
             changes_findings,
             changes_git::changes_stage,
+            changes_git::changes_discard,
             changes_git::changes_commit,
             changes_git::changes_push,
             commit_message::changes_generate_message,
@@ -2982,9 +2954,7 @@ pub fn run() {
             get_color_schemes,
             set_theme,
             set_color_schema,
-            set_sidebar_layout,
             set_sidebar_sort,
-            set_sidebar_agents,
             set_explorer_roots,
             set_explorer_show_hidden,
             agent_settings::set_claude_classic_renderer,

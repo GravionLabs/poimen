@@ -240,3 +240,52 @@ describe("Attention.changedAt (#722)", () => {
     expect(new Attention().changedAt().size).toBe(0);
   });
 });
+
+describe("Attention with presence (#1030)", () => {
+  // App passes the tabs on screen as `viewed` only while the user is present, else an empty set.
+  const tab = new Set(["p1"]);
+
+  it("marks a pane that finishes in an on-screen tab while the window is unfocused", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), tab);
+    a.observe(st({ p1: "done" }), none);
+    expect([...a.unread()]).toEqual(["p1"]);
+    expect(a.count()).toBe(1);
+  });
+
+  it("rings a pane that turns blocked while focused but idle", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), tab);
+    a.observe(st({ p1: "blocked" }), none);
+    expect([...a.attention()]).toEqual(["p1"]);
+  });
+
+  it("keeps the marks on return with focus only and clears them on the first input", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "working" }), tab);
+    a.observe(st({ p1: "done" }), none);
+    a.observe(st({ p1: "done" }), none); // focus came back, no input yet
+    expect([...a.unread()]).toEqual(["p1"]);
+    a.observe(st({ p1: "done" }), tab); // first input
+    expect(a.unread().size).toBe(0);
+  });
+
+  it("keeps a manual mark while the pane is away and viewed afterwards (#725)", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "done" }), tab);
+    a.markUnread("p1");
+    a.observe(st({ p1: "done" }), none);
+    expect([...a.unread()]).toEqual(["p1"]);
+  });
+
+  it("clears a manual mark on the first input after the pane was away, as for a tab switch (#725)", () => {
+    const a = new Attention();
+    a.observe(st({ p1: "done" }), tab);
+    a.markUnread("p1");
+    a.observe(st({ p1: "done" }), tab);
+    expect([...a.unread()]).toEqual(["p1"]);
+    a.observe(st({ p1: "done" }), none);
+    a.observe(st({ p1: "done" }), tab);
+    expect(a.unread().size).toBe(0);
+  });
+});

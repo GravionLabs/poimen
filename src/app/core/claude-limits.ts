@@ -12,7 +12,10 @@ export interface LimitWindow {
 
 /** The status bar item of the limits. */
 export interface LimitsItem {
+  /** The tightest window: one percentage (the status bar's narrower forms, #1034). */
   text: string;
+  /** Every window with its percentage; the status bar shows it while it has room. Falls back to `text`. */
+  full?: string;
   title: string;
   warning: boolean;
 }
@@ -54,6 +57,7 @@ export function limitsItem(windows: readonly LimitWindow[]): LimitsItem | null {
   );
   return {
     text: `${top.label} ${percentText(top.usedPercent)}`,
+    full: windows.map((w) => `${w.label} ${percentText(w.usedPercent)}`).join(" · "),
     title: `Claude limits\n${lines.join("\n")}`,
     warning: (top.usedPercent ?? 0) >= WARN_PERCENT,
   };

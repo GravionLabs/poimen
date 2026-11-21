@@ -1,7 +1,7 @@
 import { Injector, signal } from "@angular/core";
 import { describe, expect, it } from "vitest";
 import { Attention } from "./attention";
-import { JumpPalette } from "./jump-palette";
+import { JumpPalette, shortAge } from "./jump-palette";
 import { Machines } from "./machines";
 import type { Snapshot, Terminal } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
@@ -15,18 +15,56 @@ const term = (id: string, space: string, extra: Partial<Terminal> = {}): Termina
   ...extra,
 });
 
-function setup(opts: { unread?: string[]; recent?: Record<string, number>; extra?: number } = {}) {
+function setup(
+  opts: {
+    unread?: string[];
+    recent?: Record<string, number>;
+    extra?: number;
+  } = {},
+) {
   const snapshot: Snapshot = {
     spaces: [
-      { space_id: "s1", label: "alpha", number: 1, agent_status: "idle", cwd: "/src/alpha" },
-      { space_id: "s2", label: "beta", number: 2, agent_status: "idle", cwd: "/src/beta" },
-      { space_id: "s3", label: "gamma", number: 3, agent_status: "idle", cwd: "/src/gamma" },
-      { space_id: "m::r1", label: "remote", number: 1, agent_status: "idle", machine: "m" },
+      {
+        space_id: "s1",
+        label: "alpha",
+        number: 1,
+        agent_status: "idle",
+        cwd: "/src/alpha",
+      },
+      {
+        space_id: "s2",
+        label: "beta",
+        number: 2,
+        agent_status: "idle",
+        cwd: "/src/beta",
+      },
+      {
+        space_id: "s3",
+        label: "gamma",
+        number: 3,
+        agent_status: "idle",
+        cwd: "/src/gamma",
+      },
+      {
+        space_id: "m::r1",
+        label: "remote",
+        number: 1,
+        agent_status: "idle",
+        machine: "m",
+      },
     ],
     tabs: [],
     terminals: [
-      term("a1", "s1", { agent: "claude", agent_status: "done", cwd: "/src/alpha" }),
-      term("b1", "s2", { agent: "claude", agent_status: "blocked", cwd: "/src/beta" }),
+      term("a1", "s1", {
+        agent: "claude",
+        agent_status: "done",
+        cwd: "/src/alpha",
+      }),
+      term("b1", "s2", {
+        agent: "claude",
+        agent_status: "blocked",
+        cwd: "/src/beta",
+      }),
       term("g1", "s3", { cwd: "/src/gamma" }),
       term("m::p1", "m::r1", { agent: "claude", machine: "m" }),
     ],
@@ -49,8 +87,17 @@ function setup(opts: { unread?: string[]; recent?: Record<string, number>; extra
           pulls: signal(new Map([["/src/beta", { number: 99 }]])),
         },
       },
-      { provide: UiState, useValue: { recentSpaces: signal(opts.recent ?? {}) } },
-      { provide: Attention, useValue: { unread: signal(new Set(opts.unread ?? [])) } },
+      {
+        provide: UiState,
+        useValue: { recentSpaces: signal(opts.recent ?? {}) },
+      },
+      {
+        provide: Attention,
+        useValue: {
+          unread: signal(new Set(opts.unread ?? [])),
+          changedAt: signal(new Map([["b1", Date.now() - 3 * 60_000]])),
+        },
+      },
       {
         provide: Machines,
         useValue: {
@@ -143,5 +190,80 @@ describe("JumpPalette", () => {
     expect(p.current()?.key).toBe("pane:a1");
     p.move(1);
     expect(p.current()?.key).toBe("pane:b1");
+  });
+
+  it("shows the age since the last status change", () => {
+    const p = setup();
+    p.open(null);
+    const row = p.rows().find((r) => r.type === "item" && r.key === "pane:b1");
+    expect(row?.type === "item" && row.age).toBe("3m");
+    const none = p.rows().find((r) => r.type === "item" && r.key === "pane:a1");
+    expect(none).toBeUndefined();
+    p.setQuery("alpha");
+    const a = p.rows().find((r) => r.type === "item" && r.key === "pane:a1");
+    expect(a?.type === "item" && a.age).toBeNull();
+  });
+
+  it("names the field and the match when it is not in the name", () => {
+    const p = setup();
+    p.open(null);
+    p.setQuery("feat/42");
+    const row = p.rows().find((r) => r.type === "item" && r.key === "pane:g1");
+    expect(row?.type === "item" && row.context).toEqual({
+      field: "branch",
+      text: "feat/42-thing",
+      positions: [0, 1, 2, 3, 4, 5, 6],
+    });
+    p.setQuery("beta");
+    const byName = p.rows().find((r) => r.type === "item" && r.key === "space:s2");
+    expect(byName?.type === "item" && byName.context).toBeNull();
+  });
+
+  it("names the directory when only the directory matches", () => {
+    const p = setup();
+    p.open(null);
+    p.setQuery("src/gam");
+    const row = p.rows().find((r) => r.type === "item" && r.key === "space:s3");
+    expect(row?.type === "item" && row.context?.field).toBe("directory");
+  });
+
+  it("names the pull request or branch number for a #123 query", () => {
+    const p = setup();
+    p.open(null);
+    p.setQuery("#99");
+    const pr = p.rows().find((r) => r.type === "item" && r.key === "pane:b1");
+    expect(pr?.type === "item" && pr.context).toEqual({
+      field: "pull request",
+      text: "#99",
+      positions: [0, 1, 2],
+    });
+    p.setQuery("#42");
+    const branch = p.rows().find((r) => r.type === "item" && r.key === "pane:g1");
+    expect(branch?.type === "item" && branch.context).toEqual({
+      field: "branch",
+      text: "feat/42-thing",
+      positions: [5, 6],
+    });
+  });
+
+  it("announces the result count", () => {
+    const p = setup();
+    p.open(null);
+    expect(p.announcement()).toBe("1 result");
+    p.setQuery("zzz");
+    expect(p.announcement()).toBe("No results");
+    p.setQuery("a");
+    expect(p.announcement()).toMatch(/^\d+ results$/);
+  });
+});
+
+describe("shortAge", () => {
+  it("is short", () => {
+    const now = 10_000_000_000;
+    expect(shortAge(now - 5_000, now)).toBe("now");
+    expect(shortAge(now - 3 * 60_000, now)).toBe("3m");
+    expect(shortAge(now - 2 * 3_600_000, now)).toBe("2h");
+    expect(shortAge(now - 49 * 3_600_000, now)).toBe("2d");
+    expect(shortAge(now + 5_000, now)).toBe("now");
   });
 });

@@ -16,10 +16,11 @@
       class="deliver"
       [tone]="run.warning ? 'warn' : 'neutral'"
       [title]="run.title"
+      [ariaLabel]="run.text"
       data-testid="deliver"
       (click)="showDeliver.emit()"
     >
-      {{ run.text }}
+      {{ density().runsShort ? shortRuns(run.text) : run.text }}
     </hx-status-item>
   }
   @if (limits(); as l) {
@@ -31,7 +32,7 @@
       [title]="l.title"
       data-testid="limits"
     >
-      {{ l.text }}
+      {{ density().limitsShort ? l.text : (l.full ?? l.text) }}
     </hx-status-item>
   }
   <hx-status-item
@@ -51,9 +52,17 @@
       slot="start"
       class="awake"
       data-testid="awake"
-      title="The machine is kept awake while agents work (Settings, Agents)"
+      ariaLabel="Awake"
+      title="Awake: the machine is kept awake while agents work (Settings, Agents)"
     >
-      awake
+      @if (density().iconOnly) {
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="3" />
+          <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5" />
+        </svg>
+      } @else {
+        awake
+      }
     </hx-status-item>
   }
   @if (!panelOpen()) {
@@ -61,6 +70,7 @@
       slot="start"
       kind="button"
       class="panel-button"
+      ariaLabel="Output"
       [title]="
         panelShortcut()
           ? 'Show the output panel (' + panelShortcut() + ')'
@@ -71,7 +81,9 @@
       <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
         <path d="M2 3h12v10H2zM2 9.5h12" />
       </svg>
-      <span>Output</span>
+      @if (!density().iconOnly) {
+        <span>Output</span>
+      }
     </hx-status-item>
   }
   @if (notice(); as text) {
@@ -123,7 +135,11 @@
       slot="end"
       kind="button"
       class="mode-button"
-      [title]="modeHint(blocked())"
+      [title]="
+        density().iconOnly
+          ? modeText(m, blocked()) + ': ' + modeHint(blocked())
+          : modeHint(blocked())
+      "
       [ariaLabel]="modeText(m, blocked())"
       [disabled]="!!blocked()"
       (click)="!blocked() && control.emit(m !== 'control')"
@@ -137,7 +153,9 @@
           <path d="M4 7h8v7H4zM5.5 7V5a2.5 2.5 0 015 0v2" />
         </svg>
       }
-      <span>{{ modeText(m, blocked()) }}</span>
+      @if (!density().iconOnly) {
+        <span>{{ modeText(m, blocked()) }}</span>
+      }
     </hx-status-item>
   }
   @if (paneId() && size()) {
@@ -306,3 +324,4 @@
     ?
   </hx-status-item>
 </hx-status-bar>
+<app-task-progress />

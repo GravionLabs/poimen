@@ -197,10 +197,6 @@ pub struct Settings {
     pub shortcuts: BTreeMap<String, String>,
     /// Lines and tokens of the sidebar rows from `sidebar.rows`; types left `None` use the default.
     pub sidebar_rows: SidebarRows,
-    /// `sidebar.layout`: `tree` (default), `split` or `cards`.
-    pub sidebar_layout: String,
-    /// `sidebar.agents`: `list` (default) or `priority`, the order of the Agents section (#722).
-    pub sidebar_agents: String,
     /// `sidebar.sort`: `manual` (default), `name`, `attention` or `recent`.
     pub sidebar_sort: SidebarSort,
     /// `sidebar.groupWorktrees`: list linked worktrees below the space of their repository.
@@ -270,8 +266,6 @@ impl Default for Settings {
             auto_control: true,
             shortcuts: default_shortcuts(),
             sidebar_rows: SidebarRows::default(),
-            sidebar_layout: "tree".into(),
-            sidebar_agents: "list".into(),
             sidebar_sort: SidebarSort::Manual,
             sidebar_group_worktrees: true,
             sidebar_show_base_branch: false,
@@ -536,24 +530,6 @@ pub fn resolve(json: Option<&str>, read_ghostty: impl FnOnce() -> Option<String>
         s.sidebar_rows = resolve_sidebar_rows(value, &mut s.warnings);
         s.sidebar_sort = resolve_sidebar_sort(value, &mut s.warnings);
         s.sidebar_group_worktrees = resolve_group_worktrees(value, &mut s.warnings);
-        match value.get("layout") {
-            None => {}
-            Some(Value::String(l)) if matches!(l.as_str(), "tree" | "split" | "cards") => {
-                s.sidebar_layout = l.clone();
-            }
-            Some(other) => s.warnings.push(format!(
-                "sidebar.layout {other} must be \"tree\", \"split\" or \"cards\"; using tree"
-            )),
-        }
-        match value.get("agents") {
-            None => {}
-            Some(Value::String(l)) if matches!(l.as_str(), "list" | "priority") => {
-                s.sidebar_agents = l.clone();
-            }
-            Some(other) => s.warnings.push(format!(
-                "sidebar.agents {other} must be \"list\" or \"priority\"; using list"
-            )),
-        }
         match value.get("showBaseBranch") {
             None => {}
             Some(Value::Bool(b)) => s.sidebar_show_base_branch = *b,
@@ -798,23 +774,6 @@ pub fn set_color_schema_text(text: &str, schema: &serde_json::Value) -> Result<S
     set_key_text(text, "colorSchema", &schema.to_string())
 }
 
-/// Returns `text` with `sidebar.layout` set to `tree`, `split` or `cards`, touching nothing else. A missing
-/// `sidebar` object is created; a `sidebar` that is not an object is an error.
-pub fn set_sidebar_layout_text(text: &str, layout: &str) -> Result<String, String> {
-    if !matches!(layout, "tree" | "split" | "cards") {
-        return Err(format!("invalid sidebar layout {layout:?}"));
-    }
-    set_path_text(text, &["sidebar", "layout"], &format!("\"{layout}\""))
-}
-
-/// Returns `text` with `sidebar.agents` set to `list` or `priority`, touching nothing else.
-pub fn set_sidebar_agents_text(text: &str, mode: &str) -> Result<String, String> {
-    if !matches!(mode, "list" | "priority") {
-        return Err(format!("invalid sidebar agents mode {mode:?}"));
-    }
-    set_path_text(text, &["sidebar", "agents"], &format!("\"{mode}\""))
-}
-
 /// Returns `text` with `sidebar.sort` set to one of its four values, touching nothing else.
 pub fn set_sidebar_sort_text(text: &str, sort: &str) -> Result<String, String> {
     let Some(sort) = SidebarSort::parse(sort) else {
@@ -929,19 +888,9 @@ pub fn save_color_schema(home: &Path, schema: &serde_json::Value) -> Result<(), 
     save_with(home, |text| set_color_schema_text(text, schema))
 }
 
-/// Writes `sidebar.agents` below `home`, like `save_sidebar_sort`.
-pub fn save_sidebar_agents(home: &Path, mode: &str) -> Result<(), String> {
-    save_with(home, |text| set_sidebar_agents_text(text, mode))
-}
-
-/// Writes `sidebar.sort` below `home`, like `save_sidebar_layout`.
+/// Writes `sidebar.sort` below `home`, like `save_theme`.
 pub fn save_sidebar_sort(home: &Path, sort: &str) -> Result<(), String> {
     save_with(home, |text| set_sidebar_sort_text(text, sort))
-}
-
-/// Writes `sidebar.layout` below `home`, like `save_theme`.
-pub fn save_sidebar_layout(home: &Path, layout: &str) -> Result<(), String> {
-    save_with(home, |text| set_sidebar_layout_text(text, layout))
 }
 
 /// Writes `explorer.roots` below `home`, like `save_theme`; paths under `home` become `~/…`.
@@ -1760,31 +1709,6 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_agents_reaches_the_settings_and_is_written() {
-        assert_eq!(rows("{}").sidebar_agents, "list");
-        assert_eq!(
-            rows(r#"{"sidebar":{"agents":"priority"}}"#).sidebar_agents,
-            "priority"
-        );
-        let s = rows(r#"{"sidebar":{"agents":"newest"}}"#);
-        assert_eq!(s.sidebar_agents, "list");
-        assert!(s.warnings[0].contains("sidebar.agents"));
-        let text = "{\n  // mine\n  \"sidebar\": { \"layout\": \"split\" }\n}";
-        let out = set_sidebar_agents_text(text, "priority").unwrap();
-        assert!(out.contains("// mine") && out.contains("\"layout\": \"split\""));
-        assert!(
-            out.contains("\"agents\": \"priority\"") || out.contains("\"agents\":\"priority\"")
-        );
-        assert!(set_sidebar_agents_text("{}", "newest").is_err());
-        assert!(set_sidebar_agents_text("{\"sidebar\":3}", "list").is_err());
-        let home = std::env::temp_dir().join(format!("poimen-agents-{}", std::process::id()));
-        std::fs::create_dir_all(&home).unwrap();
-        save_sidebar_agents(&home, "priority").unwrap();
-        assert_eq!(load(&home).sidebar_agents, "priority");
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
     fn save_sidebar_sort_round_trips() {
         let home = std::env::temp_dir().join(format!("poimen-sort-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
@@ -1796,15 +1720,11 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_layout_parses_and_invalid_warns() {
-        assert_eq!(rows("{}").sidebar_layout, "tree");
-        for layout in ["split", "cards"] {
+    fn sidebar_layout_of_old_configs_is_ignored_without_a_warning() {
+        for layout in ["tree", "split", "cards", "grid"] {
             let json = format!(r#"{{"sidebar":{{"layout":"{layout}"}}}}"#);
-            assert_eq!(rows(&json).sidebar_layout, layout);
+            assert!(rows(&json).warnings.is_empty(), "{layout}");
         }
-        let s = rows(r#"{"sidebar":{"layout":"grid"}}"#);
-        assert_eq!(s.sidebar_layout, "tree");
-        assert!(s.warnings[0].contains("sidebar.layout"));
     }
 
     #[test]
@@ -1814,27 +1734,6 @@ mod tests {
         let s = rows(r#"{"sidebar":{"showBaseBranch":"yes"}}"#);
         assert!(!s.sidebar_show_base_branch);
         assert!(s.warnings[0].contains("sidebar.showBaseBranch"));
-    }
-
-    #[test]
-    fn set_sidebar_layout_replaces_inserts_and_keeps_the_rest() {
-        let text = "{\n  // c\n  \"theme\": \"dark\",\n  \"sidebar\": { \"layout\": \"tree\", \"rows\": {} }\n}";
-        let out = set_sidebar_layout_text(text, "split").unwrap();
-        assert_eq!(out, text.replace("\"tree\"", "\"split\""));
-        let into = set_sidebar_layout_text("{\"sidebar\":{\"rows\":{}}}", "split").unwrap();
-        assert_eq!(
-            into,
-            "{\"sidebar\":{\n  \"layout\": \"split\",\"rows\":{}}}"
-        );
-        let empty = set_sidebar_layout_text("{\"sidebar\":{}}", "split").unwrap();
-        assert_eq!(empty, "{\"sidebar\":{\"layout\": \"split\"}}");
-        let none = set_sidebar_layout_text("{\"theme\":\"dark\"}", "split").unwrap();
-        assert_eq!(
-            none,
-            "{\n  \"sidebar\": { \"layout\": \"split\" },\"theme\":\"dark\"}"
-        );
-        let nested = set_sidebar_layout_text("{\"x\":{\"layout\":\"tree\"}}", "split").unwrap();
-        assert!(nested.contains("\"x\":{\"layout\":\"tree\"}"));
     }
 
     #[test]
@@ -2211,24 +2110,6 @@ mod tests {
             let err = set_space_templates_text("{}", &bad).unwrap_err();
             assert!(err.starts_with("spaceTemplates: "), "{err}");
         }
-    }
-
-    #[test]
-    fn set_sidebar_layout_rejects_bad_input() {
-        assert!(set_sidebar_layout_text("{}", "grid").is_err());
-        assert!(set_sidebar_layout_text("[1]", "tree").is_err());
-        assert!(set_sidebar_layout_text("{\"sidebar\":3}", "tree").is_err());
-    }
-
-    #[test]
-    fn save_sidebar_layout_writes_a_temp_file() {
-        let home = std::env::temp_dir().join(format!("poimen-layout-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        save_sidebar_layout(&home, "split").unwrap();
-        assert_eq!(load(&home).sidebar_layout, "split");
-        save_sidebar_layout(&home, "tree").unwrap();
-        assert_eq!(load(&home).sidebar_layout, "tree");
-        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

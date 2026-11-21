@@ -26,9 +26,10 @@
             (click)="$event.stopPropagation()"
             (dblclick)="$event.stopPropagation()"
             (keydown)="$event.stopPropagation()"
-            (keydown.enter)="finishEdit(edit, input, true)"
+            [disabled]="renameBusy(edit)"
+            (keydown.enter)="enter(edit, input, $event)"
             (keydown.escape)="finishEdit(edit, input, false)"
-            (input)="clearError()"
+            (input)="clearError(edit)"
             (blur)="finishEdit(edit, input, input.value !== label)"
           />
           @if (renameError(); as message) {
@@ -39,9 +40,13 @@
             class="name"
             [class.bold]="seg.bold"
             [class.dim]="seg.dim"
+            [class.unread-name]="nameUnread(edit)"
             (dblclick)="edit && startEdit(edit, $event)"
             >{{ seg.text }}</span
           >
+          @if (nameUnread(edit)) {
+            <span class="sr-only">Unread</span>
+          }
           @if (edit?.kind === "space" && pinned()) {
             <svg
               class="pin-mark"

@@ -14,3 +14,18 @@
   color: var(--h-text-color);
   font-size: 12px;
 }
+
+.types {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+}
+
+.type {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

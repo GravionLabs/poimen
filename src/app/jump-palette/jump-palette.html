@@ -25,6 +25,9 @@
         (keydown)="key($event)"
       />
     </div>
+    <p class="sr-only" role="status" aria-live="polite">
+      {{ palette.announcement() }}
+    </p>
     <ul id="jump-list" role="listbox">
       @for (row of palette.rows(); track row.key) {
         @if (row.type === "heading") {
@@ -44,6 +47,7 @@
               (click)="choose(row.entry)"
               (mousemove)="palette.hover(row.index)"
             >
+              <app-icon class="kind" [name]="row.entry.icon" [size]="16" />
               <span class="title">
                 @for (part of parts(row.entry.title, row.positions); track $index) {
                   @if (part.hit) {
@@ -54,6 +58,21 @@
                 }
               </span>
               <span class="detail">{{ row.entry.disabled ?? row.entry.detail }}</span>
+              @if (row.age) {
+                <span class="age" [attr.title]="'In this state for ' + row.age">{{ row.age }}</span>
+              }
+              @if (row.context; as context) {
+                <span class="context">
+                  <span class="field">{{ context.field }}:</span>
+                  @for (part of parts(context.text, context.positions); track $index) {
+                    @if (part.hit) {
+                      <mark>{{ part.text }}</mark>
+                    } @else {
+                      <span>{{ part.text }}</span>
+                    }
+                  }
+                </span>
+              }
             </button>
           </li>
         }

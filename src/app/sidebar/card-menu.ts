@@ -1,3 +1,4 @@
+import type { SpaceActions } from "../core/space-actions";
 import { splitId, type SpaceNode } from "../core/snapshot";
 import type { UiState } from "../core/ui-state";
 import { spaceContext } from "./spaces";
@@ -61,14 +62,19 @@ export interface CardMenuContext {
 }
 
 /** Runs a picked id of {@link cardMenuGroups}; `false` for an id of the built-in menu. */
-export function runCardEntry(picked: string, id: string, ctx: CardMenuContext): boolean {
+export function runCardEntry(
+  picked: string,
+  id: string,
+  ctx: CardMenuContext,
+  toast: Pick<SpaceActions, "notify" | "fail"> | null = null,
+): boolean {
   const entry = cardEntry(picked);
   if (entry === null) return false;
   if (entry.kind === "sort") ctx.chooseSort(entry.mode);
   else if (entry.kind === "configure") ctx.configure(id);
   else if (entry.kind === "details")
     ctx.ui.setDetailsHidden(id, !ctx.ui.hiddenDetails().includes(id));
-  else copyText(ctx.dir(id));
+  else copyText(ctx.dir(id), toast);
   return true;
 }
 
@@ -87,8 +93,15 @@ export function cardEntry(id: string): CardEntry | null {
 }
 
 /** Puts `text` on the clipboard; nothing for an empty text. */
-export function copyText(text: string | undefined): void {
-  if (text) void Promise.resolve(navigator.clipboard?.writeText(text)).catch(() => undefined);
+export function copyText(
+  text: string | undefined,
+  toast: Pick<SpaceActions, "notify" | "fail"> | null = null,
+): void {
+  if (!text) return;
+  void Promise.resolve(navigator.clipboard?.writeText(text)).then(
+    () => toast?.notify(`Copied ${text}`, "success"),
+    (e: unknown) => toast?.fail(`Cannot copy: ${String(e)}`),
+  );
 }
 
 /** The directory of the space `id` among `spaces`; `undefined` when it has none. */

@@ -30,6 +30,7 @@ describe("limitsItem", () => {
       w("7d Opus", null),
     ]);
     expect(item?.text).toBe("5h 62 %");
+    expect(item?.full).toContain("5h 62 %");
     expect(item?.warning).toBe(false);
     expect(item?.title).toContain("7d: 30 %, reset unknown");
     expect(item?.title).toContain("7d Opus: unknown");

@@ -341,4 +341,55 @@ describe("TabBar overflow", () => {
     ]);
     expect(fixture.componentInstance.moves).toEqual([]);
   });
+  it("activates on pointer-up and not on pointer-down or a drag", () => {
+    const { fixture, root } = mount();
+    const rows = root.querySelectorAll<HTMLElement>('[role="tab"]');
+    rows[1].dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    expect(fixture.componentInstance.picked).toEqual([]);
+    rows[1].dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 2 }));
+    expect(fixture.componentInstance.picked).toEqual([]);
+    rows[1].dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+    expect(fixture.componentInstance.picked).toEqual(["b"]);
+  });
+
+  it("does not activate the tab when its close button is released", () => {
+    const { fixture, root } = mount();
+    const close = root.querySelectorAll<HTMLElement>(".close")[1];
+    close.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+    expect(fixture.componentInstance.picked).toEqual([]);
+  });
+
+  it("sizes the tabs from the strip width", () => {
+    const { fixture, strip } = mount();
+    overflow(strip, 900, 600);
+    fixture.detectChanges();
+    expect(strip.style.getPropertyValue("--tab-width")).toBe("200px");
+  });
+
+  it("shows the insertion bar on the side of the drop and keeps the tabs in place", () => {
+    const { fixture, root } = mount();
+    const rows = root.querySelectorAll<HTMLElement>('[role="tab"]');
+    rows[0].dispatchEvent(dragEvent("dragstart"));
+    rows[2].dispatchEvent(dragEvent("dragover"));
+    fixture.detectChanges();
+    expect(rows[2].classList.contains("drop-after")).toBe(true);
+    expect(rows[0].classList.contains("drop-before")).toBe(false);
+    expect(Array.from(root.querySelectorAll('[role="tab"]'))).toEqual(Array.from(rows));
+  });
+
+  it("reveals a background tab only after the pointer left the strip", () => {
+    const spy = vi.fn();
+    HTMLElement.prototype.scrollIntoView = spy;
+    const { fixture, strip } = mount();
+    TestBed.tick();
+    spy.mockClear();
+    strip.dispatchEvent(new Event("pointerenter"));
+    fixture.componentInstance.tabs = [...items, { id: "d", label: "four" }];
+    fixture.detectChanges();
+    TestBed.tick();
+    expect(spy).not.toHaveBeenCalled();
+    strip.dispatchEvent(new Event("pointerleave"));
+    expect(spy).toHaveBeenCalledTimes(1);
+    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  });
 });

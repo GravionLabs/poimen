@@ -4,12 +4,11 @@ import { describe, expect, it } from "vitest";
 
 /**
  * Buttons are `button[hx-button]` (AGENTS.md "Buttons, tags and fields"). A new plain `<button>` fails
- * here. Not counted: the files whose buttons are rows or tabs, not actions (tree rows, tab bar, palette
+ * here. Not counted: the files whose buttons are rows or tabs, not actions (tab bar, context menu, palette
  * items). `LEGACY` is the number of plain buttons each other file still has; it only goes down. When you
  * convert buttons, lower the number (delete the line at 0).
  */
 const ROW_FILES = [
-  "src/app/sidebar/sidebar.html",
   "src/app/ui/helix-candidates/tab-bar/tab-bar.html",
   "src/app/ui/context-menu/context-menu.html",
   "src/app/command-palette/command-palette.html",
@@ -18,10 +17,8 @@ const ROW_FILES = [
 
 const LEGACY: Record<string, number> = {
   "src/app/agent-picker/agent-picker.html": 3,
-  "src/app/app.html": 1,
   "src/app/explorer/explorer.html": 1,
   "src/app/notifications/notifications.html": 1,
-  "src/app/sidebar/machines-section/machines-section.html": 2,
   "src/app/terminal-view/terminal-view.html": 5,
   "src/app/toolbar/toolbar.html": 2,
 };

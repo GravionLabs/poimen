@@ -44,7 +44,7 @@ features:
 
 poimen does not keep any pane state of its own. `poimen-server`, bundled with the installers, is the backend and the only source of truth: poimen reads its snapshots and events and attaches to its terminals. Closing poimen only closes the view; the terminals and their agents keep running.
 
-<Screenshot src="sidebar-dark.png" alt="The poimen window with the Spaces sidebar: three workspaces, api-gateway working, web-app blocked and docs-site done, each with its panes and agent status" caption="The poimen window: spaces on the left with working, blocked and done agents (demo data)." />
+<Screenshot src="sidebar-dark.png" light="sidebar-light.png" alt="The poimen window with the Spaces sidebar as cards: poimen working, billing-api waiting for permission, docs done and infra idle, each with its panes and agent status, and two remote machines below" caption="The poimen window: space cards on the left with working, waiting and done agents, and remote machines below (demo data, follows the site theme)." />
 
 ## Download
 
@@ -56,21 +56,21 @@ New here? Read the [installation guide](/guide/installation): no other tool is n
 
 ### Spaces and live terminals
 
-The sidebar lists the spaces as a tree of spaces with their panes. Each row shows the agent, its status, the branch and the directory, and you choose what a row shows. A pane opens as an editor tab with one live terminal (xterm.js) for the active tab. By default it opens for input; if another client already controls the terminal, the tab falls back to read-only and offers an explicit *Take over*.
+The sidebar lists the spaces as cards with their panes. Each card and row shows the agent, its status, the branch and the directory, and you choose what a row shows. A pane opens as an editor tab with one live terminal (xterm.js) for the active tab. By default it opens for input; if another client already controls the terminal, the tab falls back to read-only and offers an explicit *Take over*.
 
-<Screenshot src="tabs-dark.png" light="tabs-light.png" alt="Editor tabs with a live terminal of a Claude Code session; the IN badge marks input tabs" caption="Editor tabs with live terminals; IN and RO mark input and read-only tabs (demo data, follows the site theme)." />
+<Screenshot src="tabs-dark.png" light="tabs-light.png" alt="An editor tab with a live Claude Code session next to a shell in a split" caption="A pane opens as an editor tab with a live terminal; a tab with several panes shows its split (demo data, follows the site theme)." />
 
 ### Agent status
 
 Statuses come from the agent hooks that report to `poimen-server`. A pane that turns blocked while you are not looking rings on its tab and sidebar row, one that turns done counts as unread, and viewing the tab clears both. "Next waiting agent" jumps to the next blocked agent, and the dock icon shows the number of waiting agents.
 
-<Screenshot src="blocked-dark.png" alt="A blocked agent: its tab and sidebar row are ringed and the terminal shows the question Claude Code asks, with a 1 waiting count in the status bar" caption="A blocked agent rings on its tab and sidebar row; the status bar counts the waiting agents (demo data)." />
+<Screenshot src="blocked-dark.png" light="blocked-light.png" alt="A blocked agent: the space card is marked waiting: permission and the terminal shows the question Claude Code asks, with a 1 waiting count in the status bar" caption="A blocked agent is marked on its space card and row; the status bar counts the waiting agents (demo data, follows the site theme)." />
 
 ### Subagents and the Flow tab
 
 The Output panel (`Cmd/Ctrl+J`) reads the session transcripts of Claude Code and GitHub Copilot CLI, read-only, and lists what the subagents of the active agent are doing. The **Flow** tab draws the run as a graph, laid out automatically: the main agent, every skill call and every subagent, nested under the one that called them, with status per node.
 
-<Screenshot src="flow-dark.png" alt="The Flow tab in the bottom panel: a graph with the main agent node (Claude Code, done) connected to a github-issue skill node (done)" caption="The Flow tab draws a run as a graph: the main agent and the skills and subagents it calls, with status per node." />
+<Screenshot src="flow-dark.png" light="flow-light.png" alt="The Flow tab in the bottom panel: the main agent node connected to a github-issue skill, an implementation skill and a started agent node named review" caption="The Flow tab draws a run as a graph: the main agent, the skills it calls and the agents it started, with status per node (demo data, follows the site theme)." />
 
 A longer run shows the nesting: the main agent starts subagents (implement, review, fix), and each subagent lists the skills it called. A node shows its status, duration, tool calls, token usage and the context size at its start.
 

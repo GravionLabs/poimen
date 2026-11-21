@@ -1,4 +1,5 @@
 import { Injector } from "@angular/core";
+import { lastToast, testMessages } from "../../testing/toasts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Snapshot } from "./snapshot";
 import { SpacesStore } from "./spaces-store";
@@ -7,6 +8,8 @@ import { SpaceRebuild, type RebuildOutcome } from "./space-rebuild";
 import { TauriBridge } from "./tauri";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { tauri } from "./tauri.mock";
+
+let injector: Injector;
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./tauri.mock")).tauri.invoke,
@@ -37,8 +40,9 @@ describe("SpaceRebuild", () => {
     answer = () => ({ state: "rebuilt", warnings: [], setup_started: false });
     tauri.answer("snapshot", () => snapshot);
     tauri.answer("rebuild_space", (args) => answer(args));
-    const injector = Injector.create({
+    injector = Injector.create({
       providers: [
+        testMessages(),
         TauriBridge,
         SpacesStore,
         { provide: UI_STORAGE, useValue: null },
@@ -112,7 +116,7 @@ describe("SpaceRebuild", () => {
     await rebuild.rebuild("s1");
     expect(calls()[1]).toEqual({ spaceId: "s1", decision: null, confirmed: true });
     expect(rebuild.marks().has("s1")).toBe(false);
-    expect(actions.warning()).toBe("layout not fully applied: boom");
+    expect(lastToast(injector)).toBe("layout not fully applied: boom");
   });
 
   it("goes through the trust dialog: trust and without resume, cancel keeps the action", async () => {

@@ -39,7 +39,7 @@ async function setup(sort: SidebarSort = "manual", nodes = [node("w1", 1), node(
       {
         provide: SettingsStore,
         useValue: {
-          settings: signal({ ...DEFAULT_SETTINGS, sidebarSort: sort, sidebarLayout: "cards" }),
+          settings: signal({ ...DEFAULT_SETTINGS, sidebarSort: sort }),
           writeError: signal(null),
         },
       },

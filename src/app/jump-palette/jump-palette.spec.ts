@@ -21,8 +21,10 @@ afterEach(() => TestBed.resetTestingModule());
 const entry = (key: string, disabled: string | null = null): JumpEntry => ({
   key,
   kind: "space",
+  icon: "space",
   title: key,
   detail: "",
+  branch: null,
   spaceId: key,
   disabled,
 });
@@ -34,7 +36,23 @@ function setup(entries: JumpEntry[]) {
     isOpen: open,
     query: () => "",
     rows: () =>
-      entries.map((e, index) => ({ type: "item", key: e.key, entry: e, index, positions: [] })),
+      entries.map((e, index) => ({
+        type: "item",
+        key: e.key,
+        entry: e,
+        index,
+        positions: [],
+        age: e.key === "a" ? "3m" : null,
+        context:
+          e.key === "a"
+            ? {
+                field: "branch",
+                text: "feat/tab-strip",
+                positions: [5, 6, 7],
+              }
+            : null,
+      })),
+    announcement: () => `${entries.length} results`,
     selected,
     hover: (i: number) => selected.set(i),
     move: (d: number) => selected.set((selected() + d + entries.length) % entries.length),
@@ -42,7 +60,9 @@ function setup(entries: JumpEntry[]) {
     close: () => open.set(false),
     setQuery: () => undefined,
   };
-  TestBed.configureTestingModule({ providers: [{ provide: JumpPalette, useValue: palette }] });
+  TestBed.configureTestingModule({
+    providers: [{ provide: JumpPalette, useValue: palette }],
+  });
   // JIT in vitest does not load template files: give the real template inline.
   TestBed.overrideComponent(JumpPaletteView, {
     set: {
@@ -88,5 +108,22 @@ describe("JumpPaletteView", () => {
     expect(open()).toBe(false);
     expect(document.activeElement).toBe(outside);
     outside.remove();
+  });
+
+  it("shows the age, the context line with the match, and announces the count", () => {
+    const { fixture } = setup([entry("a"), entry("b")]);
+    const el = fixture.nativeElement as HTMLElement;
+    const rows = el.querySelectorAll("li[role=option]");
+    expect(rows[0].querySelector(".age")?.textContent).toBe("3m");
+    expect(rows[0].querySelector(".context .field")?.textContent).toBe("branch:");
+    expect(rows[0].querySelector(".context mark")?.textContent).toBe("tab");
+    expect(rows[0].querySelector(".context")?.textContent?.replace(/\s+/g, "")).toBe(
+      "branch:feat/tab-strip",
+    );
+    expect(rows[1].querySelector(".age")).toBeNull();
+    expect(rows[1].querySelector(".context")).toBeNull();
+    const live = el.querySelector("[aria-live]");
+    expect(live?.getAttribute("role")).toBe("status");
+    expect(live?.textContent?.trim()).toBe("2 results");
   });
 });

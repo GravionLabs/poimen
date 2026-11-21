@@ -17,6 +17,8 @@ On the first start poimen offers to install the hooks. Later, **Settings > Backe
 - The notification center keeps the last status changes. poimen sends no system notifications.
 - Optional sounds for blocked and done (`sounds`, under **Settings > Appearance**), a tone of your own or a built-in one.
 
+<Screenshot src="blocked-dark.png" light="blocked-light.png" alt="A blocked agent: the space card is marked waiting: permission and the terminal shows the question Claude Code asks" caption="A blocked agent is marked on its card and its row; the status bar counts the waiting agents (demo data)." />
+
 ## Prompts and starting agents
 
 - **Start agent...** in a pane's menu starts one of your `harnesses` in a shell pane.
@@ -27,6 +29,8 @@ On the first start poimen offers to install the hooks. Later, **Settings > Backe
 ## Subagents and the Flow tab
 
 The **Output panel** (`CmdOrCtrl+J`) follows the agent of the active tab and shows what its subagents do, read from the session transcripts of Claude Code and GitHub Copilot CLI, read-only. The **Flow** tab draws the run as a graph: the main agent, every skill call and every subagent, nested under the one that called them, with status, duration, tool calls and tokens per node. Agents started through the MCP tools appear as their own nodes; a click focuses their terminal. A Flow can also open as an editor tab.
+
+<Screenshot src="flow-dark.png" light="flow-light.png" alt="The Flow tab: the main agent connected to two skill nodes and a started agent node" caption="The Flow of an agent that started another agent (node Started agent) and called two skills (demo data)." />
 
 <Screenshot src="flow-subagents-dark.png" light="flow-subagents-light.png" alt="The Flow tab with a run of one main agent, subagents for implementing, reviewing and fixing, and the skills implementation and code-review nested under them" caption="A run with subagents and skills nested under the agent that called them." />
 

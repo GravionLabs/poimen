@@ -28,6 +28,7 @@ const pane = (terminal_id: string, over: Partial<Terminal> = {}): Terminal => ({
 describe("PaneActions", () => {
   let current: Snapshot;
   let actions: PaneActions;
+  let ui: UiState;
   let store: SpacesStore;
 
   beforeEach(async () => {
@@ -51,6 +52,7 @@ describe("PaneActions", () => {
     });
     store = injector.get(SpacesStore);
     actions = injector.get(PaneActions);
+    ui = injector.get(UiState);
     await store.refresh();
   });
 
@@ -168,33 +170,64 @@ describe("PaneActions", () => {
     });
   });
 
-  it("asks for a directory, offering the workspace's directories", () => {
+  it("asks for the type of the pane in the chosen space (#1049)", () => {
     actions.askNew("w1");
-    expect(actions.dialog()).toEqual({
-      kind: "new",
-      workspaceId: "w1",
-      dirs: ["/work/app"],
-      cwd: "/work/app",
-    });
+    expect(actions.dialog()).toEqual({ kind: "new", workspaceId: "w1" });
   });
 
-  it("creates a terminal in the chosen directory and returns the new pane", async () => {
+  it("creates a terminal in the space's directory and returns the new pane", async () => {
     tauri.answer("terminal_create", () => {
-      current = { ...current, terminals: [...current.terminals, pane("w1:p3", { cwd: "/tmp" })] };
+      current = {
+        ...current,
+        terminals: [...current.terminals, pane("w1:p3", { cwd: "/tmp" })],
+      };
       return "w1:p3";
     });
     actions.askNew("w1");
-    const created = await actions.confirmNew("  /tmp ");
-    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w1", cwd: "/tmp" }]);
+    const created = await actions.confirmNew();
+    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w1", cwd: null }]);
+    expect(tauri.calls("agent_start")).toEqual([]);
     expect(created?.terminal_id).toBe("w1:p3");
     expect(actions.dialog()).toBeNull();
   });
 
-  it("sends no directory when the field is empty", async () => {
+  it("starts the agent of an agent type in the new pane", async () => {
+    tauri.answer("terminal_create", () => {
+      current = {
+        ...current,
+        terminals: [...current.terminals, pane("w1:p3")],
+      };
+      return "w1:p3";
+    });
+    actions.askNew("w1");
+    const created = await actions.confirmNew({ kind: "claude", args: [] });
+    expect(created?.terminal_id).toBe("w1:p3");
+    expect(tauri.calls("agent_start")).toEqual([
+      { terminalId: "w1:p3", kind: "claude", name: null, args: [] },
+    ]);
+  });
+
+  it("keeps the pane and shows the reason when the agent does not start", async () => {
+    tauri.answer("terminal_create", () => {
+      current = {
+        ...current,
+        terminals: [...current.terminals, pane("w1:p3")],
+      };
+      return "w1:p3";
+    });
+    tauri.answer("agent_start", () => {
+      throw "no such program";
+    });
+    actions.askNew("w1");
+    expect((await actions.confirmNew({ kind: "claude", args: [] }))?.terminal_id).toBe("w1:p3");
+    expect(actions.error()).toBe("no such program");
+  });
+
+  it("creates nothing when the server returns no pane", async () => {
     tauri.answer("terminal_create", () => null);
     actions.askNew("w1");
-    expect(await actions.confirmNew("")).toBeUndefined();
-    expect(tauri.calls("terminal_create")).toEqual([{ spaceId: "w1", cwd: null }]);
+    expect(await actions.confirmNew({ kind: "claude", args: [] })).toBeUndefined();
+    expect(tauri.calls("agent_start")).toEqual([]);
   });
 
   it("splits in the pane's own directory", async () => {
@@ -255,26 +288,45 @@ describe("PaneActions", () => {
 
   it("renames an agent pane through agent.rename", async () => {
     actions.askRename("w1:p2");
-    expect(actions.dialog()).toMatchObject({ kind: "rename", agent: true });
-    expect(await actions.confirmRename(" review ")).toBe(true);
+    expect(actions.renaming()).toBe("w1:p2");
+    expect(actions.dialog()).toBeNull();
+    expect(await actions.rename("w1:p2", " review ")).toBe(true);
     expect(tauri.calls("agent_rename")).toEqual([{ target: "w1:p2", name: "review" }]);
     expect(tauri.calls("pane_rename")).toEqual([]);
   });
 
   it("renames a plain terminal through pane.rename and clears with an empty name", async () => {
-    actions.askRename("w1:p1");
-    expect(actions.dialog()).toMatchObject({ kind: "rename", agent: false });
-    await actions.confirmRename("build");
-    actions.askRename("w1:p1");
-    await actions.confirmRename("  ");
+    await actions.rename("w1:p1", "build");
+    await actions.rename("w1:p1", "  ");
     expect(tauri.calls("pane_rename")).toEqual([
       { terminalId: "w1:p1", label: "build" },
       { terminalId: "w1:p1", label: null },
     ]);
   });
 
+  it("shows a collapsed sidebar for the field", () => {
+    ui.sidebarCollapsed.set(true);
+    actions.askRename("w1:p1");
+    expect(ui.sidebarCollapsed()).toBe(false);
+  });
+
+  it("cancels an inline rename and clears the error", () => {
+    actions.askRename("w1:p1");
+    actions.cancelRename();
+    expect(actions.renaming()).toBeNull();
+  });
+
+  it("is busy while the rename is sent", async () => {
+    let release!: () => void;
+    tauri.invoke.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    const sent = actions.rename("w1:p1", "x");
+    expect(actions.renameBusy()).toBe(true);
+    release();
+    await sent;
+    expect(actions.renameBusy()).toBe(false);
+  });
+
   it("does nothing on confirm without the matching dialog", async () => {
-    expect(await actions.confirmRename("x")).toBe(false);
     expect(await actions.confirmStartAgent("claude", "", "")).toBe(false);
     expect(tauri.invoke).not.toHaveBeenCalledWith("agent_rename", expect.anything());
   });
@@ -347,7 +399,7 @@ describe("PaneActions", () => {
 
   it("confirms nothing without a matching dialog", async () => {
     expect(await actions.confirmClose()).toBeUndefined();
-    expect(await actions.confirmNew("/x")).toBeUndefined();
+    expect(await actions.confirmNew()).toBeUndefined();
     expect(tauri.calls("pane_close")).toEqual([]);
   });
 
