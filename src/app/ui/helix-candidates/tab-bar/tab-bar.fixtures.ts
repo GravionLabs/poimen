@@ -4,7 +4,7 @@ import { TabBar, type TabBarItem } from "./tab-bar";
 const TABS: TabBarItem[] = [
   { id: "1", label: "claude", group: "api" },
   { id: "2", label: "tests", group: "api", preview: true },
-  { id: "3", label: "review", group: "web", attention: true, mark: "silent 12m" },
+  { id: "3", label: "review", group: "web", attention: true },
   { id: "4", label: "shell", unread: true, note: "controlled elsewhere" },
 ];
 

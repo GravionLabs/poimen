@@ -12,6 +12,11 @@ export function formatElapsed(ms: number): string {
   return `${Math.floor(ms / DAY)}d`;
 }
 
+/** The tooltip of a tab with the silent label after it (#1149); the tab itself shows no text. */
+export function withSilent(title: string, silentSince: number | undefined, now: number): string {
+  return silentSince === undefined ? title : `${title} · ${silentLabel(silentSince, now)}`;
+}
+
 /** The mark of a silent agent, `silent 12m`; the server decided it is silent, the client only formats. */
 export function silentLabel(silentSince: number | undefined, now: number): string | undefined {
   return silentSince === undefined ? undefined : `silent ${formatElapsed(now - silentSince)}`;

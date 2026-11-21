@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatElapsed, silentLabel } from "./agent-priority";
+import { formatElapsed, silentLabel, withSilent } from "./agent-priority";
 
 describe("formatElapsed", () => {
   const MIN = 60_000;
@@ -24,5 +24,12 @@ describe("silentLabel (#899)", () => {
   it("names the elapsed time and is absent when cleared", () => {
     expect(silentLabel(1_000, 1_000 + 12 * 60_000)).toBe("silent 12m");
     expect(silentLabel(undefined, 5)).toBeUndefined();
+  });
+});
+
+describe("withSilent (#1149)", () => {
+  it("adds the label to the tooltip of a silent tab and leaves a working one alone", () => {
+    expect(withSilent("ws / agent", 1_000, 1_000 + 12 * 60_000)).toBe("ws / agent · silent 12m");
+    expect(withSilent("ws / agent", undefined, 5)).toBe("ws / agent");
   });
 });

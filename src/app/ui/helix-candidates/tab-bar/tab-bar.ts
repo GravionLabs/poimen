@@ -38,8 +38,6 @@ export interface TabBarItem {
   unread?: boolean;
   /** A quiet mark after the label; the text is its tooltip. */
   note?: string;
-  /** A short warning text after the label, such as `silent 12m`. */
-  mark?: string;
   /** The icon of the tab kind (#1033); the app draws it in the tab, the "All tabs" menu shows it too. */
   icon?: IconName;
 }
