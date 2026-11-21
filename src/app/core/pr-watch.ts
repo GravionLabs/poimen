@@ -169,6 +169,7 @@ export class PrWatch {
       labels: [],
       hasChildren: false,
       checks: "failed",
+      conflicting: false,
       crossRepo: result.crossRepo,
       state: "open",
       review: null,
