@@ -253,6 +253,31 @@ const AA = 4.5;
 /** AA plus room for the hover and active tints under outlined and text buttons. */
 const ACTION_TEXT = 6.5;
 
+/** Graphics need 3:1 against their surface (WCAG 1.4.11). */
+const GRAPHIC = 3;
+
+/** RGB distance, 0 to ~441: how far two colors are apart. */
+export function colorDistance(a: string, b: string): number {
+  const [x, y] = [parseHex(a), parseHex(b)];
+  return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+}
+
+/**
+ * The unread mark (#1031): of the magenta, cyan and bright variants, the color farthest from the
+ * working, blocked, done and error colors, moved to 3:1 on the surface it sits on.
+ */
+function unreadColor(scheme: ColorScheme, states: string[]): string {
+  const grounds = [scheme.background];
+  let best = "";
+  let bestGap = -1;
+  for (const i of [5, 6, 13, 14]) {
+    const c = ensureContrast(scheme.ansi[i], grounds, GRAPHIC);
+    const gap = Math.min(...states.map((s) => colorDistance(c, s)));
+    if (gap > bestGap) [best, bestGap] = [c, gap];
+  }
+  return best;
+}
+
 /** Background of the tinted active sidebar row. */
 export function activeRowTint(tokens: Record<string, string>): string {
   return mixSrgb(tokens["--h-primary-color"], tokens["--h-content-background"], ACTIVE_TINT);
@@ -323,6 +348,13 @@ export function deriveTokens(scheme: ColorScheme): Record<string, string> {
     t[`--status-${name}`] = color;
     t[`--status-${name}-on-active`] = ensureContrast(color, [tint], AA);
   }
+
+  t["--status-unread"] = unreadColor(scheme, [
+    t["--status-working"],
+    t["--status-blocked"],
+    t["--status-done"],
+    scheme.ansi[1],
+  ]);
 
   t["--term-bg"] = scheme.background;
   t["--term-fg"] = scheme.foreground;

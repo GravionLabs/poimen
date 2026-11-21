@@ -39,9 +39,13 @@
             class="name"
             [class.bold]="seg.bold"
             [class.dim]="seg.dim"
+            [class.unread-name]="nameUnread(edit)"
             (dblclick)="edit && startEdit(edit, $event)"
             >{{ seg.text }}</span
           >
+          @if (nameUnread(edit)) {
+            <span class="sr-only">Unread</span>
+          }
           @if (edit?.kind === "space" && pinned()) {
             <svg
               class="pin-mark"

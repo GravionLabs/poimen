@@ -380,9 +380,16 @@
                   <span class="dot status-{{ seg.status }}"></span>
                 }
                 @case ("name") {
-                  <span class="name" [class.bold]="seg.bold" [class.dim]="seg.dim">{{
-                    seg.text
-                  }}</span>
+                  <span
+                    class="name"
+                    [class.bold]="seg.bold"
+                    [class.dim]="seg.dim"
+                    [class.unread-name]="isUnread(d.row.pane.terminal_id)"
+                    >{{ seg.text }}</span
+                  >
+                  @if (isUnread(d.row.pane.terminal_id)) {
+                    <span class="sr-only">Unread</span>
+                  }
                 }
                 @case ("state") {
                   <span
