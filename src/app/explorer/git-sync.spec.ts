@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { SpacesStore } from "../core/spaces-store";
 import { SpaceActions } from "../core/space-actions";
 import { TauriBridge } from "../core/tauri";
-import { GitSync, outcomeText, progressText, summaryText, type SyncSummary } from "./git-sync";
+import { GitSync, outcomeText, summaryText, type SyncSummary } from "./git-sync";
 
 describe("texts", () => {
   it("describes single outcomes", () => {
@@ -35,14 +35,12 @@ describe("texts", () => {
     expect(summaryText({ results: [], updated: 0, current: 0, failed: 0 })).toBe(
       "Fetch all: no repositories found.",
     );
-    expect(progressText(2, 5)).toBe("Fetch all: 2 of 5 repositories…");
   });
 });
 
 function setup(invoke: (cmd: string, args: unknown) => unknown) {
   const notify = vi.fn();
   const refreshRepos = vi.fn();
-  const unlisten = vi.fn();
   TestBed.resetTestingModule();
   TestBed.configureTestingModule({
     providers: [
@@ -50,14 +48,13 @@ function setup(invoke: (cmd: string, args: unknown) => unknown) {
         provide: TauriBridge,
         useValue: {
           invoke: vi.fn(async (c: string, a: unknown) => invoke(c, a)),
-          listen: vi.fn(async () => unlisten),
         },
       },
       { provide: SpaceActions, useValue: { notify } },
       { provide: SpacesStore, useValue: { refreshRepos } },
     ],
   });
-  return { sync: TestBed.inject(GitSync), notify, refreshRepos, unlisten };
+  return { sync: TestBed.inject(GitSync), notify, refreshRepos };
 }
 
 describe("GitSync", () => {
@@ -72,6 +69,7 @@ describe("GitSync", () => {
     await sync.pull("/s/app");
     expect(notify).toHaveBeenLastCalledWith(
       "Pull app failed: The working tree has uncommitted changes",
+      "error",
     );
     expect(refreshRepos).toHaveBeenCalledOnce();
   });
@@ -79,19 +77,21 @@ describe("GitSync", () => {
   it("fetches one repository", async () => {
     const { sync, notify } = setup(() => ({ state: "updated" }));
     await sync.fetch("/s/app");
-    expect(notify).toHaveBeenLastCalledWith("Fetch app: updated.");
+    expect(notify).toHaveBeenLastCalledWith("Fetch app: updated.", "success");
   });
 
-  it("fetch all shows the summary, stops listening and refreshes", async () => {
-    const { sync, notify, refreshRepos, unlisten } = setup(() => ({
+  it("fetch all shows the summary and refreshes", async () => {
+    const { sync, notify, refreshRepos } = setup(() => ({
       results: [{ path: "/s/a", state: "current" }],
       updated: 0,
       current: 1,
       failed: 0,
     }));
     await sync.fetchAll("/s");
-    expect(notify).toHaveBeenLastCalledWith("Fetch all: 0 updated, 1 up to date, 0 failed.");
-    expect(unlisten).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenLastCalledWith(
+      "Fetch all: 0 updated, 1 up to date, 0 failed.",
+      "success",
+    );
     expect(refreshRepos).toHaveBeenCalledOnce();
   });
 });

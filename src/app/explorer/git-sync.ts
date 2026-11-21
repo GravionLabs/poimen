@@ -42,12 +42,7 @@ export function summaryText(summary: SyncSummary): string {
   return failed.length > 0 ? `${head} ${failed.join("; ")}` : head;
 }
 
-/** Progress line while "Fetch all" runs. */
-export function progressText(done: number, total: number): string {
-  return `Fetch all: ${done} of ${total} repositories…`;
-}
-
-/** Fetch and pull from the explorer; results go to the status bar, then ahead/behind refreshes. */
+/** Fetch and pull from the explorer; results are toasts, then ahead/behind refreshes. */
 @Injectable({ providedIn: "root" })
 export class GitSync {
   private readonly bridge = inject(TauriBridge);
@@ -63,30 +58,28 @@ export class GitSync {
   }
 
   async fetchAll(dir: string): Promise<void> {
-    let unlisten: (() => void) | undefined;
     try {
-      this.actions.notify("Fetch all: looking for repositories…");
-      unlisten = await this.bridge.listen<{ done: number; total: number }>(
-        "git-sync-progress",
-        (p) => this.actions.notify(progressText(p.done, p.total)),
-      );
       const summary = await this.bridge.invoke<SyncSummary>("git_fetch_all", { dir });
-      this.actions.notify(summaryText(summary));
+      this.actions.notify(summaryText(summary), summary.failed > 0 ? "error" : "success");
     } catch (err) {
-      this.actions.notify(`Fetch all failed: ${String(err)}`);
+      this.actions.notify(`Fetch all failed: ${String(err)}`, "error");
     } finally {
-      unlisten?.();
       this.store.refreshRepos();
     }
   }
 
   private async single(verb: "Fetch" | "Pull", command: string, dir: string): Promise<void> {
-    this.actions.notify(`${verb} ${name(dir)}…`);
     try {
       const outcome = await this.bridge.invoke<SyncOutcome>(command, { dir });
-      this.actions.notify(outcomeText(verb, dir, outcome));
+      this.actions.notify(
+        outcomeText(verb, dir, outcome),
+        outcome.state === "failed" ? "error" : "success",
+      );
     } catch (err) {
-      this.actions.notify(outcomeText(verb, dir, { state: "failed", reason: String(err) }));
+      this.actions.notify(
+        outcomeText(verb, dir, { state: "failed", reason: String(err) }),
+        "error",
+      );
     } finally {
       this.store.refreshRepos();
     }

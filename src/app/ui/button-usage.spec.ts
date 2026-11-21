@@ -18,7 +18,6 @@ const ROW_FILES = [
 
 const LEGACY: Record<string, number> = {
   "src/app/agent-picker/agent-picker.html": 3,
-  "src/app/app.html": 1,
   "src/app/explorer/explorer.html": 1,
   "src/app/notifications/notifications.html": 1,
   "src/app/sidebar/machines-section/machines-section.html": 2,

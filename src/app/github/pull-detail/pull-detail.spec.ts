@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { IssueFormPane } from "../issue-form/issue-form";
+import { lastToast } from "../../../testing/toasts";
 import { readFileSync } from "node:fs";
 import { TestBed, getTestBed } from "@angular/core/testing";
 import { BrowserTestingModule, platformBrowserTesting } from "@angular/platform-browser/testing";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { SpaceActions } from "../../core/space-actions";
 import { UI_STORAGE, UiState } from "../../core/ui-state";
 import { tauri } from "../../core/tauri.mock";
 import { AgentActionMenu } from "../agent-action-menu/agent-action-menu";
@@ -351,7 +351,7 @@ describe("pull request write actions", () => {
     const { fixture, el } = await open();
     q(el, "[data-testid=pr-approve]")!.click();
     await fixture.whenStable();
-    expect(TestBed.inject(SpaceActions).warning()).toBe("Approve #1: not allowed");
+    expect(lastToast()).toBe("Approve #1: not allowed");
   });
 });
 
@@ -457,7 +457,7 @@ describe("merge, re-run and people", () => {
     q(el, "[data-testid=pr-rerun]")!.click();
     await fixture.whenStable();
     expect(tauri.calls("github_pr_rerun")).toEqual([{ root: "/src/n", number: 1 }]);
-    expect(TestBed.inject(SpaceActions).warning()).toContain("Re-running 2 failed runs of #1");
+    expect(lastToast()).toContain("Re-running 2 failed runs of #1");
   });
 
   it("hides re-run without a failed check", async () => {
@@ -513,7 +513,7 @@ describe("merge, re-run and people", () => {
     fixture.detectChanges();
     q(el, "[data-testid=merge-submit]")!.click();
     await fixture.whenStable();
-    expect(TestBed.inject(SpaceActions).warning()).toBe("Merge #1: base branch was modified");
+    expect(lastToast()).toBe("Merge #1: base branch was modified");
   });
 });
 

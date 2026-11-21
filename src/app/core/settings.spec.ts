@@ -1,4 +1,5 @@
 import { Injector } from "@angular/core";
+import { lastToast, testMessages } from "../../testing/toasts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SETTINGS,
@@ -14,8 +15,11 @@ import {
 import { TauriBridge } from "./tauri";
 import { tauri } from "./tauri.mock";
 
-const create = () =>
-  Injector.create({ providers: [TauriBridge, SettingsStore] }).get(SettingsStore);
+let injector: Injector;
+const create = () => {
+  injector = Injector.create({ providers: [testMessages(), TauriBridge, SettingsStore] });
+  return injector.get(SettingsStore);
+};
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./tauri.mock")).tauri.invoke,
@@ -346,10 +350,21 @@ describe("theme cycle and persistence", () => {
     tauri.answer("set_theme", () => {
       throw new Error("disk full");
     });
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const store = create();
     await store.setTheme("light");
     expect(store.settings().theme).toBe("system");
+    expect(lastToast(injector)).toBe("Cannot save the theme: Error: disk full");
+  });
+
+  it("an out-of-range size and a failed generic write show an error toast", async () => {
+    tauri.answer("set_explorer_roots", () => {
+      throw "read-only file system";
+    });
+    const store = create();
+    await store.setUiFontSize(500);
+    expect(lastToast(injector)).toContain("UI font size");
+    await store.setExplorerRoots(["~/src"]);
+    expect(lastToast(injector)).toBe("Cannot save the explorer folders: read-only file system");
   });
 
   it("follows an external edit of the file", async () => {

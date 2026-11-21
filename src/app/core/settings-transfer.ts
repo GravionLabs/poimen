@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from "@angular/core";
+import { injectMessages, TOAST_ERROR_MS, TOAST_MS } from "./toast";
 import { TauriBridge } from "./tauri";
 
 /**
@@ -111,6 +112,7 @@ export function exportFileName(template: string | null): string {
 @Injectable({ providedIn: "root" })
 export class SettingsTransfer {
   private readonly bridge = inject(TauriBridge);
+  private readonly messages = injectMessages();
   private readonly _pending = signal<PendingImport | null>(null);
   private readonly _message = signal<string | null>(null);
   private readonly _error = signal<string | null>(null);
@@ -179,8 +181,11 @@ export class SettingsTransfer {
     this._message.set(null);
     try {
       await step();
+      const done = this._message();
+      if (done) this.messages.add({ severity: "success", summary: done, life: TOAST_MS });
     } catch (e) {
       this._error.set(String(e));
+      this.messages.add({ severity: "error", summary: String(e), life: TOAST_ERROR_MS });
     } finally {
       this._busy.set(false);
     }

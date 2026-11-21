@@ -1,4 +1,5 @@
 import { Injector } from "@angular/core";
+import { lastToast, testMessages } from "../../testing/toasts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SpacesStore } from "./spaces-store";
 import { SpaceActions } from "./space-actions";
@@ -111,7 +112,6 @@ describe("cleanup text per machine", () => {
 
 describe("TaskCleanup", () => {
   let cleanup: TaskCleanup;
-  let spaces: SpaceActions;
   let log: TaskLog;
   let ui: UiState;
   let injector: Injector;
@@ -122,6 +122,7 @@ describe("TaskCleanup", () => {
     tauri.answer("snapshot", () => ({ spaces: [], tabs: [], terminals: [] }));
     injector = Injector.create({
       providers: [
+        testMessages(),
         { provide: UI_STORAGE, useValue: null },
         TauriBridge,
         SpacesStore,
@@ -135,7 +136,6 @@ describe("TaskCleanup", () => {
       ],
     });
     cleanup = injector.get(TaskCleanup);
-    spaces = injector.get(SpaceActions);
     log = injector.get(TaskLog);
     ui = injector.get(UiState);
   });
@@ -146,7 +146,7 @@ describe("TaskCleanup", () => {
     expect(tauri.calls("task_cleanup")).toEqual([
       { dir: "/work/app", focusedSpace: "w1", skipTeardown: false },
     ]);
-    expect(spaces.warning()).toBe("Clean up merged tasks: 2 removed, 1 left");
+    expect(lastToast(injector)).toBe("Clean up merged tasks: 2 removed, 1 left");
     expect(log.lines().map((l) => l.text)).toHaveLength(4);
     expect(ui.panelTab()).toBe("log");
     expect(ui.panelOpen()).toBe(true);
@@ -171,7 +171,7 @@ describe("TaskCleanup", () => {
     tauri.answer("task_cleanup", () => ({ removed: REPORT.removed, left: [] }));
     await cleanup.run("/work/app", null);
     expect(ui.panelOpen()).toBe(false);
-    expect(spaces.warning()).toBe("Clean up merged tasks: 2 removed, 0 left");
+    expect(lastToast(injector)).toBe("Clean up merged tasks: 2 removed, 0 left");
   });
 
   it("shows and logs a failure and resolves to null", async () => {
@@ -181,7 +181,7 @@ describe("TaskCleanup", () => {
     expect(await cleanup.run("/work/app", null)).toEqual([
       { target: null, error: "gh is not installed" },
     ]);
-    expect(spaces.warning()).toBe("Clean up merged tasks failed: gh is not installed");
+    expect(lastToast(injector)).toBe("Clean up merged tasks failed: gh is not installed");
     expect(log.lines()[0].text).toBe("Clean up merged tasks failed: gh is not installed");
   });
 
@@ -213,7 +213,7 @@ describe("TaskCleanup", () => {
       expect(tauri.calls("machine_task_cleanup")).toEqual([
         { name: "dev", dir: "/work/app", focusedSpace: "s3", skipTeardown: false },
       ]);
-      expect(spaces.warning()).toBe(
+      expect(lastToast(injector)).toBe(
         "Clean up merged tasks: This Mac 2 removed, 1 left; dev 1 removed, 0 left",
       );
       const texts = log.lines().map((l) => l.text);
@@ -233,7 +233,7 @@ describe("TaskCleanup", () => {
         { target: null, report: { removed: [], left: [] } },
         { target: "dev", error: "worktree.cleanup: conflict" },
       ]);
-      expect(spaces.warning()).toBe(
+      expect(lastToast(injector)).toBe(
         "Clean up merged tasks: This Mac 0 removed, 0 left; dev failed: worktree.cleanup: conflict",
       );
       expect(log.lines().map((l) => l.text)).toContain(
@@ -250,7 +250,7 @@ describe("TaskCleanup", () => {
           : { removed: [], left: [], teardownUntrusted: true },
       );
       await cleanup.run("/work/app", null);
-      expect(spaces.warning()).toBe("Clean up merged tasks: This Mac 2 removed, 1 left");
+      expect(lastToast(injector)).toBe("Clean up merged tasks: This Mac 2 removed, 1 left");
       expect(dialog.content()?.summary).toContain("(dev)");
       dialog.runAction();
       await vi.waitFor(() => expect(tauri.calls("machine_task_cleanup")).toHaveLength(2));
@@ -260,7 +260,7 @@ describe("TaskCleanup", () => {
       });
       expect(tauri.calls("task_cleanup")).toHaveLength(1);
       await vi.waitFor(() =>
-        expect(spaces.warning()).toBe("Clean up merged tasks: dev 1 removed, 0 left"),
+        expect(lastToast(injector)).toBe("Clean up merged tasks: dev 1 removed, 0 left"),
       );
     });
   });

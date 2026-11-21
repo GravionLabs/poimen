@@ -1,4 +1,5 @@
 import { Injector } from "@angular/core";
+import { lastToast, testMessages } from "../../testing/toasts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskPicker, type TaskChoice } from "../task-dialog/task-picker";
 import { SpacesStore } from "./spaces-store";
@@ -10,6 +11,8 @@ import { qualifyId, type Snapshot } from "./snapshot";
 import { TauriBridge } from "./tauri";
 import { UI_STORAGE, UiState } from "./ui-state";
 import { tauri } from "./tauri.mock";
+
+let injector: Injector;
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./tauri.mock")).tauri.invoke,
@@ -60,8 +63,9 @@ describe("TaskStarter", () => {
     }));
     tauri.answer("create_space", () => ({ space_id: "w2", created: true }));
     tauri.answer("task_tab", () => undefined);
-    const injector = Injector.create({
+    injector = Injector.create({
       providers: [
+        testMessages(),
         TauriBridge,
         SpacesStore,
         Machines,
@@ -124,7 +128,7 @@ describe("TaskStarter", () => {
       throw 'unknown task mode "x"';
     });
     expect(await starter.run("/work/app", CHOICE)).toBe(false);
-    expect(spaces.warning()).toBe('Start task: task mode failed: unknown task mode "x"');
+    expect(lastToast(injector)).toBe('Start task: task mode failed: unknown task mode "x"');
     expect(tauri.calls("task_worktree")).toEqual([]);
   });
 
@@ -133,7 +137,7 @@ describe("TaskStarter", () => {
       throw "git: path exists";
     });
     expect(await starter.run("/work/app", CHOICE)).toBe(false);
-    expect(spaces.warning()).toBe("Start task: git worktree failed: git: path exists");
+    expect(lastToast(injector)).toBe("Start task: git worktree failed: git: path exists");
     expect(tauri.calls("create_space")).toEqual([]);
   });
 
@@ -142,7 +146,7 @@ describe("TaskStarter", () => {
       throw "herdr: boom";
     });
     expect(await starter.run("/work/app", CHOICE)).toBe(false);
-    expect(spaces.warning()).toBe("Start task: space failed: herdr: boom");
+    expect(lastToast(injector)).toBe("Start task: space failed: herdr: boom");
   });
 
   it("a failed tab names the step", async () => {
@@ -151,7 +155,7 @@ describe("TaskStarter", () => {
       throw "herdr: no tab";
     });
     expect(await starter.run("/work/app", CHOICE)).toBe(false);
-    expect(spaces.warning()).toBe("Start task: terminal tab failed: herdr: no tab");
+    expect(lastToast(injector)).toBe("Start task: terminal tab failed: herdr: no tab");
   });
 
   it("an untrusted project holds the task: the answer creates the space with the command", async () => {
@@ -162,7 +166,7 @@ describe("TaskStarter", () => {
         : { space_id: "", created: false, trust: request },
     );
     expect(await starter.run("/work/app", CHOICE)).toBe(true);
-    expect(spaces.warning()).toBeNull();
+    expect(lastToast(injector)).toBeNull();
     await spaces.answerTrust("trust");
     expect(tauri.calls("create_space")[1]).toEqual({
       cwd: "/work/app-12",
@@ -239,7 +243,7 @@ describe("TaskStarter", () => {
       ];
       expect(await starter.run("/work/app", REMOTE)).toBe(true);
       expect(ui.splitWorkspace()).toBe(qualifyId("dev", "s7"));
-      expect(spaces.warning()).toBe('Opened the existing space "#12 Add picker" on dev.');
+      expect(lastToast(injector)).toBe('Opened the existing space "#12 Add picker" on dev.');
       expect(tauri.calls("machine_task_tab")).toEqual([]);
     });
 
@@ -248,7 +252,7 @@ describe("TaskStarter", () => {
         throw "machine dev is offline";
       });
       expect(await starter.run("/work/app", REMOTE)).toBe(false);
-      expect(spaces.warning()).toBe("Start task on dev: clone failed: machine dev is offline");
+      expect(lastToast(injector)).toBe("Start task on dev: clone failed: machine dev is offline");
       expect(tauri.calls("machine_worktree_create")).toEqual([]);
       expect(tauri.calls("machine_create_space")).toEqual([]);
     });
@@ -258,7 +262,7 @@ describe("TaskStarter", () => {
         throw "git clone: permission denied";
       });
       expect(await starter.run("/work/app", REMOTE)).toBe(false);
-      expect(spaces.warning()).toBe(
+      expect(lastToast(injector)).toBe(
         "Start task on dev: clone failed: git clone: permission denied",
       );
       expect(tauri.calls("machine_create_space")).toEqual([]);
@@ -267,7 +271,7 @@ describe("TaskStarter", () => {
     it("a repository without a GitHub origin cannot be cloned", async () => {
       tauri.answer("github_repo", () => null);
       expect(await starter.run("/work/app", REMOTE)).toBe(false);
-      expect(spaces.warning()).toContain("Start task on dev: clone failed");
+      expect(lastToast(injector)).toContain("Start task on dev: clone failed");
       expect(tauri.calls("machine_repo_ensure")).toEqual([]);
     });
 
@@ -276,14 +280,14 @@ describe("TaskStarter", () => {
         throw "path exists";
       });
       expect(await starter.run("/work/app", REMOTE)).toBe(false);
-      expect(spaces.warning()).toBe("Start task on dev: git worktree failed: path exists");
+      expect(lastToast(injector)).toBe("Start task on dev: git worktree failed: path exists");
       expect(tauri.calls("machine_create_space")).toEqual([]);
       tauri.answer("machine_worktree_create", () => ({ path: "/p", branch: "b", created: true }));
       tauri.answer("machine_create_space", () => {
         throw "not trusted";
       });
       expect(await starter.run("/work/app", REMOTE)).toBe(false);
-      expect(spaces.warning()).toBe("Start task on dev: space failed: not trusted");
+      expect(lastToast(injector)).toBe("Start task on dev: space failed: not trusted");
     });
 
     it("a failed tab names the step", async () => {
@@ -292,13 +296,14 @@ describe("TaskStarter", () => {
         throw "no tab";
       });
       expect(await starter.run("/work/app", REMOTE)).toBe(false);
-      expect(spaces.warning()).toBe("Start task on dev: terminal tab failed: no tab");
+      expect(lastToast(injector)).toBe("Start task on dev: terminal tab failed: no tab");
     });
   });
 
   it("does nothing when the picker is cancelled", async () => {
-    const injector = Injector.create({
+    injector = Injector.create({
       providers: [
+        testMessages(),
         TauriBridge,
         SpacesStore,
         Machines,

@@ -748,7 +748,7 @@ export class GithubIssues {
       });
     } catch (err) {
       const e = ghErrorOf(err);
-      this.spaces.notify(`Create issue: ${typeof e === "string" ? e : errorText(e)}`);
+      this.spaces.fail(`Create issue: ${typeof e === "string" ? e : errorText(e)}`);
       return false;
     } finally {
       this._busy.set(false);
@@ -944,7 +944,7 @@ export class GithubIssues {
       if ((await fn(root)) === false) return false;
     } catch (err) {
       const e = ghErrorOf(err);
-      this.spaces.notify(`${label} #${number}: ${typeof e === "string" ? e : errorText(e)}`);
+      this.spaces.fail(`${label} #${number}: ${typeof e === "string" ? e : errorText(e)}`);
       return false;
     } finally {
       this._busy.set(false);

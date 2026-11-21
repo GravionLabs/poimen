@@ -35,7 +35,7 @@ export class ExternalEditor {
       });
       return true;
     } catch (e) {
-      this.actions.notify(`Open in editor: ${e instanceof Error ? e.message : String(e)}`);
+      this.actions.notify(`Open in editor: ${e instanceof Error ? e.message : String(e)}`, "error");
       return false;
     }
   }

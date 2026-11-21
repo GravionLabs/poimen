@@ -415,7 +415,7 @@ export class AgentActions {
     try {
       launches = await planFor(targets);
     } catch (err) {
-      this.spaces.notify(`${action.label}: ${text(err)}`);
+      this.spaces.notify(`${action.label}: ${text(err)}`, "error");
       return null;
     }
     // `each` has one launch per target, `once` one for all of them.
